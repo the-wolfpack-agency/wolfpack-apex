@@ -24,6 +24,7 @@
  */
 
 import type { Connector, ConnectorResult } from "./types";
+import { createHash } from "node:crypto";
 import { trackEvent } from "@/lib/analytics";
 import { registerConnector } from "./registry";
 import { loadConnectorCredentials } from "./credentials";
@@ -97,6 +98,10 @@ export class RestConnector implements Connector {
     return Boolean(this.baseUrl && this.authHeader);
   }
 
+  objectTypes(): string[] {
+    return Object.keys(this.objectMap);
+  }
+
   async getRecord(
     objectType: string,
     id: string,
@@ -105,7 +110,11 @@ export class RestConnector implements Connector {
       return notConfigured(this.name, "getRecord");
     }
     const path = this.objectMap[objectType.toLowerCase()] ?? objectType.toLowerCase();
-    return this.request<Record<string, unknown>>(`/${path}/${encodeURIComponent(id)}`);
+    return this.request<Record<string, unknown>>(
+      `/${path}/${encodeURIComponent(id)}`,
+      false,
+      { operation: "getRecord", objectType: objectType.toLowerCase() },
+    );
   }
 
   async searchRecords(
@@ -139,7 +148,11 @@ export class RestConnector implements Connector {
        small REST APIs. */
     if (this.vendorPreset?.search) {
       const req = this.vendorPreset.search.build(objectType.toLowerCase(), trimmed, limit);
-      const r = await this.request<unknown>(req.path.startsWith("/") ? req.path : `/${req.path}`);
+      const r = await this.request<unknown>(
+        req.path.startsWith("/") ? req.path : `/${req.path}`,
+        false,
+        { operation: "searchRecords", objectType: objectType.toLowerCase() },
+      );
       if (!r.ok) return r as ConnectorResult<Array<Record<string, unknown>>>;
       const records = req.extract(r.data);
       return { ok: true, data: records, durationMs: r.durationMs };
@@ -151,7 +164,10 @@ export class RestConnector implements Connector {
     const url = isListAll
       ? `/${path}?limit=${limit}`
       : `/${path}?q=${encodeURIComponent(trimmed)}&limit=${limit}`;
-    const r = await this.request<unknown>(url);
+    const r = await this.request<unknown>(url, false, {
+      operation: "searchRecords",
+      objectType: objectType.toLowerCase(),
+    });
     if (!r.ok) {
       return r as ConnectorResult<Array<Record<string, unknown>>>;
     }
@@ -168,6 +184,7 @@ export class RestConnector implements Connector {
   private async request<R>(
     path: string,
     isRetry = false,
+    shape?: RequestShape,
   ): Promise<ConnectorResult<R>> {
     const start = Date.now();
     const url = `${this.baseUrl!.replace(/\/$/, "")}${path}`;
@@ -182,7 +199,7 @@ export class RestConnector implements Connector {
       });
     } catch (err) {
       const durationMs = Date.now() - start;
-      emit(this.name, "request_failed", durationMs, "network");
+      emit(this.name, "request_failed", durationMs, "network", path, shape);
       return {
         ok: false,
         code: "network",
@@ -212,19 +229,19 @@ export class RestConnector implements Connector {
          error) — fall through to the auth_failed return. */
     }
     if (res.status === 401 || res.status === 403) {
-      emit(this.name, "request_failed", durationMs, "auth_failed");
+      emit(this.name, "request_failed", durationMs, "auth_failed", path, shape);
       return { ok: false, code: "auth_failed", message: `HTTP ${res.status}`, durationMs };
     }
     if (res.status === 404) {
-      emit(this.name, "request_failed", durationMs, "not_found");
+      emit(this.name, "request_failed", durationMs, "not_found", path, shape);
       return { ok: false, code: "not_found", message: "record not found", durationMs };
     }
     if (res.status === 429) {
-      emit(this.name, "request_failed", durationMs, "rate_limited");
+      emit(this.name, "request_failed", durationMs, "rate_limited", path, shape);
       return { ok: false, code: "rate_limited", message: "rate-limited by remote", durationMs };
     }
     if (!res.ok) {
-      emit(this.name, "request_failed", durationMs, "remote_error");
+      emit(this.name, "request_failed", durationMs, "remote_error", path, shape);
       return {
         ok: false,
         code: "remote_error",
@@ -236,7 +253,7 @@ export class RestConnector implements Connector {
     try {
       body = await res.json();
     } catch {
-      emit(this.name, "request_failed", durationMs, "remote_error");
+      emit(this.name, "request_failed", durationMs, "remote_error", path, shape);
       return {
         ok: false,
         code: "remote_error",
@@ -244,7 +261,7 @@ export class RestConnector implements Connector {
         durationMs,
       };
     }
-    emit(this.name, "request_succeeded", durationMs, undefined);
+    emit(this.name, "request_succeeded", durationMs, undefined, path, shape);
     return { ok: true, data: body as R, durationMs };
   }
 
@@ -268,7 +285,13 @@ export class RestConnector implements Connector {
       };
     }
     const req = this.vendorPreset.writes.create(objectType.toLowerCase(), fields);
-    const r = await this.requestWithBody("POST", req.path.startsWith("/") ? req.path : `/${req.path}`, req.body);
+    const r = await this.requestWithBody(
+      "POST",
+      req.path.startsWith("/") ? req.path : `/${req.path}`,
+      req.body,
+      false,
+      { operation: "createRecord", objectType: objectType.toLowerCase() },
+    );
     if (!r.ok) return r as ConnectorResult<{ id: string }>;
     const id = req.extractCreatedId(r.data);
     if (!id) {
@@ -296,7 +319,13 @@ export class RestConnector implements Connector {
       };
     }
     const req = this.vendorPreset.writes.update(objectType.toLowerCase(), id, fields);
-    const r = await this.requestWithBody("PATCH", req.path.startsWith("/") ? req.path : `/${req.path}`, req.body);
+    const r = await this.requestWithBody(
+      "PATCH",
+      req.path.startsWith("/") ? req.path : `/${req.path}`,
+      req.body,
+      false,
+      { operation: "updateRecord", objectType: objectType.toLowerCase() },
+    );
     if (!r.ok) return r as ConnectorResult<{ id: string }>;
     return { ok: true, data: { id }, durationMs: r.durationMs };
   }
@@ -367,6 +396,7 @@ export class RestConnector implements Connector {
     path: string,
     body: Record<string, unknown>,
     isRetry = false,
+    shape?: RequestShape,
   ): Promise<ConnectorResult<unknown>> {
     const start = Date.now();
     const url = `${this.baseUrl!.replace(/\/$/, "")}${path}`;
@@ -383,7 +413,7 @@ export class RestConnector implements Connector {
       });
     } catch (err) {
       const durationMs = Date.now() - start;
-      emit(this.name, "request_failed", durationMs, "network");
+      emit(this.name, "request_failed", durationMs, "network", path, shape);
       return {
         ok: false,
         code: "network",
@@ -406,15 +436,15 @@ export class RestConnector implements Connector {
       }
     }
     if (res.status === 401 || res.status === 403) {
-      emit(this.name, "request_failed", durationMs, "auth_failed");
+      emit(this.name, "request_failed", durationMs, "auth_failed", path, shape);
       return { ok: false, code: "auth_failed", message: `HTTP ${res.status}`, durationMs };
     }
     if (res.status === 404) {
-      emit(this.name, "request_failed", durationMs, "not_found");
+      emit(this.name, "request_failed", durationMs, "not_found", path, shape);
       return { ok: false, code: "not_found", message: "record not found", durationMs };
     }
     if (res.status === 429) {
-      emit(this.name, "request_failed", durationMs, "rate_limited");
+      emit(this.name, "request_failed", durationMs, "rate_limited", path, shape);
       return { ok: false, code: "rate_limited", message: "rate-limited by remote", durationMs };
     }
     if (!res.ok) {
@@ -432,7 +462,7 @@ export class RestConnector implements Connector {
       } catch {
         /* non-JSON error body — keep the HTTP status. */
       }
-      emit(this.name, "request_failed", durationMs, "remote_error");
+      emit(this.name, "request_failed", durationMs, "remote_error", path, shape);
       return { ok: false, code: "remote_error", message: errText, durationMs };
     }
     /* Salesforce PATCH returns 204 No Content; HubSpot returns the
@@ -447,7 +477,7 @@ export class RestConnector implements Connector {
            PATCH). Leave data as null. */
       }
     }
-    emit(this.name, "request_succeeded", durationMs, undefined);
+    emit(this.name, "request_succeeded", durationMs, undefined, path, shape);
     return { ok: true, data, durationMs };
   }
 }
@@ -463,14 +493,46 @@ function notConfigured(
   };
 }
 
+/**
+ * A stable, non-reversible identity for one outbound request.
+ *
+ * The path is the request: `/contacts/42` and `/contacts?q=acme` are
+ * different asks of the same system, and two calls with the same path
+ * are the same ask. That makes the path exactly the right fingerprint
+ * for "is this system being asked the same thing repeatedly" — and
+ * exactly the wrong thing to store, because a search path carries the
+ * customer's own text in `?q=`.
+ *
+ * So it is hashed. Identical requests still collide, which is the only
+ * property the redundancy detector needs, and nothing readable about
+ * the client's data ever reaches our analytics table.
+ */
+export function fingerprintPath(path: string): string {
+  return createHash("sha256").update(path).digest("hex").slice(0, 16);
+}
+
+/** What a request was, in terms the client would recognise. */
+export interface RequestShape {
+  /** getRecord | searchRecords | createRecord | updateRecord */
+  operation: string;
+  /** The caller's domain word: contact, deal, invoice, vehicle. */
+  objectType: string;
+}
+
 function emit(
   connector: string,
   outcome: "request_succeeded" | "request_failed",
   durationMs: number,
   code: string | undefined,
+  path?: string,
+  shape?: RequestShape,
 ): void {
-  /* The analytics layer's typed event registry doesn't yet know about
-     these — register in src/lib/analytics.ts during wire-in. */
+  /* Until 2026-08-23 this recorded THAT a system was called and how
+     long it took, and nothing about what was asked of it. That is
+     enough to chart latency and nothing else. The question a client
+     actually wants answered on the first day — "what is hammering the
+     legacy database, and how much of it is the same call twice?" —
+     needs the identity of the request, so it is recorded here. */
   try {
     trackEvent(
       outcome === "request_succeeded"
@@ -478,7 +540,15 @@ function emit(
         : "assistant.connector_failed",
       "system",
       "system",
-      { connector, duration_ms: durationMs, code: code ?? "ok" },
+      {
+        connector,
+        duration_ms: durationMs,
+        code: code ?? "ok",
+        ...(path ? { fingerprint: fingerprintPath(path) } : {}),
+        ...(shape
+          ? { operation: shape.operation, object_type: shape.objectType }
+          : {}),
+      },
     );
   } catch {
     /* analytics failures must never break a connector call */

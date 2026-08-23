@@ -438,6 +438,23 @@ export const INSIGHT_GENERATORS: InsightGenerator[] = [
     requires: ["vercel", "calendar"],
     run: generateRecentDeployByMeetingAttendee,
   },
+  /* The two below are the only generators here that say something on
+     the day a client connects, rather than after a month of use. See
+     source-topology.ts for why that distinction is the product. */
+  {
+    name: "cross_source_overlap",
+    label: "The same entity class held in more than one connected system",
+    requires: ["connectors"],
+    run: (ctx) =>
+      import("./source-topology").then((m) => m.generateCrossSourceOverlap(ctx)),
+  },
+  {
+    name: "redundant_source_reads",
+    label: "One system answering the identical request repeatedly in a short window",
+    requires: ["connectors"],
+    run: (ctx) =>
+      import("./source-topology").then((m) => m.generateRedundantSourceReads(ctx)),
+  },
   {
     name: "team_momentum_brief",
     label: "This week's team momentum (merged PRs + successful prod deploys)",

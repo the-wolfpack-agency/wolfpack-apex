@@ -52,6 +52,14 @@ export interface Connector {
    */
   isConfigured(): boolean;
   /**
+   * The domain object types this system holds ("contact", "deal",
+   * "invoice"). Declared rather than inferred, because the answer to
+   * "which of our systems hold the same thing" is only useful if each
+   * system stated it. A connector that cannot enumerate returns [] and
+   * simply contributes nothing to the overlap picture.
+   */
+  objectTypes?(): string[];
+  /**
    * Fetch a single record by object type + id. Object type is the
    * adapter's domain language ("contact", "deal", "company",
    * "invoice") — the adapter maps it to the vendor's endpoint.
