@@ -26,6 +26,9 @@ jest.mock("@/lib/client-auth", () => ({
   jsonHeaders: () => ({ "content-type": "application/json", Authorization: "Bearer test-token" }),
   fetchWithRefresh: (...args: unknown[]) => fetchMock(...args),
   clearInstinctSession: jest.fn(),
+  /* The dashboard's release-gate banner reads the signed-in person to decide
+     whether to ask for admin data at all. */
+  getInstinctUser: () => ({ id: "u-test", role: "cto" }),
 }));
 
 // Stub heavy dashboard subcomponents — they pull in their own fetches

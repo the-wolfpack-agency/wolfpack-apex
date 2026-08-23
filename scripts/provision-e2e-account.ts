@@ -38,8 +38,16 @@ const ROTATE = process.argv.includes("--rotate");
 
 const EMAIL = process.env.E2E_ACCOUNT_EMAIL ?? "e2e@thewolfpack.agency";
 const NAME = "E2E (automated tests)";
-/** Least privilege that still reaches the SELF_SERVICE pages under test. */
-const ROLE = "member";
+/**
+ * Least privilege that still reaches the SELF_SERVICE pages under test.
+ *
+ * NOT "member". That is a rank in the tool gate's fallback table, not a role
+ * this product assigns: ROLE_MAP and the database's own check constraint agree
+ * on exactly ten, and member is in neither. "designer" is the smallest of the
+ * ten at 21 capabilities, and it still carries the SELF_SERVICE set, which is
+ * what /routines, /releases and /engineering need.
+ */
+const ROLE = "designer";
 const WORKSPACE = "default";
 
 /** 24 bytes of base64url. Long enough that nobody is tempted to type it. */

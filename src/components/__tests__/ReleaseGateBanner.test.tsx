@@ -13,9 +13,11 @@ import "@testing-library/jest-dom";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 
 const mockFetch = jest.fn();
+const mockUser = jest.fn();
 jest.mock("@/lib/client-auth", () => ({
   fetchWithRefresh: (...a: unknown[]) => mockFetch(...a),
   jsonHeaders: () => ({ "Content-Type": "application/json" }),
+  getInstinctUser: () => mockUser(),
 }));
 
 import ReleaseGateBanner, { mostUrgent } from "@/components/ReleaseGateBanner";
@@ -45,6 +47,7 @@ function routeFetch(gate: unknown) {
 }
 
 beforeEach(() => {
+  mockUser.mockReturnValue({ role: "cto" });
   mockFetch.mockReset();
 });
 
@@ -128,5 +131,33 @@ describe("ReleaseGateBanner", () => {
       );
       expect(posted).toBeTruthy();
     });
+  });
+});
+
+describe("it does not ask for what the viewer cannot have", () => {
+  it("makes no request at all for somebody without the capability", async () => {
+    /* Most people in a workspace are not admins, so this endpoint was being
+       refused on most dashboard loads. The banner degraded correctly, so the
+       cost was invisible, and a permanent expected 403 makes the production
+       smoke assertion about 401s and 403s useless by teaching everybody to
+       ignore it. */
+    mockUser.mockReturnValue({ role: "designer" });
+    render(<ReleaseGateBanner />);
+    await waitFor(() => expect(mockFetch).not.toHaveBeenCalled());
+  });
+
+  it("still asks for somebody who can read it", async () => {
+    mockUser.mockReturnValue({ role: "cto" });
+    mockFetch.mockResolvedValue({ ok: true, json: async () => ({ ok: true, gate: null }) });
+    render(<ReleaseGateBanner />);
+    await waitFor(() =>
+      expect(mockFetch).toHaveBeenCalledWith("/api/admin/deployment/release-gate"),
+    );
+  });
+
+  it("makes no request when nobody is signed in", async () => {
+    mockUser.mockReturnValue(null);
+    render(<ReleaseGateBanner />);
+    await waitFor(() => expect(mockFetch).not.toHaveBeenCalled());
   });
 });
