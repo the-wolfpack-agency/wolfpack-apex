@@ -138,6 +138,25 @@ const IBAN_RE =
  * no nested quantifiers, so the module's ReDoS guarantee holds. Prefix-anchored
  * rather than shape-guessed, which is what keeps precision high enough that
  * nobody turns the gate off. */
+/**
+ * Identifier shapes that are LONG AND BASE64 AND NOT SECRETS.
+ *
+ * The generic 40-plus-base64 rule below is deliberately broad, because a
+ * credential we fail to recognise is the expensive miss. The cost is that
+ * Microsoft Graph identifiers match it: an event id is a long base64 run, and
+ * "Meeting ID: [API_KEY_1]-XIwLg..." is what a person then reads.
+ *
+ * Reported 2026-08-23, and the report was that a key had leaked. It had not:
+ * the placeholder IS the gate working. But an answer that mangles an
+ * identifier teaches somebody that redaction is noise, and somebody who
+ * believes that is one step from wanting it switched off.
+ *
+ * So: a Graph id prefix is exempted BEFORE the generic rule sees it. Narrow on
+ * purpose. It matches the documented prefix of a Graph entity id and nothing
+ * else, so a real key that happens to be long stays caught.
+ */
+const GRAPH_ID_RE = /\bAAMkA[A-Za-z0-9+/=_-]{20,}/g;
+
 const API_KEY_RE =
   /\b(?:sk-[A-Za-z0-9\-_]{20,}|(?:sk|pk|rk)_(?:live|test)_[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{50,}|xox[bapsr]-[A-Za-z0-9\-]{10,}|AKIA[A-Z0-9]{16}|AIza[A-Za-z0-9\-_]{35}|[A-Fa-f0-9]{32,}|[A-Za-z0-9+/]{40,}={0,2})\b/g;
 
@@ -252,6 +271,19 @@ function redactFieldWithContext(
   };
   const spans: Span[] = [];
 
+  /* Regions that look like a credential and are not one. Computed first so the
+     generic key rule can be told to leave them alone. Scoped to api_key only:
+     an email or a card number sitting inside such a string is still caught,
+     because those detectors are specific enough not to need the help. */
+  const exempt: Array<[number, number]> = [];
+  GRAPH_ID_RE.lastIndex = 0;
+  let g: RegExpExecArray | null;
+  while ((g = GRAPH_ID_RE.exec(bounded)) !== null) {
+    exempt.push([g.index, g.index + g[0].length]);
+  }
+  const insideExempt = (start: number, end: number): boolean =>
+    exempt.some(([a, b]) => start >= a && end <= b);
+
   for (const { kind, re, validate } of PATTERNS) {
     if (kinds && !kinds.has(kind)) continue;
     re.lastIndex = 0;
@@ -259,6 +291,7 @@ function redactFieldWithContext(
     while ((m = re.exec(bounded)) !== null) {
       const raw = m[0];
       if (validate && !validate(raw)) continue;
+      if (kind === "api_key" && insideExempt(m.index, m.index + raw.length)) continue;
       const placeholder = placeholderFor(ctx, kind, raw);
       spans.push({
         start: m.index,

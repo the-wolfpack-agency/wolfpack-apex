@@ -36,10 +36,22 @@ export const BUILT_IN_ROUTINES: readonly Routine[] = Object.freeze([
     audience: "anyone",
     steps: [
       {
+        /* TODAY, NOT THIS MONTH.
+         *
+         * This used to call calendar_widget, which fetches the whole month by
+         * design because it renders a month grid. The step said "today's
+         * calendar", the model was handed thirty-one events, and it duly
+         * reported that today looked packed. Reported 2026-08-23 as the
+         * calendar showing everything.
+         *
+         * Nothing leaked and nothing crossed between people: the fetch is
+         * me/calendarview under that person's own token. It was one tool
+         * answering a question the step had not asked. good_morning_widget is
+         * the one that means today. */
         kind: "tool",
         slot: "agenda",
-        tool: "calendar_widget",
-        params: { month: "current" },
+        tool: "good_morning_widget",
+        params: {},
         label: "Reading today's calendar",
       },
       {
@@ -63,12 +75,19 @@ export const BUILT_IN_ROUTINES: readonly Routine[] = Object.freeze([
            once. Four separate summaries would put the reading back on them,
            which is the work this routine exists to remove. */
         prompt:
-          "Here is today's calendar: {{agenda}}\n\n" +
+          "Here is today's agenda: {{agenda}}\n\n" +
           "Here is what is open: {{tasks}}\n\n" +
           "Here is the brief for the next meeting: {{brief}}\n\n" +
           "Name the three things that actually matter today and say plainly what " +
           "is safe to leave. Be specific about which meeting or task you mean. If " +
-          "the day looks light, say so rather than inventing priorities.",
+          "the day looks light, say so rather than inventing priorities. " +
+          /* The model was previously handed a month of events under a heading
+             that said today, and reported the month back as the day. Counts
+             are the thing it reaches for when it has nothing specific, and a
+             count of the wrong window is worse than no count. */
+          "Do not report raw counts as though they described today: name the " +
+          "actual meetings and tasks, and if the data does not say which are " +
+          "today, say that instead of guessing.",
         label: "Working out what matters",
       },
       {
