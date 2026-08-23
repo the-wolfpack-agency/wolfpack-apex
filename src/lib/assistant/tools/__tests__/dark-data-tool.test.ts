@@ -63,6 +63,7 @@ describe("what it answers", () => {
       ],
       shapes: [{ shape: "SELECT full_name FROM customers WHERE id = $1", calls: 100, totalMs: 50 }],
       statementStatsAvailable: true,
+      statementTracking: "all",
     });
     const t = await tool();
     const res: any = await t.handler({}, CTX);
@@ -90,6 +91,7 @@ describe("what reaches analytics", () => {
       ],
       shapes: [{ shape: "SELECT id FROM dealer_accounts", calls: 10, totalMs: 5 }],
       statementStatsAvailable: true,
+      statementTracking: "all",
     });
     const t = await tool();
     await t.handler({}, CTX);

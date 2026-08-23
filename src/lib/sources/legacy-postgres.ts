@@ -39,6 +39,17 @@ export interface LegacyTableStat {
   seqScans: number;
   idxScans: number;
   writes: number;
+  /**
+   * Scans caused by maintenance rather than by anybody's query.
+   *
+   * ANALYZE reads the table, and autovacuum runs it on a schedule, so a
+   * table that no application has ever touched still accumulates
+   * sequential scans forever. Discovered by running this against a real
+   * server: a table nothing had ever queried reported a scan, and the
+   * "zero scans" rule that looked obvious against fixtures would have
+   * fired on almost nothing in production.
+   */
+  analyses: number;
 }
 
 /** A normalised statement shape and what it has cost since the reset. */
@@ -77,6 +88,17 @@ export interface LegacyScan {
    * ours to say.
    */
   statementStatsAvailable: boolean;
+  /**
+   * pg_stat_statements.track, when readable.
+   *
+   * The default is "top", which records only statements issued directly
+   * by a client. Anything inside a function or a stored procedure is
+   * invisible, and a legacy system of the kind this product is aimed at
+   * is frequently almost entirely stored procedures. Reporting "no
+   * repeated statements" on such a database would be a clean bill of
+   * health we had no basis for, so the setting is read and declared.
+   */
+  statementTracking: string | null;
 }
 
 /** How many rows a table needs before "nobody reads it" is interesting. */
@@ -116,7 +138,8 @@ const TABLE_STATS_SQL = `
          COALESCE(seq_scan, 0)                                     AS seq_scans,
          COALESCE(idx_scan, 0)                                     AS idx_scans,
          COALESCE(n_tup_ins, 0) + COALESCE(n_tup_upd, 0)
-           + COALESCE(n_tup_del, 0)                                AS writes
+           + COALESCE(n_tup_del, 0)                                AS writes,
+         COALESCE(analyze_count, 0) + COALESCE(autoanalyze_count, 0) AS analyses
   FROM pg_stat_user_tables
   ORDER BY COALESCE(n_live_tup, 0) DESC
   LIMIT 500`;
@@ -124,12 +147,27 @@ const TABLE_STATS_SQL = `
 /* Every column in the database, with the planner's null fraction where
    one exists. information_schema is the portable catalogue and pg_stats
    is the sample; neither reads a row of anybody's data. */
+/*
+ * BASE TABLE only. Against a real server this returned the columns of
+ * the statement-statistics views themselves, so the analysis was
+ * reporting on the monitoring extension we had just asked them to
+ * install. A view has no rows of its own to be dark.
+ *
+ * The explanation lives here rather than inside the string: whatever is
+ * in the string is sent to somebody else's database and recorded in
+ * their statement statistics, and our commentary does not belong in
+ * either.
+ */
 const COLUMN_STATS_SQL = `
   SELECT c.table_name  AS table,
          c.column_name AS column,
          c.data_type   AS data_type,
          s.null_frac   AS null_frac
   FROM information_schema.columns c
+  JOIN information_schema.tables t
+    ON t.table_schema = c.table_schema
+   AND t.table_name   = c.table_name
+   AND t.table_type   = 'BASE TABLE'
   LEFT JOIN pg_stats s
     ON s.schemaname = c.table_schema
    AND s.tablename  = c.table_name
@@ -151,6 +189,23 @@ const QUERY_SHAPES_LEGACY_SQL = `
   FROM pg_stat_statements
   ORDER BY total_time DESC
   LIMIT 50`;
+
+const TRACK_SETTING_SQL = `SELECT current_setting('pg_stat_statements.track', true) AS track`;
+
+/**
+ * Our own catalogue queries, which pg_stat_statements happily records.
+ *
+ * On a quiet database the busiest statements were OUR scan: the read
+ * only transaction, the timeout, and the catalogue selects. Reporting
+ * those back to a client as their hot query load would be absurd, and
+ * on a genuinely idle system it is what would have happened.
+ */
+function isOurOwnStatement(shape: string): boolean {
+  return (
+    /^(begin|commit|rollback|set\s+local)\b/i.test(shape) ||
+    /pg_stat_user_tables|pg_stat_statements|information_schema\./i.test(shape)
+  );
+}
 
 export interface ScanDeps {
   pool?: Pool;
@@ -199,6 +254,13 @@ export async function scanLegacyDatabase(deps: ScanDeps = {}): Promise<LegacySca
     getTenantPool(`legacy-source:${legacyDatabaseName(env)}`, url!, {
       factory: deps.factory,
       env,
+      /* Opt-in, and deliberately two conditions rather than one: the
+         operator sets the flag AND writes sslmode=disable into the URL.
+         A client's legacy database frequently has no TLS at all, and
+         the alternative to an explicit downgrade here is being unable
+         to connect to the systems this product exists to connect to.
+         Every database we own is unaffected. */
+      allowPlaintext: env.INSTINCT_LEGACY_DB_ALLOW_PLAINTEXT === "true",
     });
 
   const rawTables = await readOnly<{
@@ -207,6 +269,7 @@ export async function scanLegacyDatabase(deps: ScanDeps = {}): Promise<LegacySca
     seq_scans: string | number;
     idx_scans: string | number;
     writes: string | number;
+    analyses: string | number;
   }>(pool, TABLE_STATS_SQL);
 
   const tables: LegacyTableStat[] = rawTables.map((r) => ({
@@ -215,6 +278,7 @@ export async function scanLegacyDatabase(deps: ScanDeps = {}): Promise<LegacySca
     seqScans: Number(r.seq_scans) || 0,
     idxScans: Number(r.idx_scans) || 0,
     writes: Number(r.writes) || 0,
+    analyses: Number(r.analyses) || 0,
   }));
 
   const rawColumns = await readOnly<{
@@ -243,14 +307,26 @@ export async function scanLegacyDatabase(deps: ScanDeps = {}): Promise<LegacySca
          honest answer. */
       raw = await readOnly(pool, QUERY_SHAPES_LEGACY_SQL);
     }
-    shapes = raw.map((r) => ({
-      shape: scrubShape(String(r.shape ?? "")),
-      calls: Number(r.calls) || 0,
-      totalMs: Number(r.total_ms) || 0,
-    }));
+    shapes = raw
+      .map((r) => ({
+        shape: scrubShape(String(r.shape ?? "")),
+        calls: Number(r.calls) || 0,
+        totalMs: Number(r.total_ms) || 0,
+      }))
+      .filter((q) => !isOurOwnStatement(q.shape));
   } catch {
     statementStatsAvailable = false;
   }
 
-  return { tables, columns, shapes, statementStatsAvailable };
+  let statementTracking: string | null = null;
+  if (statementStatsAvailable) {
+    try {
+      const [row] = await readOnly<{ track: string | null }>(pool, TRACK_SETTING_SQL);
+      statementTracking = row?.track ?? null;
+    } catch {
+      statementTracking = null;
+    }
+  }
+
+  return { tables, columns, shapes, statementStatsAvailable, statementTracking };
 }
