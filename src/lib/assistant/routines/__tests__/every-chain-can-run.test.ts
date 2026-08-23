@@ -36,13 +36,38 @@ describe("the registry actually contains tools that need a detail", () => {
 });
 
 describe("no path can put an unrunnable step into a chain", () => {
-  it("the day mapper turns one into a gap", () => {
-    for (const name of NEEDS_DETAIL.slice(0, 5)) {
+  it("the day mapper either asks for the value or leaves the step out", () => {
+    /* The property is unchanged: a step that cannot run must never reach a
+       chain. What changed is that most needy tools CAN run, once somebody is
+       asked for the one value they want, so they became steps instead of
+       holes. A tool whose schema will not say which field it wants is still
+       left out, because a question nobody can phrase is not a question. */
+    for (const name of NEEDS_DETAIL) {
       const plan = mapDay([{ text: "Do the thing", tool: name, humanOnly: false }], tools, "cto");
-      expect({ tool: name, kind: plan.steps[0]?.kind }).toEqual(
-        expect.objectContaining({ kind: "gap" }),
-      );
+      const only = plan.steps[0];
+      expect(only).toBeDefined();
+      if (only.kind === "tool") {
+        /* If it is a step, it must ask for something, or it would fail on the
+           first run exactly as before. */
+        expect({ tool: name, asks: Object.keys(only.ask ?? {}).length }).toEqual(
+          expect.objectContaining({ asks: expect.any(Number) }),
+        );
+        expect(Object.keys(only.ask ?? {}).length).toBeGreaterThan(0);
+      } else {
+        expect({ tool: name, kind: only.kind }).toEqual(
+          expect.objectContaining({ kind: "gap" }),
+        );
+      }
     }
+  });
+
+  it("asks for a value the tool's own schema names", () => {
+    /* Read from the tool rather than a maintained list, so one added tomorrow
+       is chainable the day it lands. */
+    const plan = mapDay([{ text: "Look up the client", tool: "who_is", humanOnly: false }], tools, "cto");
+    const only = plan.steps[0];
+    expect(only.kind).toBe("tool");
+    if (only.kind === "tool") expect(Object.keys(only.ask ?? {})).toContain("query");
   });
 
   it("a drafted routine never contains one", () => {
@@ -59,9 +84,12 @@ describe("no path can put an unrunnable step into a chain", () => {
     expect(draft).not.toBeNull();
     for (const step of draft!.steps) {
       if (step.kind !== "tool") continue;
-      expect({ tool: step.tool, needsDetail: NEEDS_DETAIL.includes(step.tool) }).toEqual(
-        expect.objectContaining({ needsDetail: false }),
-      );
+      /* A needy tool is allowed in, provided it carries the question that
+         fills it. What must never appear is a needy tool with nothing to
+         supply the value. */
+      if (NEEDS_DETAIL.includes(step.tool)) {
+        expect(Object.keys(step.ask ?? {}).length).toBeGreaterThan(0);
+      }
     }
   });
 

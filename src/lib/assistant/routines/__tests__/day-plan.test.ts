@@ -91,19 +91,58 @@ describe("the model proposes, the registry decides", () => {
     expect(plan.covered).toBe(0);
   });
 
-  it("explains that gap differently from a missing tool, because it is different", () => {
-    /* The capability exists; the chain cannot supply the specifics. Somebody
-       can act on that by asking directly. */
+  it("ASKS for a value the schema names, instead of giving up on the step", () => {
+    /* Most of the registry needs exactly one value: who to look up, what
+       metric, which client. All of it used to be unreachable from a chain.
+       The schema names the field, so the question comes from the tool rather
+       than from a list somebody maintains. */
+    const needy = tool("who_is");
+    (needy.paramSchema as unknown as { safeParse: (v: unknown) => unknown }).safeParse = (v: unknown) =>
+      (v as { query?: string })?.query
+        ? { success: true, data: v }
+        : { success: false, error: { issues: [{ path: ["query"] }] } };
+
+    const plan = mapDay([step({ text: "Look up the client", tool: "who_is" })], [needy], "cto");
+    expect(plan.steps[0]).toMatchObject({
+      kind: "tool",
+      tool: "who_is",
+      ask: { query: 'For "Look up the client", what query should I use?' },
+    });
+    /* It counts as covered, because it is a step now rather than a hole. */
+    expect(plan.covered).toBe(1);
+  });
+
+  it("says up front that it will ask, and for what", () => {
+    /* Somebody agreeing to a chain should know where it will turn to them.
+       Finding out at run time is a surprise in something they were told was
+       automatic. */
+    const needy = tool("who_is");
+    (needy.paramSchema as unknown as { safeParse: (v: unknown) => unknown }).safeParse = (v: unknown) =>
+      (v as { query?: string })?.query
+        ? { success: true, data: v }
+        : { success: false, error: { issues: [{ path: ["query"] }] } };
+
+    const out = renderPlan(
+      mapDay([step({ text: "Look up the client", tool: "who_is" })], [needy], "cto"),
+      false,
+    );
+    expect(out).toMatch(/I will ask you for the query when it runs/i);
+  });
+
+  it("keeps the gap, with the schema's own words, when no field is named", () => {
+    /* A rule spanning several fields ("at least one of from, to or topic")
+       cannot be turned into one question, and the schema says why better than
+       we could. */
     const needy = tool("search_mail");
     (needy.paramSchema as unknown as { safeParse: (v: unknown) => unknown }).safeParse = () => ({
       success: false,
-      error: { issues: [] },
+      error: { issues: [{ path: [], message: "mail search needs at least one of 'from', 'to', or 'topic'" }] },
     });
     const out = renderPlan(
       mapDay([step({ text: "Read the overnight email", tool: "search_mail" })], [needy], "cto"),
       false,
     );
-    expect(out).toMatch(/needs a detail each time/i);
+    expect(out).toMatch(/needs at least one of 'from', 'to', or 'topic'/);
     expect(out).not.toMatch(/nothing here does this yet/i);
   });
 
