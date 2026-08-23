@@ -184,6 +184,91 @@ export const ROUTINE_TEMPLATES: readonly RoutineTemplate[] = Object.freeze([
     ],
   },
   {
+    /* READ-ONLY, AND THEREFORE NO HUMAN STEP.
+     *
+     * The human step exists to gate ACTION: nothing is sent, filed or told to
+     * anybody without somebody agreeing. A chain that only looks things up has
+     * nothing to agree to, and stopping it to ask would be friction with no
+     * safety in it.
+     *
+     * This shape is the foundation rather than a lesser case. It is the one
+     * that answers a question nobody could answer in one place before: three
+     * tools whose data has never been read together, and the reading is the
+     * whole product. */
+    id: "tmpl_anything_on_fire",
+    command: "is anything on fire",
+    description: "Open issues and outstanding scan findings, read together.",
+    audience: "engineer",
+    forRole: "Engineering",
+    outcome: "One answer to 'is there anything I should know about', instead of three tabs.",
+    steps: [
+      {
+        kind: "tool",
+        slot: "issues",
+        tool: "search_github_issues",
+        params: { state: "open" },
+        label: "Finding open issues",
+      },
+      {
+        kind: "tool",
+        slot: "findings",
+        tool: "platform_scan_findings",
+        params: {},
+        label: "Checking outstanding scan findings",
+      },
+      {
+        kind: "model",
+        prompt:
+          "Open issues: {{issues}}\n\nScan findings: {{findings}}\n\n" +
+          "Is there anything here that needs attention today, and is anything in one " +
+          "list also in the other? Say plainly if nothing does: a quiet week is a " +
+          "finding, and inventing an urgent item to fill the answer is worse than " +
+          "saying there is none.",
+        label: "Reading them together",
+      },
+    ],
+  },
+  {
+    id: "tmpl_what_changed",
+    command: "what changed this week",
+    description: "What merged, what deployed, and what moved across the tools.",
+    audience: "anyone",
+    forRole: "Anyone keeping track",
+    outcome: "The week in one answer, without opening GitHub, Vercel and three dashboards.",
+    steps: [
+      {
+        kind: "tool",
+        slot: "merged",
+        tool: "search_github_pull_requests",
+        params: { state: "closed" },
+        label: "Finding what merged",
+      },
+      {
+        kind: "tool",
+        slot: "deploys",
+        tool: "vercel_deployments_widget",
+        params: { limit: 8 },
+        label: "Finding what deployed",
+      },
+      {
+        kind: "tool",
+        slot: "signals",
+        tool: "cross_tool_insights_widget",
+        params: { lookbackDays: 7 },
+        label: "Looking across the tools",
+      },
+      {
+        kind: "model",
+        prompt:
+          "Merged: {{merged}}\n\nDeployed: {{deploys}}\n\nSignals: {{signals}}\n\n" +
+          "What actually changed this week, and does anything deployed not line up " +
+          "with anything merged? Name the specific pull request or deployment. Where " +
+          "the data does not connect the two, say that rather than assuming they match.",
+        label: "Reading the week together",
+      },
+    ],
+  },
+  {
     id: "tmpl_week_ahead",
     command: "look at the week ahead",
     description: "What is scheduled, what is open, and what has moved across the tools.",
