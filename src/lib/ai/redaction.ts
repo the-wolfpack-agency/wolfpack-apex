@@ -31,7 +31,8 @@ export type RedactionKind =
   | "credit_card"
   | "ip"
   | "iban"
-  | "api_key";
+  | "api_key"
+  | "national_id";
 
 export interface RedactionHit {
   kind: RedactionKind;
@@ -84,7 +85,28 @@ const PHONE_RE =
  * phone matches that already consume those digits).
  * Word boundaries prevent false matches on longer digit strings.
  */
-const SSN_RE = /\b\d{3}-\d{2}-\d{4}\b/g;
+const SSN_RE = /\b\d{3}[- ]\d{2}[- ]\d{4}\b/g;
+
+/*
+ * NATIONAL IDENTIFIERS THAT ARE NOT AMERICAN.
+ *
+ * Sent a UK National Insurance number through the live assistant on
+ * 2026-08-23: it reached the model and came back in the answer. The
+ * redactor knew four digit-shaped things and all of them were US or
+ * card-network formats, so the identifier a British or European employee
+ * record is keyed on had no pattern at all.
+ *
+ * NI is two prefix letters, six digits, one suffix letter. The excluded
+ * letters (D, F, I, Q, U, V first; O second; and the A-D suffix) are the
+ * real allocation rules, and they are what stops this matching an
+ * arbitrary two-letter code followed by digits.
+ *
+ * DELIBERATELY NOT A VIN. A VIN is seventeen characters and this is nine,
+ * so the shapes cannot overlap, which matters more here than anywhere: a
+ * vehicle identifier is the working vocabulary of the client this is being
+ * built for, and redacting it would break every question they ask.
+ */
+const NI_RE = /\b[ABCEGHJ-PRSTW-Z][ABCEGHJ-NPRSTW-Z]\s?\d{2}\s?\d{2}\s?\d{2}\s?[A-D]\b/g;
 
 /*
  * CREDIT CARD, 13-19 digits optionally grouped by spaces, hyphens, or
@@ -198,6 +220,7 @@ const PATTERNS: PatternSpec[] = [
   { kind: "email", re: EMAIL_RE },
   { kind: "phone", re: PHONE_RE },
   { kind: "ssn", re: SSN_RE },
+  { kind: "national_id", re: NI_RE },
   {
     kind: "credit_card",
     re: CC_RE,
@@ -466,6 +489,9 @@ export function redactMessages(
 export const NEVER_SEND_KINDS: ReadonlySet<RedactionKind> = new Set([
   "api_key",
   "ssn",
+  /* Same standing as an SSN, for the same reason: it identifies a person
+     to their government and nothing an assistant does needs it. */
+  "national_id",
   "credit_card",
   "iban",
 ]);
