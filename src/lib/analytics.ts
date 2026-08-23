@@ -1146,6 +1146,11 @@ export type InstinctEventType =
   //     question ("asked"). Never dispatched as a fresh query: a message with no
   //     subject cannot match a tool honestly, and the path after that is a guess.
   | "assistant.follow_through_resolved"
+  //   assistant.answered_not_connected { domain } - a lookup about records no
+  //     connected system holds was answered deterministically instead of being
+  //     sent to a model that would answer fluently about data it has never seen.
+  //     Zero tokens, and the count IS the demand signal for what to connect next.
+  | "assistant.answered_not_connected"
   // Aggregate query executed (count / sum / avg / win-rate / top-N).
   // Metadata: { connector, object_type, operation, result_type }.
   | "assistant.connector_aggregate_executed"
