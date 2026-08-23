@@ -101,6 +101,7 @@ import "./update-external-record-tool";
 import "./get-related-records-tool";
 import "./filter-external-records-tool";
 import "./compare-across-sources-tool";
+import "./schedule-health-tool";
 import "./aggregate-external-records-tool";
 
 /* GitHub query tools — read-only against the org PAT. Standalone (not
