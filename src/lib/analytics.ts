@@ -1125,6 +1125,11 @@ export type InstinctEventType =
   //     The disagreeing VALUES are the client's customer data and stay in
   //     the answer the user asked for, never in this table.
   | "assistant.cross_source_compared"
+  //   assistant.schedule_analysed { days, direction, meetings, usable_blocks,
+  //     stranded_hours, back_to_back_runs }: SHAPE only. What is in somebody's
+  //     calendar is among the most sensitive data we hold, and none of it is
+  //     needed to learn whether the analysis is worth keeping.
+  | "assistant.schedule_analysed"
   // Aggregate query executed (count / sum / avg / win-rate / top-N).
   // Metadata: { connector, object_type, operation, result_type }.
   | "assistant.connector_aggregate_executed"
