@@ -10,7 +10,13 @@
  * AI responses are cached in instinct_knowledge for future zero-token retrieval.
  */
 
-import { matchRoutine, runRoutine, describeRun } from "@/lib/assistant/routines";
+import {
+  matchRoutine,
+  runRoutine,
+  describeRun,
+  detectResumeIntent,
+  resumeWaitingRoutine,
+} from "@/lib/assistant/routines";
 import { matchSavedRoutine } from "@/lib/assistant/routines/saved";
 import { searchKnowledge, saveAnswer } from "@/lib/knowledge";
 import { queryBrain, markCited as markBrainCited } from "@/lib/brain/query";
@@ -856,6 +862,35 @@ export async function chat(
   /* Built-ins first, then anything this person saved. Ours are checked first so
      a saved chain can never shadow a documented command, which is also why
      saveRoutine refuses to store one that collides. */
+  /* SOMEBODY COMING BACK TO A ROUTINE THAT IS WAITING ON THEM.
+   *
+   * Checked BEFORE a new command is matched, so "done" reaches the chain that
+   * asked rather than falling through to a tool, and checked with an exact
+   * vocabulary so an unrelated question in the meantime is never swallowed as
+   * an answer.
+   *
+   * Until this existed the product told people "reply to carry on" and nothing
+   * listened. A promise in the product's own words that nothing implements is
+   * worse than not making it. */
+  const resumeIntent = detectResumeIntent(message);
+  if (resumeIntent !== "none") {
+    const resumed = await resumeWaitingRoutine(toolCtx, resumeIntent);
+    if (resumed) {
+      const msgId = await dbSaveMessage(convId, "assistant", resumed.answer, "tool", 0);
+      await dbUpdateConversationStats(convId, 0);
+      return {
+        response: resumed.answer,
+        source: "tool",
+        tokensUsed: 0,
+        conversationId: convId,
+        messageId: msgId,
+      };
+    }
+    /* Nothing was waiting. Fall through: "done" on its own is not a question,
+       but it is also not ours to answer, and the priority chain below handles
+       an ordinary message better than a guess would. */
+  }
+
   const routine =
     matchRoutine(message) ??
     (await matchSavedRoutine({ workspaceId: workspaceId ?? "default", userId }, message));
