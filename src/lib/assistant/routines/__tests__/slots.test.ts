@@ -103,3 +103,58 @@ describe("interpolate", () => {
     expect(interpolate("use {braces} freely", {})).toBe("use {braces} freely");
   });
 });
+
+describe("a slot from a real client's data, not a test workspace's", () => {
+  /* Invisible on a workspace with an empty mailbox and no deals. On a real
+     CRM the same chain builds a prompt out of thousands of records, and a
+     provider that truncates an over-long prompt does it silently: the model
+     then reasons over a partial list and answers with complete confidence. */
+
+  it("keeps a list short and says how much it kept", () => {
+    const deals = Array.from({ length: 500 }, (_, i) => ({ id: `deal-${i}`, name: `Account ${i}` }));
+    const out = interpolate("deals: {{deals}}", { deals });
+
+    expect(out).toContain("showing the first 25 of 500");
+    /* And it is still valid enough to read: the kept part is whole records. */
+    expect(out).toContain("deal-0");
+    expect(out).not.toContain("deal-400");
+  });
+
+  it("does not annotate a list that fits", () => {
+    /* A note on every list would train everybody to ignore the note. */
+    const out = interpolate("deals: {{deals}}", { deals: [{ id: "a" }, { id: "b" }] });
+    expect(out).not.toMatch(/showing the first/);
+  });
+
+  it("cuts an enormous string and says it is partial", () => {
+    const out = interpolate("body: {{mail}}", { mail: "x".repeat(20_000) });
+    expect(out).toMatch(/treat it as partial/);
+    expect(out.length).toBeLessThan(5_000);
+  });
+
+  it("says partial rather than just being shorter", () => {
+    /* The marker is the whole point. Silently shorter is the dangerous
+       version: the model cannot tell, so it describes a fragment as the whole.
+     *
+       Embedded in text, which is what a prompt looks like. A reference that IS
+       the whole string is a different case on purpose, covered below: it keeps
+       the value's type because a tool parameter needs the real thing. */
+    const out = interpolate("here it is: {{big}}", { big: { note: "y".repeat(20_000) } });
+    expect(out).toMatch(/treat it as partial/i);
+  });
+
+  it("leaves ordinary values exactly as they were", () => {
+    /* The bound must not become a tax on the common case. */
+    expect(interpolate("{{n}}", { n: 42 })).toBe(42);
+    expect(interpolate("hi {{who}}", { who: "Dana" })).toBe("hi Dana");
+    expect(interpolate("{{o}}", { o: { a: 1 } })).toEqual({ a: 1 });
+  });
+
+  it("still keeps the TYPE when a whole-string reference points at a big list", () => {
+    /* Bounding is for text going into a prompt. A tool parameter that wants
+       the array must still receive the array, or a chain breaks at validation
+       one step later. */
+    const deals = Array.from({ length: 500 }, (_, i) => i);
+    expect(interpolate({ ids: "{{deals}}" }, { deals })).toEqual({ ids: deals });
+  });
+});
