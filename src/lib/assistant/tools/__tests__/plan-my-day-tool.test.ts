@@ -129,7 +129,10 @@ describe("the answer", () => {
     expect(res.data.gaps).toBe(2);
     expect(res.data.covered).toBe(1);
     expect(res.answer).toMatch(/nothing here does this yet/i);
-    expect(res.answer).toMatch(/needs a detail each time/i);
+    /* The schema's own words, which say more than ours did: a rule spanning
+       several fields cannot become one question, and "needs at least one of
+       from, to, or topic" tells somebody exactly what to type instead. */
+    expect(res.answer).toMatch(/at least one of 'from', 'to', or 'topic'/);
   });
 });
 

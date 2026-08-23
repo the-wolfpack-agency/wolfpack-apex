@@ -44,11 +44,24 @@ export interface DescribedStep {
 }
 
 export type MappedStep =
-  | { kind: "tool"; text: string; tool: string; description: string }
+  | {
+      kind: "tool";
+      text: string;
+      tool: string;
+      description: string;
+      /** Present when the tool needs a value nobody has supplied yet. */
+      ask?: Record<string, string>;
+    }
   /** Work only a person can do. Not a gap: nothing is missing. */
   | { kind: "human"; text: string }
   /** Software could help and we do not have it. Named honestly. */
-  | { kind: "gap"; text: string; reason: "no_tool" | "not_permitted" | "needs_detail" };
+  | {
+      kind: "gap";
+      text: string;
+      reason: "no_tool" | "not_permitted" | "needs_detail";
+      /** The schema's own words, when it refused without naming a field. */
+      detail?: string;
+    };
 
 export interface DayPlan {
   steps: MappedStep[];
@@ -109,9 +122,39 @@ export function mapDay(
      *
      * It becomes a GAP rather than a step, because a chain that stops at step
      * one is worse than a chain that never included the step and said why. */
+    /* A TOOL THAT NEEDS A DETAIL CAN STILL BE A STEP: it just has to ask.
+     *
+     * This used to become a gap, which meant most of the registry could never
+     * appear in a chain somebody described. Looking a client up, checking a
+     * financial metric, asking who somebody is: all of them need one value,
+     * none of them have a sensible default, and all of them were unreachable.
+     *
+     * The schema already knows which value. A zod failure names the path, so
+     * the parameter to ask for is read from the tool itself rather than
+     * guessed or hand-listed, and a tool added tomorrow is chainable the day
+     * it lands with nobody updating anything here. */
     const runsWithNothing = tool.paramSchema.safeParse({});
     if (!runsWithNothing.success) {
-      steps.push({ kind: "gap", text, reason: "needs_detail" });
+      const keys = askableKeys(runsWithNothing.error);
+      if (keys.length === 0) {
+        /* The schema refused without saying which field, which happens when a
+           rule spans several of them ("at least one of from, to or topic").
+           Its own message is more use than ours, so it carries. */
+        steps.push({
+          kind: "gap",
+          text,
+          reason: "needs_detail",
+          detail: runsWithNothing.error.issues[0]?.message,
+        });
+        continue;
+      }
+      steps.push({
+        kind: "tool",
+        text,
+        tool: tool.name,
+        description: tool.description.split(/(?<=\.)\s/)[0].replace(/\.$/, ""),
+        ask: Object.fromEntries(keys.map((k: string) => [k, questionFor(k, text)])),
+      });
       continue;
     }
 
@@ -163,6 +206,9 @@ export function draftRoutine(plan: DayPlan, id: string, command: string): Routin
            chain, not from a model's guess at what they meant, because a wrong
            parameter is a wrong action taken confidently. */
         params: {},
+        /* Except the ones the tool insists on, which it will ask for when it
+           runs rather than being guessed now. */
+        ...(s.ask ? { ask: s.ask } : {}),
         label: s.text.slice(0, 80),
       });
     } else if (s.kind === "human") {
@@ -254,6 +300,43 @@ export function draftRoutine(plan: DayPlan, id: string, command: string): Routin
 }
 
 /**
+ * Which parameters a tool refused to run without, read from its own schema.
+ *
+ * A zod failure names the path it failed on, so the field to ask for comes
+ * from the tool rather than from a list somebody has to maintain. A tool added
+ * tomorrow becomes chainable the day it lands.
+ *
+ * First segment only: a nested path is a shape nobody can answer in a sentence,
+ * and asking "what should objectType.filters.amount.op be" is not a question a
+ * person should be asked. Deduped, and capped, because a tool demanding five
+ * values is one somebody should call directly rather than chain.
+ */
+function askableKeys(error: { issues: Array<{ path: PropertyKey[] }> }): string[] {
+  const keys = new Set<string>();
+  for (const issue of error.issues) {
+    const first = issue.path[0];
+    if (typeof first === "string" && first) keys.add(first);
+  }
+  return [...keys].slice(0, 3);
+}
+
+/**
+ * The question to put in front of somebody, in their own context.
+ *
+ * Built from the step they described rather than from the parameter name
+ * alone, because "what query?" out of nowhere is a worse question than "what
+ * should I search for, for 'look up the client'?". The key is humanised
+ * because objectType is our word, not theirs.
+ */
+function questionFor(key: string, stepText: string): string {
+  const human = key
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/[_-]+/g, " ")
+    .toLowerCase();
+  return `For "${stepText}", what ${human} should I use?`;
+}
+
+/**
  * A slot name from the person's own words.
  *
  * Lowercased, spaces to underscores, trimmed to something readable, and
@@ -287,7 +370,15 @@ export function renderPlan(plan: DayPlan, canChain: boolean): string {
   plan.steps.forEach((s, i) => {
     const n = `${i + 1}.`;
     if (s.kind === "tool") {
-      lines.push(`${n} **${s.text}** — I can do this now. ${s.description}.`);
+      /* Say that it will ask, and for what. Somebody agreeing to a chain
+         should know where it will stop and turn to them, and finding out at
+         run time is a surprise in something they were told was automatic. */
+      const asks = Object.keys(s.ask ?? {});
+      lines.push(
+        asks.length > 0
+          ? `${n} **${s.text}** — I can do this, and I will ask you for the ${asks.join(" and the ")} when it runs.`
+          : `${n} **${s.text}** — I can do this now. ${s.description}.`,
+      );
     } else if (s.kind === "human") {
       /* Named as work rather than as a shortfall. A person reading a list of
          their own job wants the parts only they can do described as the
@@ -296,11 +387,12 @@ export function renderPlan(plan: DayPlan, canChain: boolean): string {
     } else if (s.reason === "not_permitted") {
       lines.push(`${n} **${s.text}** — there is a tool for this, but your role cannot run it.`);
     } else if (s.reason === "needs_detail") {
-      /* Named differently from "nothing does this", because it is a different
-         thing and the person can act on it: the capability exists and the
-         chain cannot supply the specifics. */
+      /* Reached only when the schema refused without naming a field, so its
+         own message is the most useful thing to pass on. */
       lines.push(
-        `${n} **${s.text}** — I can do this, but not on its own: it needs a detail each time, so it is better asked directly than run in a chain.`,
+        `${n} **${s.text}** — I can do this, but not inside a chain: ${
+          s.detail ?? "it needs a detail I cannot work out how to ask for"
+        }.`,
       );
     } else {
       lines.push(`${n} **${s.text}** — nothing here does this yet.`);
