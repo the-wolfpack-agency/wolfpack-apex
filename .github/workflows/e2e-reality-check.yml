@@ -81,12 +81,16 @@ jobs:
       # its whole timeout on retries with every browser already installed.
       # Cache-gated, which is the contract reality-check-workflow.test.ts pins:
       # on a hit the binaries are already on disk and there is nothing to fetch.
-      - name: Install Playwright browser
-        if: steps.cfg.outputs.configured == 'true' && steps.pw-cache.outputs.cache-hit != 'true'
-        timeout-minutes: 8
-        run: npx playwright install chromium
-      - name: Install OS libraries for Chromium
-        if: steps.cfg.outputs.configured == 'true'
+      # These two steps existed TWICE, and the first copy of the second one had
+      # a name and an `if` and nothing to run. A step with neither `run` nor
+      # `uses` is invalid, so GitHub rejected the whole file before creating any
+      # jobs: every run failed instantly with "workflow file issue" and zero
+      # jobs, which reads in the UI like an infrastructure problem rather than
+      # a typo. 100 of the last 100 runs failed this way, going back months.
+      #
+      # The cost was silent and large. Every spec named below has been dormant:
+      # they pass locally, they were added to this file in good faith, and none
+      # of them has ever run in CI.
       - name: Install Playwright browser
         if: steps.cfg.outputs.configured == 'true' && steps.pw-cache.outputs.cache-hit != 'true'
         timeout-minutes: 8
