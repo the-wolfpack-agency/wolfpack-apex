@@ -121,11 +121,19 @@ export const routineTemplatesTool: ToolDef<Params, TemplatesData> = {
       });
 
       const humanSteps = found.template.steps.filter((s) => s.kind === "human").length;
+      /* "stop for you at 0 of them" is what a count reads like when the answer
+         is none. A chain that only looks things up has nothing to confirm, and
+         saying so is the more useful sentence anyway: it tells somebody this
+         one just answers. */
+      const stopping =
+        humanSteps === 0
+          ? "and would not need to stop: it only reads, so there is nothing to confirm"
+          : `and stop for you at ${humanSteps === 1 ? "one of them" : `${humanSteps} of them`}`;
       return {
         ok: true,
         data: { offered: ready.length, blocked: blocked.length, adopted: found.template.command },
         answer: [
-          `**${found.template.command}** would run ${found.template.steps.length} steps and stop for you at ${humanSteps === 1 ? "one of them" : `${humanSteps} of them`}.`,
+          `**${found.template.command}** would run ${found.template.steps.length} steps ${stopping}.`,
           found.template.outcome,
           "",
           "Say yes and it becomes a command you can type. You can change it afterwards.",
