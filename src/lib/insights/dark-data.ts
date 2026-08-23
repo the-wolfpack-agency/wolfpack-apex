@@ -119,6 +119,22 @@ export function starSelectTables(shapes: string[], tables: string[]): Set<string
 }
 
 export function findDarkData(scan: LegacyScan): DarkDataReport {
+  /* With no statement history there is nothing to subtract, and every
+     populated column in the database would be reported as unread. The
+     renderer said the right thing about this case and the REPORT did
+     not, so anything reading .dark directly (a widget, a count in
+     analytics, a future caller) got a list of every column in the
+     database presented as a discovery. Found by running against a real
+     server that did not have pg_stat_statements installed. */
+  if (scan.shapes.length === 0) {
+    return {
+      dark: [],
+      starSelectTables: [],
+      unanalysed: 0,
+      statementsExamined: 0,
+    };
+  }
+
   const tableNames = [...new Set(scan.columns.map((c) => c.table))];
   const shapeTexts = scan.shapes.map((s) => s.shape);
   const corpus = shapeTexts.join("\n");
@@ -211,8 +227,9 @@ export function renderDarkData(report: DarkDataReport, dbName: string): string {
   if (report.starSelectTables.length > 0) {
     lines.push(
       "",
-      `${report.starSelectTables.length} tables are read with SELECT *, so nothing about ` +
-        `their column usage is knowable from statement text and they are excluded entirely.`,
+      `${report.starSelectTables.length} ${report.starSelectTables.length === 1 ? "table is" : "tables are"} ` +
+        `read with SELECT *, so nothing about column usage there is knowable from statement ` +
+        `text and it is excluded entirely.`,
     );
   }
   if (report.unanalysed > 0) {

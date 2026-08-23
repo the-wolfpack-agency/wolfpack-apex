@@ -33,13 +33,13 @@ function fakePool(handler: (sql: string) => unknown[]) {
 }
 
 const TABLE_ROWS = [
-  { table: "archive_2011", live_rows: 4_000_000, seq_scans: 0, idx_scans: 0, writes: 0 },
-  { table: "audit_shadow", live_rows: 900_000, seq_scans: 0, idx_scans: 0, writes: 41_000 },
-  { table: "customers", live_rows: 120_000, seq_scans: 900_000, idx_scans: 100_000, writes: 12 },
-  { table: "orders", live_rows: 80_000, seq_scans: 10, idx_scans: 400_000, writes: 90 },
-  { table: "line_items", live_rows: 400_000, seq_scans: 5, idx_scans: 200_000, writes: 30 },
-  { table: "regions", live_rows: 40, seq_scans: 900, idx_scans: 10, writes: 0 },
-  { table: "staff", live_rows: 300, seq_scans: 500, idx_scans: 20, writes: 1 },
+  { table: "archive_2011", live_rows: 4_000_000, seq_scans: 0, idx_scans: 0, writes: 0, analyses: 0 },
+  { table: "audit_shadow", live_rows: 900_000, seq_scans: 0, idx_scans: 0, writes: 41_000, analyses: 0 },
+  { table: "customers", live_rows: 120_000, seq_scans: 900_000, idx_scans: 100_000, writes: 12, analyses: 3 },
+  { table: "orders", live_rows: 80_000, seq_scans: 10, idx_scans: 400_000, writes: 90, analyses: 3 },
+  { table: "line_items", live_rows: 400_000, seq_scans: 5, idx_scans: 200_000, writes: 30, analyses: 3 },
+  { table: "regions", live_rows: 40, seq_scans: 900, idx_scans: 10, writes: 0, analyses: 3 },
+  { table: "staff", live_rows: 300, seq_scans: 500, idx_scans: 20, writes: 1, analyses: 3 },
 ];
 
 function route(sql: string): unknown[] {
@@ -214,5 +214,154 @@ describe("when it could not look", () => {
     expect(await m.generateColdTables(CTX)).toEqual([]);
     expect(await m.generateReadConcentration(CTX)).toEqual([]);
     expect(await m.generateRepeatedQueryShapes(CTX)).toEqual([]);
+  });
+});
+
+/**
+ * Everything below was found by running the scan against a real
+ * Postgres rather than a fake pool. Each one passed the fixture suite
+ * and was wrong against a server.
+ */
+describe("what a real database taught this", () => {
+  function scanWith(over: Partial<any>): any {
+    return {
+      tables: [],
+      columns: [],
+      shapes: [],
+      statementStatsAvailable: true,
+      statementTracking: "all",
+      ...over,
+    };
+  }
+
+  it("does not require zero scans, because maintenance scans every table", async () => {
+    /* ANALYZE reads the table and autovacuum runs it on a schedule, so
+       a table nothing has ever queried still reports scans. The real
+       probe had a never-queried table sitting at seq_scan = 1, and the
+       "zero scans" rule would have fired on nothing in production. */
+    const { pool } = fakePool((sql) =>
+      sql.includes("pg_stat_user_tables")
+        ? [{ table: "archive_2011", live_rows: 3000, seq_scans: 2, idx_scans: 0, writes: 3000, analyses: 2 }]
+        : [],
+    );
+    jest.doMock("@/lib/sources/legacy-postgres", () => {
+      const actual = jest.requireActual("@/lib/sources/legacy-postgres");
+      return { ...actual, scanLegacyDatabase: () => actual.scanLegacyDatabase({ pool }) };
+    });
+    const { generateColdTables } = await import("../legacy-db-insights");
+    const [i] = await generateColdTables(CTX);
+    expect(i.title).toContain("A large table");
+    expect(i.detail).toContain("beyond routine maintenance");
+  });
+
+  it("still ignores a table with scans that maintenance cannot explain", async () => {
+    const { pool } = fakePool((sql) =>
+      sql.includes("pg_stat_user_tables")
+        ? [{ table: "orders", live_rows: 20000, seq_scans: 303, idx_scans: 0, writes: 10, analyses: 2 }]
+        : [],
+    );
+    jest.doMock("@/lib/sources/legacy-postgres", () => {
+      const actual = jest.requireActual("@/lib/sources/legacy-postgres");
+      return { ...actual, scanLegacyDatabase: () => actual.scanLegacyDatabase({ pool }) };
+    });
+    const { generateColdTables } = await import("../legacy-db-insights");
+    expect(await generateColdTables(CTX)).toEqual([]);
+  });
+
+  it("reads as English when exactly one table is cold", async () => {
+    /* "1 large tables have not been read" is the sort of thing that
+       makes a report look automated, which is the one impression a
+       finding like this cannot afford. */
+    const { pool } = fakePool((sql) =>
+      sql.includes("pg_stat_user_tables")
+        ? [{ table: "archive_2011", live_rows: 3000, seq_scans: 0, idx_scans: 0, writes: 0, analyses: 0 }]
+        : [],
+    );
+    jest.doMock("@/lib/sources/legacy-postgres", () => {
+      const actual = jest.requireActual("@/lib/sources/legacy-postgres");
+      return { ...actual, scanLegacyDatabase: () => actual.scanLegacyDatabase({ pool }) };
+    });
+    const { generateColdTables } = await import("../legacy-db-insights");
+    const [i] = await generateColdTables(CTX);
+    expect(i.title).not.toMatch(/\d+ large tables/);
+    expect(i.detail).toContain("holds about 3,000 rows");
+  });
+
+  it("declares the blind spot when tracking covers only direct queries", async () => {
+    /* The default is "top", which records nothing inside a function or
+       a stored procedure. On the probe that hid 3,000 calls entirely.
+       A legacy system is frequently almost all stored procedures, and
+       finding nothing under that setting is not the same as there
+       being nothing. */
+    jest.doMock("@/lib/sources/legacy-postgres", () => {
+      const actual = jest.requireActual("@/lib/sources/legacy-postgres");
+      return { ...actual, scanLegacyDatabase: async () => scanWith({ statementTracking: "top" }) };
+    });
+    const { generateRepeatedQueryShapes } = await import("../legacy-db-insights");
+    const [i] = await generateRepeatedQueryShapes(CTX);
+    expect(i.id).toBe("legacy_statement_tracking_top_only");
+  });
+
+  it("stays quiet when full tracking genuinely found nothing repeated", async () => {
+    jest.doMock("@/lib/sources/legacy-postgres", () => {
+      const actual = jest.requireActual("@/lib/sources/legacy-postgres");
+      return { ...actual, scanLegacyDatabase: async () => scanWith({ statementTracking: "all" }) };
+    });
+    const { generateRepeatedQueryShapes } = await import("../legacy-db-insights");
+    expect(await generateRepeatedQueryShapes(CTX)).toEqual([]);
+  });
+
+  it("leads with the count when the total time rounds to nothing", async () => {
+    jest.doMock("@/lib/sources/legacy-postgres", () => {
+      const actual = jest.requireActual("@/lib/sources/legacy-postgres");
+      return {
+        ...actual,
+        scanLegacyDatabase: async () =>
+          scanWith({ shapes: [{ shape: "SELECT full_name FROM customers WHERE id = $1", calls: 3000, totalMs: 400 }] }),
+      };
+    });
+    const { generateRepeatedQueryShapes } = await import("../legacy-db-insights");
+    const [i] = await generateRepeatedQueryShapes(CTX);
+    expect(i.title).toContain("has run 3,000 times");
+    expect(i.title).not.toContain("0s");
+  });
+
+  it("never reports our own catalogue queries back as the client's load", async () => {
+    /* On an idle database the busiest statements recorded were OUR
+       scan: the read-only transaction, the timeout, and the catalogue
+       selects. */
+    const { pool } = fakePool((sql) => {
+      if (sql.includes("pg_stat_statements") && sql.includes("total_exec_time")) {
+        return [
+          { shape: "BEGIN READ ONLY", calls: 5000, total_ms: 10 },
+          { shape: "SET LOCAL statement_timeout = 8000", calls: 5000, total_ms: 10 },
+          { shape: "SELECT relname AS table FROM pg_stat_user_tables", calls: 5000, total_ms: 10 },
+          { shape: "SELECT full_name FROM customers WHERE id = $1", calls: 3000, total_ms: 9000 },
+        ];
+      }
+      return [];
+    });
+    jest.dontMock("@/lib/sources/legacy-postgres");
+    jest.resetModules();
+    const { scanLegacyDatabase } = await import("@/lib/sources/legacy-postgres");
+    const s = await scanLegacyDatabase({ pool });
+    expect(s!.shapes.map((q) => q.shape)).toEqual([
+      "SELECT full_name FROM customers WHERE id = $1",
+    ]);
+  });
+
+  it("analyses base tables only, never a monitoring view's own columns", async () => {
+    /* The column query returned the columns of pg_stat_statements'
+       views, so the analysis was reporting on the extension we had just
+       asked them to install. */
+    /* Earlier tests in this file replace the module; this one needs the
+       real query text. */
+    jest.dontMock("@/lib/sources/legacy-postgres");
+    jest.resetModules();
+    const { pool, statements } = fakePool(() => []);
+    const { scanLegacyDatabase } = await import("@/lib/sources/legacy-postgres");
+    await scanLegacyDatabase({ pool });
+    const columnQuery = statements.find((s) => s.includes("information_schema.columns"))!;
+    expect(columnQuery).toContain("'BASE TABLE'");
   });
 });

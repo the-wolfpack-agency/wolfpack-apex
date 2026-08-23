@@ -28,6 +28,7 @@ function scan(
     })),
     shapes: shapes.map((shape, i) => ({ shape, calls: 100 + i, totalMs: 1000 })),
     statementStatsAvailable: true,
+    statementTracking: "all",
   };
 }
 

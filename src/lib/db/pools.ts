@@ -47,8 +47,37 @@ function cache(): Map<string, Entry> {
   return g.__tenantPools;
 }
 
-export function poolConfigFor(connectionString: string, env: NodeJS.ProcessEnv = process.env): PoolConfig {
-  const normalized = normalizeDatabaseUrlSsl(connectionString);
+export interface PoolConfigOptions {
+  /**
+   * Permit a plaintext connection when the URL explicitly says
+   * sslmode=disable.
+   *
+   * Off everywhere by default, and it must stay that way: every
+   * database WE own is reachable over TLS and silently downgrading one
+   * would be a security regression nobody asked for.
+   *
+   * It exists for a case we met the first time this ran against a real
+   * server rather than a fake pool. A client's twelve-year-old database
+   * sits on a private network and frequently has no TLS at all, and the
+   * normaliser rewrites sslmode=disable to verify-full, so the
+   * connection cannot be made under any setting. The choice is an
+   * explicit opt-in by an operator who knows the network, or refusing
+   * to integrate with the systems this product exists to integrate
+   * with.
+   */
+  allowPlaintext?: boolean;
+}
+
+export function poolConfigFor(
+  connectionString: string,
+  env: NodeJS.ProcessEnv = process.env,
+  opts: PoolConfigOptions = {},
+): PoolConfig {
+  const wantsPlaintext =
+    opts.allowPlaintext === true && /[?&]sslmode=disable(\b|&|$)/i.test(connectionString);
+  const normalized = wantsPlaintext
+    ? connectionString
+    : normalizeDatabaseUrlSsl(connectionString);
   return {
     connectionString: normalized,
     max: 10,
@@ -58,7 +87,11 @@ export function poolConfigFor(connectionString: string, env: NodeJS.ProcessEnv =
     // Same break-glass as the single-database path, and the same default of
     // full verification. A per-tenant pool that silently skipped cert checks
     // would be a downgrade nobody asked for.
-    ssl: env.INSTINCT_DB_ALLOW_INSECURE === "true" ? { rejectUnauthorized: false } : undefined,
+    ssl: wantsPlaintext
+      ? false
+      : env.INSTINCT_DB_ALLOW_INSECURE === "true"
+      ? { rejectUnauthorized: false }
+      : undefined,
   };
 }
 
@@ -74,7 +107,12 @@ const defaultFactory: PoolFactory = (config) => {
 export function getTenantPool(
   tenantId: string,
   connectionString: string,
-  deps: { factory?: PoolFactory; now?: () => number; env?: NodeJS.ProcessEnv } = {},
+  deps: {
+    factory?: PoolFactory;
+    now?: () => number;
+    env?: NodeJS.ProcessEnv;
+    allowPlaintext?: boolean;
+  } = {},
 ): Pool {
   const factory = deps.factory ?? defaultFactory;
   const now = deps.now ?? Date.now;
@@ -106,7 +144,9 @@ export function getTenantPool(
     void evicted.pool.end().catch((err) => console.warn("[db] draining evicted tenant pool:", (err as Error).message));
   }
 
-  const created = factory(poolConfigFor(connectionString, deps.env));
+  const created = factory(
+    poolConfigFor(connectionString, deps.env, { allowPlaintext: deps.allowPlaintext }),
+  );
   pools.set(tenantId, { pool: created, lastUsedAt: now() });
   return created;
 }

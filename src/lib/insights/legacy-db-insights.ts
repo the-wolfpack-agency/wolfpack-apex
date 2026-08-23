@@ -56,7 +56,17 @@ export async function generateColdTables(
   const cold = s.tables
     .filter(
       (t) =>
-        t.liveRows >= COLD_TABLE_MIN_ROWS && t.seqScans === 0 && t.idxScans === 0,
+        t.liveRows >= COLD_TABLE_MIN_ROWS &&
+        t.idxScans === 0 &&
+        /* Not "zero scans". ANALYZE reads the table and autovacuum runs
+           it on a schedule, so an untouched table still accumulates
+           sequential scans for as long as the server is up. Anything at
+           or below the number of analyses is maintenance reading its
+           own statistics, not somebody's query. Running this against a
+           real server is what turned that from a detail into the
+           difference between a rule that fires and one that never
+           does. */
+        t.seqScans <= t.analyses,
     )
     .sort((a, b) => b.liveRows - a.liveRows)
     .slice(0, 5);
@@ -71,14 +81,28 @@ export async function generateColdTables(
       generator: "legacy_cold_tables",
       severity: cold.length >= 3 ? "medium" : "low",
       signalStrength: Math.min(100, 40 + cold.length * 10),
-      title: `${cold.length} large tables in ${legacyDatabaseName()} have not been read`,
+      /* Written out both ways rather than bolted-on "(s)". This is copy
+         a client reads, and "1 large tables have not been read" is the
+         sort of thing that makes a report look automated, which is
+         exactly the impression a finding like this cannot afford. Real
+         output from a real database is what surfaced it. */
+      title:
+        cold.length === 1
+          ? `A large table in ${legacyDatabaseName()} has not been read`
+          : `${cold.length} large tables in ${legacyDatabaseName()} have not been read`,
       detail:
-        `${cold.map((t) => t.table).join(", ")} hold about ${rows.toLocaleString()} rows ` +
-        `between them and have recorded no scans of any kind since the statistics were ` +
-        `last reset` +
+        (cold.length === 1
+          ? `${cold[0].table} holds about ${rows.toLocaleString()} rows and has recorded no ` +
+            `scans beyond routine maintenance since the statistics were last reset`
+          : `${cold.map((t) => t.table).join(", ")} hold about ${rows.toLocaleString()} rows ` +
+            `between them and have recorded no scans beyond routine maintenance since the ` +
+            `statistics were last reset`) +
         (written.length
-          ? `, though ${written.length} of them are still being written to — something is ` +
-            `filling them and nothing is reading them.`
+          ? cold.length === 1
+            ? `, and it is still being written to: something is filling it and nothing is ` +
+              `reading it.`
+            : `, though ${written.length} of them are still being written to: something is ` +
+              `filling them and nothing is reading them.`
           : `. Worth confirming against a longer window before anything is retired.`),
       action: { label: "Check what still writes to these", chip: "cross-source insights" },
       sources: ["legacy-database"],
@@ -134,7 +158,7 @@ export async function generateReadConcentration(
         `${withReads.length} active tables` +
         (scanning.length
           ? `, and ${scanning.map((t) => t.table).join(" and ")} are being read mostly by ` +
-            `sequential scan rather than by index — the expensive way to be popular.`
+            `sequential scan rather than by index: the expensive way to be popular.`
           : `. Anything that touches those three is worth caching first.`),
       action: { label: "Start any migration here", chip: "cross-source insights" },
       sources: ["legacy-database"],
@@ -181,13 +205,38 @@ export async function generateRepeatedQueryShapes(
     ];
   }
 
-  const hot = s.shapes
+  const hotStatements = s.shapes
     .filter((q) => q.calls >= REPEAT_CALL_THRESHOLD)
     .sort((a, b) => b.totalMs - a.totalMs)
     .slice(0, 3);
-  if (hot.length === 0) return [];
 
-  return hot.map((q, i) => {
+  /* "top" is the default and it records only statements a client issued
+     directly. In a system built on stored procedures that hides nearly
+     all of the load. Finding nothing under that setting is not the same
+     as there being nothing, and reporting the first as the second is a
+     clean bill of health we have no basis for. */
+  if (hotStatements.length === 0 && s.statementTracking === "top") {
+    return [
+      {
+        id: "legacy_statement_tracking_top_only",
+        generator: "repeated_query_shapes",
+        severity: "low",
+        signalStrength: 25,
+        title: `Statement tracking in ${legacyDatabaseName()} covers only direct queries`,
+        detail:
+          `pg_stat_statements.track is set to "top", so anything running inside a function ` +
+          `or a stored procedure is not recorded. On a system of this age that can be most ` +
+          `of the real load. Setting it to "all" makes the repeated-query analysis meaningful ` +
+          `rather than empty.`,
+        action: { label: "Set pg_stat_statements.track = all", chip: "cross-source insights" },
+        sources: ["legacy-database"],
+      },
+    ];
+  }
+
+  if (hotStatements.length === 0) return [];
+
+  return hotStatements.map((q, i) => {
     const perCall = q.calls > 0 ? q.totalMs / q.calls : 0;
     const seconds = Math.round(q.totalMs / 1000);
     return {
@@ -197,9 +246,16 @@ export async function generateRepeatedQueryShapes(
          of something in a loop that should have been one query. */
       severity: seconds >= 3600 ? "high" : seconds >= 300 ? "medium" : "low",
       signalStrength: Math.min(100, Math.round(seconds / 60)),
-      title: `One statement has cost ${legacyDatabaseName()} ${seconds.toLocaleString()}s across ${q.calls.toLocaleString()} calls`,
+      /* When the total rounds to nothing, leading with "0s" buries the
+         finding under a number that looks like an error. The count IS
+         the finding in that case: something asks the same question
+         three thousand times. */
+      title:
+        seconds < 1
+          ? `One statement has run ${q.calls.toLocaleString()} times in ${legacyDatabaseName()}`
+          : `One statement has cost ${legacyDatabaseName()} ${seconds.toLocaleString()}s across ${q.calls.toLocaleString()} calls`,
       detail:
-        `${q.shape} — averaging ${perCall.toFixed(1)}ms each. ` +
+        `${q.shape}, averaging ${perCall.toFixed(1)}ms each. ` +
         (perCall < 5
           ? `Individually trivial, which is why nobody has noticed it; the cost is entirely ` +
             `in how many times it is asked.`
