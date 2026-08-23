@@ -398,14 +398,75 @@ describe("the step that reads it all together", () => {
     }
   });
 
+  it("reads NOTHING written after it, which is how this shipped broken", () => {
+    /* A described day can perfectly well put a tool step after the person's
+       own: "check the PRs, look at the deploys, rehearse the opening, then
+       message the team". The thinking step goes before the rehearsal, so the
+       message step's output does not exist yet.
+
+       Reading it anyway produced a chain that stopped at the thinking step
+       complaining about a slot nobody had written. Found by running a real
+       described day against production; the fixture here happened to put every
+       tool before the human step, so the invariant never bit. */
+    const r = draftRoutine(
+      p([
+        step({ text: "Check the PRs", tool: "search_mail" }),
+        step({ text: "Look at the deploys", tool: "calendar_widget" }),
+        step({ text: "Rehearse the opening", tool: null }),
+        step({ text: "Message the team", tool: "search_mail" }),
+      ]),
+      "d",
+      "run my day",
+    )!;
+
+    const model = r.steps.find((x) => x.kind === "model");
+    expect(model).toBeDefined();
+    if (model && model.kind === "model") {
+      expect(model.prompt).toContain("Check the PRs:");
+      expect(model.prompt).toContain("Look at the deploys:");
+      /* The one written after it must be absent. */
+      expect(model.prompt).not.toContain("Message the team:");
+    }
+  });
+
+  it("is omitted when fewer than two things precede the person's step", () => {
+    /* One lookup before the rehearsal is not worth a model call, even though
+       two tools exist in the chain overall. */
+    const r = draftRoutine(
+      p([
+        step({ text: "Check the PRs", tool: "search_mail" }),
+        step({ text: "Rehearse the opening", tool: null }),
+        step({ text: "Message the team", tool: "calendar_widget" }),
+      ]),
+      "d",
+      "run my day",
+    )!;
+    expect(r.steps.some((x) => x.kind === "model")).toBe(false);
+  });
+
   it("reads every slot it names, so the chain cannot fail on a missing one", () => {
     /* The order invariant, checked on generated output rather than assumed:
        every slot the thinking step reads is written by a step before it. */
-    const r = draftRoutine(two(), "d", "run my day")!;
+    /* Checked on the AWKWARD shape, not the tidy one: a tool step after the
+       person's own is exactly where this broke. */
+    const r = draftRoutine(
+      p([
+        step({ text: "Check the PRs", tool: "search_mail" }),
+        step({ text: "Look at the deploys", tool: "calendar_widget" }),
+        step({ text: "Rehearse the opening", tool: null }),
+        step({ text: "Message the team", tool: "search_mail" }),
+      ]),
+      "d",
+      "run my day",
+    )!;
     const written = new Set<string>();
     for (const x of r.steps) {
       if (x.kind === "model") {
-        for (const slot of referencedSlots(x.prompt)) expect(written.has(slot)).toBe(true);
+        for (const slot of referencedSlots(x.prompt)) {
+          expect({ slot, writtenBefore: written.has(slot) }).toEqual(
+            expect.objectContaining({ writtenBefore: true }),
+          );
+        }
       }
       if (x.kind !== "human" && x.slot) written.add(x.slot);
     }

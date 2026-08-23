@@ -201,13 +201,34 @@ export function draftRoutine(plan: DayPlan, id: string, command: string): Routin
    * Only when there are at least two things to read together. One lookup plus
    * a paragraph about that lookup is a slower way to see one lookup, and it
    * costs a model call to produce. */
-  if (gathered.length >= 2) {
-    const firstHuman = steps.findIndex((s) => s.kind === "human");
+  /* WHERE IT GOES DECIDES WHAT IT CAN READ, and getting that backwards is how
+   * this shipped broken.
+   *
+   * The step is inserted before the person's first step, so that what they are
+   * asked to act on is the reading. But a described day can perfectly well put
+   * a tool step AFTER their own: "check the PRs, look at the deploys, rehearse
+   * the opening, then message the team". Reading every gathered slot then
+   * means reading one that a later step writes, and the chain stops at the
+   * thinking step complaining about a slot nobody wrote yet.
+   *
+   * Found by running a real described day against production rather than by a
+   * test, because the fixture I wrote happened to put every tool before the
+   * human step. The order invariant only bites when the shape is less tidy.
+   *
+   * So the position is decided first, and it reads only what was gathered
+   * before it. */
+  const insertAt = steps.findIndex((s) => s.kind === "human");
+  const readable =
+    insertAt === -1
+      ? gathered
+      : gathered.filter((g) => steps.findIndex((s) => s.kind !== "human" && s.slot === g.slot) < insertAt);
+
+  if (readable.length >= 2) {
     const thinking: RoutineStep = {
       kind: "model",
       slot: "sense",
       prompt: [
-        ...gathered.map((g) => `${g.text}: {{${g.slot}}}`),
+        ...readable.map((g) => `${g.text}: {{${g.slot}}}`),
         "",
         "Read those together and say what actually matters, in the person's own terms.",
         "Be specific: name the meeting, the message, the number. If two of them are",
@@ -219,8 +240,8 @@ export function draftRoutine(plan: DayPlan, id: string, command: string): Routin
     };
     /* Before the person's first step, so what they are asked to act on is the
        reading rather than the raw material. */
-    if (firstHuman === -1) steps.push(thinking);
-    else steps.splice(firstHuman, 0, thinking);
+    if (insertAt === -1) steps.push(thinking);
+    else steps.splice(insertAt, 0, thinking);
   }
 
   return {
