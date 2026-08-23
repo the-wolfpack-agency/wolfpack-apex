@@ -301,6 +301,39 @@ function jaccard(a: Set<string>, b: Set<string>): number {
 
 const FUZZY_SIM_THRESHOLD = 0.8;
 
+/**
+ * The longest question the fuzzy cache is allowed to answer.
+ *
+ * WHAT THIS CACHE IS FOR. "what is our pricing model" and "what's our
+ * pricing model" are the same question typed twice, and answering the
+ * second from the first is free and correct. Token-set Jaccard is a good
+ * test for that.
+ *
+ * WHAT IT IS NOT FOR. A prompt carrying a document is not a paraphrase of
+ * a prompt carrying a different document, and the similarity score cannot
+ * tell the difference. Two things break at once on a long prompt:
+ *
+ *   - The key is a set of UNIQUE tokens, so six kilobytes of claim notes
+ *     collapse to about twenty words. Everything repeated contributes
+ *     nothing, and the score saturates.
+ *   - The question usually names the possible answers. Asking "was the
+ *     verdict approved or denied" puts both words in every token set, so
+ *     the one thing that decides the answer is invisible to the key by
+ *     construction.
+ *
+ * Measured against production on 2026-08-23: two prompts identical for
+ * 6,046 characters, one ending "APPROVED in full" and the other "DENIED
+ * for lack of evidence", scored 0.870 and the denied claim was answered
+ * "Approved" from cache, in 180ms, at zero cost. A cache that saves money
+ * by answering a different question is worse than no cache.
+ *
+ * Above this length only the EXACT hash match can serve, which is the one
+ * that cannot be wrong. The existing date/meeting bypass list stays: it
+ * catches a different failure, where a short question is genuinely
+ * time-bound.
+ */
+export const FUZZY_MAX_MESSAGE_CHARS = 400;
+
 async function findOrgQACacheHit(
   message: string,
 ): Promise<OrgQACacheHit | null> {
@@ -392,6 +425,11 @@ async function findOrgQACacheHit(
         LIMIT 200`,
       [ttlMs],
     );
+
+    /* A long prompt carries data, and data is not a rephrasing. See
+       FUZZY_MAX_MESSAGE_CHARS: above it the exact match has already had
+       its chance and anything else is a guess with a confident voice. */
+    if (message.length > FUZZY_MAX_MESSAGE_CHARS) return null;
 
     const incomingTokens = tokenSet(message);
     let best: { row: typeof fuzzy.rows[number]; score: number } | null = null;
