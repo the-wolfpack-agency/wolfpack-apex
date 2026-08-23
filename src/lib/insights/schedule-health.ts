@@ -45,6 +45,40 @@ export interface ScheduleEvent {
   /** ISO datetime. */
   end: string;
   attendees?: string[];
+  /** Graph's free/tentative/busy/oof marker, where the source has one. */
+  showAs?: string | null;
+  isCancelled?: boolean;
+  isAllDay?: boolean;
+  /** This person's answer to the invitation. */
+  responseStatus?: string | null;
+}
+
+/**
+ * Is this an hour somebody actually spends in a room with other people?
+ *
+ * Everything here was counted as a meeting until the calendar was read
+ * from something Graph-shaped rather than from a fixture:
+ *
+ *   - A CANCELLED occurrence stays on the calendar. Nobody attended it.
+ *   - A meeting this person DECLINED is somebody else's meeting. Counting
+ *     it charges them for an hour they deliberately kept.
+ *   - A FREE or Focus Time block is Outlook protecting time to work in,
+ *     and counting it as a meeting inverts the entire report: the very
+ *     hours a person defended are billed to them as meetings, and the
+ *     usable-block measure that is the point of this analysis falls.
+ *   - OUT OF OFFICE is not a meeting either, and a week of it would
+ *     otherwise read as the busiest week of somebody's year.
+ *
+ * Tentative counts. A maybe is still an hour that cannot be planned
+ * around, which is what the report is measuring.
+ */
+function isRealMeeting(e: ScheduleEvent): boolean {
+  if (e.isCancelled) return false;
+  if (e.isAllDay) return false;
+  const showAs = (e.showAs ?? "").toLowerCase();
+  if (showAs === "free" || showAs === "oof" || showAs === "workingelsewhere") return false;
+  if ((e.responseStatus ?? "").toLowerCase() === "declined") return false;
+  return true;
 }
 
 /**
@@ -217,6 +251,7 @@ export function analyseSchedule(
 
   const valid: ZonedEvent[] = [];
   for (const e of events) {
+    if (!isRealMeeting(e)) continue;
     const startMs = Date.parse(e.start);
     const endMs = Date.parse(e.end);
     if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) continue;

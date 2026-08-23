@@ -83,7 +83,11 @@ export const scheduleHealthTool: ToolDef<Params, ScheduleHealthData> = {
     const raw = await listEvents(ctx.userId, {
       from: from.toISOString(),
       to: to.toISOString(),
-      limit: 200,
+      /* Enough for the window rather than a flat 200. A quarter of a busy
+         calendar runs to thousands of events, and asking for 200 of them
+         used to return the first 200 and report their totals as the whole
+         quarter. Twelve a day is generous and still bounded. */
+      limit: Math.min(5_000, params.days * 12),
     });
 
     const events: ScheduleEvent[] = (raw ?? [])
@@ -102,6 +106,11 @@ export const scheduleHealthTool: ToolDef<Params, ScheduleHealthData> = {
                 typeof a === "string" ? a : String((a as { name?: string })?.name ?? "attendee"),
               )
             : undefined,
+          /* What decides whether an entry is a meeting at all. */
+          showAs: typeof r.showAs === "string" ? r.showAs : null,
+          isCancelled: r.isCancelled === true,
+          isAllDay: r.isAllDay === true,
+          responseStatus: typeof r.responseStatus === "string" ? r.responseStatus : null,
         };
       })
       .filter((e) => e.start && e.end);
