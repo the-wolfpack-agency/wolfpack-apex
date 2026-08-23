@@ -137,3 +137,43 @@ describe("GET /api/assistant/prompt-history", () => {
     warn.mockRestore();
   });
 });
+
+describe("the timestamp is when the person asked, not when it was last sent", () => {
+  /** The SQL the route actually issued. */
+  async function issuedSql(): Promise<string> {
+    mockGetUser.mockReturnValue(USER);
+    process.env.DATABASE_URL = "postgres://test";
+    mockQuery.mockResolvedValue({ rows: [] });
+    const { GET } = await import("@/app/api/assistant/prompt-history/route");
+    await GET(mkReq("/api/assistant/prompt-history", "Bearer t"));
+    expect(mockQuery).toHaveBeenCalled();
+    return String(mockQuery.mock.calls[0][0]);
+  }
+
+  it("prefers a deliberate ask over one that arrived in a burst", async () => {
+    /* Reported 2026-08-23: prompts last typed days earlier showed as minutes
+       old. The timestamps were real, and still the wrong number to show. The
+       asks behind them arrived two seconds apart in separate conversations,
+       which is not somebody remembering what they were working on, and it is
+       their memory this panel exists to serve. */
+    const sql = await issuedSql();
+    expect(sql).toMatch(/LAG\(m\.created_at\)/);
+    expect(sql).toMatch(/gap > INTERVAL '10 seconds'/);
+  });
+
+  it("falls back to the raw maximum, so a prompt never shows nothing", async () => {
+    /* A prompt whose every ask was part of a burst still has to render a time.
+       Vanishing from the list is worse than showing the only timestamp there
+       is. */
+    const sql = await issuedSql();
+    expect(sql).toMatch(/COALESCE\(/);
+    expect(sql.match(/COALESCE\(/g)?.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("still counts every ask, however it arrived", async () => {
+    /* 136 asks is 136 asks. Only the clock was wrong, and narrowing the count
+       as well would answer a question nobody asked. */
+    const sql = await issuedSql();
+    expect(sql).toMatch(/COUNT\(\*\)::int AS ask_count/);
+  });
+});
