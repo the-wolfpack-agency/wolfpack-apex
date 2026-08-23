@@ -39,6 +39,16 @@ const CLAIMS: Claim[] = [
     proof: "Scroll to “What the router kept in”. It counts both directions: withheld on the way out, and withheld on the way back.",
   },
   {
+    /* Placed third, right after the redaction claim, because the two are the
+       same idea at different depths and a client hears them together: what an
+       answer CONTAINS, then what it SAYS. */
+    headline: "An answer is checked for what it promises, not just what it contains",
+    plain:
+      "Finding passwords and card numbers is pattern matching, and it cannot see a sentence that is dangerous because of what it means. \u201cYou will qualify for 2.9% APR.\u201d \u201cThat is covered under your warranty.\u201d \u201cThere are no open recalls, it is safe to drive.\u201d None of those contains anything to remove, and every one is a promise your business gets held to, made by a model that cannot be held to anything. So a second check reads the claim itself and either lets it through, removes it, holds the answer back, or hands it to a person. The rules are sentences you can read and disagree with, set for your business, rather than another AI's opinion.",
+    proof:
+      "Scroll to \u201cWhat the router would not let through\u201d. Each line names the rule and the reasoning behind it, so you can argue with the rule rather than trust a count.",
+  },
+  {
     headline: "The same rules apply to every model, including ones we did not build",
     plain:
       "The gate sits between your data and whichever model answers. Swapping a model, adding a cheaper one, or trying a new provider changes nothing about what is allowed to leave, because the check happens on our side of the line.",

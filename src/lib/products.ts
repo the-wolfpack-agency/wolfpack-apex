@@ -62,6 +62,9 @@ export const PRODUCTS: Product[] = [
     highlights: [
       "One home for briefing, clients, HR, sites, knowledge, and financials",
       "An AI assistant grounded in your own Microsoft 365 data, not generic web answers",
+      "Runs a whole job from one command: several of your existing tools in order, stopping wherever only a person can decide, and nothing sent or filed without a confirmation",
+      "Describe your working day in your own words and it maps it onto what it can already do, names what it cannot, and offers to chain the rest",
+      "Measures what your own steps cost you, and says which of them is not happening, which is worth a tool, and which pause is not earning its place",
       "Builds sites from a wireframe and then measures the result against it, so 'does this match the design' is a number rather than an opinion",
       "Runs AI agents inside a proven boundary: a named list of what they may reach, a ceiling on what one run may spend, and a stop that takes effect immediately",
       "Every action feeds a learning loop, so the system gets more useful over time",
@@ -69,6 +72,8 @@ export const PRODUCTS: Product[] = [
     audience: "The whole Wolfpack team",
     potentialUses: [
       "The assistant, knowledge base, and learning 'Brain' pattern can power any company's internal operations hub",
+      "The routine engine drops onto any company's existing tools: there is a ceiling on how much software one person touches in a day, and the value is in removing the carrying between them rather than in adding another window",
+      "The record of where human time goes inside a workflow is something no dashboard produces, and it applies to any process that mixes people and software",
       "The client, HR, and financial modules adapt to any professional-services firm that runs on Microsoft 365",
       "The design-conformance engine works on any site with a prototype to compare against, independent of how it was built",
       "The agent containment layer — allowlist, budget, kill switch, and a boundary check that runs before the work does — applies to any team putting AI agents near production systems",
@@ -85,6 +90,8 @@ export const PRODUCTS: Product[] = [
     highlights: [
       "The cheapest model that can do the job gets the job, decided by fixed rules rather than by another AI, so the same question routes the same way every time and the reason can be read in plain words afterwards",
       "Passwords, keys, card and account numbers are found and replaced before a question leaves, and again before an answer is shown or stored, because a model can repeat what it was shown and an answer gets read by the whole team",
+      "Reads what an answer SAYS, not only what it contains: a quoted finance rate, a price guarantee, a warranty decision or a safety assurance carries nothing to redact and every one is a commitment the business gets held to, so each is withheld or handed to a person before anybody reads it",
+      "The rules are readable sentences a client can argue with rather than a classifier's opinion, set per tenant, and a refusal records the rule and never the text it refused",
       "Cost is the amount the provider billed, per answer, per model, not an estimate made before the answer existed",
       "Sensitive data goes only to providers under a zero-retention agreement, and data carrying a regional requirement is refused by any model that cannot be placed inside that region, including one whose region nobody declared",
       "Every call writes a tamper-evident record of what happened, carrying counts and kinds but never the content it is auditing",

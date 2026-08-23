@@ -54,6 +54,7 @@ describe("RouterExplainer", () => {
       "models list",
       "Activity",
       "What the router kept in",
+      "What the router would not let through",
       "models list",
       "reasons panel",
       "Which models were used",
