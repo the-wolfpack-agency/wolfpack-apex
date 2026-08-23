@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { getInstinctToken, getInstinctUser, authHeaders, fetchWithRefresh } from "@/lib/client-auth";
+import { canI } from "@/lib/client-capabilities";
 import {
   startMicrosoftConnect,
   startQuickbooksConnect,
@@ -1051,6 +1052,10 @@ export default function SettingsPage() {
   }, []);
 
   const fetchQuickbooksStatus = useCallback(async () => {
+    /* Ask only if this person may have it. Without this, every non-finance
+       person opening Settings produced a refused request and a panel that
+       correctly showed nothing. */
+    if (!canI("finance.reports.view")) return;
     try {
       const res = await fetchWithRefresh("/api/quickbooks?action=status", {
         headers: authHeaders(),
