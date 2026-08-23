@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { authHeaders, fetchWithRefresh } from "@/lib/client-auth";
+import { authHeaders, getInstinctUser, fetchWithRefresh } from "@/lib/client-auth";
+import { capabilitiesForRole } from "@/lib/auth/role-capabilities";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -137,15 +138,38 @@ export default function FinancialsCard() {
     setLoading(false);
   }, []);
 
+  /* ASK ONLY IF THIS PERSON MAY HAVE IT.
+   *
+   * The card already declined to render for anybody without access, but it
+   * decided that from the 403 it got back, which means it asked first. Every
+   * non-finance person loading a page with this card produced a refused
+   * request, then a card that correctly showed nothing. Nothing looked broken,
+   * which is why it lasted: the cost was a log full of refusals and a
+   * guardrail (no page fires a 401 or 403) that everybody learns to ignore.
+   *
+   * Found by the per-role browser sweep on 2026-08-23, the same way and on the
+   * same day as the release-gate banner. Two instances is a pattern: a
+   * component that discovers its own audience from a rejection is a component
+   * that asks everybody. */
+  const mayReadFinancials = capabilitiesForRole(
+    getInstinctUser<{ role?: string }>()?.role ?? "",
+  ).has("finance.reports.view");
+
   useEffect(() => {
+    if (!mayReadFinancials) {
+      setLoading(false);
+      return;
+    }
     fetchMetrics();
     // Refresh every 15 minutes
     const interval = setInterval(fetchMetrics, 15 * 60 * 1000);
     return () => clearInterval(interval);
-  }, [fetchMetrics]);
+  }, [fetchMetrics, mayReadFinancials]);
 
-  // Don't render for non-CEO/CTO roles
-  if (error === "restricted") return null;
+  // Don't render for anybody without finance access. Decided before the fetch
+  // now; the error check stays as the backstop for a capability the server
+  // refuses for a reason the client cannot see.
+  if (!mayReadFinancials || error === "restricted") return null;
 
   if (loading) {
     return (
