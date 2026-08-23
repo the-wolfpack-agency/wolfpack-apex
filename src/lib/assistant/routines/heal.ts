@@ -98,7 +98,19 @@ export function checkRoutine(
        "{{inbox}}" is a placeholder, and validating it before the slot exists
        would report a problem that only exists on paper. */
     if (!hasSlotReference(step.params)) {
-      const parsed = tool.paramSchema.safeParse(step.params);
+      /* A STEP THAT ASKS IS NOT MISSING ITS PARAMETERS, it is waiting for
+         them. Validating what the routine carries would fail every asking step
+         the moment it was written, and report a tool as broken when the only
+         thing absent is a question nobody has been asked yet.
+       *
+         The asked keys are stood in for so the OTHER parameters are still
+         genuinely checked: a chain with a real mistake beside an asked value
+         should still be caught. */
+      const withAnswers: Record<string, unknown> = { ...step.params };
+      for (const key of Object.keys(step.ask ?? {})) {
+        if (withAnswers[key] === undefined) withAnswers[key] = ASK_PLACEHOLDER;
+      }
+      const parsed = tool.paramSchema.safeParse(withAnswers);
       if (!parsed.success) {
         problems.push({
           stepIndex,
@@ -113,6 +125,17 @@ export function checkRoutine(
 
   return { ok: problems.length === 0, problems };
 }
+
+/**
+ * Stands in for a value the person has not supplied yet.
+ *
+ * Long enough to satisfy the minimum-length rules real schemas carry: the CRM
+ * search refuses a query under two characters, and a single letter failed it.
+ * A heuristic, and openly so. A schema with a stranger constraint could still
+ * reject this, and the right moment to find that out is while somebody is
+ * writing the template rather than while somebody else is running it.
+ */
+const ASK_PLACEHOLDER = "placeholder";
 
 /** Whether a parameter object defers to an earlier step's output. */
 function hasSlotReference(value: unknown): boolean {
