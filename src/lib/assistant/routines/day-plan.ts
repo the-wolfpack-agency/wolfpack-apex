@@ -145,12 +145,20 @@ export function mapDay(
  */
 export function draftRoutine(plan: DayPlan, id: string, command: string): Routine | null {
   const steps: RoutineStep[] = [];
+  /* Slots for what each tool step returns, so the thinking step below can read
+     them. Named from the person's own words rather than the tool's, because
+     the prompt is built from those words and "{{the_overnight_email}}" is
+     readable in a way that "{{slot_1}}" is not. */
+  const gathered: Array<{ slot: string; text: string }> = [];
 
   for (const s of plan.steps) {
     if (s.kind === "tool") {
+      const slot = slotNameFor(s.text, gathered.length);
+      gathered.push({ slot, text: s.text });
       steps.push({
         kind: "tool",
         tool: s.tool,
+        slot,
         /* Empty, deliberately. Parameters come from the person confirming the
            chain, not from a model's guess at what they meant, because a wrong
            parameter is a wrong action taken confidently. */
@@ -181,6 +189,40 @@ export function draftRoutine(plan: DayPlan, id: string, command: string): Routin
    * it is offering somebody a longer way to do what they already do. */
   if (steps.length < 2) return null;
 
+  /* THE STEP THAT MAKES IT A CHAIN RATHER THAN A LIST.
+   *
+   * Without this a described day is N independent lookups: it fetches four
+   * things and hands back four things, which is what the person could already
+   * do by asking four times. The value was always in reading them together,
+   * and every built-in routine does exactly that. A drafted one did not, so
+   * the chains people built for themselves were strictly weaker than the ones
+   * we shipped.
+   *
+   * Only when there are at least two things to read together. One lookup plus
+   * a paragraph about that lookup is a slower way to see one lookup, and it
+   * costs a model call to produce. */
+  if (gathered.length >= 2) {
+    const firstHuman = steps.findIndex((s) => s.kind === "human");
+    const thinking: RoutineStep = {
+      kind: "model",
+      slot: "sense",
+      prompt: [
+        ...gathered.map((g) => `${g.text}: {{${g.slot}}}`),
+        "",
+        "Read those together and say what actually matters, in the person's own terms.",
+        "Be specific: name the meeting, the message, the number. If two of them are",
+        "about the same thing, say so, because that connection is the reason to look",
+        "at them together at all. If nothing here needs attention, say that plainly",
+        "rather than manufacturing a priority.",
+      ].join("\n"),
+      label: "Reading it all together",
+    };
+    /* Before the person's first step, so what they are asked to act on is the
+       reading rather than the raw material. */
+    if (firstHuman === -1) steps.push(thinking);
+    else steps.splice(firstHuman, 0, thinking);
+  }
+
   return {
     id,
     command,
@@ -188,6 +230,24 @@ export function draftRoutine(plan: DayPlan, id: string, command: string): Routin
     audience: "anyone",
     steps,
   };
+}
+
+/**
+ * A slot name from the person's own words.
+ *
+ * Lowercased, spaces to underscores, trimmed to something readable, and
+ * de-duplicated by position. It ends up inside a prompt the model reads, so a
+ * name that says what it holds is worth more than a tidy identifier.
+ */
+function slotNameFor(text: string, index: number): string {
+  const base = text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .split("_")
+    .slice(0, 4)
+    .join("_");
+  return base ? `${base}_${index + 1}` : `step_${index + 1}`;
 }
 
 /**
