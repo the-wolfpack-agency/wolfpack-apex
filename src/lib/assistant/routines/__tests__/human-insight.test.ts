@@ -160,3 +160,68 @@ describe("what to read first", () => {
     }
   });
 });
+
+describe("late is not the same as long", () => {
+  /* The finding nobody else produces. Everybody measures the tech; nobody
+     measures when the human part actually happens, so nobody notices that the
+     problem with somebody's preparation is WHEN they do it. */
+  const step = (over: Partial<HumanStepRow> = {}): HumanStepRow => ({
+    routineId: "morning",
+    stepIndex: 2,
+    label: "Prepare for the client call",
+    humanAction: "do",
+    asked: 20,
+    completed: 20,
+    skipped: 0,
+    avgMsWhenDone: 60 * 60 * 1000,
+    fastestMs: 4 * 60 * 1000,
+    ...over,
+  });
+
+  it("calls out a step that is always done late, not one that is always slow", () => {
+    const [f] = readHumanSteps([step()]);
+    expect(f.kind).toBe("left_late");
+    expect(f.observation).toMatch(/as little as 4 minutes/i);
+    expect(f.suggestion).toMatch(/waiting rather than work/i);
+  });
+
+  it("says why late matters, in terms of the work rather than the clock", () => {
+    /* "Preparation done after the thing it was for did not happen" is the
+       insight; "60 minutes" is just a number. */
+    const [f] = readHumanSteps([step()]);
+    expect(f.suggestion).toMatch(/after the thing it was for/i);
+  });
+
+  it("still calls a genuinely expensive step expensive", () => {
+    /* Consistently slow even at its best is effort, not delay, and it wants a
+       tool rather than a different slot in the day. */
+    const [f] = readHumanSteps([
+      step({ avgMsWhenDone: 40 * 60 * 1000, fastestMs: 35 * 60 * 1000 }),
+    ]);
+    expect(f.kind).toBe("worth_a_tool");
+  });
+
+  it("does not call ordinary variance lateness", () => {
+    /* One quick run and one slow one is a normal week, not a finding. */
+    const [f] = readHumanSteps([
+      step({ avgMsWhenDone: 12 * 60 * 1000, fastestMs: 8 * 60 * 1000 }),
+    ]);
+    expect(f.kind).toBe("worth_a_tool");
+  });
+
+  it("says nothing about lateness when there is no best run to compare", () => {
+    /* Without the fastest run the average is unreadable, and guessing which
+       shape it has would be inventing the finding. */
+    const [f] = readHumanSteps([step({ fastestMs: null })]);
+    expect(f.kind).toBe("worth_a_tool");
+  });
+
+  it("ranks being late above being expensive", () => {
+    /* Usually the cheaper fix, and the more surprising thing to be told. */
+    const findings = readHumanSteps([
+      step({ stepIndex: 1, avgMsWhenDone: 40 * 60 * 1000, fastestMs: 35 * 60 * 1000 }),
+      step({ stepIndex: 2 }),
+    ]);
+    expect(findings.map((f) => f.kind)).toEqual(["left_late", "worth_a_tool"]);
+  });
+});
