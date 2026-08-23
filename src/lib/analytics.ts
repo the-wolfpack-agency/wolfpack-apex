@@ -1120,6 +1120,11 @@ export type InstinctEventType =
   // closing this month"). Metadata flags which clause types were
   // present so we can dashboard the most-used filter shapes.
   | "assistant.connector_filter_executed"
+  //   assistant.cross_source_compared { object_type, left, right, matched,
+  //     drifting_fields, only_left, only_right, unmatchable }: counts only.
+  //     The disagreeing VALUES are the client's customer data and stay in
+  //     the answer the user asked for, never in this table.
+  | "assistant.cross_source_compared"
   // Aggregate query executed (count / sum / avg / win-rate / top-N).
   // Metadata: { connector, object_type, operation, result_type }.
   | "assistant.connector_aggregate_executed"
