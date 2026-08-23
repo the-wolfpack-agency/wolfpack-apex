@@ -503,11 +503,24 @@ export function AssistantStarterPrompts({ onPick }: AssistantStarterPromptsProps
     .filter((c) => c.prompts.length > 0);
   const missingConnections = collectMissingConnections(STARTER_CATEGORIES, status);
 
-  /* All categories collapsed by default so the empty state stays
-   *  compact and the greeting stays above the fold. Tap a header to
-   *  expand. Both mobile and desktop start fully collapsed — desktop
-   *  users get a denser overview and choose what to explore. */
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  /* Collapsed by default so the empty state stays compact and the
+   *  greeting stays above the fold, WITH ONE EXCEPTION: the first
+   *  category opens on arrival.
+   *
+   *  Found by the discovery e2e. Putting whole jobs first achieves
+   *  nothing if the first thing a new person sees is a closed header:
+   *  they meet the words "Whole jobs, in one command" and no commands,
+   *  and the feature that saves them twenty minutes is one tap further
+   *  away than the weather. One open category costs a little height
+   *  and is the difference between a heading and an offer. */
+  const [expanded, setExpanded] = useState<Record<string, boolean>>(() => {
+    /* The first category as it stands on the FIRST render, which is the one a
+       person actually arrives at. Connector status is still loading then, so
+       this is a category with no requirements, which is exactly the sort that
+       should be open: it works for everybody. */
+    const first = visibleCategories[0]?.title;
+    return first ? { [first]: true } : {};
+  });
 
   const toggle = (title: string) =>
     setExpanded((prev) => ({ ...prev, [title]: !prev[title] }));
