@@ -479,6 +479,11 @@ export type InstinctEventType =
      identical in a single "ran" number. Metadata: { due, ran, waiting, failed,
      deactivated }. */
   | "assistant.routine_sweep"
+  /* Somebody said yes or no and nothing was waiting for it. Almost always
+     because the assistant offered something in prose that it cannot actually
+     do, so a rising count is a prompt problem rather than a user problem.
+     Metadata: { intent }. */
+  | "assistant.confirmation_without_pending"
   /* A saved workflow stopped working and a repair was proposed to its owner.
      Never applied automatically: a chain that rewrites itself is one nobody can
      reason about. Metadata: { routine_id, workspace_id, problems, kinds,

@@ -780,8 +780,45 @@ export async function chat(
         sources: exec.sources,
       };
     }
-    /* Confirmation phrase but no pending row — treat as ordinary text
-       and fall through. */
+    /* CONFIRMATION PHRASE, NOTHING TO CONFIRM.
+     *
+     * This used to fall through and be treated as an ordinary question, which
+     * meant "yes please" was sent to the knowledge search as a QUERY. It has
+     * no subject, so it keyword-matches whatever happens to be nearby, and the
+     * person gets a confident "here is what the brain has on this" followed by
+     * three unrelated documents. Reported 2026-08-23 with chunks of a Porsche
+     * training spreadsheet returned in answer to "yes please".
+     *
+     * The words carry no content of their own. Answering them with a document
+     * search is not a worse answer, it is an answer to a question nobody
+     * asked, and it teaches somebody that the knowledge base returns noise.
+     *
+     * Saying the thread was lost is short, true, and recoverable. It also
+     * names the likely cause, because the common way to get here is agreeing
+     * to something the assistant offered in prose rather than through an
+     * action it can actually take. */
+    const lost =
+      confirmIntent === "cancel"
+        ? "Nothing was waiting on an answer, so there was nothing to cancel."
+        : [
+            "I have lost the thread on what you are saying yes to. Nothing was waiting for a confirmation, so I have not done anything.",
+            "",
+            "If it was something I offered to set up, tell me again in your own words and I will either do it or say plainly that I cannot.",
+          ].join("\n");
+    const lostId = await dbSaveMessage(convId, "assistant", lost, "tool", 0);
+    await dbUpdateConversationStats(convId, 0);
+    trackEvent("assistant.confirmation_without_pending", userId, userRole, {
+      /* How often the assistant offers something it cannot actually do. A
+         rising count here is a prompt problem, not a user problem. */
+      intent: confirmIntent,
+    });
+    return {
+      response: lost,
+      source: "tool",
+      tokensUsed: 0,
+      conversationId: convId,
+      messageId: lostId,
+    };
   }
 
   /* --- Priority -3: A saved routine, before any single tool ---
