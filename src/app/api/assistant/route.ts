@@ -17,6 +17,11 @@ import {
   type RelatedPage,
 } from "@/lib/assistant/related-pages";
 import { readVercelGeo } from "@/lib/assistant/vercel-geo";
+import {
+  isFollowThrough,
+  lastAssistantMessage,
+  resolveFollowThrough,
+} from "@/lib/assistant/follow-through";
 import { buildAttachmentContext } from "@/lib/assistant/attachment-context";
 
 /**
@@ -70,7 +75,7 @@ export async function POST(req: NextRequest) {
     }
 
     // --- Chat message ---
-    const { message, conversationId, pageContext, attachments, fileContents, timeZone } = body as {
+    const { message: rawMessage, conversationId, pageContext, attachments, fileContents, timeZone } = body as {
       message?: string;
       conversationId?: string;
       pageContext?: string;
@@ -79,7 +84,7 @@ export async function POST(req: NextRequest) {
       timeZone?: string;
     };
 
-    if (!message || typeof message !== "string") {
+    if (!rawMessage || typeof rawMessage !== "string") {
       return NextResponse.json({ error: "message is required" }, { status: 400 });
     }
 
@@ -144,6 +149,45 @@ export async function POST(req: NextRequest) {
 
     // Token-free fast path: try the deterministic tool router before
     // burning any AI tokens on RAG / LLM generation.
+    /* A TURN THAT REFERS TO THE PREVIOUS ONE IS RESOLVED AGAINST IT.
+     *
+     * "ok, do that" carries no subject. Dispatched as a fresh question it
+     * matched nothing, fell through to document retrieval, and came back
+     * with a chunk of an unrelated spreadsheet presented as the answer.
+     * Measured on production 2026-08-23, turn three of four.
+     *
+     * Resolving it here, before intent classification, is deliberate:
+     * every path below this point assumes the message has a subject, and
+     * none of them can fail honestly when it does not. */
+    let message: string = rawMessage;
+    if (!hasAttachment && isFollowThrough(rawMessage)) {
+      const previous = await lastAssistantMessage(conversationId);
+      const resolved = resolveFollowThrough(previous);
+      trackEvent("assistant.follow_through_resolved", user.id, user.role, {
+        resolved: resolved.rewritten ? "ran_offer" : "asked",
+      });
+      if (resolved.clarify) {
+        const persisted = await persistToolAnswer({
+          userId: user.id,
+          conversationId,
+          userMessage: rawMessage,
+          assistantAnswer: resolved.clarify,
+          source: "tool",
+        });
+        return NextResponse.json({
+          response: resolved.clarify,
+          answer: resolved.clarify,
+          source: "tool",
+          tokensUsed: 0,
+          conversationId: persisted?.conversationId ?? conversationId ?? null,
+          messageId: persisted?.messageId,
+          sources: [],
+          relatedPages: [],
+        });
+      }
+      if (resolved.rewritten) message = resolved.rewritten;
+    }
+
     const intentMatch = classifyIntent(message);
     trackEvent("assistant.intent_classified", user.id, user.role, {
       intent: intentMatch.intent,
