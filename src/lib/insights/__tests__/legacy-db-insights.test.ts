@@ -44,6 +44,7 @@ const TABLE_ROWS = [
 
 function route(sql: string): unknown[] {
   if (sql.includes("pg_stat_user_tables")) return TABLE_ROWS;
+  if (sql.includes("information_schema.columns")) return [];
   if (sql.includes("pg_stat_statements")) {
     return [
       /* 1.8ms a call and two hours in total: the shape of something in a
@@ -77,9 +78,14 @@ describe("the scan cannot read a record", () => {
     const reads = statements.filter((s) => s.startsWith("SELECT"));
     expect(reads.length).toBeGreaterThan(0);
     for (const sql of reads) {
-      /* Every SELECT targets a catalogue view. If a future edit adds a
-         query against a client table this fails, which is the point. */
-      expect(sql).toMatch(/pg_stat_user_tables|pg_stat_statements/);
+      /* Every SELECT targets a catalogue or statistics view, never a
+         client table. The list is written out rather than loosened to
+         a pattern: adding to it should be a deliberate line in a diff
+         that a reviewer sees, which is how the dark-data column scan
+         arrived here. */
+      expect(sql).toMatch(
+        /pg_stat_user_tables|pg_stat_statements|information_schema\.columns|pg_stats/,
+      );
     }
   });
 
