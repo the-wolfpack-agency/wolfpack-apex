@@ -59,11 +59,38 @@ describe("the shape every template keeps", () => {
     expect(new Set(commands).size).toBe(commands.length);
   });
 
-  it("gives every one a human step, so nothing runs end to end unattended", () => {
-    /* A template that never stops is a template that acts on somebody's behalf
-       without them, which is the one thing this product does not do. */
+  it("stops for a person before it ACTS, and only then", () => {
+    /* The human step gates action: nothing is sent, filed or told to anybody
+       without somebody agreeing. It is not a tax on reading.
+     *
+     * A chain that only looks things up has nothing to agree to, and stopping
+     * it to ask would be friction with no safety in it. That shape is the
+     * foundation rather than a lesser case: three tools whose data has never
+     * been read together, where the reading is the whole product. */
     for (const t of ROUTINE_TEMPLATES) {
-      expect(t.steps.some((s) => s.kind === "human")).toBe(true);
+      const writes = t.steps.some((s) => s.kind === "tool" && s.tool.endsWith("_form"));
+      if (writes) {
+        expect({ command: t.command, stops: t.steps.some((s) => s.kind === "human") }).toEqual(
+          expect.objectContaining({ stops: true }),
+        );
+      }
+    }
+  });
+
+  it("has at least one chain that is pure tools, because that is the foundation", () => {
+    /* If every template needed a person, the product would be a checklist with
+       lookups attached rather than something that answers a question nobody
+       could answer in one place. */
+    const readOnly = ROUTINE_TEMPLATES.filter(
+      (t) => !t.steps.some((s) => s.kind === "human"),
+    );
+    expect(readOnly.length).toBeGreaterThan(0);
+    for (const t of readOnly) {
+      /* And it must genuinely be read-only: no form tool hiding in it. */
+      expect(t.steps.some((s) => s.kind === "tool" && s.tool.endsWith("_form"))).toBe(false);
+      /* Multi-tool, or there is nothing to read together. */
+      expect(t.steps.filter((s) => s.kind === "tool").length).toBeGreaterThanOrEqual(2);
+      expect(t.steps.some((s) => s.kind === "model")).toBe(true);
     }
   });
 
