@@ -214,6 +214,22 @@ export async function resumeWaitingRoutine(
      A run waiting on a QUESTION is different: the step that asked has not run
      yet, so the remaining work starts at that step rather than after it. */
   const remaining = routine.steps.slice(waiting.cursor + (waiting.pendingAsk ? 0 : 1));
+  /* A SLOT IS ONLY MISSING IF NOTHING LEFT TO RUN WILL WRITE IT.
+   *
+   * This asked whether any remaining step reads a slot at all, which is a
+   * different and much harsher question. In a chain that pauses to ASK, the
+   * steps that fill those slots have not run yet: they are the next thing to
+   * happen. Answering the question and being told the chain cannot continue,
+   * because a later step reads something the steps about to run will produce,
+   * made every asking routine impossible to finish.
+   *
+   * Found by running one against production. The reads-anything check was
+   * right for a chain paused AFTER its gathering, and wrong for one paused
+   * BEFORE it, and only the second kind exists now.
+   *
+   * Walked in order, tracking what each step writes, which is the same order
+   * invariant the editor enforces. */
+  const willWrite = new Set<string>();
   const needsSlot = remaining.find((step) => {
     const reads =
       step.kind === "tool"
@@ -221,7 +237,9 @@ export async function resumeWaitingRoutine(
         : step.kind === "model"
           ? referencedSlots(step.prompt)
           : [];
-    return reads.length > 0;
+    const missing = reads.some((slot) => !willWrite.has(slot));
+    if (step.kind !== "human" && step.slot) willWrite.add(step.slot);
+    return missing;
   });
   if (needsSlot) {
     return {

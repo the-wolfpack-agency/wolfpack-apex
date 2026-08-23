@@ -12,6 +12,8 @@
  * finish because the values it needs were deliberately never stored.
  */
 import { detectResumeIntent } from "../index";
+import { referencedSlots } from "../slots";
+import type { RoutineStep } from "../types";
 
 describe("what counts as coming back", () => {
   it.each(["done", "carry on", "continue", "next", "Done.", "OK done"])(
@@ -46,5 +48,65 @@ describe("what counts as coming back", () => {
   it("is not confused by an empty message", () => {
     expect(detectResumeIntent("")).toBe("none");
     expect(detectResumeIntent("   ")).toBe("none");
+  });
+});
+
+describe("what counts as a slot the resumed run cannot have", () => {
+  /* THE BUG THIS CLOSES, found by running an asking chain against production:
+     answer the question, and be told the chain cannot continue because a later
+     step reads what an earlier step produced. The steps that fill those slots
+     had not run yet. They were the next thing to happen. */
+  const reads = (step: RoutineStep): string[] =>
+    step.kind === "tool"
+      ? referencedSlots(step.params)
+      : step.kind === "model"
+        ? referencedSlots(step.prompt)
+        : [];
+
+  /** The check as it now stands: walk in order, tracking what gets written. */
+  function firstUnwritten(remaining: RoutineStep[]): string | null {
+    const willWrite = new Set<string>();
+    for (const step of remaining) {
+      for (const slot of reads(step)) if (!willWrite.has(slot)) return slot;
+      if (step.kind !== "human" && step.slot) willWrite.add(step.slot);
+    }
+    return null;
+  }
+
+  it("does not complain when the steps about to run will write it", () => {
+    /* A chain paused BEFORE its gathering: the whole point of resuming is that
+       the gathering happens now. */
+    const remaining: RoutineStep[] = [
+      { kind: "tool", tool: "crm", params: {}, slot: "record", label: "Find them" },
+      { kind: "tool", tool: "mail", params: {}, slot: "mail", label: "Find the mail" },
+      { kind: "model", prompt: "{{record}} and {{mail}}", label: "Read both" },
+    ];
+    expect(firstUnwritten(remaining)).toBeNull();
+  });
+
+  it("still complains when nothing left will write it", () => {
+    /* A chain paused AFTER its gathering, which is the case the original check
+       was written for and got right. */
+    const remaining: RoutineStep[] = [
+      { kind: "model", prompt: "summarise {{inbox}}", label: "Summarise" },
+    ];
+    expect(firstUnwritten(remaining)).toBe("inbox");
+  });
+
+  it("names the FIRST slot that cannot be filled, in order", () => {
+    const remaining: RoutineStep[] = [
+      { kind: "tool", tool: "crm", params: {}, slot: "record", label: "Find them" },
+      { kind: "model", prompt: "{{record}} then {{gone}}", label: "Read" },
+    ];
+    expect(firstUnwritten(remaining)).toBe("gone");
+  });
+
+  it("does not treat a human step's show list as a read it must satisfy", () => {
+    /* A human step shows what it has. It is not a dependency that can break a
+       chain, and treating it as one would refuse resumes that are fine. */
+    const remaining: RoutineStep[] = [
+      { kind: "human", label: "Look at this", action: "review", show: ["anything"] },
+    ];
+    expect(firstUnwritten(remaining)).toBeNull();
   });
 });
