@@ -44,6 +44,9 @@ jest.mock("@/lib/client-auth", () => ({
   fetchWithRefresh: (...args: unknown[]) => mockFetchWithRefresh(...args),
   jsonHeaders: () => ({ "Content-Type": "application/json" }),
   authHeaders: () => ({}),
+  /* The roster reads the signed-in person to decide whether to offer the
+     role control. A CTO here, so these tests exercise the fuller page. */
+  getInstinctUser: () => ({ id: "viewer-1", role: "cto" }),
 }));
 
 interface Row {

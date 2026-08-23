@@ -22,7 +22,8 @@
  */
 
 import { useCallback, useEffect, useState, FormEvent } from "react";
-import { fetchWithRefresh, jsonHeaders } from "@/lib/client-auth";
+import { fetchWithRefresh, jsonHeaders, getInstinctUser } from "@/lib/client-auth";
+import { capabilitiesForRole, ROLE_LIST } from "@/lib/auth/role-capabilities";
 
 export type AccessState = "active" | "revoked" | "invited" | "none";
 
@@ -64,6 +65,14 @@ const ACCESS_COLOR: Record<AccessState, string> = {
  */
 export function RosterList({ refreshToken = 0 }: { refreshToken?: number } = {}) {
   const [roster, setRoster] = useState<RosterEntry[]>([]);
+  /* WHO MAY DO THIS, read from the same map the server enforces.
+     Deriving it here rather than hardcoding a list of senior roles means the
+     control and the endpoint cannot disagree: a role that gains the capability
+     gains the dropdown, and one that loses it loses both. The server still
+     enforces it, so this only decides what is worth showing. */
+  const viewer = getInstinctUser<{ id?: string; role?: string }>();
+  const mayAssignRoles = capabilitiesForRole(viewer?.role ?? "").has("admin.roles.assign");
+
   const [canManageAccess, setCanManageAccess] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -147,6 +156,50 @@ export function RosterList({ refreshToken = 0 }: { refreshToken?: number } = {})
       setMsg("Save failed");
     }
     setSaving(false);
+  }
+
+  /**
+   * Change somebody's account role.
+   *
+   * The endpoint has existed since the capability was written and nothing ever
+   * called it, so the only way to change a role was a hand-written request.
+   * That is how a workspace ends up with everybody at the level they were first
+   * created at.
+   *
+   * Confirmed before it fires, because this is the one control on this page
+   * that changes what another person is ALLOWED TO DO rather than what they
+   * can see, and the confirmation names both ends of the change.
+   */
+  async function handleRoleChange(entry: RosterEntry, nextRole: string) {
+    if (!entry.member_id || nextRole === entry.account_role) return;
+    const ok =
+      typeof window !== "undefined"
+        ? window.confirm(
+            `Change ${entry.name} from ${entry.account_role ?? "no role"} to ${nextRole}? This changes what they are allowed to do, and it is recorded against your name.`,
+          )
+        : false;
+    if (!ok) return;
+
+    setBusyMemberId(entry.member_id);
+    setAccessMsg("");
+    try {
+      const r = await fetchWithRefresh(`/api/admin/users/${entry.member_id}/role`, {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: JSON.stringify({ role: nextRole }),
+      });
+      if (r.ok) {
+        await load();
+      } else {
+        const data = (await r.json().catch(() => ({}))) as { message?: string; error?: string };
+        /* The server's own wording where it has any: it explains why a
+           self-change is refused better than a generic failure would. */
+        setAccessMsg(data.message ?? data.error ?? "Could not change the role.");
+      }
+    } catch {
+      setAccessMsg("Could not change the role.");
+    }
+    setBusyMemberId(null);
   }
 
   async function handleDelete(entry: RosterEntry) {
@@ -318,7 +371,43 @@ export function RosterList({ refreshToken = 0 }: { refreshToken?: number } = {})
                       {entry.account_role && ` · ${entry.account_role}`}
                     </span>
                   </div>
-                  <div style={{ display: "flex", gap: "0.35rem" }}>
+                  <div style={{ display: "flex", gap: "0.35rem", alignItems: "center" }}>
+                    {/* THE ROLE, CHANGEABLE, and only for somebody who may.
+                        Shown as a select rather than a menu of buttons because
+                        the list comes from ROLE_MAP and will grow; a control
+                        that reads the roles cannot fall behind them. */}
+                    {mayAssignRoles && entry.member_id && entry.access !== "none" && (
+                      <select
+                        value={entry.account_role ?? ""}
+                        disabled={busyMemberId === entry.member_id || entry.member_id === viewer?.id}
+                        onChange={(e) => void handleRoleChange(entry, e.target.value)}
+                        aria-label={`Account role for ${entry.name}`}
+                        data-testid={`roster-role-${entry.key}`}
+                        /* Disabled on your own row rather than hidden, with the
+                           reason on hover: hiding it reads as a missing feature
+                           and somebody goes looking for it. */
+                        title={
+                          entry.member_id === viewer?.id
+                            ? "You cannot change your own role. Ask another admin."
+                            : `Change ${entry.name}'s role`
+                        }
+                        style={{
+                          background: "var(--wp-dark-surface2, #1a1a1a)",
+                          color: "var(--wp-text, #fff)",
+                          border: "1px solid var(--wp-border, rgba(255,255,255,0.2))",
+                          borderRadius: "0.4rem",
+                          padding: "0.25rem 0.4rem",
+                          fontSize: "0.8rem",
+                        }}
+                      >
+                        {entry.account_role === null && <option value="">no role</option>}
+                        {ROLE_LIST.map((r) => (
+                          <option key={r} value={r}>
+                            {r}
+                          </option>
+                        ))}
+                      </select>
+                    )}
                     {entry.employee_id && (
                       <>
                         <button
