@@ -553,6 +553,15 @@ export async function deleteEvent(
  * List events in a time window. Read-only — no cache write, no audit.
  * Analytics events fire only on mutations.
  */
+/** Graph's maximum page for calendarview. */
+const GRAPH_PAGE_SIZE = 200;
+/**
+ * A ceiling on paging, so a server that always claims there is more cannot
+ * hold a request open forever. Twenty-five pages is five thousand events,
+ * well past any real quarter.
+ */
+const MAX_GRAPH_PAGES = 25;
+
 export async function listEvents(
   userId: string,
   opts: ListEventsOpts = {},
@@ -562,7 +571,10 @@ export async function listEvents(
 
   const from = opts.from ? new Date(opts.from) : new Date();
   const to = opts.to ? new Date(opts.to) : new Date(from.getTime() + 7 * 24 * 60 * 60 * 1000);
-  const top = Math.min(Math.max(opts.limit ?? 50, 1), 200);
+  const wanted = Math.max(opts.limit ?? 50, 1);
+  /* Graph's own page size. The caller's limit is what they want in total,
+     which is a different number and used to be conflated with this one. */
+  const top = Math.min(wanted, GRAPH_PAGE_SIZE);
 
   const fromISO = from.toISOString();
   const toISO = to.toISOString();
@@ -571,23 +583,53 @@ export async function listEvents(
     `me/calendarview?startDateTime=${encodeURIComponent(fromISO)}` +
     `&endDateTime=${encodeURIComponent(toISO)}` +
     `&$orderby=start/dateTime&$top=${top}` +
-    `&$select=id,subject,start,end,location,attendees,isOnlineMeeting`;
+    /* WHAT MAKES SOMETHING A MEETING.
+       This asked for subject, start, end, location, attendees and
+       isOnlineMeeting, and nothing about whether the event was cancelled,
+       whether this person declined it, or whether it is a Focus Time block
+       Outlook created that nobody attends. All three counted as meetings,
+       which inflates the meeting total and destroys the usable-block
+       measure the analysis exists to produce. */
+    `&$select=id,subject,start,end,location,attendees,isOnlineMeeting,showAs,isCancelled,isAllDay,responseStatus`;
 
-  const res = await graphCall<{
-    value?: {
-      id: string;
-      subject: string;
-      start: { dateTime: string; timeZone: string };
-      end: { dateTime: string; timeZone: string };
-      location?: { displayName?: string };
-      attendees?: { emailAddress: { name?: string; address: string } }[];
-      isOnlineMeeting?: boolean;
-    }[];
-  }>("GET", endpoint, token.accessToken);
+  type RawEvent = {
+    id: string;
+    subject: string;
+    start: { dateTime: string; timeZone: string };
+    end: { dateTime: string; timeZone: string };
+    location?: { displayName?: string };
+    attendees?: { emailAddress: { name?: string; address: string } }[];
+    isOnlineMeeting?: boolean;
+    showAs?: string;
+    isCancelled?: boolean;
+    isAllDay?: boolean;
+    responseStatus?: { response?: string };
+  };
 
-  if (!res.ok || !res.data?.value) return [];
+  /* PAGE UNTIL WE HAVE WHAT WAS ASKED FOR.
+     $top was clamped to 200 and nothing followed @odata.nextLink, so any
+     window holding more than 200 events was silently truncated and its
+     totals reported as though they were the whole window. On a 90-day
+     analysis that under-counts meetings and over-counts free time, which is
+     backwards for the one claim this makes, and it fails as a plausible
+     number rather than as an error. */
+  const raw: RawEvent[] = [];
+  let next: string | null = endpoint;
+  let pages = 0;
+  while (next && raw.length < wanted && pages < MAX_GRAPH_PAGES) {
+    const res: GraphCallSuccess<{ value?: RawEvent[]; "@odata.nextLink"?: string }> | GraphCallError =
+      await graphCall<{ value?: RawEvent[]; "@odata.nextLink"?: string }>(
+        "GET",
+        next,
+        token.accessToken,
+      );
+    if (!res.ok || !res.data?.value) break;
+    raw.push(...res.data.value);
+    next = res.data["@odata.nextLink"] ?? null;
+    pages++;
+  }
 
-  return res.data.value.map((ev) => {
+  return raw.slice(0, wanted).map((ev) => {
     const rawAttendees = ev.attendees || [];
     return {
       id: ev.id,
@@ -603,6 +645,13 @@ export async function listEvents(
         .map((a) => (a.emailAddress.address || "").trim().toLowerCase())
         .filter((addr) => addr.includes("@")),
       isOnlineMeeting: ev.isOnlineMeeting || false,
+      /* Passed through rather than acted on here. Whether a declined
+         meeting counts is the caller's question: a schedule analysis says
+         no, and a "what did I miss" view would say yes. */
+      showAs: (ev.showAs as CalendarEvent["showAs"]) ?? "unknown",
+      isCancelled: ev.isCancelled ?? false,
+      isAllDay: ev.isAllDay ?? false,
+      responseStatus: ev.responseStatus?.response ?? null,
     };
   });
 }

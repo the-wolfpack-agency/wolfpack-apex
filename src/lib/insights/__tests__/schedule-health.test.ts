@@ -295,3 +295,108 @@ describe("the hours belong to the person, not to the server", () => {
     expect(r.meetingHours).toBe(1);
   });
 });
+
+/**
+ * Not everything on a calendar is a meeting.
+ *
+ * Found when listEvents was finally driven against something Graph-shaped:
+ * the query never asked whether an event was cancelled, declined, or a
+ * Focus Time block, so all of them were counted as hours somebody spent in
+ * a room.
+ */
+describe("what counts as a meeting", () => {
+  const oneHour = (over: Partial<ScheduleEvent>): ScheduleEvent => ({
+    subject: "Thing",
+    start: "2026-08-24T09:00:00.000Z",
+    end: "2026-08-24T10:00:00.000Z",
+    attendees: ["a", "b"],
+    ...over,
+  });
+
+  it("does not count a cancelled occurrence", () => {
+    /* It stays on the calendar and nobody attended it. */
+    const r = analyseSchedule([oneHour({ isCancelled: true })], { days: 7, ...ZONE });
+    expect(r.meetings).toBe(0);
+  });
+
+  it("does not count a meeting this person declined", () => {
+    /* Somebody else's meeting. Counting it charges them for an hour they
+       deliberately kept. */
+    const r = analyseSchedule([oneHour({ responseStatus: "declined" })], { days: 7, ...ZONE });
+    expect(r.meetings).toBe(0);
+  });
+
+  it("does not count a Focus Time block as a meeting", () => {
+    /* The worst of the four. Outlook creates these to PROTECT time to work
+       in, so counting them inverts the whole report: the hours a person
+       defended get billed to them as meetings, and the usable-block measure
+       this analysis exists to produce falls as a direct result. */
+    const focus = oneHour({ subject: "Focus time", showAs: "free", attendees: [] });
+    const r = analyseSchedule([focus], { days: 7, ...ZONE });
+    expect(r.meetings).toBe(0);
+    /* Free hours are counted per day that HAS something on it, so a week of
+       nothing but focus blocks is not "eight free hours", it is a week with
+       no meetings in it, and the report says exactly that. */
+    expect(renderSchedule(r)).toContain("No meetings");
+  });
+
+  it("gives the hour back when a focus block sits beside a real meeting", () => {
+    /* The measurable half of the same point: the day has a meeting, so it
+       is counted, and the focus block is free time rather than a second
+       meeting. */
+    const withBoth = analyseSchedule(
+      [
+        oneHour({ subject: "Standup", showAs: "busy" }),
+        oneHour({
+          subject: "Focus time",
+          showAs: "free",
+          start: "2026-08-24T13:00:00.000Z",
+          end: "2026-08-24T15:00:00.000Z",
+        }),
+      ],
+      { days: 7, ...ZONE },
+    );
+    expect(withBoth.meetings).toBe(1);
+    expect(withBoth.meetingHours).toBe(1);
+    /* 9-5 with one hour taken: seven hours free, and the 1pm-3pm stretch is
+       not carved out of it. */
+    expect(withBoth.freeHours).toBe(7);
+  });
+
+  it("does not count out of office", () => {
+    const r = analyseSchedule([oneHour({ showAs: "oof" })], { days: 7, ...ZONE });
+    expect(r.meetings).toBe(0);
+  });
+
+  it("still counts a tentative one", () => {
+    /* A maybe is an hour that cannot be planned around, which is exactly
+       what the report measures. */
+    const r = analyseSchedule([oneHour({ showAs: "tentative" })], { days: 7, ...ZONE });
+    expect(r.meetings).toBe(1);
+  });
+
+  it("still counts an ordinary accepted meeting", () => {
+    const r = analyseSchedule(
+      [oneHour({ showAs: "busy", responseStatus: "accepted", isCancelled: false })],
+      { days: 7, ...ZONE },
+    );
+    expect(r.meetings).toBe(1);
+  });
+
+  it("counts everything when the source says nothing about any of this", () => {
+    /* A calendar that carries none of these flags must not become an empty
+       week. Absence of a marker is not a cancellation. */
+    const r = analyseSchedule([oneHour({})], { days: 7, ...ZONE });
+    expect(r.meetings).toBe(1);
+  });
+
+  it("takes Graph's word on all-day rather than inferring it from length", () => {
+    /* The duration filter already drops anything over eight hours, which
+       misses a six-hour all-day marker. Graph states it outright. */
+    const r = analyseSchedule(
+      [oneHour({ isAllDay: true, end: "2026-08-24T15:00:00.000Z" })],
+      { days: 7, ...ZONE },
+    );
+    expect(r.meetings).toBe(0);
+  });
+});

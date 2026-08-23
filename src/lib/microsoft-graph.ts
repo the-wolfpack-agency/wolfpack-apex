@@ -81,6 +81,15 @@ export interface CalendarEvent {
    *  for backward-compat with synthetic fixtures — treat `undefined`
    *  as "unknown". */
   showAs?: "free" | "tentative" | "busy" | "oof" | "workingElsewhere" | "unknown" | null;
+  /** Graph's own cancellation flag. A cancelled occurrence stays on the
+   *  calendar and used to be counted as a meeting somebody attended. */
+  isCancelled?: boolean;
+  /** All-day events are markers, not meetings, and Graph says so directly
+   *  rather than leaving it to be inferred from a duration. */
+  isAllDay?: boolean;
+  /** This person's own answer to the invitation: "declined" means they are
+   *  not in the room, whatever the calendar still shows. */
+  responseStatus?: string | null;
 }
 
 export interface Email {
