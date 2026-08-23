@@ -357,3 +357,62 @@ describe("identifiers that look like credentials and are not", () => {
     expect(out.redacted).toBe(true);
   });
 });
+
+/**
+ * Identifiers that are not American.
+ *
+ * Sent a national identifier through the live assistant on 2026-08-23 and
+ * watched it reach the model and come back in the answer. Every
+ * digit-shaped pattern the redactor knew was a US or card-network format,
+ * so the number a British or European employee record is keyed on had no
+ * pattern at all.
+ */
+describe("national identifiers", () => {
+  const red = (t: string) => {
+    const r = redactText(t) as unknown as { text?: string; redacted?: string };
+    return r.text ?? r.redacted ?? "";
+  };
+
+  it("redacts a National Insurance number", () => {
+    expect(red("employee NI number AB123456C started Monday")).toContain("[NATIONAL_ID_1]");
+  });
+
+  it("redacts it written the way people write it, in pairs", () => {
+    expect(red("NI AB 12 34 56 C on file")).toContain("[NATIONAL_ID_1]");
+  });
+
+  it("does not match a two-letter code that could not be one", () => {
+    /* D, F, I, Q, U and V are not issued as the first letter. Honouring
+       the real allocation rules is what stops this firing on any pair of
+       letters followed by digits, of which a parts catalogue is full. */
+    expect(red("part QQ123456C on the shelf")).not.toContain("NATIONAL_ID");
+    expect(red("code DF123456A")).not.toContain("NATIONAL_ID");
+  });
+
+  it("leaves a VIN alone", () => {
+    /* The one that would matter most. A VIN is the working vocabulary of
+       the client this is built for, and a redactor that ate them would
+       break every question they ask. Seventeen characters against nine,
+       so the shapes cannot overlap. */
+    const vin = "WP1AB2A59JLB12345";
+    expect(red(`the car is VIN ${vin} in stock`)).toContain(vin);
+  });
+
+  it("leaves dealer and trim codes alone", () => {
+    expect(red("dealer code PC-DETROIT-04 confirmed")).toContain("PC-DETROIT-04");
+    expect(red("trim code CY24 on the build sheet")).toContain("CY24");
+  });
+
+  it("carries the same standing as a social security number", async () => {
+    /* Both identify a person to their government, and nothing an
+       assistant does needs either. */
+    const { NEVER_SEND_KINDS } = await import("../redaction");
+    expect(NEVER_SEND_KINDS.has("national_id")).toBe(true);
+  });
+
+  it("also catches a social security number written with spaces", () => {
+    /* The pattern was dash-only, so the same number typed with spaces
+       went through untouched. */
+    expect(red("ssn 123 45 6789 on file")).toContain("[SSN_1]");
+  });
+});
