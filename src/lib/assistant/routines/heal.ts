@@ -201,6 +201,13 @@ export function readRepair(
   const tool = tools.find((t) => t.name === name);
   if (!tool) return drop;
   if (!canInvokeTool(role, tool.capability)) return drop;
+  /* AND IT HAS TO RUN WITH NOTHING.
+     A repaired step carries no parameters, because the old ones belonged to a
+     different schema. So a replacement that requires a detail before it can do
+     anything would fail on its first run, and the failure would now look like
+     our fix rather than the original breakage. Removing the step is the honest
+     outcome. */
+  if (!tool.paramSchema.safeParse({}).success) return drop;
 
   return {
     stepIndex: problem.stepIndex,

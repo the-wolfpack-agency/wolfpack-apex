@@ -112,6 +112,7 @@ describe("the answer", () => {
     mockComplete.mockResolvedValue({
       content: JSON.stringify({
         steps: [
+          { text: "Check my calendar", tool: "calendar_widget" },
           { text: "Read email", tool: "search_mail" },
           { text: "Update the CRM in SAP", tool: "sap_update" },
         ],
@@ -119,8 +120,16 @@ describe("the answer", () => {
     });
     const res = await run();
     if (!res.ok) throw new Error("expected success");
-    expect(res.data.gaps).toBe(1);
+
+    /* TWO gaps, for two different reasons, and the answer distinguishes them.
+       search_mail exists and cannot run without knowing whose mail or about
+       what, so it is not a missing capability; SAP is genuinely absent. Both
+       count toward what to build next, and only one is a request for a new
+       tool. */
+    expect(res.data.gaps).toBe(2);
+    expect(res.data.covered).toBe(1);
     expect(res.answer).toMatch(/nothing here does this yet/i);
+    expect(res.answer).toMatch(/needs a detail each time/i);
   });
 });
 

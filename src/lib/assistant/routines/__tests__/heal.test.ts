@@ -125,6 +125,19 @@ describe("reading a proposed repair", () => {
     expect(r.action).toBe("drop_step");
   });
 
+  it("refuses a replacement that cannot run without a detail", () => {
+    /* A repaired step carries no parameters, so a replacement needing one
+       would fail on its first run and the failure would look like our fix
+       rather than the original breakage. */
+    const needy = tool("needs_input");
+    (needy.paramSchema as unknown as { safeParse: (v: unknown) => unknown }).safeParse = () => ({
+      success: false,
+      error: { issues: [] },
+    });
+    const r = readRepair('{"tool":"needs_input"}', problem, [...TOOLS, needy], "cto");
+    expect(r.action).toBe("drop_step");
+  });
+
   it("refuses the broken tool as its own replacement", () => {
     /* A model agreeing with the question rather than answering it. */
     const r = readRepair('{"tool":"gone_tool"}', problem, TOOLS, "cto");
