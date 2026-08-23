@@ -36,6 +36,10 @@ jobs:
       CI: "true"
       PROD_URL: ${{ secrets.PROD_URL }}
       SMOKE_TEST_EMAIL: ${{ secrets.SMOKE_TEST_EMAIL }}
+      # The per-role sweep signs in as each of the five non-admin test accounts,
+      # which share one password. Without it every_role.spec skips, and a
+      # skipped Playwright test reports as a pass.
+      ADMIN_E2E_PASSWORD: ${{ secrets.ADMIN_E2E_PASSWORD }}
       SMOKE_TEST_PASSWORD: ${{ secrets.SMOKE_TEST_PASSWORD }}
       SITES_SMOKE_PROJECT_ID: ${{ secrets.SITES_SMOKE_PROJECT_ID }}
 
@@ -146,6 +150,7 @@ jobs:
           tests/e2e/admin-mfa.spec.ts
           tests/e2e/routines-loop.spec.ts
           tests/e2e/routines-discovery.spec.ts
+          tests/e2e/every-role.spec.ts
           --config=playwright.config.ts --reporter=github
 
       # Upload ALL diagnostics so any real failure is debuggable and no data is
