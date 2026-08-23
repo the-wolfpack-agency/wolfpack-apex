@@ -17,6 +17,7 @@ import {
   type RelatedPage,
 } from "@/lib/assistant/related-pages";
 import { readVercelGeo } from "@/lib/assistant/vercel-geo";
+import { detectUnreachable } from "@/lib/assistant/not-connected";
 import {
   isFollowThrough,
   lastAssistantMessage,
@@ -267,6 +268,43 @@ export async function POST(req: NextRequest) {
       trackEvent("assistant.fallback_to_rag", user.id, user.role, {
         intent: intentMatch.intent,
       });
+    }
+
+    /* BEFORE THE MODEL: say what we cannot reach.
+     *
+     * A question about warranty claims or repair orders reaches no tool,
+     * so it goes to a model, which answers fluently about records it has
+     * never seen in a tone indistinguishable from the answers backed by
+     * the client's own data. That costs tokens AND teaches somebody to
+     * trust a sentence nothing checked.
+     *
+     * Deterministic, zero tokens, same answer every time, and it names
+     * what to connect. Narrow by construction: lookups only, advice and
+     * drafting fall straight through to the model where they belong. */
+    if (!hasAttachment) {
+      const unreachable = detectUnreachable(message);
+      if (unreachable) {
+        trackEvent("assistant.answered_not_connected", user.id, user.role, {
+          domain: unreachable.label,
+        });
+        const persisted = await persistToolAnswer({
+          userId: user.id,
+          conversationId,
+          userMessage: message,
+          assistantAnswer: unreachable.answer,
+          source: "tool",
+        });
+        return NextResponse.json({
+          response: unreachable.answer,
+          answer: unreachable.answer,
+          source: "tool",
+          tokensUsed: 0,
+          conversationId: persisted?.conversationId ?? conversationId ?? null,
+          messageId: persisted?.messageId,
+          sources: [],
+          relatedPages: [],
+        });
+      }
     }
 
     /* Vercel injects x-vercel-ip-city / -country / -latitude /
