@@ -144,3 +144,65 @@ describe("fx handler", () => {
     );
   });
 });
+
+describe("the provider that actually answers", () => {
+  it("calls an endpoint that needs no API key", async () => {
+    /* api.exchangerate.host moved to a paid model and began answering every
+       unauthenticated request with missing_access_key and no rates. The tool
+       handled that correctly, returning a typed failure rather than inventing
+       a number, so nothing broke loudly. It just stopped working, and
+       "exchange rate from USD to EUR" is a starter chip shown to somebody who
+       has connected nothing. Found by driving real prompts through
+       production: every test here mocks fetch, so no test could see it. */
+    const calls: string[] = [];
+    const spy = jest.spyOn(global, "fetch").mockImplementation(async (url) => {
+      calls.push(String(url));
+      return {
+        ok: true,
+        json: async () => ({ result: "success", base: "USD", rates: { EUR: 0.9 } }),
+      } as unknown as Response;
+    });
+
+    await fxTool.handler({ base: "USD", targets: ["EUR"] }, CTX);
+
+    expect(calls[0]).toContain("open.er-api.com");
+    expect(calls[0]).not.toContain("exchangerate.host");
+    expect(calls[0]).not.toMatch(/access_key|api_key/i);
+    spy.mockRestore();
+  });
+
+  it("returns only the currency that was asked for", async () => {
+    /* The endpoint returns every currency it knows. Handing 160 rates to a
+       caller who asked for one is a needlessly large thing to render and to
+       cache. */
+    const spy = jest.spyOn(global, "fetch").mockImplementation(
+      async () =>
+        ({
+          ok: true,
+          json: async () => ({
+            result: "success",
+            base: "USD",
+            rates: { EUR: 0.9, GBP: 0.78, JPY: 150, ZAR: 18 },
+          }),
+        }) as unknown as Response,
+    );
+
+    const res = await fxTool.handler({ base: "USD", targets: ["EUR"] }, CTX);
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(Object.keys((res.data as { rates: Record<string, number> }).rates)).toEqual(["EUR"]);
+    }
+    spy.mockRestore();
+  });
+
+  it("fails typed when the provider reports an error rather than inventing a rate", async () => {
+    const spy = jest.spyOn(global, "fetch").mockImplementation(
+      async () =>
+        ({ ok: true, json: async () => ({ result: "error", "error-type": "unsupported-code" }) }) as unknown as Response,
+    );
+
+    const res = await fxTool.handler({ base: "USD", targets: ["EUR"] }, CTX);
+    expect(res.ok).toBe(false);
+    spy.mockRestore();
+  });
+});
