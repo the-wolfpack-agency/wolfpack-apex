@@ -80,6 +80,12 @@ See **What the agents can do** for the exact, code-grounded list of their abilit
 - Query **GitHub** issues and pull requests.
 - Check **Vercel** deployments and recent workflow runs.
 
+## Run a whole job, not one thing at a time
+- Chain several of the tools above into a **routine** run from one command, stopping wherever a person is needed. See **Chained work, and the human steps in it**.
+- Take a description of somebody's working day and map it onto what exists, naming what has nothing behind it rather than quietly dropping it.
+- Run a routine on a **schedule**, in the person's own time zone, and hand back the result.
+- **Check a saved workflow against reality** before running it, and propose a repair when something it depends on has moved.
+
 ## Orchestrate and stay safe
 - **Delegate** to other agents and run learned procedures.
 - **Escalate** gate-blocks to a human.
@@ -89,6 +95,47 @@ See **What the agents can do** for the exact, code-grounded list of their abilit
 - Every action is **proposed**, then a deterministic policy engine **decides** (allow, escalate, or block), **executes**, and **records** it to a hash-chained, tamper-evident ledger.
 - Agents act with **short-lived, scope-limited tokens** as their owner, never elevated.
 - **High-risk or destructive actions** are intercepted and escalated to a human.`,
+  },
+  {
+    slug: "assistant-routines",
+    parentSlug: "agents",
+    position: 1,
+    title: "Chained work, and the human steps in it",
+    body: `A routine is a named sequence of the things somebody already does by hand, run from one command.
+
+## Why this exists
+There is a ceiling on how much software one person touches in a day. They open mail, read a thread, check a calendar, write something, ping a colleague, file a ticket. It is a short list, and it is the same short list five days a week.
+
+What makes it feel large is that every action lives in a different tool, so the **person** is the integration layer: they carry context out of one window and retype it into the next. A routine is that carrying, done for them.
+
+## Three kinds of step
+- **Tool** runs one registered tool, through the same pipeline a typed message takes.
+- **Model** turns what earlier steps returned into something a person can act on.
+- **Human** stops.
+
+The third one is the product. A chain that pauses records something nothing else in the estate knows: the boundary between what the tech did and what the person did, and how long the person's part took.
+
+That distinction goes further. A **review** is a checkpoint on the machine's work. A **do** is work no software can perform: rehearsing a pitch, ringing a client, walking the floor. For a client-facing role those are frequently the steps that decide how the quarter went, and they appear in no system anywhere.
+
+## What the measurement is for
+After enough runs the system reports one of four things about a **step**, never about a person:
+- it is not happening, and both readings of that are offered rather than one chosen
+- it is habitual and expensive enough that part of it may be worth a tool
+- it is a pause nobody spends time on, so it may not be earning its place
+- it is working, and it says so rather than going quiet
+
+A skip is recorded without penalty. A routine that punishes a skip gets one of two responses, and both destroy the data: people stop running it, or they tick the box without doing the thing.
+
+## Deliberately not a scripting language
+Steps run in order. A later step reads an earlier one's output from a named slot, by substitution into validated parameters. No loops, no branches, no expressions.
+
+That ceiling is the point rather than a stage to grow out of. A routine anyone can read is one an operator will trust with their mailbox; the moment it needs control flow it has stopped describing somebody's morning and become a program with no reviewer.
+
+## Where the safety comes from
+Nothing new. A routine step dispatches through the same path a chat message takes, so the capability gate, the OGIAM decision, confirmation on every write, the ledger and the analytics all still run. A routine is a faster path through the existing gates, never a way around them.
+
+## Keeping a chain working
+Every scheduled routine is checked before it runs, against the live registry and the owner's role. A broken one is **not** run, because half a chain produces a partial answer that looks like a whole one. Where a step can be repaired the fix is proposed to its owner and never applied silently, and a replacement that does something merely adjacent is refused in favour of removing the step.`,
   },
   {
     slug: "how-we-build",
@@ -241,7 +288,19 @@ Our systems share a common foundation, so a pattern proven in one product carrie
 - **Deterministic first.** We do not spend AI tokens on work that rules or existing tooling can do. AI is reserved for genuinely new reasoning, then baked into deterministic tooling so the next run is free.
 - **Ground answers in our own data first** (the Brain, Microsoft 365) before reaching for a model, so answers are accurate and cheap.
 - **Cost-routed models.** Each task goes to the cheapest model that can do it well.
-- **Measured and audited.** Every AI action is measured (analytics) and audited (ledger), so we can see where AI adds value and where it does not.`,
+- **Measured and audited.** Every AI action is measured (analytics) and audited (ledger), so we can see where AI adds value and where it does not.
+
+## The router is the layer between the model and the reader
+Every AI call goes through one place, and it checks in both directions.
+
+- **Leaving:** credentials and financial identifiers are found and replaced before a question reaches a provider.
+- **Coming back:** the same check runs again, because a model can quote a key it was shown in a document, and that answer is rendered and stored.
+- **What the answer SAYS:** redaction finds shapes and is blind to meaning. "You'll qualify for 2.9% APR", "that's covered under your warranty" and "there are no open recalls" carry nothing to redact, and each is a commitment the business is held to. A second gate reads the claim itself, using rules a client can read and argue with rather than a classifier, because a safety layer nobody can explain is one nobody will accept liability for.
+
+Four outcomes: allow, trim the claim, withhold it, or hand it to a person. Rule sets are per tenant, with a baseline true of any business plus industry sets. Refusals record the **rule**, never the sentence: a log of blocked answers would be a permanent, queryable archive of exactly the text the gate exists to withhold.
+
+## How much of a chain actually needed AI
+Every routine run records how many of its steps were tools and how many were models. The claim being made to a client is that their own tools are being operated from one place and a model is asked only where judgement is genuinely required, and that is a number per routine per week rather than a sentence in a deck. It is also the early warning if a chain drifts into asking a model something a tool already knows.`,
   },
   {
     slug: "design-conformance",
