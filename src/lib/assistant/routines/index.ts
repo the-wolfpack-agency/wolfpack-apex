@@ -51,6 +51,39 @@ export function detectResumeIntent(message: string): ResumeIntent {
 }
 export type { Routine, RoutineRun, RoutineStep, StepOutcome } from "./types";
 
+/**
+ * The most a routine will send in one prompt.
+ *
+ * Each slot is already bounded (see slots.ts), which is the fix for one tool
+ * returning a client's entire CRM. It is not the fix for EIGHT tools each
+ * returning a bounded share: a chain with eight gathering steps can still
+ * assemble something enormous out of pieces that are individually reasonable,
+ * and nothing in between was counting.
+ *
+ * So there is a ceiling on the whole thing, applied where the cost is actually
+ * incurred. Generous enough that no chain anybody has described comes near it,
+ * and present so that the first one which does is trimmed rather than sent.
+ */
+const MAX_PROMPT_CHARS = 24_000;
+
+/**
+ * Cut a prompt to the ceiling, keeping the END.
+ *
+ * The end, deliberately. A routine prompt is gathered material followed by the
+ * instruction about what to do with it, and losing the instruction leaves a
+ * model holding a pile of data and no question. Losing some of the middle of
+ * the data is survivable; losing the ask is not.
+ */
+function boundPrompt(prompt: string): string {
+  if (prompt.length <= MAX_PROMPT_CHARS) return prompt;
+  const kept = prompt.slice(prompt.length - MAX_PROMPT_CHARS);
+  return [
+    `[this chain gathered more than fits in one prompt: ${prompt.length} characters were trimmed to ${MAX_PROMPT_CHARS}, so what follows is partial and any count in it is a floor rather than a total]`,
+    "",
+    kept,
+  ].join("\n");
+}
+
 /** Live dependencies: the governed tool path, the governed model path, the clock. */
 export function liveDeps(ctx: ToolContext): RunnerDeps {
   return {
@@ -63,7 +96,7 @@ export function liveDeps(ctx: ToolContext): RunnerDeps {
     },
     askModel: async (prompt) => {
       const res = await getAIClient().complete({
-        messages: [{ role: "user", content: prompt }],
+        messages: [{ role: "user", content: boundPrompt(prompt) }],
         max_tokens: 700,
         /* Cheap by default. A step summarising what four tools just returned is
            not a reasoning problem, and paying premium prices for every step of

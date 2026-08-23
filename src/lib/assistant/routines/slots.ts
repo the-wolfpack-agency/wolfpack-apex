@@ -82,11 +82,28 @@ function render(value: unknown, field?: string): string {
      500" is a true sentence somebody can act on and "the first 4000
      characters" is a broken record ending mid-field. */
   if (Array.isArray(target)) {
-    const kept = target.slice(0, MAX_SLOT_ITEMS);
-    const body = safeStringify(kept);
-    return target.length > kept.length
-      ? bound(`${body}\n[showing the first ${kept.length} of ${target.length}]`)
-      : bound(body);
+    /* SHRINK BY ITEMS UNTIL IT FITS, then say how many survived.
+     *
+     * Capping the item count and then cutting the result to length defeats
+     * both halves of the idea, which is what the volume test caught: records
+     * carry real text, so twenty-five of them can exceed the character budget,
+     * and the character cut then severs one mid-field AND removes the note
+     * saying the list was shortened. The model is left with corrupt-looking
+     * data and no idea it is partial, which is worse than either problem
+     * alone.
+     *
+     * So the count comes down until the serialised body fits, and the note is
+     * added afterwards where nothing can trim it away. */
+    let kept = target.slice(0, MAX_SLOT_ITEMS);
+    let body = safeStringify(kept);
+    while (kept.length > 1 && body.length > MAX_SLOT_CHARS) {
+      kept = kept.slice(0, Math.max(1, Math.floor(kept.length / 2)));
+      body = safeStringify(kept);
+    }
+    if (kept.length === target.length && body.length <= MAX_SLOT_CHARS) return body;
+    /* One record that is itself enormous still has to be cut, and says so. */
+    if (body.length > MAX_SLOT_CHARS) return bound(body);
+    return `${body}\n[showing the first ${kept.length} of ${target.length}]`;
   }
 
   /* Structured output reaches a model step as JSON, which is what a model can
