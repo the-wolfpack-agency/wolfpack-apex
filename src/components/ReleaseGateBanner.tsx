@@ -24,7 +24,8 @@
  */
 
 import { useEffect, useState } from "react";
-import { fetchWithRefresh, jsonHeaders } from "@/lib/client-auth";
+import { fetchWithRefresh, getInstinctUser, jsonHeaders } from "@/lib/client-auth";
+import { capabilitiesForRole } from "@/lib/auth/role-capabilities";
 import type { ReleaseGateStatus, BlockingChange } from "@/lib/deploy/release-gate";
 
 /**
@@ -56,6 +57,25 @@ export default function ReleaseGateBanner() {
   useEffect(() => {
     let cancelled = false;
     void (async () => {
+      /* DO NOT ASK FOR WHAT THIS PERSON CANNOT HAVE.
+       *
+       * This banner reads an admin endpoint, and it was asking on every
+       * dashboard load regardless of who was looking. Most people in a
+       * workspace are not admins, so most dashboard loads produced a 403.
+       *
+       * The banner itself degraded correctly, so nothing looked broken, which
+       * is why it survived: the cost was invisible. It is real all the same.
+       * Every non-admin session generated a refused request in the logs, and
+       * the production smoke test asserts that no page fires a 401 or 403,
+       * an assertion that exists because a flood of them was the April
+       * blank-dashboard incident. A permanent, expected 403 makes that
+       * guardrail useless by teaching everybody to ignore it.
+       *
+       * Read from the same capability map the endpoint enforces, so the two
+       * cannot disagree about who this is for. */
+      if (!capabilitiesForRole(getInstinctUser<{ role?: string }>()?.role ?? "").has("settings.manage_team")) {
+        return;
+      }
       try {
         const res = await fetchWithRefresh("/api/admin/deployment/release-gate");
         if (!res.ok) return;
