@@ -173,8 +173,53 @@ describe("the chain it offers to build", () => {
     }
   });
 
+  it("BUILDS A CHAIN FROM A DAY THAT IS ENTIRELY THE PERSON'S OWN", () => {
+    /* The person this product is most for. Somebody whose morning is "ring the
+       two accounts that went quiet, walk the floor before standup" describes a
+       real, repeated, valuable sequence, and used to be told there was nothing
+       here for them because the bar was two TOOL steps.
+
+       A chain of human steps arrives when it should, remembers what comes
+       next, records what was done and what was skipped, and measures what each
+       part costs. That measurement is the most differentiated thing here, and
+       gating it behind two tool calls gave the people with the least software
+       the least of it. */
+    const r = draftRoutine(
+      plan([
+        step({ text: "Ring the two accounts that went quiet", tool: null }),
+        step({ text: "Walk the floor before standup", tool: null }),
+        step({ text: "Rehearse the opening", tool: null }),
+      ]),
+      "d",
+      "run my morning round",
+    );
+
+    expect(r).not.toBeNull();
+    expect(r!.steps).toHaveLength(3);
+    expect(r!.steps.every((s) => s.kind === "human")).toBe(true);
+    /* Their own work, marked as work rather than as a checkpoint on ours. */
+    expect(r!.steps.every((s) => s.kind === "human" && s.action === "do")).toBe(true);
+  });
+
+  it("says what such a chain would actually give them", () => {
+    /* Offering to "chain the parts I can do" to somebody whose day is entirely
+       their own reads as an offer of nothing. */
+    const out = renderPlan(
+      plan([
+        step({ text: "Ring the accounts", tool: null }),
+        step({ text: "Walk the floor", tool: null }),
+      ]),
+      true,
+    );
+    expect(out).toMatch(/keep this as one command/i);
+    expect(out).toMatch(/arrives when you want it/i);
+    expect(out).not.toMatch(/chain the parts I can do/i);
+  });
+
   it("offers nothing when there is only one thing to chain", () => {
     /* A chain of one is a longer way to do what they already do. */
+    /* One is not a sequence, whichever kind it is, and offering to save it is
+       offering a longer way to do what they already do. */
     expect(draftRoutine(plan([step()]), "d", "c")).toBeNull();
     expect(draftRoutine(plan([step({ tool: null })]), "d", "c")).toBeNull();
   });

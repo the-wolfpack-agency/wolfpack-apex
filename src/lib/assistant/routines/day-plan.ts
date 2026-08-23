@@ -162,9 +162,24 @@ export function draftRoutine(plan: DayPlan, id: string, command: string): Routin
     }
   }
 
-  /* A chain of one is not a chain. Offering to save a single tool call as a
-     routine is offering somebody a longer way to do what they already do. */
-  if (steps.filter((s) => s.kind === "tool").length < 2) return null;
+  /* A CHAIN OF ONE IS NOT A CHAIN, and that is the only bar.
+   *
+   * This used to require two TOOL steps, which quietly excluded the person
+   * this product is most for. Somebody whose morning is "read the overnight
+   * email, ring the two accounts that went quiet, walk the floor before
+   * standup" describes a real, repeated, valuable sequence, and got told there
+   * was nothing here for them.
+   *
+   * A chain of human steps is not a lesser chain. It arrives when it should,
+   * it remembers what comes next, it records what was done and what was
+   * skipped, and it measures what each part costs. That measurement is the
+   * most differentiated thing this product has, and requiring two tool calls
+   * before it would switch on meant the people with the least software got the
+   * least of it, which is exactly backwards.
+   *
+   * Two steps of any kind, because one is not a sequence and offering to save
+   * it is offering somebody a longer way to do what they already do. */
+  if (steps.length < 2) return null;
 
   return {
     id,
@@ -228,8 +243,14 @@ export function renderPlan(plan: DayPlan, canChain: boolean): string {
 
   if (canChain) {
     lines.push("");
+    /* Worded from what is actually there. Offering to "chain the parts I can
+       do" to somebody whose day is entirely their own reads as an offer of
+       nothing, when what they would get is a sequence that arrives on time,
+       remembers the order, and keeps count of what it costs them. */
     lines.push(
-      "Would you like me to chain the parts I can do into one command? It would stop and hand back to you at each of your own steps.",
+      plan.covered === 0
+        ? "Would you like me to keep this as one command? None of it is mine to do, so it would be a sequence that arrives when you want it, remembers what comes next, and keeps track of what actually got done."
+        : "Would you like me to chain the parts I can do into one command? It would stop and hand back to you at each of your own steps.",
     );
   }
 
