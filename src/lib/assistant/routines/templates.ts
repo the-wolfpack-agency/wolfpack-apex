@@ -38,7 +38,12 @@ export interface RoutineTemplate extends Routine {
   outcome: string;
 }
 
-export const ROUTINE_TEMPLATES: readonly RoutineTemplate[] = Object.freeze([
+/* Declared as RoutineTemplate[] BEFORE freezing so each entry is checked
+   against the type rather than unioned with its siblings. Inferring first
+   makes two steps with different `ask` keys collapse into a shape carrying
+   `topic?: undefined`, which no longer satisfies Record<string, string>, and
+   the error points at the array rather than at anything a reader can act on. */
+const TEMPLATES: RoutineTemplate[] = [
   {
     id: "tmpl_meeting_prep",
     command: "prep my next meeting",
@@ -153,6 +158,112 @@ export const ROUTINE_TEMPLATES: readonly RoutineTemplate[] = Object.freeze([
         label: "Reading it together",
       },
       { kind: "human", label: "Make the call", action: "review", show: ["verdict"] },
+    ],
+  },
+  {
+    /* THE CROSS-FUNCTION ONE, and the reason the product exists.
+     *
+     * Pipeline lives in the CRM, the conversation lives in mail, and what you
+     * promised to do lives in tasks. Nobody has ever seen those three at once,
+     * because seeing them means three windows and carrying the context between
+     * them by hand. The reading is what no single tool can do.
+     *
+     * It writes at the end, so it stops for a person first. */
+    id: "tmpl_work_the_pipeline",
+    command: "work the pipeline",
+    description: "Open deals, the mail around them, and what you already said you would do.",
+    audience: "sales",
+    forRole: "Sales and account management",
+    outcome: "You know which two accounts to touch today and why, without opening three systems.",
+    steps: [
+      {
+        kind: "tool",
+        slot: "deals",
+        tool: "filter_external_records",
+        params: { objectType: "deal", filters: { dateRange: "this_month" } },
+        label: "Pulling this month's deals",
+      },
+      {
+        kind: "tool",
+        slot: "totals",
+        tool: "aggregate_external_records",
+        params: { objectType: "deal", operation: "count" },
+        label: "Counting what is open",
+      },
+      {
+        kind: "tool",
+        slot: "mail",
+        tool: "email_thread_widget",
+        params: { count: 15 },
+        label: "Reading the recent mail",
+      },
+      {
+        kind: "tool",
+        slot: "commitments",
+        tool: "task_list_widget",
+        params: { limit: 25 },
+        label: "Checking what you already committed to",
+      },
+      {
+        kind: "model",
+        slot: "focus",
+        prompt:
+          "Deals this month: {{deals}}\n\nHow many are open: {{totals}}\n\n" +
+          "Recent mail: {{mail}}\n\nWhat is already on your list: {{commitments}}\n\n" +
+          "Which two accounts would you touch today, and why? The reason to look at " +
+          "these together is the overlap: a deal that has gone quiet in the mail, or " +
+          "one you promised something about and have not done. Name that connection " +
+          "where it exists. Where it does not, say the data does not show one rather " +
+          "than inventing a link.",
+        label: "Finding where the day should go",
+      },
+      { kind: "human", label: "Agree the two, or pick different ones", action: "review", show: ["focus"] },
+      {
+        kind: "tool",
+        tool: "create_task_form",
+        params: {},
+        label: "Logging what you decided",
+      },
+    ],
+  },
+  {
+    /* A CHAIN THAT ASKS. Searching mail cannot know what to look for, and a
+     * routine that guessed would search for the wrong thing confidently. It
+     * asks once, then reads the CRM and the mailbox for the same name. */
+    id: "tmpl_catch_up_on_a_client",
+    command: "catch me up on a client",
+    description: "Everything the CRM and your mailbox know about one account, read together.",
+    audience: "sales",
+    forRole: "Anyone walking into a client conversation",
+    outcome: "You walk in knowing the last thing said and the current state, not one or the other.",
+    steps: [
+      {
+        kind: "tool",
+        slot: "record",
+        tool: "search_external_records",
+        params: { objectType: "account" },
+        ask: { query: "Which client should I look up?" },
+        label: "Finding them in the CRM",
+      },
+      {
+        kind: "tool",
+        slot: "mail",
+        tool: "search_mail",
+        params: {},
+        ask: { topic: "And what should I search the mail for? A subject or a name is enough." },
+        label: "Finding the recent mail",
+      },
+      {
+        kind: "model",
+        slot: "brief",
+        prompt:
+          "What the CRM has: {{record}}\n\nWhat the mail has: {{mail}}\n\n" +
+          "Say where this account actually stands and what the last thing said was. " +
+          "If the CRM and the mail disagree, say so plainly, because that gap is the " +
+          "most useful thing here and it is exactly what nobody sees. Do not fill a " +
+          "silence with a summary of the record.",
+        label: "Reading both together",
+      },
     ],
   },
   {
@@ -291,7 +402,9 @@ export const ROUTINE_TEMPLATES: readonly RoutineTemplate[] = Object.freeze([
       { kind: "human", label: "Decide what the week is really for", action: "do", why: "This is the one judgement nothing here can make for you, and it is the one that decides how the week goes.", show: ["plan"] },
     ],
   },
-]);
+];
+
+export const ROUTINE_TEMPLATES: readonly RoutineTemplate[] = Object.freeze(TEMPLATES);
 
 /** A template by id. */
 export function templateById(id: string): RoutineTemplate | null {
