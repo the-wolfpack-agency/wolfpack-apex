@@ -80,7 +80,7 @@ describe("published content carries no em dashes", () => {
  * rise. New writing is held to zero by the suite above; the backlog comes down
  * as those files are touched.
  */
-const DOCS_EM_DASH_BACKLOG = 211;
+const DOCS_EM_DASH_BACKLOG = 208;
 
 describe("docs/ only ever gets better", () => {
   it("no new em dash lands in docs/", () => {
