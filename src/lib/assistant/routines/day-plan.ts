@@ -48,7 +48,7 @@ export type MappedStep =
   /** Work only a person can do. Not a gap: nothing is missing. */
   | { kind: "human"; text: string }
   /** Software could help and we do not have it. Named honestly. */
-  | { kind: "gap"; text: string; reason: "no_tool" | "not_permitted" };
+  | { kind: "gap"; text: string; reason: "no_tool" | "not_permitted" | "needs_detail" };
 
 export interface DayPlan {
   steps: MappedStep[];
@@ -90,6 +90,28 @@ export function mapDay(
     }
     if (!canInvokeTool(role, tool.capability)) {
       steps.push({ kind: "gap", text, reason: "not_permitted" });
+      continue;
+    }
+
+    /* CAN THIS TOOL ACTUALLY RUN WITH NOTHING?
+     *
+     * A drafted step carries no parameters, deliberately: a model's guess at
+     * what somebody meant is a wrong action taken confidently. But some tools
+     * require a detail before they can do anything at all. Searching mail needs
+     * to know whose mail, or about what; there is no sensible default and
+     * inventing one would be the guess this avoids.
+     *
+     * Found in production: a saved chain contained "read the overnight email"
+     * as a search_mail step with no parameters, and failed at step one with a
+     * validation message about the tool rather than about the chain. The
+     * template library checked for exactly this before offering anything and
+     * this path did not, so the check moved here where both use it.
+     *
+     * It becomes a GAP rather than a step, because a chain that stops at step
+     * one is worse than a chain that never included the step and said why. */
+    const runsWithNothing = tool.paramSchema.safeParse({});
+    if (!runsWithNothing.success) {
+      steps.push({ kind: "gap", text, reason: "needs_detail" });
       continue;
     }
 
@@ -177,6 +199,13 @@ export function renderPlan(plan: DayPlan, canChain: boolean): string {
       lines.push(`${n} **${s.text}** — yours. No tool should be doing this one.`);
     } else if (s.reason === "not_permitted") {
       lines.push(`${n} **${s.text}** — there is a tool for this, but your role cannot run it.`);
+    } else if (s.reason === "needs_detail") {
+      /* Named differently from "nothing does this", because it is a different
+         thing and the person can act on it: the capability exists and the
+         chain cannot supply the specifics. */
+      lines.push(
+        `${n} **${s.text}** — I can do this, but not on its own: it needs a detail each time, so it is better asked directly than run in a chain.`,
+      );
     } else {
       lines.push(`${n} **${s.text}** — nothing here does this yet.`);
     }

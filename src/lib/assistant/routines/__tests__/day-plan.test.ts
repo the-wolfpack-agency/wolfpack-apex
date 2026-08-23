@@ -69,6 +69,43 @@ describe("the model proposes, the registry decides", () => {
     expect(plan.steps[0]).toMatchObject({ kind: "tool", tool: "get_financials_metric" });
   });
 
+  it("REFUSES a tool that cannot run without a detail", () => {
+    /* Found in production. "run my day" contained "read the overnight email"
+       as a search_mail step with no parameters, and the chain failed at step
+       one with a validation message about the tool rather than about the
+       chain. A drafted step carries no parameters by design, so a tool that
+       needs one before it can do anything cannot be a step. */
+    const needy = tool("search_mail");
+    (needy.paramSchema as unknown as { safeParse: (v: unknown) => unknown }).safeParse = (v: unknown) =>
+      Object.keys((v ?? {}) as object).length > 0
+        ? { success: true, data: v }
+        : { success: false, error: { issues: [] } };
+
+    const plan = mapDay([step({ text: "Read the overnight email", tool: "search_mail" })], [needy], "cto");
+    expect(plan.steps[0]).toEqual({
+      kind: "gap",
+      text: "Read the overnight email",
+      reason: "needs_detail",
+    });
+    expect(plan.covered).toBe(0);
+  });
+
+  it("explains that gap differently from a missing tool, because it is different", () => {
+    /* The capability exists; the chain cannot supply the specifics. Somebody
+       can act on that by asking directly. */
+    const needy = tool("search_mail");
+    (needy.paramSchema as unknown as { safeParse: (v: unknown) => unknown }).safeParse = () => ({
+      success: false,
+      error: { issues: [] },
+    });
+    const out = renderPlan(
+      mapDay([step({ text: "Read the overnight email", tool: "search_mail" })], [needy], "cto"),
+      false,
+    );
+    expect(out).toMatch(/needs a detail each time/i);
+    expect(out).not.toMatch(/nothing here does this yet/i);
+  });
+
   it("treats a step with no tool as the person's own work", () => {
     const plan = mapDay([step({ text: "Rehearse the pitch", tool: null })], TOOLS, "cto");
     expect(plan.steps[0]).toEqual({ kind: "human", text: "Rehearse the pitch" });

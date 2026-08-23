@@ -105,13 +105,26 @@ async function runOne(row: ScheduleRow, now: Date): Promise<"done" | "waiting" |
     return "failed";
   }
 
-  /* The person's own identity and role are not available to a cron process, so
-     the run is made as the owner with the least privilege that still works.
-     Every tool re-checks the gate itself, so a step they could not run
-     interactively cannot run here either. */
+  /* THE OWNER'S REAL ROLE, looked up rather than assumed.
+   *
+   * This used to hardcode "member" on a least-privilege argument, and that was
+   * wrong in a way that did damage rather than merely failing. checkRoutine
+   * below runs with this role, so a CTO's scheduled routine was being judged
+   * against a member's permissions, every step above that level came back
+   * "not_permitted", and the system PROPOSED REMOVING STEPS the person could
+   * run perfectly well. A safety default that quietly suggests deleting
+   * somebody's work is not a safe default.
+   *
+   * Least privilege is still enforced, in the place that can actually enforce
+   * it: every tool re-checks the gate under this identity, so a scheduled run
+   * can do exactly what its owner could do by typing, and nothing more.
+   *
+   * Falls back to the lowest role when the lookup fails, because running a
+   * chain with less authority than intended is recoverable and running it with
+   * more is not. */
   const ctx: ToolContext = {
     userId: row.userId,
-    userRole: "member",
+    userRole: await ownerRole(row.userId),
     workspaceId: row.workspaceId,
   };
 
@@ -301,4 +314,25 @@ async function proposeRepair(
     sourceId: `${row.id}:${routine.steps.length}`,
     dedup: true,
   });
+}
+
+/**
+ * The role the schedule's owner actually holds.
+ *
+ * Never throws and never guesses upward: an unreadable row means the run is
+ * made with the least authority the platform has, which fails visibly rather
+ * than doing something nobody sanctioned.
+ */
+async function ownerRole(userId: string): Promise<string> {
+  if (!process.env.DATABASE_URL) return "member";
+  try {
+    const { query } = await import("@/lib/db");
+    const { rows } = await query<{ role: string }>(
+      `SELECT role FROM instinct_team_members WHERE id = $1 AND is_active = true LIMIT 1`,
+      [userId],
+    );
+    return rows[0]?.role ?? "member";
+  } catch {
+    return "member";
+  }
 }
