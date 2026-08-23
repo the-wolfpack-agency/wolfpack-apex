@@ -1134,6 +1134,13 @@ export type InstinctEventType =
   //     excluded_star_tables, unanalysed_columns }: counts only. Column names
   //     are the client's schema, theirs to see and not ours to accumulate.
   | "assistant.dark_data_scanned"
+  //   system.triple_write_degraded { store, reason } - a durable entity reached
+  //     Postgres and did NOT reach one of the secondary stores. Emitted ONCE per
+  //     process per store: an unconfigured store fails on every write, and tens of
+  //     thousands of identical rows a day is a worse kind of silence than none.
+  //     Written straight to the table rather than through trackEvent, because
+  //     analytics.ts calls triple-write and the loop would feed itself.
+  | "system.triple_write_degraded"
   // Aggregate query executed (count / sum / avg / win-rate / top-N).
   // Metadata: { connector, object_type, operation, result_type }.
   | "assistant.connector_aggregate_executed"

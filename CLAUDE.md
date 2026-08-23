@@ -28,7 +28,7 @@ All must be set in Vercel or the app crash-loops:
 - `GITHUB_TOKEN_WOLFPACK_AGENCY` + `WOLFPACK_SITES_WEBHOOK_SECRET` — Sites module.
 - `MICROSOFT_CLIENT_ID` / `MICROSOFT_CLIENT_SECRET` / `MICROSOFT_TENANT_ID` — Graph OAuth.
 - `QDRANT_URL` / `QDRANT_API_KEY` — vector store for triple-write.
-- `NEO4J_URI` / `NEO4J_USER` / `NEO4J_PASSWORD` — graph store for triple-write.
+- `NEO4J_URI` / `NEO4J_USER` / `NEO4J_PASSWORD` — graph store. OPTIONAL, and unset in production today: the app runs without it and writes degrade to Postgres + Qdrant, which is now reported as `system.triple_write_degraded` rather than swallowed. Listing it as a crash-loop blocker was wrong.
 - `PROD_DOMAIN` — activates the TLS hybrid posture CI assertion.
 
 Full list in `.ai/client-context.md`.

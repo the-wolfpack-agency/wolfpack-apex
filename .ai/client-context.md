@@ -42,7 +42,7 @@ Any missing value = production crash loop. Flag at the top of a handoff, not the
 | `MICROSOFT_CLIENT_ID` / `MICROSOFT_CLIENT_SECRET` / `MICROSOFT_TENANT_ID` | Graph OAuth |
 | `QUICKBOOKS_CLIENT_ID` / `QUICKBOOKS_CLIENT_SECRET` | QuickBooks OAuth |
 | `QDRANT_URL` / `QDRANT_API_KEY` | Vector store for triple-write |
-| `NEO4J_URI` / `NEO4J_USER` / `NEO4J_PASSWORD` | Graph store for triple-write |
+| `NEO4J_URI` / `NEO4J_USER` / `NEO4J_PASSWORD` | Graph store. Optional, and unset in production today. Absence degrades the triple write to Postgres + Qdrant and is reported, not silent |
 | `PROD_DOMAIN` | Enables the TLS hybrid posture CI assertion |
 
 ## Messaging guardrails
