@@ -32,7 +32,19 @@ const PROBES: SmokeProbe[] = [
   // The old "Setup" probe never matched the "Set up" h1 and was hidden by
   // verify.yml continue-on-error.
   { path: "/setup", expectText: "Set up", expectAnyText: ["Set up", "Instinct"] },
-  { path: "/tasks", expectText: "Task" },
+  /* TASKS RENDERS TWO WAYS, and both are correct.
+     With Microsoft To Do connected it lists tasks. Without it, it renders its
+     own connect-state: "Connect Microsoft To Do in Settings to see your tasks".
+     Requiring the first made this probe a test of whether the SMOKE account
+     happens to have an integration, which is not what a smoke test is for and
+     broke the moment that account changed. What it must catch is the page
+     coming back blank or unauthorised, and both spellings still prove it did
+     not. */
+  {
+    path: "/tasks",
+    expectText: "Task",
+    expectAnyText: ["Task", "Connect Microsoft To Do"],
+  },
   { path: "/releases", expectText: "Releases" },
   { path: "/products", expectText: "Products" },
   { path: "/engineering", expectText: "Engineering" },

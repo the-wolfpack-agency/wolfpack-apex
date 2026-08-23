@@ -244,12 +244,33 @@ export async function probePath(
   // Assert an expected text fragment is present somewhere in the rendered body.
   // expectAnyText (when set) passes if ANY fragment matches, for state-dependent
   // routes; otherwise the single expectText must match.
-  const bodyText = (await page.locator("body").innerText().catch(() => "")).toLowerCase();
+  /* WAITED FOR, NOT SAMPLED.
+   *
+   * This read the body ONCE, immediately after navigation and before the
+   * three-second settle below, so it was asking a client-rendered page what it
+   * said before it had finished saying it. On a warm route it usually won.
+   * That is the worst kind of assertion: right often enough to be trusted, and
+   * wrong often enough to teach everybody that a red smoke run means nothing.
+   *
+   * It also explains the mixed history on this job, where the same commit
+   * passed and failed within minutes of itself.
+   *
+   * Polling gives a slow route time to render without giving a genuinely blank
+   * one a pass: an empty page still fails, it just takes fifteen seconds to
+   * say so. */
   const candidates = probe.expectAnyText ?? [probe.expectText];
-  expect(
-    candidates.some((t) => bodyText.includes(t.toLowerCase())),
-    `None of [${candidates.join(", ")}] found on ${probe.path}`,
-  ).toBe(true);
+  await expect
+    .poll(
+      async () => {
+        const body = (await page.locator("body").innerText().catch(() => "")).toLowerCase();
+        return candidates.some((t) => body.includes(t.toLowerCase()));
+      },
+      {
+        timeout: 15_000,
+        message: `None of [${candidates.join(", ")}] found on ${probe.path}`,
+      },
+    )
+    .toBe(true);
 
   // 3-second idle window for async CSP/network failures to surface.
   await page.waitForTimeout(3_000);
