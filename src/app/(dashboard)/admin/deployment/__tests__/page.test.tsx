@@ -69,7 +69,10 @@ describe("DeploymentReadinessPage", () => {
   });
 
   test("renders the green Ready banner + critical and advisory check rows", async () => {
-    mockGetUser.mockReturnValue({ role: "admin" });
+    /* A REAL role. "admin" is not one this product assigns, so it holds no
+       capabilities, and the page now correctly declines to fetch as it. The
+       test passed before only because nothing checked. */
+    mockGetUser.mockReturnValue({ role: "cto" });
     mockFetch.mockResolvedValue(okJson(READY));
     render(<DeploymentReadinessPage />);
 
@@ -85,7 +88,10 @@ describe("DeploymentReadinessPage", () => {
   });
 
   test("renders the red Not ready banner with the critical-failure count + status labels", async () => {
-    mockGetUser.mockReturnValue({ role: "admin" });
+    /* A REAL role. "admin" is not one this product assigns, so it holds no
+       capabilities, and the page now correctly declines to fetch as it. The
+       test passed before only because nothing checked. */
+    mockGetUser.mockReturnValue({ role: "cto" });
     mockFetch.mockResolvedValue(okJson(NOT_READY));
     render(<DeploymentReadinessPage />);
 
@@ -102,7 +108,10 @@ describe("DeploymentReadinessPage", () => {
   });
 
   test("surfaces an error banner when the readiness endpoint fails", async () => {
-    mockGetUser.mockReturnValue({ role: "admin" });
+    /* A REAL role. "admin" is not one this product assigns, so it holds no
+       capabilities, and the page now correctly declines to fetch as it. The
+       test passed before only because nothing checked. */
+    mockGetUser.mockReturnValue({ role: "cto" });
     mockFetch.mockResolvedValue(errRes(500));
     render(<DeploymentReadinessPage />);
     await waitFor(() => {
@@ -158,7 +167,10 @@ const change = (over: Partial<Record<string, unknown>> = {}) => ({
 
 describe("ReleaseGateSection", () => {
   test("renders blocking rows with the correct pill tone, reason, and age", async () => {
-    mockGetUser.mockReturnValue({ role: "admin" });
+    /* A REAL role. "admin" is not one this product assigns, so it holds no
+       capabilities, and the page now correctly declines to fetch as it. The
+       test passed before only because nothing checked. */
+    mockGetUser.mockReturnValue({ role: "cto" });
     mockFetch.mockImplementation(
       routeFetch({
         gate: {
@@ -187,7 +199,10 @@ describe("ReleaseGateSection", () => {
   });
 
   test("ready_to_merge shows Promote, and confirming it POSTs promote + shows success", async () => {
-    mockGetUser.mockReturnValue({ role: "admin" });
+    /* A REAL role. "admin" is not one this product assigns, so it holds no
+       capabilities, and the page now correctly declines to fetch as it. The
+       test passed before only because nothing checked. */
+    mockGetUser.mockReturnValue({ role: "cto" });
     const promote = jest.fn((body: unknown) => okJson({ ok: true, mergedSha: "sha-merged" }));
     mockFetch.mockImplementation(
       routeFetch({
@@ -219,7 +234,10 @@ describe("ReleaseGateSection", () => {
   });
 
   test("a failed promote surfaces the typed reason (fail closed, no false success)", async () => {
-    mockGetUser.mockReturnValue({ role: "admin" });
+    /* A REAL role. "admin" is not one this product assigns, so it holds no
+       capabilities, and the page now correctly declines to fetch as it. The
+       test passed before only because nothing checked. */
+    mockGetUser.mockReturnValue({ role: "cto" });
     mockFetch.mockImplementation(
       routeFetch({
         gate: {
@@ -241,7 +259,10 @@ describe("ReleaseGateSection", () => {
   });
 
   test("degraded gate shows the warning, NOT a false all-clear", async () => {
-    mockGetUser.mockReturnValue({ role: "admin" });
+    /* A REAL role. "admin" is not one this product assigns, so it holds no
+       capabilities, and the page now correctly declines to fetch as it. The
+       test passed before only because nothing checked. */
+    mockGetUser.mockReturnValue({ role: "cto" });
     mockFetch.mockImplementation(
       routeFetch({
         gate: {
@@ -260,7 +281,10 @@ describe("ReleaseGateSection", () => {
   });
 
   test("empty gate shows the explicit all-live empty state", async () => {
-    mockGetUser.mockReturnValue({ role: "admin" });
+    /* A REAL role. "admin" is not one this product assigns, so it holds no
+       capabilities, and the page now correctly declines to fetch as it. The
+       test passed before only because nothing checked. */
+    mockGetUser.mockReturnValue({ role: "cto" });
     mockFetch.mockImplementation(
       routeFetch({
         gate: { productionBranch: "main", checkedAt: new Date().toISOString(), blocking: [] },
@@ -272,7 +296,10 @@ describe("ReleaseGateSection", () => {
   });
 
   test("renders the recommended approval order with per-step rebase notes", async () => {
-    mockGetUser.mockReturnValue({ role: "admin" });
+    /* A REAL role. "admin" is not one this product assigns, so it holds no
+       capabilities, and the page now correctly declines to fetch as it. The
+       test passed before only because nothing checked. */
+    mockGetUser.mockReturnValue({ role: "cto" });
     mockFetch.mockImplementation(
       routeFetch({
         gate: {
@@ -308,7 +335,10 @@ describe("ReleaseGateSection", () => {
   });
 
   test("merge plan flags an all-independent set as safe in any order", async () => {
-    mockGetUser.mockReturnValue({ role: "admin" });
+    /* A REAL role. "admin" is not one this product assigns, so it holds no
+       capabilities, and the page now correctly declines to fetch as it. The
+       test passed before only because nothing checked. */
+    mockGetUser.mockReturnValue({ role: "cto" });
     mockFetch.mockImplementation(
       routeFetch({
         gate: {

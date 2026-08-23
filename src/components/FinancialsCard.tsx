@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { authHeaders, getInstinctUser, fetchWithRefresh } from "@/lib/client-auth";
-import { capabilitiesForRole } from "@/lib/auth/role-capabilities";
+import { canI } from "@/lib/client-capabilities";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -151,9 +151,7 @@ export default function FinancialsCard() {
    * same day as the release-gate banner. Two instances is a pattern: a
    * component that discovers its own audience from a rejection is a component
    * that asks everybody. */
-  const mayReadFinancials = capabilitiesForRole(
-    getInstinctUser<{ role?: string }>()?.role ?? "",
-  ).has("finance.reports.view");
+  const mayReadFinancials = canI("finance.reports.view");
 
   useEffect(() => {
     if (!mayReadFinancials) {

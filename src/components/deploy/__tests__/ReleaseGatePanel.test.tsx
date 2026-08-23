@@ -4,6 +4,8 @@ import "@testing-library/jest-dom";
 
 const mockFetch = jest.fn();
 jest.mock("@/lib/client-auth", () => ({
+  /* canI() reads the signed-in person to decide whether to ask at all. */
+  getInstinctUser: () => ({ id: "u-test", role: "cto" }),
   fetchWithRefresh: (...a: unknown[]) => (mockFetch as (...x: unknown[]) => unknown)(...a),
   jsonHeaders: () => ({ "Content-Type": "application/json" }),
 }));

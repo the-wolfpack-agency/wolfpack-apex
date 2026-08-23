@@ -16,6 +16,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { fetchWithRefresh, jsonHeaders } from "@/lib/client-auth";
+import { canI } from "@/lib/client-capabilities";
 import {
   GlassPanel,
   MetricTile,
@@ -245,6 +246,9 @@ export function ReleaseGatePanel({ testId = "release-gate-panel" }: { testId?: s
 
   const load = useCallback(async () => {
     try {
+      /* Ask only if this person may have it. See lib/client-capabilities:
+         a component that discovers its audience from a 403 asks everybody. */
+      if (!canI("settings.manage_team")) return;
       const res = await fetchWithRefresh("/api/admin/deployment/release-gate");
       if (!res.ok) {
         setState({ kind: "error" });

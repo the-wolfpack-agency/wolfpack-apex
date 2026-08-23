@@ -25,7 +25,7 @@
 
 import { useEffect, useState } from "react";
 import { fetchWithRefresh, getInstinctUser, jsonHeaders } from "@/lib/client-auth";
-import { capabilitiesForRole } from "@/lib/auth/role-capabilities";
+import { canI } from "@/lib/client-capabilities";
 import type { ReleaseGateStatus, BlockingChange } from "@/lib/deploy/release-gate";
 
 /**
@@ -73,9 +73,7 @@ export default function ReleaseGateBanner() {
        *
        * Read from the same capability map the endpoint enforces, so the two
        * cannot disagree about who this is for. */
-      if (!capabilitiesForRole(getInstinctUser<{ role?: string }>()?.role ?? "").has("settings.manage_team")) {
-        return;
-      }
+      if (!canI("settings.manage_team")) return;
       try {
         const res = await fetchWithRefresh("/api/admin/deployment/release-gate");
         if (!res.ok) return;

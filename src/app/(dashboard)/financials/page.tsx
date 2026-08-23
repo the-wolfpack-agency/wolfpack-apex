@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { authHeaders, jsonHeaders, fetchWithRefresh } from "@/lib/client-auth";
+import { canI } from "@/lib/client-capabilities";
 
 // ---------------------------------------------------------------------------
 // Types (match quickbooks.ts exports)
@@ -175,6 +176,14 @@ export default function FinancialsPage() {
         headers: jsonHeaders(),
         body: JSON.stringify({ event: "system.page_viewed", metadata: { page: "financials" } }),
       }).catch(() => {});
+
+      /* Ask only if this person may have it. The page itself is reachable and
+         will show its own restricted state; what it must not do is fire a
+         request it already knows will be refused. See lib/client-capabilities. */
+      if (!canI("finance.reports.view")) {
+        setLoading(false);
+        return;
+      }
 
       const res = await fetchWithRefresh("/api/quickbooks", {
         headers: authHeaders(),

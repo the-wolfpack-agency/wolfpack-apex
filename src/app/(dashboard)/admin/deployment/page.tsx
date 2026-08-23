@@ -20,6 +20,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { getInstinctUser, fetchWithRefresh, jsonHeaders } from "@/lib/client-auth";
+import { canI } from "@/lib/client-capabilities";
 import {
   GlassPanel,
   MetricTile,
@@ -101,6 +102,9 @@ function BlockingRow({
     setConfirming(false);
     setResult(null);
     try {
+      /* Ask only if this person may have it. See lib/client-capabilities:
+         a component that discovers its audience from a 403 asks everybody. */
+      if (!canI("settings.manage_team")) return;
       const res = await fetchWithRefresh("/api/admin/deployment/release-gate/promote", {
         method: "POST",
         headers: jsonHeaders(),
