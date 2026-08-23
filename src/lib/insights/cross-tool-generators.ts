@@ -441,6 +441,26 @@ export const INSIGHT_GENERATORS: InsightGenerator[] = [
   /* The two below are the only generators here that say something on
      the day a client connects, rather than after a month of use. See
      source-topology.ts for why that distinction is the product. */
+  /* Read the client's own database counters. These are the only
+     generators that see load we did not cause. */
+  {
+    name: "legacy_cold_tables",
+    label: "Large tables in the client database that nothing reads",
+    requires: ["legacy-database"],
+    run: (ctx) => import("./legacy-db-insights").then((m) => m.generateColdTables(ctx)),
+  },
+  {
+    name: "legacy_read_concentration",
+    label: "Which few tables carry most of the client database's reads",
+    requires: ["legacy-database"],
+    run: (ctx) => import("./legacy-db-insights").then((m) => m.generateReadConcentration(ctx)),
+  },
+  {
+    name: "repeated_query_shapes",
+    label: "One statement repeated enough for the total to matter",
+    requires: ["legacy-database"],
+    run: (ctx) => import("./legacy-db-insights").then((m) => m.generateRepeatedQueryShapes(ctx)),
+  },
   {
     name: "cross_source_overlap",
     label: "The same entity class held in more than one connected system",
