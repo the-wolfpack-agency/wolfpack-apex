@@ -1141,6 +1141,11 @@ export type InstinctEventType =
   //     Written straight to the table rather than through trackEvent, because
   //     analytics.ts calls triple-write and the loop would feed itself.
   | "system.triple_write_degraded"
+  //   assistant.follow_through_resolved { resolved } - a bare "ok, do that" was
+  //     resolved against the previous turn ("ran_offer") or answered with a
+  //     question ("asked"). Never dispatched as a fresh query: a message with no
+  //     subject cannot match a tool honestly, and the path after that is a guess.
+  | "assistant.follow_through_resolved"
   // Aggregate query executed (count / sum / avg / win-rate / top-N).
   // Metadata: { connector, object_type, operation, result_type }.
   | "assistant.connector_aggregate_executed"
