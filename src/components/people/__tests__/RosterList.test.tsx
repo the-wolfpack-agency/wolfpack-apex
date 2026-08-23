@@ -16,9 +16,11 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { RosterList } from "../RosterList";
 
 const mockFetchWithRefresh = jest.fn();
+const mockUser = jest.fn();
 jest.mock("@/lib/client-auth", () => ({
   fetchWithRefresh: (...args: unknown[]) => mockFetchWithRefresh(...args),
   jsonHeaders: () => ({ "Content-Type": "application/json" }),
+  getInstinctUser: () => mockUser(),
 }));
 
 type Entry = Record<string, unknown>;
@@ -52,6 +54,7 @@ function serveRoster(roster: Entry[], canManage = true) {
 }
 
 beforeEach(() => {
+  mockUser.mockReturnValue({ id: "viewer-1", role: "cto" });
   jest.clearAllMocks();
   jest.spyOn(window, "confirm").mockReturnValue(true);
 });
@@ -233,5 +236,101 @@ describe("when the roster cannot be loaded", () => {
     render(<RosterList />);
     expect(await screen.findByText(/Nobody yet/)).toBeInTheDocument();
     expect(screen.queryByTestId("roster-load-error")).not.toBeInTheDocument();
+  });
+});
+
+describe("changing somebody's account role", () => {
+  const roster = [
+    { key: "k1", name: "Dana Ruiz", email: "d@x.test", role_title: null, department: null, employee_id: null, employee_status: null, member_id: "m-dana", account_role: "ops", invite_id: null, access: "active", last_login: null, m365_connected: false },
+    { key: "k2", name: "You", email: "y@x.test", role_title: null, department: null, employee_id: null, employee_status: null, member_id: "viewer-1", account_role: "cto", invite_id: null, access: "active", last_login: null, m365_connected: false },
+  ];
+
+  function respondRoster() {
+    mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ roster }) });
+  }
+
+  it("offers the control to somebody who may assign roles", async () => {
+    respondRoster();
+    render(<RosterList />);
+    expect(await screen.findByTestId("roster-role-k1")).toBeInTheDocument();
+  });
+
+  it("does NOT offer it to somebody who may not", async () => {
+    /* Derived from the same capability map the server enforces, so the control
+       and the endpoint cannot disagree about who may do this. */
+    mockUser.mockReturnValue({ id: "viewer-1", role: "designer" });
+    respondRoster();
+    render(<RosterList />);
+    await screen.findByTestId("roster-row-k1");
+    expect(screen.queryByTestId("roster-role-k1")).not.toBeInTheDocument();
+  });
+
+  it("disables it on your own row rather than hiding it", async () => {
+    /* Hiding reads as a missing feature and somebody goes looking for it. The
+       reason is on the control itself. */
+    respondRoster();
+    render(<RosterList />);
+    const own = await screen.findByTestId("roster-role-k2");
+    expect(own).toBeDisabled();
+    expect(own).toHaveAttribute("title", expect.stringMatching(/cannot change your own role/i));
+  });
+
+  it("lists every assignable role, read from the shared map", async () => {
+    respondRoster();
+    render(<RosterList />);
+    const select = await screen.findByTestId("roster-role-k1");
+    const values = Array.from(select.querySelectorAll("option")).map((o) => o.getAttribute("value"));
+    /* Exactly the roles the database's own check constraint permits. */
+    expect(values).toEqual(expect.arrayContaining(["cto", "ceo", "ops", "designer", "sales", "hr", "dev"]));
+    expect(values).not.toContain("member");
+  });
+
+  it("posts the change to the endpoint that audits it", async () => {
+    respondRoster();
+    const confirmSpy = jest.spyOn(window, "confirm").mockReturnValue(true);
+    render(<RosterList />);
+    const select = await screen.findByTestId("roster-role-k1");
+
+    fireEvent.change(select, { target: { value: "dev" } });
+
+    await waitFor(() =>
+      expect(mockFetchWithRefresh).toHaveBeenCalledWith(
+        "/api/admin/users/m-dana/role",
+        expect.objectContaining({ method: "POST", body: JSON.stringify({ role: "dev" }) }),
+      ),
+    );
+    confirmSpy.mockRestore();
+  });
+
+  it("asks first, naming both ends of the change", async () => {
+    /* This is the one control here that changes what another person is ALLOWED
+       to do rather than what they can see. */
+    respondRoster();
+    const confirmSpy = jest.spyOn(window, "confirm").mockReturnValue(false);
+    render(<RosterList />);
+    fireEvent.change(await screen.findByTestId("roster-role-k1"), { target: { value: "dev" } });
+
+    expect(confirmSpy).toHaveBeenCalledWith(expect.stringMatching(/from ops to dev/i));
+    expect(mockFetchWithRefresh).not.toHaveBeenCalledWith(
+      expect.stringContaining("/role"),
+      expect.anything(),
+    );
+    confirmSpy.mockRestore();
+  });
+
+  it("shows the server's own reason when it refuses", async () => {
+    respondRoster();
+    const confirmSpy = jest.spyOn(window, "confirm").mockReturnValue(true);
+    render(<RosterList />);
+    await screen.findByTestId("roster-role-k1");
+
+    mockFetchWithRefresh.mockResolvedValueOnce({
+      ok: false,
+      json: async () => ({ error: "cannot_change_own_role", message: "You cannot change your own role. Ask another admin." }),
+    });
+    fireEvent.change(screen.getByTestId("roster-role-k1"), { target: { value: "dev" } });
+
+    expect(await screen.findByText(/ask another admin/i)).toBeInTheDocument();
+    confirmSpy.mockRestore();
   });
 });

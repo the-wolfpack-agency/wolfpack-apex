@@ -129,3 +129,40 @@ describe("POST /api/admin/users/[id]/role", () => {
     expect(mockRecordAudit).not.toHaveBeenCalled();
   });
 });
+
+describe("nobody changes their own role", () => {
+  it("refuses, in either direction, and explains why", async () => {
+    /* Downward it is a locked door: the only people who can assign roles are
+       the ones who would be removing that ability from themselves, and getting
+       it back then needs a database session rather than the product.
+
+       Upward it removes the second person from a privilege escalation. Whoever
+       can assign roles can already assign themselves anything, so this is not
+       about capability; it is about the record saying one person granted
+       authority to another. A self-change makes that record say nothing. */
+    mockRequireCap.mockResolvedValue({ ok: true, user: { id: "u-self", role: "cto" } });
+
+    const { POST } = await import("@/app/api/admin/users/[id]/role/route");
+    const res = await POST(mkReq({ role: "designer" }), { params: Promise.resolve({ id: "u-self" }) });
+
+    expect(res.status).toBe(403);
+    const body = await res.json();
+    expect(body.error).toBe("cannot_change_own_role");
+    expect(body.message).toMatch(/ask another admin/i);
+    /* Nothing was written and nothing was audited: it never reached the DB. */
+    expect(mockQuery).not.toHaveBeenCalled();
+    expect(mockRecordAudit).not.toHaveBeenCalled();
+  });
+
+  it("still allows changing somebody else", async () => {
+    mockRequireCap.mockResolvedValue({ ok: true, user: { id: "u-self", role: "cto" } });
+    mockSafeQuery.mockResolvedValue({ rows: [{ role: "ops" }] });
+    mockQuery.mockResolvedValue({ rowCount: 1 });
+
+    const { POST } = await import("@/app/api/admin/users/[id]/role/route");
+    const res = await POST(mkReq({ role: "dev" }), { params: Promise.resolve({ id: "u-other" }) });
+
+    expect(res.status).toBe(200);
+    expect(mockRecordAudit).toHaveBeenCalled();
+  });
+});

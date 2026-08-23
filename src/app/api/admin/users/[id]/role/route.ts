@@ -28,6 +28,30 @@ export async function POST(
     return NextResponse.json({ error: "invalid_role" }, { status: 400 });
   }
 
+  /* NOBODY CHANGES THEIR OWN ROLE, in either direction.
+   *
+   * Downward it is a locked door: the only people who can assign roles are the
+   * ones who would be removing that ability from themselves, and restoring it
+   * then needs a database session rather than the product.
+   *
+   * Upward it removes the second person from a privilege escalation. Whoever
+   * can assign roles can already assign themselves anything, so the control is
+   * not about capability; it is about there being a record that says one
+   * person granted authority to another. A self-change makes that record say
+   * nothing.
+   *
+   * Both are the same fix, so it is one rule rather than two. */
+  if (targetUserId === auth.user.id) {
+    return NextResponse.json(
+      {
+        error: "cannot_change_own_role",
+        message:
+          "You cannot change your own role. Ask another admin, so the change is one person granting authority to another rather than to themselves.",
+      },
+      { status: 403 },
+    );
+  }
+
   // Shadow mode: no DB, still allow analytics + echo back.
   if (!process.env.DATABASE_URL) {
     trackEvent("system.role_changed", auth.user.id, auth.user.role, {

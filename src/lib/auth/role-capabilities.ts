@@ -305,6 +305,21 @@ const ROLE_MAP: Record<TeamRole, readonly Capability[]> = {
 /**
  * True if `value` is a recognized TeamRole.
  */
+/**
+ * Every role that can be assigned, in the order a person should read them:
+ * most authority first.
+ *
+ * Derived from ROLE_MAP rather than typed out again, so a role added there
+ * appears in the admin control without anybody remembering to add it, and one
+ * removed cannot linger in a dropdown that then fails at the database's own
+ * check constraint.
+ */
+export const ROLE_LIST: readonly TeamRole[] = Object.freeze(
+  (Object.keys(ROLE_MAP) as TeamRole[]).sort(
+    (a, b) => ROLE_MAP[b].length - ROLE_MAP[a].length || a.localeCompare(b),
+  ),
+);
+
 export function isTeamRole(value: unknown): value is TeamRole {
   return typeof value === "string" && Object.prototype.hasOwnProperty.call(ROLE_MAP, value);
 }
