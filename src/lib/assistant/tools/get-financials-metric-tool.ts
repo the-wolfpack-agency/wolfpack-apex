@@ -37,11 +37,36 @@ const FINANCIAL_TIMEFRAMES = [
   "last week", "today", "yesterday",
 ];
 
+/**
+ * A HINT HAS TO BE A WORD, NOT A RUN OF LETTERS.
+ *
+ * This matched with includes(), so "arr" found itself inside w-arr-anty
+ * and the financials tool claimed every sentence about warranty work.
+ * Measured against the deployed assistant on 2026-08-23: "I look after
+ * warranty claims for three dealerships, what would you do first?" was
+ * answered with "that tool needs a higher-privilege role", which reads
+ * like a permissions problem and is really a three-letter acronym
+ * matching the middle of the most important word this client uses.
+ *
+ * The short financial acronyms are where substring matching does the most
+ * damage: arr is inside warranty, arrears, carrier and arrival; mrr and
+ * ytd have the same shape. Word boundaries cost nothing and remove the
+ * whole class.
+ *
+ * p&l keeps its own handling because the ampersand is not a word
+ * character, so a boundary either side of it never matches.
+ */
+const HINT_RES: RegExp[] = FINANCIAL_HINTS.map((h) =>
+  /[^a-z0-9]/.test(h)
+    ? new RegExp(h.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i")
+    : new RegExp(`\\b${h}\\b`, "i"),
+);
+
 function matchFinancialsIntent(message: string): Params | null {
   const lower = message.toLowerCase();
   /* Require both a financial-term keyword AND a question-y framing
      so casual mentions ("revenue is up") don't accidentally fire. */
-  const hasHint = FINANCIAL_HINTS.some((h) => lower.includes(h));
+  const hasHint = HINT_RES.some((re) => re.test(lower));
   if (!hasHint) return null;
   const isQuestion =
     /^(what|how|when|where|tell|show|give)\b/i.test(message.trim()) ||
