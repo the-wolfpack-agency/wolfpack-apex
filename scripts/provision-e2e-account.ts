@@ -69,7 +69,32 @@ const NAME = "E2E (automated tests)";
  * ten at 21 capabilities, and it still carries the SELF_SERVICE set, which is
  * what /routines, /releases and /engineering need.
  */
-const ROLE = "designer";
+const DEFAULT_ROLE = "designer";
+
+/**
+ * A HIGHER ROLE, ON PURPOSE, FOR THE ADMIN SURFACES.
+ *
+ * The note above explains why an admin credential does not arrive quietly
+ * with a test. It should still be possible to ask for one, because half
+ * this product is admin pages and nobody can test what they cannot open:
+ * /admin/ai-router alone needs settings.manage_team.
+ *
+ * So it is a flag, and it is loud. --role=evp is a sentence somebody wrote
+ * on purpose, which is the whole difference between this and a default.
+ *
+ * WHY evp RATHER THAN cto. cto is defined as every capability there is, so
+ * an account holding it is not "below" anybody and there is nothing left to
+ * withhold. evp mirrors the CEO baseline: it reaches every admin surface
+ * except the developer-only actions, and those are already covered by the
+ * e2e-dev account. Two non-full-admin logins between them see the whole
+ * product, which is a better position than one that sees it by being root.
+ *
+ * A privileged account here is deliberately NOT part of --all, so it never
+ * lands in the shared CI password that any workflow can read.
+ */
+const ROLE_FLAG = process.argv.find((a) => a.startsWith("--role="))?.split("=")[1];
+const PRIVILEGED = new Set(["ceo", "cto", "evp", "vp", "cco"]);
+const ROLE = ROLE_FLAG ?? process.env.E2E_ACCOUNT_ROLE ?? DEFAULT_ROLE;
 const WORKSPACE = "default";
 
 /** 24 bytes of base64url. Long enough that nobody is tempted to type it. */
@@ -134,6 +159,24 @@ async function provisionAll(): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  /* A privileged role has to be named on the command line. Reading it from
+     the environment would let a CI job inherit one from a stray variable,
+     which is exactly the quiet grant this script exists to prevent. */
+  if (PRIVILEGED.has(ROLE) && !ROLE_FLAG) {
+    console.error(
+      `Refusing to provision the privileged role "${ROLE}" from the environment. ` +
+        `Pass it explicitly: --role=${ROLE}`,
+    );
+    process.exitCode = 1;
+    return;
+  }
+  if (PRIVILEGED.has(ROLE)) {
+    console.log(
+      `NOTE: provisioning a PRIVILEGED account (${ROLE}). Do not store this in the ` +
+        `shared CI password. Revoke it when the testing it was made for is done.`,
+    );
+  }
+
   if (!process.env.DATABASE_URL) {
     console.error("DATABASE_URL is not set. Nothing written.");
     process.exitCode = 1;
