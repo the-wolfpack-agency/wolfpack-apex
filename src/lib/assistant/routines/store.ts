@@ -28,15 +28,17 @@ export async function saveRun(run: RoutineRun): Promise<void> {
   try {
     await query(
       `INSERT INTO assistant_routine_runs
-         (run_id, routine_id, user_id, workspace_id, state, step_cursor, tech_ms, human_ms, paused_at, finished_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+         (run_id, routine_id, user_id, workspace_id, state, step_cursor, tech_ms, human_ms, paused_at, finished_at, answers, pending_ask)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb)
        ON CONFLICT (run_id) DO UPDATE SET
          state       = EXCLUDED.state,
          step_cursor = EXCLUDED.step_cursor,
          tech_ms     = EXCLUDED.tech_ms,
          human_ms    = EXCLUDED.human_ms,
          paused_at   = EXCLUDED.paused_at,
-         finished_at = EXCLUDED.finished_at`,
+         finished_at = EXCLUDED.finished_at,
+         answers     = EXCLUDED.answers,
+         pending_ask = EXCLUDED.pending_ask`,
       [
         run.runId,
         run.routineId,
@@ -48,6 +50,8 @@ export async function saveRun(run: RoutineRun): Promise<void> {
         run.humanMs,
         run.pausedAt ? new Date(run.pausedAt) : null,
         run.state === "done" || run.state === "failed" ? new Date() : null,
+        JSON.stringify(run.answers ?? {}),
+        run.pendingAsk ? JSON.stringify(run.pendingAsk) : null,
       ],
     );
 
@@ -190,7 +194,7 @@ export async function loadWaitingRun(owner: {
   try {
     const { query } = await import("@/lib/db");
     const { rows } = await query<Record<string, unknown>>(
-      `SELECT run_id, routine_id, state, step_cursor, tech_ms, human_ms, paused_at
+      `SELECT run_id, routine_id, state, step_cursor, tech_ms, human_ms, paused_at, answers, pending_ask
          FROM assistant_routine_runs
         WHERE workspace_id = $1 AND user_id = $2
           AND state = 'waiting_for_human'
@@ -232,6 +236,14 @@ export async function loadWaitingRun(owner: {
         ...(s.human_action ? { action: String(s.human_action) as "review" | "do" } : {}),
       })),
       slots: {},
+      answers:
+        r.answers && typeof r.answers === "object"
+          ? (r.answers as Record<string, string>)
+          : {},
+      pendingAsk:
+        r.pending_ask && typeof r.pending_ask === "object"
+          ? (r.pending_ask as { stepIndex: number; key: string; question: string })
+          : null,
       techMs: Number(r.tech_ms) || 0,
       humanMs: Number(r.human_ms) || 0,
       pausedAt: r.paused_at ? new Date(String(r.paused_at)).getTime() : null,

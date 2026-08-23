@@ -135,6 +135,18 @@ export function describeRun(routine: Routine, run: RoutineRun): string {
   if (last?.answer) lines.push(last.answer, "");
 
   if (run.state === "waiting_for_human") {
+    /* A QUESTION, not a checkpoint. The pause reads completely differently:
+       somebody is being asked to type an answer, not to go and do something,
+       and telling them to say "done" would be nonsense. */
+    if (run.pendingAsk) {
+      lines.push(`**${run.pendingAsk.question}**`);
+      lines.push("");
+      lines.push(
+        `${done.length} of ${routine.steps.length} steps done. Tell me and I will carry on.`,
+      );
+      return lines.join("\n");
+    }
+
     const step = routine.steps[run.cursor];
     lines.push(`**${step.kind === "human" ? step.label : "Over to you"}**`);
     /* THE REASON, when the step has one. Somebody told to rehearse at 4pm with
@@ -180,8 +192,9 @@ export function describeRun(routine: Routine, run: RoutineRun): string {
  */
 export async function resumeWaitingRoutine(
   ctx: ToolContext,
-  intent: "carry_on" | "skip",
+  intent: "carry_on" | "skip" | "answer",
   deps?: RunnerDeps,
+  answer?: string,
 ): Promise<{ answer: string } | null> {
   const owner = { workspaceId: ctx.workspaceId || "default", userId: ctx.userId };
   const { loadWaitingRun } = await import("./store");
@@ -197,8 +210,10 @@ export async function resumeWaitingRoutine(
     };
   }
 
-  /* Can what is LEFT actually run without the slots we no longer hold? */
-  const remaining = routine.steps.slice(waiting.cursor + 1);
+  /* Can what is LEFT actually run without the slots we no longer hold?
+     A run waiting on a QUESTION is different: the step that asked has not run
+     yet, so the remaining work starts at that step rather than after it. */
+  const remaining = routine.steps.slice(waiting.cursor + (waiting.pendingAsk ? 0 : 1));
   const needsSlot = remaining.find((step) => {
     const reads =
       step.kind === "tool"
@@ -220,6 +235,7 @@ export async function resumeWaitingRoutine(
 
   const run = await resumeRoutine(routine, waiting, ctx, deps ?? liveDeps(ctx), {
     skipped: intent === "skip",
+    ...(intent === "answer" ? { answer } : {}),
   });
   return { answer: describeRun(routine, run) };
 }
@@ -237,4 +253,14 @@ async function matchSavedRoutineById(
   const { listSavedRoutines } = await import("./saved");
   const saved = await listSavedRoutines(owner);
   return saved.find((r) => r.id === id) ?? null;
+}
+
+/** Is a waiting run waiting for a VALUE rather than for somebody to act? */
+export async function pendingQuestion(ctx: ToolContext): Promise<string | null> {
+  const { loadWaitingRun } = await import("./store");
+  const waiting = await loadWaitingRun({
+    workspaceId: ctx.workspaceId || "default",
+    userId: ctx.userId,
+  });
+  return waiting?.pendingAsk?.question ?? null;
 }

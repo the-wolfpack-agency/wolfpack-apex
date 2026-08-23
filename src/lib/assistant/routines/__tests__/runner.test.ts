@@ -394,3 +394,123 @@ describe("a human step somebody did not do", () => {
     expect(paused.outcomes[0].action).toBe("review");
   });
 });
+
+describe("a step that has to ask for a value", () => {
+  /* THE CEILING THIS REMOVES. Searching mail needs to know what to search for
+     and listing CI runs needs a repository. Neither has a sensible default, so
+     until now they could not be steps at all: a chain could gather things but
+     never look anything up. */
+  const asking = () =>
+    routine([
+      {
+        kind: "tool",
+        tool: "search_mail",
+        params: {},
+        ask: { topic: "What should I search your mail for?" },
+        label: "Searching your mail",
+        slot: "mail",
+      },
+      { kind: "human", label: "Read what came back", action: "review" },
+    ]);
+
+  it("pauses and asks, instead of failing validation", async () => {
+    /* Reported as a failure it would read as the tool being broken, when it is
+       a question nobody has been asked yet. */
+    const calls: string[] = [];
+    const r = asking();
+    const run = await advance(r, startRun(r, WHO), deps({
+      dispatchTool: async (t) => {
+        calls.push(t);
+        return { ok: true };
+      },
+    }));
+
+    expect(run.state).toBe("waiting_for_human");
+    expect(run.pendingAsk).toMatchObject({
+      stepIndex: 0,
+      key: "topic",
+      question: "What should I search your mail for?",
+    });
+    /* The tool has NOT run. */
+    expect(calls).toEqual([]);
+  });
+
+  it("runs the step it asked about, not the one after it", async () => {
+    /* Advancing the cursor on resume would skip the very step the question was
+       for, and the chain would carry on having never done the thing. */
+    const seen: unknown[] = [];
+    const r = asking();
+    const d = deps({
+      dispatchTool: async (_t, params) => {
+        seen.push(params);
+        return { ok: true, data: "three threads" };
+      },
+    });
+
+    const paused = await advance(r, startRun(r, WHO), d);
+    const next = await resume(r, paused, d, { answer: "the Henderson account" });
+
+    expect(seen).toEqual([{ topic: "the Henderson account" }]);
+    expect(next.slots.mail).toBe("three threads");
+  });
+
+  it("keeps the answer, so a later pause does not ask twice", async () => {
+    const r = asking();
+    const d = deps();
+    const paused = await advance(r, startRun(r, WHO), d);
+    const next = await resume(r, paused, d, { answer: "invoices" });
+
+    expect(next.answers).toEqual({ "0:topic": "invoices" });
+  });
+
+  it("the person's answer wins over anything the routine carried", async () => {
+    /* The whole reason for asking is that the routine could not know. */
+    const seen: unknown[] = [];
+    const r = routine([
+      {
+        kind: "tool",
+        tool: "search_mail",
+        params: { topic: "whatever the author guessed" },
+        ask: { topic: "What should I search for?" },
+        label: "Searching",
+      },
+    ]);
+    const d = deps({
+      dispatchTool: async (_t, params) => {
+        seen.push(params);
+        return { ok: true };
+      },
+    });
+
+    const paused = await advance(r, startRun(r, WHO), d);
+    await resume(r, paused, d, { answer: "the renewal" });
+
+    expect(seen).toEqual([{ topic: "the renewal" }]);
+  });
+
+  it("stays put when the answer is empty, rather than running with nothing", async () => {
+    const r = asking();
+    const d = deps();
+    const paused = await advance(r, startRun(r, WHO), d);
+    const still = await resume(r, paused, d, { answer: "   " });
+
+    expect(still.state).toBe("waiting_for_human");
+    expect(still.pendingAsk?.key).toBe("topic");
+  });
+
+  it("does not ask about a value the routine already supplies", async () => {
+    const seen: unknown[] = [];
+    const r = routine([
+      { kind: "tool", tool: "runs", params: { repo: "wolfpack-apex" }, label: "Checking CI" },
+    ]);
+    const run = await advance(r, startRun(r, WHO), deps({
+      dispatchTool: async (_t, params) => {
+        seen.push(params);
+        return { ok: true };
+      },
+    }));
+
+    expect(run.state).toBe("done");
+    expect(seen).toEqual([{ repo: "wolfpack-apex" }]);
+  });
+});
