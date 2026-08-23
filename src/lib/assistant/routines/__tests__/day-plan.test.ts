@@ -17,6 +17,7 @@ import {
   buildExtractionPrompt,
   type DescribedStep,
 } from "../day-plan";
+import { referencedSlots } from "../slots";
 import type { ToolDef } from "@/lib/assistant/tools/types";
 
 /** A stand-in registry, so these tests do not move when the real one does. */
@@ -133,7 +134,10 @@ describe("the chain it offers to build", () => {
       "d",
       "run my day",
     );
-    expect(r!.steps.map((s) => s.kind)).toEqual(["tool", "tool"]);
+    /* The thinking step is what makes it a chain rather than a list. Without
+       it a described day is N independent lookups, which is what the person
+       could already do by asking N times. */
+    expect(r!.steps.map((s) => s.kind)).toEqual(["tool", "tool", "model"]);
   });
 
   it("NEVER puts a gap in the chain", () => {
@@ -148,7 +152,8 @@ describe("the chain it offers to build", () => {
       "d",
       "run my day",
     );
-    expect(r!.steps).toHaveLength(2);
+    /* Two tools plus the step that reads them together; the gap is absent. */
+    expect(r!.steps.filter((s) => s.kind === "tool")).toHaveLength(2);
     expect(JSON.stringify(r)).not.toContain("intranet");
   });
 
@@ -314,5 +319,95 @@ describe("what we ask the model", () => {
   it("shows one sentence per tool, so a long registry stays readable", () => {
     const prompt = buildExtractionPrompt("x", TOOLS);
     expect(prompt).not.toContain("Second sentence that should not be shown");
+  });
+});
+
+describe("the step that reads it all together", () => {
+  /** Local, because the helper above is scoped to its own block. */
+  const p = (steps: DescribedStep[]) => mapDay(steps, TOOLS, "cto");
+
+  const two = () =>
+    p([
+      step({ text: "Read the overnight email", tool: "search_mail" }),
+      step({ text: "Check the calendar", tool: "calendar_widget" }),
+    ]);
+
+  it("names each source in the person's own words", () => {
+    /* The prompt is built from what they said, so a slot reads as
+       "{{read_the_overnight_email_1}}" rather than "{{slot_1}}". The model
+       reads this, and a name that says what it holds is worth more than a tidy
+       identifier. */
+    const r = draftRoutine(two(), "d", "run my day");
+    const model = r!.steps.find((x) => x.kind === "model");
+    expect(model).toBeDefined();
+    if (model && model.kind === "model") {
+      expect(model.prompt).toContain("Read the overnight email:");
+      expect(model.prompt).toMatch(/\{\{read_the_overnight_email_1\}\}/);
+    }
+  });
+
+  it("comes BEFORE the person's own step", () => {
+    /* So what they are asked to act on is the reading, not the raw material. */
+    const r = draftRoutine(
+      p([
+        step({ text: "Read the email", tool: "search_mail" }),
+        step({ text: "Check the calendar", tool: "calendar_widget" }),
+        step({ text: "Ring the client", tool: null }),
+      ]),
+      "d",
+      "run my day",
+    );
+    const kinds = r!.steps.map((x) => x.kind);
+    expect(kinds.indexOf("model")).toBeLessThan(kinds.indexOf("human"));
+  });
+
+  it("is not added when there is only one thing to read", () => {
+    /* One lookup plus a paragraph about that lookup is a slower way to see one
+       lookup, and it costs a model call to produce. */
+    const r = draftRoutine(
+      p([
+        step({ text: "Read the email", tool: "search_mail" }),
+        step({ text: "Ring the client", tool: null }),
+      ]),
+      "d",
+      "run my day",
+    );
+    expect(r!.steps.some((x) => x.kind === "model")).toBe(false);
+  });
+
+  it("is not added to a day that is entirely the person's own", () => {
+    /* Nothing was gathered, so a model call would be spent summarising an
+       empty set. */
+    const r = draftRoutine(
+      p([
+        step({ text: "Ring the accounts", tool: null }),
+        step({ text: "Walk the floor", tool: null }),
+      ]),
+      "d",
+      "run my day",
+    );
+    expect(r!.steps.every((x) => x.kind === "human")).toBe(true);
+  });
+
+  it("tells the model to say when nothing needs attention", () => {
+    /* The failure this prevents is a manufactured priority on a quiet day. */
+    const r = draftRoutine(two(), "d", "run my day");
+    const model = r!.steps.find((x) => x.kind === "model");
+    if (model && model.kind === "model") {
+      expect(model.prompt).toMatch(/rather than manufacturing a priority/i);
+    }
+  });
+
+  it("reads every slot it names, so the chain cannot fail on a missing one", () => {
+    /* The order invariant, checked on generated output rather than assumed:
+       every slot the thinking step reads is written by a step before it. */
+    const r = draftRoutine(two(), "d", "run my day")!;
+    const written = new Set<string>();
+    for (const x of r.steps) {
+      if (x.kind === "model") {
+        for (const slot of referencedSlots(x.prompt)) expect(written.has(slot)).toBe(true);
+      }
+      if (x.kind !== "human" && x.slot) written.add(x.slot);
+    }
   });
 });
