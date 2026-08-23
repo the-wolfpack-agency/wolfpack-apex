@@ -43,9 +43,44 @@ const NAME_KEYS = ["name", "fullname", "full_name", "displayname"];
 const FIRST_KEYS = ["firstname", "first_name", "givenname"];
 const LAST_KEYS = ["lastname", "last_name", "surname", "familyname"];
 
+/**
+ * Keys that hold the record rather than being part of it.
+ *
+ * HubSpot returns { id, properties: { email, firstname, ... } }. Every
+ * field a person would recognise is one level down, so a comparison
+ * that reads the top level sees a record with no email, no name and
+ * nothing to match on.
+ *
+ * This was invisible until the connector ran against a real HTTP server
+ * returning real vendor shapes: every HubSpot contact came back
+ * unmatchable and the report said the two systems shared no population,
+ * which is a confident, well-formatted, completely wrong answer.
+ */
+const ENVELOPE_KEYS = ["properties", "fields", "data", "record"];
+
+/** Vendor bookkeeping that is not the customer's data. */
+const METADATA_KEYS = new Set(["attributes", "_links", "links", "meta"]);
+
+/**
+ * One record, flattened and lower-cased, with envelopes lifted.
+ *
+ * An envelope's own fields win over the outer ones, since the outer
+ * level of a wrapped payload carries vendor bookkeeping and the inner
+ * level carries what a person would call the record.
+ */
 function lower(record: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(record)) out[k.toLowerCase()] = v;
+  for (const [k, v] of Object.entries(record)) {
+    const key = k.toLowerCase();
+    if (METADATA_KEYS.has(key)) continue;
+    if (ENVELOPE_KEYS.includes(key) && v && typeof v === "object" && !Array.isArray(v)) {
+      for (const [ik, iv] of Object.entries(v as Record<string, unknown>)) {
+        out[ik.toLowerCase()] = iv;
+      }
+      continue;
+    }
+    out[key] = v;
+  }
   return out;
 }
 
@@ -122,6 +157,15 @@ export interface DriftReport {
   onlyInRight: number;
   /** Records with neither an email nor a two-part name on either side. */
   unmatchable: number;
+  /**
+   * How many field names the two systems actually share.
+   *
+   * Without this, two CRMs that name every field differently produce
+   * "no disagreements", which reads as agreement and is really "we
+   * compared nothing". Same failure as a silent generator: an empty
+   * result presented as a clean bill of health.
+   */
+  comparableFields: number;
   fields: FieldDrift[];
 }
 
@@ -184,6 +228,7 @@ export function compareRecordSets(
     }
   }
 
+  const comparableFields = [...drift.values()].filter((f) => f.comparable > 0).length;
   const fields = [...drift.values()]
     .filter((f) => f.disagreements > 0)
     .sort((a, b) => b.disagreements - a.disagreements);
@@ -196,6 +241,7 @@ export function compareRecordSets(
     onlyInLeft: l.byKey.size - matched,
     onlyInRight: r.byKey.size - matched,
     unmatchable: l.unmatchable + r.unmatchable,
+    comparableFields,
     fields,
   };
 }
@@ -222,8 +268,17 @@ export function renderDrift(report: DriftReport): string {
     "",
   ];
 
-  if (report.fields.length === 0) {
-    lines.push(`No field disagreements. The two systems agree everywhere they overlap.`);
+  if (report.comparableFields === 0) {
+    lines.push(
+      `The two systems share no field names, so nothing could be compared beyond identity. ` +
+        `They hold the same people under different schemas, which is worth knowing on its own: ` +
+        `any reconciliation between them needs a field mapping first.`,
+    );
+  } else if (report.fields.length === 0) {
+    lines.push(
+      `No disagreements across the ${report.comparableFields} fields both systems name. ` +
+        `They agree everywhere they overlap.`,
+    );
   } else {
     lines.push("**Where they disagree**");
     for (const f of report.fields.slice(0, 8)) {
