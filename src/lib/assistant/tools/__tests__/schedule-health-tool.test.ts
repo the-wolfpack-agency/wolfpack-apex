@@ -14,6 +14,11 @@ jest.mock("@/lib/integrations/microsoft-calendar", () => ({
   listEvents: (...a: any[]) => mockList(...a),
 }));
 
+const mockSettings = jest.fn();
+jest.mock("@/lib/integrations/microsoft-mailbox", () => ({
+  getOwnMailboxSettings: (...a: any[]) => mockSettings(...a),
+}));
+
 const mockTrack = jest.fn();
 jest.mock("@/lib/analytics", () => ({ trackEvent: (...a: any[]) => mockTrack(...a) }));
 
@@ -29,7 +34,10 @@ function evt(dayOffset: number, hour: number, mins: number, subject: string) {
   };
 }
 
-beforeEach(() => jest.clearAllMocks());
+beforeEach(() => {
+  jest.clearAllMocks();
+  mockSettings.mockResolvedValue({ timeZone: "America/Detroit" });
+});
 
 async function tool() {
   return (await import("../schedule-health-tool")).scheduleHealthTool;
@@ -142,5 +150,42 @@ describe("what reaches analytics", () => {
     const serialized = JSON.stringify(meta);
     expect(serialized).not.toContain("Ackerman");
     expect(serialized).not.toContain("Dana");
+  });
+});
+
+describe("it asks whose day it is analysing", () => {
+  it("uses the person's mailbox timezone, not the server's", async () => {
+    /* On Vercel the server is UTC. A Detroit dealer told to defend UTC
+       afternoons acts on it once and never opens the tool again. */
+    mockSettings.mockResolvedValue({ timeZone: "America/Detroit" });
+    mockList.mockResolvedValue([
+      { subject: "Morning", start: "2026-08-24T13:00:00.000Z", end: "2026-08-24T14:00:00.000Z" },
+    ]);
+    const t = await tool();
+    const res: any = await t.handler({ days: 14, direction: "past" }, CTX);
+    expect(mockSettings).toHaveBeenCalledWith("u1");
+    expect(res.answer).toContain("times in America/Detroit");
+  });
+
+  it("still answers when the settings call fails, and says it fell back", async () => {
+    /* Refusing to report because a settings lookup failed would be
+       worse than reporting in UTC and saying so. */
+    mockSettings.mockRejectedValue(new Error("scope missing"));
+    mockList.mockResolvedValue([
+      { subject: "Morning", start: "2026-08-24T13:00:00.000Z", end: "2026-08-24T14:00:00.000Z" },
+    ]);
+    const t = await tool();
+    const res: any = await t.handler({ days: 14, direction: "past" }, CTX);
+    expect(res.ok).toBe(true);
+    expect(res.answer).toContain("times in UTC");
+  });
+
+  it("records the zone, because every other number depends on it", async () => {
+    mockList.mockResolvedValue([
+      { subject: "Morning", start: "2026-08-24T13:00:00.000Z", end: "2026-08-24T14:00:00.000Z" },
+    ]);
+    const t = await tool();
+    await t.handler({ days: 14, direction: "past" }, CTX);
+    expect(mockTrack.mock.calls[0][3]).toMatchObject({ time_zone: "America/Detroit" });
   });
 });

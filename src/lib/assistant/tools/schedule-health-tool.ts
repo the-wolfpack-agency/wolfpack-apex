@@ -106,7 +106,27 @@ export const scheduleHealthTool: ToolDef<Params, ScheduleHealthData> = {
       })
       .filter((e) => e.start && e.end);
 
-    const report = analyseSchedule(events, { days: params.days, hours: DEFAULT_HOURS });
+    /* The person's own zone, from their mailbox settings. Without it
+       every hour in the report is the server's, which on Vercel means
+       UTC: a Detroit dealer would be told to defend somebody else's
+       afternoon. Best-effort, because a report in UTC that SAYS it is
+       in UTC is still honest, and refusing to answer because a settings
+       call failed would not be. */
+    let timeZone: string | null = null;
+    try {
+      const { getOwnMailboxSettings } = await import(
+        "@/lib/integrations/microsoft-mailbox"
+      );
+      timeZone = (await getOwnMailboxSettings(ctx.userId))?.timeZone ?? null;
+    } catch {
+      timeZone = null;
+    }
+
+    const report = analyseSchedule(events, {
+      days: params.days,
+      hours: DEFAULT_HOURS,
+      timeZone,
+    });
 
     /* Shape only. What is IN somebody's calendar is among the most
        sensitive data we hold, and none of it is needed to learn whether
@@ -114,6 +134,9 @@ export const scheduleHealthTool: ToolDef<Params, ScheduleHealthData> = {
     trackEvent("assistant.schedule_analysed", ctx.userId, ctx.userRole, {
       days: params.days,
       direction: params.direction,
+      /* The zone is not personal data and it decides whether every
+         other number here means anything. */
+      time_zone: report.timeZone,
       meetings: report.meetings,
       usable_blocks: report.usableBlocks,
       stranded_hours: report.strandedHours,

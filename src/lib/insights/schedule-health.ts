@@ -29,6 +29,8 @@
  * a test rather than against a live mailbox.
  */
 
+import { resolveIanaZone } from "@/lib/calendar/timezone";
+
 /** The minimum uninterrupted stretch that useful work fits into. */
 export const USABLE_BLOCK_MINUTES = 90;
 /** Under this, two meetings are effectively one long meeting. */
@@ -45,6 +47,21 @@ export interface ScheduleEvent {
   attendees?: string[];
 }
 
+/**
+ * The zone every hour in this file is expressed in.
+ *
+ * Everything here used to call getHours(), which reads the SERVER's
+ * clock. Vercel runs UTC, so a Detroit dealer asking which hours to
+ * defend was told about somebody else's afternoon: the same week of
+ * meetings produced 9am and 2pm in Detroit, 1pm and 4pm in UTC, and
+ * thirty free hours against forty depending only on where the code
+ * happened to be running. The single most actionable line this analysis
+ * produces was wrong for everyone outside UTC.
+ *
+ * So the zone is an input, it comes from the person's own mailbox
+ * settings, and the report says which one it used. A statement about
+ * "9am" that does not say whose 9am is not worth acting on.
+ */
 export interface WorkingHours {
   /** Local hour work starts, inclusive. */
   startHour: number;
@@ -60,8 +77,54 @@ export const DEFAULT_HOURS: WorkingHours = {
   days: [1, 2, 3, 4, 5],
 };
 
+/** One event, expressed in the person's own local time. */
+interface ZonedEvent {
+  subject: string;
+  /** Local calendar day, YYYY-MM-DD. */
+  dayKey: string;
+  /** 0=Sunday, in the person's zone. */
+  weekday: number;
+  /** Minutes from local midnight. */
+  startMin: number;
+  endMin: number;
+  attendees: number;
+  startMs: number;
+  endMs: number;
+}
+
+const WEEKDAY_INDEX: Record<string, number> = {
+  Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6,
+};
+
+/**
+ * Local wall-clock parts for an instant.
+ *
+ * Intl is the only thing that gets DST right without a table, and the
+ * alternative (adding a fixed offset) is wrong twice a year in every
+ * zone that observes it.
+ */
+function zonedParts(ms: number, iana: string) {
+  const fmt = new Intl.DateTimeFormat("en-CA", {
+    timeZone: iana,
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", hour12: false,
+    weekday: "short",
+  });
+  const m: Record<string, string> = {};
+  for (const part of fmt.formatToParts(new Date(ms))) m[part.type] = part.value;
+  /* en-CA renders midnight as 24 rather than 00 in some runtimes. */
+  const hour = Number(m.hour) % 24;
+  return {
+    dayKey: `${m.year}-${m.month}-${m.day}`,
+    weekday: WEEKDAY_INDEX[m.weekday] ?? 0,
+    minutes: hour * 60 + Number(m.minute),
+  };
+}
+
 export interface ScheduleReport {
   days: number;
+  /** The zone every hour in this report is expressed in. */
+  timeZone: string;
   meetings: number;
   meetingHours: number;
   /** Working hours in the window that hold no meeting. */
@@ -111,75 +174,77 @@ function seriesKey(subject: string): string {
   return subject.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
-function withinHours(d: Date, hours: WorkingHours): boolean {
-  return (
-    hours.days.includes(d.getDay()) &&
-    d.getHours() >= hours.startHour &&
-    d.getHours() < hours.endHour
-  );
-}
-
 /**
- * Free stretches inside working hours, per day.
+ * Free stretches inside working hours, per local day.
  *
- * Built per day rather than across the window, because the overnight
- * gap between Tuesday evening and Wednesday morning is not a
- * fourteen-hour opportunity to concentrate.
+ * Built per day because the overnight gap between Tuesday evening and
+ * Wednesday morning is not a fourteen-hour opportunity to concentrate.
+ * "Day" now means the person's local day, which is the only definition
+ * that matches what they experienced.
  */
-function freeStretches(
-  events: ScheduleEvent[],
-  hours: WorkingHours,
-): number[] {
-  const byDay = new Map<string, ScheduleEvent[]>();
+function freeStretches(events: ZonedEvent[], hours: WorkingHours): number[] {
+  const openMin = hours.startHour * 60;
+  const closeMin = hours.endHour * 60;
+
+  const byDay = new Map<string, ZonedEvent[]>();
   for (const e of events) {
-    const d = new Date(e.start);
-    if (!hours.days.includes(d.getDay())) continue;
-    const key = d.toDateString();
-    byDay.set(key, [...(byDay.get(key) ?? []), e]);
+    if (!hours.days.includes(e.weekday)) continue;
+    byDay.set(e.dayKey, [...(byDay.get(e.dayKey) ?? []), e]);
   }
 
   const stretches: number[] = [];
-  for (const [dayKey, dayEvents] of byDay) {
-    const day = new Date(dayKey);
-    const open = new Date(day);
-    open.setHours(hours.startHour, 0, 0, 0);
-    const close = new Date(day);
-    close.setHours(hours.endHour, 0, 0, 0);
-
-    const sorted = [...dayEvents].sort(
-      (a, b) => new Date(a.start).getTime() - new Date(b.start).getTime(),
-    );
-
-    let cursor = open.getTime();
+  for (const dayEvents of byDay.values()) {
+    const sorted = [...dayEvents].sort((a, b) => a.startMin - b.startMin);
+    let cursor = openMin;
     for (const e of sorted) {
-      const s = Math.max(new Date(e.start).getTime(), open.getTime());
-      const en = Math.min(new Date(e.end).getTime(), close.getTime());
-      if (s > cursor) stretches.push((s - cursor) / MS_PER_MIN);
+      const s = Math.max(e.startMin, openMin);
+      const en = Math.min(e.endMin, closeMin);
+      if (s > cursor) stretches.push(s - cursor);
       cursor = Math.max(cursor, en);
     }
-    if (close.getTime() > cursor) stretches.push((close.getTime() - cursor) / MS_PER_MIN);
+    if (closeMin > cursor) stretches.push(closeMin - cursor);
   }
   return stretches.filter((m) => m > 0);
 }
 
 export function analyseSchedule(
   events: ScheduleEvent[],
-  opts: { days?: number; hours?: WorkingHours } = {},
+  opts: { days?: number; hours?: WorkingHours; timeZone?: string | null } = {},
 ): ScheduleReport {
   const hours = opts.hours ?? DEFAULT_HOURS;
   const days = opts.days ?? 7;
+  const iana = resolveIanaZone(opts.timeZone) ?? "UTC";
 
-  const valid = events.filter((e) => {
-    const m = minutes(e.start, e.end);
+  const valid: ZonedEvent[] = [];
+  for (const e of events) {
+    const startMs = Date.parse(e.start);
+    const endMs = Date.parse(e.end);
+    if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) continue;
+    const durationMin = (endMs - startMs) / MS_PER_MIN;
     /* Zero-length and all-day entries are markers rather than meetings.
        An all-day "Out of office" counted as eight meeting-hours would
        swamp every other number in the report. */
-    return Number.isFinite(m) && m > 0 && m < 8 * 60;
-  });
+    if (!(durationMin > 0 && durationMin < 8 * 60)) continue;
 
-  const meetingMinutes = valid.reduce((n, e) => n + minutes(e.start, e.end), 0);
+    const p = zonedParts(startMs, iana);
+    valid.push({
+      subject: e.subject,
+      dayKey: p.dayKey,
+      weekday: p.weekday,
+      startMin: p.minutes,
+      /* Derived from the absolute duration rather than from a second
+         lookup, so an event running across a DST boundary keeps its
+         real length instead of gaining or losing an hour. */
+      endMin: p.minutes + durationMin,
+      attendees: Math.max(1, e.attendees?.length ?? 1),
+      startMs,
+      endMs,
+    });
+  }
+
+  const meetingMinutes = valid.reduce((n, e) => n + (e.endMs - e.startMs) / MS_PER_MIN, 0);
   const attendeeMinutes = valid.reduce(
-    (n, e) => n + minutes(e.start, e.end) * Math.max(1, e.attendees?.length ?? 1),
+    (n, e) => n + ((e.endMs - e.startMs) / MS_PER_MIN) * e.attendees,
     0,
   );
 
@@ -189,14 +254,12 @@ export function analyseSchedule(
 
   /* Runs. Sorted across the whole window; a run cannot span a night
      because the gap is enormous. */
-  const sorted = [...valid].sort(
-    (a, b) => new Date(a.start).getTime() - new Date(b.start).getTime(),
-  );
+  const sorted = [...valid].sort((a, b) => a.startMs - b.startMs);
   let runs = 0;
   let longest = 0;
   let current = sorted.length > 0 ? 1 : 0;
   for (let i = 1; i < sorted.length; i++) {
-    const gap = minutes(sorted[i - 1].end, sorted[i].start);
+    const gap = (sorted[i].startMs - sorted[i - 1].endMs) / MS_PER_MIN;
     if (gap <= BACK_TO_BACK_GAP_MINUTES) {
       current++;
     } else {
@@ -214,7 +277,7 @@ export function analyseSchedule(
     const key = seriesKey(e.subject);
     const entry = series.get(key) ?? { subject: e.subject, occurrences: 0, minutes: 0 };
     entry.occurrences++;
-    entry.minutes += minutes(e.start, e.end);
+    entry.minutes += (e.endMs - e.startMs) / MS_PER_MIN;
     series.set(key, entry);
   }
   const recurring = [...series.values()].filter((s) => s.occurrences > 1);
@@ -224,13 +287,13 @@ export function analyseSchedule(
   /* Hour-of-day availability across the window. */
   const busyByHour = new Map<number, number>();
   for (const e of valid) {
-    const s = new Date(e.start);
+    const firstHour = Math.floor(e.startMin / 60);
     /* The last instant INSIDE the meeting, not the end boundary. A
        meeting finishing at 4pm does not make 4pm a busy hour, and
        counting it as one would have us telling people to defend the
        hour immediately after every meeting they have. */
-    const lastHour = new Date(new Date(e.end).getTime() - 1).getHours();
-    for (let h = s.getHours(); h <= lastHour && h < hours.endHour; h++) {
+    const lastHour = Math.floor((e.endMin - 1) / 60);
+    for (let h = firstHour; h <= lastHour && h < hours.endHour; h++) {
       if (h < hours.startHour) continue;
       busyByHour.set(h, (busyByHour.get(h) ?? 0) + 1);
     }
@@ -241,11 +304,12 @@ export function analyseSchedule(
     (a, b) => (busyByHour.get(a) ?? 0) - (busyByHour.get(b) ?? 0),
   );
 
-  const daysWithMeetings = new Set(valid.map((e) => new Date(e.start).getDay()));
+  const daysWithMeetings = new Set(valid.map((e) => e.weekday));
   const clearDays = hours.days.filter((d) => !daysWithMeetings.has(d));
 
   return {
     days,
+    timeZone: iana,
     meetings: valid.length,
     meetingHours: round1(meetingMinutes / 60),
     freeHours: round1(stretches.reduce((n, m) => n + m, 0) / 60),
@@ -333,7 +397,12 @@ export function renderSchedule(r: ScheduleReport): string {
 
   lines.push(
     "",
-    `**When to protect:** ${r.bestFocusHours.map(hourLabel).join(", ")} are the least ` +
+    /* Naming the zone is not pedantry. The hours in this paragraph are
+       the whole point of the analysis, and a reader in Detroit being
+       shown UTC afternoons would act on them once and never open it
+       again. */
+    `**When to protect** (times in ${r.timeZone}): ` +
+      `${r.bestFocusHours.map(hourLabel).join(", ")} are the least ` +
       `booked hours in this window, so they are the ones to defend. ` +
       `${r.busiestHours.map(hourLabel).join(", ")} are the busiest, which makes them the ` +
       `cheapest place to put a meeting that has to happen.`,
