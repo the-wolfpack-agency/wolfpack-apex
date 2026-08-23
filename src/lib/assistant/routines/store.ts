@@ -167,3 +167,76 @@ export async function listRecentRuns(
     return [];
   }
 }
+
+/**
+ * The run this person is being asked about, if any.
+ *
+ * Bounded to the last two hours. A routine that stopped for somebody yesterday
+ * is not something they are still in the middle of, and treating a fresh
+ * "done" as an answer to it would resume a chain they have forgotten agreeing
+ * to.
+ *
+ * SLOTS ARE NOT STORED, by the decision in migration 232: they carry mail
+ * bodies and draft replies between steps, and a table of those is a second
+ * copy of the mailbox without the mailbox's controls. So a resumed run has the
+ * outcomes and the cursor and no slot values, and the caller has to cope with
+ * that rather than pretend otherwise.
+ */
+export async function loadWaitingRun(owner: {
+  workspaceId: string;
+  userId: string;
+}): Promise<(RoutineRun & { pausedAt: number | null }) | null> {
+  if (!process.env.DATABASE_URL) return null;
+  try {
+    const { query } = await import("@/lib/db");
+    const { rows } = await query<Record<string, unknown>>(
+      `SELECT run_id, routine_id, state, step_cursor, tech_ms, human_ms, paused_at
+         FROM assistant_routine_runs
+        WHERE workspace_id = $1 AND user_id = $2
+          AND state = 'waiting_for_human'
+          AND started_at > NOW() - INTERVAL '2 hours'
+        ORDER BY started_at DESC
+        LIMIT 1`,
+      [owner.workspaceId, owner.userId],
+    );
+    const r = rows[0];
+    if (!r) return null;
+
+    /* SCOPED ON ITS OWN TERMS, not on the caller having scoped the parent.
+       The run_id above came from a workspace-filtered query, so this is safe
+       today; it is filtered anyway because that is the argument for carrying
+       workspace_id on this table at all, and the repo's isolation scan holds
+       every query to it. */
+    const steps = await query<Record<string, unknown>>(
+      `SELECT step_index, kind, label, status, duration_ms, error, human_action
+         FROM assistant_routine_steps
+        WHERE run_id = $1 AND workspace_id = $2
+        ORDER BY step_index`,
+      [String(r.run_id), owner.workspaceId],
+    );
+
+    return {
+      runId: String(r.run_id),
+      routineId: String(r.routine_id),
+      userId: owner.userId,
+      workspaceId: owner.workspaceId,
+      state: "waiting_for_human",
+      cursor: Number(r.step_cursor) || 0,
+      outcomes: steps.rows.map((s) => ({
+        index: Number(s.step_index),
+        kind: String(s.kind) as "tool" | "model" | "human",
+        label: String(s.label),
+        status: String(s.status) as "ok" | "failed" | "skipped" | "waiting",
+        durationMs: Number(s.duration_ms) || 0,
+        ...(s.error ? { error: String(s.error) } : {}),
+        ...(s.human_action ? { action: String(s.human_action) as "review" | "do" } : {}),
+      })),
+      slots: {},
+      techMs: Number(r.tech_ms) || 0,
+      humanMs: Number(r.human_ms) || 0,
+      pausedAt: r.paused_at ? new Date(String(r.paused_at)).getTime() : null,
+    };
+  } catch {
+    return null;
+  }
+}

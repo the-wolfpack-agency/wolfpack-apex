@@ -18,11 +18,37 @@ import { getAIClient } from "@/lib/ai/router";
 import { dispatchToolByName } from "@/lib/assistant/tools/dispatcher";
 import type { ToolContext } from "@/lib/assistant/tools/types";
 import { advance, resume, startRun, type RunnerDeps } from "./runner";
+import { referencedSlots } from "./slots";
 import { saveRun, trackRun } from "./store";
-import { matchRoutine, routineById } from "./catalogue";
+import { matchRoutine, routineById, BUILT_IN_ROUTINES as BUILT_IN } from "./catalogue";
 import type { Routine, RoutineRun } from "./types";
 
 export { matchRoutine, routineById, BUILT_IN_ROUTINES } from "./catalogue";
+
+/**
+ * Words that mean "I have done my part, carry on".
+ *
+ * DELIBERATELY A SHORT, EXACT LIST. The alternative, treating any message as
+ * the answer while a run is waiting, would swallow every unrelated question
+ * somebody asked in the meantime: they ask about the weather and instead their
+ * chain moves on. A named word is unambiguous, and the pause tells them which
+ * words work rather than leaving them to guess.
+ */
+const CARRY_ON = ["done", "carry on", "continue", "next", "go on", "finished", "ok done"];
+const SKIP_IT = ["skip", "skip it", "not this time", "did not do it", "didn't do it"];
+
+export type ResumeIntent = "carry_on" | "skip" | "none";
+
+/** What this message says about a routine that is waiting on somebody. */
+export function detectResumeIntent(message: string): ResumeIntent {
+  let text = message.trim().toLowerCase();
+  let end = text.length;
+  while (end > 0 && ".!?,".includes(text[end - 1])) end -= 1;
+  text = text.slice(0, end).trim();
+  if (CARRY_ON.includes(text)) return "carry_on";
+  if (SKIP_IT.includes(text)) return "skip";
+  return "none";
+}
 export type { Routine, RoutineRun, RoutineStep, StepOutcome } from "./types";
 
 /** Live dependencies: the governed tool path, the governed model path, the clock. */
@@ -115,10 +141,13 @@ export function describeRun(routine: Routine, run: RoutineRun): string {
        no reason attached skips it, and the skip then reads as "that step was
        pointless" rather than "nobody said why". */
     if (step.kind === "human" && step.why) lines.push(step.why);
+    /* NAME THE WORDS. "Reply to carry on" was a promise nothing listened for,
+       and a person who replies and gets nothing learns the chain is broken.
+       Saying which words work makes the promise keepable and checkable. */
     lines.push(
       step.kind === "human" && step.action === "do"
-        ? `${done.length} of ${routine.steps.length} steps done. Tell me when it is done, or say skip. Either answer is fine and both are recorded.`
-        : `${done.length} of ${routine.steps.length} steps done. Reply to carry on, or leave it here.`,
+        ? `${done.length} of ${routine.steps.length} steps done. Say **done** when you have, or **skip** if you are not going to. Either is fine and both are recorded.`
+        : `${done.length} of ${routine.steps.length} steps done. Say **done** to carry on, or leave it here.`,
     );
     return lines.join("\n");
   }
@@ -133,4 +162,79 @@ export function describeRun(routine: Routine, run: RoutineRun): string {
 
   lines.push(`Done. ${done.length} ${done.length === 1 ? "step" : "steps"}, ${Math.round(run.techMs / 100) / 10}s of work.`);
   return lines.join("\n");
+}
+
+/**
+ * Pick up a routine that was waiting on somebody.
+ *
+ * WHAT A RESUMED RUN DOES NOT HAVE is the slot values from before. They are
+ * deliberately never stored (migration 232: they carry mail bodies and draft
+ * replies, and a table of those is a second copy of the mailbox without its
+ * controls). So a later step that reads an earlier step's output cannot run,
+ * and the honest thing is to say which step and why rather than to fail with a
+ * message about a missing slot.
+ *
+ * Every routine that ships today is fine, because their human steps come after
+ * everything that reads a slot. This exists so the first one that is not fine
+ * explains itself instead of breaking.
+ */
+export async function resumeWaitingRoutine(
+  ctx: ToolContext,
+  intent: "carry_on" | "skip",
+  deps?: RunnerDeps,
+): Promise<{ answer: string } | null> {
+  const owner = { workspaceId: ctx.workspaceId || "default", userId: ctx.userId };
+  const { loadWaitingRun } = await import("./store");
+  const waiting = await loadWaitingRun(owner);
+  if (!waiting) return null;
+
+  const routine =
+    matchRoutineById(waiting.routineId) ?? (await matchSavedRoutineById(owner, waiting.routineId));
+  if (!routine) {
+    return {
+      answer:
+        "That routine does not exist any more, so there is nothing to carry on with. Nothing was lost: the steps that already ran are recorded.",
+    };
+  }
+
+  /* Can what is LEFT actually run without the slots we no longer hold? */
+  const remaining = routine.steps.slice(waiting.cursor + 1);
+  const needsSlot = remaining.find((step) => {
+    const reads =
+      step.kind === "tool"
+        ? referencedSlots(step.params)
+        : step.kind === "model"
+          ? referencedSlots(step.prompt)
+          : [];
+    return reads.length > 0;
+  });
+  if (needsSlot) {
+    return {
+      answer: [
+        `Recorded. I cannot finish **${routine.command}** from here, though: "${"label" in needsSlot ? needsSlot.label : "a later step"}" reads what an earlier step produced, and I do not keep that between sessions on purpose.`,
+        "",
+        `Run **${routine.command}** again and it will go straight through.`,
+      ].join("\n"),
+    };
+  }
+
+  const run = await resumeRoutine(routine, waiting, ctx, deps ?? liveDeps(ctx), {
+    skipped: intent === "skip",
+  });
+  return { answer: describeRun(routine, run) };
+}
+
+/** Built-in lookup by id, for a run that only recorded the id. */
+function matchRoutineById(id: string): Routine | null {
+  return BUILT_IN.find((r) => r.id === id) ?? null;
+}
+
+/** A saved routine by id: they are stored under a generated id. */
+async function matchSavedRoutineById(
+  owner: { workspaceId: string; userId: string },
+  id: string,
+): Promise<Routine | null> {
+  const { listSavedRoutines } = await import("./saved");
+  const saved = await listSavedRoutines(owner);
+  return saved.find((r) => r.id === id) ?? null;
 }
