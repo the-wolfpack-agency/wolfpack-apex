@@ -93,21 +93,55 @@ export const fxTool: ToolDef<Params, FxToolData> = {
     }
 
     try {
-      const url = `https://api.exchangerate.host/latest?base=${encodeURIComponent(
-        params.base,
-      )}&symbols=${encodeURIComponent(params.targets.join(","))}`;
+      /* PROVIDER CHANGED UNDER US, and nothing told us.
+       *
+       * This called api.exchangerate.host, which moved to a paid model and now
+       * answers every unauthenticated request with "missing_access_key" and no
+       * rates. The tool did the right thing with that, returning a typed
+       * failure rather than inventing a number, so nothing broke loudly. It
+       * just stopped working.
+       *
+       * Which matters more than it sounds: "exchange rate from USD to EUR" is
+       * one of the starter chips shown to somebody who has connected nothing,
+       * in the category described as working right now. It is among the first
+       * things a new person clicks, and it has been returning an error.
+       *
+       * open.er-api.com serves the same data with no key. Found by driving
+       * real prompts through production, which is the only way a dead
+       * third-party dependency surfaces: every test we had mocked it. */
+      const url = `https://open.er-api.com/v6/latest/${encodeURIComponent(params.base)}`;
       const res = await fetchWithTimeout(url, FETCH_TIMEOUT_MS);
       if (!res.ok) {
         throw new Error(`HTTP ${res.status}`);
       }
-      const json = (await res.json()) as ExchangeRateResponse;
+      const json = (await res.json()) as ExchangeRateResponse & {
+        result?: string;
+        time_last_update_utc?: string;
+      };
+      if (json.result && json.result !== "success") {
+        throw new Error(`provider said ${json.result}`);
+      }
       if (!json.rates || Object.keys(json.rates).length === 0) {
         throw new Error("empty rates payload");
       }
+      /* Narrowed to what was asked for. The endpoint returns every currency it
+         knows, and handing 160 rates to a caller that asked for one is a
+         needlessly large answer to render and to cache. */
+      const wanted: Record<string, number> = {};
+      for (const t of params.targets) {
+        const rate = json.rates[t.toUpperCase()];
+        if (typeof rate === "number") wanted[t.toUpperCase()] = rate;
+      }
+      if (Object.keys(wanted).length === 0) {
+        throw new Error(`no rate for ${params.targets.join(", ")}`);
+      }
       const data: FxToolData = {
         base: json.base ?? params.base,
-        rates: json.rates,
-        as_of: json.date ?? new Date().toISOString().slice(0, 10),
+        rates: wanted,
+        as_of:
+          json.time_last_update_utc?.slice(5, 16) ??
+          json.date ??
+          new Date().toISOString().slice(0, 10),
       };
 
       cache.set(key, { expires: Date.now() + CACHE_TTL_MS, data });
