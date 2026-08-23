@@ -11,7 +11,12 @@
  *
  * WHAT IT DELIBERATELY DOES NOT DO
  *
- * It does not grant admin. The account is created at the LEAST privilege that
+ * It does not grant admin BY DEFAULT. E2E_ACCOUNT_ROLE can override that for
+ * the one account that has to: the smoke suite probes /admin/audit, which is
+ * ceo/cto/evp only, so covering the privileged pages needs a privileged login.
+ * That account is separate from the five role accounts on purpose, so the
+ * dangerous credential is one thing that can be revoked on its own rather than
+ * a property of the whole set. The account is created at the LEAST privilege that
  * still lets the browser tests see what they need, because the password ends
  * up in a CI secret store, and a credential that can reach an admin surface is
  * worth stealing in a way that one which can read its own routines is not. If a
@@ -69,7 +74,7 @@ const NAME = "E2E (automated tests)";
  * ten at 21 capabilities, and it still carries the SELF_SERVICE set, which is
  * what /routines, /releases and /engineering need.
  */
-const ROLE = "designer";
+const ROLE = process.env.E2E_ACCOUNT_ROLE ?? "designer";
 const WORKSPACE = "default";
 
 /** 24 bytes of base64url. Long enough that nobody is tempted to type it. */

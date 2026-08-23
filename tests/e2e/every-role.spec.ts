@@ -50,7 +50,15 @@ function emailForRole(role: string): string {
   return role === "designer" ? "e2e@thewolfpack.agency" : `e2e-${role}@thewolfpack.agency`;
 }
 
-const password = process.env.ADMIN_E2E_PASSWORD ?? process.env.SMOKE_TEST_PASSWORD;
+/* ADMIN_E2E_PASSWORD ONLY, with no fallback to SMOKE_TEST_PASSWORD.
+ *
+ * The two credential sets belong to different accounts and answer different
+ * questions: SMOKE_TEST_* is an admin proving the privileged pages render, and
+ * these five are ordinary employees proving the rest of the product works for
+ * them. Falling back would pair an admin's password with an employee's address
+ * and fail at the login form, which reads as "the role accounts are broken"
+ * rather than "the wrong secret is set". */
+const password = process.env.ADMIN_E2E_PASSWORD;
 
 async function signIn(page: Page, role: string): Promise<void> {
   await page.goto(`${target.baseUrl}/login`, { waitUntil: "domcontentloaded" });
