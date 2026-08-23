@@ -1130,6 +1130,10 @@ export type InstinctEventType =
   //     calendar is among the most sensitive data we hold, and none of it is
   //     needed to learn whether the analysis is worth keeping.
   | "assistant.schedule_analysed"
+  //   assistant.dark_data_scanned { dark_columns, statements_examined,
+  //     excluded_star_tables, unanalysed_columns }: counts only. Column names
+  //     are the client's schema, theirs to see and not ours to accumulate.
+  | "assistant.dark_data_scanned"
   // Aggregate query executed (count / sum / avg / win-rate / top-N).
   // Metadata: { connector, object_type, operation, result_type }.
   | "assistant.connector_aggregate_executed"

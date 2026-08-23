@@ -54,6 +54,8 @@ const NON_TOOL_FILES = new Set([
  * doesn't fan into Universal Search.
  */
 export const SEARCH_PROVIDER_EXEMPT_TOOLS: Record<string, string> = {
+  "dark-data-tool.ts":
+    "schema-vs-statement diff over a connected database, nothing free-text searchable",
   "schedule-health-tool.ts":
     "analysis over calendar events already indexed by the calendar provider",
   "compare-across-sources-tool.ts":

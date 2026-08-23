@@ -48,8 +48,27 @@ export interface LegacyQueryShape {
   totalMs: number;
 }
 
+/**
+ * One column, and whether the planner believes there is anything in it.
+ *
+ * null_frac comes from the planner's own sample, so knowing a column is
+ * populated costs no rows read. When a table has never been analysed
+ * there is no sample and the fraction is unknown, which is reported as
+ * unknown rather than assumed empty: claiming a column is dark when we
+ * simply could not see it is the one mistake that would discredit the
+ * whole analysis.
+ */
+export interface LegacyColumn {
+  table: string;
+  column: string;
+  dataType: string;
+  /** null when the table has never been analysed. */
+  nullFraction: number | null;
+}
+
 export interface LegacyScan {
   tables: LegacyTableStat[];
+  columns: LegacyColumn[];
   shapes: LegacyQueryShape[];
   /**
    * False when pg_stat_statements is not installed. Reported rather
@@ -101,6 +120,23 @@ const TABLE_STATS_SQL = `
   FROM pg_stat_user_tables
   ORDER BY COALESCE(n_live_tup, 0) DESC
   LIMIT 500`;
+
+/* Every column in the database, with the planner's null fraction where
+   one exists. information_schema is the portable catalogue and pg_stats
+   is the sample; neither reads a row of anybody's data. */
+const COLUMN_STATS_SQL = `
+  SELECT c.table_name  AS table,
+         c.column_name AS column,
+         c.data_type   AS data_type,
+         s.null_frac   AS null_frac
+  FROM information_schema.columns c
+  LEFT JOIN pg_stats s
+    ON s.schemaname = c.table_schema
+   AND s.tablename  = c.table_name
+   AND s.attname    = c.column_name
+  WHERE c.table_schema NOT IN ('pg_catalog', 'information_schema')
+  ORDER BY c.table_name, c.ordinal_position
+  LIMIT 5000`;
 
 /* total_exec_time is PG13+; older servers call it total_time. Tried in
    that order so a modern server never pays for the fallback. */
@@ -181,6 +217,20 @@ export async function scanLegacyDatabase(deps: ScanDeps = {}): Promise<LegacySca
     writes: Number(r.writes) || 0,
   }));
 
+  const rawColumns = await readOnly<{
+    table: string;
+    column: string;
+    data_type: string;
+    null_frac: number | string | null;
+  }>(pool, COLUMN_STATS_SQL);
+
+  const columns: LegacyColumn[] = rawColumns.map((r) => ({
+    table: String(r.table),
+    column: String(r.column),
+    dataType: String(r.data_type ?? "unknown"),
+    nullFraction: r.null_frac === null || r.null_frac === undefined ? null : Number(r.null_frac),
+  }));
+
   let shapes: LegacyQueryShape[] = [];
   let statementStatsAvailable = true;
   try {
@@ -202,5 +252,5 @@ export async function scanLegacyDatabase(deps: ScanDeps = {}): Promise<LegacySca
     statementStatsAvailable = false;
   }
 
-  return { tables, shapes, statementStatsAvailable };
+  return { tables, columns, shapes, statementStatsAvailable };
 }
