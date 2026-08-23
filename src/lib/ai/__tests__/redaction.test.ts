@@ -31,7 +31,7 @@
  * 24.  inputs not mutated by redactMessages
  */
 
-import { redactMessages, redactText } from "../redaction";
+import { redactMessages, redactText, NEVER_SEND_KINDS } from "../redaction";
 
 /* ------------------------------------------------------------------ */
 /* helpers                                                             */
@@ -312,4 +312,48 @@ test("redactMessages does not mutate input messages", () => {
   const copy = original[0].content;
   redactMessages(original, undefined, "pii");
   expect(original[0].content).toBe(copy);
+});
+
+describe("identifiers that look like credentials and are not", () => {
+  const GRAPH_ID =
+    "AAMkADk1YzE0ZmQyLTk2NmItNGYzMS1hZDRhLTk5ZDkwZmU4Zjk4YQBGAAAAAAA-XIwLgZzRLj2QdM4lXLcAAAAAAENAABQ=";
+
+  it("leaves a Microsoft Graph id alone", () => {
+    /* Reported 2026-08-23 as an API key leaking into an answer. It had not:
+       the placeholder was the gate working, on a meeting id that matched the
+       generic 40-plus-base64 rule. An answer reading "Meeting ID: [API_KEY_1]"
+       teaches somebody that redaction is noise, and somebody who believes that
+       is one step from wanting it switched off. */
+    const out = redactText(`Meeting ID: ${GRAPH_ID}`, NEVER_SEND_KINDS);
+    expect(out.redacted).toBe(false);
+    expect(out.text).toContain(GRAPH_ID);
+  });
+
+  it("STILL catches a real key in the same sentence", () => {
+    /* The exemption must not become a hiding place. */
+    const out = redactText(
+      `Meeting ID: ${GRAPH_ID} and the token is sk-ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789`,
+      NEVER_SEND_KINDS,
+    );
+    expect(out.redacted).toBe(true);
+    expect(out.text).toContain(GRAPH_ID);
+    expect(out.text).not.toContain("sk-ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789");
+  });
+
+  it("still catches an ordinary long base64 secret", () => {
+    /* The generic rule is broad on purpose: a credential we fail to recognise
+       is the expensive miss. Only the Graph prefix is exempt. */
+    const out = redactText(
+      "secret aGVsbG93b3JsZGhlbGxvd29ybGRoZWxsb3dvcmxkaGVsbG93b3JsZA==",
+      NEVER_SEND_KINDS,
+    );
+    expect(out.redacted).toBe(true);
+  });
+
+  it("does not exempt something merely starting with the same letters", () => {
+    /* AAMkA is the documented prefix; a short lookalike is not an id and gets
+       no special treatment. */
+    const out = redactText("AAMkA and then sk-ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", NEVER_SEND_KINDS);
+    expect(out.redacted).toBe(true);
+  });
 });
