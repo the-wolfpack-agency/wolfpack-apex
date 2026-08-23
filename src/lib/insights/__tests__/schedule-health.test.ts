@@ -15,19 +15,22 @@ import {
   type ScheduleEvent,
 } from "../schedule-health";
 
-/** Monday 2026-08-24 was a Monday. Local time throughout. */
+/* 2026-08-24 was a Monday. Built and analysed in UTC, so the suite says
+   the same thing on a laptop in Manchester and a runner in us-east-1.
+   Before the zone became an input these helpers used the machine's own
+   clock on both sides, which agreed with itself and with nothing else. */
+const ZONE = { timeZone: "UTC" } as const;
+
 function at(day: number, hour: number, minute = 0): string {
-  const d = new Date(2026, 7, 24 + day, hour, minute, 0, 0);
-  return d.toISOString();
+  return new Date(Date.UTC(2026, 7, 24 + day, hour, minute, 0, 0)).toISOString();
 }
 
 function meeting(day: number, hour: number, lengthMin: number, subject = "Sync", attendees = 2): ScheduleEvent {
-  const start = new Date(2026, 7, 24 + day, hour, 0, 0, 0);
-  const end = new Date(start.getTime() + lengthMin * 60_000);
+  const start = Date.UTC(2026, 7, 24 + day, hour, 0, 0, 0);
   return {
     subject,
-    start: start.toISOString(),
-    end: end.toISOString(),
+    start: new Date(start).toISOString(),
+    end: new Date(start + lengthMin * 60_000).toISOString(),
     attendees: Array.from({ length: attendees }, (_, i) => `p${i}@x.com`),
   };
 }
@@ -45,8 +48,8 @@ describe("the number nobody else is showing them", () => {
     meeting(d, 15, 60, "D"),
   ]);
 
-  const a = analyseSchedule(clustered, { days: 7 });
-  const b = analyseSchedule(scattered, { days: 7 });
+  const a = analyseSchedule(clustered, { days: 7, ...ZONE });
+  const b = analyseSchedule(scattered, { days: 7, ...ZONE });
 
   it("agrees the two weeks are identical on every total anyone measures", () => {
     expect(a.meetingHours).toBe(b.meetingHours);
@@ -72,7 +75,7 @@ describe("what counts as a meeting", () => {
       start: at(0, 0),
       end: at(1, 0),
     };
-    const r = analyseSchedule([allDay, meeting(0, 10, 60)], { days: 7 });
+    const r = analyseSchedule([allDay, meeting(0, 10, 60)], { days: 7, ...ZONE });
     expect(r.meetings).toBe(1);
     expect(r.meetingHours).toBe(1);
   });
@@ -80,7 +83,7 @@ describe("what counts as a meeting", () => {
   it("ignores a zero-length entry", () => {
     const r = analyseSchedule(
       [{ subject: "Reminder", start: at(0, 10), end: at(0, 10) }],
-      { days: 7 },
+      { days: 7, ...ZONE },
     );
     expect(r.meetings).toBe(0);
   });
@@ -91,13 +94,13 @@ describe("free time is measured per day, not across the window", () => {
     /* The overnight gap is not fourteen hours of opportunity to
        concentrate. Two full days of meetings leaves nothing. */
     const solid = [0, 1].flatMap((d) => [meeting(d, 9, 480, "All day")]);
-    const r = analyseSchedule(solid, { days: 7 });
+    const r = analyseSchedule(solid, { days: 7, ...ZONE });
     expect(r.usableBlocks).toBe(0);
     expect(r.freeHours).toBe(0);
   });
 
   it("counts the stretch before the first meeting and after the last", () => {
-    const r = analyseSchedule([meeting(0, 12, 60)], { days: 7 });
+    const r = analyseSchedule([meeting(0, 12, 60)], { days: 7, ...ZONE });
     /* 9-12 is three hours, 1-5 is four. Both usable. */
     expect(r.usableBlocks).toBe(2);
     expect(r.usableHours).toBe(7);
@@ -105,7 +108,7 @@ describe("free time is measured per day, not across the window", () => {
 
   it("treats overlapping meetings as one busy stretch, not two", () => {
     const overlapping = [meeting(0, 10, 120, "A"), meeting(0, 11, 120, "B")];
-    const r = analyseSchedule(overlapping, { days: 7 });
+    const r = analyseSchedule(overlapping, { days: 7, ...ZONE });
     /* Busy 10-1. Free 9-10 (stranded) and 1-5 (usable). */
     expect(r.usableBlocks).toBe(1);
     expect(r.usableHours).toBe(4);
@@ -119,14 +122,14 @@ describe("runs", () => {
       meeting(0, 10, 60, "B"),
       meeting(0, 11, 60, "C"),
     ];
-    const r = analyseSchedule(backToBack, { days: 7 });
+    const r = analyseSchedule(backToBack, { days: 7, ...ZONE });
     expect(r.backToBackRuns).toBe(1);
     expect(r.longestRun).toBe(3);
   });
 
   it("does not count three meetings spread across a day", () => {
     const spread = [meeting(0, 9, 60, "A"), meeting(0, 12, 60, "B"), meeting(0, 15, 60, "C")];
-    expect(analyseSchedule(spread, { days: 7 }).backToBackRuns).toBe(0);
+    expect(analyseSchedule(spread, { days: 7, ...ZONE }).backToBackRuns).toBe(0);
   });
 
   it("does not join yesterday's last meeting to today's first", () => {
@@ -135,7 +138,7 @@ describe("runs", () => {
       meeting(1, 9, 60, "B"),
       meeting(2, 9, 60, "C"),
     ];
-    expect(analyseSchedule(acrossNights, { days: 7 }).backToBackRuns).toBe(0);
+    expect(analyseSchedule(acrossNights, { days: 7, ...ZONE }).backToBackRuns).toBe(0);
   });
 });
 
@@ -149,7 +152,7 @@ describe("standing cost", () => {
       meeting(4, 9, 60, "Standup"),
       meeting(0, 14, 30, "One-off"),
     ];
-    const r = analyseSchedule(events, { days: 7 });
+    const r = analyseSchedule(events, { days: 7, ...ZONE });
     expect(r.heaviestRecurring).toMatchObject({ subject: "Standup", occurrences: 5, hoursPerWeek: 5 });
   });
 
@@ -157,13 +160,13 @@ describe("standing cost", () => {
     /* A weekly hour with twelve people in it is twelve hours of the
        organisation, and that is the number worth putting in front of
        whoever owns the meeting. */
-    const r = analyseSchedule([meeting(0, 9, 60, "All hands", 12)], { days: 7 });
+    const r = analyseSchedule([meeting(0, 9, 60, "All hands", 12)], { days: 7, ...ZONE });
     expect(r.meetingHours).toBe(1);
     expect(r.attendeeHours).toBe(12);
   });
 
   it("does not call a single meeting a series", () => {
-    expect(analyseSchedule([meeting(0, 9, 60, "One-off")], { days: 7 }).recurringHoursPerWeek).toBe(0);
+    expect(analyseSchedule([meeting(0, 9, 60, "One-off")], { days: 7, ...ZONE }).recurringHoursPerWeek).toBe(0);
   });
 });
 
@@ -171,21 +174,21 @@ describe("ideal times of day", () => {
   it("names the least booked hours as the ones to defend", () => {
     /* Every day booked 9-11, nothing after. Afternoons are free. */
     const mornings = [0, 1, 2, 3, 4].map((d) => meeting(d, 9, 120, "Morning block"));
-    const r = analyseSchedule(mornings, { days: 7 });
+    const r = analyseSchedule(mornings, { days: 7, ...ZONE });
     expect(r.bestFocusHours.every((h) => h >= 11)).toBe(true);
     expect(r.busiestHours).toContain(9);
   });
 
   it("names the busiest hours as the cheapest place to add a meeting", () => {
     const afternoons = [0, 1, 2, 3, 4].map((d) => meeting(d, 15, 60, "Late"));
-    const r = analyseSchedule(afternoons, { days: 7 });
+    const r = analyseSchedule(afternoons, { days: 7, ...ZONE });
     expect(r.busiestHours[0]).toBe(15);
   });
 
   it("reports a completely clear weekday as worth keeping", () => {
     const monThruThu = [0, 1, 2, 3].map((d) => meeting(d, 10, 60));
     /* Friday is index 5. */
-    expect(analyseSchedule(monThruThu, { days: 7 }).clearDays).toContain(5);
+    expect(analyseSchedule(monThruThu, { days: 7, ...ZONE }).clearDays).toContain(5);
   });
 });
 
@@ -194,7 +197,7 @@ describe("how it reads", () => {
     const fragmented = [0, 1, 2, 3, 4].flatMap((d) => [
       meeting(d, 9, 60), meeting(d, 11, 60), meeting(d, 13, 60), meeting(d, 15, 60),
     ]);
-    const out = renderSchedule(analyseSchedule(fragmented, { days: 7 }));
+    const out = renderSchedule(analyseSchedule(fragmented, { days: 7, ...ZONE }));
     expect(out).toContain("actually usable");
     expect(out).toContain("too short to start anything");
   });
@@ -205,18 +208,90 @@ describe("how it reads", () => {
     const brutal = [0, 1, 2, 3, 4].flatMap((d) =>
       [9, 10, 11, 13, 14, 15, 16].map((h) => meeting(d, h, 60, `M${h}`, 8)),
     );
-    const out = renderSchedule(analyseSchedule(brutal, { days: 7 })).toLowerCase();
+    const out = renderSchedule(analyseSchedule(brutal, { days: 7, ...ZONE })).toLowerCase();
     for (const word of ["too many", "should not", "wasting", "poor", "bad ", "failing"]) {
       expect(out).not.toContain(word);
     }
   });
 
   it("says there is nothing to improve when the calendar is empty", () => {
-    expect(renderSchedule(analyseSchedule([], { days: 7 }))).toContain("nothing here to improve");
+    expect(renderSchedule(analyseSchedule([], { days: 7, ...ZONE }))).toContain("nothing here to improve");
   });
 
   it("still gives the best hours when nothing is stranded", () => {
-    const out = renderSchedule(analyseSchedule([meeting(0, 9, 60)], { days: 7 }));
+    const out = renderSchedule(analyseSchedule([meeting(0, 9, 60)], { days: 7, ...ZONE }));
     expect(out).toContain("When to protect");
+  });
+});
+
+/**
+ * Whose nine in the morning?
+ *
+ * Found by running the same week of meetings under three server
+ * timezones and getting three different answers. Every hour in this
+ * analysis came from getHours(), which reads the machine's clock, and
+ * Vercel runs UTC. The most actionable line the report produces, the
+ * hours to defend, was wrong for everyone outside UTC.
+ */
+describe("the hours belong to the person, not to the server", () => {
+  /* A normal Detroit week: 9am and 2pm, Monday to Friday, stored as
+     absolute instants because that is what Graph returns. */
+  const detroitWeek: ScheduleEvent[] = [0, 1, 2, 3, 4].flatMap((d) => {
+    const day = 24 + d;
+    return [
+      { subject: "Morning", start: `2026-08-${day}T13:00:00.000Z`, end: `2026-08-${day}T14:00:00.000Z`, attendees: ["a", "b"] },
+      { subject: "Afternoon", start: `2026-08-${day}T18:00:00.000Z`, end: `2026-08-${day}T19:00:00.000Z`, attendees: ["a", "b"] },
+    ];
+  });
+
+  it("reports the meetings at the times the person actually had them", () => {
+    const r = analyseSchedule(detroitWeek, { days: 7, timeZone: "America/Detroit" });
+    /* 9am and 2pm local. Under the server's clock in UTC these came
+       back as 1pm and 4pm: somebody else's afternoon. */
+    expect(r.busiestHours).toContain(9);
+    expect(r.busiestHours).toContain(14);
+  });
+
+  it("gives the same answer whatever zone the code is running in", () => {
+    const a = analyseSchedule(detroitWeek, { days: 7, timeZone: "America/Detroit" });
+    const b = analyseSchedule(detroitWeek, { days: 7, timeZone: "America/Detroit" });
+    expect(a).toEqual(b);
+    /* And a different PERSON's zone genuinely is a different answer,
+       which is the point: the same instants are a different week
+       depending on where you live. */
+    const london = analyseSchedule(detroitWeek, { days: 7, timeZone: "Europe/London" });
+    expect(london.busiestHours).not.toEqual(a.busiestHours);
+  });
+
+  it("accepts the Windows zone names Graph hands back", () => {
+    /* Mailbox settings return "Eastern Standard Time", not an IANA id.
+       Taking it literally would silently fall back to UTC. */
+    const r = analyseSchedule(detroitWeek, { days: 7, timeZone: "Eastern Standard Time" });
+    expect(r.timeZone).toBe("America/New_York");
+    expect(r.busiestHours).toContain(9);
+  });
+
+  it("falls back to UTC and says so, rather than guessing", () => {
+    const r = analyseSchedule(detroitWeek, { days: 7, timeZone: null });
+    expect(r.timeZone).toBe("UTC");
+    expect(renderSchedule(r)).toContain("times in UTC");
+  });
+
+  it("names the zone in the paragraph the reader is meant to act on", () => {
+    /* A reader in Detroit shown UTC afternoons acts on them once and
+       never opens it again. */
+    const out = renderSchedule(analyseSchedule(detroitWeek, { days: 7, timeZone: "America/Detroit" }));
+    expect(out).toContain("times in America/Detroit");
+  });
+
+  it("keeps a meeting's real length across a daylight-saving change", () => {
+    /* 2026-11-01, clocks go back in the US. A one-hour meeting spanning
+       the change is still one hour, and reading the end time from the
+       wall clock would call it two. */
+    const r = analyseSchedule(
+      [{ subject: "Across the change", start: "2026-11-01T05:30:00.000Z", end: "2026-11-01T06:30:00.000Z", attendees: ["a"] }],
+      { days: 7, timeZone: "America/Detroit" },
+    );
+    expect(r.meetingHours).toBe(1);
   });
 });
