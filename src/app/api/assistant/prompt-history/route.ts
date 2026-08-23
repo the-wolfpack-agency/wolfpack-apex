@@ -74,18 +74,50 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
        * isn't needed; MAX(created_at) on the grouped key gives the
        * most-recent ask, COUNT(*) gives repeats. ORDER BY
        * most-recent so the overlay shows newest first. */
-      `SELECT
-         BTRIM(m.content) AS content,
-         MAX(m.created_at) AS last_asked_at,
-         COUNT(*)::int AS ask_count
-       FROM instinct_messages m
-       JOIN instinct_conversations c ON c.id = m.conversation_id
-       WHERE c.user_id = $1
-         AND m.role = 'user'
-         AND LENGTH(BTRIM(m.content)) >= $2
-       GROUP BY BTRIM(m.content)
-       ORDER BY MAX(m.created_at) DESC
-       LIMIT $3`,
+      /* WHEN THIS PERSON ASKED IT, not when it was last sent.
+       *
+       * Reported 2026-08-23: prompts last typed days earlier were all showing
+       * as minutes old. The timestamps were real, which is what made it
+       * confusing, and the raw MAX was still the wrong number to show.
+       *
+       * The give-away is in the shape of the traffic. The asks behind those
+       * timestamps arrived two and three seconds apart, each in its own new
+       * conversation, thirteen of them inside a minute. Nobody types like
+       * that. Whatever produced them, a click-through, a replay, an automated
+       * pass, it is not the person remembering what they were working on, and
+       * it is their memory this panel exists to serve.
+       *
+       * So an ask counts as DELIBERATE when at least ten seconds passed since
+       * that person's previous ask. A prompt's timestamp is the most recent
+       * deliberate one, and the raw maximum only when there is none, so a
+       * prompt never vanishes and never shows nothing.
+       *
+       * The count still counts everything: 136 asks is 136 asks however they
+       * arrived. Only the CLOCK is corrected, because that is the part that was
+       * telling somebody a false thing about their own week. */
+      `WITH asks AS (
+         SELECT BTRIM(m.content) AS content,
+                m.created_at,
+                m.created_at - LAG(m.created_at) OVER (ORDER BY m.created_at) AS gap
+           FROM instinct_messages m
+           JOIN instinct_conversations c ON c.id = m.conversation_id
+          WHERE c.user_id = $1
+            AND m.role = 'user'
+            AND LENGTH(BTRIM(m.content)) >= $2
+       )
+       SELECT content,
+              COALESCE(
+                MAX(created_at) FILTER (WHERE gap IS NULL OR gap > INTERVAL '10 seconds'),
+                MAX(created_at)
+              ) AS last_asked_at,
+              COUNT(*)::int AS ask_count
+         FROM asks
+        GROUP BY content
+        ORDER BY COALESCE(
+                   MAX(created_at) FILTER (WHERE gap IS NULL OR gap > INTERVAL '10 seconds'),
+                   MAX(created_at)
+                 ) DESC
+        LIMIT $3`,
       [user.id, MIN_PROMPT_CHARS, limit],
     );
 
