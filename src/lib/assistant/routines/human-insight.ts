@@ -35,9 +35,36 @@ export interface HumanStepRow {
   skipped: number;
   /** Average milliseconds on the runs where it was actually done. */
   avgMsWhenDone: number | null;
+  /**
+   * The FASTEST it has ever been done, in milliseconds.
+   *
+   * The closest honest proxy for how long the work itself takes. Elapsed time
+   * from being asked to being done includes however long somebody left it, and
+   * the run where they left it least is the run where the number is mostly
+   * work. A step whose average is an hour and whose best is four minutes is
+   * not an hour of effort; it is four minutes that waits an hour.
+   */
+  fastestMs?: number | null;
 }
 
 export type HumanFindingKind =
+  /**
+   * Consistently done, and consistently a long time after it was offered.
+   *
+   * The finding nobody else produces, and the one the whole design is for. A
+   * step that is always picked up hours late is not a step somebody is slow
+   * at: it is a step in the wrong place in their day. Preparation done after
+   * the thing it was for is preparation that did not happen, and a call made
+   * at five for a decision needed at ten is a decision made without it.
+   *
+   * Kept separate from "expensive" on purpose. Elapsed time from being asked
+   * to being done is latency AND work together, and we cannot split them
+   * without asking. What we can say honestly is which of those two shapes the
+   * number has: a step done every time, quickly once started, but always
+   * started late, is a scheduling problem rather than an effort problem, and
+   * the fix is different.
+   */
+  | "left_late"
   /** Consistently done, quickly, and nobody changes anything. The pause is
    *  costing more than it is catching. */
   | "pause_not_earning"
@@ -68,6 +95,15 @@ const SKIPPED_A_LOT = 0.5;
 const NEARLY_ALWAYS = 0.9;
 /** Long enough that carrying it by hand is worth naming. Five minutes. */
 const SLOW_MS = 5 * 60 * 1000;
+/**
+ * How much bigger the average must be than the best run before the number is
+ * mostly waiting rather than working.
+ *
+ * Four, deliberately not two. Somebody having one quick run and one slow one
+ * is ordinary variance; an average four times the best is a step that sits
+ * untouched most days, and that is a different conversation.
+ */
+const LATENCY_RATIO = 4;
 /** Under a minute, a review is a glance. */
 const GLANCE_MS = 60 * 1000;
 /**
@@ -113,6 +149,34 @@ export function readHumanSteps(rows: HumanStepRow[]): HumanFinding[] {
       continue;
     }
 
+    /* LEFT LATE, checked BEFORE expensive.
+     *
+     * The two look identical in the average and mean opposite things. A step
+     * that takes forty minutes every time is expensive. A step that takes four
+     * minutes when somebody finally gets to it, an hour after being asked, is
+     * not expensive at all: it is late, and the fix is where it sits in the
+     * day rather than what it costs.
+     *
+     * The fastest run is the tell. If somebody has ever done this in a small
+     * fraction of the average, the average is mostly waiting. */
+    const fastest = r.fastestMs ?? null;
+    if (
+      r.humanAction === "do" &&
+      rate >= NEARLY_ALWAYS &&
+      avg >= SLOW_MS &&
+      fastest !== null &&
+      fastest * LATENCY_RATIO <= avg
+    ) {
+      findings.push({
+        ...base,
+        kind: "left_late",
+        observation: `Done on ${pct(rate)} of runs. Usually about ${minutes(avg)} minutes from being asked to being done, but as little as ${minutes(fastest)} minutes when you get to it straight away.`,
+        suggestion:
+          "That gap is waiting rather than work. Preparation done after the thing it was for did not happen, so it is worth asking whether this belongs earlier in the day, or whether the routine should arrive later.",
+      });
+      continue;
+    }
+
     if (r.humanAction === "do" && rate >= NEARLY_ALWAYS && avg >= SLOW_MS) {
       findings.push({
         ...base,
@@ -148,9 +212,13 @@ export function readHumanSteps(rows: HumanStepRow[]): HumanFinding[] {
 
   const order: Record<HumanFindingKind, number> = {
     not_happening: 0,
-    worth_a_tool: 1,
-    pause_not_earning: 2,
-    healthy: 3,
+    /* Above "worth a tool", because being late is usually the cheaper fix and
+       the more surprising finding: nobody is expecting to be told that the
+       problem with their preparation is when they do it. */
+    left_late: 1,
+    worth_a_tool: 2,
+    pause_not_earning: 3,
+    healthy: 4,
   };
   return findings.sort(
     (a, b) => order[a.kind] - order[b.kind] || a.routineId.localeCompare(b.routineId) || a.stepIndex - b.stepIndex,
@@ -176,14 +244,15 @@ export async function humanStepFindings(workspaceId: string): Promise<HumanFindi
       completed: string;
       skipped: string;
       avg_ms_when_done: string | null;
+      fastest_ms_when_done: string | null;
     }>(
       `SELECT v.routine_id, v.step_index, v.label, v.human_action,
-              v.asked, v.completed, v.skipped, v.avg_ms_when_done
+              v.asked, v.completed, v.skipped, v.avg_ms_when_done, v.fastest_ms_when_done
          FROM v_routine_human_steps v
          JOIN assistant_routine_runs r ON r.routine_id = v.routine_id
         WHERE r.workspace_id = $1
         GROUP BY v.routine_id, v.step_index, v.label, v.human_action,
-                 v.asked, v.completed, v.skipped, v.avg_ms_when_done
+                 v.asked, v.completed, v.skipped, v.avg_ms_when_done, v.fastest_ms_when_done
         LIMIT 500`,
       [workspaceId],
     );
@@ -197,6 +266,8 @@ export async function humanStepFindings(workspaceId: string): Promise<HumanFindi
         completed: Number(r.completed) || 0,
         skipped: Number(r.skipped) || 0,
         avgMsWhenDone: r.avg_ms_when_done === null ? null : Number(r.avg_ms_when_done),
+        fastestMs:
+          r.fastest_ms_when_done === null ? null : Number(r.fastest_ms_when_done),
       })),
     );
   } catch {
