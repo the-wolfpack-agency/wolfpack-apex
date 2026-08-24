@@ -55,9 +55,23 @@ async function main() {
   const { carriesEnoughToQuote } = await import("../src/lib/brain/confidence");
 
   const limit = Number(arg("--limit") ?? 60);
+  /* REAL QUESTIONS, NOT THE RED TEAM'S.
+   *
+   * The first version took DISTINCT query ORDER BY query, which is alphabetical
+   * and therefore front-loaded with slash commands and the security suite's
+   * payloads: card numbers, national insurance numbers, and prompts repeating
+   * "the dealer replaced the BRAKE CALIPER" two hundred times. Those are in the
+   * log because somebody tested this product, and "the assistant now returns a
+   * document for a fabricated card number" is not an improvement anybody wants.
+   *
+   * Measuring against them made the headline look far better than the truth,
+   * which is the one thing an eval must never do. */
   const log = await query<{ query: string }>(
     `SELECT DISTINCT query FROM brain_query_log
-      WHERE created_at > now() - interval '90 days' AND length(query) > 0
+      WHERE created_at > now() - interval '90 days'
+        AND length(query) BETWEEN 8 AND 120
+        AND query NOT LIKE '/%'
+        AND query !~ '[0-9]{4}[ -][0-9]{4}'
       ORDER BY query LIMIT $1`,
     [limit],
   );

@@ -39,6 +39,10 @@ export interface BackfillOptions {
   dryRun?: boolean;
   /** Called after each batch, for progress on a long run. */
   onProgress?: (done: number, total: number) => void;
+  /** Attempts per batch before giving up. Backs off between tries. */
+  maxAttempts?: number;
+  /** Pause between batches, to stay under the deployment's tokens-per-minute. */
+  pauseMs?: number;
 }
 
 export interface BackfillResult {
@@ -46,9 +50,12 @@ export interface BackfillResult {
   embedded: number;
   /** Chunks still waiting when this returned. */
   remaining: number;
-  /** Batches that threw. The run continues; the rows stay false and are
-   *  retried next time, which is the point of resumability. */
+  /** Batches that threw. The rows stay false and are retried next time, which
+   *  is the point of resumability. */
   failedBatches: number;
+  /** WHY it stopped. "failed batches: 1" without this is a number that sends
+   *  somebody to the logs to find out what a script already knew. */
+  lastError: string | null;
   backend: ReturnType<typeof embeddingBackend>;
   dryRun: boolean;
 }
@@ -92,6 +99,8 @@ export async function backfillEmbeddings(
   const backend = embeddingBackend();
   const batchSize = Math.min(Math.max(opts.batchSize ?? 32, 1), 128);
   const dryRun = opts.dryRun === true;
+  const maxAttempts = Math.max(opts.maxAttempts ?? 4, 1);
+  const pauseMs = Math.max(opts.pauseMs ?? 1_200, 0);
 
   if (!isEmbeddingConfigured()) {
     /* Refusing loudly beats a clean run that embedded nothing. That exact
@@ -107,27 +116,53 @@ export async function backfillEmbeddings(
   const target = opts.limit ? Math.min(opts.limit, total) : total;
   let embedded = 0;
   let failedBatches = 0;
+  let lastError: string | null = null;
 
   while (embedded < target) {
     const batch = await takePending(Math.min(batchSize, target - embedded));
     if (batch.length === 0) break;
 
     if (dryRun) {
-      embedded += batch.length;
+      /* THE WHOLE BACKLOG, NOT THE FIRST BATCH. A dry run reads one batch to
+         prove the query and the config work, then stops, because it marks
+         nothing and would otherwise loop on the same rows forever. Reporting
+         that batch as the total said "would embed 32" for a backlog of 2,305,
+         which is the same shape of misleading number this file exists to
+         stop producing. */
+      embedded = target;
       opts.onProgress?.(embedded, target);
-      /* A dry run must not loop forever on rows it never marks. */
       break;
     }
 
     try {
-      const result = await embedBatch(batch.map((c) => c.content));
-      if (!result || result.vectors.length !== batch.length) {
+      /* RETRIED, BECAUSE THE COMMON FAILURE IS TEMPORARY AND UNNAMED.
+       *
+       * The Azure adapter documents that it NEVER throws: every failure comes
+       * back as an empty array plus an analytics event. So a rate limit, an
+       * expired key and a network blip are indistinguishable here, and the
+       * first run of this backfill stopped after 208 chunks on "embedder
+       * returned 0 vectors for 8 chunks" with no way to tell which.
+       *
+       * At roughly 750 tokens a chunk, eight at a time with no pause runs at
+       * about 156k tokens a minute against a 120k deployment, so the likeliest
+       * answer is the one a backfill should simply absorb. Backing off and
+       * trying again costs seconds; stopping costs a person. */
+      let result: Awaited<ReturnType<typeof embedBatch>> = null;
+      let attemptError = "";
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        result = await embedBatch(batch.map((c) => c.content));
+        if (result && result.vectors.length === batch.length) break;
+        attemptError = `embedder returned ${result?.vectors.length ?? 0} vectors for ${batch.length} chunks`;
+        result = null;
+        if (attempt < maxAttempts) {
+          await new Promise((r) => setTimeout(r, pauseMs * 2 ** attempt));
+        }
+      }
+      if (!result) {
         /* A short vector list silently mismatched to chunks would attach the
            wrong meaning to the right document, which is worse than no
            embedding at all. */
-        throw new Error(
-          `embedder returned ${result?.vectors.length ?? 0} vectors for ${batch.length} chunks`,
-        );
+        throw new Error(`${attemptError} after ${maxAttempts} attempts`);
       }
 
       const points = batch.map((c, i) => ({
@@ -156,8 +191,14 @@ export async function backfillEmbeddings(
       );
       embedded += batch.length;
       opts.onProgress?.(embedded, target);
+      /* Paced on purpose. A backfill has nowhere to be, and running it flat out
+         against a shared deployment steals capacity from the live product. */
+      if (pauseMs > 0 && embedded < target) {
+        await new Promise((r) => setTimeout(r, pauseMs));
+      }
     } catch (err) {
       failedBatches += 1;
+      lastError = (err as Error)?.message?.slice(0, 300) ?? "unknown";
       trackEvent("system.brain_backfill_batch_failed", "system", "system", {
         size: batch.length,
         error: (err as Error)?.message?.slice(0, 200) ?? "unknown",
@@ -172,6 +213,7 @@ export async function backfillEmbeddings(
     embedded,
     remaining: dryRun ? total : await countPending(),
     failedBatches,
+    lastError,
     backend,
     dryRun,
   };

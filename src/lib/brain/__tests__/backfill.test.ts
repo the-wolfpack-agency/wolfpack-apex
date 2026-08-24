@@ -79,16 +79,32 @@ describe("embedding the backlog", () => {
        which is worse than leaving it unembedded. */
     plan(2, [[chunk("a"), chunk("b")], []]);
     mockEmbed.mockResolvedValue({ vectors: [[1]], tokensUsed: 0, model: "m" });
-    const r = await backfillEmbeddings({ batchSize: 2 });
+    const r = await backfillEmbeddings({ batchSize: 2, maxAttempts: 2, pauseMs: 0 });
     expect(mockUpsert).not.toHaveBeenCalled();
     expect(r.embedded).toBe(0);
     expect(r.failedBatches).toBe(1);
+    expect(r.lastError).toMatch(/1 vectors for 2 chunks/);
+  });
+
+  it("retries a batch before giving up on it", async () => {
+    /* The Azure adapter never throws: a rate limit comes back as an empty
+       array, exactly like a dead key. The first real run of this backfill
+       stopped after 208 of 2,305 chunks on one such batch. Absorbing it costs
+       seconds; stopping costs a person. */
+    plan(2, [[chunk("a"), chunk("b")], []]);
+    mockEmbed
+      .mockResolvedValueOnce({ vectors: [], tokensUsed: 0, model: "m" })
+      .mockResolvedValueOnce({ vectors: [[1], [2]], tokensUsed: 0, model: "m" });
+    const r = await backfillEmbeddings({ batchSize: 2, maxAttempts: 3, pauseMs: 0 });
+    expect(mockEmbed).toHaveBeenCalledTimes(2);
+    expect(r.embedded).toBe(2);
+    expect(r.failedBatches).toBe(0);
   });
 
   it("stops on a failing batch rather than grinding through a broken provider", async () => {
     plan(4, [[chunk("a")], [chunk("b")], []]);
     mockEmbed.mockRejectedValue(new Error("azure said no"));
-    const r = await backfillEmbeddings({ batchSize: 1 });
+    const r = await backfillEmbeddings({ batchSize: 1, maxAttempts: 1, pauseMs: 0 });
     expect(r.failedBatches).toBe(1);
     expect(mockEmbed).toHaveBeenCalledTimes(1);
   });

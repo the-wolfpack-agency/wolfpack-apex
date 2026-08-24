@@ -25,6 +25,7 @@ async function main() {
     dryRun,
     limit: value("--limit"),
     batchSize: value("--batch") ?? 32,
+    pauseMs: value("--pause") ?? 1_200,
     onProgress: (done, total) => {
       const pct = total > 0 ? Math.round((done / total) * 100) : 100;
       process.stdout.write(`\r  ${done}/${total} chunks (${pct}%)   `);
@@ -37,6 +38,7 @@ async function main() {
   console.log(`still waiting   ${result.remaining}`);
   if (result.failedBatches > 0) {
     console.log(`failed batches  ${result.failedBatches} (rows left unembedded, safe to re-run)`);
+    console.log(`reason          ${result.lastError ?? "not recorded"}`);
   }
   console.log(`took            ${((Date.now() - started) / 1000).toFixed(1)}s`);
 
