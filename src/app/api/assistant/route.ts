@@ -22,6 +22,7 @@ import {
   isFollowThrough,
   lastAssistantMessage,
   resolveFollowThrough,
+  somethingIsAlreadyWaiting,
 } from "@/lib/assistant/follow-through";
 import { buildAttachmentContext } from "@/lib/assistant/attachment-context";
 
@@ -161,7 +162,17 @@ export async function POST(req: NextRequest) {
      * every path below this point assumes the message has a subject, and
      * none of them can fail honestly when it does not. */
     let message: string = rawMessage;
-    if (!hasAttachment && isFollowThrough(rawMessage)) {
+    if (
+      !hasAttachment &&
+      isFollowThrough(rawMessage) &&
+      /* Step aside when something downstream is already waiting for this
+         word. A write tool asking before it acts, a routine stopped at a
+         person, a template offering to be adopted: all three end by
+         telling somebody to say yes, and a second reader of "yes" that
+         cannot see the first one's offers will eventually contradict it.
+         It did, on the template flow, in production. */
+      !(await somethingIsAlreadyWaiting(user.id, conversationId))
+    ) {
       const previous = await lastAssistantMessage(conversationId);
       const resolved = resolveFollowThrough(previous);
       trackEvent("assistant.follow_through_resolved", user.id, user.role, {

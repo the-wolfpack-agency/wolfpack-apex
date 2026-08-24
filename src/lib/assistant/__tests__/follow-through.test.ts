@@ -96,3 +96,75 @@ describe("what happens on the turn itself", () => {
     expect(resolveFollowThrough("").clarify).toBeTruthy();
   });
 });
+
+/**
+ * "yes" was already meant for something.
+ *
+ * The conversation layer has had its own confirmation handling far
+ * longer: a write tool that asks before it acts, a routine stopped at a
+ * person, a template offering to be adopted. All three end by telling
+ * somebody to say yes.
+ *
+ * Resolving follow-through in the route put a second reader of that word
+ * in front of all of them, and driving the deployed assistant found it on
+ * the one flow that says the word out loud:
+ *
+ *   < look at the week ahead would run 5 steps... Say yes and it becomes
+ *     a command you can type.
+ *   > yes
+ *   < I did not offer anything specific just now.
+ *
+ * It had offered something specific. It had asked for exactly that word.
+ */
+describe("stepping aside when something is already waiting", () => {
+  const mockQuery = jest.fn();
+  beforeEach(() => {
+    jest.resetModules();
+    /* reset, not clear: clearAllMocks empties the call log and leaves the
+       mockResolvedValueOnce queue behind, so the second test in this
+       block was being answered with the first one's leftovers. */
+    mockQuery.mockReset();
+    process.env.DATABASE_URL = "postgres://test";
+    jest.doMock("@/lib/db", () => ({ query: (...a: unknown[]) => mockQuery(...a) }));
+  });
+
+  async function waiting(pending: number, runs: number) {
+    mockQuery
+      .mockResolvedValueOnce({ rows: [{ n: String(pending) }] })
+      .mockResolvedValueOnce({ rows: [{ n: String(runs) }] });
+    const { somethingIsAlreadyWaiting } = await import("../follow-through");
+    return somethingIsAlreadyWaiting("u1", "c1");
+  }
+
+  it("yields when a write tool is waiting to be confirmed", async () => {
+    expect(await waiting(1, 0)).toBe(true);
+  });
+
+  it("yields when a routine is stopped at a person", async () => {
+    expect(await waiting(0, 1)).toBe(true);
+  });
+
+  it("takes the turn when nothing is pending", async () => {
+    /* The gap it was written for: a bare "ok, do that" that would
+       otherwise be dispatched as a fresh question. */
+    expect(await waiting(0, 0)).toBe(false);
+  });
+
+  it("yields when it cannot tell", async () => {
+    /* The safe answer to "may I take this yes" when the state is
+       unreadable is no. Contradicting a confirmation somebody is waiting
+       on is worse than declining to help with one. */
+    mockQuery.mockRejectedValue(new Error("db down"));
+    const { somethingIsAlreadyWaiting } = await import("../follow-through");
+    expect(await somethingIsAlreadyWaiting("u1", "c1")).toBe(true);
+  });
+
+  it("does not consume the thing it is checking for", async () => {
+    /* Consuming here would answer the confirmation in the wrong layer and
+       the action would never run. */
+    await waiting(1, 0);
+    for (const call of mockQuery.mock.calls) {
+      expect(String(call[0])).not.toMatch(/UPDATE|DELETE|consumed_at\s*=/i);
+    }
+  });
+});
