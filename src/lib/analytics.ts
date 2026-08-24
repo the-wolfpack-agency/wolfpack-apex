@@ -1145,6 +1145,10 @@ export type InstinctEventType =
   //   answer, so the user sees no error, which is exactly why this has to be
   //   recorded: measured 2026-08-24, 252 brain queries over 30 days with zero
   //   semantic hits and nobody aware.
+  //   system.brain_backfill_batch_failed { size, error } - a batch of the
+  //   embedding backfill threw. The rows stay unembedded and are retried on the
+  //   next run, so this is the only record that it happened.
+  | "system.brain_backfill_batch_failed"
   | "system.brain_semantic_degraded"
   | "system.triple_write_degraded"
   //   assistant.follow_through_resolved { resolved } - a bare "ok, do that" was

@@ -77,8 +77,30 @@ function parseGraphProvider(raw: string | undefined): GraphProvider {
   );
 }
 
+/**
+ * Which provider to embed with when nobody said.
+ *
+ * This defaulted to "openai" regardless of what the deployment actually had.
+ * Combined with a factory that threw a TODO, the result was that Instinct,
+ * which runs on Azure and holds no OpenAI key at all, silently never embedded
+ * anything: 2,305 chunks at embedded=false and 252 brain queries over 30 days
+ * with zero semantic hits.
+ *
+ * A default that ignores the configuration is not a default, it is a guess.
+ * The explicit setting still wins, and selecting a provider whose variables
+ * are missing still throws rather than falling back, which is the rule this
+ * file already had and was right about.
+ */
+function defaultEmbeddingProvider(): EmbeddingProviderName {
+  const azureReady =
+    readEnv("AZURE_OPENAI_ENDPOINT") &&
+    readEnv("AZURE_OPENAI_API_KEY") &&
+    readEnv("AZURE_OPENAI_EMBEDDING_DEPLOYMENT");
+  return azureReady ? "azure_openai" : "openai";
+}
+
 function parseEmbeddingProvider(raw: string | undefined): EmbeddingProviderName {
-  const v = (raw ?? "openai").toLowerCase();
+  const v = (raw ?? defaultEmbeddingProvider()).toLowerCase();
   if (v === "openai" || v === "azure_openai") return v;
   throw new Error(
     `INSTINCT_EMBEDDING_PROVIDER: invalid value "${raw}". Expected one of: openai | azure_openai`,

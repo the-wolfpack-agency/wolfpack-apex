@@ -17,6 +17,12 @@
  */
 
 const EMBED_URL = "https://api.openai.com/v1/embeddings";
+const AZURE_KEYS = ["AZURE_OPENAI_ENDPOINT", "AZURE_OPENAI_API_KEY", "AZURE_OPENAI_EMBEDDING_DEPLOYMENT"] as const;
+
+/** True when this deployment is configured to embed via Azure. */
+function azureConfigured(): boolean {
+  return AZURE_KEYS.every((k) => Boolean(process.env[k]));
+}
 const DEFAULT_MODEL = "text-embedding-3-small";
 export const EMBED_DIM = 1536;
 
@@ -26,13 +32,51 @@ export interface EmbedResult {
   model: string;
 }
 
+/**
+ * THIS ANSWERED NO IN PRODUCTION FOR THE WHOLE LIFE OF THE FEATURE.
+ *
+ * It asked for OPENAI_API_KEY or BRAIN_EMBEDDING_KEY. This deployment runs
+ * Azure OpenAI and has never had either, so the semantic half of every brain
+ * search was skipped: not failed, not caught, never run. Measured 2026-08-24:
+ * 2,305 chunks across 779 documents with embedded=false, every one, and 252
+ * brain queries over 30 days with zero semantic hits.
+ *
+ * The same shape as #377, where the router decided a model was unreachable by
+ * looking for an OpenAI key. A deployment is not OpenAI just because the code
+ * was written against it.
+ */
 export function isEmbeddingConfigured(): boolean {
-  return Boolean(process.env.OPENAI_API_KEY || process.env.BRAIN_EMBEDDING_KEY);
+  return azureConfigured() || Boolean(process.env.OPENAI_API_KEY || process.env.BRAIN_EMBEDDING_KEY);
+}
+
+/** Which way this deployment embeds, for the degrade event and the backfill. */
+export function embeddingBackend(): "azure" | "openai" | "none" {
+  if (azureConfigured()) return "azure";
+  if (process.env.OPENAI_API_KEY || process.env.BRAIN_EMBEDDING_KEY) return "openai";
+  return "none";
 }
 
 export async function embedBatch(texts: string[]): Promise<EmbedResult | null> {
   if (!isEmbeddingConfigured()) return null;
   if (texts.length === 0) return { vectors: [], tokensUsed: 0, model: DEFAULT_MODEL };
+
+  /* AZURE FIRST, THROUGH THE ADAPTER THAT ALREADY EXISTED.
+     createAzureOpenAIEmbedder was written, tested and never called, because
+     the factory that should have returned it threw a TODO and this file went
+     straight to api.openai.com. Deployment-name routing, api-key header: an
+     Azure call is not an OpenAI call with a different host. */
+  if (azureConfigured()) {
+    const { getEmbeddingProvider } = await import("@/lib/rag-providers/factory");
+    const provider = getEmbeddingProvider();
+    const vectors = await provider.embed(texts);
+    return {
+      vectors,
+      /* Azure returns usage per call; the adapter does not surface it yet, and
+         a made-up number is worse than an honest zero. */
+      tokensUsed: 0,
+      model: provider.model,
+    };
+  }
 
   const key = process.env.BRAIN_EMBEDDING_KEY || process.env.OPENAI_API_KEY!;
   const model = process.env.BRAIN_EMBEDDING_MODEL || DEFAULT_MODEL;

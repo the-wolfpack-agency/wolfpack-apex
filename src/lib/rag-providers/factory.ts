@@ -13,6 +13,7 @@
 
 import type { EmbeddingProvider, GraphStore, VectorStore } from "./types";
 import { getProviderConfig } from "./config";
+import { createAzureOpenAIEmbedder } from "./azure-openai";
 
 /**
  * Resolve the active vector store. Throws `rag-provider adapter not
@@ -50,12 +51,29 @@ export function getEmbeddingProvider(): EmbeddingProvider {
 
   switch (cfg.embedding) {
     case "openai":
-      // TODO(azure-migration): wire openai-embeddings.ts (text-embedding-3-*).
+      // Still unwired, and deliberately so: this deployment runs Azure, and an
+      // OpenAI adapter nobody uses is an untested path pretending to be a
+      // fallback. It throws by name so the failure says which provider was
+      // asked for.
       throw new Error("rag-provider adapter not wired: openai");
-    case "azure_openai":
-      // TODO(azure-migration): wire azure-openai-embeddings.ts against
-      // cfg.azureOpenAI (deployment-name routing, not model-name).
-      throw new Error("rag-provider adapter not wired: azure_openai");
+    case "azure_openai": {
+      /* WIRED 2026-08-24. It had been a TODO that threw, next to a complete
+         implementation in azure-openai.ts, while brain/embedder.ts went its own
+         way to api.openai.com with a Bearer token. The result: 2,305 chunks
+         across 779 documents with embedded=false, every one of them, and 252
+         brain queries in 30 days with zero semantic hits. */
+      if (!cfg.azureOpenAI) {
+        throw new Error(
+          "azure_openai embeddings selected but not configured: needs AZURE_OPENAI_ENDPOINT, " +
+            "AZURE_OPENAI_API_KEY and AZURE_OPENAI_EMBEDDING_DEPLOYMENT",
+        );
+      }
+      return createAzureOpenAIEmbedder({
+        endpoint: cfg.azureOpenAI.endpoint,
+        apiKey: cfg.azureOpenAI.apiKey,
+        deployment: cfg.azureOpenAI.embeddingDeployment,
+      });
+    }
     default: {
       const _exhaustive: never = cfg.embedding;
       throw new Error(`rag-provider adapter not wired: ${_exhaustive as string}`);
