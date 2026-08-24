@@ -102,8 +102,21 @@ export function probeTargetFor(spec: ModelSpec, env: NodeJS.ProcessEnv): { url: 
   const deployment = spec.deploymentEnvVar ? env[spec.deploymentEnvVar] : undefined;
 
   if (spec.provider === "openai") {
+    /* "openai" is a WIRE FORMAT here, not a vendor.
+     *
+     * client-models.ts says so where it builds a spec, and every model a
+     * client brings arrives that way: Kimi, Qwen, a self-hosted gateway,
+     * anything speaking /chat/completions. Each carries the endpoint it
+     * is actually served from.
+     *
+     * This ignored it and sent every one of them to api.openai.com. A
+     * client's own model would have been probed against somebody else's
+     * host, with a key that does not belong there, and reported
+     * unreachable for a reason that had nothing to do with their
+     * deployment. */
+    const served = (spec as { endpoint?: string }).endpoint;
     return {
-      url: "https://api.openai.com/v1/chat/completions",
+      url: served && served.length > 0 ? served : "https://api.openai.com/v1/chat/completions",
       body: { model: spec.id, max_tokens: 1, messages: [{ role: "user", content: "ping" }] },
     };
   }
@@ -166,6 +179,9 @@ export async function probeModel(spec: ModelSpec, deps: ProbeDeps = {}): Promise
     return { modelId: spec.id, outcome: "refused", latencyMs: null, status: null, detail: `egress refused: ${verdict.reason}` };
   }
 
+  /* A model served from somebody else's host needs its own key. Falling
+     back to OPENAI_API_KEY would send our OpenAI credential to whatever
+     endpoint a client typed in, which is worse than failing to probe. */
   const key = env[spec.apiKeyEnvVar ?? (spec.provider === "openai" ? "OPENAI_API_KEY" : "AZURE_OPENAI_API_KEY")] ?? "";
   const headers: Record<string, string> = { "content-type": "application/json" };
   if (spec.provider === "openai") headers.authorization = `Bearer ${key}`;

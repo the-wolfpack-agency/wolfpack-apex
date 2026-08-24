@@ -222,8 +222,18 @@ export function isModelAvailable(
   env: Record<string, string | undefined> = process.env,
 ): boolean {
   switch (spec.provider) {
-    case "openai":
-      return hasValue(env.OPENAI_API_KEY);
+    case "openai": {
+      /* The SAME reasoning the azure branch below already applies, which
+         this one never got: a model carrying its own key is answering a
+         question about a different resource.
+         Every client-brought model arrives as provider "openai", because
+         that names the wire format and not the vendor. Keyed only on
+         OPENAI_API_KEY, a client's Kimi or Qwen deployment is reported
+         unavailable whenever we happen not to have an OpenAI key, and
+         available whenever we happen to have one, with their key never
+         consulted in either case. */
+      return hasValue(env[spec.apiKeyEnvVar ?? "OPENAI_API_KEY"]);
+    }
     /* One key, no per-model deployment names: Anthropic addresses models by
        their canonical id, so the key is the whole question. */
     case "anthropic":
