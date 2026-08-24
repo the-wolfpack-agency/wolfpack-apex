@@ -23,6 +23,16 @@ const PATTERNS: RegExp[] = [
   /\bhow\s+are\s+we\s+doing\s+on\s+(?:our|the|my)\s+(?:goals|okrs|objectives)\b/i,
   /\b(?:current|active)\s+(?:goals|okrs|objectives)\b/i,
   /\bnorth[\s-]?star\s+metric\b/i,
+  /* Swept 2026-08-24: four of five ordinary phrasings missed, including
+     "what are our goals", which is the plainest possible way to ask.
+     Every pattern above wanted either the acronym OKR or the verb show.
+     Goal, objective and target are the nouns; "are we on target" and
+     "what did we say we would do" are how somebody asks without using
+     any of them. */
+  /\bwhat\s+are\s+(?:our|the|my)\s+(?:goals|objectives|targets)\b/i,
+  /\bhow\s+are\s+we\s+tracking\s+(?:against|on)\b/i,
+  /\bare\s+we\s+on\s+(?:target|track)\b/i,
+  /\bwhat\s+did\s+we\s+say\s+we\s+(?:would|d)\s+do\b/i,
 ];
 
 function matchGoalsIntent(message: string): Params | null {

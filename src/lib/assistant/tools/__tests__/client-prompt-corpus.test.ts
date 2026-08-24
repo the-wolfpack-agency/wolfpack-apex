@@ -57,6 +57,11 @@ const MUST_NOT_MATCH: Array<[string, string]> = [
   ["what did the technician write on the repair order?", "service work, no tool yet"],
   ["my customer is angry about a delay, what do I say?", "advice, not a lookup"],
   ["the car arrived damaged, who do I tell?", "arrived contains arr"],
+  /* Widening the task matcher put these within reach. "remind the dealer"
+     is somebody ELSE being reminded, and "a note OF the mileage" is a
+     record rather than a thing to do. */
+  ["remind the dealer to call us", "somebody else being reminded"],
+  ["make a note of the mileage", "a record, not a task"],
   /* The other side of widening the capability matcher. Each of these
      carries an OBJECT, which is the whole discriminator: asking what the
      assistant can help with is asking for the menu, asking what it can
