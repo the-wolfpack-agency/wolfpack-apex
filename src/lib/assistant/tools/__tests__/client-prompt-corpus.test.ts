@@ -62,6 +62,11 @@ const MUST_NOT_MATCH: Array<[string, string]> = [
      record rather than a thing to do. */
   ["remind the dealer to call us", "somebody else being reminded"],
   ["make a note of the mileage", "a record, not a task"],
+  /* The discriminator for a message is WHO is being told. These point the
+     other way: somebody asking to BE told. A compose form in answer to a
+     question is the trespass to avoid. */
+  ["let me know if that works", "asking to be told"],
+  ["let us know the outcome", "asking to be told"],
   /* The other side of widening the capability matcher. Each of these
      carries an OBJECT, which is the whole discriminator: asking what the
      assistant can help with is asking for the menu, asking what it can
@@ -140,6 +145,19 @@ const MUST_MATCH: Array<[string, string[]]> = [
   ["what came in overnight", ["email_thread_widget"]],
   ["check my inbox", ["email_thread_widget"]],
   ["any new email", ["email_thread_widget"]],
+  /* Telling somebody something rarely uses the word "message". All five
+     ordinary phrasings reached a model, which cannot send anything, so
+     the person got a paragraph about how they might word it instead of a
+     draft with a send button and a confirmation step. */
+  ["tell the team it is ready for review", ["create_message_form"]],
+  ["let the dealer know the part arrived", ["create_message_form"]],
+  ["send a note to Dana about the delay", ["create_message_form"]],
+  ["post to the channel that we are live", ["create_message_form"]],
+  /* Pinned here rather than as a must-not-match because org facts
+     legitimately answers it: it is a question ABOUT an account. What must
+     never happen is a compose form appearing in answer to a question, and
+     the trespass check enforces exactly that. */
+  ["tell me about the Ackerman account", ["get_org_facts"]],
   ["brief me on my 10am", ["meeting_prep"]],
   ["get me ready for the meeting", ["meeting_prep"]],
   ["what do I need to know before this call", ["meeting_prep"]],
