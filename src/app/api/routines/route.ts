@@ -26,6 +26,7 @@ import { listSchedules } from "@/lib/assistant/routines/schedule-store";
 import { describeSchedule } from "@/lib/assistant/routines/schedule";
 import { humanStepFindings } from "@/lib/assistant/routines/human-insight";
 import { BUILT_IN_ROUTINES } from "@/lib/assistant/routines/catalogue";
+import { buildAreaMap, describeAreaMap } from "@/lib/assistant/routines/area-map";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -99,6 +100,14 @@ export async function GET(req: NextRequest) {
         humanSteps: r.steps.filter((s) => s.kind === "human").length,
         plan: planOf(r.steps),
       })),
+      /* Derived from the templates on every request rather than stored:
+         a map that can go stale is a map somebody will eventually read as
+         current. It is cheap, it is pure, and it changes the day a chain
+         is added rather than the day somebody remembers to redraw it. */
+      areaMap: (() => {
+        const map = buildAreaMap();
+        return { ...map, summary: describeAreaMap(map) };
+      })(),
       schedules: schedules.map((s) => ({
         command: s.command,
         when: describeSchedule(s.schedule),
