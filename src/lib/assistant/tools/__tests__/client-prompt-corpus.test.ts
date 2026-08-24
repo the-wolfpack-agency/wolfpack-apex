@@ -57,6 +57,14 @@ const MUST_NOT_MATCH: Array<[string, string]> = [
   ["what did the technician write on the repair order?", "service work, no tool yet"],
   ["my customer is angry about a delay, what do I say?", "advice, not a lookup"],
   ["the car arrived damaged, who do I tell?", "arrived contains arr"],
+  /* Widening feedback and the feature form put these in reach. A broken
+     car is not a broken page, and a client wanting to cancel is not a
+     feature request. */
+  ["the car is broken", "a vehicle, not the software"],
+  ["the client wants to cancel", "a cancellation, not a request"],
+  /* "Spend" is also a word about time. Money has an amount or a period
+     attached; a day is not either. */
+  ["how should I spend today", "spending time, not money"],
   /* Widening the diary matcher put these in reach. Booking a car in for a
      service and blocking somebody from a portal are not calendar
      entries, and neither is a question about billed hours. */
@@ -165,6 +173,19 @@ const MUST_MATCH: Array<[string, string[]]> = [
   ["log 2 hours on the recall job", ["log_time"]],
   ["record 90 minutes on the handover", ["log_time"]],
   ["log my time for today", ["log_time"]],
+  /* The moment somebody says it is broken is the moment to catch it. All
+     of these reached a model, which listened and recorded nothing, and
+     "report a bug" went to the GitHub issue SEARCH, so somebody
+     reporting a fault was shown a list of other people's. */
+  ["this is broken", ["feedback"]],
+  ["report a bug", ["feedback"]],
+  ["something is not working", ["feedback"]],
+  ["this page is wrong", ["feedback"]],
+  /* How a request actually arrives: somebody repeating what they were
+     just told. Otherwise it stays in a mailbox. */
+  ["the client wants a new report", ["create_feature_form"]],
+  ["log a feature request", ["create_feature_form"]],
+  ["raise a feature request for bulk upload", ["create_feature_form"]],
   /* Telling somebody something rarely uses the word "message". All five
      ordinary phrasings reached a model, which cannot send anything, so
      the person got a paragraph about how they might word it instead of a

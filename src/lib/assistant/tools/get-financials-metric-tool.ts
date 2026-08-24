@@ -62,7 +62,23 @@ const HINT_RES: RegExp[] = FINANCIAL_HINTS.map((h) =>
     : new RegExp(`\\b${h}\\b`, "i"),
 );
 
+/**
+ * "Spend" is also a word about time.
+ *
+ * "how should I spend today" reached the financials tool, because spend
+ * is a money hint and the sentence is a question. Same shape as "arr"
+ * inside "warranty": a word that means one thing in this tool's domain
+ * and another in ordinary speech.
+ *
+ * The tell is what is being spent. Money has an amount or a period
+ * attached; a day, a morning and an hour are time, and somebody asking
+ * how to spend one is asking about their diary.
+ */
+const SPENDING_TIME_RE =
+  /\bspend\s+(?:my\s+|the\s+|his\s+|her\s+|their\s+)?(?:time|day|morning|afternoon|week|hour|evening)\b|\bhow\s+should\s+i\s+spend\s+(?:today|tomorrow|this\s+\w+)\b/i;
+
 function matchFinancialsIntent(message: string): Params | null {
+  if (SPENDING_TIME_RE.test(message)) return null;
   const lower = message.toLowerCase();
   /* Require both a financial-term keyword AND a question-y framing
      so casual mentions ("revenue is up") don't accidentally fire. */

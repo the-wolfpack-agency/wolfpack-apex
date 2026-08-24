@@ -77,8 +77,30 @@ interface FeedbackData {
  *   - whitespace-only + body, no slash → compose  (natural language)
  *   - nothing after the stem           → compose  (bare command)
  */
-const INTENT_RE =
-  /^\s*(\/?)(feedback|i\s+have\s+feedback|share\s+feedback)\b([:\s]*)(.*)$/i;
+/**
+ * The moment somebody says it is broken is the moment to catch it.
+ *
+ * This wanted the literal word "feedback". Swept 2026-08-24: "this is
+ * broken", "something is not working" and "this page is wrong" all
+ * reached a model, which listened sympathetically and recorded nothing.
+ * "report a bug" went to the GitHub issue SEARCH, so somebody reporting a
+ * fault was shown a list of other people's.
+ *
+ * That is the worst possible moment to lose somebody's words. They are
+ * already annoyed, they have told us once, and if it goes nowhere they do
+ * not tell us twice. The production backlog has "this platform still
+ * sucks" in it three times, recorded as an unanswered question rather
+ * than as the feedback it plainly was.
+ */
+const INTENT_RE = new RegExp(
+  [
+    String.raw`^\s*(\/?)(feedback|i\s+have\s+feedback|share\s+feedback)\b([:\s]*)(.*)$`,
+    String.raw`^\s*()(report\s+a\s+bug|log\s+a\s+bug|raise\s+a\s+bug)\b([:\s]*)(.*)$`,
+    String.raw`^\s*()(this\s+is\s+broken|something\s+is\s+(?:not\s+working|broken)|this\s+(?:page|screen|button)\s+is\s+(?:wrong|broken))\b([:\s]*)(.*)$`,
+    String.raw`^\s*()(i\s+want\s+to\s+(?:give\s+feedback|report\s+something))\b([:\s]*)(.*)$`,
+  ].join("|"),
+  "i",
+);
 
 export function matchFeedbackIntent(message: string): Params | null {
   const trimmed = (message ?? "").trim();
