@@ -57,6 +57,11 @@ const MUST_NOT_MATCH: Array<[string, string]> = [
   ["what did the technician write on the repair order?", "service work, no tool yet"],
   ["my customer is angry about a delay, what do I say?", "advice, not a lookup"],
   ["the car arrived damaged, who do I tell?", "arrived contains arr"],
+  /* Widening the diary matcher put these in reach. Booking a car in for a
+     service and blocking somebody from a portal are not calendar
+     entries, and neither is a question about billed hours. */
+  ["book the car in for a service", "a service booking, not a diary entry"],
+  ["block the dealer from the portal", "an access change, not a diary entry"],
   /* Widening the task matcher put these within reach. "remind the dealer"
      is somebody ELSE being reminded, and "a note OF the mileage" is a
      record rather than a thing to do. */
@@ -158,6 +163,14 @@ const MUST_MATCH: Array<[string, string[]]> = [
      never happen is a compose form appearing in answer to a question, and
      the trespass check enforces exactly that. */
   ["tell me about the Ackerman account", ["get_org_facts"]],
+  /* Putting something in the diary without saying "meeting". What these
+     have instead of a noun is a DURATION, which is what somebody says
+     when the point is the time rather than the occasion. */
+  ["book me 30 minutes with Dana tomorrow", ["create_calendar_event_form"]],
+  ["block an hour tomorrow morning", ["create_calendar_event_form"]],
+  ["put a hold in for the handover", ["create_calendar_event_form"]],
+  ["what is happening across my tools", ["cross_tool_insights_widget"]],
+  ["what patterns do you see", ["cross_tool_insights_widget"]],
   ["brief me on my 10am", ["meeting_prep"]],
   ["get me ready for the meeting", ["meeting_prep"]],
   ["what do I need to know before this call", ["meeting_prep"]],

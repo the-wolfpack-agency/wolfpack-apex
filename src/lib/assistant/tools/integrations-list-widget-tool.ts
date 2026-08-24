@@ -53,14 +53,29 @@ interface IntegrationsListData {
  * to, can you see, can you read, are you plugged into, do you integrate
  * with.
  */
+const LEAD = "(?:so|and|ok(?:ay)?|right|hey|but)?[\\s,]*";
+
 const INTENT_RE = new RegExp(
   [
     `\\b(list|show|see|what)\\s+(all\\s+)?(my\\s+)?(integrations?|widgets?|connectors?|tools?)\\b`,
     `\\bwhat\\s+can\\s+(the\\s+)?assistant\\s+do\\b`,
-    `\\b(?:do|can)\\s+you\\s+(?:have\\s+)?(?:access\\s+to|see|read|reach|get\\s+(?:to|at))\\b`,
-    `\\b(?:are|is)\\s+you\\s*(?:connected|plugged\\s+in(?:to)?|hooked\\s+up)\\b`,
-    `\\bare\\s+you\\s+connected\\s+to\\b`,
-    `\\bdo\\s+you\\s+integrate\\s+with\\b`,
+    /* ANCHORED TO THE START, which the first version was not.
+       "what patterns do you see" contains "do you see" and was claimed by
+       this tool, so somebody asking what the product had noticed got a
+       list of integrations. A connectivity question OPENS with the verb;
+       when the same words appear later in a sentence they belong to
+       whatever came before them. Leading filler is allowed because that
+       is how people carry on a conversation. */
+    `^${LEAD}(?:do|can)\\s+you\\s+(?:have\\s+)?(?:access\\s+to|see|read|reach|get\\s+(?:to|at))\\b`,
+    /* "what systems can you see" asks the same thing with the noun in
+       front. Restricted to SYSTEM nouns, which is what keeps "what
+       patterns do you see" out: the noun is the whole discriminator once
+       the verb has moved. */
+    `\\b(?:what|which|how\\s+many)\\s+(?:systems?|tools?|integrations?|connectors?|sources?|platforms?)\\s+(?:can|do)\\s+you\\s+(?:see|access|reach|read|use)\\b`,
+    `\\b(?:which|what)\\s+(?:integrations?|connectors?|systems?)\\s+(?:are|is)\\s+(?:set\\s+up|connected|configured|live)\\b`,
+    `^${LEAD}(?:are|is)\\s+you\\s*(?:connected|plugged\\s+in(?:to)?|hooked\\s+up)\\b`,
+    `^${LEAD}are\\s+you\\s+connected\\s+to\\b`,
+    `^${LEAD}do\\s+you\\s+integrate\\s+with\\b`,
     `\\bwhat\\s+(?:are\\s+you|do\\s+you)\\s+connect(?:ed)?\\s+to\\b`,
   ].join("|"),
   "i",
