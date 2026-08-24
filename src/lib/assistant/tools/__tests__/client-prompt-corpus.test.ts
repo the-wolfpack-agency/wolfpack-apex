@@ -73,6 +73,11 @@ const MUST_NOT_MATCH: Array<[string, string]> = [
      not answer for the runner, or "run my morning" becomes a menu. */
   ["run my morning", "starts a chain, does not list them"],
   ["start my day", "starts a chain, does not list them"],
+  /* "can you see" is also an idiom. Somebody checking they have been
+     understood is not asking what this is plugged into, and the tell is
+     that a question word follows the verb rather than a system. */
+  ["can you see what I mean", "an idiom, not a connectivity question"],
+  ["can you see if the invoice went out", "a lookup, not a connectivity question"],
 ];
 
 describe("prompts a dealership types that no tool should claim", () => {
@@ -144,6 +149,19 @@ const MUST_MATCH: Array<[string, string[]]> = [
   ["show me the routines", ["routine_templates", "search"]],
   ["list my automations", ["routine_templates"]],
   ["what can I automate", ["routine_templates"]],
+  /* WHAT AM I CONNECTED TO IS A QUESTION ABOUT REALITY.
+     "what tools are you connected to?" was answered from the live
+     registry. "do you have access to our CRM?" matched nothing, reached a
+     model, and the model answered out of the knowledge base: "Yes, I have
+     access to your CRM system integrated into the wolfpack-auto
+     platform." Every clause of that is a claim about what THIS product
+     can reach, made from a document about a different one.
+     A missing capability is a gap. A claimed one that does not exist is
+     the thing a client discovers by relying on it. */
+  ["do you have access to our CRM?", ["integrations_list_widget"]],
+  ["can you see my email?", ["integrations_list_widget"]],
+  ["are you connected to Salesforce?", ["integrations_list_widget"]],
+  ["do you integrate with HubSpot?", ["integrations_list_widget"]],
 ];
 
 describe("prompts that must reach the tool built for them", () => {

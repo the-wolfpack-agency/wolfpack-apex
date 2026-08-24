@@ -27,11 +27,60 @@ interface IntegrationsListData {
   integrationCount: number;
 }
 
-const INTENT_RE =
-  /\b(list|show|see|what)\s+(all\s+)?(my\s+)?(integrations?|widgets?|connectors?|tools?)\b|\bwhat\s+can\s+(the\s+)?assistant\s+do\b/i;
+/**
+ * WHAT AM I CONNECTED TO IS A QUESTION ABOUT REALITY.
+ *
+ * "what tools are you connected to?" matched and was answered from the
+ * live registry. "do you have access to our CRM?" matched nothing, fell
+ * through to a model, and the model answered out of the knowledge base:
+ *
+ *   > do you have access to our CRM?
+ *   < Yes, I have access to your CRM system integrated into the
+ *     wolfpack-auto platform. This includes client profiles, leads,
+ *     communication history, inventory, and analytics.
+ *
+ * Measured against the deployed assistant on 2026-08-24. Every clause of
+ * that is a claim about what this product can reach, made from a document
+ * describing a different product, and told to somebody who would plan
+ * around it.
+ *
+ * A missing capability is a gap. A CLAIMED capability that does not exist
+ * is a different thing entirely, and it is the one a client discovers by
+ * relying on it. So the question is answered from the registry, which
+ * knows, and never from retrieval, which is only ever quoting somebody.
+ *
+ * The phrasings are the ones people use to ask it: connected to, access
+ * to, can you see, can you read, are you plugged into, do you integrate
+ * with.
+ */
+const INTENT_RE = new RegExp(
+  [
+    `\\b(list|show|see|what)\\s+(all\\s+)?(my\\s+)?(integrations?|widgets?|connectors?|tools?)\\b`,
+    `\\bwhat\\s+can\\s+(the\\s+)?assistant\\s+do\\b`,
+    `\\b(?:do|can)\\s+you\\s+(?:have\\s+)?(?:access\\s+to|see|read|reach|get\\s+(?:to|at))\\b`,
+    `\\b(?:are|is)\\s+you\\s*(?:connected|plugged\\s+in(?:to)?|hooked\\s+up)\\b`,
+    `\\bare\\s+you\\s+connected\\s+to\\b`,
+    `\\bdo\\s+you\\s+integrate\\s+with\\b`,
+    `\\bwhat\\s+(?:are\\s+you|do\\s+you)\\s+connect(?:ed)?\\s+to\\b`,
+  ].join("|"),
+  "i",
+);
+
+/**
+ * "can you see" is also an idiom.
+ *
+ * "can you see what I mean" is somebody checking they have been
+ * understood, not asking what this is plugged into, and answering it with
+ * a list of integrations is its own small absurdity. The tell is what
+ * follows the verb: a system has a determiner in front of it, and a
+ * rhetorical one is followed by a question word.
+ */
+const IDIOM_RE = /\b(?:see|read|reach)\s+(?:what|why|how|if|whether|where)\b/i;
 
 function matchIntent(message: string): Params | null {
-  if (!INTENT_RE.test(message.trim())) return null;
+  const m = message.trim();
+  if (IDIOM_RE.test(m)) return null;
+  if (!INTENT_RE.test(m)) return null;
   return {};
 }
 
