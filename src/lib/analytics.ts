@@ -1140,6 +1140,12 @@ export type InstinctEventType =
   //     thousands of identical rows a day is a worse kind of silence than none.
   //     Written straight to the table rather than through trackEvent, because
   //     analytics.ts calls triple-write and the loop would feed itself.
+  //   system.brain_semantic_degraded { reason, error? } - the semantic half of
+  //   a brain search did not run, or ran and threw. Keyword results still
+  //   answer, so the user sees no error, which is exactly why this has to be
+  //   recorded: measured 2026-08-24, 252 brain queries over 30 days with zero
+  //   semantic hits and nobody aware.
+  | "system.brain_semantic_degraded"
   | "system.triple_write_degraded"
   //   assistant.follow_through_resolved { resolved } - a bare "ok, do that" was
   //     resolved against the previous turn ("ran_offer") or answered with a

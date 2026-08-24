@@ -54,6 +54,7 @@ import {
 import { getAIClient, NoProviderAvailableError } from "@/lib/ai";
 import { selectAssistantTier, parseTierDirective, type TierDirective } from "@/lib/assistant/model-tier";
 import { fenceUntrusted, type PromptPart } from "@/lib/ai/provenance";
+import { carriesEnoughToQuote } from "@/lib/brain/confidence";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -2227,9 +2228,24 @@ async function tryBrain(
     // reasonable tsrank score. ts_rank_cd returns values typically in
     // [0, 1]; 0.05 is a conservative floor that filters out barely-
     // tangential chunks without missing real signal.
+    /* A KEYWORD-ONLY MATCH IS NOT EVIDENCE THE DOCUMENT IS ABOUT THE QUESTION.
+     *
+     * Measured against the real index on 2026-08-24, ts_rank_cd put "yes" at
+     * 0.5000, "ok do that" at 0.4000 and "thanks" at 0.3000: the three highest
+     * scores in the sample, above every genuine question, while a real question
+     * about time-off policy scored 0.0404 and was rejected. The score tracks how
+     * short the query is, not how relevant the chunk is, so no floor separates
+     * them. That is how "start my day" came back with a chunk of a Porsche
+     * mobile coaching spreadsheet.
+     *
+     * Semantic hits are exempt: an embedding match IS evidence of aboutness.
+     * Which matters more than it looks, because on the same day the production
+     * log showed 252 brain queries in 30 days and NOT ONE semantic hit, so in
+     * practice every answer here has been taking the keyword branch. */
+    const quotable = carriesEnoughToQuote(message);
     const strong = result.hits.filter((h) => {
       if (h.source.includes("semantic")) return true;
-      return h.score >= 0.05;
+      return quotable && h.score >= 0.05;
     });
     if (strong.length === 0) return { strong: null, context };
 
