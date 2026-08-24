@@ -65,6 +65,12 @@ const MUST_NOT_MATCH: Array<[string, string]> = [
   /* "Spend" is also a word about time. Money has an amount or a period
      attached; a day is not either. */
   ["how should I spend today", "spending time, not money"],
+  /* Identical grammar to a bug report and not one. The UI noun is what
+     separates them: icons and attachments are ours, dealers and clients
+     are not. */
+  ["the dealer doesnt want the car", "a business fact, not a bug"],
+  ["the client cannot attend friday", "a business fact, not a bug"],
+  ["the car isnt ready", "a business fact, not a bug"],
   /* Widening the diary matcher put these in reach. Booking a car in for a
      service and blocking somebody from a portal are not calendar
      entries, and neither is a question about billed hours. */
@@ -160,6 +166,13 @@ const MUST_MATCH: Array<[string, string[]]> = [
   ["anything overdue", ["task_list_widget"]],
   ["my open tasks", ["task_list_widget"]],
   ["what came in overnight", ["email_thread_widget"]],
+  /* Taken from the production backlog rather than guessed. Every one was
+     filed as an unanswered question and answered by a model, which
+     listened and recorded nothing. Nobody writes "I have feedback": they
+     describe the thing that did not happen. */
+  ["the ai agent widget icon doesnt appear on messages", ["feedback"]],
+  ["this attachment wont send unless i type into the field", ["feedback"]],
+  ["the export isnt working", ["feedback"]],
   ["check my inbox", ["email_thread_widget"]],
   ["any new email", ["email_thread_widget"]],
   /* Three tools that were command-shaped and unreachable by any natural
