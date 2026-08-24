@@ -18,8 +18,13 @@
         ]
       },
       "expect": {
-        "sourceNot": ["knowledge_cache"],
-        "answerNotContains": ["Morning Briefing", "dashboard"]
+        "sourceNot": [
+          "knowledge_cache"
+        ],
+        "answerNotContains": [
+          "Morning Briefing",
+          "dashboard"
+        ]
       }
     },
     {
@@ -32,8 +37,12 @@
       },
       "expect": {
         "source": "ai",
-        "answerContains": ["qubits"],
-        "answerNotContains": ["I don't have a confident answer"]
+        "answerContains": [
+          "qubits"
+        ],
+        "answerNotContains": [
+          "I don't have a confident answer"
+        ]
       }
     },
     {
@@ -54,7 +63,9 @@
       },
       "expect": {
         "source": "knowledge_cache",
-        "answerContains": ["JWT"]
+        "answerContains": [
+          "JWT"
+        ]
       }
     },
     {
@@ -67,7 +78,9 @@
       },
       "expect": {
         "source": "ai",
-        "answerContains": ["476"]
+        "answerContains": [
+          "476"
+        ]
       }
     },
     {
@@ -88,14 +101,19 @@
         "aiResponse": "Hi! How can I help?"
       },
       "expect": {
-        "sourceNot": ["knowledge_cache"],
-        "answerNotContains": ["hiring process", "resume"]
+        "sourceNot": [
+          "knowledge_cache"
+        ],
+        "answerNotContains": [
+          "hiring process",
+          "resume"
+        ]
       }
     },
     {
       "id": "regression-low-rating-kb-skipped",
       "category": "regression",
-      "rationale": "Entries rated <= 2 must be skipped even when sim is high — they're explicitly graded wrong by the team. Without this, a downvoted answer would still be served.",
+      "rationale": "Entries rated <= 2 must be skipped even when sim is high \u2014 they're explicitly graded wrong by the team. Without this, a downvoted answer would still be served.",
       "question": "what is our refund policy",
       "mocks": {
         "kb": [
@@ -110,8 +128,12 @@
         "aiResponse": "Refund policy details aren't in the knowledge base yet."
       },
       "expect": {
-        "sourceNot": ["knowledge_cache"],
-        "answerNotContains": ["We do not offer refunds"]
+        "sourceNot": [
+          "knowledge_cache"
+        ],
+        "answerNotContains": [
+          "We do not offer refunds"
+        ]
       }
     },
     {
@@ -133,7 +155,7 @@
     {
       "id": "edge-kb-just-above-threshold",
       "category": "edge_case",
-      "rationale": "Sim of 0.45 (exactly at KB_MIN_SIMILARITY) must pass — boundary check guards against threshold drift. Question avoids tool-intent regexes ('tell me about X', 'what do we know about X') so the KB path is the one being exercised.",
+      "rationale": "Sim of 0.45 (exactly at KB_MIN_SIMILARITY) must pass \u2014 boundary check guards against threshold drift. Question avoids tool-intent regexes ('tell me about X', 'what do we know about X') so the KB path is the one being exercised.",
       "question": "how does our authentication flow work end to end",
       "mocks": {
         "kb": [
@@ -148,7 +170,9 @@
       },
       "expect": {
         "source": "knowledge_cache",
-        "answerContains": ["JWT"]
+        "answerContains": [
+          "JWT"
+        ]
       }
     },
     {
@@ -166,11 +190,15 @@
             "rating": 5
           }
         ],
-        "aiResponse": "I'd be happy to help — what topic?"
+        "aiResponse": "I'd be happy to help \u2014 what topic?"
       },
       "expect": {
-        "sourceNot": ["knowledge_cache"],
-        "answerNotContains": ["JWT"]
+        "sourceNot": [
+          "knowledge_cache"
+        ],
+        "answerNotContains": [
+          "JWT"
+        ]
       }
     },
     {
@@ -192,7 +220,10 @@
       "rationale": "'Calendar Monday' (the page name + a weekday) used to fire page-facts and return the Calendar page description. The weekday hint signals a date-bound calendar lookup; page-facts must bypass when a weekday name is in the question (shouldBypassKnowledgeCache extension), and the calendar tool's bare-keyword shortcut pattern picks it up as a self-query.",
       "question": "Calendar Monday",
       "expect": {
-        "sourceNot": ["page_facts", "knowledge_cache"],
+        "sourceNot": [
+          "page_facts",
+          "knowledge_cache"
+        ],
         "answerNotContains": [
           "Your Microsoft 365 calendar view",
           "Open it: Calendar"
@@ -202,13 +233,15 @@
     {
       "id": "regression-2026-05-15-what-meetings-do-i-have-phrasing",
       "category": "regression",
-      "rationale": "'what meetings do I have on Monday' previously fell through to a calendar lookup with empty timeframe, which resolved to today and returned 'You look free today.' The new leading-noun pattern matches '(?:what|any) meetings ... (on)? <timeframe>' so the actual day captured drives the lookup.",
+      "rationale": "'what meetings do I have on Monday' previously fell through to a calendar lookup with an empty timeframe, which resolved to TODAY. The guard is that the day named in the question drives the lookup. It asserted that by forbidding the phrase 'free today', which is a proxy, and the proxy is wrong one day in seven: when the day asked for IS today, 'You look free today (Monday)' is the correct answer and the case failed anyway. It failed on main at 00:10 UTC on a Monday having passed all Sunday. It now asserts the thing it cares about, which is that the answer names the day that was asked for.",
       "question": "what meetings do I have on Monday",
       "expect": {
-        "sourceNot": ["page_facts", "knowledge_cache"],
-        "answerNotContains": [
-          "You look free today",
-          "free today"
+        "sourceNot": [
+          "page_facts",
+          "knowledge_cache"
+        ],
+        "answerContains": [
+          "Monday"
         ]
       }
     },
@@ -219,7 +252,12 @@
       "question": "create a contact named Jane Doe email jane@acme.com",
       "expect": {
         "source": "tool",
-        "answerContains": ["create", "contact", "Jane", "confirm"],
+        "answerContains": [
+          "create",
+          "contact",
+          "Jane",
+          "confirm"
+        ],
         "answerNotContains": [
           "I don't have a confident answer",
           "Created in",
@@ -234,8 +272,15 @@
       "question": "move the Acme Renewal to Closed Won",
       "expect": {
         "source": "tool",
-        "answerContains": ["update", "Acme Renewal", "Closed Won", "confirm"],
-        "answerNotContains": ["✓ Updated"]
+        "answerContains": [
+          "update",
+          "Acme Renewal",
+          "Closed Won",
+          "confirm"
+        ],
+        "answerNotContains": [
+          "\u2713 Updated"
+        ]
       }
     },
     {
@@ -254,7 +299,7 @@
     {
       "id": "happy-filter-deals-over-amount-routes-to-tool",
       "category": "happy_path",
-      "rationale": "'deals over $50k closing this month' is the canonical sales-reporting query. It must route to the filter tool — not get_external_record (would treat '$50k' as an ID), not search (no name match).",
+      "rationale": "'deals over $50k closing this month' is the canonical sales-reporting query. It must route to the filter tool \u2014 not get_external_record (would treat '$50k' as an ID), not search (no name match).",
       "question": "deals over $50k closing this month",
       "expect": {
         "source": "tool",
@@ -267,21 +312,25 @@
     {
       "id": "happy-aggregate-count-routes-to-tool",
       "category": "happy_path",
-      "rationale": "'how many deals are in the pipeline' is the canonical CEO query. Routes to aggregate_external_records → SOQL COUNT(Id). Must not match filter_external_records, get_external_record, or LLM fallback.",
+      "rationale": "'how many deals are in the pipeline' is the canonical CEO query. Routes to aggregate_external_records \u2192 SOQL COUNT(Id). Must not match filter_external_records, get_external_record, or LLM fallback.",
       "question": "how many deals are in the pipeline",
       "expect": {
         "source": "tool",
-        "answerNotContains": ["I don't have a confident answer"]
+        "answerNotContains": [
+          "I don't have a confident answer"
+        ]
       }
     },
     {
       "id": "happy-aggregate-win-rate-routes-to-tool",
       "category": "happy_path",
-      "rationale": "'what's my win rate' is the canonical sales-leader query. Routes to aggregate_external_records → SOQL GROUP BY IsWon. Must not match other tools or fall to LLM.",
+      "rationale": "'what's my win rate' is the canonical sales-leader query. Routes to aggregate_external_records \u2192 SOQL GROUP BY IsWon. Must not match other tools or fall to LLM.",
       "question": "what's my win rate this quarter",
       "expect": {
         "source": "tool",
-        "answerNotContains": ["I don't have a confident answer"]
+        "answerNotContains": [
+          "I don't have a confident answer"
+        ]
       }
     },
     {
@@ -291,7 +340,9 @@
       "question": "top 5 accounts by revenue",
       "expect": {
         "source": "tool",
-        "answerNotContains": ["I don't have a confident answer"]
+        "answerNotContains": [
+          "I don't have a confident answer"
+        ]
       }
     },
     {
@@ -300,13 +351,19 @@
       "rationale": "Porsche-class snapshots now ground the assistant via context-resolver. The grounding-block fixture below is what searchPorscheClassNotes would render for 'what changed in BA101 on April 20'. The AI mock must cite the +2 added participants so we know the prompt block reached the LLM (not just that the SQL ran). This is the smoke test for the new grounding lane end-to-end.",
       "question": "what changed in BA101 on April 20",
       "mocks": {
-        "groundingBlock": "Internal context (cite if you use it):\n\n[Meeting] BA101 2026-04-20 Atlanta — 2026-04-20T15:00:00Z\n12 participants · +2 added (Smith, Jones)\n/automations/porsche-classes\n",
+        "groundingBlock": "Internal context (cite if you use it):\n\n[Meeting] BA101 2026-04-20 Atlanta \u2014 2026-04-20T15:00:00Z\n12 participants \u00b7 +2 added (Smith, Jones)\n/automations/porsche-classes\n",
         "aiResponse": "BA101 on April 20 in Atlanta had 12 participants. Two new attendees joined: Smith and Jones."
       },
       "expect": {
         "source": "ai",
-        "answerContains": ["BA101", "Smith", "Jones"],
-        "answerNotContains": ["I don't have a confident answer"]
+        "answerContains": [
+          "BA101",
+          "Smith",
+          "Jones"
+        ],
+        "answerNotContains": [
+          "I don't have a confident answer"
+        ]
       }
     },
     {
@@ -316,13 +373,15 @@
       "question": "search porsche",
       "expect": {
         "source": "tool",
-        "answerNotContains": ["I don't have a confident answer"]
+        "answerNotContains": [
+          "I don't have a confident answer"
+        ]
       }
     },
     {
       "id": "regression-2026-05-19-search-typed-crm-still-wins",
       "category": "regression",
-      "rationale": "Typed-object CRM intent must continue to win over the broader `search` tool when both are registered. 'find the contact for Acme' belongs to search_external_records — it has object-type-aware rendering Universal Search can't replicate. If TYPED_CRM_RE inside search.matchIntent ever stops claiming the typed phrasings, this case catches the shadowing regression.",
+      "rationale": "Typed-object CRM intent must continue to win over the broader `search` tool when both are registered. 'find the contact for Acme' belongs to search_external_records \u2014 it has object-type-aware rendering Universal Search can't replicate. If TYPED_CRM_RE inside search.matchIntent ever stops claiming the typed phrasings, this case catches the shadowing regression.",
       "question": "find the contact for Acme",
       "expect": {
         "source": "tool",
@@ -351,14 +410,18 @@
       "question": "search xyznotarealthing",
       "expect": {
         "source": "tool",
-        "answerContains": ["No results"],
-        "answerNotContains": ["I don't have a confident answer"]
+        "answerContains": [
+          "No results"
+        ],
+        "answerNotContains": [
+          "I don't have a confident answer"
+        ]
       }
     },
     {
       "id": "regression-2026-05-19-weather",
       "category": "regression",
-      "rationale": "Empty-state demo tool — a brand-new user with zero integrations connected can ask 'weather in Boston' and the `weather` tool routes the dispatch, hits Open-Meteo, and returns a populated WeatherWidget. Pins the routing contract; if a future change shadows the intent OR removes the tool from the registry, the answer drops to AI fallback and this case catches it. The eval harness doesn't mock external HTTP, so a real-time Open-Meteo failure could surface here — accept either the populated answer OR the explicit external_api_failed error, as long as the dispatcher routed to a tool.",
+      "rationale": "Empty-state demo tool \u2014 a brand-new user with zero integrations connected can ask 'weather in Boston' and the `weather` tool routes the dispatch, hits Open-Meteo, and returns a populated WeatherWidget. Pins the routing contract; if a future change shadows the intent OR removes the tool from the registry, the answer drops to AI fallback and this case catches it. The eval harness doesn't mock external HTTP, so a real-time Open-Meteo failure could surface here \u2014 accept either the populated answer OR the explicit external_api_failed error, as long as the dispatcher routed to a tool.",
       "question": "weather in Boston",
       "expect": {
         "source": "tool",
@@ -370,7 +433,7 @@
     {
       "id": "regression-2026-05-19-headlines",
       "category": "regression",
-      "rationale": "Empty-state demo tool — 'top news' / 'top headlines' must route to the `headlines` tool. Pins the routing contract; the BBC RSS feed may be unreachable in CI but the dispatcher still hands the answer to the tool layer (success or external_api_failed), never to AI fallback. If a future change shadows the intent the answer drops to AI and this case catches it.",
+      "rationale": "Empty-state demo tool \u2014 'top news' / 'top headlines' must route to the `headlines` tool. Pins the routing contract; the BBC RSS feed may be unreachable in CI but the dispatcher still hands the answer to the tool layer (success or external_api_failed), never to AI fallback. If a future change shadows the intent the answer drops to AI and this case catches it.",
       "question": "top news",
       "expect": {
         "source": "tool",
@@ -382,7 +445,7 @@
     {
       "id": "regression-2026-05-19-fx",
       "category": "regression",
-      "rationale": "Empty-state demo tool — 'fx rate' must route to the `fx` tool. Same routing-contract logic as the weather + headlines cases above. exchangerate.host failure in CI still keeps the dispatch inside the tool layer; if a future change removes the tool from the registry the answer drops to AI fallback and this case catches it.",
+      "rationale": "Empty-state demo tool \u2014 'fx rate' must route to the `fx` tool. Same routing-contract logic as the weather + headlines cases above. exchangerate.host failure in CI still keeps the dispatch inside the tool layer; if a future change removes the tool from the registry the answer drops to AI fallback and this case catches it.",
       "question": "fx rate",
       "expect": {
         "source": "tool",
@@ -406,7 +469,7 @@
     {
       "id": "regression-2026-05-19-meeting-prep",
       "category": "tool_dispatch",
-      "rationale": "Meeting-prep synthesis tool — 'prep for my next meeting' must route to the meeting_prep tool (NOT AI fallback). The tool fans out across 5+ sources and emits a single Haiku call on cache miss (ONE LLM call per workspace+meeting+source-hash). If a future change shadows the intent OR removes the tool from the registry, the answer drops to AI fallback and this case catches it.",
+      "rationale": "Meeting-prep synthesis tool \u2014 'prep for my next meeting' must route to the meeting_prep tool (NOT AI fallback). The tool fans out across 5+ sources and emits a single Haiku call on cache miss (ONE LLM call per workspace+meeting+source-hash). If a future change shadows the intent OR removes the tool from the registry, the answer drops to AI fallback and this case catches it.",
       "question": "prep for my next meeting",
       "expect": {
         "source": "tool",

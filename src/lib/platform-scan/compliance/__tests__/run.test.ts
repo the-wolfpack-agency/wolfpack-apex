@@ -16,6 +16,29 @@ import type { ComplianceFinding } from "../findings";
 // Shared fetch double: `ok` for 2xx only, aborted signals reject immediately.
 import { fakeFetch, htmlResponse, redirectTo } from "../../__tests__/fake-fetch";
 
+/* NO TEST MAY RESOLVE DNS.
+ *
+ * The SSRF guard calls dns.lookup on every URL it clears, including each
+ * hop of a redirect, and its own comment notes that the lookup is not
+ * covered by the scan's abort signal. These suites use example.com and
+ * example.org, which resolve for real, so every redirect test was making
+ * a live DNS query.
+ *
+ * It is invisible on a laptop with a warm resolver and it is a hang on a
+ * CI runner. On 2026-08-23 "reports a redirect target as the URL actually
+ * scanned" exceeded jest's five-second limit and failed a build on a
+ * branch that had touched none of this.
+ *
+ * The lookup is stubbed rather than the guard: the guard's logic still
+ * runs, still rejects private addresses, and simply gets its answer from
+ * here instead of from the network. A public address keeps every existing
+ * expectation true.
+ */
+jest.mock("node:dns/promises", () => ({
+  lookup: jest.fn(async () => [{ address: "93.184.216.34", family: 4 }]),
+}));
+
+
 const PAGE = "https://client.example.com/";
 const ACTOR = { userId: "u1", role: "admin" };
 
