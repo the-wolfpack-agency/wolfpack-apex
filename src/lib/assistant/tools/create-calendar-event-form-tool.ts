@@ -23,8 +23,30 @@ interface CreateCalendarEventFormData {
   formKind: "create_calendar_event";
 }
 
-const INTENT_RE =
-  /\b(?:create|new|schedule|book|add|set\s+up)\s+(?:an?\s+)?(?:calendar\s+)?(?:event|meeting|appointment|call)\b/i;
+/**
+ * PUTTING SOMETHING IN THE DIARY WITHOUT SAYING "MEETING".
+ *
+ * This needed a noun: event, meeting, appointment or call. Swept
+ * 2026-08-24: "book me 30 minutes with Dana tomorrow", "block an hour
+ * tomorrow morning" and "put a hold in for the handover" all missed, and
+ * the first of those is about as ordinary a request as this product will
+ * ever receive.
+ *
+ * What they have instead of a noun is a DURATION or the word hold, which
+ * is what somebody says when the point is the time rather than the
+ * occasion.
+ */
+const INTENT_RE = new RegExp(
+  [
+    `\\b(?:create|new|schedule|book|add|set\\s+up)\\s+(?:an?\\s+)?(?:calendar\\s+)?(?:event|meeting|appointment|call)\\b`,
+    /* "book me 30 minutes with Dana", "block an hour tomorrow" */
+    `\\b(?:book|block|hold|reserve|put\\s+aside)\\s+(?:me\\s+|out\\s+)?(?:an?\\s+|\\d+\\s*)(?:min(?:ute)?s?|hours?|hrs?|h\\b)`,
+    /* "put a hold in for the handover" */
+    `\\bput\\s+(?:an?\\s+)?hold\\s+in\\b`,
+    `\\bblock\\s+(?:out\\s+)?(?:some\\s+)?time\\b`,
+  ].join("|"),
+  "i",
+);
 const TITLE_RE = /\b(?:titled|called|named|about|for)\s+["']?([^"'\n]{2,80})["']?/i;
 
 function matchCalendarEventFormIntent(message: string): Params | null {

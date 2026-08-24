@@ -31,6 +31,15 @@ interface Capability {
   tool: string | null;
   what: string;
   phrasings: string[];
+  /**
+   * Other tools allowed to claim these phrasings.
+   *
+   * Not every co-claim is a defect. Two tools that genuinely overlap on a
+   * question are a JUDGEMENT about how the product is carved up, and a
+   * sweep that reports a judgement as a bug trains people to ignore it.
+   * Naming them here turns each one into a decision somebody wrote down.
+   */
+  alsoFine?: string[];
 }
 
 /* Written as somebody speaks, not as a spec. Contractions, missing
@@ -151,6 +160,11 @@ const CAPABILITIES: Capability[] = [
   {
     tool: "who_is",
     what: "who somebody is",
+    /* Org facts answers questions about people in the organisation and
+       who_is answers questions about a contact. "tell me about Ray
+       Okonkwo" is legitimately either, and which one wins depends on
+       whether Ray works here, which the phrasing does not say. */
+    alsoFine: ["get_org_facts"],
     phrasings: [
       "who is Dana", "who is dana@dealer.test", "tell me about Ray Okonkwo",
       "who am I dealing with here", "what do we know about this person",
@@ -212,6 +226,10 @@ const CAPABILITIES: Capability[] = [
   {
     tool: "search_external_records",
     what: "finding a record in a connected system",
+    /* Universal search fans across every provider including the CRM, so
+       it claiming a record lookup is the design working rather than a
+       tool reaching past itself. Registration order decides. */
+    alsoFine: ["search"],
     phrasings: [
       "find the customer Ackerman", "look up the account for Dana",
       "search the CRM for the dealer group", "pull up the contact for Ray",
@@ -270,6 +288,12 @@ for (const cap of CAPABILITIES) {
     if (cap.tool === null) {
       /* Nothing should claim these. Anything that does is answering for
          a domain it does not cover. */
+      if (hits.some((h) => (cap.alsoFine ?? []).includes(h))) {
+        /* A recorded overlap. Not silence: it still prints, so nobody has
+           to read this file to know the tie exists. */
+        if (!missesOnly) lines.push(`  tie   ${hits.join(", ").padEnd(24)}"${phrase}"`);
+        continue;
+      }
       if (hits.length > 0) {
         trespassed++;
         lines.push(`  CLAIMED by ${hits.join(", ")}  "${phrase}"`);

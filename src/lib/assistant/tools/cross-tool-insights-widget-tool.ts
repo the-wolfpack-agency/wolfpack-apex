@@ -40,7 +40,7 @@ interface CrossToolInsightsData {
  * something specific (e.g. "marketing insights", "sales insights",
  * "customer insights") — those should go to RAG, not the widget. */
 const INTENT_RE =
-  /\b(cross[- ]?tool|cross[- ]?source|cross[- ]?cutting|efficiency)\s+insights?\b|\binsights?\s+across\s+(my\s+)?(tools?|integrations?)\b|\bwhat\s+should\s+i\s+know\b|\bwhat\s+insights?\s+(do\s+i\s+have|are\s+there)\b/i;
+  /\b(cross[- ]?tool|cross[- ]?source|cross[- ]?cutting|efficiency)\s+insights?\b|\binsights?\s+across\s+(my\s+)?(tools?|integrations?)\b|\bwhat\s+should\s+i\s+know\b|\bwhat\s+insights?\s+(do\s+i\s+have|are\s+there)\b|\bwhat\s+(?:is|'?s)\s+happening\s+across\s+(?:my\s+|our\s+)?(?:tools?|systems?|integrations?)\b|\bwhat\s+patterns?\s+(?:do|can)\s+you\s+see\b|\bwhat\s+patterns?\s+are\s+there\b/i;
 
 const SHORT_INTENT_RE =
   /^(insights?|give\s+me\s+insights?|any\s+insights?|show\s+(me\s+)?insights?|what\s+insights?|i\s+want\s+insights?)\s*[!.?]*$/i;
