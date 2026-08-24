@@ -141,6 +141,61 @@ export interface RunSummary {
  * happened lately and what is waiting on me", and a year of history answers
  * neither question while costing more to read.
  */
+/** One executed step, as it was recorded. */
+export interface RunStepRecord {
+  index: number;
+  kind: string;
+  /** The tool it ran. Null on model and human steps, which touch none. */
+  tool: string | null;
+  label: string;
+  status: string;
+  durationMs: number;
+  error: string | null;
+  humanAction: string | null;
+}
+
+/**
+ * The steps of one run, in the order they happened.
+ *
+ * Scoped by workspace AND user on the run, not just by run_id. A run id
+ * is guessable enough that reading somebody else's chain should not come
+ * down to whether they picked a long one, and the step rows carry another
+ * company's labels.
+ */
+export async function stepsForRun(
+  owner: { workspaceId: string; userId: string },
+  runId: string,
+): Promise<RunStepRecord[]> {
+  if (!process.env.DATABASE_URL) return [];
+  try {
+    const { query } = await import("@/lib/db");
+    const { rows } = await query<Record<string, unknown>>(
+      `SELECT s.step_index, s.kind, s.tool, s.label, s.status, s.duration_ms,
+              s.error, s.human_action
+         FROM assistant_routine_steps s
+         JOIN assistant_routine_runs r ON r.run_id = s.run_id
+        WHERE s.run_id = $1
+          AND r.workspace_id = $2
+          AND r.user_id = $3
+     ORDER BY s.step_index`,
+      [runId, owner.workspaceId, owner.userId],
+    );
+    return rows.map((r) => ({
+      index: Number(r.step_index) || 0,
+      kind: String(r.kind),
+      tool: r.tool === null || r.tool === undefined ? null : String(r.tool),
+      label: String(r.label),
+      status: String(r.status),
+      durationMs: Number(r.duration_ms) || 0,
+      error: r.error === null || r.error === undefined ? null : String(r.error),
+      humanAction:
+        r.human_action === null || r.human_action === undefined ? null : String(r.human_action),
+    }));
+  } catch {
+    return [];
+  }
+}
+
 export async function listRecentRuns(
   owner: { workspaceId: string; userId: string },
   limit = 20,
