@@ -34,7 +34,31 @@ export interface QueryExecution extends BrainQueryResult {
   /** DB id of the row inserted into brain_query_log — callers can pass
    *  this to markCited() once the assistant's final answer quotes a hit. */
   query_log_id: number;
+  /**
+   * WHETHER THE OTHER HALF OF THIS SEARCH ACTUALLY RAN.
+   *
+   * "0 semantic hits" was indistinguishable from "semantic never ran", and on
+   * 2026-08-24 that turned out to matter enormously: 252 real brain queries in
+   * the previous 30 days, and NOT ONE of them had a semantic hit. 192 were
+   * keyword-only and 60 found nothing. The hybrid search had been half dead for
+   * at least a month and nothing anywhere said so, because the failure path was
+   * a bare `catch {}` with the comment "degrade silently".
+   *
+   * Callers can now tell the difference, and a non-ok value emits an event.
+   */
+  semantic_status: SemanticStatus;
 }
+
+/** Why the semantic half returned what it returned. */
+export type SemanticStatus =
+  /** Ran, and matched. */
+  | "ok"
+  /** Ran, matched nothing. Legitimate for a query about nothing we hold. */
+  | "empty"
+  /** No embedding provider configured in this deployment. */
+  | "not_configured"
+  /** Configured, and threw. This is the one that hid for a month. */
+  | "failed";
 
 export async function queryBrain(opts: QueryOpts): Promise<QueryExecution> {
   const limit = Math.min(Math.max(opts.limit ?? DEFAULT_LIMIT, 1), 20);
@@ -46,19 +70,44 @@ export async function queryBrain(opts: QueryOpts): Promise<QueryExecution> {
     kind: opts.kind,
   });
 
-  // 2. semantic (best-effort)
+  /* 2. SEMANTIC. Best-effort, but no longer silent.
+   *
+   * This read `catch { // degrade silently }`. Keyword results ARE still
+   * useful, so degrading is right; doing it without a word is not. Measured on
+   * 2026-08-24: 252 brain queries over 30 days, zero semantic hits, nobody
+   * aware. A keyword-only search is a different product from a hybrid one, and
+   * the difference showed up as confidently quoted documents that had nothing
+   * to do with the question. */
   let semantic: Awaited<ReturnType<typeof searchBrain>> = [];
   let tokensUsed = 0;
+  let semanticStatus: SemanticStatus = "not_configured";
+  let semanticError: string | null = null;
   if (isEmbeddingConfigured()) {
     try {
       const emb = await embedBatch([opts.query]);
       if (emb && emb.vectors.length > 0) {
         tokensUsed = emb.tokensUsed;
         semantic = await searchBrain(emb.vectors[0], limit);
+        semanticStatus = semantic.length > 0 ? "ok" : "empty";
+      } else {
+        /* Configured, called, and handed back nothing to search with. That is
+           a broken embedder, not an empty index. */
+        semanticStatus = "failed";
+        semanticError = "embedder returned no vector";
       }
-    } catch {
-      // degrade silently — keyword results are still useful
+    } catch (err) {
+      semanticStatus = "failed";
+      semanticError = (err as Error)?.message?.slice(0, 200) ?? "unknown";
     }
+  }
+  if (semanticStatus !== "ok" && semanticStatus !== "empty") {
+    /* Named after system.triple_write_degraded, which exists for exactly this
+       shape: a fan-out where one leg can fail without the user seeing an
+       error, and therefore must not fail without a record. */
+    trackEvent("system.brain_semantic_degraded", opts.userId, opts.userRole, {
+      reason: semanticStatus,
+      ...(semanticError ? { error: semanticError } : {}),
+    });
   }
 
   // 3. merge by chunk_id
@@ -147,6 +196,7 @@ export async function queryBrain(opts: QueryOpts): Promise<QueryExecution> {
     latency_ms,
     tokens_used: tokensUsed,
     query_log_id: queryLogId,
+    semantic_status: semanticStatus,
   };
 }
 
