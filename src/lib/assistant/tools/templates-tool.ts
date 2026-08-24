@@ -65,6 +65,11 @@ const LIST_RE = new RegExp(
     `\\bpre-?built\\s+workflows?\\b`,
     /* theirs */
     `\\bwhat\\s+(?:could|can)\\s+i\\s+automate\\b`,
+    /* "show me what you can automate" was still missing after the first
+       widening, and it is how somebody asks when they are being shown
+       round rather than searching. The gap was between our nouns and the
+       verb people reach for. */
+    `\\b(?:show\\s+me\\s+)?what\\s+(?:you\\s+)?can\\s+(?:you\\s+)?automate\\b`,
     `\\bwhat\\s+${NOUN}\\s+(?:can|could)\\s+i\\s+(?:run|start|use)\\b`,
     `\\bwhat\\s+${NOUN}\\s+(?:do|have)\\s+(?:you|we|i)\\s+(?:have|got)\\b`,
     `\\bwhat\\s+${NOUN}\\s+are\\s+(?:there|available)\\b`,

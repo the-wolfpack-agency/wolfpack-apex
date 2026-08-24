@@ -1151,6 +1151,11 @@ export type InstinctEventType =
   //     sent to a model that would answer fluently about data it has never seen.
   //     Zero tokens, and the count IS the demand signal for what to connect next.
   | "assistant.answered_not_connected"
+  //   assistant.social_turn { kind } - a greeting, thank-you, farewell or
+  //     "I am new here" was answered as what it is. Before this they reached
+  //     retrieval, which cannot decline: given "hi" it returns the least-far
+  //     document rather than none.
+  | "assistant.social_turn"
   // Aggregate query executed (count / sum / avg / win-rate / top-N).
   // Metadata: { connector, object_type, operation, result_type }.
   | "assistant.connector_aggregate_executed"
