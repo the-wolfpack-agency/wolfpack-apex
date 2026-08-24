@@ -60,7 +60,10 @@ test.describe("/knowledge semantic Q&A cache", () => {
     await page
       .getByPlaceholder(/what would you like to know/i)
       .fill(uniqueQuestion);
-    await page.getByRole("button", { name: "Ask" }).click();
+    /* exact: getByRole matches the accessible name by SUBSTRING, so "Ask"
+   also matched the "Ask a Question" button that opens this panel, and
+   the click hit two elements. */
+    await page.getByRole("button", { name: "Ask", exact: true }).click();
     const firstResp = await firstAskPromise;
     const firstBody = await firstResp.json();
     expect(firstBody.was_cache_hit).toBe(false);
@@ -83,7 +86,10 @@ test.describe("/knowledge semantic Q&A cache", () => {
     await page
       .getByPlaceholder(/what would you like to know/i)
       .fill(uniqueQuestion);
-    await page.getByRole("button", { name: "Ask" }).click();
+    /* exact: getByRole matches the accessible name by SUBSTRING, so "Ask"
+   also matched the "Ask a Question" button that opens this panel, and
+   the click hit two elements. */
+    await page.getByRole("button", { name: "Ask", exact: true }).click();
     const secondResp = await secondAskPromise;
     const secondBody = await secondResp.json();
     expect(secondBody.was_cache_hit).toBe(true);

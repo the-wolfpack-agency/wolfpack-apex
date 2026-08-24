@@ -15,7 +15,7 @@ name: Main verify watch
 
 on:
   workflow_run:
-    workflows: ["Verify"]
+    workflows: ["Verify", "E2E Reality Check"]
     types: [completed]
     branches: [main]
 
@@ -39,8 +39,10 @@ jobs:
             const run = context.payload.workflow_run;
             // A stable marker in the body, so the search finds the same thread
             // every time regardless of how the title is edited by a human.
-            const MARKER = '<!-- main-verify-watch -->';
-            const title = 'Verify is failing on main';
+            // One thread per workflow, so a red Verify and a red reality check do
+            // not end up interleaved in the same issue.
+            const MARKER = `<!-- main-verify-watch:${run.name} -->`;
+            const title = `${run.name} is failing on main`;
 
             const { data: found } = await github.rest.search.issuesAndPullRequests({
               q: `repo:${context.repo.owner}/${context.repo.repo} is:issue is:open label:maint-queue in:body "${MARKER}"`,
@@ -48,7 +50,7 @@ jobs:
             const existing = found.items[0];
 
             const line =
-              `Verify failed on main at ${run.head_sha.slice(0, 7)} ` +
+              `${run.name} failed on main at ${run.head_sha.slice(0, 7)} ` +
               `([run ${run.id}](${run.html_url})), ${run.updated_at}.`;
 
             if (existing) {
