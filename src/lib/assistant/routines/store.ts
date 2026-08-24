@@ -73,10 +73,13 @@ export async function saveRun(run: RoutineRun): Promise<void> {
           run.workspaceId,
           o.index,
           o.kind,
-          /* The tool name is on the routine, not the outcome; recorded as null
-             here rather than guessed, because a wrong tool name in this table
-             would send somebody hunting the wrong step. */
-          null,
+          /* The outcome now carries it. It used to be on the routine only,
+             so this wrote null rather than guess, and every run ever
+             recorded has an empty tool column as a result. Null is still
+             what a model or human step writes, because they touched no
+             tool and saying otherwise would make this table lie about
+             what reached the client's systems. */
+          o.tool ?? null,
           o.label,
           o.status,
           o.durationMs,

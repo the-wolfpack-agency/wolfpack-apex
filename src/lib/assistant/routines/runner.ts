@@ -150,6 +150,7 @@ export async function advance(
           label: step.label,
           status: "waiting",
           durationMs: 0,
+          ...(step.tool ? { tool: step.tool } : {}),
         });
         return {
           ...run,
@@ -280,6 +281,11 @@ async function runStep(
     status: "ok",
     durationMs: 0,
     ...(step.slot ? { slot: step.slot } : {}),
+    /* Only a tool step has one. A model or human step carrying a tool
+       name would make the table lie about what touched the client's
+       systems, which is the one thing this record exists to be right
+       about. */
+    ...(step.kind === "tool" && step.tool ? { tool: step.tool } : {}),
   };
 
   try {

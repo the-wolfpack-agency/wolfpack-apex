@@ -175,6 +175,22 @@ export interface StepOutcome {
   /** For a human step: which kind of ask it was. */
   action?: HumanAction;
   /**
+   * The tool a tool step ran.
+   *
+   * The step definition has always known this and the outcome did not, so
+   * the store wrote null rather than guess, which was the right call at
+   * the time and left the column empty in every run ever recorded.
+   * Confirmed against production on 2026-08-24: a five-step chain
+   * executed correctly, three tool steps, all with a null tool.
+   *
+   * It is the column that answers "which tool is only ever reached from a
+   * routine", and it is what a step-by-step view of a chain has to read
+   * to say which system each step touched. Carried here rather than
+   * re-derived from the routine later, because the outcome is the record
+   * of what ran and the routine is only the plan.
+   */
+  tool?: string;
+  /**
    * For a human step the person SKIPPED rather than did.
    *
    * Recorded plainly and without penalty. A routine that punishes a skip gets

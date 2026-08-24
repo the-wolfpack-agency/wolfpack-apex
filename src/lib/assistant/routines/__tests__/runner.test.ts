@@ -514,3 +514,39 @@ describe("a step that has to ask for a value", () => {
     expect(seen).toEqual([{ repo: "wolfpack-apex" }]);
   });
 });
+
+/**
+ * Which tool ran that step.
+ *
+ * The step definition has always known, and the outcome did not, so the
+ * store wrote null rather than guess. Right call at the time, and it left
+ * the column empty in every run ever recorded.
+ *
+ * Confirmed against production on 2026-08-24: "look at the week ahead"
+ * ran five steps, three of them tools, 4.9s of machine time against 55.8s
+ * of human time, and every tool column was null. It is the column that
+ * answers which tool is only ever reached from a routine, and the one a
+ * step-by-step view of a chain has to read to say which system each step
+ * touched.
+ */
+describe("the record says which tool ran", () => {
+  it("carries the tool name on a tool step", async () => {
+    const r = routine([
+      { kind: "tool", slot: "a", tool: "calendar_widget", params: {}, label: "Reading the calendar" },
+    ]);
+    const run = await advance(r, startRun(r, WHO), deps());
+    expect(run.outcomes[0]).toMatchObject({ kind: "tool", tool: "calendar_widget" });
+  });
+
+  it("leaves it off a model or human step", async () => {
+    /* A model or human step carrying a tool name would make the table lie
+       about what touched the client's systems, which is the one thing
+       this record exists to be right about. */
+    const r = routine([
+      { kind: "model", slot: "m", prompt: "say something", label: "Thinking" },
+      { kind: "human", label: "Decide", action: "do" },
+    ]);
+    const run = await advance(r, startRun(r, WHO), deps());
+    for (const o of run.outcomes) expect(o.tool).toBeUndefined();
+  });
+});
