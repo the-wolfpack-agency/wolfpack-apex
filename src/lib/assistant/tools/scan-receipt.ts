@@ -31,8 +31,25 @@ interface ScanReceiptData {
    Regression: 2026-05-21 — "scan invoice" matched both tools and
    scan-receipt won by registration order, surfacing the wrong widget
    + wrong answer text. */
-const INTENT_RE =
-  /^\s*\/?(?:scan\s+receipt|upload\s+receipt|receipt|scan\s+document)\b\s*(.*)$/i;
+/* Same story as the invoice scanner: a command, anchored at position 0,
+   which no natural phrasing reaches because they all put a word between
+   the verb and the noun. The command forms are untouched. */
+const INTENT_RE = new RegExp(
+  [
+    /* The two-word commands keep their free-text tail: "scan receipt
+       Shell 42.10" is somebody typing a command with the details after
+       it. The BARE noun does not, and that is a pre-existing over-reach
+       this sweep surfaced: "receipt of the goods was confirmed" starts
+       with the word and opened a scanning form. A bare noun is a command
+       only when it is the whole message. */
+    `^\\s*\\/?(?:scan\\s+receipt|upload\\s+receipt|scan\\s+document)\\b\\s*(.*)$`,
+    `^\\s*\\/?receipt\\b\\s*$`,
+    `\\b(?:scan|log|upload|add|process)\\s+(?:this|that|the|my|an?)\\s+receipt\\b\\s*(.*)$`,
+    `\\bexpense\\s+(?:this|that|it)\\b\\s*(.*)$`,
+    `\\bwhat\\s+did\\s+(?:this|that|the)\\s+receipt\\s+come\\s+to\\b\\s*(.*)$`,
+  ].join("|"),
+  "i",
+);
 
 export function matchScanReceiptIntent(message: string): Params | null {
   const trimmed = (message ?? "").trim();

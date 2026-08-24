@@ -62,6 +62,10 @@ const MUST_NOT_MATCH: Array<[string, string]> = [
      entries, and neither is a question about billed hours. */
   ["book the car in for a service", "a service booking, not a diary entry"],
   ["block the dealer from the portal", "an access change, not a diary entry"],
+  /* A bare noun is a command only when it is the whole message. This one
+     started with the word "receipt" and opened a scanning form, which was
+     a pre-existing over-reach the sweep surfaced. */
+  ["receipt of the goods was confirmed", "prose that begins with a command word"],
   /* Widening the task matcher put these within reach. "remind the dealer"
      is somebody ELSE being reminded, and "a note OF the mileage" is a
      record rather than a thing to do. */
@@ -150,6 +154,17 @@ const MUST_MATCH: Array<[string, string[]]> = [
   ["what came in overnight", ["email_thread_widget"]],
   ["check my inbox", ["email_thread_widget"]],
   ["any new email", ["email_thread_widget"]],
+  /* Three tools that were command-shaped and unreachable by any natural
+     phrasing: every one of these has a word between the verb and the
+     noun, or puts an amount where the noun was. The command forms still
+     work, so nobody who learned them loses anything. */
+  ["scan this invoice", ["scan_invoice"]],
+  ["what does this invoice say", ["scan_invoice"]],
+  ["scan this receipt", ["scan_receipt"]],
+  ["expense this", ["scan_receipt"]],
+  ["log 2 hours on the recall job", ["log_time"]],
+  ["record 90 minutes on the handover", ["log_time"]],
+  ["log my time for today", ["log_time"]],
   /* Telling somebody something rarely uses the word "message". All five
      ordinary phrasings reached a model, which cannot send anything, so
      the person got a paragraph about how they might word it instead of a

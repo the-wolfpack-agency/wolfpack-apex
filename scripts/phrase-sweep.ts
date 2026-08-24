@@ -246,6 +246,57 @@ const CAPABILITIES: Capability[] = [
     ],
   },
   {
+    tool: "scan_invoice",
+    what: "a bill somebody has been sent",
+    phrasings: [
+      "scan this invoice", "read this invoice", "what does this invoice say",
+      "pull the numbers off this invoice", "log this invoice",
+    ],
+  },
+  {
+    tool: "scan_receipt",
+    what: "an expense",
+    phrasings: [
+      "scan this receipt", "log this receipt", "expense this",
+      "add this receipt to expenses", "what did this receipt come to",
+    ],
+  },
+  {
+    tool: "log_time",
+    what: "hours worked",
+    phrasings: [
+      "log 2 hours on the recall job", "put 3 hours against the Ackerman account",
+      "log my time for today", "record 90 minutes on the handover",
+      "book 2 hours to the service job",
+    ],
+  },
+  {
+    tool: "aggregate_external_records",
+    what: "counting and totalling records",
+    phrasings: [
+      "how many deals are open", "total value of open deals",
+      "how many contacts do we have", "sum the deals closing this month",
+      "count the tickets by status",
+    ],
+  },
+  {
+    tool: "op_draft_email",
+    what: "writing an email",
+    phrasings: [
+      "draft an email to the dealer", "write an email to Dana about the delay",
+      "help me draft a reply to the customer", "compose an email about the recall",
+    ],
+  },
+  {
+    tool: "dms_inventory_widget",
+    what: "what is in stock",
+    phrasings: [
+      "what do we have in stock", "show me the inventory",
+      "how many Cayennes are on the lot", "what vehicles are available",
+      "check stock for the Macan",
+    ],
+  },
+  {
     tool: null,
     what: "things nothing should claim",
     phrasings: [
