@@ -117,6 +117,7 @@ export const CAPABILITIES = {
   "settings.view_own": "View own profile settings",
   "settings.view_workspace": "View workspace-wide settings",
   "settings.manage_integrations": "Manage workspace integrations",
+  "router.view": "See how the model router chooses a model, and what it cost",
   "settings.manage_team": "Invite / manage team members",
 
   // Admin

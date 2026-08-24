@@ -51,6 +51,16 @@ const SELF_SERVICE: readonly Capability[] = [
   // The engineering wiki is org-wide reading: it explains how the systems work
   // to every team member. Authoring (engineering.manage) stays with CTO/CEO.
   "engineering.view",
+  // The model router is org-wide reading for the same reason as the wiki, and
+  // a stronger one: it is the part of this product that is hardest to believe
+  // without seeing. A routing engine only leadership can look at is a set of
+  // defaults nobody is checking, and the people best placed to notice a wrong
+  // answer are the ones using the assistant all day.
+  //
+  // READING ONLY. The probe on that page makes a real inference call against
+  // every configured provider, so it stays on settings.manage_team: a button
+  // that spends money on click is not org-wide reading.
+  "router.view",
   // A person's own routines, schedules and human-step history. Self-service by
   // definition: this is a page ABOUT them, built from their own runs, and
   // gating it behind an admin capability would mean the people the feature

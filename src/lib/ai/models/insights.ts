@@ -121,6 +121,19 @@ export interface RouterInsights {
   /** WHICH WEIGHTS HAVE ANSWERED, and when that changed. Optional so a payload
    *  from an older deploy still renders. */
   versions?: ModelVersionSummary[];
+  /**
+   * Whether THIS caller may run the probe, answered by the route from the
+   * capability set the gate already resolved.
+   *
+   * Reading the router is org-wide; the probe sends a real inference call to
+   * every configured provider, so it is not. Offering a button that answers
+   * 403 is a menu of disappointments, and deciding on the client would put a
+   * second copy of the rule where it can drift from the runtime.
+   *
+   * Optional so a payload from an older deploy still renders, and absent is
+   * read as "no", which fails closed.
+   */
+  canProbe?: boolean;
 }
 
 /** Reason codes are stable machine strings; these are for people. */
