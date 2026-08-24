@@ -37,6 +37,11 @@
 /** The longest a bare social turn plausibly is. */
 const MAX_SOCIAL_CHARS = 32;
 
+/* Both of these are in the production backlog, filed as questions nobody
+   could answer. They are not questions. */
+const HOW_ARE_YOU_RE =
+  /^(?:how\s+(?:are|r)\s+(?:you|u)|how'?s\s+it\s+going|how\s+are\s+things|what'?s\s+up|what\s+is\s+up|you\s+ok|you\s+alright)\b[\s,.!?]*$/i;
+
 const GREETING_RE =
   /^(?:hi|hey|hello|yo|hiya|howdy|good\s+(?:morning|afternoon|evening)|morning|afternoon|evening)\b[\s,.!]*(?:there|all|team|again)?[\s,.!]*$/i;
 
@@ -56,6 +61,7 @@ export function detectSocial(message: string): SocialKind | null {
   const m = message.trim();
   if (!m || m.length > MAX_SOCIAL_CHARS) return null;
   if (NEW_HERE_RE.test(m)) return "new_here";
+  if (HOW_ARE_YOU_RE.test(m)) return "greeting";
   if (GREETING_RE.test(m)) return "greeting";
   if (THANKS_RE.test(m)) return "thanks";
   if (FAREWELL_RE.test(m)) return "farewell";

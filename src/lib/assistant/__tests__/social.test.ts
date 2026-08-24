@@ -89,3 +89,25 @@ describe("what it says back", () => {
     expect(a).not.toMatch(/try|ask me|you can/i);
   });
 });
+
+/**
+ * Two more from the production backlog.
+ *
+ * Both were filed as questions nobody could answer. Neither is a
+ * question: "how are you?" and "what is up?" are somebody opening a
+ * conversation, and answering them with a document search is the same
+ * failure as answering "hi" with a tax form.
+ */
+describe("asking how it is", () => {
+  it.each(["how are you?", "what is up?", "hows it going", "you ok"])(
+    "reads %p as a greeting",
+    (m) => {
+      expect(detectSocial(m)).toBe("greeting");
+    },
+  );
+
+  it("leaves the same words alone when they carry a subject", () => {
+    expect(detectSocial("what is up with the pipeline")).toBeNull();
+    expect(detectSocial("how are you planning to handle the recall")).toBeNull();
+  });
+});

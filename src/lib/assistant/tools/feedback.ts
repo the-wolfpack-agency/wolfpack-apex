@@ -89,15 +89,36 @@ interface FeedbackData {
  * That is the worst possible moment to lose somebody's words. They are
  * already annoyed, they have told us once, and if it goes nowhere they do
  * not tell us twice. The production backlog has "this platform still
- * sucks" in it three times, recorded as an unanswered question rather
- * than as the feedback it plainly was.
+ * sucks" in it three times, filed as an unanswered question rather than
+ * as the feedback it plainly was.
+ *
+ * AND NOBODY WRITES "I HAVE FEEDBACK". Taken from the same backlog:
+ *
+ *   "the ai agent widget icon doesnt appear on messages"
+ *   "the instinct assistant icon doesnt appear on the messages page"
+ *   "this attachment wont send unless i type into the field"
+ *
+ * They describe the thing that did not happen, and the shape is always a
+ * noun followed by a verb it failed to do.
+ *
+ * THE NOUN IS WHAT MAKES IT SAFE. "the dealer doesn't want the car" and
+ * "the client cannot attend Friday" have exactly the same grammar and are
+ * not bug reports, so a UI noun is required rather than merely a negated
+ * verb. Icons, buttons, pages and attachments are ours; dealers and
+ * clients are not.
  */
+const UI_NOUN =
+  "(?:icon|button|page|screen|tab|link|form|field|attachment|upload|download|export|import|widget|panel|menu|modal|dialog|filter|search|login|sidebar|chart|report|dashboard|assistant)";
+
 const INTENT_RE = new RegExp(
   [
     String.raw`^\s*(\/?)(feedback|i\s+have\s+feedback|share\s+feedback)\b([:\s]*)(.*)$`,
     String.raw`^\s*()(report\s+a\s+bug|log\s+a\s+bug|raise\s+a\s+bug)\b([:\s]*)(.*)$`,
     String.raw`^\s*()(this\s+is\s+broken|something\s+is\s+(?:not\s+working|broken)|this\s+(?:page|screen|button)\s+is\s+(?:wrong|broken))\b([:\s]*)(.*)$`,
     String.raw`^\s*()(i\s+want\s+to\s+(?:give\s+feedback|report\s+something))\b([:\s]*)(.*)$`,
+    /* the shape people actually use */
+    `^\\s*()(.{0,60}?\\b${UI_NOUN}\\b[^.!?]{0,40}?\\s(?:does\\s?n[o']?t|doesnt|won'?t|wont|will\\s+not|isn'?t|is\\s+not|cannot|can'?t)\\s+\\w+)\\b([:\\s]*)(.*)$`,
+    `^\\s*()(the\\s+${UI_NOUN}\\s+is\\s+(?:wrong|broken|missing|blank|empty))\\b([:\\s]*)(.*)$`,
   ].join("|"),
   "i",
 );
