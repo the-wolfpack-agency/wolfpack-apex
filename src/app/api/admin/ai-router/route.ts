@@ -33,8 +33,22 @@ const MAX_DAYS = 180;
 const DEFAULT_DAYS = 30;
 
 export async function GET(req: NextRequest) {
-  const auth = await requireCapability(req, "settings.manage_team");
+  /* READ IS ORG-WIDE. This asked for settings.manage_team, which is the right
+     gate for changing the team and the wrong one for looking at how the router
+     picked a model: it meant only five of the ten roles could see the part of
+     the product that is hardest to believe without seeing.
+
+     The payload is aggregate by construction. Counts, prices, reason codes and
+     rule ids; refusals carry rule ids and never a sentence, and blockedBy names
+     a missing environment variable rather than its value. There is nothing here
+     that reads differently for one seat than another. */
+  const auth = await requireCapability(req, "router.view");
   if (!auth.ok) return auth.response;
+
+  /* Asked and answered ONCE, here, from the set the gate already resolved.
+     The page needs to know whether to offer the probe, and a second copy of
+     that rule on the client is how the menu and the runtime come to disagree. */
+  const canProbe = auth.capabilities.has("settings.manage_team");
 
   const raw = Number(req.nextUrl.searchParams.get("days"));
   const days = Number.isFinite(raw) && raw > 0 ? Math.min(Math.floor(raw), MAX_DAYS) : DEFAULT_DAYS;
@@ -48,7 +62,7 @@ export async function GET(req: NextRequest) {
     getDeterministicShare(days),
   ]);
 
-  return NextResponse.json({ ...insights, deterministic }, {
+  return NextResponse.json({ ...insights, deterministic, canProbe }, {
     status: 200,
     headers: { "Cache-Control": "no-store, max-age=0" },
   });

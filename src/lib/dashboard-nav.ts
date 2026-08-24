@@ -103,8 +103,12 @@ export const NAV_ITEMS: NavItem[] = [
      chose for each call, and what that is estimated to have cost. The routing
      engine (lib/ai/models) has run for a while with no surface at all; a
      routing engine nobody can see is a set of defaults nobody is checking.
-     Same role gate as Agents. */
-  { label: "Model Router", href: "/admin/ai-router", roles: ["ceo", "cto", "evp", "vp", "cco"], icon: "M13 10V3L4 14h7v7l9-11h-7z" },
+
+     NO ROLE GATE, like Releases, Products and Engineering. It was leadership
+     only, which left the same engine unchecked by everybody who actually uses
+     the assistant. Reading is granted to every seat via router.view; the
+     probe on that page spends money and stays on settings.manage_team. */
+  { label: "Model Router", href: "/admin/ai-router", icon: "M13 10V3L4 14h7v7l9-11h-7z" },
   /* Compliance Scan: point it at an ownership-verified client site and get back
      what a visitor, a regulator, or a lawyer would look for, plus every host the
      page contacts that nothing accounts for. Same role gate as Agents, because

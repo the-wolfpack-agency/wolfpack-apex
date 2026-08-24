@@ -26,6 +26,10 @@ jest.mock("@/lib/client-auth", () => ({
 
 function insights(over: Record<string, unknown> = {}) {
   return {
+    /* The route answers this from the capability set the gate resolved. The
+       existing probe cases below assume the control is on screen, which is now
+       a statement about who is asking. */
+    canProbe: true,
     days: 30,
     totalDecisions: 4,
     estimatedCostUsd: 0.12,
@@ -397,5 +401,39 @@ describe("what the router would not let through", () => {
     expect(await screen.findByTestId("router-metric-spend")).toBeInTheDocument();
     expect(screen.queryByTestId("router-refusal-rules")).not.toBeInTheDocument();
     expect(screen.queryByTestId("router-refusal-clean")).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * The page is org-wide reading as of 2026-08-24. The probe is not: it sends a
+ * real inference call to every configured provider and costs money on click.
+ *
+ * Hidden rather than disabled. A control that is permanently dead teaches
+ * somebody the page is broken, and one that answers 403 teaches them not to
+ * trust the buttons.
+ */
+describe("the probe is not for every seat", () => {
+  it("hides the probe when the server says this caller may not run it", async () => {
+    respond(insights({ canProbe: false }));
+    render(<Page />);
+    // The page still renders in full for them.
+    expect(await screen.findByTestId("router-models")).toBeInTheDocument();
+    expect(screen.queryByTestId("router-probe-run")).not.toBeInTheDocument();
+  });
+
+  it("hides it when the field is missing entirely, rather than assuming yes", async () => {
+    /* An older deploy, or a payload that lost the field. Absent must read as
+       no: failing open here means offering a spend button to everybody. */
+    const { canProbe: _drop, ...withoutTheField } = insights();
+    respond(withoutTheField);
+    render(<Page />);
+    expect(await screen.findByTestId("router-models")).toBeInTheDocument();
+    expect(screen.queryByTestId("router-probe-run")).not.toBeInTheDocument();
+  });
+
+  it("shows it to a caller the server says may run it", async () => {
+    respond(insights({ canProbe: true }));
+    render(<Page />);
+    expect(await screen.findByTestId("router-probe-run")).toBeInTheDocument();
   });
 });

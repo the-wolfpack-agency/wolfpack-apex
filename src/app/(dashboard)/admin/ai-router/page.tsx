@@ -53,6 +53,9 @@ function normalize(raw: unknown): RouterInsights | null {
   const b = raw as Partial<RouterInsights>;
   if (!Array.isArray(b.models) || !Array.isArray(b.usage) || !Array.isArray(b.reasons)) return null;
   return {
+    /* Absent means no. An older deploy, or a payload that lost the field,
+       must not silently offer a control the server will refuse. */
+    canProbe: b.canProbe === true,
     days: typeof b.days === "number" ? b.days : 30,
     totalDecisions: b.totalDecisions ?? 0,
     estimatedCostUsd: b.estimatedCostUsd ?? 0,
@@ -504,6 +507,12 @@ export default function AiRouterPage() {
           title="Models this platform can reach"
           subtitle="Availability is read from the deployment's configuration. It is not editable here: changing which models serve every AI call belongs in a deployment with a review, not a form."
         >
+          {/* THE READING IS FOR EVERYONE, THE SPENDING IS NOT. Every seat can
+              see how the router chose and what it cost; the probe sends a real
+              request to each configured model, so it stays with the roles that
+              manage the deployment. Hidden rather than disabled: a control that
+              is permanently dead teaches somebody the page is broken. */}
+          {data.canProbe ? (
           <div style={{ marginBottom: "0.9rem" }}>
             <button type="button" onClick={() => void runProbe()} disabled={probing} style={button} data-testid="router-probe-run">
               {probing ? "Testing…" : "Test each model"}
@@ -543,6 +552,7 @@ export default function AiRouterPage() {
               </div>
             )}
           </div>
+          ) : null}
           <ul style={list} data-testid="router-models">
             {/* Only what the platform can actually reach. The unconfigured rows
                 were the OpenAI-hosted twins of Azure models that ARE configured
