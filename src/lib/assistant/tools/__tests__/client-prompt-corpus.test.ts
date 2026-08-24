@@ -106,6 +106,11 @@ const MUST_MATCH: Array<[string, string[]]> = [
   ["what is on my calendar this week?", ["calendar_widget", "get_calendar_availability"]],
   ["analyse my calendar", ["schedule_health"]],
   ["what are my ideal times of day?", ["schedule_health"]],
+  /* Questions about the SHAPE of a week, which is the line between this
+     and the calendar tools. Also from the sweep. */
+  ["how much of my week is meetings", ["schedule_health"]],
+  ["which hours should I protect", ["schedule_health"]],
+  ["when am I most free", ["schedule_health"]],
   ["compare contacts across systems", ["compare_across_sources"]],
   ["what is in the legacy database that nobody uses?", ["dark_data"]],
   /* THE FIRST THING ANYBODY TYPES.
@@ -122,6 +127,13 @@ const MUST_MATCH: Array<[string, string[]]> = [
   ["where do I start?", ["what_can_you_do"]],
   ["what are you able to do", ["what_can_you_do"]],
   ["help", ["what_can_you_do"]],
+  /* Found by sweeping the phrasings rather than by waiting for somebody
+     to type them. A leading "so" is how a person carries on a
+     conversation, and it made this miss a matcher that already knew
+     "what do you do". */
+  ["so what do you actually do", ["what_can_you_do"]],
+  ["what else can you do", ["what_can_you_do"]],
+  ["give me the tour", ["what_can_you_do"]],
   /* THE QUESTION THAT OPENS THE CHAINING FEATURE.
      "what routines can I run?" matched nothing on the deployed assistant,
      fell through to a model, and came back describing the inventory sync
