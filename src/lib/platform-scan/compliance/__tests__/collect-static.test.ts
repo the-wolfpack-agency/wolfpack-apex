@@ -19,6 +19,29 @@ import {
 // three PRs came from fakes that modelled the contract wrongly; see its header.
 import { fakeFetch, htmlResponse as html, redirectTo } from "../../__tests__/fake-fetch";
 
+/* NO TEST MAY RESOLVE DNS.
+ *
+ * The SSRF guard calls dns.lookup on every URL it clears, including each
+ * hop of a redirect, and its own comment notes that the lookup is not
+ * covered by the scan's abort signal. These suites use example.com and
+ * example.org, which resolve for real, so every redirect test was making
+ * a live DNS query.
+ *
+ * It is invisible on a laptop with a warm resolver and it is a hang on a
+ * CI runner. On 2026-08-23 "reports a redirect target as the URL actually
+ * scanned" exceeded jest's five-second limit and failed a build on a
+ * branch that had touched none of this.
+ *
+ * The lookup is stubbed rather than the guard: the guard's logic still
+ * runs, still rejects private addresses, and simply gets its answer from
+ * here instead of from the network. A public address keeps every existing
+ * expectation true.
+ */
+jest.mock("node:dns/promises", () => ({
+  lookup: jest.fn(async () => [{ address: "93.184.216.34", family: 4 }]),
+}));
+
+
 const PAGE = "https://client.example.com/pricing";
 
 /** A single 200 with an HTML body. */
@@ -211,10 +234,28 @@ describe("collectStatic", () => {
     // The guard resolves DNS, which no fetch abort signal covers. Without a
     // budget check around it, a slow or hostile resolver runs past the whole
     // scan and, on a serverless function, past its execution limit.
-    const f = fakeFetch(html("<html></html>"));
-    const res = await collectStatic(PAGE, { fetchImpl: f, timeoutMs: 1 });
-    expect(res.error).toMatch(/timed out/);
-    expect(f).not.toHaveBeenCalled();
+    /* This used to pass because the SSRF guard was resolving DNS for real
+       and a network round trip is longer than a 1ms budget. With the
+       lookup stubbed it returned instantly, the timer had not fired, and
+       the request went out: the test was measuring the resolver rather
+       than the budget.
+       The delay is now stated here, in the test, where it can be read.
+       Five milliseconds against a one millisecond budget is deterministic
+       in a way that a DNS query never was. */
+    const dns = jest.requireMock("node:dns/promises") as { lookup: jest.Mock };
+    const instant = dns.lookup.getMockImplementation();
+    dns.lookup.mockImplementation(async () => {
+      await new Promise((r) => setTimeout(r, 5));
+      return [{ address: "93.184.216.34", family: 4 }];
+    });
+    try {
+      const f = fakeFetch(html("<html></html>"));
+      const res = await collectStatic(PAGE, { fetchImpl: f, timeoutMs: 1 });
+      expect(res.error).toMatch(/timed out/);
+      expect(f).not.toHaveBeenCalled();
+    } finally {
+      if (instant) dns.lookup.mockImplementation(instant);
+    }
   });
 
   it("identifies itself, so a site owner can see who is fetching them", async () => {
