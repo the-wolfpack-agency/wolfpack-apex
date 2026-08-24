@@ -44,8 +44,25 @@ interface CreateTaskFormData {
    the CRM action tool (which is registered BEFORE this one). The CRM
    tool requires the phrase "log a <verb>" / "create a task to ...".
    We capture the bare "create task" form-trigger here. */
-const INTENT_RE =
-  /\b(?:create|add|new|make)\s+(?:an?\s+)?(?:to[\s-]?do|task)\b(?!\s+to\s+\w)/i;
+/* The lookahead is deliberate and stays: "create a task to follow up" is
+   routed to the CRM action tool, which is registered first and owns the
+   "create a task to <verb>" shape.
+   What was missing is every phrasing that never uses the word task at
+   all. Swept 2026-08-24: "remind me to call the dealer", "add to my
+   list", "I need to remember to", and "make a note to" all reached no
+   tool, and they are how somebody actually says it out loud. None of them
+   collide with the CRM shape, which needs the noun. */
+const INTENT_RE = new RegExp(
+  [
+    `\\b(?:create|add|new|make)\\s+(?:an?\\s+)?(?:to[\\s-]?do|task)\\b(?!\\s+to\\s+\\w)`,
+    `\\bremind\\s+me\\s+to\\s+\\w`,
+    `\\badd\\s+to\\s+my\\s+(?:list|todos?)\\b`,
+    `\\bi\\s+need\\s+to\\s+remember\\s+to\\s+\\w`,
+    `\\bmake\\s+a\\s+note\\s+to\\s+\\w`,
+    `\\bdon'?t\\s+let\\s+me\\s+forget\\s+to\\s+\\w`,
+  ].join("|"),
+  "i",
+);
 const TITLE_RE = /\b(?:titled|called|named|about|for)\s+["']?([^"'\n]{2,80})["']?/i;
 
 function matchTaskFormIntent(message: string): Params | null {

@@ -192,6 +192,42 @@ const CAPABILITIES: Capability[] = [
     ],
   },
   {
+    tool: "create_message_form",
+    what: "sending word to somebody",
+    phrasings: [
+      "message the team that the car is ready", "tell the team it is ready for review",
+      "send a note to Dana about the delay", "let the dealer know the part arrived",
+      "post to the channel that we are live",
+    ],
+  },
+  {
+    tool: "create_calendar_event_form",
+    what: "putting something in the diary",
+    phrasings: [
+      "book me 30 minutes with Dana tomorrow", "schedule a call with the dealer group",
+      "set up a meeting for Thursday at 2", "put a hold in for the handover",
+      "block an hour tomorrow morning",
+    ],
+  },
+  {
+    tool: "search_external_records",
+    what: "finding a record in a connected system",
+    phrasings: [
+      "find the customer Ackerman", "look up the account for Dana",
+      "search the CRM for the dealer group", "pull up the contact for Ray",
+      "find the deal for the Cayenne",
+    ],
+  },
+  {
+    tool: "filter_external_records",
+    what: "narrowing records down",
+    phrasings: [
+      "deals over 50k closing this month", "show me deals stuck in proposal",
+      "opportunities over $100k", "contacts owned by Dana",
+      "which deals are closing this quarter",
+    ],
+  },
+  {
     tool: null,
     what: "things nothing should claim",
     phrasings: [
@@ -243,8 +279,19 @@ for (const cap of CAPABILITIES) {
       continue;
     }
     if (!hits.includes(cap.tool)) {
-      missed++;
-      lines.push(`  MISS  ${(hits.join(", ") || "reaches a model").padEnd(24)}"${phrase}"`);
+      /* A phrasing claimed by the WRONG tool is worse than one that
+         reaches a model. A model gives a vague answer; a wrong tool acts.
+         "add a task to call the dealer" was claimed by the CRM record
+         writer, which would put a confirmation dialog in front of
+         somebody offering to create a record in a system they never
+         mentioned. Counted as trespass, and it fails the run. */
+      if (hits.length > 0) {
+        trespassed++;
+        lines.push(`  WRONG TOOL  ${hits.join(", ").padEnd(22)}"${phrase}"`);
+      } else {
+        missed++;
+        lines.push(`  MISS  ${"reaches a model".padEnd(24)}"${phrase}"`);
+      }
     } else if (!missesOnly) {
       lines.push(`  ok    ${cap.tool.padEnd(24)}"${phrase}"`);
     }
