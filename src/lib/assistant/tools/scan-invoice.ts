@@ -20,8 +20,27 @@ interface ScanInvoiceData {
   kind: "scan_invoice";
 }
 
-const INTENT_RE =
-  /^\s*\/?(?:scan\s+invoice|log\s+invoice|process\s+invoice|ap\s+invoice|invoice|ap)\b/i;
+/**
+ * A COMMAND IS NOT A SENTENCE.
+ *
+ * This was anchored at position 0 and shaped like a slash command, which
+ * is what it was written as. Swept 2026-08-24: all five natural phrasings
+ * missed, because every one of them has a word between the verb and the
+ * noun. "scan this invoice" fails on "this".
+ *
+ * The command forms stay exactly as they were, so anybody who learned
+ * them keeps them. What is added is the way somebody asks when they have
+ * not learned anything.
+ */
+const INTENT_RE = new RegExp(
+  [
+    `^\\s*\\/?(?:scan\\s+invoice|log\\s+invoice|process\\s+invoice|ap\\s+invoice|invoice|ap)\\b`,
+    `\\b(?:scan|read|process|log|check)\\s+(?:this|that|the|my|an?)\\s+invoice\\b`,
+    `\\bwhat\\s+does\\s+(?:this|that|the)\\s+invoice\\s+say\\b`,
+    `\\bpull\\s+the\\s+(?:numbers|details|figures)\\s+off\\s+(?:this|that|the)\\s+invoice\\b`,
+  ].join("|"),
+  "i",
+);
 
 export function matchScanInvoiceIntent(message: string): Params | null {
   const trimmed = (message ?? "").trim();

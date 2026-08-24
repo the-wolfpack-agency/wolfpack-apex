@@ -23,8 +23,26 @@ interface LogTimeData {
   kind: "time_log";
 }
 
-const INTENT_RE =
-  /^\s*\/?(?:log\s+(?:time|hours)|track\s+time|time\s+entry)\b\s*(.*)$/i;
+/**
+ * Nobody says "log time". They say how long, on what.
+ *
+ * Swept 2026-08-24: all five natural phrasings missed. The matcher wanted
+ * the literal pair "log time" or "log hours", and a person says "log 2
+ * hours on the recall job", putting the AMOUNT where the noun was.
+ *
+ * The amount plus a job, account or ticket is what makes this time
+ * logging rather than something for the diary: "book 2 hours with Dana
+ * tomorrow" is an appointment and stays with the calendar, which is why
+ * the reference to a piece of WORK is required rather than optional.
+ */
+const INTENT_RE = new RegExp(
+  [
+    `^\\s*\\/?(?:log\\s+(?:time|hours)|track\\s+time|time\\s+entry)\\b\\s*(.*)$`,
+    `\\b(?:log|record|put|add)\\s+[\\d.]+\\s*(?:h|hr|hrs|hours?|min|mins|minutes?)\\s+(?:on|to|against|for)\\s+(.*)$`,
+    `\\blog\\s+my\\s+time\\b\\s*(.*)$`,
+  ].join("|"),
+  "i",
+);
 
 export function matchLogTimeIntent(message: string): Params | null {
   const trimmed = (message ?? "").trim();
