@@ -42,8 +42,47 @@ interface CapabilitiesData {
   withheldCount: number;
 }
 
-const INTENT_RE =
-  /^(?:what\s+can\s+you\s+do|what\s+can\s+i\s+ask(?:\s+you)?|what\s+are\s+you\s+(?:able\s+to\s+do|capable\s+of)|help|what\s+do\s+you\s+do|show\s+(?:me\s+)?(?:your\s+)?(?:capabilities|commands|routines))[\s.?!]*$/i;
+/**
+ * THE FIRST THING ANYBODY TYPES.
+ *
+ * This was anchored end to end with no room for the words people
+ * actually put in the middle. Measured against the deployed assistant on
+ * 2026-08-23: "what can you do?" returned the capability list, and "what
+ * can you actually do for me today?" spent 1,483 tokens to answer "I
+ * don't have a confident answer for that. Could you rephrase, or open a
+ * support ticket."
+ *
+ * Five of ten ordinary phrasings missed, including "what can you help me
+ * with?" and "how can you help?", which are the two commonest ways the
+ * question gets asked. It is the worst question to fail, because it is
+ * the first one anybody types and the answer to it is the only thing
+ * standing between a new user and giving up.
+ *
+ * WIDENING THIS IS THE RISK, NOT THE FIX. A capability matcher that
+ * swallows real questions is the same failure as arr matching inside
+ * warranty, and it would be a worse one here because this tool answers
+ * confidently and never says it is unsure. So the discriminator is that
+ * the question has NO OBJECT: "what can you help me with" is asking for
+ * the menu, "what can you help me with on the Detroit account" is asking
+ * about Detroit. Filler is allowed, an object is not, and the corpus
+ * carries both sides.
+ */
+const FILLER = "(?:\\s+(?:actually|really|even|just|please|exactly))*";
+const TAIL = "(?:\\s+(?:for\\s+me|for\\s+us|here|today|right\\s+now|around\\s+here|in\\s+here))*";
+const ASKS = [
+  `what${FILLER}\\s+can\\s+you${FILLER}\\s+do`,
+  `what${FILLER}\\s+can\\s+you${FILLER}\\s+help\\s+(?:me|us)\\s+with`,
+  `how${FILLER}\\s+can\\s+you${FILLER}\\s+help(?:\\s+(?:me|us))?`,
+  `what${FILLER}\\s+can\\s+i\\s+ask(?:\\s+you)?`,
+  `what${FILLER}\\s+should\\s+i\\s+ask(?:\\s+you)?`,
+  `what\\s+are\\s+you\\s+(?:able\\s+to\\s+do|capable\\s+of)`,
+  `what\\s+do\\s+you\\s+do`,
+  `where\\s+(?:do|should)\\s+i\\s+start`,
+  `help`,
+  `show\\s+(?:me\\s+)?(?:your\\s+)?(?:capabilities|commands|routines)`,
+];
+
+const INTENT_RE = new RegExp(`^(?:${ASKS.join("|")})${TAIL}[\\s.?!]*$`, "i");
 
 export function matchCapabilitiesIntent(message: string): Params | null {
   return INTENT_RE.test(message.trim()) ? {} : null;
