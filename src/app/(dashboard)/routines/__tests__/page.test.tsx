@@ -351,3 +351,57 @@ describe("the plan of a chain", () => {
     expect(screen.queryByTestId("routines-plan-steps")).not.toBeInTheDocument();
   });
 });
+
+/**
+ * Who the chains are for, and where they meet.
+ *
+ * A list of chains says what somebody can run. It does not say how their
+ * work reaches anybody else's, which is the question a company asks
+ * before it buys middleware.
+ */
+describe("the area map", () => {
+  const AREA_MAP = {
+    summary: "11 chains across 4 areas. 4 systems are reached from more than one area.",
+    areas: [
+      { area: "sales", forRole: "Sales", chains: [{ command: "work the pipeline", touches: ["crm"], humanSteps: 1 }] },
+      { area: "engineer", forRole: "Engineering", chains: [{ command: "is anything on fire", touches: ["github"], humanSteps: 0 }] },
+    ],
+    crossings: [
+      { tool: "email_thread_widget", areas: ["anyone", "sales"], chains: ["start my day", "work the pipeline"] },
+    ],
+  };
+
+  it("names each area and the chains that belong to it", async () => {
+    respond(payload({ areaMap: AREA_MAP }));
+    render(<Page />);
+    const areas = await screen.findByTestId("routines-areas");
+    expect(areas).toHaveTextContent("sales");
+    expect(areas).toHaveTextContent("work the pipeline");
+  });
+
+  it("shows which systems more than one area reaches, with the chains involved", async () => {
+    /* Named so the claim can be checked rather than believed. */
+    respond(payload({ areaMap: AREA_MAP }));
+    render(<Page />);
+    const crossings = await screen.findByTestId("routines-crossings");
+    expect(crossings).toHaveTextContent("email_thread_widget");
+    expect(crossings).toHaveTextContent("anyone and sales");
+    expect(crossings).toHaveTextContent("start my day");
+  });
+
+  it("says plainly when no area's work reaches another's", async () => {
+    /* The honest answer for a young catalogue, rather than a diagram
+       implying connections that are not there. */
+    respond(payload({ areaMap: { ...AREA_MAP, crossings: [] } }));
+    render(<Page />);
+    expect(await screen.findByTestId("routines-no-crossings")).toBeInTheDocument();
+  });
+
+  it("stays quiet when the response carries no map", async () => {
+    /* An older deployment does not send one. Absent is not empty. */
+    respond(payload({}));
+    render(<Page />);
+    await screen.findByTestId("routines-chains");
+    expect(screen.queryByTestId("routines-areas")).not.toBeInTheDocument();
+  });
+});

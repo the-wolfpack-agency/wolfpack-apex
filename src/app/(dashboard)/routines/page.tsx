@@ -39,6 +39,12 @@ interface RoutineSummary {
   plan?: PlanStep[];
 }
 
+interface AreaMap {
+  summary: string;
+  areas: Array<{ area: string; forRole: string; chains: Array<{ command: string; touches: string[]; humanSteps: number }> }>;
+  crossings: Array<{ tool: string; areas: string[]; chains: string[] }>;
+}
+
 interface ScheduleSummary {
   command: string;
   when: string;
@@ -96,6 +102,7 @@ interface Finding {
 
 interface Payload {
   builtIn: RoutineSummary[];
+  areaMap?: AreaMap;
   saved: RoutineSummary[];
   schedules: ScheduleSummary[];
   runs: RunSummary[];
@@ -137,6 +144,7 @@ export default function RoutinesPage() {
          throwing and blanking the page during the minute of a rollout. */
       setData({
         builtIn: Array.isArray(body.builtIn) ? body.builtIn : [],
+        areaMap: body.areaMap,
         saved: Array.isArray(body.saved) ? body.saved : [],
         schedules: Array.isArray(body.schedules) ? body.schedules : [],
         runs: Array.isArray(body.runs) ? body.runs : [],
@@ -300,6 +308,53 @@ export default function RoutinesPage() {
               </ul>
             )}
           </GlassPanel>
+
+          {data.areaMap && data.areaMap.areas.length > 0 ? (
+            <GlassPanel
+              title="Who these are for, and where they meet"
+              subtitle={data.areaMap.summary}
+            >
+              <ul style={list} data-testid="routines-areas">
+                {data.areaMap.areas.map((a) => (
+                  <li key={a.area} style={row}>
+                    <strong style={{ textTransform: "capitalize" }}>{a.area}</strong>
+                    <span style={dim}> {a.forRole}</span>
+                    <div style={dim}>
+                      {a.chains.map((c) => c.command).join(" · ")}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+
+              {data.areaMap.crossings.length > 0 ? (
+                <>
+                  {/* The part a list of chains cannot show: one area's
+                      work reaching another's. Named with the chains
+                      involved, so it can be checked rather than
+                      believed. */}
+                  <p style={{ ...dim, margin: "0.9rem 0 0.4rem" }}>
+                    Systems more than one area reaches, most shared first. These are the
+                    connections worth making early, and the ones worth worrying about when
+                    they are down.
+                  </p>
+                  <ul style={list} data-testid="routines-crossings">
+                    {data.areaMap.crossings.slice(0, 8).map((c) => (
+                      <li key={c.tool} style={row}>
+                        <code>{c.tool}</code>
+                        <span style={dim}> {c.areas.join(" and ")}</span>
+                        <div style={dim}>{c.chains.join(" · ")}</div>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              ) : (
+                <p style={{ ...dim, marginTop: "0.9rem" }} data-testid="routines-no-crossings">
+                  No system is reached from more than one area yet, so nothing here shows one
+                  area&apos;s work reaching another&apos;s.
+                </p>
+              )}
+            </GlassPanel>
+          ) : null}
 
           <GlassPanel title="Chains you can run" subtitle="Type the command anywhere in the assistant.">
             <ul style={list} data-testid="routines-chains">
