@@ -27,6 +27,7 @@ import { registerTool } from "./registry";
 import { getTools } from "./registry";
 import { canInvokeTool } from "./gate";
 import { BUILT_IN_ROUTINES } from "@/lib/assistant/routines/catalogue";
+import { PROMPT_GUIDE } from "@/lib/assistant/prompt-corpus";
 import type { ToolDef, ToolResult } from "./types";
 
 const ParamSchema = z.object({});
@@ -93,6 +94,13 @@ const ASKS = [
 ];
 
 const INTENT_RE = new RegExp(`^${LEAD}(?:${ASKS.join("|")})${TAIL}[\\s.?!]*$`, "i");
+
+/** The capability a guide entry's tool is gated behind, so the openers
+ *  respect the same gate the list above does: suggesting something the
+ *  reader cannot run is a menu of disappointments. */
+function toolCapability(toolName: string): string {
+  return getTools().find((t) => t.name === toolName)?.capability ?? "*";
+}
 
 export function matchCapabilitiesIntent(message: string): Params | null {
   return INTENT_RE.test(message.trim()) ? {} : null;
@@ -195,6 +203,32 @@ export const capabilitiesTool: ToolDef<Params, CapabilitiesData> = {
       lines.push(
         `There ${withheldCount === 1 ? "is 1 more tool" : `are ${withheldCount} more tools`} your role does not have access to.`,
       );
+    }
+
+    /* THREE THINGS TO TYPE, NOT A LIST OF TOOLS.
+     *
+     * The list above says what exists. Somebody who has just asked what
+     * this does still has to guess at the words, and the whole reason the
+     * capability question was worth fixing is that guessing is where
+     * people give up.
+     *
+     * Taken from the verified guide rather than written here, so it can
+     * never suggest a phrasing that stopped working: a test runs every
+     * one of them through the real matchers. */
+    const openers = PROMPT_GUIDE.filter(
+      (g) =>
+        /* Not the question they just asked. Suggesting "what can you do?"
+           to somebody reading the answer to it is the kind of thing that
+           only shows up when you read the output rather than the code. */
+        g.tool !== "what_can_you_do" &&
+        canInvokeTool(ctx.userRole, toolCapability(g.tool)),
+    ).slice(0, 3);
+    if (openers.length > 0) {
+      lines.push("");
+      lines.push("**If you would rather just start**");
+      for (const g of openers) {
+        lines.push(`- \`${g.say[0]}\` — ${g.gives}`);
+      }
     }
 
     trackEvent("assistant.tool_invoked", ctx.userId, ctx.userRole, {
