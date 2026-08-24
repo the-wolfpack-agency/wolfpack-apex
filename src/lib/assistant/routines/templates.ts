@@ -44,6 +44,56 @@ export interface RoutineTemplate extends Routine {
    `topic?: undefined`, which no longer satisfies Record<string, string>, and
    the error points at the array rather than at anything a reader can act on. */
 const TEMPLATES: RoutineTemplate[] = [
+  /* CHAINS SHAPED LIKE THE PLACE THIS IS BEING SOLD INTO.
+     Everything below this comment was written for an agency's week: prep
+     my next meeting, work through my inbox, where do things stand. All of
+     it is real and none of it is how somebody at a dealership describes
+     their day.
+     This one is, and it is deliberately built ONLY from tools that exist
+     today.
+
+     It arrived as three. Two of them, a week-ahead chain and a customer
+     catch-up, turned out to be the catalogue's own "look at the week
+     ahead" and "catch me up on a client" written again in different
+     words, which is what happens when you write before you read. Both
+     were dropped rather than shipped as near-duplicates: a menu with two
+     entries that do the same thing is worse than a shorter menu. It would be easy to write a warranty-claims chain that
+     reads beautifully and cannot run; every-chain-can-run.test.ts exists
+     because that has already happened once. What a client cannot do yet,
+     the assistant now says plainly rather than dressing up in a chain. */
+  {
+    id: "tmpl_start_of_day",
+    command: "start my day",
+    description: "What came in overnight, what is booked, what is waiting on you, and the one thing to do first.",
+    audience: "anyone",
+    forRole: "Anyone running a floor, a desk or a service lane",
+    outcome:
+      "You know what happened while you were away and what to pick up first, before anybody asks you for it.",
+    steps: [
+      { kind: "tool", slot: "mail", tool: "email_thread_widget", params: { count: 15 }, label: "Reading what came in" },
+      { kind: "tool", slot: "agenda", tool: "calendar_widget", params: { month: "current" }, label: "Checking what is booked" },
+      { kind: "tool", slot: "tasks", tool: "task_list_widget", params: {}, label: "Checking what is waiting on you" },
+      {
+        kind: "model",
+        slot: "first",
+        prompt:
+          "Overnight mail: {{mail}}\n\nToday's calendar: {{agenda}}\n\nOpen tasks: {{tasks}}\n\n" +
+          "Name the ONE thing to do first and say why in a single line. Then list anything that " +
+          "someone is waiting on from you, longest wait first. If nothing is urgent, say the " +
+          "morning is clear rather than inventing a priority.",
+        label: "Working out what comes first",
+      },
+      {
+        kind: "human",
+        label: "Do the first thing before opening anything else",
+        action: "do",
+        why:
+          "The list is only worth the minute it took if the first item happens now. Deciding what " +
+          "matters and then reading email anyway is how a morning disappears.",
+        show: ["first"],
+      },
+    ],
+  },
   {
     id: "tmpl_meeting_prep",
     command: "prep my next meeting",
