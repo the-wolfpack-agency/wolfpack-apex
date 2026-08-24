@@ -18,6 +18,7 @@ import {
 } from "@/lib/assistant/related-pages";
 import { readVercelGeo } from "@/lib/assistant/vercel-geo";
 import { detectUnreachable } from "@/lib/assistant/not-connected";
+import { detectSocial, socialAnswer } from "@/lib/assistant/social";
 import {
   isFollowThrough,
   lastAssistantMessage,
@@ -198,6 +199,41 @@ export async function POST(req: NextRequest) {
         });
       }
       if (resolved.rewritten) message = resolved.rewritten;
+    }
+
+    /* HELLO IS NOT A SEARCH.
+     *
+     * A greeting carries no question, so every layer below this one
+     * treats it as one. Retrieval given "hi" does not fail: it returns
+     * the least-far document, which on 2026-08-24 was a spreadsheet of
+     * chatbot rules, and for "I am new here" was somebody's tax form.
+     *
+     * Answered here, above intent classification, for the same reason
+     * follow-through is: everything downstream assumes a subject, and a
+     * turn without one cannot fail honestly anywhere below. */
+    if (!hasAttachment) {
+      const social = detectSocial(message);
+      if (social) {
+        const answer = socialAnswer(social, user.name?.split(" ")[0]);
+        trackEvent("assistant.social_turn", user.id, user.role, { kind: social });
+        const persisted = await persistToolAnswer({
+          userId: user.id,
+          conversationId,
+          userMessage: message,
+          assistantAnswer: answer,
+          source: "tool",
+        });
+        return NextResponse.json({
+          response: answer,
+          answer,
+          source: "tool",
+          tokensUsed: 0,
+          conversationId: persisted?.conversationId ?? conversationId ?? null,
+          messageId: persisted?.messageId,
+          sources: [],
+          relatedPages: [],
+        });
+      }
     }
 
     const intentMatch = classifyIntent(message);

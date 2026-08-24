@@ -432,7 +432,10 @@ describe("API Route -- File Attachment Analytics", () => {
   });
 
   test("works without attachments", async () => {
-    const req = makeRequest({ message: "Hello" });
+    /* Not "Hello": a bare greeting is now answered as a greeting, before
+       any of the machinery this test is about. The fixture wanted "any
+       message" and a greeting stopped being one. */
+    const req = makeRequest({ message: "What is our refund policy?" });
     const res = await POST(req as any);
     const data = await res.json();
     expect(data.response).toBe("test response");
@@ -705,7 +708,9 @@ describe("API Route -- Quality Gate Integration", () => {
   });
 
   test("processes message without fileContents normally", async () => {
-    const req = makeRequest({ message: "Hello there" });
+    /* Same reason as above: "Hello there" is a greeting now, and this
+       test is about the quality gate rather than about greetings. */
+    const req = makeRequest({ message: "What is our refund policy?" });
     const res = await POST(req as any);
     const data = await res.json();
 
