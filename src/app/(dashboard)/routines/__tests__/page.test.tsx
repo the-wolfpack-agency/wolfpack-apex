@@ -287,3 +287,67 @@ describe("the steps of a run", () => {
     expect(await screen.findByTestId("routines-run-no-steps")).toBeInTheDocument();
   });
 });
+
+/**
+ * What a chain would do, before it does it.
+ *
+ * The run view answers this once a chain has run, which is the wrong way
+ * round for the person deciding whether to run it at all. "5 steps, one
+ * of them yours" says how big a commitment it is and nothing about what
+ * it will touch, and a chain that reads mail is a different proposition
+ * from one that reads a calendar even when both are five steps long.
+ */
+describe("the plan of a chain", () => {
+  const CHAIN = {
+    command: "look at the week ahead",
+    description: "Monday starts with a plan rather than an inbox.",
+    steps: 3,
+    humanSteps: 1,
+    plan: [
+      { index: 0, kind: "tool", tool: "calendar_widget", label: "Reading the calendar" },
+      { index: 1, kind: "model", tool: null, label: "Working out the week" },
+      { index: 2, kind: "human", tool: null, label: "Decide what the week is really for" },
+    ],
+  };
+
+  it("stays closed until somebody asks what it does", async () => {
+    respond(payload({ builtIn: [CHAIN] }));
+    render(<Page />);
+    await screen.findByTestId("routines-chains");
+    expect(screen.queryByTestId("routines-plan-steps")).not.toBeInTheDocument();
+  });
+
+  it("names the system each step would touch", async () => {
+    respond(payload({ builtIn: [CHAIN] }));
+    render(<Page />);
+    (await screen.findByTestId("routines-plan-toggle")).click();
+    const tiles = await screen.findAllByTestId("routines-plan-step");
+    expect(tiles).toHaveLength(3);
+    expect(tiles[0]).toHaveTextContent("calendar_widget");
+    expect(tiles[1]).toHaveTextContent("no system touched");
+    expect(tiles[2]).toHaveTextContent("waits for you");
+  });
+
+  it("promises no duration, because nothing has run", async () => {
+    /* An estimate here would be a number somebody plans around that we
+       invented. The run view has real ones; this one has none. */
+    respond(payload({ builtIn: [CHAIN] }));
+    render(<Page />);
+    (await screen.findByTestId("routines-plan-toggle")).click();
+    const tiles = await screen.findAllByTestId("routines-plan-step");
+    for (const t of tiles) {
+      expect(t.textContent ?? "").not.toMatch(/\d+\s*(ms|s\b|m\b)/);
+    }
+  });
+
+  it("stays quiet when the response carries no plan at all", async () => {
+    /* An older deployment does not send one. Absent is not the same as
+       empty, and rendering "this chain does nothing" would be a lie about
+       a chain that works. */
+    const { plan: _dropped, ...noPlan } = CHAIN;
+    respond(payload({ builtIn: [noPlan] }));
+    render(<Page />);
+    (await screen.findByTestId("routines-plan-toggle")).click();
+    expect(screen.queryByTestId("routines-plan-steps")).not.toBeInTheDocument();
+  });
+});

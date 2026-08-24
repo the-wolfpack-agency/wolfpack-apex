@@ -32,6 +32,11 @@ interface RoutineSummary {
   description: string;
   steps: number;
   humanSteps: number;
+  /* The steps it WOULD run. Absent from an older response rather than
+     empty, so the page can tell "this chain has no steps" from "this
+     deployment does not send them yet" and stay quiet in the second
+     case. */
+  plan?: PlanStep[];
 }
 
 interface ScheduleSummary {
@@ -49,6 +54,14 @@ interface ScheduleSummary {
  * order, and where it stopped for them, and that is a different question
  * from a count.
  */
+/** A step of a chain that has NOT run: no duration, nothing happened. */
+interface PlanStep {
+  index: number;
+  kind: string;
+  tool: string | null;
+  label: string;
+}
+
 interface RunStep {
   index: number;
   kind: string;
@@ -150,6 +163,10 @@ export default function RoutinesPage() {
      run's steps to render a page where most of them stay closed would
      make the page slower for everybody to serve the person who opens one,
      and the steps of a finished run do not change. */
+  /* Which chain's plan is open. Separate from the run state below: a
+     person comparing what a chain WOULD do against what it DID is looking
+     at two different things and should not have one close the other. */
+  const [openPlan, setOpenPlan] = useState<string | null>(null);
   const [openRun, setOpenRun] = useState<string | null>(null);
   const [steps, setSteps] = useState<Record<string, RunStep[]>>({});
 
@@ -288,14 +305,54 @@ export default function RoutinesPage() {
             <ul style={list} data-testid="routines-chains">
               {[...data.saved, ...data.builtIn].map((r) => (
                 <li key={r.command} style={row}>
-                  <strong>{r.command}</strong>
-                  <div style={dim}>{r.description}</div>
-                  <div style={dim}>
-                    {r.steps} {r.steps === 1 ? "step" : "steps"}
-                    {r.humanSteps > 0
-                      ? `, ${r.humanSteps} of them yours`
-                      : ", none of them yours"}
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setOpenPlan((cur) => (cur === r.command ? null : r.command))}
+                    aria-expanded={openPlan === r.command}
+                    data-testid="routines-plan-toggle"
+                    style={runButton}
+                  >
+                    <strong>{r.command}</strong>
+                    <div style={dim}>{r.description}</div>
+                    <div style={dim}>
+                      {r.steps} {r.steps === 1 ? "step" : "steps"}
+                      {r.humanSteps > 0
+                        ? `, ${r.humanSteps} of them yours`
+                        : ", none of them yours"}
+                      {" · "}
+                      {openPlan === r.command ? "hide what it does" : "see what it does"}
+                    </div>
+                  </button>
+
+                  {openPlan === r.command && (r.plan ?? []).length > 0 ? (
+                    <ol style={tiles} data-testid="routines-plan-steps">
+                      {(r.plan ?? []).map((st) => (
+                        <li key={st.index} style={tile} data-testid="routines-plan-step">
+                          <div style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
+                            <StatusPill
+                              status={st.kind}
+                              label={KIND_LABEL[st.kind] ?? st.kind}
+                              tone={KIND_TONE[st.kind] ?? "info"}
+                              size="sm"
+                            />
+                            <strong style={{ fontSize: "0.92rem" }}>{st.label}</strong>
+                          </div>
+                          {/* No duration: nothing has run. An estimate
+                              here would be a number somebody plans around
+                              that we invented. */}
+                          <div style={{ ...dim, marginTop: "0.3rem" }}>
+                            {st.tool ? (
+                              <code>{st.tool}</code>
+                            ) : st.kind === "human" ? (
+                              "waits for you"
+                            ) : (
+                              "no system touched"
+                            )}
+                          </div>
+                        </li>
+                      ))}
+                    </ol>
+                  ) : null}
                 </li>
               ))}
             </ul>

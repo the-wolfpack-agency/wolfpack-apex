@@ -30,6 +30,37 @@ import { BUILT_IN_ROUTINES } from "@/lib/assistant/routines/catalogue";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+/**
+ * WHAT A CHAIN WOULD DO, BEFORE IT DOES IT.
+ *
+ * A run's steps can be shown once it has run, which is the wrong way
+ * round for the person deciding whether to run it at all. "5 steps, one
+ * of them yours" tells somebody how much of a commitment it is and
+ * nothing about what it will touch, and a chain that reads mail is a
+ * different proposition from one that reads a calendar even when both are
+ * five steps long.
+ *
+ * The same shape a completed run reports, so one set of tiles renders
+ * both: this is the plan, that is what happened, and a person can compare
+ * them without learning two layouts.
+ *
+ * No duration, because nothing has run. An estimate here would be a
+ * number somebody plans around that we invented.
+ */
+function planOf(
+  steps: ReadonlyArray<{ kind: string; label: string; tool?: string }>,
+): Array<{ index: number; kind: string; tool: string | null; label: string }> {
+  return steps.map((s, index) => ({
+    index,
+    kind: s.kind,
+    /* Only a tool step names one. Saying "no system touched" about a
+       model step is the honest answer and the same one the run view
+       gives. */
+    tool: s.kind === "tool" && s.tool ? s.tool : null,
+    label: s.label,
+  }));
+}
+
 export async function GET(req: NextRequest) {
   const auth = await requireCapability(req, "routines.view");
   if (!auth.ok) return auth.response;
@@ -59,12 +90,14 @@ export async function GET(req: NextRequest) {
         description: r.description,
         steps: r.steps.length,
         humanSteps: r.steps.filter((s) => s.kind === "human").length,
+        plan: planOf(r.steps),
       })),
       saved: saved.map((r) => ({
         command: r.command,
         description: r.description,
         steps: r.steps.length,
         humanSteps: r.steps.filter((s) => s.kind === "human").length,
+        plan: planOf(r.steps),
       })),
       schedules: schedules.map((s) => ({
         command: s.command,
