@@ -23,6 +23,7 @@ import CommandPalette from "@/components/ui/CommandPalette";
 import { useAmbientRefresh } from "@/lib/hooks/useAmbientRefresh";
 import { useEmailArrivalPoll } from "@/lib/hooks/useEmailArrivalPoll";
 import { NAV_ITEMS, PINNED_NAV_HREFS, defaultHiddenForRole, canSeeNavItem } from "@/lib/dashboard-nav";
+import { BOOT_SPLASH_TESTID, BOOT_SPLASH_TEXT } from "@/lib/ui/boot-splash";
 
 interface User {
   id: string;
@@ -224,7 +225,13 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   if (!user) {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ background: "var(--wp-dark)" }}>
-        <div className="text-sm" style={{ color: "var(--wp-text-dim)" }}>Loading Instinct…</div>
+        <div
+          data-testid={BOOT_SPLASH_TESTID}
+          className="text-sm"
+          style={{ color: "var(--wp-text-dim)" }}
+        >
+          {BOOT_SPLASH_TEXT}
+        </div>
       </div>
     );
   }

@@ -14,37 +14,15 @@
 import { test, expect } from "@playwright/test";
 import {
   probePath,
+  hasInstinctToken,
   resolveSmokeTarget,
   signInIfPossible,
-  type SmokeProbe,
 } from "./helpers/smoke-helpers";
+import { PROBES, PUBLIC_PATHS, PUBLIC_LANDING_PROBE } from "./helpers/smoke-probes";
 import { waitForAppReady } from "./helpers/app-ready";
 
 const target = resolveSmokeTarget();
 
-// Routes per the verify spec. Authenticated routes expect text found in the
-// signed-in dashboard shell; the landing route works unauthenticated.
-const PROBES: SmokeProbe[] = [
-  { path: "/", expectText: "Instinct" },
-  // /setup shows the wizard ("Set up your workspace") for a fresh workspace but
-  // redirects an already-onboarded account (e.g. the smoke user) to the
-  // dashboard shell. Accept either; a 401 blank is the real failure we guard.
-  // The old "Setup" probe never matched the "Set up" h1 and was hidden by
-  // verify.yml continue-on-error.
-  { path: "/setup", expectText: "Set up", expectAnyText: ["Set up", "Instinct"] },
-  { path: "/tasks", expectText: "Task" },
-  { path: "/releases", expectText: "Releases" },
-  { path: "/products", expectText: "Products" },
-  { path: "/engineering", expectText: "Engineering" },
-  { path: "/notifications", expectText: "Notification" },
-  { path: "/settings", expectText: "Setting" },
-  { path: "/admin/audit", expectText: "Audit" },
-  { path: "/security-posture", expectText: "Security" },
-];
-
-// Routes that only work pre-auth (login itself). Keep the landing / root probe
-// above, it is expected to render without a session.
-const PUBLIC_PATHS = new Set<string>(["/"]);
 
 test.describe("verify smoke", () => {
   test.beforeAll(async () => {
@@ -74,6 +52,15 @@ test.describe("verify smoke", () => {
     // Sign in once, then probe every route on the same page.
     const signedIn = await signInIfPossible(page, target);
     expect(signedIn, "sign-in was attempted").toBe(true);
+    // signInIfPossible returns true for "the form was filled in", which is not
+    // the same claim as "there is a session". Its own doc comment says so. If
+    // the smoke credentials ever go stale, every probe below would be testing
+    // the login page, and the ones expecting shell text would fail for a reason
+    // that has nothing to do with the route named in the error.
+    expect(
+      await hasInstinctToken(page),
+      "sign-in produced a real session (check SMOKE_TEST_EMAIL / SMOKE_TEST_PASSWORD)",
+    ).toBe(true);
 
     for (const probe of PROBES) {
       await probePath(page, target, probe);
@@ -81,6 +68,8 @@ test.describe("verify smoke", () => {
   });
 
   test("public landing renders without CSP violations", async ({ page }) => {
-    await probePath(page, target, { path: "/", expectText: "Instinct" });
+    // Signed out, / resolves to the sign-in screen. "Sign In" is content only a
+    // rendered page has; "Instinct" was not, because the splash says it too.
+    await probePath(page, target, PUBLIC_LANDING_PROBE);
   });
 });

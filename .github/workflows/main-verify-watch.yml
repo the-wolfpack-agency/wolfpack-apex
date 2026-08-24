@@ -1,0 +1,84 @@
+name: Main verify watch
+
+# A red main gate that nobody is told about is not a gate.
+#
+# Verify failed on every push to main from 2026-06-28 to 2026-08-24, fifty-odd
+# runs, while production was healthy and every pull request reported SUCCESS.
+# It could: the deployed-URL smoke is deliberately skipped on pull_request
+# events, so the only job that touches production runs after the merge, where
+# the result is a red tick on a commit page nobody revisits.
+#
+# The skip itself is right (a PR cannot fix stale prod state). What was missing
+# is anybody being told. This files the failure into the maint-queue label the
+# maintenance loop already drains, and updates the same issue rather than
+# opening a new one per push, so a long outage is one thread instead of fifty.
+
+on:
+  workflow_run:
+    workflows: ["Verify"]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: main-verify-watch
+  cancel-in-progress: false
+
+jobs:
+  report:
+    if: github.event.workflow_run.conclusion == 'failure'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v7.0.1
+        with:
+          script: |
+            const run = context.payload.workflow_run;
+            // A stable marker in the body, so the search finds the same thread
+            // every time regardless of how the title is edited by a human.
+            const MARKER = '<!-- main-verify-watch -->';
+            const title = 'Verify is failing on main';
+
+            const { data: found } = await github.rest.search.issuesAndPullRequests({
+              q: `repo:${context.repo.owner}/${context.repo.repo} is:issue is:open label:maint-queue in:body "${MARKER}"`,
+            });
+            const existing = found.items[0];
+
+            const line =
+              `Verify failed on main at ${run.head_sha.slice(0, 7)} ` +
+              `([run ${run.id}](${run.html_url})), ${run.updated_at}.`;
+
+            if (existing) {
+              await github.rest.issues.createComment({
+                ...context.repo,
+                issue_number: existing.number,
+                body: line,
+              });
+              core.notice(`Appended to #${existing.number}: ${line}`);
+              return;
+            }
+
+            const body = [
+              MARKER,
+              '',
+              line,
+              '',
+              'The deployed-URL smoke runs only on push to main, so a pull request',
+              'cannot see this. Main stays red until somebody looks, which is what',
+              'this issue is for.',
+              '',
+              `Reproduce: \`PROD_URL=<prod> SMOKE_TEST_EMAIL=... SMOKE_TEST_PASSWORD=... npm run test:e2e:smoke\``,
+              '',
+              'Closing this without a green Verify on main just hides it again.',
+            ].join('\n');
+
+            const { data: issue } = await github.rest.issues.create({
+              ...context.repo,
+              title,
+              body,
+              labels: ['maint-queue'],
+            });
+            core.notice(`Opened #${issue.number}`);
