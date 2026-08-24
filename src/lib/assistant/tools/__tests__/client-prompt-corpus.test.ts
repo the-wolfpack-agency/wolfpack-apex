@@ -69,6 +69,10 @@ const MUST_NOT_MATCH: Array<[string, string]> = [
   ["what do you do about a rejected claim?", "capability phrasing, real object"],
   ["where do I start the claim from?", "capability phrasing, real object"],
   ["what should I ask the technician?", "capability phrasing, real object"],
+  /* Running a chain is not asking which chains exist. The catalogue must
+     not answer for the runner, or "run my morning" becomes a menu. */
+  ["run my morning", "starts a chain, does not list them"],
+  ["start my day", "starts a chain, does not list them"],
 ];
 
 describe("prompts a dealership types that no tool should claim", () => {
@@ -118,6 +122,28 @@ const MUST_MATCH: Array<[string, string[]]> = [
   ["where do I start?", ["what_can_you_do"]],
   ["what are you able to do", ["what_can_you_do"]],
   ["help", ["what_can_you_do"]],
+  /* THE QUESTION THAT OPENS THE CHAINING FEATURE.
+     "what routines can I run?" matched nothing on the deployed assistant,
+     fell through to a model, and came back describing the inventory sync
+     and VIN decode routines of a DIFFERENT product, pulled out of the
+     brain with complete confidence. 1,391 tokens to answer the wrong
+     question about the wrong system.
+     Somebody evaluating whether this can automate their work asks this
+     first. "Template" is our word for it; routine, workflow, automation
+     and chain are theirs. */
+  ["what routines can I run?", ["routine_templates"]],
+  ["what automations do you have?", ["routine_templates"]],
+  ["what workflows are there", ["routine_templates"]],
+  /* Universal search also claims this one, because "show me the ..." is
+     a search phrasing. Recorded rather than narrowed: search is
+     deliberately broad, and taking that shape away from it to win one
+     prompt would cost more than it gains. Registration order decides,
+     routine_templates is registered at position 9 against search at 54,
+     so the catalogue answers. The point of naming it here is that the
+     tie is a decision somebody made rather than one a client discovers. */
+  ["show me the routines", ["routine_templates", "search"]],
+  ["list my automations", ["routine_templates"]],
+  ["what can I automate", ["routine_templates"]],
 ];
 
 describe("prompts that must reach the tool built for them", () => {
