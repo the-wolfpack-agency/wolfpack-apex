@@ -14,6 +14,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { getRouterInsights } from "@/lib/ai/models/insights";
+import { getDeterministicShare } from "@/lib/ai/models/deterministic-share";
 
 export const runtime = "nodejs";
 
@@ -38,7 +39,16 @@ export async function GET(req: NextRequest) {
   const raw = Number(req.nextUrl.searchParams.get("days"));
   const days = Number.isFinite(raw) && raw > 0 ? Math.min(Math.floor(raw), MAX_DAYS) : DEFAULT_DAYS;
 
-  return NextResponse.json(await getRouterInsights(days), {
+  /* The share sits alongside the spend deliberately. Spend describes the
+     calls we made; the share describes the ones we did not, and that is
+     the number this product is sold on. Fetched in parallel so adding it
+     costs latency only where the two queries overlap. */
+  const [insights, deterministic] = await Promise.all([
+    getRouterInsights(days),
+    getDeterministicShare(days),
+  ]);
+
+  return NextResponse.json({ ...insights, deterministic }, {
     status: 200,
     headers: { "Cache-Control": "no-store, max-age=0" },
   });
