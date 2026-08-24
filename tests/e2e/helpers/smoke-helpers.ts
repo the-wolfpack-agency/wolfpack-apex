@@ -232,6 +232,59 @@ export function collectConsoleAndNetworkFailures(page: Page) {
   return () => failures.slice();
 }
 
+/**
+ * Wait until a page has actually RENDERED, then return its text.
+ *
+ * Ten places in this suite had copied the same two lines: navigate with
+ * waitUntil "domcontentloaded", then read body.innerText() straight away and
+ * assert a word is in it. At that instant every authenticated route in this
+ * app shows one thing, "Loading Instinct…", so the assertion is about the
+ * loading screen. On 2026-08-24 that was found to have kept Verify red on
+ * main since 2026-06-28, and to account for several of the failures the
+ * reality check was quietly swallowing.
+ *
+ * THE SPLASH AND THE TEXT ARE CHECKED TOGETHER, not one after the other.
+ * Before React mounts, the splash is not in the DOM either, so "the splash is
+ * gone" is briefly true of a page that has rendered nothing. Both at once is
+ * only ever true of a real render.
+ *
+ * Returns the settled body text, lowercased, so callers can go on asserting
+ * against the page they now know is there.
+ */
+export async function expectRendered(
+  page: Page,
+  where: string,
+  candidates: string[],
+  opts: { message?: string; timeoutMs?: number } = {},
+): Promise<string> {
+  const wanted = candidates.map((t) => t.toLowerCase());
+  const splash = page.locator(`[data-testid="${BOOT_SPLASH_TESTID}"]`);
+  const budgetMs = opts.timeoutMs ?? DEFAULT_CONTENT_TIMEOUT_MS;
+  const deadline = Date.now() + budgetMs;
+  let booting = false;
+  let bodyText = "";
+  let ready = false;
+  while (!ready) {
+    booting = (await splash.count()) > 0;
+    bodyText = (await page.locator("body").innerText().catch(() => "")).toLowerCase();
+    ready = !booting && wanted.some((t) => bodyText.includes(t));
+    if (ready || Date.now() >= deadline) break;
+    await page.waitForTimeout(POLL_INTERVAL_MS);
+  }
+  // Two different failures, said differently. A page stuck on the splash is a
+  // boot problem; a page showing something else is a content problem. Calling
+  // both "text not found" is what sent somebody looking at /tasks for two
+  // months while the page rendered perfectly well a second later.
+  expect(
+    ready,
+    booting
+      ? `${where} never finished booting: still showing the loading splash after ${budgetMs}ms`
+      : `${opts.message ?? `None of [${candidates.join(", ")}] found on ${where}`}` +
+        ` (after ${budgetMs}ms; body was ${JSON.stringify(bodyText.slice(0, 300))})`,
+  ).toBe(true);
+  return bodyText;
+}
+
 /** Probe one path: HTTP 200, expected text visible, zero CSP/network failures. */
 export async function probePath(
   page: Page,
@@ -257,46 +310,12 @@ export async function probePath(
     return;
   }
 
-  // WAIT FOR THE PAGE. DO NOT SAMPLE THE SPLASH.
-  //
-  // This read body.innerText() once, the instant after domcontentloaded.
-  // Every authenticated route in this app says exactly one thing at that
-  // moment: "Loading Instinct…". So a probe expecting the fragment
-  // "Instinct" passed on a blank screen, and a probe expecting anything else
-  // failed on a perfectly healthy one. /tasks was the first probe in the list
-  // asking for something the splash does not say, and it had been failing on
-  // main since 2026-06-28 while production rendered the page correctly.
-  //
-  // BOTH CONDITIONS ARE POLLED TOGETHER ON PURPOSE. Clearing the splash first
-  // and then reading the text has a race of its own: before React mounts, the
-  // splash is not in the DOM yet, so "splash is gone" is briefly true of a
-  // page that has rendered nothing at all. A page is ready when the splash is
-  // absent AND the expected text is present, which is only ever true of a
-  // real render.
+  // One implementation of "has this actually rendered", shared with every
+  // other spec that asks the question. See expectRendered above.
   const candidates = probe.expectAnyText ?? [probe.expectText];
-  const wanted = candidates.map((t) => t.toLowerCase());
-  const splash = page.locator(`[data-testid="${BOOT_SPLASH_TESTID}"]`);
-  const budgetMs = probe.contentTimeoutMs ?? DEFAULT_CONTENT_TIMEOUT_MS;
-  const deadline = Date.now() + budgetMs;
-  let booting = false;
-  let bodyText = "";
-  let ready = false;
-  while (!ready) {
-    booting = (await splash.count()) > 0;
-    bodyText = (await page.locator("body").innerText().catch(() => "")).toLowerCase();
-    ready = !booting && wanted.some((t) => bodyText.includes(t));
-    if (ready || Date.now() >= deadline) break;
-    await page.waitForTimeout(POLL_INTERVAL_MS);
-  }
-  // Two different failures, said differently. A page stuck on the splash is a
-  // boot problem; a page that rendered something else is a content problem.
-  // Reporting both as "text not found" is what made this take two months.
-  expect(
-    ready,
-    booting
-      ? `${probe.path} never finished booting: still showing the loading splash after ${budgetMs}ms`
-      : `None of [${candidates.join(", ")}] found on ${probe.path} after ${budgetMs}ms. Body was: ${JSON.stringify(bodyText.slice(0, 300))}`,
-  ).toBe(true);
+  await expectRendered(page, probe.path, candidates, {
+    timeoutMs: probe.contentTimeoutMs,
+  });
 
   // 3-second idle window for async CSP/network failures to surface.
   await page.waitForTimeout(3_000);

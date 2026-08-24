@@ -27,6 +27,7 @@
 
 import { test, expect } from "@playwright/test";
 import {
+  expectRendered,
   resolveSmokeTarget,
   signInIfPossible,
   authToken,
@@ -142,13 +143,9 @@ test.describe("OGIAM adversarial flow, live dispatch reality check", () => {
     });
     expect(nav?.status(), "/admin/ogiam loads (not 401/blank)").toBe(200);
 
-    const bodyText = (
-      await page.locator("body").innerText().catch(() => "")
-    ).toLowerCase();
-    expect(
-      bodyText.includes("ai gateway") || bodyText.includes("decisions"),
-      "the OGIAM explorer page is not blank",
-    ).toBe(true);
+    await expectRendered(page, "/admin/ogiam", ["ai gateway", "decisions"], {
+      message: "the OGIAM explorer page is not blank",
+    });
 
     const list = page.getByTestId("ogiam-decisions-list");
     const empty = page.getByTestId("ogiam-decisions-empty");

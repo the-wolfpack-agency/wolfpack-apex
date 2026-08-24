@@ -28,6 +28,7 @@
 
 import { test, expect } from "@playwright/test";
 import {
+  expectRendered,
   resolveSmokeTarget,
   signInIfPossible,
   authToken,
@@ -138,11 +139,9 @@ test.describe("feedback screenshot data flow, real DB round-trip", () => {
     });
     expect(nav?.status(), "/admin/feedback loads (not 401/blank)").toBe(200);
 
-    const bodyText = await page.locator("body").innerText().catch(() => "");
-    expect(
-      bodyText.toLowerCase().includes("team feedback"),
-      "the feedback page is not blank",
-    ).toBe(true);
+    await expectRendered(page, "/admin/feedback", ["team feedback"], {
+      message: "the feedback page is not blank",
+    });
 
     // The thumbnail link is keyed by the row id. It may sit below the fold or
     // under the All filter, so scope the assertion to its testid.

@@ -30,6 +30,7 @@
 
 import { test, expect } from "@playwright/test";
 import {
+  expectRendered,
   resolveSmokeTarget,
   signInIfPossible,
   collectConsoleAndNetworkFailures,
@@ -75,8 +76,9 @@ test.describe("Benchmark dashboard reality check", () => {
     expect(nav?.status(), "/admin/benchmark loads (not 401/blank)").toBe(200);
 
     // The page is not blank: the title is rendered.
-    const bodyText = (await page.locator("body").innerText().catch(() => "")).toLowerCase();
-    expect(bodyText.includes("benchmark"), "the benchmark page is not blank").toBe(true);
+    await expectRendered(page, "/admin/benchmark", ["benchmark"], {
+      message: "the benchmark page is not blank",
+    });
 
     // Either the summary cards (with data) OR the explicit empty state is in the
     // DOM, never a silent blank. The page-level container is always present.

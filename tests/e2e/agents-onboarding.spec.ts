@@ -27,6 +27,7 @@
 
 import { test, expect } from "@playwright/test";
 import {
+  expectRendered,
   resolveSmokeTarget,
   signInIfPossible,
   collectConsoleAndNetworkFailures,
@@ -51,10 +52,9 @@ test.describe("Agent-principal onboarding, roster reality check", () => {
     expect(nav?.status(), "/admin/agents loads (not 401/blank)").toBe(200);
 
     // The page is not blank: the title is rendered.
-    const bodyText = (
-      await page.locator("body").innerText().catch(() => "")
-    ).toLowerCase();
-    expect(bodyText.includes("agents"), "the agents page is not blank").toBe(true);
+    await expectRendered(page, "/admin/agents", ["agents"], {
+      message: "the agents page is not blank",
+    });
 
     // Either the roster list or the explicit empty state is in the DOM, never a
     // silent blank. One of the two testids is always present.
@@ -104,13 +104,9 @@ test.describe("Agent-principal onboarding, roster reality check", () => {
     expect(nav?.status(), "/admin/agents/memory loads (not 401/blank)").toBe(200);
 
     // The page is not blank: the title is rendered.
-    const bodyText = (
-      await page.locator("body").innerText().catch(() => "")
-    ).toLowerCase();
-    expect(
-      bodyText.includes("agent memory"),
-      "the agent-memory page is not blank",
-    ).toBe(true);
+    await expectRendered(page, "/admin/agents/memory", ["agent memory"], {
+      message: "the agent-memory page is not blank",
+    });
 
     // Either the memory list or the explicit empty state is in the DOM, never a
     // silent blank. One of the two testids is always present.

@@ -25,6 +25,7 @@
 
 import { test, expect } from "@playwright/test";
 import {
+  expectRendered,
   resolveSmokeTarget,
   signInIfPossible,
   collectConsoleAndNetworkFailures,
@@ -68,8 +69,9 @@ test.describe("Cross-scan intelligence console reality check", () => {
     expect(nav?.status(), "/admin/cross-scan-insights loads (not 401/blank)").toBe(200);
 
     // The page is not blank: the title is rendered.
-    const bodyText = (await page.locator("body").innerText().catch(() => "")).toLowerCase();
-    expect(bodyText.includes("cross-scan"), "the cross-scan page is not blank").toBe(true);
+    await expectRendered(page, "/admin/cross-scan-insights", ["cross-scan"], {
+      message: "the cross-scan page is not blank",
+    });
 
     // The page-level container is always present.
     await expect(

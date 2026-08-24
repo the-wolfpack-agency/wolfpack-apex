@@ -29,6 +29,7 @@
 
 import { test, expect } from "@playwright/test";
 import {
+  expectRendered,
   resolveSmokeTarget,
   signInIfPossible,
   collectConsoleAndNetworkFailures,
@@ -74,8 +75,9 @@ test.describe("Scan command center reality check", () => {
     expect(nav?.status(), "/admin/platform-scans loads (not 401/blank)").toBe(200);
 
     // The page is not blank: the command-center title is rendered.
-    const bodyText = (await page.locator("body").innerText().catch(() => "")).toLowerCase();
-    expect(bodyText.includes("platform scans"), "the command center is not blank").toBe(true);
+    await expectRendered(page, "/admin/platform-scans", ["platform scans"], {
+      message: "the command center is not blank",
+    });
 
     // The page-level container mounts (never the auth-pending placeholder for a
     // signed-in user).

@@ -26,6 +26,7 @@
 
 import { test, expect } from "@playwright/test";
 import {
+  expectRendered,
   resolveSmokeTarget,
   signInIfPossible,
   collectConsoleAndNetworkFailures,
@@ -69,8 +70,9 @@ test.describe("Production release gate reality check", () => {
     expect(nav?.status(), "/admin/deployment loads (not 401/blank)").toBe(200);
 
     // The page is not blank.
-    const bodyText = (await page.locator("body").innerText().catch(() => "")).toLowerCase();
-    expect(bodyText.includes("release"), "the release gate is on the page").toBe(true);
+    await expectRendered(page, "/admin/deployment", ["release"], {
+      message: "the release gate is on the page",
+    });
 
     // The gate section always mounts.
     await expect(

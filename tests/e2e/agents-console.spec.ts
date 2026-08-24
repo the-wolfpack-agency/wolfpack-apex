@@ -30,6 +30,7 @@
 
 import { test, expect } from "@playwright/test";
 import {
+  expectRendered,
   resolveSmokeTarget,
   signInIfPossible,
   collectConsoleAndNetworkFailures,
@@ -75,8 +76,9 @@ test.describe("Agent fleet console reality check", () => {
     expect(nav?.status(), "/admin/agents loads (not 401/blank)").toBe(200);
 
     // The page is not blank: the fleet framing copy is rendered.
-    const bodyText = (await page.locator("body").innerText().catch(() => "")).toLowerCase();
-    expect(bodyText.includes("agent"), "the agents console is not blank").toBe(true);
+    await expectRendered(page, "/admin/agents", ["agent"], {
+      message: "the agents console is not blank",
+    });
 
     // The page-level container always mounts.
     await expect(
