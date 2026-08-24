@@ -55,6 +55,7 @@ import { getAIClient, NoProviderAvailableError } from "@/lib/ai";
 import { selectAssistantTier, parseTierDirective, type TierDirective } from "@/lib/assistant/model-tier";
 import { fenceUntrusted, type PromptPart } from "@/lib/ai/provenance";
 import { carriesEnoughToQuote } from "@/lib/brain/confidence";
+import { SEMANTIC_SCORE_FLOOR } from "@/lib/brain/qdrant";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -2244,7 +2245,13 @@ async function tryBrain(
      * practice every answer here has been taking the keyword branch. */
     const quotable = carriesEnoughToQuote(message);
     const strong = result.hits.filter((h) => {
-      if (h.source.includes("semantic")) return true;
+      /* SEMANTIC IS EXEMPT FROM THE SUBJECT-WORD TEST, NOT FROM HAVING TO BE
+         CLOSE. Qdrant already refuses anything under SEMANTIC_SCORE_FLOOR, and
+         this repeats the check because the exemption is only safe while that
+         floor exists: for one afternoon it did not, and every query on record
+         came back with five confident hits. Belt and braces on the one branch
+         that answers without asking anything else. */
+      if (h.source.includes("semantic")) return h.score >= SEMANTIC_SCORE_FLOOR;
       return quotable && h.score >= 0.05;
     });
     if (strong.length === 0) return { strong: null, context };

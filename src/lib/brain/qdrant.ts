@@ -128,6 +128,35 @@ export async function deleteByDocumentId(documentId: string): Promise<void> {
   }
 }
 
+/**
+ * HOW CLOSE COUNTS AS RELEVANT.
+ *
+ * A vector search returns the k nearest neighbours whether or not any of them
+ * are near. Without a floor, every query gets an answer: on 2026-08-24, the
+ * first run after the embedding backfill returned five hits for 60 out of 60
+ * real queries, including "1111-1212-3232-4321" confidently matched to a
+ * mobile-coaching spreadsheet and "171 state street New York, NY" to a session
+ * export. Switching semantic on had made the wrong-answer problem universal
+ * rather than fixing it.
+ *
+ * Measured against this index, cosine, text-embedding-3-small:
+ *
+ *   things we hold          0.3872 .. 0.5986   (leadership team, demo vehicle,
+ *                                               onboarding, dinner receipt)
+ *   things we do not        0.2322 .. 0.3432   (a card number, a street
+ *                                               address, weather, "thanks",
+ *                                               bicycle punctures, gibberish)
+ *
+ * 0.36 sits in the gap. Unlike the keyword score, which put "yes" above every
+ * genuine question and could not be thresholded at all, these two populations
+ * genuinely separate.
+ *
+ * Erring low costs a confident wrong answer; erring high costs an "I don't
+ * know" for something we hold. After the day this was found, the second is the
+ * better failure.
+ */
+export const SEMANTIC_SCORE_FLOOR = 0.36;
+
 export async function searchBrain(
   queryVector: number[],
   limit: number,
@@ -137,6 +166,9 @@ export async function searchBrain(
     vector: queryVector,
     limit,
     with_payload: true,
+    /* Applied by Qdrant rather than by us, so a distant neighbour is never
+       fetched, never scored and never has the chance to be quoted. */
+    score_threshold: SEMANTIC_SCORE_FLOOR,
   };
   if (filter) body.filter = filter;
 

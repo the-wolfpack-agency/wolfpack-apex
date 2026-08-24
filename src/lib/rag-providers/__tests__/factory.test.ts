@@ -72,17 +72,33 @@ describe("getVectorStore() — not wired state", () => {
   });
 });
 
-describe("getEmbeddingProvider() — not wired state", () => {
+describe("getEmbeddingProvider()", () => {
   test("throws 'not wired: openai' on default env", () => {
     expect(() => getEmbeddingProvider()).toThrow(/rag-provider adapter not wired: openai/);
   });
 
-  test("throws 'not wired: azure_openai' with full creds", () => {
+  /* WIRED 2026-08-24. This test pinned the TODO, and the TODO was the bug: a
+     complete Azure embedder sat unused in azure-openai.ts while the factory
+     threw, so Instinct embedded nothing for the life of the feature. 2,305
+     chunks at embedded=false, 252 brain queries in 30 days, zero semantic
+     hits. Asserting that a thing is unwired keeps it unwired. */
+  test("returns a real Azure embedder with full creds", () => {
     process.env.INSTINCT_EMBEDDING_PROVIDER = "azure_openai";
     process.env.AZURE_OPENAI_ENDPOINT = "https://x.openai.azure.com";
     process.env.AZURE_OPENAI_API_KEY = "k";
     process.env.AZURE_OPENAI_EMBEDDING_DEPLOYMENT = "emb";
-    expect(() => getEmbeddingProvider()).toThrow(/rag-provider adapter not wired: azure_openai/);
+    const provider = getEmbeddingProvider();
+    expect(provider.name).toBe("azure_openai");
+    expect(provider.model).toBe("emb");
+    expect(typeof provider.embed).toBe("function");
+  });
+
+  test("selecting azure without a deployment name still refuses, with no silent fallback", () => {
+    process.env.INSTINCT_EMBEDDING_PROVIDER = "azure_openai";
+    process.env.AZURE_OPENAI_ENDPOINT = "https://x.openai.azure.com";
+    process.env.AZURE_OPENAI_API_KEY = "k";
+    delete process.env.AZURE_OPENAI_EMBEDDING_DEPLOYMENT;
+    expect(() => getEmbeddingProvider()).toThrow(/AZURE_OPENAI_EMBEDDING_DEPLOYMENT/);
   });
 });
 
