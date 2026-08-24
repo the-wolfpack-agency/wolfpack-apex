@@ -177,7 +177,22 @@ const IBAN_RE =
  * purpose. It matches the documented prefix of a Graph entity id and nothing
  * else, so a real key that happens to be long stays caught.
  */
-const GRAPH_ID_RE = /\bAAMkA[A-Za-z0-9+/=_-]{20,}/g;
+/**
+ * A percent sign is part of the identifier, not the end of it.
+ *
+ * An Outlook deep link carries its item id URL-encoded, so a real one
+ * reads AAMkAGY4...FRAAgI3s%2FxNAUAAEY..., and this character class had
+ * no %. The exemption matched up to the percent and stopped, leaving the
+ * tail to be caught as an API key.
+ *
+ * Found by auditing five thousand stored answers on 2026-08-24: five
+ * carried a shape reported as a never-send key, and every one of them was
+ * a calendar link. The consequence is not a leak, it is the opposite: a
+ * legitimate link to somebody's own meeting had its tail replaced with a
+ * placeholder before it reached the model, so the model was reasoning
+ * about a broken URL.
+ */
+const GRAPH_ID_RE = /\bAAMkA[A-Za-z0-9+/=_%-]{20,}/g;
 
 const API_KEY_RE =
   /\b(?:sk-[A-Za-z0-9\-_]{20,}|(?:sk|pk|rk)_(?:live|test)_[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{50,}|xox[bapsr]-[A-Za-z0-9\-]{10,}|AKIA[A-Z0-9]{16}|AIza[A-Za-z0-9\-_]{35}|[A-Fa-f0-9]{32,}|[A-Za-z0-9+/]{40,}={0,2})\b/g;
