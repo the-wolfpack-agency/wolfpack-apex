@@ -1,0 +1,23 @@
+{
+  "//": [
+    "Tests that are known to fail in the reality check's soft-spec step.",
+    "A failure listed here is reported and tolerated. A failure NOT listed here fails the job.",
+    "The list may shrink and may not silently grow. Every entry needs a reason somebody can act on;",
+    "'flaky' is not a reason, it is a description of not having looked yet.",
+    "Recorded 2026-08-24 from run 32742348831 on main, which reported SUCCESS while containing all twelve."
+  ],
+  "failures": {
+    "tests/e2e/agents-onboarding.spec.ts › Agent-principal onboarding, roster reality check › /admin/agents renders the roster-or-empty state and the onboard form cleanly": "Read the page before it rendered. Fixed in #380; expected to drop off the list on the next run.",
+    "tests/e2e/agents-onboarding.spec.ts › Agent-principal onboarding, roster reality check › /admin/agents/memory renders the shared-memory list-or-empty state cleanly": "Read the page before it rendered. Fixed in #380; expected to drop off the list on the next run.",
+    "tests/e2e/ogiam-adversarial-flow.spec.ts › OGIAM adversarial flow, live dispatch reality check › an adversarial prompt drives the gate, then the explorer renders the decisions": "Read the page before it rendered. Fixed in #380; expected to drop off the list on the next run.",
+    "tests/e2e/ogiam-shadow-flow.spec.ts › OGIAM decision explorer, shadow-mode reality check › decisions API returns the explorer shape, then the page renders cleanly": "Read the page before it rendered. Fixed in #380; expected to drop off the list on the next run.",
+    "tests/e2e/knowledge-qa-cache.spec.ts › /knowledge semantic Q&A cache › ask twice → first miss + AI badge, second is a cache hit": "getByRole name matches by SUBSTRING, so \"Ask\" also matched \"Ask a Question\" and the click hit two elements. Fixed here with exact:true.",
+    "tests/e2e/feedback-screenshot-flow.spec.ts › feedback screenshot data flow, real DB round-trip › POST with screenshot, read back via API, then render in the UI": "UNDIAGNOSED. The row is filed and then not found in the admin list. Could be the write, the read, or a filter defaulting to a subset.",
+    "tests/e2e/feature-requests-data-flow.spec.ts › feature-requests data flow — real DB round-trip › POST → id returned → GET by id returns identical row": "UNDIAGNOSED. A real DB round-trip that does not round-trip. Worth reading before anything else on this list.",
+    "tests/e2e/emails-inbox-flow.spec.ts › emails inbox flow (real browser) › empty / composer / reader are mutually exclusive and laid out left-to-right": "UNDIAGNOSED. Console errors during the flow, plus a layout assertion.",
+    "tests/e2e/emails-inbox-flow.spec.ts › emails inbox flow (real browser) › right pane stays visible and above the fold across realistic viewports": "UNDIAGNOSED. Fails at 640px wide. A real responsive bug until shown otherwise.",
+    "tests/e2e/sites-upload-reality-check.spec.ts › sites — wireframe upload reality check › uploaded wireframe text survives into the extracted brief": "UNDIAGNOSED. setInputFiles times out, so the upload control is not reaching an interactive state.",
+    "tests/e2e/sites-upload-reality-check.spec.ts › sites — wireframe upload reality check › multi-file upload produces a multi-page brief (when feature lands)": "UNDIAGNOSED. Same setInputFiles timeout as above; the title says the feature may not have landed.",
+    "tests/e2e/sites-designer-journey.spec.ts › sites — designer journey reality check › full flow: sign in → edit prompt → preview reflects the new tagline": "UNDIAGNOSED. The longest journey on the list, so most likely to be broken somewhere ordinary."
+  }
+}

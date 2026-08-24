@@ -127,8 +127,11 @@ jobs:
       # (workers:1 from the config) since several mutate. continue-on-error keeps
       # a soft failure from failing the job.
       - name: Reality-check soft specs (post-merge visibility)
+        id: soft
         if: steps.cfg.outputs.configured == 'true' && github.event_name == 'push'
         continue-on-error: true
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_NAME: soft-spec-results.json
         run: >-
           npx playwright test
           tests/e2e/sites-upload-reality-check.spec.ts
@@ -155,7 +158,26 @@ jobs:
           tests/e2e/routines-loop.spec.ts
           tests/e2e/routines-discovery.spec.ts
           tests/e2e/every-role.spec.ts
-          --config=playwright.config.ts --reporter=github
+          --config=playwright.config.ts --reporter=github,json
+
+      # THE STEP ABOVE CANNOT FAIL, WHICH IS WHY NOBODY KNEW.
+      #
+      # continue-on-error is right: several of these specs mutate real state and
+      # genuinely flake, and blocking every merge on them would get the step
+      # deleted inside a week. What was wrong is that failing cost nothing. The
+      # run of 2026-08-24 reported SUCCESS while containing "12 failed, 7
+      # skipped, 30 passed", and several of those twelve were the same
+      # loading-screen bug that kept Verify red on main for two months.
+      #
+      # So the known-failing set is written down in tests/e2e/known-soft-failures.json
+      # with a reason each. A listed failure is reported and tolerated. An
+      # unlisted one fails HERE, where the step is allowed to fail. The pile can
+      # shrink and cannot silently grow.
+      #
+      # always(): the ratchet must run precisely when the step above failed.
+      - name: Soft-spec ratchet (the pile may shrink, not grow)
+        if: always() && steps.soft.outcome != 'skipped'
+        run: npx tsx scripts/soft-spec-ratchet.ts soft-spec-results.json
 
       # Upload ALL diagnostics so any real failure is debuggable and no data is
       # lost: the HTML report + the raw trace/video/screenshot artifacts.
