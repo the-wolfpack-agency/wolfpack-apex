@@ -31,8 +31,31 @@ interface EmailWidgetData {
   messageCount: number;
 }
 
-const INTENT_RE =
-  /^(?:inbox|show\s+(?:me\s+)?(?:my\s+)?inbox|recent\s+emails?|show\s+(?:me\s+)?(?:my\s+)?(?:recent\s+)?emails?|email\s+widget|show\s+(?:my\s+)?email)[\s.?!]*$/i;
+/**
+ * "WHAT CAME IN" IS THE MOST-ASKED QUESTION THERE IS.
+ *
+ * This required the literal word "inbox" or "email" and was anchored end
+ * to end. Swept on 2026-08-24: "check my inbox", "what came in
+ * overnight", "any new email" and "what emails came in today" all reached
+ * no tool at all, and were answered by a model from whatever the
+ * knowledge base had nearest.
+ *
+ * It is the first thing most people do at a desk, it is answerable from
+ * their own mailbox in milliseconds, and every one of those phrasings was
+ * being paid for as a model call and answered from a document.
+ */
+const INTENT_RE = new RegExp(
+  [
+    `^(?:inbox|show\\s+(?:me\\s+)?(?:my\\s+)?inbox|recent\\s+emails?|show\\s+(?:me\\s+)?(?:my\\s+)?(?:recent\\s+)?emails?|email\\s+widget|show\\s+(?:my\\s+)?email)[\\s.?!]*$`,
+    `^\\s*check\\s+(?:my\\s+)?(?:inbox|email|mail)[\\s.?!]*$`,
+    `^\\s*(?:any|got\\s+any)\\s+new\\s+(?:email|mail|messages?)[\\s.?!]*$`,
+    /* Named by WHEN rather than by what: the commonest morning phrasing
+       and the one that contains neither of the words this looked for. */
+    `^\\s*what\\s+(?:came|arrived|landed)\\s+in\\s+(?:overnight|today|this\\s+morning|last\\s+night|since\\s+yesterday)[\\s.?!]*$`,
+    `^\\s*what\\s+(?:emails?|mail|messages?)\\s+(?:came|arrived|landed)\\s+in\\s+(?:today|overnight|this\\s+morning)?[\\s.?!]*$`,
+  ].join("|"),
+  "i",
+);
 
 function matchEmailWidgetIntent(message: string): Params | null {
   if (!INTENT_RE.test(message.trim())) return null;

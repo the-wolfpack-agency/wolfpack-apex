@@ -61,6 +61,16 @@ const INTENT_PATTERNS = [
   /^\s*(?:prep|brief)(?:\s+me)?(?:\s+for)?(?:\s+my)?(?:\s+(?:next|upcoming))?\s+(?:meeting|call|sync)(?:\s+(?:with\s+)?(.+))?[\s.?!]*$/i,
   /^\s*meeting\s+prep[\s.?!]*$/i,
   /^\s*what\s+should\s+i\s+know\s+(?:about|for)\s+my\s+(?:next\s+|upcoming\s+)?(?:meeting|call)\??[\s.?!]*$/i,
+  /* Found by sweeping the phrasings on 2026-08-24: four of five ordinary
+     ways of asking to be got ready for a meeting reached a model instead
+     of the tool built for it. "Prep" is our word; brief me, get me ready
+     and what do I need to know are theirs.
+     A TIME rather than the word "meeting" is the commonest of all: "brief
+     me on my 10am" names the thing by when it is. */
+  /^\s*(?:brief|prep|prepare|catch)\s+me\s+(?:up\s+)?(?:on|for)\s+(?:my\s+)?(?:next\s+)?(?:\d{1,2}(?::\d{2})?\s*(?:am|pm)?|meeting|call|sync|one\s*[- ]?on\s*[- ]?one|1:1)\b/i,
+  /^\s*get\s+me\s+ready\s+for\s+(?:my\s+|the\s+)?(?:next\s+)?(?:meeting|call|sync|\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\b/i,
+  /^\s*what\s+do\s+i\s+need\s+to\s+know\s+(?:before|for|about)\s+(?:this|my|the)\s+(?:next\s+)?(?:meeting|call|sync)\b/i,
+  /^\s*who\s+am\s+i\s+meeting\b/i,
 ];
 
 function matchMeetingPrepIntent(message: string): Params | null {

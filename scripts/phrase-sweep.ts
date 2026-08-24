@@ -106,6 +106,92 @@ const CAPABILITIES: Capability[] = [
     ],
   },
   {
+    /* Recent mail is the widget's job; a targeted search is the mail
+       tool's. The sweep expected one tool for both and was wrong about
+       which, which is worth recording: a miss here was partly my own
+       expectation rather than the product's. */
+    tool: "email_thread_widget",
+    what: "what came in",
+    phrasings: [
+      "what came in overnight", "any new email", "check my inbox",
+      "what emails came in today", "show me my email", "inbox",
+    ],
+  },
+  {
+    tool: "search_mail",
+    what: "finding a particular email",
+    phrasings: [
+      "did anyone email me about the invoice",
+      "find emails from Dana about the warranty claim",
+      "show emails to the dealer group",
+      "any emails about the recall",
+      /* "anything from the dealer group" is left out on purpose: without
+         the word mail or email in it, "anything from X" is as likely to
+         be about a document or a supplier as about a mailbox. */
+    ],
+  },
+  {
+    tool: "task_list_widget",
+    what: "what is waiting on somebody",
+    phrasings: [
+      "what is waiting on me", "show me my tasks", "what do I owe people",
+      "what is on my plate", "my open tasks", "what have I got outstanding",
+      "what am I supposed to be doing today", "anything overdue",
+    ],
+  },
+  {
+    tool: "meeting_prep",
+    what: "getting ready for a meeting",
+    phrasings: [
+      "prep me for my next meeting", "brief me on my 10am",
+      "what do I need to know before this call", "get me ready for the meeting",
+      "who am I meeting and what about",
+    ],
+  },
+  {
+    tool: "who_is",
+    what: "who somebody is",
+    phrasings: [
+      "who is Dana", "who is dana@dealer.test", "tell me about Ray Okonkwo",
+      "who am I dealing with here", "what do we know about this person",
+    ],
+  },
+  {
+    tool: "cross_tool_insights_widget",
+    what: "patterns across tools",
+    phrasings: [
+      "give me cross-tool insights", "what should I know",
+      "any insights", "show me insights", "what is happening across my tools",
+      "what patterns do you see",
+    ],
+  },
+  {
+    tool: "compare_across_sources",
+    what: "where two systems disagree",
+    phrasings: [
+      "compare contacts across systems", "compare our customers across both",
+      "where do our systems disagree about contacts", "contact drift between systems",
+      "do our two CRMs agree",
+    ],
+  },
+  {
+    tool: "dark_data",
+    what: "what nobody reads",
+    phrasings: [
+      "what is in the legacy database that nobody uses", "show me the dark data",
+      "unused columns", "what data are we not using",
+      "what is in there that we have never looked at",
+    ],
+  },
+  {
+    tool: "search_github_pull_requests",
+    what: "open code review",
+    phrasings: [
+      "what PRs are open", "any pull requests waiting", "show me open PRs",
+      "what is waiting for review", "whose PR needs looking at",
+    ],
+  },
+  {
     tool: null,
     what: "things nothing should claim",
     phrasings: [

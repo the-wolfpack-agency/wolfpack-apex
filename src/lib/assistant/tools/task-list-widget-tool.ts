@@ -33,8 +33,42 @@ interface TaskWidgetData {
   overdueCount: number;
 }
 
-const INTENT_RE =
-  /^(?:tasks|my\s+tasks|open\s+tasks|show\s+(?:me\s+)?(?:my\s+)?tasks|task\s+list|to-?do\s+list|todos?|show\s+tasks)[\s.?!]*$/i;
+/**
+ * ASKING WHAT IS WAITING ON YOU, IN THE WORDS PEOPLE USE.
+ *
+ * This was anchored end to end and required the literal word "task" or
+ * "todo". Swept on 2026-08-24: seven of eight ordinary phrasings missed,
+ * including "what is waiting on me", "what is on my plate" and "anything
+ * overdue".
+ *
+ * It is the question somebody asks every morning, and it is one of the
+ * few this product can answer from their own data in milliseconds. Every
+ * missed phrasing was instead answered by a model, from whatever the
+ * knowledge base had nearest.
+ *
+ * "Task" is the word the software uses. Plate, waiting, outstanding,
+ * owe and overdue are the words a person uses for the same thing.
+ */
+const INTENT_RE = new RegExp(
+  [
+    /* the original literal set, kept exactly */
+    `^(?:tasks|my\\s+tasks|open\\s+tasks|show\\s+(?:me\\s+)?(?:my\\s+)?tasks|task\\s+list|to-?do\\s+list|todos?|show\\s+tasks)[\\s.?!]*$`,
+    /* what a person actually types */
+    `\\bwhat(?:'s| is| have i got)?\\s+(?:is\\s+)?(?:still\\s+)?(?:waiting|outstanding|left)\\s+(?:on|for|with)?\\s*me\\b`,
+    `\\bwhat(?:'s| is)\\s+on\\s+my\\s+plate\\b`,
+    /* These two have to stand alone. "what do I owe the dealer group" and
+       "anything overdue on the invoice" are questions about a party and a
+       document, and a task list answering them would be trespassing on a
+       real question the same way the financials tool did on warranty. */
+    `\\bwhat\\s+do\\s+i\\s+owe(?:\\s+(?:people|anyone|anybody))?[\\s.?!]*$`,
+    `\\bwhat\\s+have\\s+i\\s+got\\s+outstanding[\\s.?!]*$`,
+    `\\banything\\s+(?:overdue|outstanding|waiting)(?:\\s+(?:on\\s+me|for\\s+me))?[\\s.?!]*$`,
+    `\\bmy\\s+open\\s+(?:tasks|items|work)\\b`,
+    `\\bwhat\\s+am\\s+i\\s+supposed\\s+to\\s+be\\s+doing\\b`,
+    `\\bwhat\\s+(?:should|do)\\s+i\\s+(?:need\\s+to\\s+)?(?:do|work\\s+on)\\s+(?:today|next)\\b`,
+  ].join("|"),
+  "i",
+);
 
 function matchTaskWidgetIntent(message: string): Params | null {
   if (!INTENT_RE.test(message.trim())) return null;
