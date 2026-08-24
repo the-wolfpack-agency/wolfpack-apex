@@ -110,6 +110,9 @@ if [ "${VERIFY_DRY_RUN:-0}" = "1" ]; then
   if [ "${VERIFY_SKIP_BUILD:-0}" != "1" ]; then
     stage_enabled e2e && echo "    - next-build"
   fi
+  if [ "${VERIFY_SKIP_E2E:-0}" != "1" ]; then
+    stage_enabled e2e && echo "    - smoke-self-check"
+  fi
   if [ "${VERIFY_SKIP_E2E:-0}" != "1" ] && [ "${VERIFY_SKIP_SMOKE:-0}" != "1" ] && [ "${CI:-}" = "true" ]; then
     stage_enabled e2e && echo "    - e2e-smoke"
   fi
@@ -154,6 +157,19 @@ if stage_enabled e2e; then
     skip_stage "next-build" "VERIFY_SKIP_BUILD=1"
   else
     run_stage "next-build" npx next build
+  fi
+
+  # THE SMOKE'S OWN GUARDRAIL, and it runs where the smoke does not.
+  #
+  # e2e-smoke is CI-only and post-merge-only, so from 2026-06-28 to 2026-08-24
+  # it failed on main while every PR went green and every local verify printed
+  # 8/8. This spec serves its own pages over localhost, needs no deployment and
+  # no credentials, and pins the probe timing that broke. It runs on PRs and
+  # locally, which is precisely where the bug was invisible.
+  if [ "${VERIFY_SKIP_E2E:-0}" = "1" ]; then
+    skip_stage "smoke-self-check" "VERIFY_SKIP_E2E=1"
+  else
+    run_stage "smoke-self-check" npm run test:e2e:smoke-self-check
   fi
 
   # The e2e-smoke probes the DEPLOYED prod URL (PROD_URL). That is a post-merge

@@ -12,6 +12,14 @@ import {
   type Response,
   type ConsoleMessage,
 } from "@playwright/test";
+import { BOOT_SPLASH_TESTID } from "@/lib/ui/boot-splash";
+
+/** How long a route gets to boot and render its content before we call it
+ *  broken. Production settled in about 8s when this was measured on
+ *  2026-08-24, so this is generous on purpose: a slow render is a
+ *  different complaint from a blank one. */
+const DEFAULT_CONTENT_TIMEOUT_MS = 30_000;
+const POLL_INTERVAL_MS = 250;
 
 export interface SmokeProbe {
   path: string;
@@ -29,6 +37,14 @@ export interface SmokeProbe {
   json?: boolean;
   /** Allowed non-2xx status for the main document (e.g. 401 for pre-auth). */
   allowStatus?: number[];
+  /**
+   * How long the route gets to boot and render before the probe calls it
+   * broken. Defaults to 30s, which is generous against production (it settled
+   * in about 8s when measured on 2026-08-24). An explicit option rather than
+   * an env var on purpose: an env var reads as a gate, and a spec that looks
+   * gated on a secret is how a test comes to never run at all.
+   */
+  contentTimeoutMs?: number;
 }
 
 export interface SmokeTarget {
@@ -241,14 +257,45 @@ export async function probePath(
     return;
   }
 
-  // Assert an expected text fragment is present somewhere in the rendered body.
-  // expectAnyText (when set) passes if ANY fragment matches, for state-dependent
-  // routes; otherwise the single expectText must match.
-  const bodyText = (await page.locator("body").innerText().catch(() => "")).toLowerCase();
+  // WAIT FOR THE PAGE. DO NOT SAMPLE THE SPLASH.
+  //
+  // This read body.innerText() once, the instant after domcontentloaded.
+  // Every authenticated route in this app says exactly one thing at that
+  // moment: "Loading Instinct…". So a probe expecting the fragment
+  // "Instinct" passed on a blank screen, and a probe expecting anything else
+  // failed on a perfectly healthy one. /tasks was the first probe in the list
+  // asking for something the splash does not say, and it had been failing on
+  // main since 2026-06-28 while production rendered the page correctly.
+  //
+  // BOTH CONDITIONS ARE POLLED TOGETHER ON PURPOSE. Clearing the splash first
+  // and then reading the text has a race of its own: before React mounts, the
+  // splash is not in the DOM yet, so "splash is gone" is briefly true of a
+  // page that has rendered nothing at all. A page is ready when the splash is
+  // absent AND the expected text is present, which is only ever true of a
+  // real render.
   const candidates = probe.expectAnyText ?? [probe.expectText];
+  const wanted = candidates.map((t) => t.toLowerCase());
+  const splash = page.locator(`[data-testid="${BOOT_SPLASH_TESTID}"]`);
+  const budgetMs = probe.contentTimeoutMs ?? DEFAULT_CONTENT_TIMEOUT_MS;
+  const deadline = Date.now() + budgetMs;
+  let booting = false;
+  let bodyText = "";
+  let ready = false;
+  while (!ready) {
+    booting = (await splash.count()) > 0;
+    bodyText = (await page.locator("body").innerText().catch(() => "")).toLowerCase();
+    ready = !booting && wanted.some((t) => bodyText.includes(t));
+    if (ready || Date.now() >= deadline) break;
+    await page.waitForTimeout(POLL_INTERVAL_MS);
+  }
+  // Two different failures, said differently. A page stuck on the splash is a
+  // boot problem; a page that rendered something else is a content problem.
+  // Reporting both as "text not found" is what made this take two months.
   expect(
-    candidates.some((t) => bodyText.includes(t.toLowerCase())),
-    `None of [${candidates.join(", ")}] found on ${probe.path}`,
+    ready,
+    booting
+      ? `${probe.path} never finished booting: still showing the loading splash after ${budgetMs}ms`
+      : `None of [${candidates.join(", ")}] found on ${probe.path} after ${budgetMs}ms. Body was: ${JSON.stringify(bodyText.slice(0, 300))}`,
   ).toBe(true);
 
   // 3-second idle window for async CSP/network failures to surface.

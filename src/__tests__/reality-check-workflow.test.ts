@@ -123,6 +123,11 @@ const NOT_RUN_HERE: Record<string, string> = {
   "tests/e2e/smoke.spec.ts": "runs in the post-deploy smoke workflow",
   "tests/e2e/ai-router.spec.ts": "needs SMOKE_TEST credentials against prod; the behaviour spec covers this page without them",
   "tests/e2e/agent-onboarding.spec.ts": "has its own workflow (agent-onboarding-e2e.yml)",
+  "tests/e2e/smoke-probe-waits.spec.ts":
+    "runs in the verify gate itself, on every PR and every local run, via the " +
+    "smoke-self-check stage in scripts/verify.sh. Not in this workflow on purpose: it " +
+    "guards the smoke suite's own timing and serves its own pages, so it needs no " +
+    "deployment and must run where the deployed-URL smoke cannot.",
 };
 
 function referencedSpecs(): string[] {
