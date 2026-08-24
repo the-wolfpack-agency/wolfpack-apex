@@ -416,3 +416,47 @@ describe("national identifiers", () => {
     expect(red("ssn 123 45 6789 on file")).toContain("[SSN_1]");
   });
 });
+
+
+/**
+ * A percent sign is part of the identifier, not the end of it.
+ *
+ * Found by auditing five thousand stored answers on 2026-08-24. Five
+ * carried a shape reported as a never-send API key, and every one was a
+ * calendar link: an Outlook deep link carries its item id URL-encoded, so
+ * a real one reads AAMkAGY4...FRAAgI3s%2FxNAUAAEY..., and the exemption's
+ * character class had no percent in it. The match stopped at the percent
+ * and the api-key detector took the tail.
+ *
+ * The consequence is the opposite of a leak: a legitimate link to
+ * somebody's own meeting had its tail replaced with a placeholder before
+ * it reached the model, so the model reasoned about a broken URL.
+ */
+describe("an Outlook link is not an API key", () => {
+  const link =
+    "https://outlook.office365.com/owa/?itemid=AAMkAGY4MGIxYzU1LTk4NDUtNDRiYi04YmY2LWZiN2UyNWM0NjIxYgFRAAgI3s%2FxNAUAAEYAAAAA0nIWNgruYEGHPaBj2JYfMQcAUP1yMC4Gc0S49kHTOJVy3AAAAAABDQAAUP1yMC4Gc0S49kHTOJVy3AABGU9LJAAA%3D&exvsurl=1";
+
+  it("leaves a percent-encoded item id alone", () => {
+    const r = redactText(`You have 2 meetings today: [Max OOO](${link})`) as unknown as {
+      hits: Array<{ kind: string }>;
+    };
+    expect(r.hits.map((h) => h.kind)).not.toContain("api_key");
+  });
+
+  it("keeps the link intact, not just unflagged", () => {
+    /* Unflagged and unmangled are different. The point of the exemption
+       is that the model sees a URL it could follow. */
+    const r = redactText(`meeting link ${link}`) as unknown as { text?: string };
+    expect(r.text ?? "").toContain("%2F");
+    expect(r.text ?? "").toContain("exvsurl=1");
+  });
+
+  it("still catches a real key in the same message", () => {
+    /* The exemption must not become a hiding place: a key sitting beside
+       a calendar link is still a key. */
+    const r = redactText(
+      `${link} and OPENAI_API_KEY=sk-proj-AbCd1234EfGh5678IjKl9012MnOp3456`,
+    ) as unknown as { hits: Array<{ kind: string }> };
+    expect(r.hits.map((h) => h.kind)).toContain("api_key");
+  });
+});
