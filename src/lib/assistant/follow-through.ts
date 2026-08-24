@@ -108,6 +108,74 @@ export function resolveFollowThrough(
  * antecedent asks, which is the same answer it gives when there was no
  * offer.
  */
+/**
+ * IS THIS "YES" ALREADY SPOKEN FOR?
+ *
+ * The conversation layer has its own confirmation handling and has had it
+ * for far longer: a write tool that asks before it acts, a routine that
+ * stops for an answer, a template offering to be adopted. All three end
+ * with the product telling somebody to say yes.
+ *
+ * Resolving follow-through in the ROUTE put a second reader of the word
+ * "yes" in front of all of them. Driving the deployed assistant found it
+ * immediately, on the one flow that says the word out loud:
+ *
+ *   < look at the week ahead would run 5 steps and stop for you at one of
+ *     them. Say yes and it becomes a command you can type.
+ *   > yes
+ *   < I want to make sure I carry on with the right thing, and I did not
+ *     offer anything specific just now.
+ *
+ * It had offered something specific. It had asked for exactly that word.
+ * The offer simply was not in backticks, and a second reader that cannot
+ * see the first one's offers will always eventually contradict it.
+ *
+ * So the route now steps aside whenever something downstream is already
+ * waiting for an answer. Follow-through is for the case where nothing is
+ * pending and a bare "ok, do that" would otherwise be dispatched as a
+ * fresh question, which is the gap it was written for and the only gap it
+ * should fill.
+ */
+export async function somethingIsAlreadyWaiting(
+  userId: string,
+  conversationId: string | null | undefined,
+): Promise<boolean> {
+  if (!process.env.DATABASE_URL) return false;
+  try {
+    const { query } = await import("@/lib/db");
+    /* A pending action is the confirmation the write path is waiting on.
+       Checked without consuming it: consuming here would answer the
+       confirmation in the wrong layer and the action would never run. */
+    const pending = await query<{ n: string }>(
+      `SELECT COUNT(*)::bigint AS n
+         FROM instinct_pending_actions
+        WHERE user_id = $1
+          AND consumed_at IS NULL
+          AND expires_at > NOW()`,
+      [userId],
+    );
+    if (Number(pending.rows[0]?.n ?? 0) > 0) return true;
+
+    /* A routine stopped at a human step or an ask is also waiting, and
+       the word it is waiting for is the same one. */
+    if (conversationId) {
+      const waiting = await query<{ n: string }>(
+        `SELECT COUNT(*)::bigint AS n
+           FROM assistant_routine_runs
+          WHERE user_id = $1
+            AND state = 'waiting_for_human'`,
+        [userId],
+      );
+      if (Number(waiting.rows[0]?.n ?? 0) > 0) return true;
+    }
+    return false;
+  } catch {
+    /* Unreadable state means we do not know, and the safe answer to "may
+       I take this yes" when we do not know is no. */
+    return true;
+  }
+}
+
 export async function lastAssistantMessage(
   conversationId: string | null | undefined,
 ): Promise<string | null> {
