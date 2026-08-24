@@ -26,6 +26,7 @@
  * every write tool already requires.
  */
 import type { Routine } from "./types";
+import { ROUTINE_TEMPLATES } from "./templates";
 
 export const BUILT_IN_ROUTINES: readonly Routine[] = Object.freeze([
   {
@@ -227,5 +228,27 @@ export function matchRoutine(message: string): Routine | null {
   }
   text = text.slice(0, end).trim();
 
-  return BUILT_IN_ROUTINES.find((r) => text === r.command) ?? null;
+  /* BOTH LIBRARIES, BECAUSE A PERSON CANNOT SEE THE DIFFERENCE.
+   *
+   * On 2026-08-24 somebody typed "start my day" into the live assistant and
+   * got a chunk of a Porsche coaching CSV. The command is real: it is one of
+   * eleven templates, each carrying a `command` written the way somebody
+   * would say it. Only the three BUILT_IN_ROUTINES were matched here, so the
+   * other eleven fell past every tool and into the knowledge search, which
+   * answered a different question confidently.
+   *
+   * The distinction between a built-in routine and a template is ours. It is
+   * about where the chain came from, not about what it does, and there is no
+   * version of it that a person typing a sentence could be expected to know.
+   * A command offered in the library has to run when it is typed.
+   *
+   * Still exact. Eleven more names is eleven more exact matches, not a fuzzier
+   * matcher: a five-step chain firing at somebody who asked a question remains
+   * far worse than one that did not recognise its own name.
+   */
+  return (
+    BUILT_IN_ROUTINES.find((r) => text === r.command) ??
+    ROUTINE_TEMPLATES.find((t) => text === t.command) ??
+    null
+  );
 }
