@@ -39,8 +39,11 @@ interface ScheduleHealthData {
   strandedHours: number;
 }
 
+/* Phrasings found by sweeping, not by waiting for somebody to type them.
+   Each is a question about the SHAPE of a week rather than about what is
+   on a given day, which is the line between this and the calendar tools. */
 const INTENT_RE =
-  /\b(?:where\s+are\s+)?(?:my\s+|our\s+)?meetings?\s+(?:are\s+)?(?:doing\s+more\s+harm|hurting|costing)\b|\bschedule\s+health\b|\b(?:analyse|analyze|review)\s+(?:my\s+|our\s+)?(?:calendar|schedule|meetings?)\b|\b(?:ideal|best)\s+times?\s+(?:of\s+(?:the\s+)?day|to\s+(?:focus|work))\b|\bwhen\s+should\s+i\s+(?:do\s+)?(?:focus|deep)\s+work\b|\bhow\s+much\s+(?:focus|deep)\s+time\b|\bwhere\s+is\s+my\s+(?:time|week)\s+going\b/i;
+  /\b(?:where\s+are\s+)?(?:my\s+|our\s+)?meetings?\s+(?:are\s+)?(?:doing\s+more\s+harm|hurting|costing)\b|\bschedule\s+health\b|\b(?:analyse|analyze|review)\s+(?:my\s+|our\s+)?(?:calendar|schedule|meetings?)\b|\b(?:ideal|best)\s+times?\s+(?:of\s+(?:the\s+)?day|to\s+(?:focus|work))\b|\bwhen\s+should\s+i\s+(?:do\s+)?(?:focus|deep)\s+work\b|\bhow\s+much\s+(?:focus|deep)\s+time\b|\bwhere\s+is\s+my\s+(?:time|week)\s+going\b|\bhow\s+much\s+of\s+my\s+(?:week|day|time)\s+is\s+(?:in\s+)?meetings?\b|\b(?:which|what)\s+hours\s+should\s+i\s+(?:protect|defend|block)\b|\bwhen\s+am\s+i\s+most\s+free\b/i;
 
 const AHEAD_RE = /\b(next|coming|upcoming|ahead|this\s+week)\b/i;
 

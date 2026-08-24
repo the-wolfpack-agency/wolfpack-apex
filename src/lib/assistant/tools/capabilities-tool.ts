@@ -69,6 +69,11 @@ interface CapabilitiesData {
  */
 const FILLER = "(?:\\s+(?:actually|really|even|just|please|exactly))*";
 const TAIL = "(?:\\s+(?:for\\s+me|for\\s+us|here|today|right\\s+now|around\\s+here|in\\s+here))*";
+/* A leading "so" or "and" is how somebody carries on a conversation, and
+   it made "so what do you actually do" miss a matcher that already knew
+   "what do you do". Filler at the front is not a different question. */
+const LEAD = "(?:so|and|ok(?:ay)?|right|well)?[\\s,]*";
+
 const ASKS = [
   `what${FILLER}\\s+can\\s+you${FILLER}\\s+do`,
   `what${FILLER}\\s+can\\s+you${FILLER}\\s+help\\s+(?:me|us)\\s+with`,
@@ -76,13 +81,18 @@ const ASKS = [
   `what${FILLER}\\s+can\\s+i\\s+ask(?:\\s+you)?`,
   `what${FILLER}\\s+should\\s+i\\s+ask(?:\\s+you)?`,
   `what\\s+are\\s+you\\s+(?:able\\s+to\\s+do|capable\\s+of)`,
-  `what\\s+do\\s+you\\s+do`,
+  `what\\s+do\\s+you\\s+(?:actually\\s+)?do`,
+  `what\\s+else\\s+can\\s+you\\s+do`,
+  /* "give me the tour" is what somebody says when they want to be shown
+     round rather than told a list. Distinctive enough to take. */
+  `give\\s+me\\s+(?:the\\s+)?tour`,
+  `show\\s+me\\s+(?:a|the)\\s+tour`,
   `where\\s+(?:do|should)\\s+i\\s+start`,
   `help`,
   `show\\s+(?:me\\s+)?(?:your\\s+)?(?:capabilities|commands|routines)`,
 ];
 
-const INTENT_RE = new RegExp(`^(?:${ASKS.join("|")})${TAIL}[\\s.?!]*$`, "i");
+const INTENT_RE = new RegExp(`^${LEAD}(?:${ASKS.join("|")})${TAIL}[\\s.?!]*$`, "i");
 
 export function matchCapabilitiesIntent(message: string): Params | null {
   return INTENT_RE.test(message.trim()) ? {} : null;
