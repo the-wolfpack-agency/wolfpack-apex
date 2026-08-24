@@ -40,6 +40,26 @@ interface ScheduleSummary {
   nextRunAt: string;
 }
 
+/**
+ * One step as it was recorded, which is the whole point of this view.
+ *
+ * A run used to be one line saying how many steps it had. That answers
+ * "did it work" and nothing else. Somebody deciding whether to trust a
+ * chain with their morning wants to see WHICH systems it touched, in what
+ * order, and where it stopped for them, and that is a different question
+ * from a count.
+ */
+interface RunStep {
+  index: number;
+  kind: string;
+  tool: string | null;
+  label: string;
+  status: string;
+  durationMs: number;
+  error: string | null;
+  humanAction: string | null;
+}
+
 interface RunSummary {
   runId: string;
   routineId: string;
@@ -124,6 +144,39 @@ export default function RoutinesPage() {
     }
     void load();
   }, [router, load]);
+
+  /* Fetched per run, on demand, and kept once fetched.
+     The list can hold twenty runs and nobody opens twenty. Loading every
+     run's steps to render a page where most of them stay closed would
+     make the page slower for everybody to serve the person who opens one,
+     and the steps of a finished run do not change. */
+  const [openRun, setOpenRun] = useState<string | null>(null);
+  const [steps, setSteps] = useState<Record<string, RunStep[]>>({});
+
+  const toggleRun = useCallback(
+    async (runId: string) => {
+      if (openRun === runId) {
+        setOpenRun(null);
+        return;
+      }
+      setOpenRun(runId);
+      if (steps[runId] !== undefined) return;
+      try {
+        const res = await fetchWithRefresh(`/api/routines/${encodeURIComponent(runId)}/steps`);
+        const body = await res.json();
+        setSteps((prev) => ({
+          ...prev,
+          [runId]: Array.isArray(body.steps) ? body.steps : [],
+        }));
+      } catch {
+        /* An empty list reads as "no steps recorded", which is honest when
+           we could not read them and is better than a panel that stays on
+           "reading" forever. */
+        setSteps((prev) => ({ ...prev, [runId]: [] }));
+      }
+    },
+    [openRun, steps],
+  );
 
   const waiting = (data?.runs ?? []).filter((r) => r.state === "waiting_for_human");
   const humanTotal = (data?.runs ?? []).reduce((n, r) => n + r.humanMs, 0);
@@ -278,14 +331,67 @@ export default function RoutinesPage() {
               <ul style={list} data-testid="routines-runs">
                 {data.runs.map((r) => (
                   <li key={r.runId} style={row}>
-                    <strong>{r.routineId}</strong>
-                    <span style={dim}>
-                      {" "}
-                      {r.startedAt.slice(0, 10)}, {r.steps} {r.steps === 1 ? "step" : "steps"},{" "}
-                      {mins(r.techMs)} of work
-                      {r.humanMs > 0 ? ` and ${mins(r.humanMs)} of yours` : ""}
-                    </span>
-                    <div style={dim}>{r.state.replace(/_/g, " ")}</div>
+                    <button
+                      type="button"
+                      onClick={() => void toggleRun(r.runId)}
+                      aria-expanded={openRun === r.runId}
+                      data-testid="routines-run-toggle"
+                      style={runButton}
+                    >
+                      <strong>{r.routineId}</strong>
+                      <span style={dim}>
+                        {" "}
+                        {r.startedAt.slice(0, 10)}, {r.steps} {r.steps === 1 ? "step" : "steps"},{" "}
+                        {mins(r.techMs)} of work
+                        {r.humanMs > 0 ? ` and ${mins(r.humanMs)} of yours` : ""}
+                      </span>
+                      <div style={dim}>
+                        {r.state.replace(/_/g, " ")}
+                        {" · "}
+                        {openRun === r.runId ? "hide the steps" : "see the steps"}
+                      </div>
+                    </button>
+
+                    {openRun === r.runId ? (
+                      steps[r.runId] === undefined ? (
+                        <p style={{ ...dim, marginTop: "0.6rem" }}>Reading the run…</p>
+                      ) : steps[r.runId].length === 0 ? (
+                        <p style={{ ...dim, marginTop: "0.6rem" }} data-testid="routines-run-no-steps">
+                          No steps were recorded for this run.
+                        </p>
+                      ) : (
+                        <ol style={tiles} data-testid="routines-run-steps">
+                          {steps[r.runId].map((st) => (
+                            <li key={st.index} style={tile} data-testid="routines-run-step">
+                              <div style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
+                                <StatusPill
+                                  status={st.kind}
+                                  label={KIND_LABEL[st.kind] ?? st.kind}
+                                  tone={KIND_TONE[st.kind] ?? "info"}
+                                  size="sm"
+                                />
+                                <strong style={{ fontSize: "0.92rem" }}>{st.label}</strong>
+                              </div>
+                              {/* The tool is the answer to "what did it
+                                  touch". Absent on model and human steps
+                                  because they touched nothing, and saying
+                                  so is more useful than leaving a gap. */}
+                              <div style={{ ...dim, marginTop: "0.3rem" }}>
+                                {st.tool ? <code>{st.tool}</code> : st.kind === "human" ? "your call" : "no system touched"}
+                                {" · "}
+                                {st.kind === "human" && st.durationMs > 0
+                                  ? `${ms(st.durationMs)} of your time`
+                                  : ms(st.durationMs)}
+                                {st.status !== "ok" ? ` · ${st.status}` : ""}
+                              </div>
+                              {st.error ? (
+                                <div style={{ ...dim, marginTop: "0.25rem" }}>{st.error}</div>
+                              ) : null}
+                            </li>
+                          ))}
+                        </ol>
+                      )
+                    ) : null}
                   </li>
                 ))}
               </ul>
@@ -296,6 +402,52 @@ export default function RoutinesPage() {
     </div>
   );
 }
+
+/* A step is one of three things and they are not the same kind of thing.
+   A tool touched one of the client's systems, a model wrote something
+   from what the tools returned, and a human step is the chain stopping
+   and waiting. Showing them identically would hide the one distinction
+   this product is built on. */
+const KIND_LABEL: Record<string, string> = {
+  tool: "system",
+  model: "written",
+  human: "you",
+};
+const KIND_TONE: Record<string, SeverityTone> = {
+  tool: "info",
+  model: "info",
+  human: "warning",
+};
+
+function ms(n: number): string {
+  if (n < 1000) return `${n}ms`;
+  if (n < 60_000) return `${(n / 1000).toFixed(1)}s`;
+  return `${Math.round(n / 60_000)}m`;
+}
+
+const runButton: React.CSSProperties = {
+  all: "unset",
+  cursor: "pointer",
+  display: "block",
+  width: "100%",
+};
+/* Tiles rather than rows: the steps of a chain are a sequence somebody
+   reads left to right and top to bottom, and they wrap on a phone into
+   the same order they ran in. */
+const tiles: React.CSSProperties = {
+  listStyle: "none",
+  padding: 0,
+  margin: "0.7rem 0 0",
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 15rem), 1fr))",
+  gap: "0.5rem",
+};
+const tile: React.CSSProperties = {
+  border: "1px solid var(--wp-border, rgba(255,255,255,0.1))",
+  borderRadius: "0.55rem",
+  padding: "0.6rem 0.7rem",
+  background: "var(--wp-surface-2, rgba(255,255,255,0.02))",
+};
 
 const dim: React.CSSProperties = { color: "var(--wp-text-dim)", fontSize: "0.9rem" };
 const list: React.CSSProperties = {

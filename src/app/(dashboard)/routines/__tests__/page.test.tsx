@@ -188,3 +188,102 @@ describe("when the read fails", () => {
     expect(screen.queryByTestId("routines-chains")).not.toBeInTheDocument();
   });
 });
+
+/**
+ * Seeing the chain that ran.
+ *
+ * A run used to be one line saying how many steps it had, which answers
+ * "did it work" and nothing else. Somebody deciding whether to trust a
+ * chain with their morning wants to know WHICH systems it touched, in
+ * what order, and where it stopped for them.
+ *
+ * Taken from a real run against production on 2026-08-24: three tools, a
+ * model step, and a human step, 4.9s of machine time against 55.8s of a
+ * person's.
+ */
+describe("the steps of a run", () => {
+  const RUN = {
+    runId: "r1",
+    routineId: "look at the week ahead",
+    state: "done",
+    startedAt: "2026-08-24T09:32:36.780Z",
+    techMs: 4931,
+    humanMs: 55832,
+    steps: 5,
+    waitingOn: null,
+  };
+  const STEPS = [
+    { index: 0, kind: "tool", tool: "calendar_widget", label: "Reading the calendar", status: "ok", durationMs: 32, error: null, humanAction: null },
+    { index: 1, kind: "tool", tool: "task_list_widget", label: "Collecting what is open", status: "ok", durationMs: 43, error: null, humanAction: null },
+    { index: 2, kind: "tool", tool: "cross_tool_insights_widget", label: "Looking across the tools", status: "ok", durationMs: 592, error: null, humanAction: null },
+    { index: 3, kind: "model", tool: null, label: "Working out the week", status: "ok", durationMs: 4264, error: null, humanAction: null },
+    { index: 4, kind: "human", tool: null, label: "Decide what the week is really for", status: "ok", durationMs: 55832, error: null, humanAction: "do" },
+  ];
+
+  function respondToBoth() {
+    mockFetch.mockImplementation(async (url: string) =>
+      String(url).includes("/steps")
+        ? { ok: true, status: 200, json: async () => ({ runId: "r1", steps: STEPS }) }
+        : { ok: true, status: 200, json: async () => payload({ runs: [RUN] }) },
+    );
+  }
+
+  it("keeps them closed until somebody asks", async () => {
+    /* The list can hold twenty runs and nobody opens twenty. Fetching
+       every run's steps to render a page where most stay closed would
+       make it slower for everybody to serve the person who opens one. */
+    respondToBoth();
+    render(<Page />);
+    await screen.findByTestId("routines-runs");
+    expect(screen.queryByTestId("routines-run-steps")).not.toBeInTheDocument();
+    const stepCalls = mockFetch.mock.calls.filter((c) => String(c[0]).includes("/steps"));
+    expect(stepCalls).toHaveLength(0);
+  });
+
+  it("shows which system each step touched, in the order it ran", async () => {
+    respondToBoth();
+    render(<Page />);
+    (await screen.findByTestId("routines-run-toggle")).click();
+
+    const tiles = await screen.findAllByTestId("routines-run-step");
+    expect(tiles).toHaveLength(5);
+    /* The tool name is the answer to "what did it touch", and the order
+       is the answer to "what happened first". */
+    expect(tiles[0]).toHaveTextContent("calendar_widget");
+    expect(tiles[1]).toHaveTextContent("task_list_widget");
+    expect(tiles[2]).toHaveTextContent("cross_tool_insights_widget");
+  });
+
+  it("says plainly when a step touched no system", async () => {
+    /* A model step and a human step reached none of the client's systems.
+       Leaving a gap there invites somebody to assume one did. */
+    respondToBoth();
+    render(<Page />);
+    (await screen.findByTestId("routines-run-toggle")).click();
+    const tiles = await screen.findAllByTestId("routines-run-step");
+    expect(tiles[3]).toHaveTextContent("no system touched");
+    expect(tiles[4]).toHaveTextContent("your call");
+  });
+
+  it("counts a human step's time as the person's, not the machine's", async () => {
+    /* The distinction the whole product is built on. 55.8 seconds of
+       somebody's attention is not 55.8 seconds of work done for them. */
+    respondToBoth();
+    render(<Page />);
+    (await screen.findByTestId("routines-run-toggle")).click();
+    const tiles = await screen.findAllByTestId("routines-run-step");
+    expect(tiles[4]).toHaveTextContent("of your time");
+    expect(tiles[0]).not.toHaveTextContent("of your time");
+  });
+
+  it("says nothing was recorded rather than spinning forever", async () => {
+    mockFetch.mockImplementation(async (url: string) =>
+      String(url).includes("/steps")
+        ? { ok: true, status: 200, json: async () => ({ runId: "r1", steps: [] }) }
+        : { ok: true, status: 200, json: async () => payload({ runs: [RUN] }) },
+    );
+    render(<Page />);
+    (await screen.findByTestId("routines-run-toggle")).click();
+    expect(await screen.findByTestId("routines-run-no-steps")).toBeInTheDocument();
+  });
+});
