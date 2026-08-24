@@ -56,6 +56,18 @@ const URGENT_LABEL_HINTS = /\b(urgent|priority|p0|p1|critical)\b/i;
 
 function matchIssueIntent(message: string): Params | null {
   const trimmed = message.trim();
+  /* REPORTING A BUG IS NOT SEARCHING FOR ONE.
+     "report a bug" contains the word bug, which satisfies both the
+     keyword requirement and the label hint below, so this tool claimed
+     it. It is registered at position 36 and the feedback tool at 53, so
+     it won: somebody telling us something was broken was shown a list of
+     other people's issues.
+     The verbs are the whole difference. Report, log, raise and file are
+     somebody handing us something; find, show and search are somebody
+     looking. */
+  if (/\b(?:report|log|raise|file|submit)\s+(?:an?\s+)?(?:bug|issue|defect|problem)\b/i.test(trimmed)) {
+    return null;
+  }
   /* PR phrases belong to the PR tool. */
   if (/\b(?:pull\s+requests?|pull-requests?|prs?)\b/i.test(trimmed)) return null;
   /* Require an "issue" / "ticket" / "bug" keyword. "ticket" overlaps

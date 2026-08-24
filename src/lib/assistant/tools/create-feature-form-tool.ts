@@ -23,8 +23,29 @@ interface CreateFeatureFormData {
   formKind: "create_feature";
 }
 
-const INTENT_RE =
-  /\b(?:create|new|add|request|file|submit)\s+(?:an?\s+)?(?:feature(?:\s+request)?|product\s+request|roadmap\s+item)\b/i;
+/**
+ * "Log a feature request" did not match a feature-request tool.
+ *
+ * The verbs were create, new, add, request, file and submit. Swept
+ * 2026-08-24: all five natural phrasings missed, including "log a feature
+ * request" and "raise a feature request", which are the two verbs most
+ * people reach for.
+ *
+ * The most valuable phrasing has no verb of ours in it at all. "the
+ * client wants a new report" is how a request actually arrives: somebody
+ * repeating what they were just told. That is the sentence this product
+ * exists to catch, because otherwise it stays in a mailbox.
+ */
+const INTENT_RE = new RegExp(
+  [
+    `\\b(?:create|new|add|request|file|submit|log|raise|capture|open)\\s+(?:an?\\s+)?(?:feature(?:\\s+request)?|product\\s+request|roadmap\\s+item)\\b`,
+    `\\b(?:add|put)\\s+(?:a\\s+)?(?:request|feature)\\s+(?:to|on)\\s+the\\s+backlog\\b`,
+    `\\bcapture\\s+(?:this|that|it)\\s+as\\s+a\\s+feature\\b`,
+    /* How a request actually arrives. */
+    `\\b(?:the\\s+)?(?:client|customer|dealer|they)\\s+(?:wants?|asked\\s+for|needs?|would\\s+like)\\s+(?:a|an|the)\\s+\\w`,
+  ].join("|"),
+  "i",
+);
 const TITLE_RE = /\b(?:titled|called|named|for|about)\s+["']?([^"'\n]{2,160})["']?/i;
 
 function matchFeatureFormIntent(message: string): Params | null {

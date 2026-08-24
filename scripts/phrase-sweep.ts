@@ -297,6 +297,68 @@ const CAPABILITIES: Capability[] = [
     ],
   },
   {
+    tool: "plan_my_day",
+    what: "describing a day so it can be turned into a chain",
+    /* My expectation was wrong here and the sweep was right to fail it.
+       This tool takes a DESCRIPTION of somebody's day and builds a
+       routine from it, which is why it requires forty characters and
+       refuses anything opening like a question. "plan my day" is a
+       command and reaches nothing, deliberately.
+       Whether a bare "plan my day" should offer to build one is a product
+       question worth asking, and it is written here rather than fixed by
+       widening a tool into a job it does not do. */
+    phrasings: [
+      "every morning I read my email, check the calendar and chase the overnight leads",
+      "here is what I do each Monday: inbox, then the pipeline, then the team call",
+      "my usual day looks like mail first, then service, then whatever is on fire",
+      "walking you through my day: I start with the overnight claims and work down",
+    ],
+  },
+  {
+    tool: "calendar_widget",
+    what: "the calendar itself",
+    phrasings: [
+      "show me my calendar", "what is on my calendar", "open my calendar",
+      "what does my week look like", "what have I got on this week",
+    ],
+    /* Availability answers "am I free", the widget answers "what is on".
+       On an empty week those are the same sentence. */
+    alsoFine: ["get_calendar_availability", "schedule_health"],
+  },
+  {
+    tool: "recent_workflow_runs",
+    what: "whether the build is green",
+    phrasings: [
+      "is CI green", "did the build pass", "what failed in CI",
+      "are the tests passing", "show me recent workflow runs",
+    ],
+  },
+  {
+    tool: "search_github_issues",
+    what: "open issues",
+    phrasings: [
+      "what issues are assigned to me", "any open issues",
+      "show me the bugs", "what is on the backlog", "open issues for the repo",
+    ],
+  },
+  {
+    tool: "create_feature_form",
+    what: "capturing a request",
+    phrasings: [
+      "log a feature request", "the client wants a new report",
+      "raise a feature request for bulk upload", "add a request to the backlog",
+      "capture this as a feature",
+    ],
+  },
+  {
+    tool: "feedback",
+    what: "telling us something is wrong",
+    phrasings: [
+      "this is broken", "report a bug", "something is not working",
+      "I want to give feedback", "this page is wrong",
+    ],
+  },
+  {
     tool: null,
     what: "things nothing should claim",
     phrasings: [
@@ -339,12 +401,6 @@ for (const cap of CAPABILITIES) {
     if (cap.tool === null) {
       /* Nothing should claim these. Anything that does is answering for
          a domain it does not cover. */
-      if (hits.some((h) => (cap.alsoFine ?? []).includes(h))) {
-        /* A recorded overlap. Not silence: it still prints, so nobody has
-           to read this file to know the tie exists. */
-        if (!missesOnly) lines.push(`  tie   ${hits.join(", ").padEnd(24)}"${phrase}"`);
-        continue;
-      }
       if (hits.length > 0) {
         trespassed++;
         lines.push(`  CLAIMED by ${hits.join(", ")}  "${phrase}"`);
@@ -360,6 +416,17 @@ for (const cap of CAPABILITIES) {
          writer, which would put a confirmation dialog in front of
          somebody offering to create a record in a system they never
          mentioned. Counted as trespass, and it fails the run. */
+      /* A RECORDED OVERLAP IS NOT A DEFECT.
+         This check was written into the wrong branch, where nothing has a
+         named tool, so every tie a capability declared was still reported
+         as a wrong tool. The sweep was crying wolf about decisions
+         somebody had already made and written down.
+         It still PRINTS: nobody should have to read this file to know a
+         tie exists. */
+      if (hits.some((h) => (cap.alsoFine ?? []).includes(h))) {
+        if (!missesOnly) lines.push(`  tie   ${hits.join(", ").padEnd(22)}"${phrase}"`);
+        continue;
+      }
       if (hits.length > 0) {
         trespassed++;
         lines.push(`  WRONG TOOL  ${hits.join(", ").padEnd(22)}"${phrase}"`);
