@@ -78,6 +78,15 @@ const MUST_NOT_MATCH: Array<[string, string]> = [
      that a question word follows the verb rather than a system. */
   ["can you see what I mean", "an idiom, not a connectivity question"],
   ["can you see if the invoice went out", "a lookup, not a connectivity question"],
+  /* Widening the task and meeting matchers put these within reach, and
+     each carries an OBJECT that makes it a different question. A task
+     list answering "what do I owe the dealer group" would be trespassing
+     the same way the financials tool did on warranty. */
+  ["what do I owe the dealer group", "money owed to a party, not a task list"],
+  ["anything overdue on the invoice", "about an invoice, not a task list"],
+  ["what is waiting on the supplier", "about a supplier, not a task list"],
+  ["brief me on the Q3 numbers", "a briefing, not a meeting"],
+  ["get me ready for the audit", "an audit, not a meeting"],
 ];
 
 describe("prompts a dealership types that no tool should claim", () => {
@@ -116,6 +125,19 @@ const MUST_MATCH: Array<[string, string[]]> = [
   ["how much of my week is meetings", ["schedule_health"]],
   ["which hours should I protect", ["schedule_health"]],
   ["when am I most free", ["schedule_health"]],
+  /* The two most-asked questions at a desk, both of which reached no tool
+     at all until they were swept. Every phrasing here was being paid for
+     as a model call and answered from a document. */
+  ["what is waiting on me", ["task_list_widget"]],
+  ["what is on my plate", ["task_list_widget"]],
+  ["anything overdue", ["task_list_widget"]],
+  ["my open tasks", ["task_list_widget"]],
+  ["what came in overnight", ["email_thread_widget"]],
+  ["check my inbox", ["email_thread_widget"]],
+  ["any new email", ["email_thread_widget"]],
+  ["brief me on my 10am", ["meeting_prep"]],
+  ["get me ready for the meeting", ["meeting_prep"]],
+  ["what do I need to know before this call", ["meeting_prep"]],
   ["compare contacts across systems", ["compare_across_sources"]],
   ["what is in the legacy database that nobody uses?", ["dark_data"]],
   /* THE FIRST THING ANYBODY TYPES.
