@@ -38,8 +38,40 @@ interface TemplatesData {
   adopted?: string;
 }
 
-const LIST_RE =
-  /\b(?:workflow\s+templates?|routine\s+templates?|show\s+(?:me\s+)?(?:the\s+)?templates?|what\s+could\s+i\s+automate|what\s+can\s+i\s+automate|prebuilt\s+workflows?|pre-built\s+workflows?)\b/i;
+/**
+ * ASKING WHAT CAN BE AUTOMATED, IN THE WORDS PEOPLE USE.
+ *
+ * This required the literal word "template" or "automate". Asked "what
+ * routines can I run?" on the deployed assistant, nothing matched, the
+ * question fell through to a model, and the answer described the
+ * inventory sync and VIN decode routines of a DIFFERENT product, pulled
+ * out of the brain and presented with complete confidence. 1,391 tokens
+ * to answer the wrong question about the wrong system.
+ *
+ * It is the question that opens the whole chaining feature. Somebody
+ * evaluating whether this can automate their work asks it first, and the
+ * answer they got was a hallucinated list of somebody else's features.
+ *
+ * The nouns people actually use are routine, workflow, automation and
+ * chain, and the verbs are run, start and have. "Template" is our word
+ * for it, not theirs.
+ */
+const NOUN = "(?:routines?|workflows?|automations?|chains?|templates?)";
+const LIST_RE = new RegExp(
+  [
+    /* our vocabulary, kept working */
+    `\\b(?:workflow|routine)\\s+templates?\\b`,
+    `\\bshow\\s+(?:me\\s+)?(?:the\\s+|my\\s+|your\\s+)?${NOUN}\\b`,
+    `\\bpre-?built\\s+workflows?\\b`,
+    /* theirs */
+    `\\bwhat\\s+(?:could|can)\\s+i\\s+automate\\b`,
+    `\\bwhat\\s+${NOUN}\\s+(?:can|could)\\s+i\\s+(?:run|start|use)\\b`,
+    `\\bwhat\\s+${NOUN}\\s+(?:do|have)\\s+(?:you|we|i)\\s+(?:have|got)\\b`,
+    `\\bwhat\\s+${NOUN}\\s+are\\s+(?:there|available)\\b`,
+    `\\blist\\s+(?:the\\s+|my\\s+|your\\s+)?${NOUN}\\b`,
+  ].join("|"),
+  "i",
+);
 const ADOPT_RE = /\b(?:use|adopt|set\s+up|add)\s+(?:the\s+)?["“]?([a-z][a-z0-9 ]{4,60}?)["”]?\s*(?:template|workflow)\b/i;
 
 export function matchTemplatesIntent(message: string): Params | null {
