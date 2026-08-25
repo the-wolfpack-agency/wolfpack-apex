@@ -52,6 +52,19 @@ export interface VercelGeo {
 }
 
 export interface ToolContext {
+  /**
+   * What the person actually typed this turn.
+   *
+   * Tools receive PARAMETERS, which is right: a matcher's job is to turn a
+   * sentence into arguments so the handler cannot be confused by phrasing. But
+   * a tool that has to ask a follow-up needs the original words to send back
+   * with the answer filled in, and reconstructing them from parameters would
+   * put a paraphrase in front of somebody who can see what they wrote.
+   *
+   * Optional, and no handler should read it to decide WHAT to do - only to
+   * quote the person back to themselves.
+   */
+  message?: string;
   /** Authenticated user firing the question. */
   userId: string;
   /** User's role (cto, ceo, evp, dev, sales, ops, hr, ...). */

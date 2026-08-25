@@ -85,11 +85,17 @@ export function ClarifyWidget({ spec, workflowId }: ClarifyWidgetProps) {
           className="text-xs mt-0.5"
           style={{ color: "var(--wp-text-dim, #aaa)" }}
         >
-          You typed{" "}
-          <span style={{ color: "var(--wp-text, #eee)", fontStyle: "italic" }}>
-            &ldquo;{spec.originalQuery}&rdquo;
-          </span>
-          . Tap a suggestion to run it.
+          {spec.subtitle ? (
+            spec.subtitle
+          ) : (
+            <>
+              You typed{" "}
+              <span style={{ color: "var(--wp-text, #eee)", fontStyle: "italic" }}>
+                &ldquo;{spec.originalQuery}&rdquo;
+              </span>
+              . Tap a suggestion to run it.
+            </>
+          )}
         </div>
       </div>
       <ul className="space-y-1.5">

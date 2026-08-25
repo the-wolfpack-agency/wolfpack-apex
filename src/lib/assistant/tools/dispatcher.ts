@@ -53,6 +53,10 @@ export async function tryDispatchTool(
 ): Promise<ToolDispatchResult | null> {
   if (!message || message.trim().length === 0) return null;
 
+  /* The words themselves, for a tool that has to ask a follow-up and wants to
+     send the person's own sentence back with the missing piece filled in. */
+  ctx = { ...ctx, message };
+
   const tools = getTools();
   for (const tool of tools) {
     const params = safeMatchIntent(tool, message);

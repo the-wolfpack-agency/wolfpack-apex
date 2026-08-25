@@ -227,3 +227,66 @@ describe("when no repo is named, it asks instead of guessing", () => {
     expect(res.data.repo).toBe("");
   });
 });
+
+/* ---------------------------------------------------------------------
+ * A prose list of repositories is a list of things to retype, and retyping is
+ * where people give up: the whole reason the tool asked is that it could not
+ * work the answer out, so making them spell it back is a poor trade.
+ * --------------------------------------------------------------- */
+describe("asking which repository, as buttons", () => {
+  const run = async (repos: string[]) => {
+    const mod = await import("@/lib/assistant/tools/github-repos");
+    const spy = jest.spyOn(mod, "knownRepos").mockResolvedValue(repos);
+    const res = await recentWorkflowRunsTool.handler({} as never, {
+      userId: "u1",
+      userRole: "cto",
+      workspaceId: "w1",
+      message: "is CI green",
+    } as never);
+    spy.mockRestore();
+    return res;
+  };
+
+  it("offers one tap per repository", async () => {
+    const res = await run(["wolfpack-apex", "wolfpack-auto"]);
+    if (!res.ok) throw new Error("expected ok");
+    expect(res.widget?.kind).toBe("clarify");
+    const spec = res.widget as { suggestions: Array<{ label: string; query: string }> };
+    expect(spec.suggestions.map((s) => s.label)).toEqual([
+      "wolfpack-apex",
+      "wolfpack-auto",
+    ]);
+  });
+
+  /* THE BUTTON HAS TO RUN. A chip that re-sends a sentence this tool cannot
+     match would be a picker that looks like it works and does not. */
+  it("each button re-sends a question this tool can answer", async () => {
+    const res = await run(["wolfpack-apex"]);
+    if (!res.ok) throw new Error("expected ok");
+    const spec = res.widget as { suggestions: Array<{ query: string }> };
+    for (const s of spec.suggestions) {
+      const params = recentWorkflowRunsTool.matchIntent!(s.query) as {
+        repo?: string;
+      } | null;
+      expect(params).not.toBeNull();
+      expect(params?.repo).toBe("wolfpack-apex");
+    }
+  });
+
+  /* It does not tell somebody what they typed. They did not mistype; they
+     asked a fair question that named no repository. */
+  it("frames it as a question rather than a correction", async () => {
+    const res = await run(["wolfpack-apex"]);
+    if (!res.ok) throw new Error("expected ok");
+    expect((res.widget as { subtitle?: string }).subtitle).toBe("Pick one and I will run it.");
+  });
+
+  /* Nothing to offer is not a picker, and an empty box is worse than a
+     sentence naming the shape of the thing to type. */
+  it("falls back to words when there is nothing to offer", async () => {
+    const res = await run([]);
+    if (!res.ok) throw new Error("expected ok");
+    expect(res.widget).toBeUndefined();
+    expect(res.answer).toMatch(/which repositor/i);
+  });
+});

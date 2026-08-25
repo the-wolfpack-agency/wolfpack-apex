@@ -16,6 +16,7 @@ import { z } from "zod";
 import { trackEvent } from "@/lib/analytics";
 import { registerTool } from "./registry";
 import type { ToolDef, ToolResult } from "./types";
+import { knownRepos, askWhichRepo, whichRepoWidget } from "./github-repos";
 import { withSourceFooter } from "./source-footer";
 import {
   recentWorkflowRuns,
@@ -93,36 +94,6 @@ function matchWorkflowIntent(message: string): Params | null {
   return params;
 }
 
-/**
- * The repositories this workspace already manages.
- *
- * Read from the sites table rather than a new list, because that is where a
- * repo becomes ours: it is written when a site is created from the template.
- * A second source of truth for "our repos" would disagree with it the first
- * time somebody deleted a site.
- */
-async function knownRepos(): Promise<string[]> {
-  if (!process.env.DATABASE_URL) return [];
-  try {
-    const { safeQuery } = await import("@/lib/db");
-    /* instinct_site_projects carries no workspace_id - see 009 and the 067
-       rename - so this is not workspace-scoped, and it reads the same table
-       through the same name that src/lib/sites.ts uses. */
-    const { rows } = await safeQuery<{ github_repo: string }>(
-      `SELECT DISTINCT github_repo
-         FROM instinct_site_projects
-        WHERE github_repo IS NOT NULL AND btrim(github_repo) <> ''
-        ORDER BY github_repo
-        LIMIT 8`,
-      [],
-    );
-    return rows.map((r) => String(r.github_repo));
-  } catch {
-    /* The question is still worth asking without the list. */
-    return [];
-  }
-}
-
 /* ---------------------------------------------------------------------
  * Rendering
  * ------------------------------------------------------------------- */
@@ -194,19 +165,14 @@ export const recentWorkflowRunsTool: ToolDef<Params, RecentWorkflowRunsData> = {
         repo: "unspecified",
         status: params.status ?? "any",
       });
+      const example = (repo: string) => `is the build green for ${repo}`;
+      const widget = whichRepoWidget(ctx.message ?? "is the build green", known, example);
       return {
         ok: true,
         data: { connector: "github", repo: "", matchCount: 0, runs: [] },
-        answer:
-          known.length > 0
-            ? [
-                "Which repository? I can check any of these:",
-                "",
-                ...known.map((r) => `- \`${r}\``),
-                "",
-                `Say for example **is the build green for ${known[0]}**.`,
-              ].join("\n")
-            : "Which repository should I check? Name it and I will read its recent workflow runs, for example **is the build green for wolfpack-apex**.",
+        answer: askWhichRepo(known, example),
+        /* One tap instead of retyping the whole question. */
+        ...(widget ? { widget } : {}),
       };
     }
 
