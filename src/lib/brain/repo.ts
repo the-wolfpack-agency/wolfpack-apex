@@ -227,6 +227,28 @@ export async function deleteDocument(id: string): Promise<BrainDocument | null> 
 
 // ── chunks ─────────────────────────────────────────────────────────
 
+/**
+ * Store what a document is about.
+ *
+ * Separate from updateDocumentStats because enrichment is best-effort and runs
+ * beside the pipeline rather than inside it: a model being unavailable must
+ * leave the document indexed and searchable, just without a description.
+ */
+export async function updateDocumentSummary(
+  documentId: string,
+  summary: string,
+  topics: string[],
+): Promise<void> {
+  await query(
+    `UPDATE brain_documents
+        SET summary = $2,
+            topics  = $3,
+            updated_at = NOW()
+      WHERE id = $1`,
+    [documentId, summary || null, topics.length > 0 ? topics : null],
+  );
+}
+
 export async function insertChunks(
   documentId: string,
   chunks: { idx: number; content: string; tokenEstimate: number }[],
