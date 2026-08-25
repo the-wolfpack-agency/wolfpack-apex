@@ -247,3 +247,60 @@ describe("runCalendarAvailability", () => {
     expect(out).toBeNull();
   });
 });
+
+/* ---------------------------------------------------------------------
+ * Regression 2026-08-25: "the time of meetings is blatantly wrong."
+ *
+ * Reported from `run my day` by a user in Eastern. A 1:00 PM meeting read
+ * back as 5:00 PM: the whole UTC offset, on every meeting.
+ *
+ * Vercel functions run in UTC, so formatTime() without a zone formats in the
+ * server's, and the caller's browser had been sending its IANA zone on every
+ * turn all along. It reached the orchestrator and stopped there, so asking
+ * about your calendar in a sentence was right while the identical lookup
+ * inside a routine step was four hours out.
+ * --------------------------------------------------------------- */
+describe("whose clock the times are read in", () => {
+  const meeting = {
+    id: "m1",
+    /* 5:00 PM UTC. In Eastern on this date (EDT, UTC-4) that is 1:00 PM. */
+    subject: "A Weekend with Porsche",
+    start: "2026-08-25T17:00:00Z",
+    end: "2026-08-25T17:45:00Z",
+    location: "",
+    attendees: [],
+    attendeeEmails: [],
+    isOnlineMeeting: false,
+  };
+  const AUG = Date.parse("2026-08-25T15:00:00Z");
+
+  const ask = (timeZone?: string) => {
+    mockSafeQuery.mockResolvedValue({
+      rows: [{ user_id: "u1", display_name: "Hoxsie", mail: "hoxsie@wolfpack.dev" }],
+    });
+    mockFetchCalendarEvents.mockResolvedValue([meeting]);
+    return runCalendarAvailability({
+      personName: "Hoxsie",
+      timeframeToken: "afternoon_today",
+      nowMs: AUG,
+      timeZone,
+    });
+  };
+
+  test("an Eastern caller is told 1:00 PM, not 5:00 PM", async () => {
+    const out = await ask("America/New_York");
+    expect(out?.answer).toContain("1:00 PM");
+    /* The exact number that was on the screen. */
+    expect(out?.answer).not.toContain("5:00 PM");
+  });
+
+  test("the end of the meeting moves with it", async () => {
+    expect((await ask("America/New_York"))?.answer).toContain("1:45 PM");
+  });
+
+  /* Somebody else, somewhere else, reading the same meeting. Proves the zone
+     is actually applied rather than a second hardcoded default. */
+  test("a London caller is told 6:00 PM", async () => {
+    expect((await ask("Europe/London"))?.answer).toContain("6:00 PM");
+  });
+});

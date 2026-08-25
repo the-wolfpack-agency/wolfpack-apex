@@ -685,6 +685,10 @@ export async function chat(
      is asking about something in front of them, which changes how this turn is
      routed — see the guards below. */
   attachmentBlock?: string,
+  /* The caller's own IANA zone, sent by the browser on every turn. Threaded
+     through for the same reason geo is: a server that formats times in its own
+     zone tells somebody their 1pm meeting is at 5pm. */
+  timeZone?: string,
 ): Promise<AssistantResponse> {
   /* workflow_id correlates every analytics event fired during this
    * single chat() turn (tool dispatch, page-facts hit, brain hit,
@@ -898,6 +902,9 @@ export async function chat(
        location fallback when the user's message didn't capture a
        specific city — fixes the NYC-user-gets-Houston bug. */
     ...(geo ? { geo } : {}),
+    /* THE CALLER'S ZONE, on the shared context so a routine step and a direct
+       question format the same meeting the same way. */
+    ...(timeZone ? { timeZone } : {}),
   };
 
   /* Built-ins first, then anything this person saved. Ours are checked first so
