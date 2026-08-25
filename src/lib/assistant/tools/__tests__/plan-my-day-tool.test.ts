@@ -8,6 +8,11 @@
 import { planMyDayTool, matchPlanDayIntent } from "../plan-my-day-tool";
 
 const mockComplete = jest.fn();
+const mockSavePending = jest.fn();
+jest.mock("../pending-actions", () => ({
+  ...jest.requireActual("../pending-actions"),
+  savePendingAction: (...a: unknown[]) => mockSavePending(...a),
+}));
 jest.mock("@/lib/analytics", () => ({ trackEvent: jest.fn() }));
 jest.mock("@/lib/ai/router", () => ({
   getAIClient: () => ({ complete: (...a: unknown[]) => mockComplete(...a) }),
@@ -27,6 +32,9 @@ const run = (role = "cto", description = DAY) =>
 
 beforeEach(() => {
   jest.clearAllMocks();
+  /* The offer is only answerable if the row behind it exists, so the happy
+     path has to say that it does. */
+  mockSavePending.mockResolvedValue({ id: "p1", description: "d", saved: true });
   mockComplete.mockResolvedValue({
     content: JSON.stringify({
       steps: [
@@ -106,6 +114,30 @@ describe("the answer", () => {
     if (!res.ok) throw new Error("expected success");
     expect(res.data.canChain).toBe(true);
     expect(res.answer).toMatch(/chain the parts I can do into one command/i);
+  });
+
+  /* THE BUG THIS CLOSES. The offer used to go out whether or not the pending
+     row had been written, so "yes" landed on nothing and the person was told
+     the assistant had lost the thread of the conversation they were in the
+     middle of. An offer nothing can answer is worse than no offer: it costs
+     them a reply and teaches them the chain-building does not work. */
+  it("does not offer to chain when the offer could not be saved", async () => {
+    mockSavePending.mockResolvedValue({ id: "error-1", description: "d", saved: false });
+    const res = await run();
+    if (!res.ok) throw new Error("expected success");
+    expect(res.data.canChain).toBe(false);
+    expect(res.answer).not.toMatch(/would you like me to/i);
+    /* The plan itself still arrives. Losing the offer must not lose the work. */
+    expect(res.answer).toMatch(/rehearse/i);
+  });
+
+  /* Somebody is about to read a dozen steps back before they answer. The
+     five-minute window this defaults to was set for irreversible sends. */
+  it("keeps the offer open long enough to read the plan", async () => {
+    await run();
+    expect(mockSavePending).toHaveBeenCalledWith(
+      expect.objectContaining({ ttlMinutes: 60 }),
+    );
   });
 
   it("counts the gaps, which is the clearest statement of what to build next", async () => {

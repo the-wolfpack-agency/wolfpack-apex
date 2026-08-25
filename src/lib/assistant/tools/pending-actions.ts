@@ -59,6 +59,17 @@ export interface PendingActionRow {
  * sentences containing "yes" mid-thought ("yes, but also...") don't
  * trigger the execute path. The user has to mean it.
  */
+/** Matches the column default in migration 135. */
+const DEFAULT_PENDING_TTL_MINUTES = 5;
+
+/**
+ * How long an offer to SAVE something the person has just read stays open.
+ *
+ * Long enough to read a dozen steps back, think about whether the order is
+ * right, and answer. Nothing here acts on anybody else's behalf.
+ */
+export const REVIEWABLE_PENDING_TTL_MINUTES = 60;
+
 export type ConfirmIntent = "confirm" | "cancel" | "none";
 
 export function detectConfirmationIntent(message: string): ConfirmIntent {
@@ -88,27 +99,58 @@ export async function savePendingAction(args: {
   toolName: string;
   params: Record<string, unknown>;
   description: string;
-}): Promise<{ id: string; description: string }> {
+  /**
+   * How long the offer stays answerable, in minutes. Defaults to the column
+   * default of five.
+   *
+   * FIVE MINUTES IS RIGHT FOR A SEND AND WRONG FOR A DECISION. The window was
+   * set for actions that do something irreversible to somebody else, where a
+   * "yes" arriving out of the blue half an hour later is a genuine harm. It is
+   * the wrong window for an offer whose whole point is that the person reads
+   * something over first: a plan of their own working day runs to a dozen
+   * steps, and deciding whether it is right is not a five-minute job.
+   *
+   * The cost of the two mistakes is not symmetric either. A stale yes to a
+   * saved routine leaves a command they can delete. A window that closes while
+   * somebody is still reading tells them the assistant has lost the thread of
+   * a conversation they are in the middle of, which is the thing that makes
+   * people stop trusting it.
+   */
+  ttlMinutes?: number;
+}): Promise<{ id: string; description: string; saved: boolean }> {
   if (!process.env.DATABASE_URL) {
     return {
       id: `shadow-${Date.now()}`,
       description: args.description,
+      /* NOT SAVED, AND SAID SO. There is no row, so the confirmation that
+         follows will find nothing. A caller that offers anyway is making a
+         promise this returned value already knows is broken. */
+      saved: false,
     };
   }
   try {
     const r = await safeQuery<{ id: string }>(
       `INSERT INTO instinct_pending_actions
-         (user_id, tool_name, params, description)
-       VALUES ($1, $2, $3::jsonb, $4)
+         (user_id, tool_name, params, description, expires_at)
+       VALUES ($1, $2, $3::jsonb, $4,
+               now() + make_interval(mins => $5::int))
        RETURNING id`,
-      [args.userId, args.toolName, JSON.stringify(args.params), args.description],
+      [
+        args.userId,
+        args.toolName,
+        JSON.stringify(args.params),
+        args.description,
+        args.ttlMinutes ?? DEFAULT_PENDING_TTL_MINUTES,
+      ],
     );
-    const id = r.rows[0]?.id ?? `fallback-${Date.now()}`;
-    return { id, description: args.description };
+    const id = r.rows[0]?.id;
+    if (!id) return { id: `fallback-${Date.now()}`, description: args.description, saved: false };
+    return { id, description: args.description, saved: true };
   } catch {
     return {
       id: `error-${Date.now()}`,
       description: args.description,
+      saved: false,
     };
   }
 }

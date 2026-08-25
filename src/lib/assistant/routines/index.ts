@@ -159,7 +159,14 @@ export async function resumeRoutine(
  * not worth running. A wall of step names does neither.
  */
 export function describeRun(routine: Routine, run: RoutineRun): string {
-  const done = run.outcomes.filter((o) => o.status === "ok" && o.kind !== "human");
+  /* COUNTED ON THE SAME BASIS AS THE TOTAL IT IS COMPARED TO.
+     This excluded human steps while the total next to it counted all of them,
+     so "1 of 4 steps done" could not reach 4 and did not move when somebody
+     did the very step they had been asked to do. A four-step chain of
+     tool/human/human/tool said "1 of 4" twice and finished "Done. 2 steps",
+     which reads as the chain losing track of the work rather than the tally
+     measuring something else. A step somebody performed is a step done. */
+  const done = run.outcomes.filter((o) => o.status === "ok");
   const lines: string[] = [];
 
   /* The model's answer is the thing they actually want; it goes first, and the
@@ -235,7 +242,7 @@ export async function resumeWaitingRoutine(
   if (!waiting) return null;
 
   const routine =
-    matchRoutineById(waiting.routineId) ?? (await matchSavedRoutineById(owner, waiting.routineId));
+    routineById(waiting.routineId) ?? (await matchSavedRoutineById(owner, waiting.routineId));
   if (!routine) {
     return {
       answer:
@@ -291,10 +298,7 @@ export async function resumeWaitingRoutine(
   return { answer: describeRun(routine, run) };
 }
 
-/** Built-in lookup by id, for a run that only recorded the id. */
-function matchRoutineById(id: string): Routine | null {
-  return BUILT_IN.find((r) => r.id === id) ?? null;
-}
+
 
 /** A saved routine by id: they are stored under a generated id. */
 async function matchSavedRoutineById(

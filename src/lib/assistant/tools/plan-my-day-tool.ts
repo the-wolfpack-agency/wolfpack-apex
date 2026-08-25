@@ -32,7 +32,7 @@ import {
   draftRoutine,
   renderPlan,
 } from "@/lib/assistant/routines/day-plan";
-import { savePendingAction } from "./pending-actions";
+import { savePendingAction, REVIEWABLE_PENDING_TTL_MINUTES } from "./pending-actions";
 import type { ToolDef, ToolResult } from "./types";
 
 const ParamSchema = z.object({
@@ -122,13 +122,24 @@ export const planMyDayTool: ToolDef<Params, PlanData> = {
      * Nothing is written yet. A plan is a description of somebody's day, and
      * quietly keeping a routine they have not agreed to would be the product
      * deciding for them at exactly the moment it is asking. */
+    /* ONLY OFFER WHAT THE "YES" CAN REACH.
+     *
+     * This swallowed the result, so the offer went out whether or not anything
+     * had been written to answer it with. Somebody read their day back, said
+     * yes, and got "I have lost the thread on what you are saying yes to" —
+     * which is the assistant blaming the conversation for its own failed
+     * write. Rendering the question is now conditional on the row existing. */
+    let offerIsLive = false;
     if (draft) {
-      await savePendingAction({
+      const pending = await savePendingAction({
         userId: ctx.userId,
         toolName: "save_routine",
         params: { routine: draft, workspaceId: ctx.workspaceId ?? "default" },
         description: `Save the chain from the day you described as "${draft.command}"`,
-      }).catch(() => undefined);
+        /* They are about to read a dozen steps before answering. */
+        ttlMinutes: REVIEWABLE_PENDING_TTL_MINUTES,
+      }).catch(() => ({ saved: false }));
+      offerIsLive = pending.saved;
     }
 
     trackEvent("assistant.tool_invoked", ctx.userId, ctx.userRole, {
@@ -151,9 +162,9 @@ export const planMyDayTool: ToolDef<Params, PlanData> = {
         covered: plan.covered,
         humanOnly: plan.humanOnly,
         gaps: plan.gaps,
-        canChain: draft !== null,
+        canChain: offerIsLive,
       },
-      answer: renderPlan(plan, draft !== null),
+      answer: renderPlan(plan, offerIsLive),
     };
   },
 };
