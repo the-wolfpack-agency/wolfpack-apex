@@ -51,6 +51,10 @@ export type InstinctEventType =
      the shape-based gates cannot see aboutness, and this is what they let
      through. */
   | "brain.retrieval_judged_irrelevant"
+  /* A document described at ingest. Flat at zero across a sync means
+     enrichment is not running at all, which is invisible from the document
+     rows alone because they still index perfectly well without it. */
+  | "brain.document_described"
   // Upload-to-Brain widget pre-ingest filter lifecycle. Fires from the
   // /api/brain/upload route which runs the data-quality filter BEFORE
   // delegating to ingest(). `brain.upload_attempted` fires for every

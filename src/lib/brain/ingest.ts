@@ -30,8 +30,11 @@ import {
   sha256,
   updateDocumentStats,
   updateDocumentStatus,
+  updateDocumentSummary,
 } from "./repo";
 import { capExtracted } from "./security";
+import { summaryChunkText, SUMMARY_EXCERPT_CHARS, type DocumentSummary } from "./enrich";
+import { recordAudit } from "@/lib/audit-log";
 import type { IngestRequest, IngestResult } from "./types";
 
 const MAX_SIZE_BYTES = Number(process.env.BRAIN_MAX_SIZE_BYTES ?? 50 * 1024 * 1024); // 50 MB default
@@ -180,13 +183,51 @@ export async function ingest(req: IngestRequest): Promise<IngestResult> {
     };
   }
 
+  /* WHAT THE DOCUMENT IS, ONCE, HERE.
+   *
+   * Retrieval matches chunks, and a chunk is a slice of a page. Somebody asked
+   * about meeting briefs and got "BA102_Day 3 (chunk 18)": text beginning
+   * mid-sentence, from a document whose subject appears nowhere inside the
+   * slice. The chunk did not know what it was part of.
+   *
+   * The summary is a chunk that does. It is embedded with the others, so a
+   * question about a document's subject can match the document instead of
+   * having to collide with exactly the right paragraph.
+   *
+   * ONE CHEAP CALL PER DOCUMENT, at ingest, never per question. Cost is
+   * bounded by the size of the library rather than by how much anybody uses
+   * it, and every future question is answered better for it. Summarising at
+   * query time would pay again for every asking and help only that asking.
+   *
+   * Best-effort throughout: a model that is unavailable, over budget or
+   * refused by policy costs the description, never the document. */
+  const enriched = await describeDocument(req, capped.text, doc.id);
+  if (enriched.summary) {
+    await updateDocumentSummary(doc.id, enriched.summary, enriched.topics);
+  }
+
+  const summaryChunk = enriched.summary ? summaryChunkText(enriched) : "";
   const inserted = await insertChunks(
     doc.id,
-    chunks.map((c) => ({
-      idx: c.idx,
-      content: c.content,
-      tokenEstimate: c.token_estimate,
-    })),
+    [
+      ...chunks.map((c) => ({
+        idx: c.idx,
+        content: c.content,
+        tokenEstimate: c.token_estimate,
+      })),
+      /* Appended rather than placed first, so every existing chunk keeps the
+         index it already had and nothing that cites "chunk 4" starts meaning
+         a different piece of text. */
+      ...(summaryChunk
+        ? [
+            {
+              idx: chunks.length,
+              content: summaryChunk,
+              tokenEstimate: Math.ceil(summaryChunk.length / 4),
+            },
+          ]
+        : []),
+    ],
   );
   await recordJob(doc.id, "chunk", "succeeded", { durationMs: Date.now() - tChunk });
   await trackEvent("brain.chunked", req.uploadedBy, req.uploaderRole, {
@@ -304,5 +345,77 @@ export class BrainIngestError extends Error {
       default:
         return 500;
     }
+  }
+}
+
+
+/**
+ * Describe one document through the router.
+ *
+ * Through the router rather than a provider, so enrichment inherits redaction,
+ * residency, the workspace budget ceiling and the constitution. A summariser
+ * that could read a credential the assistant could not, or spend past a limit
+ * the workspace has already hit, would be a hole in every one of those at
+ * once.
+ */
+async function describeDocument(
+  req: IngestRequest,
+  text: string,
+  docId: string,
+): Promise<DocumentSummary> {
+  try {
+    const { getAIClient } = await import("@/lib/ai");
+    const { summariseDocument } = await import("./enrich");
+    const out = await summariseDocument(req.filename, text, async (input) => {
+      const res = await getAIClient().complete({
+        messages: [
+          { role: "system", content: input.system },
+          { role: "user", content: input.prompt },
+        ],
+        max_tokens: input.maxTokens,
+        /* Describing a document is not a reasoning problem. */
+        model_tier: "cheap",
+        metadata: {
+          feature: "brain.document_summary",
+          user_id: req.uploadedBy,
+          user_role: req.uploaderRole,
+        },
+      });
+      return res.content;
+    });
+    /* WHAT LEFT THE TENANT, IN THE CHAIN THAT CANNOT BE EDITED.
+     *
+     * This is the one step in ingest that sends a client's document content to
+     * a model, and it is the first question a corporate auditor asks: which
+     * documents, to which model, on whose behalf, when. Analytics answers "how
+     * often" and can be sampled or lost; the hash-chained log answers "prove
+     * it" and cannot.
+     *
+     * The excerpt itself is deliberately NOT recorded. The audit log would
+     * become a second copy of the document library, outside its retention
+     * rules and its access controls, which is a worse exposure than the one
+     * being evidenced. The document id, the size of what was sent, and the
+     * model that saw it are what makes the record checkable. */
+    await recordAudit({
+      actor: { user_id: req.uploadedBy, role: req.uploaderRole },
+      action: "brain.document.summarised",
+      resourceType: "brain_document",
+      resourceId: docId,
+      afterState: {
+        excerpt_chars: Math.min(text.length, SUMMARY_EXCERPT_CHARS),
+        described: Boolean(out.summary),
+        topics: out.topics.length,
+      },
+    }).catch(() => undefined);
+
+    trackEvent("brain.document_described", req.uploadedBy, req.uploaderRole, {
+      /* Flat at zero across a sync means enrichment is not running at all,
+         which is invisible from the document rows alone: they still index. */
+      described: Boolean(out.summary),
+      topics: out.topics.length,
+    });
+    return out;
+  } catch {
+    return { summary: "", topics: [] };
   }
 }

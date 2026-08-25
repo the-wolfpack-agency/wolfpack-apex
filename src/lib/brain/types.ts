@@ -37,6 +37,11 @@ export type BrainJobStatus = "queued" | "running" | "succeeded" | "failed" | "sk
 export interface BrainDocument {
   id: string;
   ms_drive_item_id: string | null;
+  /** What this document is about, written once at ingest. Null when
+   *  enrichment was unavailable, which never blocks the document. */
+  summary?: string | null;
+  /** Short labels for matching a search. */
+  topics?: string[] | null;
   ms_file_local_id: string | null;
   web_url: string | null;
   filename: string;
