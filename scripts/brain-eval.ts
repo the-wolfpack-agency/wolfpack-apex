@@ -41,6 +41,11 @@ interface Row {
   keywordHits: number;
   semanticHits: number;
   quotable: boolean;
+  /** Best score among the hits, so a verdict can be paired with a threshold. */
+  topScore?: number;
+  /** Set only with --judge. "returned something" is coverage; this is quality. */
+  relevance?: string;
+  reason?: string;
 }
 
 async function main() {
@@ -81,17 +86,57 @@ async function main() {
     process.exit(1);
   }
 
+  /* THE JUDGE, ON THE CHEAP TIER.
+   *
+   * Coverage is the easy half. After the backfill this went from 9 of 60 real
+   * questions answered to 45, and the first uncalibrated run said 60 of 60,
+   * because a vector search with no floor answers everything. "Returned a
+   * document" has never been the same claim as "returned the document that
+   * answers the question", and no rule available here can tell them apart.
+   *
+   * Grading 60 retrievals on the cheap tier costs a fraction of a cent, which
+   * is the router's argument in one line: on a premium-only stack this
+   * measurement simply would not get done. */
+  const judging = argv.includes("--judge");
+  let judgeFn: ((q: string, m: string) => Promise<{ verdict: string; reason: string }>) | null = null;
+  if (judging) {
+    const { judgeRelevance } = await import("../src/lib/brain/relevance");
+    const { getAIClient } = await import("../src/lib/ai/router");
+    judgeFn = (q, m) =>
+      judgeRelevance(q, m, async ({ system, prompt, maxTokens }) => {
+        const res = await getAIClient().complete({
+          messages: [
+            { role: "system", content: system },
+            { role: "user", content: prompt },
+          ],
+          max_tokens: maxTokens,
+          model_tier: "cheap",
+          metadata: { feature: "brain.retrieval_eval", user_id: "eval", user_role: "system" },
+        });
+        return res.content;
+      });
+  }
+
   const rows: Row[] = [];
   for (const q of questions) {
     try {
       const r = await queryBrain({ query: q, limit: 5, userId: "eval", userRole: "system" });
       const top = r.hits[0];
+      let relevance: string | undefined;
+      let reason: string | undefined;
+      if (judgeFn && top) {
+        const verdict = await judgeFn(q, String(top.content ?? ""));
+        relevance = verdict.verdict;
+        reason = verdict.reason;
+      }
       rows.push({
         query: q,
         topDoc: top ? String(top.document_filename) : null,
         keywordHits: r.keyword_hits,
         semanticHits: r.semantic_hits,
         quotable: carriesEnoughToQuote(q),
+        topScore: top ? Number(top.score) : 0,
+        ...(relevance ? { relevance, reason } : {}),
       });
     } catch (e) {
       rows.push({ query: q, topDoc: null, keywordHits: 0, semanticHits: 0, quotable: false });
@@ -104,6 +149,49 @@ async function main() {
   console.log(`\n${rows.length} real queries from the log`);
   console.log(`  answered at all      ${answered}/${rows.length}`);
   console.log(`  with a semantic hit  ${withSemantic}/${rows.length}`);
+
+  if (judging) {
+    const graded = rows.filter((r) => r.relevance && r.relevance !== "unjudged");
+    const good = graded.filter((r) => r.relevance === "relevant").length;
+    const bad = graded.filter((r) => r.relevance === "irrelevant").length;
+    const ungraded = rows.filter((r) => r.topDoc !== null && (!r.relevance || r.relevance === "unjudged")).length;
+    console.log(`\njudged by a model on the cheap tier`);
+    console.log(`  relevant     ${good}`);
+    console.log(`  IRRELEVANT   ${bad}   (returned a document that does not answer the question)`);
+    if (ungraded > 0) console.log(`  unjudged     ${ungraded}   (judge unreachable; counted as neither)`);
+    if (answered > 0) {
+      const pct = graded.length > 0 ? Math.round((good / graded.length) * 100) : 0;
+      console.log(`  precision    ${pct}% of answered questions got a useful document`);
+    }
+    /* WHERE THE HONEST FLOOR IS. A verdict on its own says the retrieval was
+       poor; a verdict paired with its score says what to do about it. */
+    const rel = graded.filter((r) => r.relevance === "relevant").map((r) => r.topScore ?? 0).sort((a, b) => a - b);
+    const irr = graded.filter((r) => r.relevance === "irrelevant").map((r) => r.topScore ?? 0).sort((a, b) => b - a);
+    if (rel.length && irr.length) {
+      /* THIS IS THE MERGED SCORE, NOT THE COSINE ONE. queryBrain blends the
+         keyword and semantic hits, which is why values above 1.0 appear here
+         and why this sweep cannot be used on its own to retune
+         SEMANTIC_SCORE_FLOOR. It is shown because the OVERLAP is the finding:
+         if the two populations cannot be separated even in principle, the
+         answer is not a better threshold. */
+      console.log(`\n  top merged score, not cosine (see note in source)`);
+      console.log(`  relevant scores    ${rel[0].toFixed(4)} .. ${rel[rel.length - 1].toFixed(4)}`);
+      console.log(`  irrelevant scores  ${irr[irr.length - 1].toFixed(4)} .. ${irr[0].toFixed(4)}`);
+      let best = { floor: 0, kept: 0, cut: 0, precision: 0 };
+      for (const f of [0.36, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7]) {
+        const keptGood = rel.filter((x) => x >= f).length;
+        const keptBad = irr.filter((x) => x >= f).length;
+        const p = keptGood + keptBad > 0 ? keptGood / (keptGood + keptBad) : 0;
+        console.log(`  floor ${f.toFixed(2)}  keeps ${keptGood}/${rel.length} relevant, ${keptBad}/${irr.length} irrelevant, precision ${Math.round(p * 100)}%`);
+        if (p > best.precision || (p === best.precision && keptGood > best.kept)) {
+          best = { floor: f, kept: keptGood, cut: keptBad, precision: p };
+        }
+      }
+    }
+    for (const r of rows.filter((x) => x.relevance === "irrelevant").slice(0, 8)) {
+      console.log(`    - "${r.query.slice(0, 52)}" -> ${r.topDoc}  (${r.reason})`);
+    }
+  }
 
   const save = arg("--save");
   if (save) {
