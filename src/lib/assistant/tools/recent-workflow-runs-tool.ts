@@ -26,7 +26,10 @@ const STATUS_VALUES = ["success", "failure", "in_progress", "queued", "cancelled
 type StatusFilter = (typeof STATUS_VALUES)[number];
 
 const ParamSchema = z.object({
-  repo: z.string().min(1).max(140),
+  /* OPTIONAL, because "is CI green" is a real question and does not name one.
+     Absent, the tool asks which repo instead of guessing, which costs nothing
+     and cannot be wrong. See matchWorkflowIntent. */
+  repo: z.string().min(1).max(140).optional(),
   status: z.enum(STATUS_VALUES).optional(),
 });
 type Params = z.infer<typeof ParamSchema>;
@@ -49,15 +52,37 @@ function matchWorkflowIntent(message: string): Params | null {
   const trimmed = message.trim();
   /* Require an actions/workflow/CI/build keyword. */
   const isWorkflowAsk =
-    /\b(?:workflow\s+runs?|actions?\s+runs?|ci\s+runs?|workflow|github\s+actions?|gh\s+actions?|actions?\b|ci\b|build|builds)\b/i.test(trimmed);
+    /\b(?:workflow\s+runs?|actions?\s+runs?|ci\s+runs?|workflow|github\s+actions?|gh\s+actions?|actions?\b|ci\b|build|builds|tests?)\b/i.test(trimmed);
   if (!isWorkflowAsk) return null;
   /* "green build" / "is the build passing" → success filter */
   /* "failed CI" / "broken build" → failure filter */
 
   const repoMatch = REPO_RE.exec(trimmed);
-  if (!repoMatch) return null; // require an explicit repo
 
-  const params: Params = { repo: repoMatch[1] };
+  /* NO REPO NAMED IS STILL A QUESTION ABOUT THE BUILD.
+   *
+   * This returned null, so "is CI green", "are the tests passing" and "did the
+   * build pass" all fell through - the first two to a model, and the third to
+   * the Vercel deployments widget, which answered a question about CI with a
+   * list of deploys. Found by scripts/phrase-sweep.ts.
+   *
+   * THE REPO REQUIREMENT WAS ALSO DOING A SECOND JOB, and dropping it without
+   * noticing would have been the bug. The keyword gate above accepts the bare
+   * word "build", so "build me a report for the board" satisfies it; the
+   * explicit repo was the only thing standing between that and this tool.
+   *
+   * So the gate is stricter when no repo is named: a real CI word, or "build"
+   * and "tests" paired with an outcome. Asking about a build's RESULT is a
+   * different sentence from asking somebody to build something. */
+  const namesRepo = Boolean(repoMatch);
+  if (!namesRepo) {
+    const explicitCi = /\b(?:ci|workflow|workflows|github\s+actions?|gh\s+actions?|pipeline)\b/i.test(trimmed);
+    const outcome = /\b(?:pass(?:ed|ing)?|fail(?:ed|ing)?|green|red|broken|succeed(?:ed|ing)?|status)\b/i.test(trimmed);
+    const buildOrTests = /\b(?:builds?|tests?)\b/i.test(trimmed);
+    if (!explicitCi && !(buildOrTests && outcome)) return null;
+  }
+
+  const params: Params = repoMatch ? { repo: repoMatch[1] } : {};
 
   if (/\b(?:failed|failure|failing|broken|red)\b/i.test(trimmed)) params.status = "failure";
   else if (/\b(?:green|passing|succeeded|successful|success)\b/i.test(trimmed)) params.status = "success";
@@ -66,6 +91,36 @@ function matchWorkflowIntent(message: string): Params | null {
   else if (/\b(?:cancell?ed)\b/i.test(trimmed)) params.status = "cancelled";
 
   return params;
+}
+
+/**
+ * The repositories this workspace already manages.
+ *
+ * Read from the sites table rather than a new list, because that is where a
+ * repo becomes ours: it is written when a site is created from the template.
+ * A second source of truth for "our repos" would disagree with it the first
+ * time somebody deleted a site.
+ */
+async function knownRepos(): Promise<string[]> {
+  if (!process.env.DATABASE_URL) return [];
+  try {
+    const { safeQuery } = await import("@/lib/db");
+    /* instinct_site_projects carries no workspace_id - see 009 and the 067
+       rename - so this is not workspace-scoped, and it reads the same table
+       through the same name that src/lib/sites.ts uses. */
+    const { rows } = await safeQuery<{ github_repo: string }>(
+      `SELECT DISTINCT github_repo
+         FROM instinct_site_projects
+        WHERE github_repo IS NOT NULL AND btrim(github_repo) <> ''
+        ORDER BY github_repo
+        LIMIT 8`,
+      [],
+    );
+    return rows.map((r) => String(r.github_repo));
+  } catch {
+    /* The question is still worth asking without the list. */
+    return [];
+  }
 }
 
 /* ---------------------------------------------------------------------
@@ -119,6 +174,42 @@ export const recentWorkflowRunsTool: ToolDef<Params, RecentWorkflowRunsData> = {
   capability: "*",
   matchIntent: matchWorkflowIntent,
   async handler(params, ctx): Promise<ToolResult<RecentWorkflowRunsData>> {
+    /* ASK, DO NOT GUESS.
+     *
+     * There is no default repo in this codebase and inventing one here would
+     * mean answering "is CI green" confidently about a repository nobody
+     * mentioned. The repos the workspace already manages are on record, so
+     * the question can name them and be answered with a click rather than a
+     * paragraph. Zero tokens either way, which is the point: this replaces a
+     * model call that could not have known the answer either. */
+    if (!params.repo) {
+      const known = await knownRepos();
+      trackEvent("assistant.github_query_executed", ctx.userId, ctx.userRole, {
+        tool: "recent_workflow_runs",
+        ok: true,
+        match_count: 0,
+        /* How often people ask about the build without naming a repo. If this
+           stays high, the answer is a default repo setting, not a wider
+           regex. */
+        repo: "unspecified",
+        status: params.status ?? "any",
+      });
+      return {
+        ok: true,
+        data: { connector: "github", repo: "", matchCount: 0, runs: [] },
+        answer:
+          known.length > 0
+            ? [
+                "Which repository? I can check any of these:",
+                "",
+                ...known.map((r) => `- \`${r}\``),
+                "",
+                `Say for example **is the build green for ${known[0]}**.`,
+              ].join("\n")
+            : "Which repository should I check? Name it and I will read its recent workflow runs, for example **is the build green for wolfpack-apex**.",
+      };
+    }
+
     const result = await recentWorkflowRuns({
       repo: params.repo,
       status: params.status,
@@ -149,7 +240,7 @@ export const recentWorkflowRunsTool: ToolDef<Params, RecentWorkflowRunsData> = {
       ok: true,
       data: {
         connector: "github",
-        repo: params.repo,
+        repo: params.repo ?? "",
         matchCount: result.data.length,
         runs: result.data,
       },

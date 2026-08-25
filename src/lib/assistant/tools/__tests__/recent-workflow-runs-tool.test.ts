@@ -46,8 +46,16 @@ describe("matchIntent — basic phrases", () => {
 });
 
 describe("matchIntent — rejection", () => {
-  test("no repo → null (we don't fan-out across the org)", () => {
-    expect(recentWorkflowRunsTool.matchIntent("any failed workflow runs")).toBeNull();
+  /* WAS: no repo → null, "we don't fan-out across the org".
+     That invariant still holds and is asserted below: without a repo this
+     tool never calls GitHub. What changed is what happens instead. Returning
+     null sent "is CI green" to a model, which could not know the answer
+     either and charged for the privilege. It now claims the phrase and asks
+     which repository, which fans out across nothing. */
+  test("no repo → claimed, but nothing is queried", () => {
+    const p = recentWorkflowRunsTool.matchIntent("any failed workflow runs");
+    expect(p).not.toBeNull();
+    expect(p?.repo).toBeUndefined();
   });
 
   test.each([
@@ -151,5 +159,71 @@ describe("handler — failure paths", () => {
     const r = await recentWorkflowRunsTool.handler({ repo: "missing" }, ctx);
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.code).toBe("internal");
+  });
+});
+
+/* ---------------------------------------------------------------------
+ * Found by scripts/phrase-sweep.ts: nobody names a repo when they ask whether
+ * the build is alright.
+ *
+ * The tool returned null without one, so "is CI green" and "are the tests
+ * passing" reached a model, and "did the build pass" was answered by the
+ * Vercel deployments widget - a list of deploys in reply to a question about
+ * CI. It is registered at 44 and this tool at 37, so simply claiming the
+ * phrase is enough to take it back.
+ * --------------------------------------------------------------- */
+describe("asking about the build without naming a repo", () => {
+  const match = (m: string) => recentWorkflowRunsTool.matchIntent!(m);
+
+  it.each([
+    "is CI green",
+    "are the tests passing",
+    "did the build pass",
+    "show me recent workflow runs",
+  ])("%s is a question about the build", (m) => {
+    expect(match(m)).not.toBeNull();
+  });
+
+  it("leaves the repo unset rather than inventing one", () => {
+    /* "green" is still read as a status filter; the point is that no repo is
+       conjured to go with it. */
+    expect(match("is CI green")).toEqual({ status: "success" });
+  });
+
+  it("still reads an explicit repo when there is one", () => {
+    expect(match("is the build green for wolfpack-apex")).toEqual({
+      repo: "wolfpack-apex",
+      status: "success",
+    });
+  });
+
+  /* THE SECOND JOB THE REPO REQUIREMENT WAS DOING, and the thing that would
+     have made dropping it a bug. The keyword gate accepts the bare word
+     "build", so without a repo to lean on, anything about building something
+     would land here. Asking about a build's RESULT is a different sentence
+     from asking somebody to build something. */
+  it.each([
+    "can you build a landing page",
+    "we need to build trust with the client",
+    "I tested the new flow and it feels slow",
+  ])("%s is not a question about CI", (m) => {
+    expect(match(m)).toBeNull();
+  });
+});
+
+describe("when no repo is named, it asks instead of guessing", () => {
+  it("returns a question and no runs, without calling GitHub", async () => {
+    const res = await recentWorkflowRunsTool.handler({} as never, {
+      userId: "u1",
+      userRole: "cto",
+      workspaceId: "w1",
+    } as never);
+    expect(res.ok).toBe(true);
+    if (!res.ok) throw new Error("expected ok");
+    expect(res.answer).toMatch(/which repositor/i);
+    expect(res.data.runs).toHaveLength(0);
+    /* Naming a repo it was never told about would be the failure this
+       replaces, not a fix for it. */
+    expect(res.data.repo).toBe("");
   });
 });
