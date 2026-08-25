@@ -52,10 +52,29 @@ function matchPRIntent(message: string): Params | null {
   /* The phrase "pull request" / "PR" must be present — otherwise this
      tool can capture stuff like "PR firm" (Wolfpack Agency is a PR firm
      in some clients' minds). Strict on the keyword. */
-  if (!/\b(?:pull\s+requests?|pull-requests?|prs?)\b/i.test(trimmed)) return null;
-  /* Avoid false-positive on the word "press" (PR firm parlance) which
-     would otherwise match the loose [pP][rR] regex. */
-  if (/\bpress\b/i.test(trimmed) && !/\b(?:pull\s+requests?|pull-requests?|prs?)\b/i.test(trimmed)) {
+  /* "WAITING FOR REVIEW" IS A PULL REQUEST, and never a PR firm. Found by
+     scripts/phrase-sweep.ts: the commonest way to ask what needs looking at
+     reached a model. Kept as a fixed phrase rather than the word "review",
+     which appears in performance reviews, design reviews and quarterly
+     reviews - none of which this tool should answer. */
+  const waitingForReview =
+    /\b(?:waiting|up)\s+for\s+review\b/i.test(trimmed) ||
+    /\bawaiting\s+review\b/i.test(trimmed) ||
+    /\bneeds?\s+(?:a\s+)?review\b/i.test(trimmed);
+  if (!/\b(?:pull\s+requests?|pull-requests?|prs?)\b/i.test(trimmed) && !waitingForReview) {
+    return null;
+  }
+  /* "PR" AS IN PUBLIC RELATIONS, which this agency actually does.
+   *
+   * The guard here tested for "press" AND the absence of a PR keyword, which
+   * can never be true: the line above already returned unless a PR keyword was
+   * present. So it did nothing, and "the PR firm sent their invoice" claimed
+   * this tool. Pre-existing - confirmed against main before changing it - and
+   * fixed here because the phrase-sweep negatives now cover it.
+   *
+   * The discriminator is the noun after PR: a firm, an agency, a team and a
+   * push are public relations; a pull request is not followed by any of them. */
+  if (/\bpr\s+(?:firm|agency|team|push|campaign|strategy|release)\b/i.test(trimmed)) {
     return null;
   }
 
