@@ -136,6 +136,19 @@ export function mapDay(
     const runsWithNothing = tool.paramSchema.safeParse({});
     if (!runsWithNothing.success) {
       const keys = askableKeys(runsWithNothing.error);
+      /* THE SCHEMA REFUSED WITHOUT SAYING WHICH FIELD, which happens when a
+         rule spans several of them. The tool can still say what to ask for,
+         and if it has, the step is chainable after all. */
+      if (keys.length === 0 && tool.chainAsk) {
+        steps.push({
+          kind: "tool",
+          text,
+          tool: tool.name,
+          description: tool.description.split(/(?<=\.)\s/)[0].replace(/\.$/, ""),
+          ask: { ...tool.chainAsk },
+        });
+        continue;
+      }
       if (keys.length === 0) {
         /* The schema refused without saying which field, which happens when a
            rule spans several of them ("at least one of from, to or topic").
@@ -406,11 +419,40 @@ export function renderPlan(plan: DayPlan, canChain: boolean): string {
     }.`,
   );
 
-  if (plan.gaps > 0) {
-    /* STATED, NOT BURIED. A plan that quietly omits what it cannot do reads as
-       full coverage, and the person finds out at the worst moment. */
+  /* STATED, NOT BURIED, AND NOT LUMPED TOGETHER.
+   *
+   * This counted every gap as "nothing behind them yet" and said they had been
+   * "left out". Both were untrue of two of the three kinds, and the person
+   * could see it: a step reported as having nothing behind it was printed
+   * three lines above saying "I can do this". Reported 2026-08-25 against a
+   * real plan that said "0 of 8 steps are something I can already do" while
+   * listing two it could.
+   *
+   * A tool that exists and needs a detail is not an absence. A tool the role
+   * cannot run is not an absence either. Only the third kind is, and only that
+   * one is worth apologising for. Counted separately so the words can be true
+   * of what they describe, and so the numbers add up to the list above them. */
+  const needsDetail = plan.steps.filter(
+    (s) => s.kind === "gap" && s.reason === "needs_detail",
+  ).length;
+  const notPermitted = plan.steps.filter(
+    (s) => s.kind === "gap" && s.reason === "not_permitted",
+  ).length;
+  const nothingYet = plan.gaps - needsDetail - notPermitted;
+
+  if (needsDetail > 0) {
     lines.push(
-      `${plan.gaps} ${plan.gaps === 1 ? "step has" : "steps have"} nothing behind ${plan.gaps === 1 ? "it" : "them"} yet. I have left ${plan.gaps === 1 ? "it" : "them"} out rather than building a chain that stops halfway.`,
+      `${needsDetail} ${needsDetail === 1 ? "step needs" : "steps need"} a detail I cannot ask for on ${needsDetail === 1 ? "its" : "their"} own, so ${needsDetail === 1 ? "it stays" : "they stay"} out of the chain. Ask me for ${needsDetail === 1 ? "it" : "them"} directly and I will do ${needsDetail === 1 ? "it" : "them"}.`,
+    );
+  }
+  if (notPermitted > 0) {
+    lines.push(
+      `${notPermitted} ${notPermitted === 1 ? "step has" : "steps have"} a tool your role cannot run, so ${notPermitted === 1 ? "it is" : "they are"} not in the chain.`,
+    );
+  }
+  if (nothingYet > 0) {
+    lines.push(
+      `${nothingYet} ${nothingYet === 1 ? "step has" : "steps have"} nothing behind ${nothingYet === 1 ? "it" : "them"} yet. I have left ${nothingYet === 1 ? "it" : "them"} out rather than building a chain that stops halfway.`,
     );
   }
 
