@@ -200,3 +200,36 @@ describe("handler — analytics", () => {
     );
   });
 });
+
+/* ---------------------------------------------------------------------
+ * "What is waiting for review" is the commonest way to ask what needs
+ * looking at, and it reached a model. Kept to fixed phrases rather than the
+ * word "review", which belongs to performance, design and quarterly reviews.
+ * --------------------------------------------------------------- */
+describe("asking what needs reviewing", () => {
+  const match = (m: string) => searchGithubPullRequestsTool.matchIntent!(m);
+
+  it.each(["what is waiting for review", "anything awaiting review", "what needs review"])(
+    "%s reaches the pull-request search",
+    (m) => {
+      expect(match(m)).not.toBeNull();
+    },
+  );
+
+  it.each([
+    "the quarterly review is next week",
+    "I need a performance review with Sam",
+  ])("%s is not a pull request", (m) => {
+    expect(match(m)).toBeNull();
+  });
+
+  /* PR AS IN PUBLIC RELATIONS, which this agency does. The old guard tested
+     for "press" AND the absence of a PR keyword, which the line above had
+     already made impossible, so it did nothing and this claimed the tool. */
+  it.each(["the PR firm sent their invoice", "the PR agency wants a call"])(
+    "%s is public relations, not a pull request",
+    (m) => {
+      expect(match(m)).toBeNull();
+    },
+  );
+});

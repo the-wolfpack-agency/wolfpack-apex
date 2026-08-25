@@ -54,6 +54,8 @@ const NON_TOOL_FILES = new Set([
  * doesn't fan into Universal Search.
  */
 export const SEARCH_PROVIDER_EXEMPT_TOOLS: Record<string, string> = {
+  "github-repos.ts":
+    "not a tool: shared helper that lists the repos this workspace manages and phrases the 'which repository?' question for the three GitHub tools",
   "dark-data-tool.ts":
     "schema-vs-statement diff over a connected database, nothing free-text searchable",
   "schedule-health-tool.ts":

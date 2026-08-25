@@ -49,6 +49,8 @@ interface SearchGithubIssuesData {
 const REPO_RE =
   /\b(?:in|for|on|from)\s+(?:repo\s+|the\s+)?([a-z0-9][\w-]*(?:\/[\w.-]+)?)\b/i;
 const AUTHOR_RE = /\bby\s+@?([\w-]{1,60})\b/i;
+/** Words that follow "in/for/on" and are never a repository name. */
+const GENERIC_REPO_WORD = /^(?:repo|repos|repository|repositories|project|projects)$/i;
 const LABEL_RE = /\blabel(?:ed|led)?\s+(?:as\s+)?["']?([\w-]{1,40})["']?/i;
 
 const BUG_LABEL_HINTS = /\b(bug|bugs|defects?)\b/i;
@@ -73,14 +75,43 @@ function matchIssueIntent(message: string): Params | null {
   /* Require an "issue" / "ticket" / "bug" keyword. "ticket" overlaps
      with Zendesk/Jira but neither is registered yet — when they land we
      reorder. */
-  if (!/\b(?:issues?|tickets?|bugs?)\b/i.test(trimmed)) return null;
+  /* "the backlog" IS the issue list here, and carries none of these words. */
+  if (!/\b(?:issues?|tickets?|bugs?|backlog)\b/i.test(trimmed)) return null;
   /* Defensive: "GitHub" / "gh" anchor reduces false-positive vs.
      "any issues with the deploy" style chatter. We DON'T require it
      when "label/labeled" appears (a strong GitHub-y signal). */
   const isExplicitGithub = /\b(?:github|gh)\b/i.test(trimmed);
   const hasLabelHint = /\blabel(?:ed|led)?\b/i.test(trimmed) || BUG_LABEL_HINTS.test(trimmed) || URGENT_LABEL_HINTS.test(trimmed);
-  const hasRepoHint = /\b(?:repo\s+|wolfpack-|the-wolfpack-agency)/i.test(trimmed);
-  if (!isExplicitGithub && !hasLabelHint && !hasRepoHint) return null;
+  /* "for the repo" ends the sentence, so `repo\s+` never matched it. */
+  const hasRepoHint = /\b(?:repos?\b|wolfpack-|the-wolfpack-agency)/i.test(trimmed);
+
+  /* SHAPES THAT ARE ONLY EVER ABOUT A TRACKER.
+   *
+   * The github/gh anchor exists to keep "any issues with the deploy" out, and
+   * it is right to. But it also kept out the four commonest ways anybody asks
+   * for their issue list - found by scripts/phrase-sweep.ts, all four reaching
+   * a model that cannot see GitHub.
+   *
+   * These are narrower than the anchor rather than looser: "open issues" as a
+   * phrase, or work assigned to a person, or the backlog. "any issues with the
+   * deploy" matches none of them, because the discriminator is the noun phrase
+   * and not the word "issues" on its own. */
+  const trackerShape =
+    /\b(?:open|closed)\s+(?:issues?|tickets?|bugs?)\b/i.test(trimmed) ||
+    /\bbacklog\b/i.test(trimmed);
+
+  /* NOT "ASSIGNED TO ME", and this is the interesting one.
+   *
+   * The sweep lists it as a miss and it is tempting, because it is obviously
+   * about GitHub. But this client filters by AUTHOR, not assignee, and there
+   * is no mapping from an Instinct user to a GitHub login. Claiming the phrase
+   * would answer "what is assigned to me" with every open issue in the org -
+   * confidently, and wrongly, which is worse than the model call it replaces.
+   *
+   * It stays a miss until there is an assignee filter and an identity to put
+   * in it. A phrasing we cannot answer correctly is not a phrasing to take. */
+
+  if (!isExplicitGithub && !hasLabelHint && !hasRepoHint && !trackerShape) return null;
 
   const params: Params = {};
 
@@ -89,7 +120,12 @@ function matchIssueIntent(message: string): Params | null {
   else params.state = "open"; // sensible default
 
   const repoMatch = REPO_RE.exec(trimmed);
-  if (repoMatch) params.repo = repoMatch[1];
+  /* "for the repo" IS NOT A REPO NAMED "repo". REPO_RE takes the word after
+     in/for/on/from, so a generic noun becomes a repository that does not
+     exist, and the search returns an empty list rather than the org-wide
+     answer the person asked for. Falling through to the org is correct here:
+     they said "the repo" precisely because they did not name one. */
+  if (repoMatch && !GENERIC_REPO_WORD.test(repoMatch[1])) params.repo = repoMatch[1];
 
   const authorMatch = AUTHOR_RE.exec(trimmed);
   if (authorMatch) params.author = authorMatch[1];
