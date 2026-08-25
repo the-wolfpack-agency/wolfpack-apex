@@ -46,6 +46,11 @@ export type InstinctEventType =
   | "brain.upload_started"
   | "brain.upload_completed"
   | "brain.upload_rejected"
+  /* A retrieval that cleared every score gate and still did not answer the
+     question. This is the number that says whether the floor is set right:
+     the shape-based gates cannot see aboutness, and this is what they let
+     through. */
+  | "brain.retrieval_judged_irrelevant"
   // Upload-to-Brain widget pre-ingest filter lifecycle. Fires from the
   // /api/brain/upload route which runs the data-quality filter BEFORE
   // delegating to ingest(). `brain.upload_attempted` fires for every

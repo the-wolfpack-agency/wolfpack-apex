@@ -21,6 +21,7 @@ import {
 import { matchSavedRoutine } from "@/lib/assistant/routines/saved";
 import { searchKnowledge, saveAnswer } from "@/lib/knowledge";
 import { queryBrain, markCited as markBrainCited } from "@/lib/brain/query";
+import { judgeRelevance } from "@/lib/brain/relevance";
 import { neutralizeInjection } from "@/lib/brain/security";
 import { getCitationRefs } from "@/lib/brain/repo";
 import { searchMeetingTranscripts } from "@/lib/plaud";
@@ -2262,6 +2263,56 @@ async function tryBrain(
       return quotable && h.score >= 0.05;
     });
     if (strong.length === 0) return { strong: null, context };
+
+    /* DID IT FIND THE RIGHT THING, OR MERELY SOMETHING?
+     *
+     * Every gate above this line is a rule about SHAPE - how many hits, what
+     * score, how long the query was. A confident wrong retrieval passes all of
+     * them, because it reads perfectly. #386 built the judge that can tell the
+     * difference, measured it, and never called it: judgeRelevance was
+     * imported by its own test and nothing else, so the Brain went on quoting
+     * whatever cleared the score floor.
+     *
+     * What that looks like in production, reported 2026-08-25: a message about
+     * generating meeting briefs was answered with three chunks of Porsche
+     * Brand Ambassador training PDFs, at five semantic hits and full
+     * confidence. Nothing in the numbers said anything was wrong.
+     *
+     * Judged only when we are ABOUT TO QUOTE, so the cost lands on the turns
+     * that would otherwise be confidently wrong rather than on every query.
+     * One cheap-tier call, which is the argument the router exists to make. */
+    const material = strong
+      .slice(0, 3)
+      .map((h) => h.content.slice(0, 500))
+      .join("\n\n");
+    const relevance = await judgeRelevance(message, material, async (input) => {
+      const res = await getAIClient().complete({
+        messages: [
+          { role: "system", content: input.system },
+          { role: "user", content: input.prompt },
+        ],
+        max_tokens: input.maxTokens,
+        model_tier: "cheap",
+        metadata: { feature: "brain.retrieval_relevance", user_id: userId, user_role: userRole },
+      });
+      return res.content;
+    });
+
+    if (relevance.verdict === "irrelevant") {
+      trackEvent("brain.retrieval_judged_irrelevant", userId, userRole, {
+        /* What the shape-based gates let through. A rising count is the score
+           floor being wrong, not the judge being expensive. */
+        hits: strong.length,
+        top_score: Number(topScore.toFixed(4)),
+        semantic_hits: result.semantic_hits,
+        keyword_hits: result.keyword_hits,
+      });
+      /* THE CONTEXT GOES TOO. Having decided this material does not answer the
+         question, handing it to the model as grounding would be the same
+         mistake one layer down, and the model would quote it with our
+         confidence rather than its own. */
+      return { strong: null, context: emptyContext };
+    }
 
     // Format zero-LLM-token response. Each chunk is passed through
     // neutralizeInjection() so a hostile document containing
