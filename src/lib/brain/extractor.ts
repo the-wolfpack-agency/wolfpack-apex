@@ -143,18 +143,46 @@ async function extractPdf(buffer: Buffer): Promise<ExtractResult> {
 
 // ── DOCX ─────────────────────────────────────────────────────────
 
+/**
+ * .docx text, without mammoth.
+ *
+ * THE THIRD PLACE THIS BUG HAS BEEN FIXED, and the one that mattered most.
+ *
+ * package.json overrides @xmldom/xmldom to 0.9.x to clear a high-severity
+ * advisory in the 0.8 line. mammoth declares ^0.8.6 and every published
+ * version still does, including the latest. 0.9 made the mimeType argument
+ * required, and mammoth's own wrapper (lib/xml/xmldom.js) takes only the
+ * string, dropping the "text/xml" its caller passes at lib/xml/reader.js. So
+ * every call arrives with mimeType undefined and throws.
+ *
+ * src/lib/principles/parser.ts hit this and moved to a dependency-free
+ * extractor. The meeting-insights attachment extractor hit it and adopted the
+ * same one. The Brain, which is where a corporate document library actually
+ * lands, was never changed: 90 Word documents in production failed with
+ * `DOMParser.parseFromString: the provided mimeType "undefined" is not valid`,
+ * and docx is most of what such a library is made of.
+ *
+ * Reusing docxBufferToMarkdown rather than writing a fourth version, and
+ * rather than patching mammoth's call sites at runtime: the patch would have
+ * been two deep, because mammoth also passes an errorHandler that 0.9
+ * deprecated and then treats the deprecation warning as a parse failure.
+ *
+ * Markdown is the right output here. Heading and emphasis markers cost a few
+ * characters per chunk and carry document structure into the embedding, which
+ * is worth more to retrieval than it costs.
+ */
 async function extractDocx(buffer: Buffer): Promise<ExtractResult> {
-  // Dynamic import so mammoth only loads on the routes that need it
-  const mammoth = await import("mammoth");
-  const result = await mammoth.extractRawText({ buffer });
-  const text = (result.value || "").trim();
+  const { docxBufferToMarkdown } = await import("@/lib/principles/parser");
+  let text: string;
+  try {
+    text = (await docxBufferToMarkdown(buffer)).trim();
+  } catch (err) {
+    return { ok: false, reason: "failed", detail: `docx parse: ${(err as Error).message}` };
+  }
   if (!text) {
     return { ok: false, reason: "empty", detail: "DOCX had no extractable text" };
   }
-  const detail = result.messages && result.messages.length > 0
-    ? `mammoth notes: ${result.messages.length}`
-    : undefined;
-  return { ok: true, text, detail };
+  return { ok: true, text };
 }
 
 // ── Plain text / markdown ────────────────────────────────────────
