@@ -82,11 +82,28 @@ export const getCalendarAvailabilityTool: ToolDef<Params, CalendarAvailabilityRe
   capability: "*",
   matchIntent: matchCalendarIntent,
   async handler(params, ctx): Promise<ToolResult<CalendarAvailabilityResult>> {
+    /* A CALENDAR STEP WITH NOBODY NAMED IS YOUR OWN CALENDAR.
+     *
+     * This tool has two modes and, called with nothing, did neither: no name
+     * to look up and no self-user to fall back on. It answered "I couldn't
+     * find calendar info for that person" about a person nobody had mentioned.
+     *
+     * Which is exactly what a drafted chain hands it. A step built from
+     * "check my calendar" carries no parameters on purpose - a guessed
+     * parameter is a wrong action taken confidently - and the schema lets it
+     * through because every field here is optional. So the first step of the
+     * first chain somebody built for themselves failed, and failed in a way
+     * that read as the product not knowing who they were.
+     *
+     * An explicit isSelfQuery still wins in both directions, so asking about a
+     * named person is untouched. */
+    const isSelf = params.isSelfQuery ?? !(params.personName ?? "").trim();
+
     try {
       const result = await runCalendarAvailability({
         personName: params.personName ?? "",
         timeframeToken: params.timeframe,
-        selfUser: params.isSelfQuery
+        selfUser: isSelf
           ? { userId: ctx.userId, displayName: ctx.userEmail ?? ctx.userId }
           : undefined,
       });
@@ -94,7 +111,7 @@ export const getCalendarAvailabilityTool: ToolDef<Params, CalendarAvailabilityRe
         return {
           ok: true,
           data: { busy: [], free: [], notes: "no_data" } as unknown as CalendarAvailabilityResult,
-          answer: params.isSelfQuery
+          answer: isSelf
             ? "I couldn't read your calendar. You may need to grant Microsoft Calendar access in Settings."
             : `I couldn't find calendar info for ${params.personName ?? "that person"}.`,
         };
