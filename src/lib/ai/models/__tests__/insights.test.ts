@@ -8,7 +8,8 @@
  */
 jest.mock("@/lib/db", () => ({ query: jest.fn() }));
 
-import { summarizeDecisions, describeInsights, describeReason, modelAvailability, getRouterInsights } from "../insights";
+import { summarizeDecisions, describeInsights, describeReason, modelAvailability, getRouterInsights, describeMissingConfig } from "../insights";
+import { MODEL_REGISTRY } from "../registry";
 import { query } from "@/lib/db";
 
 const q = query as jest.Mock;
@@ -128,8 +129,13 @@ describe("modelAvailability", () => {
     expect(models.every((m) => !m.available)).toBe(true);
     const openai = models.find((m) => m.provider === "openai");
     if (openai) expect(openai.blockedBy).toMatch(/OPENAI_API_KEY/);
-    const azure = models.find((m) => m.provider === "azure");
-    if (azure) expect(azure.blockedBy).toMatch(/AZURE_OPENAI_ENDPOINT/);
+    // A CLASSIC Azure model specifically. Foundry-served models live on their
+    // own endpoint and correctly name AZURE_AI_FOUNDRY_* instead, so picking
+    // "the first azure model" now asserts the wrong thing.
+    const classicAzure = models.find(
+      (m) => m.provider === "azure" && !MODEL_REGISTRY.find((s) => s.id === m.modelId)?.endpointEnvVar,
+    );
+    if (classicAzure) expect(classicAzure.blockedBy).toMatch(/AZURE_OPENAI_ENDPOINT/);
   });
 
   it("distinguishes a missing deployment name from missing credentials", () => {
@@ -188,5 +194,49 @@ describe("getRouterInsights", () => {
     const out = await getRouterInsights();
     expect(q).not.toHaveBeenCalled();
     expect(out.models.length).toBeGreaterThan(0);
+  });
+});
+
+describe("the blocked-by message names EVERY missing variable", () => {
+  const classic = {
+    AZURE_OPENAI_ENDPOINT: "https://x.openai.azure.com",
+    AZURE_OPENAI_API_KEY: "k",
+  } as unknown as NodeJS.ProcessEnv;
+
+  it("names all three for a Foundry model, not just the deployment", () => {
+    // The bug this fixes. The old message checked the CLASSIC Azure pair — which
+    // was set — and reported only the deployment name. Someone would set that,
+    // redeploy, and see "Not Configured" again with no new information. A
+    // diagnostic that leads you through whack-a-mole is worse than silence,
+    // because you trust it.
+    const deepseek = MODEL_REGISTRY.find((m) => m.id === "azure-deepseek-v3")!;
+    const message = describeMissingConfig(deepseek, classic);
+    expect(message).toContain("AZURE_AI_FOUNDRY_ENDPOINT");
+    expect(message).toContain("AZURE_AI_FOUNDRY_API_KEY");
+    expect(message).toContain("AZURE_FOUNDRY_DEPLOYMENT_DEEPSEEK");
+  });
+
+  it("does not blame the classic Azure vars for a model that does not use them", () => {
+    const deepseek = MODEL_REGISTRY.find((m) => m.id === "azure-deepseek-v3")!;
+    expect(describeMissingConfig(deepseek, classic)).not.toContain("AZURE_OPENAI_ENDPOINT");
+  });
+
+  it("names just one when only one is missing", () => {
+    const withFoundry = {
+      ...classic,
+      AZURE_AI_FOUNDRY_ENDPOINT: "https://x.services.ai.azure.com/models",
+      AZURE_AI_FOUNDRY_API_KEY: "k",
+    } as unknown as NodeJS.ProcessEnv;
+    const deepseek = MODEL_REGISTRY.find((m) => m.id === "azure-deepseek-v3")!;
+    expect(describeMissingConfig(deepseek, withFoundry)).toBe("AZURE_FOUNDRY_DEPLOYMENT_DEEPSEEK is not set");
+  });
+
+  it("is derived from the spec, so a model added later cannot be mis-described", () => {
+    // A rule written before a model exists cannot describe it correctly.
+    for (const spec of MODEL_REGISTRY) {
+      const message = describeMissingConfig(spec, {} as unknown as NodeJS.ProcessEnv);
+      if (spec.endpointEnvVar) expect(message).toContain(spec.endpointEnvVar);
+      if (spec.deploymentEnvVar) expect(message).toContain(spec.deploymentEnvVar);
+    }
   });
 });
