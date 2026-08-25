@@ -22,6 +22,7 @@
 
 import { graphFetch, getValidToken } from "@/lib/microsoft-graph";
 import { ingest as brainIngest } from "@/lib/brain/ingest";
+import { findIngestedDriveItemIds } from "@/lib/brain/repo";
 import { trackEvent } from "@/lib/analytics";
 import { createRepo, type SharepointRepo } from "./repo";
 import type { IngestJobStatus, SharepointSource } from "./types";
@@ -148,24 +149,63 @@ async function walkFolder(
   return out;
 }
 
-/** Download a file's bytes from a drive item. */
+/** How many times to wait out a throttle before giving up on one file. */
+const MAX_THROTTLE_RETRIES = 4;
+/** Cap on a single wait, so one hostile Retry-After cannot stall a whole run. */
+const MAX_BACKOFF_MS = 30_000;
+
+export function backoffMs(attempt: number, retryAfterHeader: string | null): number {
+  /* GRAPH'S OWN NUMBER FIRST. Retry-After is not advice; it is the service
+     saying when it will serve you, and ignoring it is how a client turns a
+     throttle into a ban. Seconds per the RFC. */
+  const advised = Number(retryAfterHeader);
+  if (Number.isFinite(advised) && advised > 0) {
+    return Math.min(advised * 1000, MAX_BACKOFF_MS);
+  }
+  /* No header: back off exponentially from one second. */
+  return Math.min(2 ** attempt * 1000, MAX_BACKOFF_MS);
+}
+
+/**
+ * Download a file's bytes from a drive item.
+ *
+ * WAITS OUT A THROTTLE INSTEAD OF CALLING IT A FAILURE.
+ *
+ * This threw on any non-OK status, which included 429. Graph throttles hard
+ * on bulk reads, so the one real run of this connector - 2026-05-16 - recorded
+ * "873 file(s) failed", almost every one of them download_failed_429, and the
+ * connector has not been run since. The Brain is full of learning journals and
+ * receipts because the corpus that was meant to replace them never arrived.
+ *
+ * 503 and 504 are treated the same way: Graph returns them under load and both
+ * are retryable. Anything else is a real error and still fails immediately -
+ * a 404 does not get more true by asking again.
+ */
 async function downloadDriveItem(
   userId: string,
   driveId: string,
   itemId: string,
+  sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)),
 ): Promise<Buffer> {
   const token = await getValidToken(userId);
   if (!token) throw new Error("no_token");
   const url = `https://graph.microsoft.com/v1.0/drives/${encodeURIComponent(driveId)}/items/${encodeURIComponent(itemId)}/content`;
-  const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${token.accessToken}` },
-    redirect: "follow",
-  });
-  if (!res.ok) {
-    throw new Error(`download_failed_${res.status}`);
+
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${token.accessToken}` },
+      redirect: "follow",
+    });
+    if (res.ok) {
+      const ab = await res.arrayBuffer();
+      return Buffer.from(ab);
+    }
+    const retryable = res.status === 429 || res.status === 503 || res.status === 504;
+    if (!retryable || attempt >= MAX_THROTTLE_RETRIES) {
+      throw new Error(`download_failed_${res.status}`);
+    }
+    await sleep(backoffMs(attempt, res.headers.get("retry-after")));
   }
-  const ab = await res.arrayBuffer();
-  return Buffer.from(ab);
 }
 
 export interface SyncOpts {
@@ -181,6 +221,8 @@ export interface SyncOpts {
    *  route uses this so it can return the jobId to the UI before the
    *  background sync runs. */
   existingJobId?: string;
+  /** Override the already-ingested lookup (for tests). */
+  alreadyIngestedFn?: (ids: string[]) => Promise<Set<string>>;
 }
 
 /** Run one sync of the given source. Never throws — failures surface
@@ -195,6 +237,7 @@ export async function syncSource(
   const ingestFn = opts.ingestFn ?? brainIngest;
   const walkFn = opts.walkFn ?? walkFolder;
   const downloadFn = opts.downloadFn ?? downloadDriveItem;
+  const alreadyIngested = opts.alreadyIngestedFn ?? findIngestedDriveItemIds;
 
   /* Caller can pre-create the job row (POST route does this so it can
    * return the jobId in the 202 response). When provided we wrap it
@@ -214,6 +257,9 @@ export async function syncSource(
   let failCount = 0;
   let bytesIngested = 0;
   let topLevelError: string | null = null;
+  /* Files a previous run already landed. Reported so a resumed sync does not
+     look like it did nothing. */
+  let skippedCount = 0;
 
   /* Skip files larger than the brain ingest cap BEFORE downloading.
    * Downloading a 500MB video into a Buffer then handing it to brain
@@ -232,7 +278,34 @@ export async function syncSource(
     const files = await walkFn(triggeredBy, source.driveId, source.folderPath);
     fileCount = files.length;
 
+    /* WHAT THIS RUN DOES NOT HAVE TO DO AGAIN.
+     *
+     * Asked once for the whole folder, before anything is downloaded. Without
+     * it a sync has no memory: the run on 2026-05-16 walked nine hundred
+     * files, was throttled on most of them, was killed by the six-minute
+     * reconciler, and left the operator with no way to make progress except
+     * to start again from the first file and meet the same throttle.
+     *
+     * Keyed on the drive item rather than the content hash on purpose. A hash
+     * is only known after the download, which is the expensive part and the
+     * part being rate limited. */
+    const already = await alreadyIngested(files.map((f) => f.id));
+    if (already.size > 0) {
+      trackEvent("connectors.sharepoint.sync_resumed", triggeredBy, triggeredByRole, {
+        source_id: source.id,
+        job_id: job.id,
+        /* How much of the folder a previous run got through. */
+        already_ingested: already.size,
+        total_files: files.length,
+      });
+    }
+
     for (const f of files) {
+      /* Already in the Brain and readable. Not a download, not a failure. */
+      if (already.has(f.id)) {
+        skippedCount++;
+        continue;
+      }
       try {
         if (typeof f.size === "number" && f.size > MAX_FILE_BYTES) {
           /* Oversized media (video/audio): index a placeholder so the
@@ -257,6 +330,7 @@ export async function syncSource(
                * brain_documents.web_url so chat citations can render
                * as clickable "Sources" links. */
               webUrl: f.webUrl,
+              msDriveItemId: f.id,
             });
             successCount++;
             bytesIngested += buf.length;
@@ -289,6 +363,8 @@ export async function syncSource(
           filename: f.name,
           contentType: f.file?.mimeType ?? "application/octet-stream",
           buffer: buf,
+          /* The resume key. Without it the next run starts from zero. */
+          msDriveItemId: f.id,
           uploadedBy: triggeredBy,
           uploaderRole: triggeredByRole,
           tags: [

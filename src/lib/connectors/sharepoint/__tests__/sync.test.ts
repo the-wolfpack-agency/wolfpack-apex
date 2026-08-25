@@ -245,3 +245,101 @@ describe("syncSource", () => {
     expect(events).toContain("connectors.sharepoint.sync_finished");
   });
 });
+
+/* ---------------------------------------------------------------------
+ * The connector ran once, on 2026-05-16, and has not run since. The job rows
+ * say why: "873 file(s) failed", almost every one download_failed_429, and ten
+ * more jobs killed by the reconciler at six minutes.
+ *
+ * Graph throttles bulk reads. Treating a throttle as a permanent failure meant
+ * the corpus never arrived, which is why the Brain holds learning journals and
+ * receipts while people ask product questions.
+ * --------------------------------------------------------------- */
+import { backoffMs } from "@/lib/connectors/sharepoint/sync";
+
+describe("waiting out a throttle", () => {
+  it("obeys Retry-After, because it is the service saying when it will serve you", () => {
+    expect(backoffMs(0, "12")).toBe(12_000);
+    expect(backoffMs(3, "5")).toBe(5_000);
+  });
+
+  it("backs off exponentially when Graph does not say", () => {
+    expect(backoffMs(0, null)).toBe(1_000);
+    expect(backoffMs(1, null)).toBe(2_000);
+    expect(backoffMs(2, null)).toBe(4_000);
+  });
+
+  /* One hostile or mistaken header must not stall an entire run. */
+  it("caps a single wait", () => {
+    expect(backoffMs(0, "3600")).toBe(30_000);
+    expect(backoffMs(20, null)).toBe(30_000);
+  });
+
+  it("ignores a header that is not a number", () => {
+    expect(backoffMs(1, "soon")).toBe(2_000);
+  });
+});
+
+describe("a sync that has run before", () => {
+  const twoFiles = [
+    { id: "f1", name: "doc1.pdf", size: 100, file: { mimeType: "application/pdf" } },
+    { id: "f2", name: "doc2.pdf", size: 200, file: { mimeType: "application/pdf" } },
+  ];
+
+  it("does not download what a previous run already landed", async () => {
+    const repo = fakeRepo();
+    const walkFn = jest.fn().mockResolvedValue(twoFiles);
+    const downloadFn = jest.fn().mockResolvedValue(Buffer.from("hello"));
+    const ingestFn = jest.fn().mockResolvedValue({
+      document_id: "doc", status: "indexed", chunk_count: 1, extracted_chars: 5,
+    });
+    const alreadyIngestedFn = jest.fn().mockResolvedValue(new Set(["f1"]));
+
+    const result = await syncSource(source, "u1", "cto", {
+      repo, walkFn, downloadFn, ingestFn, alreadyIngestedFn,
+    });
+
+    /* The whole point: the expensive, rate-limited call is not made. */
+    expect(downloadFn).toHaveBeenCalledTimes(1);
+    expect(ingestFn).toHaveBeenCalledTimes(1);
+    expect(result.status).toBe("succeeded");
+    expect(result.failCount).toBe(0);
+  });
+
+  /* Asked once for the folder, not once per file: nine hundred round trips
+     before the first download is the shape of problem being escaped. */
+  it("asks about the whole folder in one go", async () => {
+    const repo = fakeRepo();
+    const alreadyIngestedFn = jest.fn().mockResolvedValue(new Set<string>());
+    await syncSource(source, "u1", "cto", {
+      repo,
+      walkFn: jest.fn().mockResolvedValue(twoFiles),
+      downloadFn: jest.fn().mockResolvedValue(Buffer.from("x")),
+      ingestFn: jest.fn().mockResolvedValue({
+        document_id: "d", status: "indexed", chunk_count: 1, extracted_chars: 1,
+      }),
+      alreadyIngestedFn,
+    });
+    expect(alreadyIngestedFn).toHaveBeenCalledTimes(1);
+    expect(alreadyIngestedFn).toHaveBeenCalledWith(["f1", "f2"]);
+  });
+
+  /* The resume key itself. Null on all 1,112 production documents, which is
+     why no sync has ever been able to pick up where it left off. */
+  it("records which drive item each document came from", async () => {
+    const repo = fakeRepo();
+    const ingestFn = jest.fn().mockResolvedValue({
+      document_id: "d", status: "indexed", chunk_count: 1, extracted_chars: 1,
+    });
+    await syncSource(source, "u1", "cto", {
+      repo,
+      walkFn: jest.fn().mockResolvedValue([twoFiles[0]]),
+      downloadFn: jest.fn().mockResolvedValue(Buffer.from("x")),
+      ingestFn,
+      alreadyIngestedFn: jest.fn().mockResolvedValue(new Set<string>()),
+    });
+    expect(ingestFn).toHaveBeenCalledWith(
+      expect.objectContaining({ msDriveItemId: "f1" }),
+    );
+  });
+});

@@ -46,6 +46,40 @@ export async function findDocumentBySha(sha: string): Promise<BrainDocument | nu
   return res.rows[0] ?? null;
 }
 
+/**
+ * Documents already taken from a set of Graph drive items.
+ *
+ * Answered in ONE query for a whole folder rather than one per file: a sync
+ * walking nine hundred items would otherwise open nine hundred round trips
+ * before downloading anything, which is the shape of problem it is trying to
+ * escape.
+ *
+ * Only counts documents that actually landed. A row left in `failed` or
+ * `chunking` is not a document the Brain can answer from, and skipping it
+ * would make a failed ingest permanent.
+ */
+export async function findIngestedDriveItemIds(ids: string[]): Promise<Set<string>> {
+  if (ids.length === 0) return new Set();
+  /* FAILS TOWARD DOING THE WORK. Not knowing what has already landed must
+     mean "download it again", never "assume it is there": the first wastes a
+     request, the second silently leaves a hole in the corpus that nobody can
+     see, and a Brain missing a document answers questions about it wrongly
+     rather than not at all. */
+  if (!process.env.DATABASE_URL) return new Set();
+  try {
+    const res = await query<{ ms_drive_item_id: string }>(
+      `SELECT DISTINCT ms_drive_item_id
+         FROM brain_documents
+        WHERE ms_drive_item_id = ANY($1)
+          AND status IN ('indexed', 'skipped')`,
+      [ids],
+    );
+    return new Set(res.rows.map((r) => String(r.ms_drive_item_id)));
+  } catch {
+    return new Set();
+  }
+}
+
 export async function getDocument(id: string): Promise<BrainDocument | null> {
   const res = await query<BrainDocument>(
     `SELECT * FROM brain_documents WHERE id = $1 LIMIT 1`,

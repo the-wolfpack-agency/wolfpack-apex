@@ -1263,6 +1263,10 @@ export type InstinctEventType =
   | "connectors.sharepoint.source_added"
   | "connectors.sharepoint.source_removed"
   | "connectors.sharepoint.sync_started"
+  /* How much of a folder a previous run already landed. Rising over a series
+     of runs is a sync making progress against a throttle; flat at zero means
+     drive item ids are not being recorded and every run starts from nothing. */
+  | "connectors.sharepoint.sync_resumed"
   | "connectors.sharepoint.sync_finished"
   | "connectors.sharepoint.file_ingest_failed"
   | "connectors.sharepoint.placeholder_indexed"
