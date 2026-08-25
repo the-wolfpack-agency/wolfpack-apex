@@ -78,3 +78,46 @@ describe("ClarifyWidget", () => {
     );
   });
 });
+
+/* ---------------------------------------------------------------------
+ * The same chips, framed as a question rather than a typo correction.
+ *
+ * A tool that is missing a parameter - "which repository?" - needs exactly
+ * this interaction, and the person did not mistype anything. Telling them what
+ * they typed reads as a correction they do not deserve.
+ * --------------------------------------------------------------- */
+describe("when the chips are answering a question, not fixing a typo", () => {
+  const spec = {
+    kind: "clarify" as const,
+    title: "Which repository?",
+    originalQuery: "is CI green",
+    subtitle: "Pick one and I will run it.",
+    suggestions: [
+      { label: "wolfpack-apex", query: "is the build green for wolfpack-apex" },
+    ],
+  };
+
+  it("says the subtitle instead of quoting them back", () => {
+    render(<ClarifyWidget spec={spec} />);
+    expect(screen.getByText("Pick one and I will run it.")).toBeInTheDocument();
+    expect(screen.queryByText(/You typed/)).not.toBeInTheDocument();
+  });
+
+  it("still quotes them back when there is no subtitle", () => {
+    render(<ClarifyWidget spec={{ ...spec, subtitle: undefined }} />);
+    expect(screen.getByText(/You typed/)).toBeInTheDocument();
+  });
+
+  /* The button is the whole point: one tap re-sends the question with the
+     answer in it, so nobody retypes a sentence the tool already has. */
+  it("a tap re-sends the filled-in question", async () => {
+    const seen: string[] = [];
+    const onSubmit = (e: Event) =>
+      seen.push((e as CustomEvent<{ prompt: string }>).detail.prompt);
+    window.addEventListener("instinct:autosubmit", onSubmit);
+    render(<ClarifyWidget spec={spec} />);
+    fireEvent.click(screen.getByText("wolfpack-apex"));
+    window.removeEventListener("instinct:autosubmit", onSubmit);
+    expect(seen).toEqual(["is the build green for wolfpack-apex"]);
+  });
+});

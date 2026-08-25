@@ -46,8 +46,16 @@ describe("matchIntent — basic phrases", () => {
 });
 
 describe("matchIntent — rejection", () => {
-  test("no repo → null (we don't fan-out across the org)", () => {
-    expect(recentWorkflowRunsTool.matchIntent("any failed workflow runs")).toBeNull();
+  /* WAS: no repo → null, "we don't fan-out across the org".
+     That invariant still holds and is asserted below: without a repo this
+     tool never calls GitHub. What changed is what happens instead. Returning
+     null sent "is CI green" to a model, which could not know the answer
+     either and charged for the privilege. It now claims the phrase and asks
+     which repository, which fans out across nothing. */
+  test("no repo → claimed, but nothing is queried", () => {
+    const p = recentWorkflowRunsTool.matchIntent("any failed workflow runs");
+    expect(p).not.toBeNull();
+    expect(p?.repo).toBeUndefined();
   });
 
   test.each([
@@ -151,5 +159,134 @@ describe("handler — failure paths", () => {
     const r = await recentWorkflowRunsTool.handler({ repo: "missing" }, ctx);
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.code).toBe("internal");
+  });
+});
+
+/* ---------------------------------------------------------------------
+ * Found by scripts/phrase-sweep.ts: nobody names a repo when they ask whether
+ * the build is alright.
+ *
+ * The tool returned null without one, so "is CI green" and "are the tests
+ * passing" reached a model, and "did the build pass" was answered by the
+ * Vercel deployments widget - a list of deploys in reply to a question about
+ * CI. It is registered at 44 and this tool at 37, so simply claiming the
+ * phrase is enough to take it back.
+ * --------------------------------------------------------------- */
+describe("asking about the build without naming a repo", () => {
+  const match = (m: string) => recentWorkflowRunsTool.matchIntent!(m);
+
+  it.each([
+    "is CI green",
+    "are the tests passing",
+    "did the build pass",
+    "show me recent workflow runs",
+  ])("%s is a question about the build", (m) => {
+    expect(match(m)).not.toBeNull();
+  });
+
+  it("leaves the repo unset rather than inventing one", () => {
+    /* "green" is still read as a status filter; the point is that no repo is
+       conjured to go with it. */
+    expect(match("is CI green")).toEqual({ status: "success" });
+  });
+
+  it("still reads an explicit repo when there is one", () => {
+    expect(match("is the build green for wolfpack-apex")).toEqual({
+      repo: "wolfpack-apex",
+      status: "success",
+    });
+  });
+
+  /* THE SECOND JOB THE REPO REQUIREMENT WAS DOING, and the thing that would
+     have made dropping it a bug. The keyword gate accepts the bare word
+     "build", so without a repo to lean on, anything about building something
+     would land here. Asking about a build's RESULT is a different sentence
+     from asking somebody to build something. */
+  it.each([
+    "can you build a landing page",
+    "we need to build trust with the client",
+    "I tested the new flow and it feels slow",
+  ])("%s is not a question about CI", (m) => {
+    expect(match(m)).toBeNull();
+  });
+});
+
+describe("when no repo is named, it asks instead of guessing", () => {
+  it("returns a question and no runs, without calling GitHub", async () => {
+    const res = await recentWorkflowRunsTool.handler({} as never, {
+      userId: "u1",
+      userRole: "cto",
+      workspaceId: "w1",
+    } as never);
+    expect(res.ok).toBe(true);
+    if (!res.ok) throw new Error("expected ok");
+    expect(res.answer).toMatch(/which repositor/i);
+    expect(res.data.runs).toHaveLength(0);
+    /* Naming a repo it was never told about would be the failure this
+       replaces, not a fix for it. */
+    expect(res.data.repo).toBe("");
+  });
+});
+
+/* ---------------------------------------------------------------------
+ * A prose list of repositories is a list of things to retype, and retyping is
+ * where people give up: the whole reason the tool asked is that it could not
+ * work the answer out, so making them spell it back is a poor trade.
+ * --------------------------------------------------------------- */
+describe("asking which repository, as buttons", () => {
+  const run = async (repos: string[]) => {
+    const mod = await import("@/lib/assistant/tools/github-repos");
+    const spy = jest.spyOn(mod, "knownRepos").mockResolvedValue(repos);
+    const res = await recentWorkflowRunsTool.handler({} as never, {
+      userId: "u1",
+      userRole: "cto",
+      workspaceId: "w1",
+      message: "is CI green",
+    } as never);
+    spy.mockRestore();
+    return res;
+  };
+
+  it("offers one tap per repository", async () => {
+    const res = await run(["wolfpack-apex", "wolfpack-auto"]);
+    if (!res.ok) throw new Error("expected ok");
+    expect(res.widget?.kind).toBe("clarify");
+    const spec = res.widget as { suggestions: Array<{ label: string; query: string }> };
+    expect(spec.suggestions.map((s) => s.label)).toEqual([
+      "wolfpack-apex",
+      "wolfpack-auto",
+    ]);
+  });
+
+  /* THE BUTTON HAS TO RUN. A chip that re-sends a sentence this tool cannot
+     match would be a picker that looks like it works and does not. */
+  it("each button re-sends a question this tool can answer", async () => {
+    const res = await run(["wolfpack-apex"]);
+    if (!res.ok) throw new Error("expected ok");
+    const spec = res.widget as { suggestions: Array<{ query: string }> };
+    for (const s of spec.suggestions) {
+      const params = recentWorkflowRunsTool.matchIntent!(s.query) as {
+        repo?: string;
+      } | null;
+      expect(params).not.toBeNull();
+      expect(params?.repo).toBe("wolfpack-apex");
+    }
+  });
+
+  /* It does not tell somebody what they typed. They did not mistype; they
+     asked a fair question that named no repository. */
+  it("frames it as a question rather than a correction", async () => {
+    const res = await run(["wolfpack-apex"]);
+    if (!res.ok) throw new Error("expected ok");
+    expect((res.widget as { subtitle?: string }).subtitle).toBe("Pick one and I will run it.");
+  });
+
+  /* Nothing to offer is not a picker, and an empty box is worse than a
+     sentence naming the shape of the thing to type. */
+  it("falls back to words when there is nothing to offer", async () => {
+    const res = await run([]);
+    if (!res.ok) throw new Error("expected ok");
+    expect(res.widget).toBeUndefined();
+    expect(res.answer).toMatch(/which repositor/i);
   });
 });

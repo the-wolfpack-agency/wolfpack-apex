@@ -1,3 +1,5 @@
+import type { ClarifyWidgetSpec } from "@/lib/assistant/widgets/types";
+
 /**
  * Which repositories are ours, and what to say when nobody named one.
  *
@@ -63,4 +65,36 @@ export function askWhichRepo(known: string[], example: (repo: string) => string)
     "",
     `Say for example **${example(known[0])}**.`,
   ].join("\n");
+}
+
+/**
+ * The same question, as buttons.
+ *
+ * A prose list of repositories is a list of things to retype, and retyping is
+ * where people give up: the whole reason the tool asked is that it could not
+ * work the answer out, and making them spell it back is a poor trade. One tap
+ * re-sends the question with the repository in it.
+ *
+ * Reuses the clarify widget rather than adding a kind. It is already chips
+ * that re-send a prompt, already styled, already carries its analytics both
+ * ways, and the only thing that did not fit was a sentence about typos.
+ */
+export function whichRepoWidget(
+  question: string,
+  known: string[],
+  example: (repo: string) => string,
+): ClarifyWidgetSpec | null {
+  /* Nothing to offer is not a picker. The prose answer still names the shape
+     of the thing to type, which is better than an empty box. */
+  if (known.length === 0) return null;
+  return {
+    kind: "clarify",
+    title: "Which repository?",
+    originalQuery: question,
+    subtitle: "Pick one and I will run it.",
+    suggestions: known.slice(0, 6).map((repo) => ({
+      label: repo,
+      query: example(repo),
+    })),
+  };
 }

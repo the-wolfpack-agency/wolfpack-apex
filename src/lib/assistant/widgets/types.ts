@@ -580,6 +580,19 @@ export interface ClarifyWidgetSpec {
   title: string;
   /** The original user query, echoed so they can confirm what they typed. */
   originalQuery: string;
+  /**
+   * Framing sentence, when "you typed X, tap a suggestion" is the wrong words.
+   *
+   * This widget started as a typo corrector, and its subtitle says so. The
+   * same three chips are exactly what a tool needs when it is missing a
+   * parameter - "which repository?" - and there the person did not mistype
+   * anything, they asked a reasonable question that did not name a thing.
+   * Telling them what they typed reads as a correction they do not deserve.
+   *
+   * Same interaction, same styling, same event: a second widget would be a
+   * copy of this one with one sentence changed, and the two would drift.
+   */
+  subtitle?: string;
   /** Ordered list of suggestions (most-likely first). */
   suggestions: ClarifySuggestion[];
 }
