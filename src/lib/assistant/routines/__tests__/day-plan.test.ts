@@ -511,3 +511,76 @@ describe("the step that reads it all together", () => {
     }
   });
 });
+
+/* ---------------------------------------------------------------------
+ * Reported 2026-08-25 from a real plan. A Wednesday that opened "I check
+ * email" came back saying:
+ *
+ *   1. check email — I can do this, but not inside a chain: ...
+ *   ...
+ *   0 of 8 steps are something I can already do, and 6 are yours.
+ *   2 steps have nothing behind them yet. I have left them out.
+ *
+ * Three untrue things in four lines. It could do step 1 and said it could,
+ * three lines before saying it could do none of them. The two steps were not
+ * "left out" - they are printed as items 1 and 3. And "nothing behind them
+ * yet" describes a tool that exists and wants a parameter.
+ *
+ * The counting was the same mistake as the routine step tally: a numerator and
+ * a denominator measured on different bases, in front of somebody who can see
+ * both.
+ * --------------------------------------------------------------- */
+describe("the plan summary agrees with the list above it", () => {
+  const tools = [
+    {
+      name: "search_mail",
+      description: "Search the mailbox. Filters by sender, topic, or both.",
+      capability: "*",
+      paramSchema: {
+        safeParse: () => ({
+          success: false,
+          error: { issues: [{ path: [], message: "needs at least one of 'from', 'to', or 'topic'" }] },
+        }),
+      },
+      chainAsk: { topic: "What should I look for?" },
+    },
+  ];
+  const day = [
+    { text: "check email", tool: "search_mail", humanOnly: false },
+    { text: "go to the gym", tool: null, humanOnly: true },
+    { text: "check email again", tool: "search_mail", humanOnly: false },
+    { text: "eat lunch", tool: null, humanOnly: true },
+  ];
+
+  const plan = mapDay(day as never, tools as never, "cto");
+
+  it("counts a step it can do as a step it can do", () => {
+    expect(plan.covered).toBe(2);
+    expect(plan.humanOnly).toBe(2);
+    expect(plan.gaps).toBe(0);
+  });
+
+  /* The arithmetic the reader does without meaning to. */
+  it("adds up to the number of steps listed", () => {
+    expect(plan.covered + plan.humanOnly + plan.gaps).toBe(plan.steps.length);
+  });
+
+  it("never claims to have left out a step it just printed", () => {
+    const out = renderPlan(plan, true);
+    const listed = out.match(/^\d+\. /gm) ?? [];
+    expect(listed).toHaveLength(4);
+    expect(out).not.toMatch(/left them out|left it out/);
+    expect(out).toContain("2 of 4 steps are something I can already do");
+  });
+
+  /* A tool that exists and wants a parameter is not an absence, and saying so
+     sends somebody looking for a feature that is already there. */
+  it("does not describe a tool that needs a detail as nothing at all", () => {
+    const noAsk = [{ ...tools[0], chainAsk: undefined }];
+    const p2 = mapDay(day as never, noAsk as never, "cto");
+    const out = renderPlan(p2, false);
+    expect(p2.gaps).toBe(2);
+    expect(out).not.toMatch(/nothing behind/);
+    expect(out).toMatch(/needs? a detail/i);
+  });
+});

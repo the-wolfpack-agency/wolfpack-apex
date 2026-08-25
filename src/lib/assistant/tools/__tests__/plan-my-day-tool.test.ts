@@ -195,18 +195,22 @@ describe("the answer", () => {
     const res = await run();
     if (!res.ok) throw new Error("expected success");
 
-    /* TWO gaps, for two different reasons, and the answer distinguishes them.
-       search_mail exists and cannot run without knowing whose mail or about
-       what, so it is not a missing capability; SAP is genuinely absent. Both
-       count toward what to build next, and only one is a request for a new
-       tool. */
-    expect(res.data.gaps).toBe(2);
-    expect(res.data.covered).toBe(1);
+    /* ONE gap, and it is the only one that is a request for a new tool.
+     *
+     * WAS TWO. search_mail counted as a gap because its rule spans three
+     * fields and fails at the root, so the planner had nothing to ask for.
+     * That was a limitation of the planner rather than a fact about the
+     * product, and it read to the user as "I cannot check your email" - the
+     * commonest step anybody describes. Tools now name their own question
+     * (ToolDef.chainAsk) and search_mail asks for a topic, so it is covered.
+     *
+     * SAP is the real gap: nothing behind it at all. Which is the number that
+     * was always meant to say what to build next. */
+    expect(res.data.gaps).toBe(1);
+    expect(res.data.covered).toBe(2);
     expect(res.answer).toMatch(/nothing here does this yet/i);
-    /* The schema's own words, which say more than ours did: a rule spanning
-       several fields cannot become one question, and "needs at least one of
-       from, to, or topic" tells somebody exactly what to type instead. */
-    expect(res.answer).toMatch(/at least one of 'from', 'to', or 'topic'/);
+    /* And the mail step says where it will stop and turn to them. */
+    expect(res.answer).toMatch(/I will ask you for the topic/i);
   });
 });
 

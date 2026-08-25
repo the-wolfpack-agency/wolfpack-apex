@@ -142,3 +142,44 @@ describe("handler — failure paths", () => {
     if (!r.ok) expect(r.code).toBe("internal");
   });
 });
+
+/* ---------------------------------------------------------------------
+ * Found by scripts/phrase-sweep.ts: the commonest ways to ask for the issue
+ * list reached a model, which cannot see GitHub.
+ *
+ * The github/gh anchor kept them out. It exists to stop "any issues with the
+ * deploy" and it is right to, so the additions are NARROWER than the anchor
+ * rather than looser: a tracker-shaped noun phrase, not the word "issues".
+ * --------------------------------------------------------------- */
+describe("asking for the issue list in the words people use", () => {
+  const match = (m: string) => searchGithubIssuesTool.matchIntent!(m);
+
+  it.each(["any open issues", "what is on the backlog", "open issues for the repo"])(
+    "%s reaches the issue search",
+    (m) => {
+      expect(match(m)).not.toBeNull();
+    },
+  );
+
+  /* No repo named means the whole org, which is a real answer here and what
+     the person asked for. "the repo" is not a repository called "repo". */
+  it("asks the org rather than a repository named 'repo'", () => {
+    expect(match("open issues for the repo")).toEqual({ state: "open" });
+  });
+
+  /* THE CHATTER THE ANCHOR EXISTS FOR. Still refused. */
+  it.each(["any issues with the deploy", "we had issues with the client call"])(
+    "%s is conversation, not a query",
+    (m) => {
+      expect(match(m)).toBeNull();
+    },
+  );
+
+  /* NOT TAKEN, DELIBERATELY. This client filters by author, not assignee, and
+     no Instinct user maps to a GitHub login. Claiming it would answer "what is
+     assigned to me" with every open issue in the org - confidently and wrongly,
+     which is worse than the model call it would replace. */
+  it("refuses 'assigned to me', which it cannot answer correctly", () => {
+    expect(match("what issues are assigned to me")).toBeNull();
+  });
+});

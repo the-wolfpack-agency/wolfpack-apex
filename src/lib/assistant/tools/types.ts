@@ -236,6 +236,22 @@ export interface ToolDef<P, R> {
    */
   requiresConfirmation?: boolean;
   /**
+   * What to ask for when this tool appears in a chain and the schema refused
+   * an empty call WITHOUT naming a field.
+   *
+   * The day planner reads the required parameter off the zod failure, which
+   * works whenever the rule belongs to one field. It cannot work for a rule
+   * that spans several - "at least one of from, to or topic" fails at the root
+   * with no path - and every such tool was therefore unchainable. search_mail
+   * is one, and "check my email" is the single commonest step anybody
+   * describes, so the commonest day could not be turned into a chain.
+   *
+   * Same shape as a routine step's `ask`: the key is the parameter the answer
+   * fills, the value is the question. Declared by the tool because only the
+   * tool knows which of its several fields is the useful one to ask for.
+   */
+  chainAsk?: Record<string, string>;
+  /**
    * Human-only tools (e.g. delegate_to_agent) must never be invoked BY an
    * agent principal. When set, the dispatcher skips this tool for an agent
    * caller so the instruction falls through to a real work tool. This also
