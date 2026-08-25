@@ -103,6 +103,17 @@ export interface IngestRequest {
   tags?: string[];
   /** OneDrive parent folder id when we also want to mirror to Graph. */
   onedriveParentId?: string;
+  /**
+   * The Graph drive item this came from.
+   *
+   * brain_documents has carried this column since the table was created and
+   * createDocument has always accepted it, but ingest() never passed it, so
+   * every one of the 1,112 documents in production has it null. That is the
+   * reason a SharePoint sync cannot resume: with no record of WHICH file
+   * became which document, a re-run has to download all nine hundred again
+   * and meet the same throttling that killed the first attempt.
+   */
+  msDriveItemId?: string;
   /** Source URL where this document can be opened (SharePoint webUrl,
    *  Stream Watch URL, etc.). Stored on brain_documents.web_url so
    *  chat citations can render as clickable links to the original. */
