@@ -32,11 +32,24 @@ export async function knownRepos(): Promise<string[]> {
   if (!process.env.DATABASE_URL) return [];
   try {
     const { safeQuery } = await import("@/lib/db");
+    /* READY, AND RECENT FIRST.
+     *
+     * This ordered alphabetically over every row, which put seven scratch
+     * repos at the top of the list: wolfpack-test10, test11, test12, test2,
+     * test3, test4, test6. Found by reading the actual answer through
+     * scripts/prompt-transcript.ts, which is the only way a menu of junk shows
+     * up - the query was correct, the tool worked, and the reply was useless.
+     *
+     * A site that failed to deploy is not one to ask about the build of, so
+     * status carries the filter, and the most recently touched come first
+     * because those are the ones somebody is working in. */
     const { rows } = await safeQuery<{ github_repo: string }>(
-      `SELECT DISTINCT github_repo
+      `SELECT github_repo
          FROM instinct_site_projects
         WHERE github_repo IS NOT NULL AND btrim(github_repo) <> ''
-        ORDER BY github_repo
+          AND status = 'ready'
+        GROUP BY github_repo
+        ORDER BY max(updated_at) DESC
         LIMIT 8`,
       [],
     );

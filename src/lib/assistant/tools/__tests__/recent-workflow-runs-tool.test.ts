@@ -290,3 +290,35 @@ describe("asking which repository, as buttons", () => {
     expect(res.answer).toMatch(/which repositor/i);
   });
 });
+
+/* ---------------------------------------------------------------------
+ * Found by reading the answer, not the code. scripts/prompt-transcript.ts
+ * showed the picker offering seven scratch repos ahead of the real one:
+ * wolfpack-test10, test11, test12, test2, test3, test4, test6.
+ *
+ * The query was correct and the tool worked. The reply was a menu of junk,
+ * which no assertion about tools or matchers could have caught.
+ * --------------------------------------------------------------- */
+describe("the repositories it offers", () => {
+  it("asks for ready sites, most recently touched first", async () => {
+    const db = await import("@/lib/db");
+    const spy = jest
+      .spyOn(db, "safeQuery")
+      .mockResolvedValue({ rows: [], rowCount: 0 } as never);
+    const prev = process.env.DATABASE_URL;
+    process.env.DATABASE_URL = "postgres://test";
+
+    const { knownRepos } = await import("@/lib/assistant/tools/github-repos");
+    await knownRepos();
+
+    const sql = String(spy.mock.calls[0]?.[0] ?? "");
+    /* A site that failed to deploy is not one to ask about the build of. */
+    expect(sql).toMatch(/status\s*=\s*'ready'/);
+    /* Alphabetical order is what surfaced the scratch repos. */
+    expect(sql).toMatch(/ORDER BY\s+max\(updated_at\)\s+DESC/i);
+    expect(sql).not.toMatch(/ORDER BY github_repo/i);
+
+    process.env.DATABASE_URL = prev;
+    spy.mockRestore();
+  });
+});
