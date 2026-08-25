@@ -2600,6 +2600,23 @@ async function callAI(
       max_tokens: 2048,
       model_tier: tierChoice.tier,
       latency_target: "real_time",
+      /* CHECK THE ANSWER BEFORE THE PERSON READS IT.
+       *
+       * The router has carried an answer-quality layer for months - rule
+       * checks for empty, truncated, deferred, ignored-question and
+       * placeholder answers, a model judge above them, and escalation to a
+       * better tier when a model tried and fell short. All of it is gated on
+       * `verify`, and NOTHING IN THE PRODUCT HAS EVER SET IT. Production has
+       * 257 completions and zero ai.answer_judged events: not one assistant
+       * answer has ever been checked before somebody read it.
+       *
+       * Rule-based checking is free - no second call, no tokens - so there is
+       * no argument for leaving it off. Deep judging is deliberately not on
+       * here: it costs a second call, and it needs a model from a different
+       * family to be worth anything, which this deployment does not have yet.
+       * Turning it on today would buy a small model marking its own homework,
+       * which is the weakest form of this idea and reads as assurance. */
+      verify: true,
       // Govern the assistant's answers with the OGIAM Agent Constitution. The
       // router prepends it to `system` at the chokepoint.
       apply_constitution: true,

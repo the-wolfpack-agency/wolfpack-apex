@@ -1322,3 +1322,53 @@ describe("Round-Trip Data Integrity", () => {
     expect(archiveQueries.length).toBeGreaterThanOrEqual(0);
   });
 });
+
+/* ---------------------------------------------------------------------
+ * Nothing has ever checked an assistant answer before somebody read it.
+ *
+ * The router has carried an answer-quality layer for months: rule checks for
+ * empty, truncated, deferred, ignored-question and placeholder answers, a
+ * model judge above them, and escalation when a model tried and fell short.
+ * All of it is gated on `verify`, and no caller in the product set it.
+ * Production has 257 completions and zero ai.answer_judged events.
+ *
+ * Rule checking is free - no second call, no tokens - so there was never an
+ * argument for leaving it off.
+ * --------------------------------------------------------------- */
+describe("the assistant asks for its answer to be checked", () => {
+  it("sends verify with the completion", async () => {
+    mockAIComplete.mockResolvedValue({
+      content: "An answer.",
+      model_used: "gpt-4o-mini",
+      provider_used: "azure",
+      usage: { input_tokens: 10, output_tokens: 5 },
+    });
+    await chat("How does the pricing engine work?", "u1", "dev");
+
+    const call = mockAIComplete.mock.calls.find(
+      (c: unknown[]) =>
+        (c[0] as { metadata?: { feature?: string } })?.metadata?.feature === "assistant_chat",
+    );
+    expect(call).toBeDefined();
+    expect((call![0] as { verify?: unknown }).verify).toBe(true);
+  });
+
+  /* NOT "deep", deliberately. That costs a second call and is only worth
+     anything with a model from a different family to judge with, which this
+     deployment does not have. A small model marking its own homework is the
+     weakest form of the idea and reads as assurance. */
+  it("does not pay for a deep judge it cannot make independent", async () => {
+    mockAIComplete.mockResolvedValue({
+      content: "An answer.",
+      model_used: "gpt-4o-mini",
+      provider_used: "azure",
+      usage: { input_tokens: 10, output_tokens: 5 },
+    });
+    await chat("How does the pricing engine work?", "u1", "dev");
+    const call = mockAIComplete.mock.calls.find(
+      (c: unknown[]) =>
+        (c[0] as { metadata?: { feature?: string } })?.metadata?.feature === "assistant_chat",
+    );
+    expect((call![0] as { verify?: unknown }).verify).not.toBe("deep");
+  });
+});
