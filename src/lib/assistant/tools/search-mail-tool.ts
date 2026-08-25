@@ -88,6 +88,12 @@ export const searchMailTool: ToolDef<Params, MailSearchResult> = {
     "Search the requesting user's Microsoft 365 mailbox. Filters by sender, topic, or both.",
   paramSchema: ParamSchema,
   capability: "*",
+  /* "CHECK MY EMAIL" IS THE COMMONEST STEP ANYBODY DESCRIBES, and this tool
+     could not appear in a chain at all. Its rule spans three fields - at least
+     one of from, to or topic - so it fails at the root with no path, and the
+     day planner had nothing to ask for. Topic is the useful one to ask: people
+     describing a morning mean "anything about X", not a named sender. */
+  chainAsk: { topic: "What should I look for in your mail? A topic, or a person's name." },
   matchIntent: matchMailIntent,
   async handler(params, ctx): Promise<ToolResult<MailSearchResult>> {
     try {
