@@ -37,8 +37,22 @@ interface CalendarWidgetData {
   eventCount: number;
 }
 
+/* ANCHORED END TO END, WITH NO ROOM FOR "MY".
+ *
+ * "open calendar" was a calendar and "open my calendar" was not, which is not
+ * a distinction anybody types with. Found by scripts/phrase-sweep.ts: three of
+ * the commonest ways to ask for the calendar reached a model instead.
+ *
+ * The looking-ahead forms are here for the same reason. "what does my week
+ * look like" and "what have I got on this week" are asking to SEE the diary,
+ * not to be told whether a particular slot is free, and the anchoring keeps
+ * them from swallowing anything with an object: "what does my week look like
+ * for the Detroit launch" is a different question and still falls through.
+ *
+ * The zone-aware availability tool owns the "am I free on Tuesday" shapes and
+ * is matched on its own patterns; nothing here overlaps them. */
 const INTENT_RE =
-  /^(?:calendar|show\s+(?:me\s+)?(?:my\s+)?calendar|open\s+calendar|calendar\s+widget|show\s+calendar)[\s.?!]*$/i;
+  /^(?:(?:show|open|pull\s+up|bring\s+up)\s+(?:me\s+)?(?:my\s+|the\s+)?calendar(?:\s+widget)?|calendar(?:\s+widget)?|what\s+does\s+my\s+(?:week|month|calendar)\s+look\s+like|what\s+have\s+i\s+got\s+(?:on\s+)?(?:this\s+)?(?:week|month))[\s.?!]*$/i;
 
 function matchCalendarWidgetIntent(message: string): Params | null {
   const trimmed = message.trim();

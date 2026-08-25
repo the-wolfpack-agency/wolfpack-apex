@@ -192,3 +192,39 @@ describe("dms_inventory handler", () => {
     );
   });
 });
+
+/* ---------------------------------------------------------------------
+ * Found by scripts/phrase-sweep.ts: the two most natural ways to ask what is
+ * in stock both cost a model call.
+ *
+ * The keyword set knew inventory, dms and stock - none of which somebody
+ * standing in a dealership reaches for first. They say "on the lot", and
+ * everyone else says "vehicles".
+ * --------------------------------------------------------------- */
+describe("asking what is in stock, in the words people use", () => {
+  const match = (m: string) => dmsInventoryWidgetTool.matchIntent!(m);
+
+  it.each(["how many Cayennes are on the lot", "what vehicles are available"])(
+    "%s reaches the inventory widget",
+    (m) => {
+      expect(match(m)).not.toBeNull();
+    },
+  );
+
+  /* THE REGRESSION THE WIDENING NEARLY SHIPPED. "vehicles available" pulled
+     in a report of a broken page, and this tool is registered at 43 while
+     feedback is at 53, so it would have won: somebody telling us the product
+     was broken would have been shown a list of cars. */
+  it.each([
+    "the available vehicles page is broken",
+    "the vehicles list is blank",
+    "the inventory widget is not working",
+  ])("%s is a fault report, not a stock query", (m) => {
+    expect(match(m)).toBeNull();
+  });
+
+  /* Unchanged by the widening, and asserted so it stays that way. */
+  it("still ignores a casual mention of a car", () => {
+    expect(match("I drive a Porsche")).toBeNull();
+  });
+});

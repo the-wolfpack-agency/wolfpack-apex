@@ -69,7 +69,14 @@ const MODEL_AFTER_MAKE_RE =
   /\b(?:toyota|honda|ford|chevrolet|chevy|nissan|jeep|ram|gmc|hyundai|kia|subaru|mazda|tesla|bmw|audi|mercedes|lexus|acura|volkswagen|vw|dodge|chrysler|cadillac|buick|lincoln|infiniti|porsche|volvo|mini|fiat|alfa|jaguar|land\s*rover|mitsubishi|genesis)\s+([a-z0-9-]{2,30})/i;
 const YEAR_RE = /\b(20\d{2}|19\d{2})\b/;
 const PRICE_RE = /under\s+\$?([0-9]+)(k)?\b/i;
-const INVENTORY_KEYWORD_RE = /\b(inventory|dms|stock)\b/i;
+/* "ON THE LOT" IS HOW A DEALER SAYS INVENTORY, and "vehicles" is how everyone
+   else does. This knew three words, none of which somebody standing in a
+   dealership would reach for first. Found by scripts/phrase-sweep.ts: "how
+   many Cayennes are on the lot" and "what vehicles are available" both cost a
+   model call. The make/verb gates below are unchanged, so a casual mention
+   still cannot fire the tool. */
+const INVENTORY_KEYWORD_RE =
+  /\b(inventory|dms|stock|on\s+the\s+lot|vehicles?\s+(?:are\s+)?available|available\s+vehicles?)\b/i;
 
 function matchDmsIntent(message: string): Params | null {
   const trimmed = message.trim();
@@ -83,9 +90,25 @@ function matchDmsIntent(message: string): Params | null {
    * Real vehicle queries always carry a make OR an inventory keyword;
    * date-bound meeting queries carry neither. */
   if (!makeMatch && !inventoryKw) return null;
+  /* A BROKEN PAGE IS NOT AN INVENTORY QUERY.
+   *
+   * Widening the keywords to "vehicles available" brought "the available
+   * vehicles page is broken" with it, and this tool is registered at 43 while
+   * feedback is at 53, so it would win: somebody reporting a fault would be
+   * shown a list of cars. Exactly the trap search-github-issues-tool already
+   * documents for "report a bug", and guarded the same way and for the same
+   * reason - the moment somebody says the product is broken is the moment
+   * their words matter most. */
+  if (
+    /\b(?:page|screen|widget|button|tab|form|filter|list)\b[^.?!]{0,40}?\b(?:broken|not\s+working|wrong|blank|empty)\b/i.test(
+      trimmed,
+    )
+  ) {
+    return null;
+  }
   /* Tighten: also require a "search-y" verb so casual mentions
    * ("I drive a Toyota") don't fire the tool. */
-  if (!/\b(show|find|search|look\s+up|list|browse|any|got|have|inventory|stock|dms)\b/i.test(trimmed)) {
+  if (!/\b(show|find|search|look\s+up|list|browse|any|got|have|inventory|stock|dms|how\s+many|available)\b/i.test(trimmed)) {
     return null;
   }
   /* Universal-search shadow guard: bare "search <make>" / "find <make>" /
