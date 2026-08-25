@@ -51,8 +51,46 @@ interface PlanData {
 
 /* Needs BOTH an invitation to plan and enough text to plan from. A short
    "my day" must not spend a model call on three words. */
-const INTENT_RE =
-  /\b(?:here'?s?\s+what\s+i\s+do|this\s+is\s+what\s+i\s+do|my\s+(?:typical\s+|usual\s+)?(?:day|monday|morning)\s+(?:looks?\s+like|is|goes)|walk(?:ing)?\s+you\s+through\s+my\s+day|plan\s+my\s+day|map\s+my\s+day)\b/i;
+/* "HERE IS" AND "HERE'S" ARE THE SAME SENTENCE. This read here'?s?, which
+   cannot span the space in "here is", so "here is what I do each Monday" was
+   not a day description and "here's what I do each Monday" was. Nobody types
+   with that distinction in mind, and the half that missed fell through to the
+   CRM search, which answered a description of somebody's morning with a
+   record list.
+
+   AND NOBODY ANNOUNCES THAT THEY ARE ABOUT TO DESCRIBE THEIR DAY. Every
+   opener above is an invitation - "here is what I do", "walk you through my
+   day". People just start: "every morning I read my email, check the calendar
+   and chase the overnight leads". That is the single most useful thing anybody
+   can type at this product and it reached a model.
+
+   THE SEQUENCE IS THE DISCRIMINATOR, not the opener. "every morning I check
+   the CRM" is a remark; a chain is a LIST, so the bare form below additionally
+   requires a comma or a "then". That keeps the widening from swallowing
+   ordinary sentences that happen to begin with "every day I", which is the
+   failure this file already warns about in the capability matcher above. */
+const DAY_OPENER =
+  "here(?:'?s|\\s+is)?\\s+what\\s+i\\s+do" +
+  "|this\\s+is\\s+what\\s+i\\s+do" +
+  "|my\\s+(?:typical\\s+|usual\\s+)?(?:day|monday|morning)\\s+(?:looks?\\s+like|is|goes)" +
+  "|walk(?:ing)?\\s+you\\s+through\\s+my\\s+day" +
+  "|plan\\s+my\\s+day" +
+  "|map\\s+my\\s+day";
+
+/** Somebody describing a routine without announcing it, as a sequence. */
+const BARE_ROUTINE =
+  "(?:every|each)\\s+(?:morning|day|monday|week|afternoon)\\b[^.?!]*?\\bi\\s+\\w+" +
+  /* TWO SEPARATORS, NOT ONE. A single comma is how somebody complains:
+     "every day I have to log in again, the session expires". Requiring one was
+     enough to claim three bug reports out of four, and a bug report answered
+     with a planning exercise is the worst possible response to somebody
+     telling you the product is broken - it is the moment their words matter
+     most, and feedback is the tool that must get them.
+     A described day is a LIST, so it carries at least two: "read my email,
+     check the calendar and chase the leads". */
+  "(?:[^.?!]*?(?:,|\\bthen\\b|\\band\\b)){2}";
+
+const INTENT_RE = new RegExp(`\\b(?:${DAY_OPENER}|${BARE_ROUTINE})`, "i");
 
 /* A QUESTION IS NOT A DESCRIPTION.
    "what does my day look like tomorrow" wants a calendar, and answering it with

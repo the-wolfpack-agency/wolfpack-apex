@@ -47,6 +47,48 @@ beforeEach(() => {
   });
 });
 
+/* ---------------------------------------------------------------------
+ * Found by scripts/phrase-sweep.ts, which runs every phrasing through the
+ * real matchers: two ways of describing a working day were being answered by
+ * the CRM record search instead of the day planner.
+ * --------------------------------------------------------------- */
+describe("how people actually describe their day", () => {
+  /* "here's" and "here is" are the same sentence. The matcher read here'?s?,
+     which cannot span the space, so one of them was a day description and the
+     other was a database query. */
+  it.each([
+    "here is what I do each Monday: inbox, then the pipeline, then the team call",
+    "here's what I do each Monday: inbox, then the pipeline, then the team call",
+  ])("%s is a day", (m) => {
+    expect(matchPlanDayIntent(m)).not.toBeNull();
+  });
+
+  /* Nobody announces that they are about to describe their day. They just
+     start, and that is the single most useful thing anybody can type here. */
+  it("takes a routine described without any announcement", () => {
+    expect(
+      matchPlanDayIntent(
+        "every morning I read my email, check the calendar and chase the overnight leads",
+      ),
+    ).not.toBeNull();
+  });
+
+  /* THE RISK THE WIDENING CREATES, and the reason it asks for a list rather
+     than a single comma. Every one of these begins exactly like a described
+     routine and none of them is one; the first three are bug reports, which
+     must reach feedback. Answering somebody who says the product is broken
+     with a planning exercise is the worst response available at the moment
+     their words matter most. */
+  it.each([
+    "every day I have to log in again, the session expires too quickly",
+    "every morning I get an error on the dashboard, can you fix it",
+    "each week I see the same bug in the report, it is really annoying",
+    "every day I am getting complaints about the login page from users",
+  ])("%s is NOT a day", (m) => {
+    expect(matchPlanDayIntent(m)).toBeNull();
+  });
+});
+
 describe("knowing when to spend a model call", () => {
   it("matches somebody walking through their day", () => {
     expect(matchPlanDayIntent(DAY)).toEqual({ description: DAY });
