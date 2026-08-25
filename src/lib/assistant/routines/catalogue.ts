@@ -193,9 +193,25 @@ export const BUILT_IN_ROUTINES: readonly Routine[] = Object.freeze([
   },
 ]);
 
-/** Look up a routine by its id. */
+/**
+ * Look up a routine by its id.
+ *
+ * TEMPLATES COUNT. This searched the built-ins alone, which made every one of
+ * the eleven template routines impossible to RESUME: a run records its
+ * routine id, and coming back to say "done" looked that id up here, missed,
+ * and was told the routine did not exist any more. Running one worked,
+ * finishing one did not, and the person had already done the thing they were
+ * asked to do when they were told the chain was gone.
+ *
+ * Same omission matchRoutine carried until it was fixed, and the reason both
+ * lookups now read from the same two lists in the same order.
+ */
 export function routineById(id: string): Routine | null {
-  return BUILT_IN_ROUTINES.find((r) => r.id === id) ?? null;
+  return (
+    BUILT_IN_ROUTINES.find((r) => r.id === id) ??
+    ROUTINE_TEMPLATES.find((t) => t.id === id) ??
+    null
+  );
 }
 
 /**
