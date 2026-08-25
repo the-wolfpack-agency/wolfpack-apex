@@ -73,6 +73,7 @@ export async function tryToolAnswer(
   if (match.intent === "meetings_on_date") {
     const result = await runMeetingsOnDate({
       question,
+      timeZone: ctx.timeZone,
       nowMs: ctx.nowMs,
       userId: ctx.userId,
     });
