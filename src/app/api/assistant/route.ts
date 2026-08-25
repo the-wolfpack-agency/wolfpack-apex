@@ -371,6 +371,9 @@ export async function POST(req: NextRequest) {
       user.workspaceId,
       geo,
       attachmentContext.block || undefined,
+      /* Already read off the request body above and handed to the
+         orchestrator path. The tool path needs it for the same reason. */
+      timeZone,
     );
 
     // Include gate results (warnings) alongside the response

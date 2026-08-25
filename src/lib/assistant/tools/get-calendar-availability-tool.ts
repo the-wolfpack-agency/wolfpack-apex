@@ -106,6 +106,17 @@ export const getCalendarAvailabilityTool: ToolDef<Params, CalendarAvailabilityRe
         selfUser: isSelf
           ? { userId: ctx.userId, displayName: ctx.userEmail ?? ctx.userId }
           : undefined,
+        /* THE CALLER'S ZONE, NOT THE SERVER'S.
+         *
+         * runCalendarAvailability formats times in this zone and falls back to
+         * the server's when it is absent. Vercel runs in UTC, so absent meant
+         * every meeting this tool reported was shifted by the caller's whole
+         * offset: a 1pm Eastern meeting read back as 5pm.
+         *
+         * The orchestrator has always passed this. This path did not, so
+         * asking about your calendar in a sentence was right and running the
+         * same lookup inside a routine was four hours out. */
+        timeZone: ctx.timeZone,
       });
       if (!result) {
         return {

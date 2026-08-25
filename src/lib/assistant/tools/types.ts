@@ -57,6 +57,16 @@ export interface ToolContext {
   /** User's role (cto, ceo, evp, dev, sales, ops, hr, ...). */
   userRole: string;
   /**
+   * IANA zone from the browser, e.g. "America/New_York".
+   *
+   * WHY A TOOL NEEDS THIS AT ALL. Vercel functions run in UTC, so any time a
+   * tool formats server-side reads back in UTC unless it is told otherwise.
+   * The orchestrator's own context has carried this for exactly that reason;
+   * the tool-facing one did not, so the same calendar lookup answered
+   * correctly through one door and four hours out through the other.
+   */
+  timeZone?: string;
+  /**
    * Set when this dispatch is being driven by an AGENT principal rather than a
    * human. When present, the OGIAM gate runs in enforce mode and attributes the
    * decision to the agent's identity, so the agent's actions are governed and

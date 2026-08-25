@@ -162,6 +162,28 @@ describe("a calendar step with nobody named", () => {
     expect((await callWith({ personName: "Hoxsie" }))?.selfUser).toBeUndefined();
   });
 
+  /* THE DOOR THE BUG CAME THROUGH. The browser sends its IANA zone on every
+     turn and the orchestrator has always used it; this path dropped it, so a
+     routine step formatted every meeting in the server's UTC. Asserted on the
+     call rather than the output, because the whole failure was a value that
+     existed and was never handed on. */
+  test("hands the caller's zone to the formatter", async () => {
+    const mod = await import("@/lib/assistant/tools/calendar-availability");
+    const spy = jest
+      .spyOn(mod, "runCalendarAvailability")
+      .mockResolvedValue(null as never);
+    await getCalendarAvailabilityTool.handler({} as never, {
+      userId: "u1",
+      userRole: "cto",
+      userEmail: "u1@wolfpack.dev",
+      timeZone: "America/New_York",
+    } as never);
+    expect(
+      (spy.mock.calls[0]?.[0] as { timeZone?: string })?.timeZone,
+    ).toBe("America/New_York");
+    spy.mockRestore();
+  });
+
   test("an explicit isSelfQuery:false is still honoured", async () => {
     expect(
       (await callWith({ personName: "Hoxsie", isSelfQuery: false }))?.selfUser,

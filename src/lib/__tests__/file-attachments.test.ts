@@ -463,12 +463,14 @@ describe("API Route -- File Attachment Analytics", () => {
     const req = makeRequest({ message: "Test message" });
     await POST(req as any);
     // The route calls chat(message, user.id, user.role, conversationId,
-    // pageContext, user.workspaceId, geo, attachmentBlock). conversationId
-    // and pageContext are absent in this request, the mocked user has no
-    // workspaceId, and the test request carries no x-vercel-ip-* headers so
-    // readVercelGeo returns an empty object. This request has no attachments,
-    // so the block is undefined — asserted rather than dropped, so a future
-    // change that stops passing attachments through fails here.
+    // pageContext, user.workspaceId, geo, attachmentBlock, timeZone).
+    // conversationId and pageContext are absent in this request, the mocked
+    // user has no workspaceId, and the test request carries no x-vercel-ip-*
+    // headers so readVercelGeo returns an empty object. This request has no
+    // attachments, so the block is undefined — asserted rather than dropped,
+    // so a future change that stops passing attachments through fails here.
+    // timeZone is undefined for the same reason: this body carries none. A
+    // real browser always sends one, and the tools format times with it.
     expect(mockChat).toHaveBeenCalledWith(
       "Test message",
       "test-user",
@@ -477,6 +479,7 @@ describe("API Route -- File Attachment Analytics", () => {
       undefined,
       undefined,
       {},
+      undefined,
       undefined,
     );
   });
