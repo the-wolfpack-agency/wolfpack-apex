@@ -112,3 +112,36 @@ describe("calendar_widget handler", () => {
     expect(res.answer).toMatch(/No meetings/i);
   });
 });
+
+/* ---------------------------------------------------------------------
+ * Found by scripts/phrase-sweep.ts: three of the commonest ways to ask for
+ * the calendar reached a model instead of this widget.
+ *
+ * The pattern was anchored end to end with no room for "my", so "open
+ * calendar" was a calendar and "open my calendar" was not. Nobody types with
+ * that distinction in mind.
+ * --------------------------------------------------------------- */
+describe("asking to see the calendar, in the words people use", () => {
+  it.each([
+    "open my calendar",
+    "open calendar",
+    "show me my calendar",
+    "pull up my calendar",
+    "what does my week look like",
+    "what have I got on this week",
+  ])("%s opens the calendar", (m) => {
+    expect(calendarWidgetTool.matchIntent!(m)).not.toBeNull();
+  });
+
+  /* THE ANCHORING IS THE SAFETY. A question with an OBJECT is a different
+     question, and answering it with a month grid would be worse than the
+     model call this replaces. */
+  it.each([
+    "what does my week look like for the Detroit launch",
+    "open my calendar and clear Friday",
+    "the calendar page is broken",
+    "why does my calendar keep resetting",
+  ])("%s is not a request for the widget", (m) => {
+    expect(calendarWidgetTool.matchIntent!(m)).toBeNull();
+  });
+});
