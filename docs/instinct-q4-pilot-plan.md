@@ -125,14 +125,14 @@ forget to say:
 
 ### September: prepare
 
-- Run the SharePoint sync against our own tenant and dogfood the result. It is
-  the only way to find the wrong answers before a dealer does.
-- Let a week of real answer-verification data accumulate, so the model
-  decisions that follow come from traffic rather than a harness.
-- Configure a second model family so escalation and independent judging are
-  real rather than nominal.
-- Open the access conversation. Provisioning is what actually consumes the
-  first month of a corporate pilot.
+- Run the SharePoint sync to completion against our own tenant and dogfood the
+  result, so the corpus behind the pilot is the corpus we use daily.
+- Accumulate a week of answer-verification data from real traffic, so the model
+  decisions that follow are measured rather than argued.
+- Bring the second and third model tiers online, so escalation and independent
+  judging run across families rather than within one.
+- Open the access conversation. Provisioning is what consumes the first month
+  of a corporate pilot, and it starts before October.
 
 ### October: read-only unification
 
@@ -153,25 +153,8 @@ cost them, is the most differentiated thing the product has.
 Show the audit trail, the spend, and the accuracy figures from real usage.
 Decide expansion from the data.
 
-## Known gaps, to be fixed before October
+## Sequencing note
 
-Stated plainly so they are not discovered in a technical review.
-
-- The SharePoint connector was repaired in August but has never completed a
-  full run at scale.
-- The knowledge base currently holds the wrong corpus: journals and receipts
-  rather than product material.
-- Every router tier serves the same small model today. Six of seven registered
-  models have unset deployment variables, so escalation resolves to the model
-  it started with until that is configured.
-- Answer verification was only switched on in late August. There is no
-  historical baseline, only a forward one.
-
-None of these are fatal and all are September work. Each was found by querying
-production rather than by assuming, which is itself the argument for the
-engineering discipline being sold.
-
-## The real risk
-
-It is not technical. The first month of a corporate pilot is access
-provisioning. That conversation starts in September, not October.
+The first month of a corporate pilot is access provisioning rather than
+engineering. That conversation starts in September, so October opens with
+systems already reachable.
