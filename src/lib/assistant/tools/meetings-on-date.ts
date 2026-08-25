@@ -16,6 +16,7 @@
 import { safeQuery } from "@/lib/db";
 import { listEvents } from "@/lib/integrations/microsoft-calendar";
 import { getRelevantContext } from "@/lib/assistant/context-resolver";
+import { resolveIanaZone, zonedWallClockToUtcMs } from "@/lib/calendar/timezone";
 
 export interface MeetingOnDateRow {
   id: string;
@@ -34,7 +35,6 @@ export interface MeetingsOnDateResult {
   endMs: number;
 }
 
-const MS_DAY = 24 * 3_600_000;
 
 /**
  * Parse a free-text date out of the question. Returns the UTC day
@@ -48,6 +48,7 @@ const MS_DAY = 24 * 3_600_000;
 export function extractExplicitDate(
   text: string,
   nowMs = Date.now(),
+  timeZone?: string,
 ): { startMs: number; endMs: number; label: string } | null {
   const q = text.trim();
 
@@ -55,7 +56,7 @@ export function extractExplicitDate(
   const iso = /\b(\d{4})-(\d{2})-(\d{2})\b/.exec(q);
   if (iso) {
     const [, y, m, d] = iso;
-    return dayBounds(Number(y), Number(m) - 1, Number(d));
+    return dayBounds(Number(y), Number(m) - 1, Number(d), timeZone);
   }
 
   // US: 4/21/2026 or 04/21/26
@@ -64,7 +65,7 @@ export function extractExplicitDate(
     const [, m, d, yr] = us;
     let y = Number(yr);
     if (y < 100) y += 2000;
-    return dayBounds(y, Number(m) - 1, Number(d));
+    return dayBounds(y, Number(m) - 1, Number(d), timeZone);
   }
 
   // Month name: "April 21, 2026" or "Apr 21 2026". Year optional —
@@ -93,22 +94,59 @@ export function extractExplicitDate(
       ? Number(named[3])
       : new Date(nowMs).getUTCFullYear();
     if (monthIdx != null && day >= 1 && day <= 31) {
-      return dayBounds(year, monthIdx, day);
+      return dayBounds(year, monthIdx, day, timeZone);
     }
   }
 
   return null;
 }
 
+/**
+ * The [start, end] instants of a calendar day, IN THE CALLER'S ZONE.
+ *
+ * This built the day with Date.UTC, so "the 25th" meant 00:00Z to 23:59Z on
+ * the 25th. For anybody west of Greenwich that is not their 25th: an 8pm
+ * Eastern meeting on the 25th happens at 00:00Z on the 26th and was reported
+ * under the wrong date, while a meeting from the evening of the 24th was
+ * counted as theirs. Evening meetings are exactly the ones people ask about
+ * after the fact.
+ *
+ * Sibling of the display bug fixed in #389 - same cause, a server in UTC
+ * deciding what a local day is - and it uses the same canonical zone helpers
+ * rather than a second implementation of the arithmetic.
+ *
+ * The end is the next local midnight less a millisecond rather than start plus
+ * 24 hours, because a DST day is 23 or 25 hours long and the fixed offset
+ * would clip or overrun it.
+ */
 function dayBounds(
   y: number,
   monthIdx: number,
   day: number,
+  timeZone?: string,
 ): { startMs: number; endMs: number; label: string } {
-  const startMs = Date.UTC(y, monthIdx, day);
-  const endMs = startMs + MS_DAY - 1;
+  const iana = resolveIanaZone(timeZone) ?? "UTC";
+  const startMs =
+    iana === "UTC"
+      ? Date.UTC(y, monthIdx, day)
+      : zonedWallClockToUtcMs(y, monthIdx + 1, day, 0, 0, 0, iana);
+  /* Date.UTC normalises day+1 over month and year ends. */
+  const nextUtc = new Date(Date.UTC(y, monthIdx, day + 1));
+  const nextMs =
+    iana === "UTC"
+      ? nextUtc.getTime()
+      : zonedWallClockToUtcMs(
+          nextUtc.getUTCFullYear(),
+          nextUtc.getUTCMonth() + 1,
+          nextUtc.getUTCDate(),
+          0,
+          0,
+          0,
+          iana,
+        );
+  const endMs = nextMs - 1;
   const label = new Date(startMs).toLocaleDateString("en-US", {
-    timeZone: "UTC",
+    timeZone: iana,
     year: "numeric",
     month: "long",
     day: "numeric",
@@ -123,8 +161,11 @@ export async function runMeetingsOnDate(args: {
    *  delegated token. Optional: when absent, we still hit our cached
    *  tables but skip live calendar. */
   userId?: string;
+  /** Caller's IANA zone. Decides which calendar day "the 25th" is, and which
+   *  clock the times below are read in. Absent falls back to UTC. */
+  timeZone?: string;
 }): Promise<MeetingsOnDateResult | null> {
-  const range = extractExplicitDate(args.question, args.nowMs ?? Date.now());
+  const range = extractExplicitDate(args.question, args.nowMs ?? Date.now(), args.timeZone);
   if (!range) return null;
   if (!process.env.DATABASE_URL) return null;
 
@@ -324,10 +365,13 @@ export async function runMeetingsOnDate(args: {
     };
   }
 
+  /* Named once so the times and the day they are grouped under can never
+     disagree about which zone they are in. */
+  const zone = resolveIanaZone(args.timeZone) ?? "UTC";
   const lines = meetings.map((m) => {
     const time = m.recordedAt
       ? new Date(m.recordedAt).toLocaleTimeString("en-US", {
-          timeZone: "UTC",
+          timeZone: zone,
           hour: "numeric",
           minute: "2-digit",
           hour12: true,
@@ -336,7 +380,7 @@ export async function runMeetingsOnDate(args: {
     const title = m.title ?? "Untitled meeting";
     const owner = m.ownerName ? ` — ${m.ownerName}` : "";
     const detail = m.summary ? `\n  ${m.summary}` : "";
-    return `- ${time} UTC: ${title}${owner}${detail}`;
+    return `- ${time}: ${title}${owner}${detail}`;
   });
 
   const header =

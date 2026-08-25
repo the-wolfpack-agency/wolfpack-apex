@@ -179,3 +179,54 @@ describe("runMeetingsOnDate", () => {
     expect(r!.answer).toMatch(/No meeting integrations are connected/);
   });
 });
+
+/* ---------------------------------------------------------------------
+ * Sibling of the display bug fixed in #389: the same server-in-UTC cause,
+ * one layer down. #389 made times read in the caller's zone; this makes the
+ * DAY they are grouped under the caller's day too.
+ *
+ * dayBounds built the window with Date.UTC, so "the 25th" meant 00:00Z to
+ * 23:59Z. For anybody west of Greenwich that is not their 25th. An 8pm Eastern
+ * meeting on the 25th happens at 00:00Z on the 26th and fell outside the
+ * window entirely; a meeting from the evening of the 24th was counted as
+ * theirs. Evening meetings are exactly the ones people ask about afterwards.
+ * --------------------------------------------------------------- */
+describe("whose day 'the 25th' is", () => {
+  const eastern = () =>
+    extractExplicitDate("meetings on 2026-08-25", undefined, "America/New_York")!;
+
+  it("starts at midnight Eastern, not midnight UTC", () => {
+    /* EDT is UTC-4 in August, so the local day opens at 04:00Z. */
+    expect(new Date(eastern().startMs).toISOString()).toBe("2026-08-25T04:00:00.000Z");
+  });
+
+  it("includes an 8pm Eastern meeting, which happens the next day in UTC", () => {
+    const r = eastern();
+    const eightPmEastern = Date.parse("2026-08-26T00:00:00Z");
+    expect(eightPmEastern).toBeGreaterThanOrEqual(r.startMs);
+    expect(eightPmEastern).toBeLessThanOrEqual(r.endMs);
+  });
+
+  it("excludes the evening before, which UTC counted as this day", () => {
+    /* 8pm Eastern on the 24th = 00:00Z on the 25th. The UTC window opened
+       exactly there and claimed it. */
+    const eveningBefore = Date.parse("2026-08-25T00:00:00Z");
+    expect(eveningBefore).toBeLessThan(eastern().startMs);
+  });
+
+  it("spans a full local day across the DST boundary", () => {
+    /* 1 November 2026 is 25 hours long in Eastern. start + 24h would clip an
+       hour off the end of it. */
+    const r = extractExplicitDate("meetings on 2026-11-01", undefined, "America/New_York")!;
+    expect(r.endMs - r.startMs + 1).toBe(25 * 3_600_000);
+  });
+
+  it("still reads as UTC when no zone is given", () => {
+    const r = extractExplicitDate("meetings on 2026-08-25")!;
+    expect(new Date(r.startMs).toISOString()).toBe("2026-08-25T00:00:00.000Z");
+  });
+
+  it("labels the day in the caller's zone", () => {
+    expect(eastern().label).toBe("August 25, 2026");
+  });
+});
