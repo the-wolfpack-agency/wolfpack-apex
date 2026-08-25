@@ -107,3 +107,64 @@ describe("person-query intent patterns (existing — no regression)", () => {
     expect(r?.personName?.toLowerCase()).toBe("nick");
   });
 });
+
+/* ---------------------------------------------------------------------
+ * Regression 2026-08-25: the first step of the first chain somebody built
+ * for themselves.
+ *
+ * A drafted chain carries no parameters on purpose, and every field on this
+ * tool is optional, so a step built from "check my calendar" arrived here as
+ * {}. The tool has two modes and did neither: no name to look up, no self-user
+ * to fall back on. It answered "I couldn't find calendar info for that person"
+ * about a person nobody had mentioned, which reads as the product not knowing
+ * who its own user is.
+ * --------------------------------------------------------------- */
+describe("a calendar step with nobody named", () => {
+  const callWith = async (params: Record<string, unknown>) => {
+    const mod = await import("@/lib/assistant/tools/calendar-availability");
+    const spy = jest
+      .spyOn(mod, "runCalendarAvailability")
+      .mockResolvedValue(null as never);
+    await getCalendarAvailabilityTool.handler(params as never, {
+      userId: "u1",
+      userRole: "cto",
+      userEmail: "u1@wolfpack.dev",
+    } as never);
+    const arg = spy.mock.calls[0]?.[0] as { selfUser?: { userId: string } };
+    spy.mockRestore();
+    return arg;
+  };
+
+  test("reads the caller's own calendar", async () => {
+    expect((await callWith({}))?.selfUser?.userId).toBe("u1");
+  });
+
+  test("says so in its own words when there is nothing to read", async () => {
+    const mod = await import("@/lib/assistant/tools/calendar-availability");
+    const spy = jest
+      .spyOn(mod, "runCalendarAvailability")
+      .mockResolvedValue(null as never);
+    const res = await getCalendarAvailabilityTool.handler({} as never, {
+      userId: "u1",
+      userRole: "cto",
+      userEmail: "u1@wolfpack.dev",
+    } as never);
+    spy.mockRestore();
+    /* Not "that person". There is no person; there is the person asking. */
+    expect(res.ok && res.answer).toMatch(/couldn't read your calendar/i);
+    expect(res.ok && res.answer).not.toMatch(/that person/i);
+  });
+
+  /* THE OTHER DIRECTION MUST NOT MOVE. Asking about a named colleague is
+     still about them, and a self fallback that swallowed that would be a
+     worse bug than the one being fixed. */
+  test("still looks up a named person as that person", async () => {
+    expect((await callWith({ personName: "Hoxsie" }))?.selfUser).toBeUndefined();
+  });
+
+  test("an explicit isSelfQuery:false is still honoured", async () => {
+    expect(
+      (await callWith({ personName: "Hoxsie", isSelfQuery: false }))?.selfUser,
+    ).toBeUndefined();
+  });
+});
