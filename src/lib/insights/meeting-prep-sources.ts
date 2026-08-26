@@ -95,9 +95,33 @@ export interface MeetingSourcesVersionMarkers {
   lastBrainEditAt: string;
 }
 
+/** A document worth reading before the meeting. */
+export interface MeetingSourcesDocument {
+  documentId: string;
+  filename: string;
+  /** Written once at ingest, so this is a description rather than a fragment. */
+  summary: string;
+  topics: string[];
+  /** Opens the original, in SharePoint or wherever it came from. */
+  webUrl: string | null;
+}
+
 export interface MeetingSources {
   event: MeetingSourcesEvent;
   perAttendee: MeetingSourcesAttendee[];
+  /**
+   * What to read before this meeting.
+   *
+   * The brain search that already existed here looks up each ATTENDEE by name,
+   * which finds facts about people. Nobody was asking the library what the
+   * MEETING is about, so the documents that exist on the subject, the ones a
+   * person would want to have read, were never surfaced.
+   *
+   * This is the join a single system cannot do: the calendar knows there is a
+   * dealer review on Thursday, the library knows which documents cover it, and
+   * neither knows the other exists.
+   */
+  documents: MeetingSourcesDocument[];
   versionMarkers: MeetingSourcesVersionMarkers;
 }
 
@@ -319,6 +343,62 @@ async function fetchAttendeeEmails(
   }
 }
 
+/**
+ * Documents about what the meeting IS.
+ *
+ * Searched on the subject rather than on the attendees, because "what should I
+ * have read before the dealer review" is a question about the review.
+ *
+ * GOES THROUGH queryBrain, which means it goes through the audience gate. A
+ * meeting brief assembled from documents the reader may not open would be the
+ * most efficient way imaginable to leak an HR file, since it arrives looking
+ * like something the system decided they needed.
+ *
+ * Degrades to nothing. A brief without documents is still a brief; a brief
+ * that fails to render because the library was unreachable is not.
+ */
+async function fetchMeetingDocuments(
+  ctx: FetchMeetingSourcesContext,
+  subject: string,
+): Promise<MeetingSourcesDocument[]> {
+  const topic = (subject || "").trim();
+  if (!topic) return [];
+  try {
+    const { queryBrain } = await import("@/lib/brain/query");
+    const res = await queryBrain({
+      userId: ctx.userId,
+      userRole: ctx.userRole ?? "",
+      query: topic,
+      limit: 6,
+    });
+    const seen = new Set<string>();
+    const out: MeetingSourcesDocument[] = [];
+    for (const hit of res.hits) {
+      const id = String(hit.document_id);
+      if (seen.has(id)) continue;
+      seen.add(id);
+      out.push({
+        documentId: id,
+        filename: String(hit.document_filename ?? "Untitled"),
+        /* The summary written at ingest, not the chunk that matched. A chunk
+           starting mid-sentence tells a reader nothing about whether the
+           document is worth their time, which is the only question a
+           pre-read list answers. */
+        summary: String((hit as { document_summary?: string }).document_summary ?? "").trim(),
+        topics: Array.isArray((hit as { document_topics?: string[] }).document_topics)
+          ? ((hit as { document_topics?: string[] }).document_topics as string[])
+          : [],
+        webUrl: (hit as { web_url?: string }).web_url ?? null,
+      });
+      if (out.length >= 3) break;
+    }
+    return out;
+  } catch (err) {
+    emitDegraded(ctx, "brain_search", err);
+    return [];
+  }
+}
+
 async function fetchAttendeeBrainFacts(
   ctx: FetchMeetingSourcesContext,
   name: string,
@@ -471,8 +551,11 @@ export async function fetchMeetingSources(
   }
 
   const lastBrainEditAt = await fetchLastBrainEditAt();
+  /* What to read before it. Searched on the subject, gated by who is asking. */
+  const documents = await fetchMeetingDocuments(ctx, event.subject);
 
   return {
+    documents,
     event: {
       id: event.id,
       subject: event.subject,
@@ -514,3 +597,8 @@ function sortKeys(obj: Record<string, string>): Record<string, string> {
   }
   return out;
 }
+
+
+/** Test seam: the join is worth asserting on its own, and the function it
+ *  lives in fans out to Graph, the CRM and the mailbox. */
+export const fetchMeetingDocumentsForTests = fetchMeetingDocuments;

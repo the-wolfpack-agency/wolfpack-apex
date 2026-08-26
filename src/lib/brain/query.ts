@@ -15,6 +15,7 @@
 import { embedBatch, isEmbeddingConfigured } from "./embedder";
 import { keywordSearch, logQuery, markQueryCited } from "./repo";
 import { readableDocumentIds } from "./audience";
+import { describeDocuments } from "./repo";
 import { searchBrain } from "./qdrant";
 import { trackEvent } from "@/lib/analytics";
 import type { BrainKind, BrainQueryHit, BrainQueryResult } from "./types";
@@ -137,6 +138,16 @@ export async function queryBrain(opts: QueryOpts): Promise<QueryExecution> {
   // 3. merge by chunk_id
   const byId = new Map<string, BrainQueryHit>();
 
+  /* DOCUMENT-LEVEL CONTEXT FOR EVERY HIT, in one query rather than per chunk.
+     A chunk that starts mid-sentence cannot tell a reader whether the document
+     is worth opening, and that is the only question a list of things to read
+     before a meeting answers. */
+  const documentIds = Array.from(
+    new Set([...keyword.map((k) => String(k.document_id)), ...semantic.map((s) => String(s.document_id))]),
+  );
+  const documentMeta = await describeDocuments(documentIds);
+  const meta = (id: string) => documentMeta.get(String(id));
+
   for (const k of keyword) {
     byId.set(k.chunk_id, {
       chunk_id: k.chunk_id,
@@ -148,6 +159,9 @@ export async function queryBrain(opts: QueryOpts): Promise<QueryExecution> {
       score: Number(k.score) || 0.1,
       source: "keyword",
       snippet: k.headline || truncate(k.content, 180),
+      document_summary: meta(k.document_id)?.summary ?? null,
+      document_topics: meta(k.document_id)?.topics ?? null,
+      web_url: meta(k.document_id)?.webUrl ?? null,
     });
   }
 
@@ -169,6 +183,9 @@ export async function queryBrain(opts: QueryOpts): Promise<QueryExecution> {
         score: s.score,
         source: "semantic",
         snippet: truncate(s.content, 180),
+        document_summary: meta(s.document_id)?.summary ?? null,
+        document_topics: meta(s.document_id)?.topics ?? null,
+        web_url: meta(s.document_id)?.webUrl ?? null,
       });
     }
   }

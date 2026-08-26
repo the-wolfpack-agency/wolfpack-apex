@@ -257,6 +257,15 @@ export const meetingPrepTool: ToolDef<Params, MeetingPrepToolData> = {
         links: toRefArray(ab.links),
       })),
       open_questions: prep.open_questions,
+      /* Straight from the sources rather than through the model: which
+         documents exist on a subject is a fact, and asking a model to restate
+         a list of filenames is paying for the chance to get one wrong. */
+      pre_reads: (result.sources.documents ?? []).map((d) => ({
+        documentId: d.documentId,
+        filename: d.filename,
+        summary: d.summary,
+        ...(d.webUrl ? { url: d.webUrl } : {}),
+      })),
       viewerCanRegenerate,
     };
 
@@ -266,7 +275,15 @@ export const meetingPrepTool: ToolDef<Params, MeetingPrepToolData> = {
         : result.cacheStatus === "regenerated"
           ? "freshly regenerated"
           : "freshly generated";
-    const answer = `Here's your pre-brief for "${event.subject}" — ${cachePill}.`;
+    /* NAMED IN THE SENTENCE, not only in the widget. Somebody skimming a chat
+       reads the line; a count of documents they have not read is the part
+       worth interrupting them for. */
+    const preReadCount = (result.sources.documents ?? []).length;
+    const preReadLine =
+      preReadCount > 0
+        ? ` ${preReadCount} document${preReadCount === 1 ? "" : "s"} worth reading first.`
+        : "";
+    const answer = `Here's your pre-brief for "${event.subject}" — ${cachePill}.${preReadLine}`;
 
     return {
       ok: true,

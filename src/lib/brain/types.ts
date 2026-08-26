@@ -87,6 +87,17 @@ export interface BrainQueryHit {
   score: number;
   source: "keyword" | "semantic" | "keyword+semantic";
   snippet: string; // highlighted substring for UI
+  /**
+   * What the DOCUMENT is, as opposed to what the chunk says.
+   *
+   * A chunk beginning mid-sentence tells a reader nothing about whether the
+   * document is worth their time, which is the only question a pre-read list
+   * answers. Written once at ingest, so this costs a join rather than a call.
+   */
+  document_summary?: string | null;
+  document_topics?: string[] | null;
+  /** Opens the original, wherever it came from. */
+  web_url?: string | null;
 }
 
 export interface BrainQueryResult {

@@ -414,6 +414,15 @@ export interface MeetingPrepWidgetSourceRef {
   url?: string;
 }
 
+/** A document worth reading before the meeting. */
+export interface MeetingPrepWidgetPreRead {
+  documentId: string;
+  filename: string;
+  /** Written at ingest, so it says what the document IS. */
+  summary: string;
+  url?: string;
+}
+
 export interface MeetingPrepWidgetTalkingPoint {
   point: string;
   source_refs: MeetingPrepWidgetSourceRef[];
@@ -435,6 +444,17 @@ export interface MeetingPrepWidgetAttendeeBrief {
 
 export interface MeetingPrepWidgetSpec {
   kind: "meeting_prep";
+  /**
+   * What to read before this, from the document library.
+   *
+   * The join a single system cannot do: the calendar knows there is a dealer
+   * review on Thursday, the library knows which documents cover it, and
+   * neither knows the other exists. Audience-gated like every other retrieval,
+   * because a brief assembled from documents the reader may not open would be
+   * an efficient way to leak one - it arrives looking like something the
+   * system decided they needed.
+   */
+  pre_reads?: MeetingPrepWidgetPreRead[];
   /** Meeting Graph id — used by the regenerate handler to call the API
    *  route with the same event. */
   meetingId: string;
