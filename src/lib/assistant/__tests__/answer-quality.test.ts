@@ -712,3 +712,86 @@ describe("questions about us cannot be answered from nothing", () => {
     expect(gateUngroundedClaimAboutUs("what is the Zentrala protocol", 0)).toBeNull();
   });
 });
+
+/* ---------------------------------------------------------------------
+ * A long list is evidence the CHECK failed, not the answer.
+ *
+ * Measured on a real answer about registering a demo vehicle:
+ *   "16 unfamiliar name(s): Navigate, Inventory Management, Inventory"
+ *
+ * A verb and two UI labels. A model does not invent sixteen people in one
+ * paragraph; a capitalisation heuristic run over a formatted answer finds
+ * sixteen capitalised things, which is a different fact.
+ *
+ * Warning anyway is worse than silence: a list of sixteen teaches people to
+ * dismiss the hedge, which then gets dismissed on the answer that really did
+ * invent a colleague. An unreliable warning spends the credibility of the
+ * reliable one.
+ * --------------------------------------------------------------- */
+describe("when the entity check finds implausibly many names", () => {
+  const ROSTER = ["jorge colon"];
+
+  it("stays quiet rather than crying wolf", () => {
+    const formatted = [
+      "1. **Navigate to Inventory Management**",
+      "2. **Add Vehicle**: Click Add Vehicle",
+      "3. **Enter Vehicle Details**: VIN, Make, Model, Year",
+      "4. **Assign to Dealer**: Optionally assign",
+      "5. **Save Vehicle**: Click Save or Submit",
+      "6. **Verify**: Check Demo Vehicles in Inventory",
+    ].join("\n");
+    expect(validateEntities(formatted, ROSTER)).toBeNull();
+  });
+
+  /* THE ONE IT EXISTS FOR still fires. A fabrication names one or two people,
+     which is why the threshold is generous rather than tight. */
+  it("still flags a single invented colleague", () => {
+    const flag = validateEntities("Mortimer joined the deal last week.", ROSTER);
+    expect(flag).not.toBeNull();
+    expect(flag?.reason ?? "").toMatch(/Mortimer/);
+  });
+
+  it("still flags a small handful", () => {
+    expect(
+      validateEntities("Mortimer and Fenwick reviewed it together.", ROSTER),
+    ).not.toBeNull();
+  });
+});
+
+/* ---------------------------------------------------------------------
+ * The tell is not always in the question.
+ *
+ * "How do I register a demo vehicle" names nobody, so the gate stayed quiet -
+ * and the reply was a six-step walkthrough of screens in wolfpack-auto that do
+ * not exist: Navigate to Inventory Management, click Add Vehicle, set Vehicle
+ * Status to Demo. Fluent, numbered and invented, and a dealer following those
+ * steps is the concrete harm.
+ * --------------------------------------------------------------- */
+describe("an answer that describes us with nothing behind it", () => {
+  const WALKTHROUGH =
+    "To register a demo vehicle in the wolfpack-auto platform: navigate to Inventory Management and click Add Vehicle.";
+
+  it("is blocked even when the question named nobody", () => {
+    expect(
+      gateUngroundedClaimAboutUs("how do I register a demo vehicle", 0, WALKTHROUGH),
+    ).not.toBeNull();
+  });
+
+  it("is allowed when something was actually retrieved", () => {
+    expect(
+      gateUngroundedClaimAboutUs("how do I register a demo vehicle", 3, WALKTHROUGH),
+    ).toBeNull();
+  });
+
+  /* The world is still answerable, which is the regression this whole gate is
+     careful not to repeat. */
+  it("leaves an answer about the world alone", () => {
+    expect(
+      gateUngroundedClaimAboutUs(
+        "what is a VIN",
+        0,
+        "A VIN is a seventeen character identifier assigned to a vehicle by its manufacturer.",
+      ),
+    ).toBeNull();
+  });
+});

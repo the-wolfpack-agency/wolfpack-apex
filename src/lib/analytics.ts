@@ -482,6 +482,10 @@ export type InstinctEventType =
      Recorded per model, because whether a model does this is the question
      that decides if it can be trusted with traffic. */
   | "ai.response_flagged"
+  /* A draft answer read by a second model before it was sent. Records whether
+     it was reviewed at all and whether the reviewer changed anything, because
+     "checked and fine" and "not checked" must never look alike. */
+  | "ai.answer_improved"
   /* An answer the content policy would not let through as written. Redaction
      (above) finds shapes; this finds MEANING -- a quoted finance rate, a price
      guarantee, a warranty decision, an invented discount -- and withholds or

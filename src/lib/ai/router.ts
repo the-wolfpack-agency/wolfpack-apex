@@ -31,6 +31,7 @@ import { selectModel, logModelSelection } from "@/lib/ai/models";
 import { applyConstitutionToRequest } from "@/lib/constitution";
 import { redactMessages, redactText, NEVER_SEND_KINDS } from "./redaction";
 import { inspectResponse } from "./response-safety";
+import { reviewAndImprove } from "./improve";
 import {
   applyPolicy,
   policyFor,
@@ -1042,6 +1043,68 @@ class RouterClient implements AIClient {
             (shouldEscalate(verdict) || judged?.sound === false),
         },
       );
+      /* A SECOND MODEL FIXES IT, RATHER THAN A BIGGER ONE REDOING IT.
+       *
+       * Runs only when the free rules were unsatisfied, so the cost lands on
+       * the answers that need it. The reviewer is the independent candidate
+       * already chosen above where one exists: a model reviewing its own
+       * output agrees with itself and produces an audit row that means
+       * nothing.
+       *
+       * A cheap answer plus a cheap review costs a fraction of a premium call
+       * and is checkable in a way a single premium call is not, because two
+       * families had to agree and any disagreement is recorded. That is the
+       * argument for addressing several models at once rather than picking the
+       * best one. */
+      if (req.improve && !verdict.sufficient && question) {
+        const reviewer = judgeChoice?.candidate ?? null;
+        const improved = await reviewAndImprove(
+          question,
+          response.content,
+          async ({ system, prompt, maxTokens }) => {
+            const r = await this.complete({
+              messages: [{ role: "user", content: prompt }],
+              system,
+              max_tokens: maxTokens,
+              model_tier: reviewer ? cReq.model_tier : (escalateTo ?? cReq.model_tier),
+              /* verify:false and improve:false on the reviewer's own call:
+                 a review of a review is a third call this design rules out. */
+              verify: false,
+              improve: false,
+              ...(reviewer ? { provider_pin: reviewer.provider } : {}),
+              metadata: { ...cReq.metadata, feature: `${cReq.metadata?.feature ?? "unknown"}.review` },
+            } as AICompleteRequest);
+            return r.content;
+          },
+        );
+        trackEvent(
+          "ai.answer_improved",
+          cReq.metadata?.user_id ?? "system",
+          cReq.metadata?.user_role ?? "system",
+          {
+            feature: cReq.metadata?.feature ?? "unknown",
+            model: response.model_used,
+            reviewer: reviewer?.provider ?? "same-tier",
+            /* Whether it was checked at all, kept separate from whether it
+               changed. "checked and fine" and "not checked" must not look
+               alike. */
+            reviewed: improved.reviewed,
+            changed: improved.changed,
+            reason: improved.reason,
+          },
+        );
+        if (improved.changed) {
+          response = { ...response, content: improved.answer };
+          /* Re-verified, because a correction is an answer too and shipping it
+             unchecked would move the gap rather than close it. */
+          const after = verifyAnswer({ answer: response.content, question });
+          if (after.sufficient) {
+            emitCompletionEvent(cReq, response, fallbackUsed, bridged?.spec.id);
+            return response;
+          }
+        }
+      }
+
       if (escalateTo && (shouldEscalate(verdict) || judged?.sound === false)) {
         try {
           const retried = await this.complete({

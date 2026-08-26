@@ -102,6 +102,20 @@ export interface AICompleteRequest {
    */
   verify?: boolean | "deep";
   /**
+   * Let a second model correct the answer before it is sent.
+   *
+   * Different from escalation. Escalating asks a LARGER model the original
+   * question again, pays full price for a second attempt and discards the
+   * first including the parts that were right. Most of what a small model gets
+   * wrong is an edit - a missing caveat, an unanswered half of a question, a
+   * claim it should not have made - so a reviewer is given the draft and
+   * returns either SHIP or a correction.
+   *
+   * Only asked when the free rules are unsatisfied, so the cost lands on the
+   * answers that need it rather than on re-approving ones that were fine.
+   */
+  improve?: boolean;
+  /**
    * Send this call to a named provider, whatever selection would prefer.
    *
    * Exists for the independent judge: the whole point of choosing a different
