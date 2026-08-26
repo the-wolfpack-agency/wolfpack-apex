@@ -331,6 +331,7 @@ export async function syncSource(
                * as clickable "Sources" links. */
               webUrl: f.webUrl,
               msDriveItemId: f.id,
+              audienceRoles: source.audienceRoles,
             });
             successCount++;
             bytesIngested += buf.length;
@@ -365,6 +366,11 @@ export async function syncSource(
           buffer: buf,
           /* The resume key. Without it the next run starts from zero. */
           msDriveItemId: f.id,
+          /* THE LIBRARY'S OWN AUDIENCE, CARRIED IN. A SharePoint library is
+             somebody else's permission model. Ingesting from it without the
+             audience would publish a manager-only process document to every
+             dealer with a login, and nothing downstream could tell. */
+          audienceRoles: source.audienceRoles,
           uploadedBy: triggeredBy,
           uploaderRole: triggeredByRole,
           tags: [

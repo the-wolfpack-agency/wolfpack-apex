@@ -5,6 +5,13 @@
 export interface SharepointSource {
   id: string;
   workspaceId: string;
+  /**
+   * Roles that may be quoted documents from this library.
+   *
+   * Admin-only by default at the database level, because widening is a
+   * decision somebody makes and narrowing must never be something they forget.
+   */
+  audienceRoles: string[];
   name: string;
   siteUrl: string;
   siteId: string;

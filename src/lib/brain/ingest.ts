@@ -88,6 +88,7 @@ export async function ingest(req: IngestRequest): Promise<IngestResult> {
     webUrl: req.webUrl,
     /* So a connector sync can tell what it has already taken. */
     msDriveItemId: req.msDriveItemId,
+    audienceRoles: req.audienceRoles,
   });
 
   // 4. extraction
