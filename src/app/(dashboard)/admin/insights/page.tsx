@@ -24,6 +24,18 @@ interface UserInfo {
   role: string;
 }
 
+/** A control somebody could see, could click, and was never allowed to use. */
+interface RoleMismatch {
+  control: string;
+  method: string;
+  surface: string;
+  role: string;
+  attempts: number;
+  people: number;
+  worstRepeat: number;
+  lastSeen: string;
+}
+
 function isAdmin(user: UserInfo | null): boolean {
   return !!user && (user.role === "ceo" || user.role === "cto" || user.role === "evp");
 }
@@ -85,14 +97,20 @@ export default function InsightsAdminPage() {
     }
   }, [router]);
 
+  const [mismatches, setMismatches] = useState<RoleMismatch[] | null>(null);
+  /* Unreadable is not the same fact as none, and rendering an empty table for
+     both would claim no control in the product lies to anybody. */
+  const [mismatchesReadable, setMismatchesReadable] = useState(true);
+
   const loadAll = useCallback(async () => {
     setLoading(true);
     const failures: string[] = [];
     try {
-      const [intentRes, templateRes, healthRes] = await Promise.all([
+      const [intentRes, templateRes, healthRes, mismatchRes] = await Promise.all([
         fetchWithRefresh("/api/admin/insights/unmet-intents", { headers: authHeaders() }),
         fetchWithRefresh("/api/admin/templates", { headers: authHeaders() }),
         fetchWithRefresh("/api/health/integrations", { headers: authHeaders() }),
+        fetchWithRefresh("/api/admin/insights/role-mismatches", { headers: authHeaders() }),
       ]);
       if (intentRes.ok) {
         const body = await intentRes.json();
@@ -106,6 +124,11 @@ export default function InsightsAdminPage() {
         const body = await healthRes.json();
         setHealth(body.vendors ?? []);
       } else failures.push(`health: HTTP ${healthRes.status}`);
+      if (mismatchRes.ok) {
+        const body = await mismatchRes.json();
+        setMismatches(body.mismatches ?? []);
+        setMismatchesReadable(body.readable !== false);
+      } else failures.push(`role-mismatches: HTTP ${mismatchRes.status}`);
     } catch (err) {
       failures.push((err as Error).message);
     }
@@ -152,6 +175,75 @@ export default function InsightsAdminPage() {
           Some feeds failed to load: {errors.join("; ")}
         </div>
       )}
+
+      {/* FIRST ON THE PAGE, deliberately. The other panels describe what to
+          build next; this one names something already broken for somebody who
+          did not tell us. A person shown a control their role cannot use
+          clicks it, nothing happens, and they conclude the product is broken.
+          The API refusing is correct, so there is nothing to harden: the work
+          is on the front end, and the surface column says which page. */}
+      <section data-testid="insights-role-mismatches" className="mb-8">
+        <h2 className="text-lg font-semibold mb-2" style={{ color: "var(--wp-text)" }}>
+          Controls shown to roles that cannot use them (last 30 days)
+        </h2>
+        <p className="text-xs mb-3" style={{ color: "var(--wp-text-dim)" }}>
+          Someone clicked, the API correctly refused, and nothing happened on screen. Ranked by the
+          most attempts by a single person, because one refusal can be a stale tab and three in a
+          row is the product lying to them. Fix on the page named, not in the API.
+        </p>
+        {mismatches === null ? (
+          <p className="text-sm" style={{ color: "var(--wp-text-dim)" }}>Loading…</p>
+        ) : !mismatchesReadable ? (
+          <p className="text-sm" data-testid="mismatches-unreadable" style={{ color: "var(--wp-text-dim)" }}>
+            This could not be read just now. That is not the same as no mismatches: it is an
+            unmeasured window, and the difference matters.
+          </p>
+        ) : mismatches.length === 0 ? (
+          <p className="text-sm" style={{ color: "var(--wp-text-dim)" }}>
+            No refused controls in the window. Either every control on screen is one its viewer can
+            use, or write traffic is low — check back after more usage.
+          </p>
+        ) : (
+          <table className="w-full text-sm">
+            <thead>
+              <tr style={{ color: "var(--wp-text-dim)", textAlign: "left" }}>
+                <th className="py-1">Control</th>
+                <th className="py-1 w-40">Shown on</th>
+                <th className="py-1 w-24">Role</th>
+                <th className="py-1 w-24">Worst repeat</th>
+                <th className="py-1 w-20">People</th>
+                <th className="py-1 w-20">Attempts</th>
+              </tr>
+            </thead>
+            <tbody>
+              {mismatches.map((m) => (
+                <tr
+                  key={`${m.control}-${m.method}-${m.surface}-${m.role}`}
+                  className="border-t"
+                  style={{ borderColor: "var(--wp-dark-border)" }}
+                >
+                  <td className="py-2" style={{ color: "var(--wp-text)" }}>
+                    <span style={{ color: "var(--wp-text-muted)" }}>{m.method} </span>
+                    {m.control}
+                  </td>
+                  <td className="py-2" style={{ color: "var(--wp-text)" }}>{m.surface}</td>
+                  <td className="py-2" style={{ color: "var(--wp-text-dim)" }}>{m.role}</td>
+                  {/* The ranking key, so it reads as the reason the row is here. */}
+                  <td
+                    className="py-2 font-semibold"
+                    style={{ color: m.worstRepeat > 1 ? "var(--wp-gold)" : "var(--wp-text-dim)" }}
+                  >
+                    {m.worstRepeat}
+                    {m.worstRepeat > 1 ? "\u00d7 by one person" : ""}
+                  </td>
+                  <td className="py-2" style={{ color: "var(--wp-text-dim)" }}>{m.people}</td>
+                  <td className="py-2" style={{ color: "var(--wp-text-dim)" }}>{m.attempts}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
 
       <section data-testid="insights-unmet-intents" className="mb-8">
         <h2 className="text-lg font-semibold mb-2" style={{ color: "var(--wp-text)" }}>
