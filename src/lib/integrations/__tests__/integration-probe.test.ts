@@ -17,7 +17,7 @@
  * never call a cache hit proof of a live integration, and treat an empty
  * result as different from a failure.
  */
-import { classify, type ProbeResult } from "../../../../scripts/integration-probe";
+import { classify, type ProbeResult } from "../probe";
 
 describe("reading an integration's answer", () => {
   it("treats an empty list as working with nothing to say, not as broken", () => {
