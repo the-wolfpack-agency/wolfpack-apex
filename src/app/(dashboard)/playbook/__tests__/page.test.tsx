@@ -231,6 +231,36 @@ describe("the playbook renders as a document a person can read", () => {
     expect(html).toMatch(/<pre><code>their people/);
   });
 
+  /* Counting <pre> blocks was not enough. The first diagram fenced correctly
+     and then CLOSED EARLY, because its four column labels are indented two
+     spaces rather than four. The top half rendered as a diagram, the labels
+     escaped into a paragraph, and the page showed "tools retrieval the router
+     connectors (their (their (only where" as prose directly beneath it. Both
+     halves were present, both looked plausible in a count, and the thing was
+     visibly broken on screen.
+     So: each diagram must contain its own LAST line, not merely exist. */
+  it("keeps each diagram whole, not merely started", () => {
+    const blocks = [...html.matchAll(/<pre><code>([\s\S]*?)<\/code><\/pre>/g)].map(
+      (m) => m[1],
+    );
+    const shape = blocks.find((b) => b.includes("their people"));
+    expect(shape).toBeDefined();
+    expect(shape).toContain("connectors");
+    expect(shape).toContain("directly)");
+
+    const ontology = blocks.find((b) => b.includes("--works at--"));
+    expect(ontology).toBeDefined();
+    expect(ontology).toContain("Capability");
+  });
+
+  /* The symptom, asserted directly. A diagram fragment loose in a paragraph
+     is unreadable in a way no count catches. */
+  it("never leaks diagram text into a paragraph", () => {
+    const paragraphs = [...html.matchAll(/<p>([\s\S]*?)<\/p>/g)].map((m) => m[1]);
+    const leaked = paragraphs.filter((t) => /\(their\s+\(their|\|\s{3,}\|/.test(t));
+    expect(leaked).toEqual([]);
+  });
+
   it("renders the tables as tables", () => {
     expect((html.match(/<table>/g) ?? []).length).toBeGreaterThanOrEqual(5);
   });

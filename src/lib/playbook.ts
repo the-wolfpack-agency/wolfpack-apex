@@ -147,12 +147,12 @@ the gate       (who is this, what may they reach, what may they be told)
     |
 +---------------+---------------+----------------+
 |               |               |                |
+tools           retrieval       the router        connectors
+(their          (their          (only where       (their systems,
+ systems,        documents,      judgement         read first,
+ answered        scoped by       is needed)        written later)
+ directly)       audience)
 \`\`\`
-  tools         retrieval       the router        connectors
-  (their        (their          (only where       (their systems,
-   systems,      documents,      judgement         read first,
-   answered      scoped by       is needed)        written later)
-   directly)     audience)
 
 The important line is the one between tools and the router. Most questions are
 answered by reading their own systems and never reach a model at all. In our
