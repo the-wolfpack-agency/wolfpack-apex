@@ -168,12 +168,51 @@ function scoreAllDomains(lower: string): PageFactsMatch[] {
 const ASKS_ABOUT_A_RULE =
   /\b(polic(?:y|ies)|entitlement|allowance|guidelines?|handbook|rules?\s+(?:on|about|for)|am\s+i\s+(?:entitled|allowed)|how\s+(?:many|much)\s+(?:days?|hours?|weeks?)\s+(?:of|do|can)|eligib(?:le|ility))\b/;
 
+/**
+ * A question about STATE is not a question about a page.
+ *
+ * Found by sweeping the prompts a person actually types, 2026-08-26:
+ *
+ *   "what's blocking the pilot" -> a tour of the Phase One dashboard, because
+ *   the page's domain is "pilot". The person asked what is going wrong; they
+ *   were told what a screen contains.
+ *
+ * Same defect as ASKS_ABOUT_A_RULE above, in a different dress. The page name
+ * genuinely is in the sentence, so the match arrives at full confidence, and a
+ * confident tour of the wrong screen is the one answer guaranteed to be
+ * useless. Worse here than for rules, because "pilot" is the word this
+ * business uses for its most important engagement.
+ *
+ * Narrow on purpose: it asks whether the sentence is ABOUT an obstacle or a
+ * status, not whether one is mentioned. "Open the pilot dashboard" is
+ * untouched.
+ */
+const ASKS_ABOUT_STATE =
+  /\b(?:blocking|blocked|blockers?|at\s+risk|stuck\s+on|holding\s+(?:it|us)\s+up|going\s+wrong|behind\s+schedule|slipping)\b/;
+
+/**
+ * A question about PEOPLE is not a question about a page.
+ *
+ * "who reports to me" answered with the Reports page: how to generate a weekly
+ * report, how to export it as PDF. The person asked who is in their team.
+ *
+ * The tell is "who" leading a question about a relationship. Reports, People,
+ * Clients and Directory all carry names that are also ordinary verbs and
+ * nouns, so this collision is not rare.
+ */
+const ASKS_ABOUT_PEOPLE =
+  /^\s*who\b(?!\s+(?:is\s+)?(?:the\s+)?(?:page|screen|tab)\b)/;
+
 export function matchPageFacts(
   question: string,
 ): { page: PageFact; confidence: number } | null {
   if (!question || !question.trim()) return null;
   const lower = question.toLowerCase();
   if (ASKS_ABOUT_A_RULE.test(lower)) return null;
+  /* Both decline and let retrieval have the question. An honest "I could not
+     find that" beats a confident tour of the wrong screen. */
+  if (ASKS_ABOUT_STATE.test(lower)) return null;
+  if (ASKS_ABOUT_PEOPLE.test(lower)) return null;
 
   const candidates = scoreAllDomains(lower);
   if (candidates.length === 0) return null;

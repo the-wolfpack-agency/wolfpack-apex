@@ -472,3 +472,31 @@ describe("the response inspector", () => {
     expect(mockTrackEvent.mock.calls.some((c) => c[0] === "ai.response_flagged")).toBe(false);
   });
 });
+
+/**
+ * The reviewer never escalates.
+ *
+ * Found in a prompt sweep, 2026-08-26: every review that had no independent
+ * judge available fell back to the escalation tier, which is premium. No
+ * premium deployment is configured, so the call 404'd every time. The answer
+ * still shipped, because reviewAndImprove degrades, but the round trip was
+ * spent and the review never happened on exactly the answers a router had
+ * already decided were worth escalating.
+ *
+ * The review's value is independence, not size, and the escalation tier was
+ * chosen for the answer path rather than this one.
+ */
+describe("the reviewer's tier", () => {
+  it("stays on the tier that answered rather than escalating", async () => {
+    mockMessagesCreate
+      .mockResolvedValueOnce(reply("The invoice total is $4,200."))
+      .mockResolvedValueOnce(reply("SHIP"));
+    await getAIClient().complete(request({ verify: true, improve: "always", model_tier: "cheap" }));
+    expect(mockMessagesCreate).toHaveBeenCalledTimes(2);
+    /* Both calls on the same tier: the second must not have gone looking for a
+       deployment that does not exist. */
+    const ev = mockTrackEvent.mock.calls.find((c) => c[0] === "ai.answer_improved");
+    expect(ev).toBeDefined();
+    expect(ev![3]).toMatchObject({ reviewed: true });
+  });
+});

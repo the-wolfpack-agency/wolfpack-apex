@@ -1072,7 +1072,14 @@ class RouterClient implements AIClient {
               messages: [{ role: "user", content: prompt }],
               system,
               max_tokens: maxTokens,
-              model_tier: reviewer ? cReq.model_tier : (escalateTo ?? cReq.model_tier),
+              /* NEVER ESCALATE THE REVIEWER. This used to fall back to
+                 escalateTo when no independent judge was available, which sent
+                 the review to the premium tier. There is no premium deployment
+                 configured, so every one of those 404'd: a guaranteed wasted
+                 round trip on the answers most likely to need a second read.
+                 The review's value is independence, not size, and escalateTo
+                 was chosen for the ANSWER path rather than this one. */
+              model_tier: cReq.model_tier,
               /* verify:false and improve:false on the reviewer's own call:
                  a review of a review is a third call this design rules out. */
               verify: false,

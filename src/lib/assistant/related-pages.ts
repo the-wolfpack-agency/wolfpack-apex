@@ -37,6 +37,22 @@ interface DomainEntry {
 
 const DOMAIN_MAP: DomainEntry[] = [
   {
+    /* Added with the page in #428. Without an entry here the only keyword is
+       the title's first word, so "phase one" and "pilot dashboard" found
+       nothing: a page nobody can name is a page nobody opens. */
+    domain: "pilot",
+    label: "Phase one",
+    href: "/pilot",
+    keywords: ["phase one", "pilot dashboard", "deterministic share", "passages answerable"],
+  },
+  {
+    /* Added with the page in #416, same omission. */
+    domain: "playbook",
+    label: "Client deployment playbook",
+    href: "/playbook",
+    keywords: ["deployment playbook", "client playbook", "client deployment", "phases"],
+  },
+  {
     domain: "calendar",
     label: "Calendar",
     href: "/calendar",
