@@ -1,3 +1,4 @@
+import { personaAllows } from "./persona";
 /**
  * Shared tool role gate.
  *
@@ -32,6 +33,27 @@ export const TOOL_ROLE_LEVEL: Record<string, number> = {
  * True when a principal with `role` may invoke a tool whose required level is
  * `toolCapability`. "*" is open to any authenticated principal.
  */
+/**
+ * May this role invoke this named tool?
+ *
+ * Two questions, asked in order. The persona asks whether the tool is any of
+ * this person's business, which is what a client-facing surface needs and what
+ * the rank comparison cannot answer while forty-six tools declare "*". The
+ * rank then asks whether it is too sensitive for them, which is the question it
+ * was built for.
+ *
+ * A role with no persona reaches the rank check unchanged, so internal users
+ * see exactly what they saw before.
+ */
+export function canInvokeNamedTool(
+  role: string,
+  toolName: string,
+  toolCapability: string,
+): boolean {
+  if (!personaAllows(role, toolName)) return false;
+  return canInvokeTool(role, toolCapability);
+}
+
 export function canInvokeTool(role: string, toolCapability: string): boolean {
   if (toolCapability === "*") return true;
   const need = TOOL_ROLE_LEVEL[toolCapability.toLowerCase()] ?? 0;

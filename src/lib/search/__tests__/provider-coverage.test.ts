@@ -54,6 +54,8 @@ const NON_TOOL_FILES = new Set([
  * doesn't fan into Universal Search.
  */
 export const SEARCH_PROVIDER_EXEMPT_TOOLS: Record<string, string> = {
+  "persona.ts":
+    "not a tool: the curated tool surface for a client-facing role, so a dealer sees their six capabilities rather than all sixty",
   "github-repos.ts":
     "not a tool: shared helper that lists the repos this workspace manages and phrases the 'which repository?' question for the three GitHub tools",
   "dark-data-tool.ts":
