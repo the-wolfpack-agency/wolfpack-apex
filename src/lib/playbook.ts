@@ -124,17 +124,22 @@ the same store. That is the whole argument for this shape.
 ### The order is not negotiable, and it is the real insight
 
 **Dealer first. Corporate second.** Not because the corporate view is worth
-less, but because building it first makes it impossible.
+less, but because building it first makes it weaker.
 
-A roll-up that reports on dealers before it gives them anything is surveillance,
-and it is read that way inside a week. Dealers who feel measured supply the
-minimum, and a corporate dashboard fed by reluctant data is worse than no
-dashboard: it is confidently wrong at the exact altitude where decisions get
-made. A dealer tool that helps close a sale is used because it pays for itself,
-and once it is used the roll-up is a by-product rather than an imposition.
+The tool depends on the people using it. Every figure in a corporate roll-up
+arrives because somebody at a dealership found the thing useful enough to work
+in, so the completeness of the corporate picture is decided by how well the
+dealer side does its job. Build the roll-up first and it reports on a tool
+nobody has reason to use yet, which produces a thin picture at exactly the
+altitude where decisions get made.
 
-So the corporate value is real and it is delivered second. Anyone proposing to
-invert that is proposing a slower path to the same place, with worse data.
+Serve the dealer first and both sides win from the same work. The dealer gets a
+brief that helps them close, corporate gets a complete picture because the data
+is a by-product of people doing their jobs well, and the analytics underneath
+show whether the tool is actually earning its place for either of them.
+
+So the corporate value is real and it is delivered second. Inverting the order
+is a slower path to the same place, with a thinner picture at the end of it.
 
 ### What this deliberately does not depend on
 

@@ -322,7 +322,7 @@ describe("phase 1 on both sides", () => {
      workstreams, the argument is gone even though every word still reads fine. */
   it("states dealer first and says why inverting it fails", () => {
     expect(CLIENT_DEPLOYMENT_PLAYBOOK).toMatch(/Dealer first\. Corporate second\./);
-    expect(CLIENT_DEPLOYMENT_PLAYBOOK).toMatch(/surveillance/i);
+    expect(CLIENT_DEPLOYMENT_PLAYBOOK).toMatch(/tool depends on the people using it/i);
     expect(CLIENT_DEPLOYMENT_PLAYBOOK).toMatch(/order is not negotiable/i);
   });
 
