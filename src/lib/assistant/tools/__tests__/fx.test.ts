@@ -206,3 +206,32 @@ describe("the provider that actually answers", () => {
     spy.mockRestore();
   });
 });
+
+/**
+ * "euro to dollar" reached no tool.
+ *
+ * Found by a routing audit, 2026-08-26. The pattern required the words
+ * "exchange rate" or "fx", and nobody says those: they name the two
+ * currencies and expect to be understood.
+ */
+describe("naming the two currencies", () => {
+  it.each([
+    "euro to dollar",
+    "what is the euro to dollar rate",
+    "pounds to euros",
+    "yen vs dollar",
+  ])("claims %s", (prompt) => {
+    expect(fxTool.matchIntent!(prompt)).not.toBeNull();
+  });
+
+  /* NAMED CURRENCIES ONLY. "X to Y" is an extremely common sentence shape,
+     and a currency tool claiming it generally would take conversions,
+     translations and handovers that were never for it. */
+  it.each([
+    "pounds to kilos",
+    "brief to client",
+    "move the meeting to tuesday",
+  ])("leaves %s alone", (prompt) => {
+    expect(fxTool.matchIntent!(prompt)).toBeNull();
+  });
+});
