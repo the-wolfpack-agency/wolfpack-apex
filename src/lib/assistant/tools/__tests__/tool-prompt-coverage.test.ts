@@ -83,11 +83,6 @@ const TOOL_PROMPTS: Record<string, string[]> = {
  */
 const UNREACHABLE: Array<{ prompt: string; shouldReach: string; note: string }> = [
   {
-    prompt: "plan my day",
-    shouldReach: "plan_my_day",
-    note: "the exact name of the feature reaches no tool at all",
-  },
-  {
     prompt: "delegate this to an agent",
     shouldReach: "delegate_to_agent",
     note: "the agent capability a client asks about by name",
