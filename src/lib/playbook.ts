@@ -316,6 +316,156 @@ that is choosing the automation before finding the work.
 | 4 | One of theirs, chosen by use | Depends: Vehicle, Account, Ticket | None |
 | 5 | Same | Task, Confirmation | Behind a person, always |
 
+## The questions they will ask, and the answer we already have
+
+Every one of these has been asked by somebody evaluating automation, and every
+answer below is a thing that exists in the product today rather than something
+we would build if asked. Where the honest answer is a boundary, it is stated as
+a boundary.
+
+### Their data
+
+**Where does our data live, and is it mixed in with your other clients?**
+One client, one database. Not rows in a shared table with a tenant column. The
+separation is physical, so a query written wrongly cannot reach across it.
+
+**Could another client's data ever reach us?**
+Tenancy is enforced at the query, and a scan runs across the whole repository
+that fails the build if any workspace-scoped query is missing its filter. The
+count of unclassified queries has to be zero for a change to ship. That check
+found a query in this very section's own feature while it was being written,
+which is the point of having it.
+
+**What actually leaves our tenant when a model is called?**
+Only the passages needed to answer, redacted for credentials and identifiers on
+the way out and again on the way back, at one chokepoint every call passes
+through. Most questions never reach a model at all: in our own production it is
+roughly nineteen turns in twenty.
+
+**Do you train anything on our data?**
+No. Their content is retrieved to answer their questions and is not used to
+train a model.
+
+**Who at your company can see our data?**
+The same three gates that apply to their people apply to ours: role, audience
+and tenancy. There is no support path that reads a client's documents outside
+them, and every document sent to a model is written to the audit log.
+
+**A document was ingested that should not have been. Now what?**
+Audience is inherited from the library the document came from, so the first
+answer is that it was already scoped by their own permission model rather than
+by a second one we invented. Removing it removes its passages and its
+embeddings, and the audit log shows every answer it was ever used in. The log
+holds the reference, never the content, so deleting the document does not leave
+a copy of it inside the evidence.
+
+### The agents
+
+**What can an agent actually do?**
+Read the list. Everything an agent can do is a declared operation naming an
+existing internal route, the capability it needs and the fields to take from an
+instruction. It is reviewable as an inventory, not inferred from a prompt.
+
+**What stops it doing something we did not intend?**
+It cannot invent a capability. If an operation is not declared there is no path
+to it, however the instruction is phrased. A model proposes; the gate decides,
+executes and records. The model never touches a system directly.
+
+**What stops it running away?**
+Every act an agent takes on a person's behalf passes an hourly ceiling first,
+set per agent rather than per workspace so one misbehaving agent cannot spend
+everybody else's allowance before anything trips. Refused attempts are counted
+as well as executed ones, because a refusal that is not counted is a ceiling
+you walk through by retrying. If the limiter cannot be read, the agent does not
+act: an agent that keeps working when its limiter is broken is an agent with no
+limiter. Hitting the ceiling notifies the agent's owner, so the person
+accountable hears it from us rather than from a bill.
+
+**Who is accountable when an agent acts?**
+A named person. An agent acts on behalf of its owner through a short-lived
+delegation token good for a single act, so it can never reach anything that
+person could not. The audit shows both: who acted, and who authorised.
+
+**Can we stop it?**
+Pause or revoke, immediately. Revoke kills the credential. Both are
+hash-chained, as is raising an agent's ceiling, because permitting an agent to
+do more unsupervised is exactly as security-relevant as stopping it, and who
+lifted a limit is the first question an incident review asks.
+
+**How do we know it still behaves the way it did last month?**
+It is scored against a fixed task set, attributed to the model version that
+produced the score, and the same tasks are re-run so a change in behaviour is
+reported rather than discovered. A model vendor shipping a new version is a
+change we detect.
+
+**Can it write to our systems?**
+Not until phase five, and then only behind a person confirming. Anything
+irreversible requires an approval before it runs.
+
+### Whether to trust the answers
+
+**What happens when it does not know?**
+It says so. An answer that cannot be grounded in their documents is refused
+rather than guessed, and a retrieval judged irrelevant is discarded instead of
+being quoted at somebody.
+
+**Can one of our documents tell it to do something?**
+Retrieved text is marked as untrusted before it reaches a model, so a document
+is content to be read and not an instruction to be followed. Separately, the
+response is inspected before a person sees it and refused if it carries
+credential exfiltration, fetch-and-run, or instructions aimed at a downstream
+system.
+
+**How do you know the answers are any good?**
+A cheap model drafts and a second model from a different family reviews and may
+correct it before anything is sent. Two families had to agree, and any
+disagreement is in the record. Beyond that, we read transcripts: every
+answer-quality problem found this month was found by reading an answer, not by
+a test passing.
+
+**How do we know it is getting better rather than just different?**
+Irrelevant retrievals, refused promotions, improved answers and flagged
+responses are all recorded as events, so the trend is measurable rather than
+asserted.
+
+### Cost and lock-in
+
+**What does this cost to run?**
+Most turns cost nothing at a model, because they are answered from their own
+systems. Our own sixty-day figure across thousands of assistant turns is well
+under a dollar. The bakeoff produces the cost and sufficiency table for their
+prompts rather than a benchmark built from somebody else's.
+
+**What stops a runaway bill?**
+A workspace budget ceiling at the same chokepoint as everything else, checked
+before the call rather than reported after it, plus the per-agent operation
+ceiling above.
+
+**Are we locked to one model vendor?**
+No. Providers are configuration, and the router selects across families,
+including small open-weight models where they are sufficient. That is also the
+failover story: a provider outage degrades rather than stops.
+
+### Continuity and compliance
+
+**What if a system of ours is unavailable?**
+The answer says so. It does not invent one. Integrations return typed errors
+and never throw into the surface a person is using.
+
+**Can we audit what happened, and can the log be edited?**
+Append-only and hash-chained, with the chain verifiable after the fact and
+immutability enforced at the database rather than by convention.
+
+**What if we want to leave?**
+It is their database. Postgres is the source of truth and everything durable is
+in it, exportable without us.
+
+**What about post-quantum?**
+Every signing and verifying operation goes through a named-algorithm registry
+with the post-quantum slots reserved, so migration is a configuration change
+rather than a rewrite. The honest word is quantum-migration-ready, not
+quantum-safe today.
+
 ## What is verified before every phase ships
 
 Run in this order. Each answers a different question and none substitutes for
