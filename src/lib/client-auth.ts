@@ -1,5 +1,7 @@
 "use client";
 
+import { shouldReportMismatch, controlKey } from "@/lib/analytics/role-mismatch";
+
 /**
  * Client-side auth helpers for Instinct.
  *
@@ -158,7 +160,7 @@ async function refreshAccessToken(): Promise<string | null> {
         setInstinctSession(data.token, data.user);
       } else {
         // Token-only refresh — preserve existing user, just rotate access token.
-        const user = getInstinctUser();
+        const user = getInstinctUser<{ role?: string }>();
         setInstinctSession(data.token, user);
       }
       return data.token;
@@ -211,6 +213,45 @@ const EXP_SKEW_SECONDS = 30;
  * Primary authenticated fetch. Use this instead of raw fetch() for any
  * call that hits an endpoint requiring auth.
  */
+/**
+ * Record that somebody acted on a control their role could not use.
+ *
+ * Deliberately swallows everything. A telemetry failure must never surface to
+ * the person who already had one thing not work.
+ */
+async function reportRoleMismatch(
+  input: RequestInfo | URL,
+  opts: RequestInit,
+): Promise<void> {
+  try {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    const method = (opts.method ?? "GET").toUpperCase();
+    if (!shouldReportMismatch(url, method)) return;
+
+    const user = getInstinctUser<{ role?: string }>();
+    /* Raw fetch, not fetchWithRefresh: this IS inside fetchWithRefresh, and
+       recursing through it would re-enter the 403 branch on its own failure. */
+    await fetch("/api/analytics", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({
+        event: "ui.role_mismatch_click",
+        metadata: {
+          control: controlKey(url),
+          method,
+          /* Where they were standing, which is what tells us which page to
+             take the control off. */
+          surface: typeof window !== "undefined" ? window.location.pathname : "unknown",
+          role: user?.role ?? "unknown",
+        },
+      }),
+    });
+  } catch {
+    /* Swallowed on purpose. See above. */
+  }
+}
+
 export async function fetchWithRefresh(
   input: RequestInfo | URL,
   init: RequestInit = {},
@@ -245,6 +286,18 @@ export async function fetchWithRefresh(
   const opts: RequestInit = { ...init, headers, credentials: "include" };
 
   const res = await fetch(input, opts);
+
+  /* A CONTROL THAT LIED. 403 means the API refused, which is the security
+     layer working. It also means this person was shown something they could
+     never use, clicked it, and watched nothing happen. Recorded here because
+     every authenticated fetch in the product passes through this function and
+     a guardrail test keeps it that way, so one line covers every control that
+     exists and every control added later. Fire-and-forget: telemetry must
+     never delay or fail the caller's request. */
+  if (res.status === 403) {
+    void reportRoleMismatch(input, opts);
+  }
+
   if (res.status !== 401) return res;
 
   // Access token rejected — try to refresh.

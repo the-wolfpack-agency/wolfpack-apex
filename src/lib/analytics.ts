@@ -63,6 +63,9 @@ export type InstinctEventType =
      into the knowledge base. Rising says the prompt or the grounding needs
      work; it was invisible while every answer was kept regardless. */
   | "assistant.answer_not_promoted"
+  /* Somebody acted on a control their role could never use. The API refusing
+     is correct; the control being on their screen is the defect. */
+  | "ui.role_mismatch_click"
   // Upload-to-Brain widget pre-ingest filter lifecycle. Fires from the
   // /api/brain/upload route which runs the data-quality filter BEFORE
   // delegating to ingest(). `brain.upload_attempted` fires for every
