@@ -94,6 +94,8 @@ export interface ModelVersionSummary {
   callsOnCurrent: number;
 }
 
+import type { QualityTrend } from "@/lib/learning/answer-quality";
+
 export interface RouterInsights {
   /** What the router kept from leaving, and how much traffic it checked. */
   protection?: ProtectionSummary;
@@ -117,6 +119,14 @@ export interface RouterInsights {
   models: ModelAvailability[];
   /** Share of decisions served by the cheapest tier. The efficiency headline. */
   smallTierShare: number | null;
+  /**
+   * Whether the answers are getting better, week by week.
+   *
+   * Carried alongside the spend deliberately: spend says what the router did,
+   * this says whether what it did improved. Optional so a payload from an
+   * older deploy still renders.
+   */
+  quality?: QualityTrend;
   headline: string;
   /** WHICH WEIGHTS HAVE ANSWERED, and when that changed. Optional so a payload
    *  from an older deploy still renders. */

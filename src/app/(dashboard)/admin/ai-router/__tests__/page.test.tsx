@@ -437,3 +437,106 @@ describe("the probe is not for every seat", () => {
     expect(await screen.findByTestId("router-probe-run")).toBeInTheDocument();
   });
 });
+
+/**
+ * Is it getting better.
+ *
+ * Four events recorded every catch the product made and nothing read them, so
+ * "the trend is measurable" described the events existing rather than anybody
+ * being able to see it. That claim is now in a client-facing document, which
+ * is a good reason for it to be true.
+ *
+ * These are almost all one idea: a catch count without its denominator is
+ * unreadable, and every way of hiding that is a bug.
+ */
+function quality(over: Record<string, unknown> = {}) {
+  return {
+    readable: true,
+    empty: false,
+    weeks: [
+      {
+        weekStart: "2026-08-17",
+        modelCalls: 1000,
+        flagged: 10,
+        reviewed: 200,
+        corrected: 40,
+        irrelevantRetrievals: 12,
+        notPromoted: 3,
+      },
+    ],
+    ...over,
+  };
+}
+
+describe("the quality trend", () => {
+  it("shows each catch beside the volume it was measured against", async () => {
+    respond(insights({ quality: quality() }));
+    render(<Page />);
+    const table = await screen.findByTestId("router-quality-table");
+    /* The denominator on screen next to the count. Without it, ten flagged
+       responses is a number nobody can interpret. */
+    expect(table).toHaveTextContent("1,000");
+    expect(table).toHaveTextContent("10.0");
+  });
+
+  /* The bug this whole panel is shaped to avoid: a zero in a column of
+     percentages reads as a clean week to anyone scanning it, and that is
+     exactly the week where nothing was checked. */
+  it("renders n/a, not a zero, when there was no volume to divide by", async () => {
+    respond(
+      insights({
+        quality: quality({
+          weeks: [
+            {
+              weekStart: "2026-08-24",
+              modelCalls: 0,
+              flagged: 0,
+              reviewed: 0,
+              corrected: 0,
+              irrelevantRetrievals: 0,
+              notPromoted: 0,
+            },
+          ],
+        }),
+      }),
+    );
+    render(<Page />);
+    const table = await screen.findByTestId("router-quality-table");
+    expect(table).toHaveTextContent("n/a");
+  });
+
+  /* Unreadable is not the same fact as empty, and the difference matters more
+     than either: one means nothing happened, the other means nobody looked. */
+  it("says the window was unmeasured rather than showing a clean one", async () => {
+    respond(insights({ quality: quality({ readable: false, weeks: [], empty: true }) }));
+    render(<Page />);
+    expect(await screen.findByTestId("router-quality-unreadable")).toHaveTextContent(
+      /not a clean week/i,
+    );
+    expect(screen.queryByTestId("router-quality-table")).not.toBeInTheDocument();
+  });
+
+  it("distinguishes an empty window from an unreadable one", async () => {
+    respond(insights({ quality: quality({ readable: true, weeks: [], empty: true }) }));
+    render(<Page />);
+    expect(await screen.findByTestId("router-quality-empty")).toBeInTheDocument();
+    expect(screen.queryByTestId("router-quality-unreadable")).not.toBeInTheDocument();
+  });
+
+  /* The normaliser rebuilds the payload field by field, and a field it does
+     not name is dropped silently. That is how the measured spend was lost. */
+  it("survives the normaliser rather than being dropped by it", async () => {
+    respond(insights({ quality: quality() }));
+    render(<Page />);
+    expect(await screen.findByTestId("router-quality-table")).toBeInTheDocument();
+  });
+
+  /* An older deploy returns no quality field at all. It must render the rest
+     of the page rather than throwing. */
+  it("renders the page when the payload predates the panel", async () => {
+    respond(insights());
+    render(<Page />);
+    expect(await screen.findByTestId("router-metric-cheap")).toBeInTheDocument();
+    expect(screen.queryByTestId("router-quality-table")).not.toBeInTheDocument();
+  });
+});
