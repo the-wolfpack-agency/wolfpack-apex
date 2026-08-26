@@ -1099,15 +1099,39 @@ async function fetchLiveRecentEmails(userId: string, count: number, folderId?: s
   }));
 }
 
-async function fetchLiveEmailsFromContact(userId: string, email: string, count: number): Promise<Email[]> {
+/**
+ * Messages exchanged with one person.
+ *
+ * WHY THERE IS NO $orderby ON THE LAMBDA FILTERS. Graph rejects a complex
+ * filter combined with a sort on /me/messages, and the two recipient filters
+ * below are exactly that. Production ran 354 of these in fourteen days and
+ * every to/cc one came back 400, which is to say this had never worked for
+ * anyone. The merged list is sorted here anyway, so the parameter bought
+ * nothing and cost the whole query.
+ *
+ * FAILED IS NOT EMPTY. The old shape returned [] on failure, the caller cached
+ * it, and "we could not ask" became "you have never emailed this person" for
+ * the life of the cache entry. A wrong answer is worse than a missing one, and
+ * a cached wrong answer is worse again, so the outcome now says which it was.
+ */
+interface ContactEmails {
+  emails: Email[];
+  /** True when at least one query failed, so the list may be incomplete. */
+  degraded: boolean;
+}
+
+async function fetchLiveEmailsFromContact(
+  userId: string,
+  email: string,
+  count: number,
+): Promise<ContactEmails> {
   const token = await getValidToken(userId);
-  if (!token) return [];
+  if (!token) return { emails: [], degraded: true };
 
   // Sanitize the email for OData — double single quotes; strip
   // non-printable. Graph's email-address `eq` is case-insensitive.
   const safe = email.replace(/'/g, "''").replace(/[^\x20-\x7E]/g, "");
   const select = "id,subject,from,receivedDateTime,bodyPreview,isRead,importance";
-  const order = "receivedDateTime desc";
 
   // Graph's /me/messages rejects OR'd `any()` filters with
   // InefficientFilter for many tenants, which is why the widened
@@ -1132,12 +1156,18 @@ async function fetchLiveEmailsFromContact(userId: string, email: string, count: 
   const perFilter = await Promise.all(
     filters.map((f) =>
       graphFetch<{ value?: RawMsg[] }>(
-        `me/messages?$filter=${encodeURIComponent(f)}&$top=${count}&$orderby=${encodeURIComponent(order)}&$select=${encodeURIComponent(select)}`,
+        /* No $orderby: see above. Graph refuses a lambda filter and a sort
+           together, and the merge below sorts anyway. */
+        `me/messages?$filter=${encodeURIComponent(f)}&$top=${count}&$select=${encodeURIComponent(select)}`,
         token.accessToken,
         userId,
-      ).catch(() => ({ value: [] as RawMsg[] })),
+      ).catch(() => null),
     ),
   );
+  /* graphFetch returns null on a non-2xx, and so does the catch. Either way
+     that filter contributed nothing, and the caller has to know the list is
+     partial rather than complete-and-short. */
+  const degraded = perFilter.some((page) => page === null);
   const merged: RawMsg[] = [];
   const seen = new Set<string>();
   for (const page of perFilter) {
@@ -1153,9 +1183,9 @@ async function fetchLiveEmailsFromContact(userId: string, email: string, count: 
   );
   const data = { value: merged.slice(0, count) };
 
-  if (!data?.value) return [];
-
-  return data.value.map((msg) => ({
+  return {
+    degraded,
+    emails: data.value.map((msg) => ({
     id: msg.id,
     subject: msg.subject,
     // Sent items can omit `from`; fall back to "You" so the thread
@@ -1169,7 +1199,8 @@ async function fetchLiveEmailsFromContact(userId: string, email: string, count: 
     bodyPreview: msg.bodyPreview,
     isRead: msg.isRead,
     importance: (msg.importance?.toLowerCase() || "normal") as "low" | "normal" | "high",
-  }));
+    })),
+  };
 }
 
 async function fetchLiveContacts(userId: string, count: number): Promise<Contact[]> {
@@ -1714,12 +1745,21 @@ export async function fetchEmailsFromContact(userId: string, email: string, coun
   const cached = getCached<Email[]>(cacheKey);
   if (cached) return cached;
 
-  const result = isShadowMode()
-    ? demoEmailsFromContact(email, count)
-    : await fetchLiveEmailsFromContact(userId, email, count);
+  if (isShadowMode()) {
+    const demo = demoEmailsFromContact(email, count);
+    setCache(cacheKey, demo);
+    return demo;
+  }
 
-  setCache(cacheKey, result);
-  return result;
+  const { emails, degraded } = await fetchLiveEmailsFromContact(userId, email, count);
+
+  /* A FAILED QUERY IS NEVER CACHED. Caching it turns "we could not ask" into
+     "you have never emailed this person" for the life of the entry, which is a
+     wrong answer that outlives the outage that caused it. Returning the
+     partial list is still right: some of it came back, and a short list is
+     recoverable next request where a cached empty one is not. */
+  if (!degraded) setCache(cacheKey, emails);
+  return emails;
 }
 
 /**
