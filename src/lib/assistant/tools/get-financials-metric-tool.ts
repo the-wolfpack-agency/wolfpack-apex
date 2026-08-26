@@ -12,7 +12,8 @@
 
 import { z } from "zod";
 import {
-  runFinancialsMetric,
+  runFinancialsMetricOutcome,
+  type FinancialsFailure,
   type FinancialsMetricResult,
 } from "./financials-metric";
 import { registerTool } from "./registry";
@@ -100,6 +101,37 @@ function matchFinancialsIntent(message: string): Params | null {
   return { question: message.trim(), timeframe };
 }
 
+/**
+ * What to say when there is no number, per reason.
+ *
+ * None of these suggests a rephrasing unless rephrasing is genuinely the fix.
+ * Offering one for a disconnected accounting system sends somebody round a
+ * loop they cannot get out of by trying harder.
+ */
+function messageFor(reason: FinancialsFailure): string {
+  switch (reason) {
+    case "not_connected":
+      return (
+        "I understood the question, but financials are not connected yet, so there is no figure to " +
+        "read. Connect QuickBooks in Admin, Connectors and I will be able to answer this."
+      );
+    case "no_data":
+      return (
+        "Financials are connected, but there is nothing recorded for that period. Try a different " +
+        "timeframe, or check the Financials page for what is there."
+      );
+    case "not_authorised":
+      return "Financial figures are limited to admin roles, so I cannot answer that one.";
+    case "unknown_metric":
+      /* The only case where the user's wording is genuinely the problem, and
+         the only one that should ever ask them to rephrase. */
+      return (
+        "I could not tell which financial metric you meant. I can answer revenue, net profit, cash " +
+        "position, unpaid invoices and aged receivables."
+      );
+  }
+}
+
 export const getFinancialsMetricTool: ToolDef<Params, FinancialsMetricResult> = {
   name: "get_financials_metric",
   description:
@@ -109,19 +141,33 @@ export const getFinancialsMetricTool: ToolDef<Params, FinancialsMetricResult> = 
   matchIntent: matchFinancialsIntent,
   async handler(params, ctx): Promise<ToolResult<FinancialsMetricResult>> {
     try {
-      const result = await runFinancialsMetric({
+      const outcome = await runFinancialsMetricOutcome({
         question: params.question,
         timeframeToken: params.timeframe,
         userRole: ctx.userRole,
       });
-      if (!result) {
+      if (!outcome.ok) {
+        /* SAY WHAT ACTUALLY HAPPENED. Every one of these used to render the
+           same sentence: "I couldn't find a matching financial metric. Try a
+           more specific question like 'what was our MRR last month?'"
+           Asked "what's our MRR", the product understood perfectly,
+           classified it as revenue, found QuickBooks unconnected, and blamed
+           the wording. Anybody who followed the suggestion asked the exact
+           question that had just failed and got the identical error. A
+           suggestion that cannot work is worse than no suggestion, because it
+           spends the person's second attempt as well as their first. */
         return {
           ok: true,
-          data: { metric: null, value: null, answer: "no_data" } as unknown as FinancialsMetricResult,
-          answer:
-            "I couldn't find a matching financial metric. Try a more specific question like 'what was our MRR last month?'",
+          data: {
+            metric: null,
+            value: null,
+            answer: outcome.reason,
+          } as unknown as FinancialsMetricResult,
+          answer: messageFor(outcome.reason),
+          sources: [],
         };
       }
+      const result = outcome.result;
       const ans =
         (result as { answer?: string }).answer ??
         "I found the metric but don't have a formatted summary.";

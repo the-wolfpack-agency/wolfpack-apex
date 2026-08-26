@@ -28,6 +28,7 @@ jest.mock("@/lib/assistant/tools/goals-lookup", () => ({
 const mockRunFinancials = jest.fn();
 jest.mock("@/lib/assistant/tools/financials-metric", () => ({
   runFinancialsMetric: (...a: any[]) => mockRunFinancials(...a),
+  runFinancialsMetricOutcome: (...a: any[]) => mockRunFinancials(...a),
 }));
 
 import { getCalendarAvailabilityTool } from "@/lib/assistant/tools/get-calendar-availability-tool";
@@ -209,7 +210,8 @@ describe("get_financials_metric — intent", () => {
 describe("get_financials_metric — handler", () => {
   test("returns handler answer when metric resolved", async () => {
     mockRunFinancials.mockResolvedValueOnce({
-      metric: "revenue", value: 1234567, answer: "Revenue this quarter: $1.23M.",
+      ok: true,
+      result: { metric: "revenue", value: 1234567, answer: "Revenue this quarter: $1.23M." },
     });
     const r = await getFinancialsMetricTool.handler(
       { question: "what's our revenue this quarter?", timeframe: "this quarter" },
@@ -219,14 +221,21 @@ describe("get_financials_metric — handler", () => {
     if (r.ok) expect(r.answer).toContain("$1.23M");
   });
 
-  test("returns no-data answer when handler returns null", async () => {
-    mockRunFinancials.mockResolvedValueOnce(null);
+  /* Was: asserted the one-size-fits-all "matching financial metric" message.
+     That message blamed the user's wording for a disconnected accounting
+     system and suggested a rephrasing that was the question which had just
+     failed. The answer now depends on WHY, so the test does too. */
+  test("names the missing connection rather than the user's wording", async () => {
+    mockRunFinancials.mockResolvedValueOnce({ ok: false, reason: "not_connected" });
     const r = await getFinancialsMetricTool.handler(
       { question: "what's our revenue?" },
       ctx,
     );
     expect(r.ok).toBe(true);
-    if (r.ok) expect(r.answer.toLowerCase()).toContain("matching financial metric");
+    if (r.ok) {
+      expect(r.answer).toMatch(/not connected/i);
+      expect(r.answer).not.toMatch(/more specific/i);
+    }
   });
 
   test("capability is 'cto' (admin-only)", () => {
