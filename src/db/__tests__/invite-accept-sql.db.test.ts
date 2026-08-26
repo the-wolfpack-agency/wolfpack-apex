@@ -34,6 +34,7 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { Client } from "pg";
+import { requireLocalTestDatabase } from "./db-test-safety";
 
 const URL = process.env.TEST_DATABASE_URL;
 const d = URL ? describe : describe.skip;
@@ -55,7 +56,10 @@ d("invite acceptance, against a real database", () => {
   let db: Client;
 
   beforeAll(async () => {
-    db = new Client({ connectionString: URL });
+    /* REFUSES A NON-LOCAL HOST. This suite drops and recreates tables, and on
+       2026-08-26 a sibling file was pointed at production by a reused shell
+       command and destroyed the token table. Same hazard here. */
+    db = new Client({ connectionString: requireLocalTestDatabase(URL) });
     await db.connect();
 
     /* Build only what this path touches. Running all ~250 migrations would drag
