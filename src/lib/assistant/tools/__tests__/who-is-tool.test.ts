@@ -218,3 +218,37 @@ describe("regression: who_is + landing-page chip", () => {
     );
   });
 });
+
+/**
+ * "what does Jorge do" is the same question as "who is Jorge".
+ *
+ * A routing audit on 2026-08-26 found it reached no tool. People ask about a
+ * colleague both ways, and the second is at least as common, because it is
+ * what you say when you know the name and not the job.
+ */
+describe("asking what somebody does", () => {
+  it.each([
+    "what does Jorge do",
+    "what does Ashley work on",
+    "what does Nick Homyk focus on",
+  ])("claims %s", (prompt) => {
+    expect(whoIsTool.matchIntent!(prompt)).not.toBeNull();
+  });
+
+  /* THE SUBJECT MUST LOOK LIKE A NAME. A person lookup answering "what does
+     this button do" is the confident wrong answer this codebase keeps
+     finding, so the pattern requires a capitalised subject rather than any
+     noun. */
+  it.each([
+    "what does this button do",
+    "what does the contract say",
+    "what does the SOW say",
+    "what does it do",
+  ])("leaves %s alone", (prompt) => {
+    expect(whoIsTool.matchIntent!(prompt)).toBeNull();
+  });
+
+  it("still claims the plain form", () => {
+    expect(whoIsTool.matchIntent!("who is Jorge")).not.toBeNull();
+  });
+});

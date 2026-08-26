@@ -21,8 +21,19 @@ const CACHE_TTL_MS = 5 * 60 * 1000;
 const DEFAULT_BASE = "USD";
 const DEFAULT_TARGETS = ["EUR", "GBP", "JPY", "CAD", "AUD"];
 
+/* "euro to dollar" reached no tool, found by a routing audit 2026-08-26. The
+   pattern required the words "exchange rate" or "fx", and nobody says those:
+   they name the two currencies and expect to be understood. Named currencies
+   only, so "pounds to kilos" and "brief to client" stay out. */
+const CURRENCY =
+  "(?:usd|dollars?|eur|euros?|gbp|pounds?|sterling|jpy|yen|cad|aud|chf|francs?)";
 const INTENT_RE =
   /^\s*(?:what'?s\s+the\s+)?(?:exchange\s+rate|fx\s+rate|fx)(?:\s+(?:from|for|on)\s+(\w{3})\s+(?:to|in|into)\s+(\w{3}))?\??\s*$/i;
+
+const NAMED_PAIR_RE = new RegExp(
+  `^\\s*(?:what(?:'s| is)\\s+)?(?:the\\s+)?${CURRENCY}\\s+(?:to|vs\\.?|against|in|into)\\s+${CURRENCY}\\s*(?:rate)?\\s*\\??\\s*$`,
+  "i",
+);
 
 const ParamSchema = z.object({
   base: z.string().length(3),
@@ -71,7 +82,9 @@ export const fxTool: ToolDef<Params, FxToolData> = {
   paramSchema: ParamSchema,
   capability: "*",
   matchIntent(message: string): Params | null {
-    const m = INTENT_RE.exec(message);
+    /* The named-currency form carries no capture groups, so it falls through
+       to the default pair below, which is what "euro to dollar" wants anyway. */
+    const m = INTENT_RE.exec(message) ?? NAMED_PAIR_RE.exec(message);
     if (!m) return null;
     const fromCcy = m[1]?.toUpperCase();
     const toCcy = m[2]?.toUpperCase();

@@ -46,9 +46,25 @@ export interface WhoIsResult {
 
 const WHO_IS_RE = /\bwho\s+is\s+(.{2,120})\??$/i;
 
+/**
+ * "what does Jorge do" is the same question as "who is Jorge".
+ *
+ * A routing audit on 2026-08-26 found it reached no tool. People ask about a
+ * colleague both ways and the second way is at least as common, because it is
+ * what you say when you know the name and not the job.
+ *
+ * Kept separate from WHO_IS_RE rather than folded into one pattern, because
+ * this one has to be narrow: the subject must look like a NAME. "what does
+ * this button do" and "what does the contract say" are not questions about a
+ * person, and a person lookup answering them is the confident wrong answer
+ * this codebase keeps finding.
+ */
+const WHAT_DOES_X_DO_RE =
+  /^\s*what\s+does\s+([A-Z][\w'-]*(?:\s+[A-Z][\w'-]*)?)\s+(?:do|work\s+on|focus\s+on)\s*\??\s*$/;
+
 function matchWhoIsIntent(message: string): Params | null {
   const trimmed = message.trim();
-  const m = WHO_IS_RE.exec(trimmed);
+  const m = WHO_IS_RE.exec(trimmed) ?? WHAT_DOES_X_DO_RE.exec(trimmed);
   if (!m) return null;
   const q = m[1].trim().replace(/[?.!]+$/, "").trim();
   if (!q) return null;
