@@ -28,6 +28,7 @@
  * leaked context would be a worse bug than the one it detects.
  */
 import { MODEL_REGISTRY, isModelAvailable } from "./registry";
+import { configuredCompatibleProviders, configuredModelHosts } from "@/lib/ai/openai-compatible-provider";
 import { decideEgress } from "@/lib/containment/allowlist";
 import type { ModelSpec } from "./types";
 
@@ -174,7 +175,7 @@ export async function probeModel(spec: ModelSpec, deps: ProbeDeps = {}): Promise
   // The same egress guard every other outbound call answers to. A probe is an
   // outbound request like any other, and exempting it would make the one thing
   // that reaches every configured endpoint the one thing nobody checks.
-  const verdict = decideEgress(target.url, "model-api");
+  const verdict = decideEgress(target.url, "model-api", configuredModelHosts(env));
   if (verdict.allowed !== true) {
     return { modelId: spec.id, outcome: "refused", latencyMs: null, status: null, detail: `egress refused: ${verdict.reason}` };
   }
@@ -222,9 +223,64 @@ export async function probeModel(spec: ModelSpec, deps: ProbeDeps = {}): Promise
   }
 }
 
+/**
+ * The models this deployment was GIVEN, as opposed to the ones it ships with.
+ *
+ * A compatible provider is added by configuration - a base URL, a key and a
+ * model name - so it never appears in MODEL_REGISTRY. That is the point of the
+ * design and it left a hole in the one tool meant to answer "do these actually
+ * work": configure DeepSeek or Kimi and the probe reported on ten built-in
+ * models and said nothing about either.
+ *
+ * Which is precisely the question worth asking about them. Nobody doubts that
+ * gpt-4o-mini answers. Whether a Moonshot key, a base URL somebody typed and a
+ * model name spelled from memory produce a reply is the whole risk of adding
+ * one, and it was invisible.
+ *
+ * Built as ModelSpecs so they go through the SAME probeModel as everything
+ * else: same egress guard, same timeout, same outcome vocabulary. A second
+ * probe path for configured providers would be a second thing to keep true.
+ */
+export function compatibleProviderSpecs(
+  env: Record<string, string | undefined> = process.env,
+): ModelSpec[] {
+  const specs: ModelSpec[] = [];
+  for (const cfg of configuredCompatibleProviders(env)) {
+    for (const [tier, model] of Object.entries(cfg.models)) {
+      if (!model) continue;
+      const price = cfg.pricing?.[tier as keyof typeof cfg.pricing];
+      /* THE ID IS THE MODEL NAME THE VENDOR ANSWERS TO, because probeTargetFor
+         puts spec.id in the request body. Decorating it with the provider
+         would send "deepseek:deepseek-chat" as a model name and earn a 400 -
+         a probe failure that says nothing about whether the model works. The
+         provider is carried in the endpoint instead, which is where the
+         difference actually lives. */
+      specs.push({
+        id: model,
+        provider: "openai",
+        capabilityTier: tier === "cheap" ? "small" : tier === "premium" ? "reasoning" : "large",
+        contextWindow: 128_000,
+        inputPricePer1kUsd: price?.inputPer1k ?? 0,
+        outputPricePer1kUsd: price?.outputPer1k ?? 0,
+        apiKeyEnvVar: `AI_COMPAT_${cfg.id.replace(/[^a-zA-Z0-9]+/g, "_").toUpperCase()}_API_KEY`,
+        /* The configured base URL, not the OpenAI default probeTargetFor
+           falls back to. Without this every configured provider is probed at
+           api.openai.com, which is neither reachable nor the question. */
+        endpoint: `${cfg.baseUrl.replace(/\/+$/, "")}/chat/completions`,
+      } as ModelSpec & { endpoint: string });
+    }
+  }
+  return specs;
+}
+
 export async function probeAllModels(deps: ProbeDeps = {}): Promise<ProbeReport> {
   const results: ProbeResult[] = [];
   for (const spec of MODEL_REGISTRY) {
+    results.push(await probeModel(spec, deps));
+  }
+  /* Configured providers, probed the same way. Listed after the built-ins so
+     the familiar list stays where people expect it. */
+  for (const spec of compatibleProviderSpecs(deps.env ?? process.env)) {
     results.push(await probeModel(spec, deps));
   }
 
