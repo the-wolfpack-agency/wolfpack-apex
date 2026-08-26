@@ -48,6 +48,7 @@ function mapRow(r: Record<string, unknown>): AgentRecord {
     activatedAt: (r.activated_at as string | null) ?? null,
     lastSeenAt: (r.last_seen_at as string | null) ?? null,
     revokedAt: (r.revoked_at as string | null) ?? null,
+    maxOperationsPerHour: Number(r.max_operations_per_hour ?? 0),
     /* Default empty; listAgents joins the real bound connector names. */
     connections: [],
   };
@@ -155,6 +156,39 @@ export async function setAgentState(
   trackEvent("agent.lifecycle_changed", actor.userId, actor.role, {
     agent_id: agent.id,
     state,
+  });
+  return agent;
+}
+
+/**
+ * Change how many operations an agent may run per hour.
+ *
+ * The ceiling is enforced whether or not anybody ever calls this: the column
+ * has a real default, so an agent created before this existed is bounded too.
+ * This is here so a bound can be RAISED deliberately by an accountable human
+ * rather than being a number only engineering can reach.
+ *
+ * Zero means unlimited, which is why it cannot be reached by accident: the
+ * caller has to pass it, and the audit chain records who did.
+ */
+export async function setAgentCeiling(
+  id: string,
+  workspaceId: string,
+  maxOperationsPerHour: number,
+  actor: { userId: string; role: string },
+): Promise<AgentRecord | null> {
+  const res = await writeQuery<Record<string, unknown>>(
+    `UPDATE instinct_agents SET max_operations_per_hour = $3
+      WHERE id = $1 AND workspace_id = $2
+      RETURNING ${SELECT_COLS}`,
+    [id, workspaceId, maxOperationsPerHour],
+  );
+  const row = res.rows[0];
+  if (!row) return null;
+  const agent = mapRow(row);
+  trackEvent("agent.ceiling_changed", actor.userId, actor.role, {
+    agent_id: agent.id,
+    max_operations_per_hour: maxOperationsPerHour,
   });
   return agent;
 }

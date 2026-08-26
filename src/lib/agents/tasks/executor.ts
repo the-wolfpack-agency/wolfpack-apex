@@ -27,6 +27,7 @@ import { scoreRun } from "@/lib/agents/evals/behavior-eval";
 import { getConstitution, CONSTITUTION_VERSION } from "@/lib/constitution";
 import { safeQuery } from "@/lib/db";
 import { mintOnBehalfToken } from "@/lib/agents/on-behalf";
+import { checkAndRecordOperation } from "@/lib/agents/ceiling";
 import {
   autofillForm,
   referencesPriorOutput,
@@ -244,6 +245,41 @@ type OnBehalfOutcome =
  * failure path (missing role, thrown mint, thrown execute, non-2xx response)
  * degrades to a typed outcome, so this never throws into the run loop.
  */
+/**
+ * The ceiling, in front of every act an agent takes on its owner's behalf.
+ *
+ * BOTH PATHS OR NEITHER. Form actions and registry operations are two spellings
+ * of the same thing: the agent doing something real as its owner. A ceiling on
+ * one of them is not a ceiling, it is a detour, so this sits in front of both
+ * and there is exactly one of it.
+ *
+ * A ceiling hit is BLOCKED, not an error. Blocked notifies the owner, which is
+ * the entire point: the person accountable for the agent finds out it is
+ * looping from us rather than from their bill.
+ */
+async function ceilingRefusal(
+  task: ExecutableTask,
+  operationName: string,
+): Promise<OnBehalfOutcome | null> {
+  const verdict = await checkAndRecordOperation({
+    workspaceId: task.workspaceId,
+    agentId: task.agentId,
+    operation: operationName,
+  });
+  if (verdict.allowed) return null;
+  trackEvent("agent.operation_ceiling_hit", task.ownerUserId, task.role, {
+    agent_id: task.agentId,
+    operation: operationName,
+    outcome: verdict.outcome,
+    used: verdict.used,
+    ceiling: verdict.ceiling,
+  });
+  return {
+    kind: "blocked",
+    detail: `Stopped: ${verdict.reason}. Raise the agent's hourly ceiling to allow more.`,
+  };
+}
+
 async function executeFormOnBehalf(args: {
   form: FormSpec;
   formKind: FormKind;
@@ -267,6 +303,8 @@ async function executeFormOnBehalf(args: {
 }): Promise<OnBehalfOutcome> {
   const { form, formKind, instruction, parsedParams, priorResults, task, deps } = args;
   try {
+    const refused = await ceilingRefusal(task, `form:${formKind}`);
+    if (refused) return refused;
     const { values, missingRequired } = deps.autofill(
       form,
       instruction,
@@ -380,6 +418,8 @@ async function executeOperationOnBehalf(args: {
 }): Promise<OnBehalfOutcome> {
   const { operation, instruction, priorResults, task, deps } = args;
   try {
+    const refused = await ceilingRefusal(task, `operation:${operation.id}`);
+    if (refused) return refused;
     // RESULT CHAINING. A body field declared as fillFromPriorResults draws from
     // the carried prior-step output when the instruction refers back to it
     // ("create a document summary of the results") and the field is otherwise
