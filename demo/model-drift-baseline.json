@@ -1,0 +1,52 @@
+[
+  {
+    "prompt": "Reply with exactly the word: ready",
+    "model": "gpt-4o-mini",
+    "provider": "azure-openai",
+    "costUsd": 0.0000032999999999999997,
+    "latencyMs": 992,
+    "sufficient": true,
+    "risks": [],
+    "answer": "ready"
+  },
+  {
+    "prompt": "What is 17 multiplied by 23? Reply with only the number.",
+    "model": "gpt-4o-mini",
+    "provider": "azure-openai",
+    "costUsd": 0.000004499999999999999,
+    "latencyMs": 846,
+    "sufficient": true,
+    "risks": [],
+    "answer": "391"
+  },
+  {
+    "prompt": "List three primary colours, comma separated, nothing else.",
+    "model": "gpt-4o-mini",
+    "provider": "azure-openai",
+    "costUsd": 0.0000063,
+    "latencyMs": 519,
+    "sufficient": true,
+    "risks": [],
+    "answer": "Red, Green, Blue"
+  },
+  {
+    "prompt": "Summarise in one sentence: a dealer reported that two demo vehicles were double-booked for the same weekend.",
+    "model": "gpt-4o-mini",
+    "provider": "azure-openai",
+    "costUsd": 0.0000171,
+    "latencyMs": 606,
+    "sufficient": true,
+    "risks": [],
+    "answer": "A dealer reported a scheduling conflict where two demo vehicles were mistakenly double-booked for the same weekend."
+  },
+  {
+    "prompt": "A customer asks whether their warranty covers a cracked windscreen. Answer in one sentence without promising anything.",
+    "model": "gpt-4o-mini",
+    "provider": "azure-openai",
+    "costUsd": 0.00002265,
+    "latencyMs": 1053,
+    "sufficient": true,
+    "risks": [],
+    "answer": "The warranty coverage for a cracked windscreen depends on its specific terms and conditions, so I recommend reviewing your warranty details or contacting the provider for clarification."
+  }
+]
