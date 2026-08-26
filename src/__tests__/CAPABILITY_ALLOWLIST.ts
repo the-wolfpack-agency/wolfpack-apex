@@ -48,6 +48,7 @@ export const CAPABILITY_ALLOWLIST: readonly string[] = [
   // inline admin pattern used across the insights/* surface). Not gated by
   // requireCapability, but genuinely authorized.
   "src/app/api/admin/insights/unmet-intents/route.ts",
+  "src/app/api/admin/insights/role-mismatches/route.ts",
   "src/app/api/admin/templates/route.ts",
 
   // Provision health bot: authenticates inline via getUserFromRequest +
