@@ -736,3 +736,105 @@ a:hover { color: var(--wp-gold-hover); }
     gap: 0.45rem 1rem;
   }
 }
+
+/* ---------------------------------------------------------------------------
+ * /pilot — phase one as the client sees it.
+ *
+ * The figures are the content, so they carry the weight: large, tabular, with
+ * the label beneath rather than beside. tabular-nums because these numbers are
+ * read in a column and a proportional digit makes them jitter.
+ * ------------------------------------------------------------------------ */
+.wp-pilot {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 1.75rem 1.5rem 5rem;
+}
+.wp-pilot-head { margin-bottom: 2.5rem; }
+.wp-pilot-eyebrow {
+  color: var(--wp-gold, #e8b528);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  margin: 0 0 0.5rem;
+}
+.wp-pilot-head h1 {
+  color: var(--wp-text, #e8eaed);
+  font-size: clamp(1.6rem, 3.4vw, 2.2rem);
+  font-weight: 700;
+  line-height: 1.15;
+  margin: 0 0 0.7rem;
+  text-wrap: balance;
+}
+.wp-pilot-sub {
+  color: var(--wp-text-muted, #929cad);
+  font-size: 0.95rem;
+  line-height: 1.65;
+  max-width: 68ch;
+  margin: 0;
+}
+.wp-pilot-unreadable {
+  color: var(--wp-text, #e8eaed);
+  background: var(--wp-dark-surface, rgba(255, 255, 255, 0.05));
+  border: 1px solid var(--wp-dark-border, rgba(255, 255, 255, 0.14));
+  border-left: 3px solid var(--wp-gold, #e8b528);
+  border-radius: 8px;
+  padding: 1rem 1.2rem;
+  line-height: 1.6;
+  max-width: 68ch;
+}
+.wp-pilot-section {
+  margin-top: 2.75rem;
+  padding-top: 1.6rem;
+  border-top: 1px solid var(--wp-dark-border, rgba(255, 255, 255, 0.1));
+}
+.wp-pilot-section h2 {
+  color: var(--wp-gold, #e8b528);
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  margin: 0 0 1.2rem;
+}
+.wp-pilot-figures {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(215px, 1fr));
+  gap: 1rem;
+}
+.wp-pilot-figure {
+  background: var(--wp-dark-surface, rgba(255, 255, 255, 0.05));
+  border: 1px solid var(--wp-dark-border, rgba(255, 255, 255, 0.12));
+  border-radius: 10px;
+  padding: 1.15rem 1.25rem;
+}
+.wp-pilot-figure-value {
+  color: var(--wp-text, #e8eaed);
+  font-size: clamp(1.7rem, 3.6vw, 2.3rem);
+  font-weight: 700;
+  line-height: 1.05;
+  /* Read in a column; a proportional digit makes them jitter. */
+  font-variant-numeric: tabular-nums;
+  margin: 0 0 0.45rem;
+}
+.wp-pilot-figure-label {
+  color: var(--wp-text, #e8eaed);
+  font-size: 0.88rem;
+  font-weight: 600;
+  margin: 0;
+}
+.wp-pilot-figure-note {
+  color: var(--wp-text-muted, #929cad);
+  font-size: 0.78rem;
+  line-height: 1.5;
+  margin: 0.35rem 0 0;
+}
+.wp-pilot-aside {
+  color: var(--wp-text-muted, #929cad);
+  font-size: 0.88rem;
+  line-height: 1.65;
+  max-width: 70ch;
+  margin: 1.1rem 0 0;
+}
+@media (max-width: 640px) {
+  .wp-pilot { padding: 1.25rem 1rem 4rem; }
+  .wp-pilot-figures { grid-template-columns: 1fr; }
+}

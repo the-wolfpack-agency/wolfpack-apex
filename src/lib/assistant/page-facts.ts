@@ -103,6 +103,24 @@ export const PAGE_FACTS: Record<string, PageFact> = {
     ],
     related_pages: ["dashboard", "assistant"],
   },
+  pilot: {
+    domain: "pilot",
+    route: "/pilot",
+    title: "Phase one",
+    purpose:
+      "What a client sees in phase one of a deployment: their library read and answerable, how much was answered without a model, and what the product declined to answer rather than guess.",
+    what_you_can_do: [
+      "See how many passages are indexed and answerable, and how many libraries are connected.",
+      "See the share of questions answered straight from connected systems, without a model.",
+      "See how many questions the product refused rather than guessed at.",
+      "Check the shape of the client-facing dashboard against real numbers before a client sees it.",
+    ],
+    how_to: [
+      "Open Phase One from the left nav.",
+      "Read the deterministic share first: it is the number the product is sold on.",
+    ],
+    related_pages: ["playbook", "brain", "analytics"],
+  },
   playbook: {
     domain: "playbook",
     route: "/playbook",
