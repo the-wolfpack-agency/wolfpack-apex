@@ -26,6 +26,7 @@ import { trackEvent } from "@/lib/analytics";
 import { registerTool } from "./registry";
 import { getTools } from "./registry";
 import { canInvokeNamedTool, canInvokeTool } from "./gate";
+import { hasPersona, personaCopyFor } from "./persona";
 import { BUILT_IN_ROUTINES } from "@/lib/assistant/routines/catalogue";
 import { PROMPT_GUIDE } from "@/lib/assistant/prompt-corpus";
 import type { ToolDef, ToolResult } from "./types";
@@ -185,15 +186,29 @@ export const capabilitiesTool: ToolDef<Params, CapabilitiesData> = {
       lines.push("");
     }
 
+    /* IN THE READER'S LANGUAGE WHERE WE HAVE IT. A tool's own description is
+       written for whoever maintains it, which is right for the registry and
+       wrong for the first screen a dealer ever sees. */
     const byArea = new Map<string, string[]>();
+    const areaOrder: string[] = [];
     for (const t of usable) {
-      const area = areaFor(t.name);
-      if (!byArea.has(area)) byArea.set(area, []);
-      byArea.get(area)!.push(`- ${trim(t.description)}`);
+      const copy = personaCopyFor(ctx.userRole, t.name);
+      const area = copy?.area ?? areaFor(t.name);
+      if (!byArea.has(area)) {
+        byArea.set(area, []);
+        areaOrder.push(area);
+      }
+      byArea.get(area)!.push(`- ${copy ? copy.description : trim(t.description)}`);
     }
 
     lines.push("**One thing at a time**");
-    for (const { title } of AREAS) {
+    /* A persona's sections are its own, in the order its tools were curated.
+       The built-in AREAS order is for the whole registry and files a dealer's
+       most important capability under "Everything else". */
+    const sections = hasPersona(ctx.userRole)
+      ? areaOrder.map((title) => ({ title }))
+      : AREAS;
+    for (const { title } of sections) {
       const items = byArea.get(title);
       if (!items || items.length === 0) continue;
       lines.push("");
@@ -211,10 +226,17 @@ export const capabilitiesTool: ToolDef<Params, CapabilitiesData> = {
        A person reading a capability list still has to map their own job onto
        it, which is the translation this product is supposed to do for them.
        Saying so here costs one line and turns a menu into a conversation. */
-    lines.push("");
-    lines.push(
-      "If none of that quite matches your job, describe your day instead: tell me what you do on a Monday, in order, and I will map it onto what I can and cannot do, then offer to chain the rest into one command.",
-    );
+    /* ONLY OFFERED IF THEY CAN ACTUALLY DO IT. This is the most useful line on
+       the page and it was printed unconditionally, so a dealer whose persona
+       does not include plan_my_day was invited to describe their day and would
+       have been met with nothing. A closing invitation that fails is worse
+       than no closing line, because it is the last thing they read. */
+    if (canInvokeNamedTool(ctx.userRole, "plan_my_day", toolCapability("plan_my_day"))) {
+      lines.push("");
+      lines.push(
+        "If none of that quite matches your job, describe your day instead: tell me what you do on a Monday, in order, and I will map it onto what I can and cannot do, then offer to chain the rest into one command.",
+      );
+    }
 
     if (withheldCount > 0) {
       lines.push("");

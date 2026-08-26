@@ -73,3 +73,56 @@ describe("the menu and the runtime agree", () => {
     expect(personaAllows("dealer", "what_can_you_do")).toBe(true);
   });
 });
+
+/* ---------------------------------------------------------------------
+ * The first screen a dealer ever sees, in their language.
+ *
+ * Scoping made the surface the right size and left it in the wrong words. The
+ * most important capability a dealer has read:
+ *
+ *   Everything else
+ *   - Drive the dealer's DMS web UI (via the AgenticQA browser-driver bridge)
+ *     to fetch and render vehicle inventory matching the user's filters
+ *
+ * Every word of that is about our architecture, filed under a heading that
+ * says it does not matter. Somebody deciding whether this product is worth
+ * their time learns that it is not for them, and they are right to.
+ * --------------------------------------------------------------- */
+import { personaCopyFor, PERSONA_COPY } from "@/lib/assistant/tools/persona";
+
+describe("client-facing copy", () => {
+  it("describes a dealer's vehicles in their terms, not ours", () => {
+    const copy = personaCopyFor("dealer", "dms_inventory_widget");
+    expect(copy?.area).toBe("Your demo vehicles");
+    expect(copy?.description ?? "").not.toMatch(/AgenticQA|browser-driver|widget|render/i);
+  });
+
+  /* Internal roles keep the registry's own wording, which is right for them. */
+  it("leaves roles without a persona on the tool's own description", () => {
+    expect(personaCopyFor("cto", "dms_inventory_widget")).toBeNull();
+  });
+
+  /* A tool with no entry falls back rather than disappearing: nothing should
+     be hidden by an omission in a copy map. */
+  it("falls back for a tool nobody has written copy for", () => {
+    expect(personaCopyFor("dealer", "some_unwritten_tool")).toBeNull();
+  });
+
+  it("says nothing about how it works", () => {
+    for (const [name, copy] of Object.entries(PERSONA_COPY)) {
+      expect({ name, leaks: /API|endpoint|widget|bridge|Graph|SDK|payload/i.test(copy.description) })
+        .toEqual({ name, leaks: false });
+    }
+  });
+
+  /* Copy is only useful if it covers what a persona actually exposes. */
+  it("covers every tool the dealer persona shows them", () => {
+    /* what_can_you_do is the tool answering the question and excludes itself
+       from its own list, so it never needs a line of copy. Everything a dealer
+       actually reads does. */
+    const uncovered = TOOL_PERSONAS.dealer
+      .filter((n) => n !== "what_can_you_do")
+      .filter((n) => !PERSONA_COPY[n]);
+    expect(uncovered).toEqual([]);
+  });
+});
