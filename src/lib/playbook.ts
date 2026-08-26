@@ -460,12 +460,6 @@ immutability enforced at the database rather than by convention.
 It is their database. Postgres is the source of truth and everything durable is
 in it, exportable without us.
 
-**What about post-quantum?**
-Every signing and verifying operation goes through a named-algorithm registry
-with the post-quantum slots reserved, so migration is a configuration change
-rather than a rewrite. The honest word is quantum-migration-ready, not
-quantum-safe today.
-
 ## What is verified before every phase ships
 
 Run in this order. Each answers a different question and none substitutes for

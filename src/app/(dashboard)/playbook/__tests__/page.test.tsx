@@ -188,14 +188,17 @@ describe("the questions they will ask", () => {
     expect(CLIENT_DEPLOYMENT_PLAYBOOK).toMatch(/the agent does not\s*act/i);
   });
 
-  /* Two claims we are not allowed to make. Both have a true version that is
-     nearly as good, and a false version that would be found out. */
-  it("says quantum-migration-ready and never quantum-safe today", () => {
-    expect(CLIENT_DEPLOYMENT_PLAYBOOK).toMatch(/quantum-migration-ready, not\s*quantum-safe today/i);
-  });
-
+  /* Two things the playbook must not raise, for the same reason: they are not
+     built out yet. Asserted as ABSENCES, which is the only form of this test
+     that works. A claim we do not make cannot be softened into one we do
+     without deleting a test, and deleting a test is a decision somebody makes
+     on purpose rather than while editing for confidence. */
   it("does not claim MFA anywhere, because it is not shipped", () => {
     expect(CLIENT_DEPLOYMENT_PLAYBOOK).not.toMatch(/\bMFA\b|multi-factor/i);
+  });
+
+  it("does not raise post-quantum, because it is not built out yet", () => {
+    expect(CLIENT_DEPLOYMENT_PLAYBOOK).not.toMatch(/quantum/i);
   });
 
   /* Writes stay behind a person in the answer as well as in the phase table.
