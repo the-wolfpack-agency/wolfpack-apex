@@ -103,6 +103,25 @@ export const PAGE_FACTS: Record<string, PageFact> = {
     ],
     related_pages: ["dashboard", "assistant"],
   },
+  playbook: {
+    domain: "playbook",
+    route: "/playbook",
+    title: "Client deployment playbook",
+    purpose:
+      "How a client engagement is actually run: what has to exist before anything, the order the phases ship in, and when to stop and re-plan.",
+    what_you_can_do: [
+      "See what a client has to provide before engineering can start, and why each item blocks.",
+      "Read the phases in order, each one usable on its own so a pause leaves the client with something working.",
+      "See the architecture behind a client deployment: how data flows, how it is scoped, and what is audited.",
+      "See which verification command answers which question before a phase ships.",
+      "Read what we say plainly to a client, so everyone says the same thing.",
+    ],
+    how_to: [
+      "Open Client deployment playbook from the left nav, or ask the assistant 'how do we deploy for a client'.",
+      "Read the access table first: it consumes more of the first month than the build does.",
+    ],
+    related_pages: ["products", "engineering", "brain"],
+  },
   products: {
     domain: "products",
     route: "/products",
