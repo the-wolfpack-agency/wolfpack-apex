@@ -56,6 +56,13 @@ const INTENT_RE = new RegExp(
     /* what a person actually types */
     `\\bwhat(?:'s| is| have i got)?\\s+(?:is\\s+)?(?:still\\s+)?(?:waiting|outstanding|left)\\s+(?:on|for|with)?\\s*me\\b`,
     `\\bwhat(?:'s| is)\\s+on\\s+my\\s+plate\\b`,
+    /* THE PLAINEST PHRASING OF ALL, and it reached nothing. The literal set
+       above is anchored, so "tasks" and "my tasks" worked while "what are my
+       tasks" and "what tasks do I have" did not. Found by a routing audit on
+       2026-08-26: 22 of 51 ordinary prompts reached no tool, and this was one
+       of the plainest. */
+    `^\\s*what\\s+(?:are|is)\\s+(?:my|our)\\s+(?:open\\s+|outstanding\\s+)?(?:tasks?|to-?dos?)\\b`,
+    `^\\s*what\\s+(?:tasks?|to-?dos?)\\s+(?:do|have)\\s+i\\s+(?:have|got)\\b`,
     /* These two have to stand alone. "what do I owe the dealer group" and
        "anything overdue on the invoice" are questions about a party and a
        document, and a task list answering them would be trespassing on a

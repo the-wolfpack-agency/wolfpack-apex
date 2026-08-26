@@ -51,8 +51,12 @@ interface CalendarWidgetData {
  *
  * The zone-aware availability tool owns the "am I free on Tuesday" shapes and
  * is matched on its own patterns; nothing here overlaps them. */
+/* "when is my next meeting" reached NO tool, which a routing audit found on
+   2026-08-26 alongside twenty-one other ordinary phrasings. The pattern was
+   anchored to the literal ways somebody might name the calendar, and asking
+   about the next thing on it never names it. */
 const INTENT_RE =
-  /^(?:(?:show|open|pull\s+up|bring\s+up)\s+(?:me\s+)?(?:my\s+|the\s+)?calendar(?:\s+widget)?|calendar(?:\s+widget)?|what\s+does\s+my\s+(?:week|month|calendar)\s+look\s+like|what\s+have\s+i\s+got\s+(?:on\s+)?(?:this\s+)?(?:week|month))[\s.?!]*$/i;
+  /^(?:(?:show|open|pull\s+up|bring\s+up)\s+(?:me\s+)?(?:my\s+|the\s+)?calendar(?:\s+widget)?|calendar(?:\s+widget)?|what\s+does\s+my\s+(?:week|month|calendar)\s+look\s+like|what\s+have\s+i\s+got\s+(?:on\s+)?(?:this\s+)?(?:week|month)|(?:when|what)(?:'s| is)?\s+(?:is\s+)?my\s+next\s+(?:meeting|call|appointment)|what(?:'s| is)\s+my\s+next\s+(?:meeting|call|appointment))[\s.?!]*$/i;
 
 function matchCalendarWidgetIntent(message: string): Params | null {
   const trimmed = message.trim();
