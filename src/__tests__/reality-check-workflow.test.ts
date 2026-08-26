@@ -18,6 +18,13 @@ const HARD_GATES = [
   "tests/e2e/sites-preview-reality-check.spec.ts",
   "tests/e2e/dashboard-quick-actions.spec.ts",
   "tests/e2e/ai-router-behaviour.spec.ts",
+  /* A hard gate because this page shipped correct and unreadable, twice: once
+     with no stylesheet at all, then with a diagram that fenced and closed
+     early so half of it rendered as prose. Both times the unit tests were
+     green, because they read the source string. Only a browser against the
+     deployed page can tell the difference, and a check that only runs when
+     somebody remembers to run it would not have caught either. */
+  "tests/e2e/playbook-readable.spec.ts",
 ];
 
 /**

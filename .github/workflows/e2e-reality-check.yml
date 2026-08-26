@@ -119,6 +119,7 @@ jobs:
           tests/e2e/sites-preview-reality-check.spec.ts
           tests/e2e/dashboard-quick-actions.spec.ts
           tests/e2e/ai-router-behaviour.spec.ts
+          tests/e2e/playbook-readable.spec.ts
           --config=playwright.config.ts --workers=2 --reporter=github
 
       # SOFT SPECS — one invocation, push-to-main ONLY (off the PR critical path).
