@@ -119,6 +119,15 @@ export interface IngestRequest {
    * and meet the same throttling that killed the first attempt.
    */
   msDriveItemId?: string;
+  /**
+   * Roles that may be quoted this document. Absent means workspace-wide,
+   * which is what a hand upload honestly is.
+   *
+   * A connector always sets it. A SharePoint library is somebody else's
+   * permission model, and inheriting "everyone" from a system that says
+   * otherwise is the failure the audience column exists to prevent.
+   */
+  audienceRoles?: string[];
   /** Source URL where this document can be opened (SharePoint webUrl,
    *  Stream Watch URL, etc.). Stored on brain_documents.web_url so
    *  chat citations can render as clickable links to the original. */

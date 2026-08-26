@@ -14,6 +14,7 @@
 
 import { embedBatch, isEmbeddingConfigured } from "./embedder";
 import { keywordSearch, logQuery, markQueryCited } from "./repo";
+import { readableDocumentIds } from "./audience";
 import { searchBrain } from "./qdrant";
 import { trackEvent } from "@/lib/analytics";
 import type { BrainKind, BrainQueryHit, BrainQueryResult } from "./types";
@@ -68,6 +69,9 @@ export async function queryBrain(opts: QueryOpts): Promise<QueryExecution> {
   const keyword = await keywordSearch(opts.query, limit, {
     uploadedBy: opts.uploadedBy,
     kind: opts.kind,
+    /* Who is asking. Applied inside the query, so a document this role may not
+       read is never ranked, never headlined and never counted. */
+    role: opts.userRole,
   });
 
   /* 2. SEMANTIC. Best-effort, but no longer silent.
@@ -87,7 +91,27 @@ export async function queryBrain(opts: QueryOpts): Promise<QueryExecution> {
       const emb = await embedBatch([opts.query]);
       if (emb && emb.vectors.length > 0) {
         tokensUsed = emb.tokensUsed;
-        semantic = await searchBrain(emb.vectors[0], limit);
+        const raw = await searchBrain(emb.vectors[0], limit);
+        /* THE VECTOR SIDE IS FILTERED AGAINST POSTGRES, not against the point
+           payload. The payload does not carry the audience, so filtering there
+           would need every point written before this to be backfilled, and a
+           point the backfill missed would be a document silently readable by
+           anybody. The row that owns the document is the only thing that
+           cannot be out of date with itself. */
+        const allowed = await readableDocumentIds(
+          raw.map((h) => String(h.document_id)),
+          opts.userRole,
+        );
+        semantic = raw.filter((h) => allowed.has(String(h.document_id)));
+        if (semantic.length < raw.length) {
+          trackEvent("brain.retrieval_audience_filtered", opts.userId, opts.userRole, {
+            /* How much of the index a role cannot see. Rising is the gate
+               working; flat at zero on a tenant with restricted libraries
+               means it is not being applied. */
+            withheld: raw.length - semantic.length,
+            returned: semantic.length,
+          });
+        }
         semanticStatus = semantic.length > 0 ? "ok" : "empty";
       } else {
         /* Configured, called, and handed back nothing to search with. That is

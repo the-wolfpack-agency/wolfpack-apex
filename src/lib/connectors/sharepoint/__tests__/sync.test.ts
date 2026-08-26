@@ -34,6 +34,8 @@ const source: SharepointSource = {
   createdAt: "2026-05-16T00:00:00Z",
   lastSyncedAt: null,
   isActive: true,
+  /* A real source always carries one; admin-only is the database default. */
+  audienceRoles: ["admin"],
 };
 
 function fakeRepo() {

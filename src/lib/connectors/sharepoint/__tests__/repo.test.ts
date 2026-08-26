@@ -67,6 +67,10 @@ describe("createRepo", () => {
       createdAt: "2026-05-16T00:00:00Z",
       lastSyncedAt: null,
       isActive: true,
+      /* A row with no audience column maps to admin-only, not to everyone. The
+         default has to be the safe answer: the unsafe one stays invisible
+         until a dealer is quoted an HR file. */
+      audienceRoles: ["admin"],
     });
     expect(fake.calls[0].sql).toMatch(/INSERT INTO instinct_sharepoint_sources/);
   });

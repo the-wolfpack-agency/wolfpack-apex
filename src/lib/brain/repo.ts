@@ -9,6 +9,7 @@
 import { createHash } from "node:crypto";
 import { query } from "@/lib/db";
 import { trackEvent, type InstinctEventType } from "@/lib/analytics";
+import { readsEverything } from "./audience";
 import type {
   BrainChunk,
   BrainDocument,
@@ -34,6 +35,8 @@ export interface CreateDocArgs {
   uploaderRole: string;
   tags?: string[];
   msDriveItemId?: string | null;
+  /** Roles that may be quoted this document. Null/absent = workspace-wide. */
+  audienceRoles?: string[] | null;
   msFileLocalId?: string | null;
   webUrl?: string | null;
 }
@@ -153,8 +156,8 @@ export async function createDocument(
     `INSERT INTO brain_documents
         (ms_drive_item_id, ms_file_local_id, web_url,
          filename, content_type, size_bytes, sha256,
-         kind, status, uploaded_by, uploader_role, tags)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'queued', $9, $10, $11)
+         kind, status, uploaded_by, uploader_role, tags, audience_roles)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'queued', $9, $10, $11, $12)
      RETURNING *`,
     [
       args.msDriveItemId ?? null,
@@ -168,6 +171,9 @@ export async function createDocument(
       args.uploadedBy,
       args.uploaderRole,
       args.tags ?? [],
+      /* NULL, not an empty array: an empty audience would read as "no role may
+         see this", which is not what "unrestricted" means. */
+      args.audienceRoles && args.audienceRoles.length > 0 ? args.audienceRoles : null,
     ],
   );
   const doc = res.rows[0];
@@ -324,13 +330,20 @@ export interface KeywordHit {
 export async function keywordSearch(
   queryText: string,
   limit: number,
-  opts: { uploadedBy?: string; kind?: BrainKind } = {},
+  opts: { uploadedBy?: string; kind?: BrainKind; role?: string } = {},
 ): Promise<KeywordHit[]> {
   const where: string[] = [`bc.tsv @@ websearch_to_tsquery('english', $1)`];
   const args: unknown[] = [queryText];
   if (opts.uploadedBy) {
     args.push(opts.uploadedBy);
     where.push(`bd.uploaded_by = $${args.length}`);
+  }
+  /* WHO IS ASKING, applied in the query rather than after it. Filtering
+     afterwards would mean a restricted document had already been ranked,
+     headlined and counted, and one missed branch would quote it. */
+  if (opts.role && !readsEverything(opts.role)) {
+    args.push(opts.role.toLowerCase());
+    where.push(`(bd.audience_roles IS NULL OR $${args.length} = ANY(bd.audience_roles))`);
   }
   if (opts.kind) {
     args.push(opts.kind);

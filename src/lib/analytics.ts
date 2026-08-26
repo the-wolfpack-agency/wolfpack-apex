@@ -55,6 +55,10 @@ export type InstinctEventType =
      enrichment is not running at all, which is invisible from the document
      rows alone because they still index perfectly well without it. */
   | "brain.document_described"
+  /* Documents a role was not allowed to be quoted. Rising is the audience gate
+     working; flat at zero on a tenant with restricted libraries means it is
+     not being applied at all. */
+  | "brain.retrieval_audience_filtered"
   // Upload-to-Brain widget pre-ingest filter lifecycle. Fires from the
   // /api/brain/upload route which runs the data-quality filter BEFORE
   // delegating to ingest(). `brain.upload_attempted` fires for every

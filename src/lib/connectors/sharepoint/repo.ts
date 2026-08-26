@@ -32,6 +32,7 @@ interface SourceRow extends Record<string, unknown> {
   created_at: string;
   last_synced_at: string | null;
   is_active: boolean;
+  audience_roles?: string[] | null;
 }
 
 interface JobRow extends Record<string, unknown> {
@@ -61,6 +62,14 @@ function rowToSource(r: SourceRow): SharepointSource {
     createdAt: r.created_at,
     lastSyncedAt: r.last_synced_at,
     isActive: r.is_active,
+    /* FAILS CLOSED. A row read before migration 239, or one whose column is
+       somehow null, is admin-only rather than everyone: the default has to be
+       the safe answer, because the unsafe one is invisible until a dealer is
+       quoted an HR file. */
+    audienceRoles:
+      Array.isArray(r.audience_roles) && r.audience_roles.length > 0
+        ? r.audience_roles
+        : ["admin"],
   };
 }
 
