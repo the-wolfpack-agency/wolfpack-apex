@@ -111,10 +111,24 @@ export interface AICompleteRequest {
    * claim it should not have made - so a reviewer is given the draft and
    * returns either SHIP or a correction.
    *
-   * Only asked when the free rules are unsatisfied, so the cost lands on the
-   * answers that need it rather than on re-approving ones that were fine.
+   * `true` asks only when the free rules are unsatisfied. `"always"` asks on
+   * every answer that carries a question.
+   *
+   * WHY "ALWAYS" EXISTS, AND WHY IT IS OFTEN THE RIGHT SETTING. The free rules
+   * catch shape: empty, truncated, refused, deferred, placeholder. A competent
+   * model essentially never produces those, so `true` gates the reviewer
+   * behind a condition that does not occur. Across 28 verified answers in
+   * production, the rules said sufficient 28 times and the reviewer ran zero
+   * times.
+   *
+   * The failure a reviewer is actually for is the opposite kind: an answer
+   * that is well formed, confident, and wrong or half-answered. verification.ts
+   * says so itself, that relevance is exactly the judgement a rule cannot make
+   * and therefore the one place a second model earns its cost. Gating the
+   * reviewer on the rules failing points it at the one case it can least help
+   * with, and away from every case it was built for.
    */
-  improve?: boolean;
+  improve?: boolean | "always";
   /**
    * Send this call to a named provider, whatever selection would prefer.
    *

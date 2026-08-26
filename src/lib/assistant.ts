@@ -2680,11 +2680,21 @@ async function callAI(
        * Turning it on today would buy a small model marking its own homework,
        * which is the weakest form of this idea and reads as assurance. */
       verify: true,
-      /* And let a second model fix it when the rules are unsatisfied. Only
-         fires on answers the free checks already doubted, so the cost lands
-         where it changes the outcome rather than on re-approving answers that
-         were fine. */
-      improve: true,
+      /* And let a second model read every answer before a person does.
+         "always" rather than true, and the difference is the whole control.
+         `true` asks the reviewer only when the free rules are unsatisfied, and
+         the free rules catch shape: empty, truncated, refused, deferred,
+         placeholder. A competent model does not produce those. Production bore
+         that out exactly: 28 verified assistant answers, 28 sufficient, the
+         reviewer ran zero times while the playbook told clients a second model
+         reads every answer.
+         The failure worth catching here is the other kind, an answer that is
+         well formed and confident and wrong, or that answered half the
+         question. That is the judgement verification.ts says a rule cannot
+         make. Reviewing every answered question is what makes the claim true,
+         and at this volume the cost is a rounding error against a bill that
+         ran to 43 cents in sixty days. */
+      improve: "always",
       // Govern the assistant's answers with the OGIAM Agent Constitution. The
       // router prepends it to `system` at the chokepoint.
       apply_constitution: true,
