@@ -120,7 +120,7 @@ export function __resetStrictnessCacheForTests(): void {
 export type QualityVerdict = "ok" | "low_confidence" | "reject";
 
 export interface QualityFlag {
-  filter: "confidence" | "entities" | "citations" | "stale" | "org_facts";
+  filter: "confidence" | "entities" | "citations" | "stale" | "org_facts" | "ungrounded_internal";
   reason: string;
   severity: "warn" | "block";
 }
@@ -128,6 +128,9 @@ export interface QualityFlag {
 export interface QualityCheckInput {
   /** The candidate answer string. */
   answer: string;
+  /** What was asked. Needed to tell a question about the world from a
+   *  question about us, which a model cannot answer without a source. */
+  question?: string;
   /** Top retrieval score (0..1). undefined when no retrieval. */
   topScore?: number;
   /** Number of retrieved hits. */
@@ -205,6 +208,61 @@ export function gateConfidence(
   return {
     filter: "confidence",
     reason: `top retrieval score ${topScore.toFixed(2)} < ${MIN_CONFIDENCE_SCORE} (hits=${hits})`,
+    severity: "block",
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* A1b — ungrounded claims about US                                    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Asking about THIS organisation, not about the world.
+ *
+ * "our Q4 initiative", "we", "the company's process" and our own product names
+ * are all claims only our own records can settle. A model has no way to know
+ * them and every incentive to sound like it does.
+ */
+const ASKS_ABOUT_US =
+  /\b(?:our|we|us|the\s+(?:company|team|agency|firm)(?:'|\u2019)?s?|wolfpack\w*|instinct)\b/i;
+
+/**
+ * A confident answer about us, built from nothing.
+ *
+ * THE FAILURE THIS CATCHES. gateConfidence returns null at zero hits on
+ * purpose: with no retrieval the answer is general knowledge, and gating it
+ * killed "what is Nurburgring" when it was tried in May. That reasoning is
+ * right about the world and wrong about us.
+ *
+ * Measured 2026-08-26 by typing invented terms at the deployed assistant:
+ *
+ *   "WolfpackxPCNA"  -> "the integration between the Wolfpack platform and
+ *                        Porsche Cars North America... inventory management,
+ *                        pricing, incentives and lead handling"
+ *   "our Q4 Falcon initiative" -> "enhancing the Falcon lead distribution
+ *                        engine... optimizing lead routing algorithms"
+ *
+ * WolfpackxPCNA is a SharePoint folder. Falcon does not exist. Both answers
+ * were fluent, specific, and delivered at full confidence with a page link.
+ *
+ * This is the worst failure the product has, worse than a wrong retrieval,
+ * because there is nothing to check it against: a wrong document can be
+ * opened and disagreed with, and an invented process cannot. In front of a
+ * dealer asking about a warranty procedure it is indefensible.
+ *
+ * The world is untouched. "What is Nurburgring" mentions nobody's company and
+ * still answers.
+ */
+export function gateUngroundedClaimAboutUs(
+  question: string,
+  hitCount: number | undefined,
+): QualityFlag | null {
+  if (!question) return null;
+  if ((hitCount ?? 0) > 0) return null;
+  if (!ASKS_ABOUT_US.test(question)) return null;
+  return {
+    filter: "ungrounded_internal",
+    reason: "asked about this organisation with no retrieved source to answer from",
     severity: "block",
   };
 }
@@ -494,6 +552,9 @@ export function runAnswerQualityChecks(
 
   const fConfidence = gateConfidence(input.topScore, input.hitCount);
   if (fConfidence) flags.push(fConfidence);
+
+  const fUngrounded = gateUngroundedClaimAboutUs(input.question ?? "", input.hitCount);
+  if (fUngrounded) flags.push(fUngrounded);
 
   if (input.knownNames) {
     const fEntities = validateEntities(

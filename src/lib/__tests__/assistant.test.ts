@@ -224,10 +224,32 @@ describe("AI fallback", () => {
     expect(result.tokensUsed).toBe(150);
     expect(result.response).toContain("qubits");
 
-    // Verify it cached the response
+    /* NOT CACHED, and that is the point. The answer trips the entity check
+       ("Quantum" opens the sentence and is not on the roster), so the gate
+       hedges it - and an answer we hedge must not become knowledge.
+       Previously saveAnswer ran before the checks, so a hedged or invented
+       answer was written into the curated knowledge base unflagged and served
+       from knowledge_cache at zero tokens forever after. */
+    expect(mockSaveAnswer).not.toHaveBeenCalled();
+  });
+
+  test("an answer that passes the checks IS promoted to knowledge", async () => {
+    mockAIComplete.mockResolvedValueOnce({
+      content: "The kettle boils water using an electric element.",
+      model_used: "test-model",
+      provider_used: "test-provider",
+      input_tokens: 100,
+      output_tokens: 50,
+      cost_usd: 0,
+      latency_ms: 1,
+    });
+
+    const result = await chat("how does a kettle work", "u1", "dev");
+
+    expect(result.source).toBe("ai");
     expect(mockSaveAnswer).toHaveBeenCalledWith(
-      "What is quantum computing?",
-      "Quantum computing uses qubits.",
+      "how does a kettle work",
+      "The kettle boils water using an electric element.",
       "ai",
       "u1",
       undefined,

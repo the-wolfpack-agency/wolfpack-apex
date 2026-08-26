@@ -383,6 +383,18 @@ async function findOrgQACacheHit(
           AND a.content NOT ILIKE 'No meetings recorded%'
           AND a.content NOT ILIKE 'No meetings found%'
           AND a.content NOT ILIKE 'No results found%'
+          /* NEVER REPLAY AN ANSWER WE HEDGED.
+             The quality gate prefixes "this answer may need a second look"
+             onto anything it could not stand behind. Serving that from cache
+             repeats a doubtful answer at zero tokens, for free, indefinitely,
+             with none of the checks that produced the doubt in the path.
+             Measured 2026-08-26: two invented terms typed once each were still
+             being answered with fluent fabrications days later, hedge and all,
+             because the cache does not read its own warning. */
+          AND a.content NOT ILIKE '%may need a second look%'
+          /* And never the canned refusal: it is an absence of an answer, not
+             an answer, and caching it makes the absence permanent. */
+          AND a.content NOT ILIKE '%don''t have a confident answer%'
         ORDER BY u.created_at DESC
         LIMIT 1`,
       [normalized, ttlMs],
@@ -424,6 +436,18 @@ async function findOrgQACacheHit(
           AND u.created_at > NOW() - ($1::bigint || ' milliseconds')::interval
           AND a.source IS DISTINCT FROM 'fallback'
           AND a.tokens_used > 0
+          /* THE SAME GUARDS AS THE EXACT MATCH ABOVE.
+             This is the second lookup in this function and it had none of
+             them, which is the whole reason the exclusions above appeared to
+             do nothing: an invented answer that failed the exact match on
+             punctuation was picked straight back up by the fuzzy one. Two
+             queries against the same table, one filtered and one not, is a
+             filter that only works some of the time. */
+          AND a.content NOT ILIKE '%may need a second look%'
+          AND a.content NOT ILIKE '%don''t have a confident answer%'
+          AND a.content NOT ILIKE 'No meetings recorded%'
+          AND a.content NOT ILIKE 'No meetings found%'
+          AND a.content NOT ILIKE 'No results found%'
         ORDER BY u.created_at DESC
         LIMIT 200`,
       [ttlMs],
@@ -1385,17 +1409,6 @@ export async function chat(
       workflow_id: workflowId,
     });
 
-    // Cache AI response for future zero-token retrieval
-    saveAnswer(
-      message,
-      aiResult.content,
-      "ai",
-      userId,
-      undefined,
-      undefined,
-      aiResult.tokensUsed,
-    ).catch(() => {});
-
     /* Answer-quality gate: validate entities + stale-doc cues + citations
        on the LLM output before it reaches the user. Reject-severity flags
        swap in the deterministic low-confidence message; warn-severity
@@ -1428,6 +1441,8 @@ export async function chat(
     const quality = runAnswerQualityChecks(
       {
         answer: citationCheck.cleanAnswer,
+        /* Needed to tell a question about the world from one about us. */
+        question: message,
         knownNames,
         /* topScore + hitCount + retrievedIds now thread through from the
            brain retrieval. Confidence gate (A1) fires when no real hits
@@ -1447,6 +1462,46 @@ export async function chat(
       },
       { userId, userRole, strictness },
     );
+    /* PROMOTED TO KNOWLEDGE ONLY AFTER IT PASSES.
+     *
+     * This ran the moment the model replied, BEFORE any of the checks below.
+     * So a fabricated answer was written into the curated knowledge base
+     * unflagged, the gate then hedged the copy shown to the person, and every
+     * later asking was served the original from knowledge_cache at zero tokens
+     * with no gate in the path at all.
+     *
+     * Measured 2026-08-26: "WolfpackxPCNA" - the name of a SharePoint folder -
+     * had become a knowledge entry reading "the integration between the
+     * Wolfpack platform and Porsche Cars North America... inventory
+     * management, pricing, incentives and lead handling". None of it exists.
+     * It answered at zero tokens, indistinguishable from something a person
+     * had written and approved.
+     *
+     * That is a poisoning loop rather than a bad answer: the model invents
+     * once and the product repeats it forever, with more authority each time,
+     * because a cached answer looks curated. An answer worth keeping is one
+     * that survived the checks, so the write moves after them.
+     */
+    if (quality.verdict === "ok" && quality.flags.length === 0) {
+      saveAnswer(
+        message,
+        citationCheck.cleanAnswer,
+        "ai",
+        userId,
+        undefined,
+        undefined,
+        aiResult.tokensUsed,
+      ).catch(() => {});
+    } else {
+      trackEvent("assistant.answer_not_promoted", userId, userRole, {
+        /* How often the model produces something not worth keeping. Rising
+           says the prompt or the grounding needs work, and it was invisible
+           while every answer was kept regardless. */
+        verdict: quality.verdict,
+        flags: quality.flags.map((f) => f.filter).join(","),
+      });
+    }
+
     let safeContent = citationCheck.cleanAnswer;
     if (quality.verdict === "reject") {
       /* Append the "Try one of these instead:" lead-in so the inline

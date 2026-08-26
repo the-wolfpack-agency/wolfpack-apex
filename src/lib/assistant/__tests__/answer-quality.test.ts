@@ -16,6 +16,7 @@ jest.mock("@/lib/db", () => ({
 }));
 
 import {
+  gateUngroundedClaimAboutUs,
   MIN_CONFIDENCE_SCORE,
   STALE_DOC_AGE_MS,
   gateConfidence,
@@ -649,5 +650,65 @@ describe("names corroborated by the material they came from", () => {
     expect(
       validateEntities("Sessions were held there.", ROSTER, "sessions were held"),
     ).toBeNull();
+  });
+});
+
+/* ---------------------------------------------------------------------
+ * A confident answer about US, built from nothing.
+ *
+ * gateConfidence returns null at zero hits on purpose: with no retrieval the
+ * answer is general knowledge, and gating it killed "what is Nurburgring" when
+ * that was tried in May. Right about the world, wrong about us.
+ *
+ * Measured by typing invented terms at the deployed assistant:
+ *   "WolfpackxPCNA"             -> "the integration between the Wolfpack
+ *                                   platform and Porsche Cars North America"
+ *   "our Q4 Falcon initiative"  -> "enhancing the Falcon lead distribution
+ *                                   engine, optimizing lead routing"
+ *
+ * WolfpackxPCNA is a SharePoint folder. Falcon does not exist. Both were
+ * fluent, specific and delivered at full confidence.
+ *
+ * Worse than a wrong retrieval, because there is nothing to check it against:
+ * a wrong document can be opened and disagreed with, an invented process
+ * cannot. In front of a dealer asking about a warranty procedure it is
+ * indefensible.
+ * --------------------------------------------------------------- */
+describe("questions about us cannot be answered from nothing", () => {
+  it.each([
+    "what is our Q4 Falcon initiative",
+    "WolfpackxPCNA",
+    "what does our escalation process look like",
+    "how do we handle warranty claims",
+    "what is the company's travel policy",
+  ])("%s is blocked with no retrieval behind it", (q) => {
+    expect(gateUngroundedClaimAboutUs(q, 0)).not.toBeNull();
+  });
+
+  /* THE MAY REGRESSION THIS MUST NOT REPEAT. The world is still answerable. */
+  it.each([
+    "what is Nurburgring",
+    "what is a VIN",
+    "who was Ferdinand Porsche",
+    "what does horsepower mean",
+  ])("%s still answers", (q) => {
+    expect(gateUngroundedClaimAboutUs(q, 0)).toBeNull();
+  });
+
+  /* With a source behind it, an internal question is exactly what the product
+     is for. The gate is about absence of grounding, not about the subject. */
+  it("allows an internal question when something was retrieved", () => {
+    expect(gateUngroundedClaimAboutUs("what is our travel policy", 3)).toBeNull();
+  });
+
+  /* KNOWN LIMIT, RECORDED. A question naming no company reads as general
+     knowledge, so an invented external-sounding term still gets a
+     general-knowledge answer: "what is the Zentrala protocol" is answered.
+     Widening to any unknown proper noun would take Nurburgring with it, which
+     is the regression this gate is careful not to repeat. The real remedy is
+     grounding: with the library loaded, the answer comes from a document or
+     says there is none. */
+  it("does not catch an invented term that names no organisation", () => {
+    expect(gateUngroundedClaimAboutUs("what is the Zentrala protocol", 0)).toBeNull();
   });
 });
