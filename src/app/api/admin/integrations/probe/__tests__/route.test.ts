@@ -14,9 +14,6 @@ jest.mock("@/lib/auth/require-capability", () => ({
   requireCapability: (...a: unknown[]) => mockRequireCap(...a),
 }));
 
-const mockQuery = jest.fn();
-jest.mock("@/lib/db", () => ({ query: (...a: unknown[]) => mockQuery(...a) }));
-
 const mockToken = jest.fn();
 jest.mock("@/lib/microsoft-graph", () => ({
   getValidToken: (...a: unknown[]) => mockToken(...a),
@@ -33,7 +30,7 @@ jest.mock("@/lib/integrations/probe", () => ({
   probeAll: (...a: unknown[]) => mockProbeAll(...a),
 }));
 
-const CTO = { id: "u_cto", role: "cto", workspaceId: "ws-1" };
+const CTO = { id: "u_cto", email: "cto@wolfpack.test", role: "cto", workspaceId: "ws-1" };
 
 function req(): any {
   return { url: "http://x/api/admin/integrations/probe", headers: new Headers() };
@@ -42,7 +39,6 @@ function req(): any {
 beforeEach(() => {
   jest.clearAllMocks();
   mockRequireCap.mockResolvedValue({ ok: true, user: CTO, capabilities: new Set() });
-  mockQuery.mockResolvedValue({ rows: [{ connected_by: "u-ms" }] });
   mockToken.mockResolvedValue({ accessToken: "tok", userEmail: "a@b.c" });
   mockProbeAll.mockResolvedValue([{ label: "People", verdict: "works", detail: "3 item(s)" }]);
 });
@@ -74,8 +70,12 @@ describe("refusing to report what it did not observe", () => {
     expect(mockProbeAll).not.toHaveBeenCalled();
   });
 
-  it("probes nothing when no account is connected", async () => {
-    mockQuery.mockResolvedValue({ rows: [] });
+  it("probes nothing when the caller has no account to probe with", async () => {
+    mockRequireCap.mockResolvedValue({
+      ok: true,
+      user: { ...CTO, email: "" },
+      capabilities: new Set(),
+    });
     const { POST } = await import("@/app/api/admin/integrations/probe/route");
     const res = await POST(req());
     expect(res.status).toBe(409);
@@ -114,12 +114,14 @@ describe("when it can genuinely probe", () => {
     expect(res.status).toBe(200);
   });
 
-  /* Probing with another workspace's token would answer a question nobody
-     asked, and would do it using somebody else's credential. */
-  it("picks the connected account from this workspace only", async () => {
+  /* PROBES AS THE CALLER. The first version picked whichever token row was
+     most recently updated, which let an administrator spend a colleague's
+     credential without either of them choosing it, and filtered on a
+     workspace_id column that does not exist on that table. */
+  it("probes with the caller's own connected account", async () => {
     const { POST } = await import("@/app/api/admin/integrations/probe/route");
     await POST(req());
-    expect(String(mockQuery.mock.calls[0][0])).toMatch(/workspace_id = \$1/);
-    expect(mockQuery.mock.calls[0][1]).toEqual(["ws-1"]);
+    expect(mockToken).toHaveBeenCalledWith("cto@wolfpack.test");
+    expect(mockProbeAll).toHaveBeenCalledWith("cto@wolfpack.test");
   });
 });
