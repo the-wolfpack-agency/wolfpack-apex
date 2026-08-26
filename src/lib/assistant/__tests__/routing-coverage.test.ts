@@ -18,7 +18,11 @@ describe("routing coverage", () => {
      somebody deliberately editing this line, which is the point. */
   /* Raised from 22 on 2026-08-26 after the day cluster landed. The ratchet only
      ever goes up, and it goes up in the same change that earns it. */
-  const FLOOR = 25;
+  /* Raised from 25 to 30 on 2026-08-26 by the pilot_status tool. The status
+     cluster was the last WHOLLY dead group in the audit: three prompts, no
+     tool, because no tool existed. Measured 27 before and 30 after, on the
+     same 36-prompt corpus. */
+  const FLOOR = 30;
 
   it(`routes at least ${FLOOR} of the audit prompts to exactly one tool`, async () => {
     const r = await auditRouting();
@@ -32,10 +36,18 @@ describe("routing coverage", () => {
     const dead = Object.entries(r.byGroup)
       .filter(([, v]) => v.none === v.total)
       .map(([g]) => g);
-    /* status: "what's blocking the pilot", "how is the pilot going", "what's
-       left to do". Nothing answers a question about how work is going, which
-       is the question a client asks first. Recorded, not hidden. */
-    expect(dead).toEqual(["status"]);
+    /* EMPTY, as of the pilot_status tool on 2026-08-26.
+     *
+     * This asserted ["status"] for one day. "what's blocking the pilot", "how
+     * is the pilot going" and "what's left to do" reached no tool because no
+     * tool existed, and it is the question a client asks first. The entry came
+     * out in the same change that made it untrue, which is what this list is
+     * for: a dead cluster is a missing capability, and it is meant to be
+     * argued with until somebody builds the thing.
+     *
+     * Still an assertion rather than a deletion, because the next capability
+     * gap should fail here rather than be discovered by a client. */
+    expect(dead).toEqual([]);
   });
 
   it("keeps the audit corpus from shrinking to flatter the score", async () => {
@@ -52,6 +64,18 @@ describe("the phrasings fixed on 2026-08-26", () => {
     ["what tasks do I have", "task_list_widget"],
     ["when is my next meeting", "calendar_widget"],
     ["what is my next meeting", "calendar_widget"],
+    /* The status cluster. Every one of these reached nothing at all until the
+       tool existed, and they are the three sentences the audit measured. */
+    ["what's blocking the pilot", "pilot_status"],
+    ["how is the pilot going", "pilot_status"],
+    ["what's left to do", "pilot_status"],
+    /* The phrasings a client uses for the same question, which is the point of
+       having a tool rather than a keyword. */
+    ["where are we on the project", "pilot_status"],
+    ["are we on track", "pilot_status"],
+    ["how are we tracking", "pilot_status"],
+    ["what's at risk", "pilot_status"],
+    ["give me a status update on the engagement", "pilot_status"],
   ])("%s reaches %s", async (prompt, tool) => {
     await import("@/lib/assistant/tools");
     const { getTools } = await import("@/lib/assistant/tools/registry");
@@ -73,4 +97,50 @@ describe("the phrasings fixed on 2026-08-26", () => {
       expect(claimed).toHaveLength(0);
     },
   );
+});
+
+/**
+ * The boundary between "how is the engagement going" and "what is on my plate".
+ *
+ * pilot_status and task_list_widget both answer a question about outstanding
+ * work, and the difference is scope, not vocabulary: a personal to-do question
+ * belongs to the task list, an engagement question belongs to status. A widened
+ * matcher on either side turns one of them into a tool that confidently answers
+ * a question that was not for it, which the audit rates as worse than reaching
+ * nothing.
+ *
+ * Pinned in both directions so neither can drift into the other.
+ */
+describe("pilot_status does not trespass on the personal task list", () => {
+  async function claimants(prompt: string): Promise<string[]> {
+    await import("@/lib/assistant/tools");
+    const { getTools } = await import("@/lib/assistant/tools/registry");
+    return (getTools() as unknown as Array<{ name: string; matchIntent?: (m: string) => unknown }>)
+      .filter((t) => typeof t.matchIntent === "function" && t.matchIntent(prompt) != null)
+      .map((t) => t.name);
+  }
+
+  /* These are somebody's own to-do list, not a question about an engagement. */
+  it.each([
+    "what are my tasks",
+    "anything overdue",
+    "what's on my plate",
+    "what have I got outstanding",
+    "my tasks",
+  ])("%s stays with the task list", async (prompt) => {
+    const got = await claimants(prompt);
+    expect(got).not.toContain("pilot_status");
+  });
+
+  /* And the engagement questions must reach exactly one tool, not two. A
+     second claimant is how a prompt stops counting in the audit even though
+     both tools "work". */
+  it.each([
+    "what's blocking the pilot",
+    "how is the pilot going",
+    "what's left to do",
+    "where do we stand",
+  ])("%s reaches pilot_status and nothing else", async (prompt) => {
+    expect(await claimants(prompt)).toEqual(["pilot_status"]);
+  });
 });

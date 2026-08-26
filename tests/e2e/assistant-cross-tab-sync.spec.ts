@@ -22,6 +22,7 @@ import {
   stubInstinctSession,
   collectConsoleAndNetworkFailures,
 } from "./helpers/smoke-helpers";
+import { submitComposer } from "./helpers/assistant-composer";
 
 const target = resolveSmokeTarget();
 
@@ -158,7 +159,7 @@ test.describe("assistant chat — cross-tab BroadcastChannel sync", () => {
       // Send a message from Tab A.
       const input = tabA.getByPlaceholder(/ask|message|type/i).first();
       await input.fill("hello from tab A");
-      await input.press("Enter");
+      await submitComposer(tabA);
 
       // Tab A should show the assistant reply.
       await expect(
@@ -274,7 +275,7 @@ test.describe("assistant chat — cross-tab BroadcastChannel sync", () => {
 
       const input1 = tabIso1.getByPlaceholder(/ask|message|type/i).first();
       await input1.fill("only context 1 should see this");
-      await input1.press("Enter");
+      await submitComposer(tabIso1);
 
       await expect(tabIso1.getByText("isolated reply").first()).toBeVisible({
         timeout: 5_000,

@@ -142,6 +142,13 @@ import "./vercel-deployments-widget-tool";
  * surfaces signals no single tool can see. Rule-based detection;
  * zero AI tokens for the patterns themselves. */
 import "./cross-tool-insights-widget-tool";
+/* Pilot status — joins the calendar, the Brain and the task store into one
+ * answer to "how is the pilot going". The routing audit on 2026-08-26 found
+ * this whole cluster reaching NO tool: not a phrasing gap, a missing
+ * capability, and the first question a client asks. Registered next to
+ * cross-tool insights because it is the same idea (a fact no single
+ * integration holds) pointed at an engagement rather than at efficiency. */
+import "./pilot-status-tool";
 /* Integrations list — discoverability surface auto-discovered from
  * the search-provider + tool registries. */
 import "./integrations-list-widget-tool";

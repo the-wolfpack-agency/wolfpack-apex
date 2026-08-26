@@ -15,6 +15,7 @@ import {
   resolveSmokeTarget,
   stubInstinctSession,
 } from "./helpers/smoke-helpers";
+import { submitComposer } from "./helpers/assistant-composer";
 
 const target = resolveSmokeTarget();
 
@@ -126,7 +127,7 @@ test.describe("Cross-tool insights + integrations list widgets", () => {
 
     const composer = page.getByTestId("assistant-composer-input");
     await composer.fill("show me cross-tool insights");
-    await composer.press("Enter");
+    await submitComposer(page);
 
     await expect(page.getByTestId("cross-tool-insights-widget")).toBeVisible({
       timeout: 10_000,
@@ -158,7 +159,7 @@ test.describe("Cross-tool insights + integrations list widgets", () => {
 
     const composer = page.getByTestId("assistant-composer-input");
     await composer.fill("list integrations");
-    await composer.press("Enter");
+    await submitComposer(page);
 
     await expect(page.getByTestId("integrations-list-widget")).toBeVisible({ timeout: 10_000 });
     for (const it of INTEGRATIONS_LIST_RESPONSE.widget.items) {

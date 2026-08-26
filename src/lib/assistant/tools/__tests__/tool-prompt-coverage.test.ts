@@ -57,6 +57,26 @@ const TOOL_PROMPTS: Record<string, string[]> = {
     "create a document called Q4 pilot notes",
     "make a new document for the client brief",
   ],
+  /* STATUS. The question a client asks first, and the one that reached no
+     tool at all until 2026-08-26 because no tool existed. Deliberately more
+     phrasings than any other entry here: "how is it going" has no canonical
+     wording, and a status tool reachable only by the word "status" would be a
+     tool nobody reaches. Every one of these is a sentence somebody said in a
+     meeting, not a paraphrase of the function name. */
+  pilot_status: [
+    "how is the pilot going",
+    "what's blocking the pilot",
+    "what's left to do",
+    "where are we on the project",
+    "where do we stand",
+    "are we on track",
+    "how are we tracking",
+    "what's at risk",
+    "what's in our way",
+    "give me a status update on the engagement",
+    "how's the rollout going",
+    "what's outstanding on the pilot",
+  ],
   who_is: ["who is Jorge", "who is Ashley Martinez"],
   execute_agent_widget: ["run the agent", "execute agent task"],
   recent_workflow_runs: ["what happened in CI today", "show me the latest CI runs"],
