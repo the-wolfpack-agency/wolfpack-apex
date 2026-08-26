@@ -32,6 +32,19 @@ function inline(text: string): string {
 }
 
 /** Render a Markdown string to sanitized HTML. */
+/**
+ * A heading's anchor. Lowercase, words joined by hyphens, everything else
+ * dropped. Two headings with the same words collide, which is the correct
+ * trade: disambiguating with a counter produces links that silently retarget
+ * when a section is added above them.
+ */
+export function headingSlug(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
 export function renderMarkdown(md: string): string {
   if (!md || typeof md !== "string") return "";
   const lines = md.replace(/\r\n/g, "\n").split("\n");
@@ -63,7 +76,12 @@ export function renderMarkdown(md: string): string {
     if (h) {
       // The page title is the h1, so body headings start at h2: `##` -> h2, `###` -> h3.
       const level = Math.min(Math.max(h[1].length, 2), 5);
-      out.push(`<h${level}>${inline(esc(h[2].trim()))}</h${level}>`);
+      const text = h[2].trim();
+      /* An id per heading, so a long document can carry its own contents list
+         and a section can be linked to directly. Derived from the text rather
+         than from a counter: a link that survives an edit elsewhere in the
+         document is the only kind worth having. */
+      out.push(`<h${level} id="${esc(headingSlug(text))}">${inline(esc(text))}</h${level}>`);
       i++;
       continue;
     }

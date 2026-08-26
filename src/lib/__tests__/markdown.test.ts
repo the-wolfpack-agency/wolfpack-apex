@@ -10,7 +10,7 @@ import { renderMarkdown } from "@/lib/markdown";
 describe("renderMarkdown", () => {
   it("renders headings, bold, italic, and inline code", () => {
     const html = renderMarkdown("## Title\n\nSome **bold** and _em_ and `code`.");
-    expect(html).toContain("<h2>Title</h2>");
+    expect(html).toContain('<h2 id="title">Title</h2>');
     expect(html).toContain("<strong>bold</strong>");
     expect(html).toContain("<em>em</em>");
     expect(html).toContain("<code>code</code>");
@@ -65,5 +65,31 @@ describe("renderMarkdown", () => {
   it("returns empty string for empty / non-string input", () => {
     expect(renderMarkdown("")).toBe("");
     expect(renderMarkdown(undefined as unknown as string)).toBe("");
+  });
+});
+
+/**
+ * Anchors, so a long document can carry its own contents list.
+ *
+ * Derived from the heading text rather than from a counter, because a link
+ * built on position silently retargets the moment somebody inserts a section
+ * above it, and a wrong link is worse than a missing one.
+ */
+describe("heading anchors", () => {
+  it("slugs the words and drops the punctuation", () => {
+    expect(renderMarkdown("## Phase 1: documents, read only")).toContain(
+      'id="phase-1-documents-read-only"',
+    );
+  });
+
+  it("does not leave a trailing hyphen when a heading ends in punctuation", () => {
+    expect(renderMarkdown("## What is verified?")).toContain('id="what-is-verified"');
+  });
+
+  it("anchors every level, not only h2", () => {
+    const html = renderMarkdown("## Two\n\n### Three\n\n#### Four");
+    expect(html).toContain('<h2 id="two">');
+    expect(html).toContain('<h3 id="three">');
+    expect(html).toContain('<h4 id="four">');
   });
 });

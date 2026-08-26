@@ -10,9 +10,10 @@
  * in front of a client.
  */
 import "@testing-library/jest-dom";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import PlaybookPage from "../page";
 import { CLIENT_DEPLOYMENT_PLAYBOOK } from "@/lib/playbook";
+import { renderMarkdown, headingSlug } from "@/lib/markdown";
 
 describe("the client deployment playbook page", () => {
   it("renders", () => {
@@ -206,5 +207,56 @@ describe("the questions they will ask", () => {
   it("keeps writes behind a person and behind phase five", () => {
     expect(CLIENT_DEPLOYMENT_PLAYBOOK).toMatch(/Not until phase five/i);
     expect(CLIENT_DEPLOYMENT_PLAYBOOK).toMatch(/requires an approval before it runs/i);
+  });
+});
+
+/**
+ * The document has to be readable, not merely correct.
+ *
+ * It shipped with the right words and no styling: headings at body weight,
+ * table cells run together into "Microsoft 365 tenant consentTheir IT", and
+ * both architecture diagrams collapsed into prose because they were indented
+ * rather than fenced. Every assertion above passed the whole time, because
+ * they all read the source string and none of them looked at what a person
+ * actually gets.
+ */
+describe("the playbook renders as a document a person can read", () => {
+  const html = renderMarkdown(CLIENT_DEPLOYMENT_PLAYBOOK);
+
+  /* Indented blocks are not code blocks to this renderer, so an ASCII diagram
+     written that way silently becomes a paragraph of run-together spaces.
+     That is exactly how both diagrams were lost. */
+  it("keeps the architecture diagrams as diagrams", () => {
+    expect((html.match(/<pre>/g) ?? []).length).toBeGreaterThanOrEqual(2);
+    expect(html).toMatch(/<pre><code>their people/);
+  });
+
+  it("renders the tables as tables", () => {
+    expect((html.match(/<table>/g) ?? []).length).toBeGreaterThanOrEqual(5);
+  });
+
+  it("gives every section an anchor, so the contents rail can reach it", () => {
+    const headings = CLIENT_DEPLOYMENT_PLAYBOOK.split("\n").filter((l) => /^##\s+/.test(l));
+    expect(headings.length).toBeGreaterThan(5);
+    for (const h of headings) {
+      expect(html).toContain(`id="${headingSlug(h.replace(/^##\s+/, "").trim())}"`);
+    }
+  });
+
+  it("carries a contents entry for every section", () => {
+    render(<PlaybookPage />);
+    const nav = screen.getByRole("navigation", { name: /sections/i });
+    const links = within(nav).getAllByRole("link");
+    const sectionCount = CLIENT_DEPLOYMENT_PLAYBOOK.split("\n").filter((l) =>
+      /^##\s+/.test(l),
+    ).length;
+    expect(links).toHaveLength(sectionCount);
+  });
+
+  /* The body must claim the shared stylesheet. Without the class the page
+     renders exactly as it shipped: correct, and unreadable. */
+  it("applies the shared markdown styling", () => {
+    render(<PlaybookPage />);
+    expect(screen.getByTestId("client-deployment-playbook").querySelector(".wp-md")).not.toBeNull();
   });
 });

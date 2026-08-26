@@ -521,3 +521,218 @@ a:hover { color: var(--wp-gold-hover); }
     transition: none;
   }
 }
+
+/* ---------------------------------------------------------------------------
+ * .wp-md — how rendered markdown looks, in one place.
+ *
+ * These rules were written for the engineering wiki and lived inside its
+ * component, so the playbook page shipped with NO styling at all: headings
+ * rendered at body weight, table cells ran together into "Microsoft 365 tenant
+ * consentTheir IT", and the whole document read as one grey block. The rules
+ * were not missing, they were unreachable, which is the argument for them
+ * being here rather than inside whichever component happened to need them
+ * first.
+ *
+ * Two of these fix bugs that are not obvious and will look removable:
+ *   - list-style is set explicitly because Tailwind Preflight resets it to
+ *     none globally, which flattens every list into prose.
+ *   - a table gets a min-width and its wrapper scrolls, because otherwise the
+ *     browser shrinks each column to fit and stacks short words one letter
+ *     per line while still clipping the last column.
+ * ------------------------------------------------------------------------ */
+.wp-md {
+  color: var(--wp-text, #e8eaed);
+  font-size: 0.95rem;
+  line-height: 1.7;
+  overflow-wrap: break-word;
+}
+.wp-md > *:first-child { margin-top: 0; }
+.wp-md h2,
+.wp-md h3 {
+  color: var(--wp-gold, #e8b528);
+  font-weight: 700;
+  line-height: 1.3;
+  text-wrap: balance;
+}
+/* A section opening needs air above it far more than below it: the gap is what
+   tells a reader a new argument has started. */
+.wp-md h2 {
+  font-size: 1.3rem;
+  margin: 2.6rem 0 0.9rem;
+  padding-top: 1.4rem;
+  border-top: 1px solid var(--wp-dark-border, rgba(255, 255, 255, 0.1));
+}
+.wp-md h3 { font-size: 1.1rem; margin: 1.8rem 0 0.6rem; }
+.wp-md h4,
+.wp-md h5 {
+  color: var(--wp-text, #e8eaed);
+  font-weight: 700;
+  margin: 1.2rem 0 0.5rem;
+}
+.wp-md h4 { font-size: 1rem; }
+.wp-md h5 { font-size: 0.92rem; }
+.wp-md p { margin: 0.8rem 0; max-width: 74ch; }
+/* Tailwind Preflight sets list-style: none globally. Without this every list
+   in the document reads as unbroken prose. */
+.wp-md ul { list-style: disc outside; margin: 0.8rem 0; padding-left: 1.4rem; max-width: 74ch; }
+.wp-md ol { list-style: decimal outside; margin: 0.8rem 0; padding-left: 1.6rem; max-width: 74ch; }
+.wp-md li { margin: 0.45rem 0; padding-left: 0.25rem; line-height: 1.65; }
+.wp-md li::marker { color: var(--wp-gold, #e8b528); font-weight: 700; }
+.wp-md ul ul, .wp-md ul ol, .wp-md ol ul, .wp-md ol ol { margin: 0.35rem 0; }
+.wp-md strong { color: var(--wp-text, #e8eaed); font-weight: 700; }
+.wp-md a { color: var(--wp-gold, #e8b528); text-decoration: underline; }
+.wp-md code {
+  background: var(--wp-dark-surface, rgba(255, 255, 255, 0.06));
+  border: 1px solid var(--wp-dark-border, rgba(255, 255, 255, 0.1));
+  border-radius: 4px;
+  padding: 0.1rem 0.35rem;
+  font-size: 0.85em;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+/* Diagrams live in here. They are drawn with spaces, so the box must never
+   wrap and must scroll instead. */
+.wp-md pre {
+  background: var(--wp-dark-surface, rgba(255, 255, 255, 0.06));
+  border: 1px solid var(--wp-dark-border, rgba(255, 255, 255, 0.1));
+  border-radius: 10px;
+  padding: 1.1rem 1.2rem;
+  overflow-x: auto;
+  margin: 1.1rem 0;
+}
+.wp-md pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 0.84rem;
+  line-height: 1.55;
+  white-space: pre;
+  color: var(--wp-text, #e8eaed);
+}
+.wp-md blockquote {
+  border-left: 3px solid var(--wp-gold, #e8b528);
+  margin: 1rem 0;
+  padding: 0.2rem 0 0.2rem 1rem;
+  color: var(--wp-text-muted, #929cad);
+}
+/* The wrapper scrolls so the table keeps its natural column widths instead of
+   being squeezed by the content column. */
+.wp-md .wiki-table { overflow-x: auto; margin: 1rem 0 1.5rem; }
+.wp-md table { border-collapse: collapse; margin: 0; width: 100%; min-width: 560px; }
+.wp-md th,
+.wp-md td {
+  border: 1px solid var(--wp-dark-border, rgba(255, 255, 255, 0.12));
+  padding: 0.6rem 0.8rem;
+  text-align: left;
+  vertical-align: top;
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+.wp-md th {
+  background: var(--wp-dark-surface, rgba(255, 255, 255, 0.05));
+  color: var(--wp-gold, #e8b528);
+  font-weight: 700;
+  white-space: nowrap;
+}
+.wp-md tbody tr:nth-child(even) { background: rgba(255, 255, 255, 0.02); }
+
+/* ---------------------------------------------------------------------------
+ * /playbook — a long document with somewhere to stand.
+ *
+ * The rail is sticky because the reason to look at a contents list is almost
+ * always that you are already a long way down the page.
+ * ------------------------------------------------------------------------ */
+.wp-playbook {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 1.75rem 1.5rem 5rem;
+}
+.wp-playbook-head { margin-bottom: 2rem; }
+.wp-playbook-eyebrow {
+  color: var(--wp-gold, #e8b528);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  margin: 0 0 0.5rem;
+}
+.wp-playbook-head h1 {
+  color: var(--wp-text, #e8eaed);
+  font-size: clamp(1.6rem, 3.4vw, 2.2rem);
+  font-weight: 700;
+  line-height: 1.15;
+  margin: 0 0 0.6rem;
+  text-wrap: balance;
+}
+.wp-playbook-sub {
+  color: var(--wp-text-muted, #929cad);
+  font-size: 0.95rem;
+  line-height: 1.6;
+  max-width: 70ch;
+  margin: 0;
+}
+.wp-playbook-layout {
+  display: flex;
+  align-items: flex-start;
+  gap: 2.5rem;
+}
+.wp-playbook-toc {
+  flex: 0 0 232px;
+  position: sticky;
+  top: 1.5rem;
+  max-height: calc(100vh - 3rem);
+  overflow-y: auto;
+  padding-right: 0.75rem;
+  border-right: 1px solid var(--wp-dark-border, rgba(255, 255, 255, 0.1));
+}
+.wp-playbook-toc-title {
+  color: var(--wp-text-muted, #929cad);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  margin: 0 0 0.7rem;
+}
+/* Numbered because the order of the phases IS the argument this document
+   makes. On any other page this would be decoration; here it is the content. */
+.wp-playbook-toc ol {
+  list-style: decimal outside;
+  margin: 0;
+  padding-left: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.wp-playbook-toc li::marker { color: var(--wp-text-muted, #929cad); font-size: 0.75rem; }
+.wp-playbook-toc a {
+  color: var(--wp-text-muted, #929cad);
+  font-size: 0.82rem;
+  line-height: 1.4;
+  text-decoration: none;
+  display: block;
+}
+.wp-playbook-toc a:hover,
+.wp-playbook-toc a:focus-visible { color: var(--wp-gold, #e8b528); }
+.wp-playbook-body { flex: 1 1 auto; min-width: 0; }
+/* An anchored heading must not land under the sticky header. */
+.wp-playbook-body h2,
+.wp-playbook-body h3 { scroll-margin-top: 1.5rem; }
+
+@media (max-width: 900px) {
+  .wp-playbook { padding: 1.25rem 1rem 4rem; }
+  .wp-playbook-layout { flex-direction: column; gap: 1.5rem; }
+  .wp-playbook-toc {
+    position: static;
+    flex: 1 1 auto;
+    width: 100%;
+    max-height: none;
+    padding-right: 0;
+    padding-bottom: 1rem;
+    border-right: none;
+    border-bottom: 1px solid var(--wp-dark-border, rgba(255, 255, 255, 0.1));
+  }
+  .wp-playbook-toc ol {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 0.45rem 1rem;
+  }
+}

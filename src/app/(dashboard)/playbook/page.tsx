@@ -10,9 +10,21 @@
  * a markdown file at request time depends on that file being traced into the
  * serverless bundle, and this repo has already lost /engineering to a markdown
  * path that did not survive the build.
+ *
+ * WHY IT LOOKS LIKE THIS. It shipped with the right words and no styling at
+ * all: every heading at body weight, tables run together into "Microsoft 365
+ * tenant consentTheir IT", and the two architecture diagrams collapsed into
+ * prose because they were indented rather than fenced. Read end to end it was
+ * one grey block, which is a document nobody finishes.
+ *
+ * A long document also needs somewhere to stand. The contents rail is built
+ * from the headings themselves rather than hand-listed, so a section added to
+ * the source appears in the rail without anybody remembering to add it. That
+ * matters more here than on a normal page: this document is explicitly
+ * expected to grow.
  */
 import type { Metadata } from "next";
-import { renderMarkdown } from "@/lib/markdown";
+import { renderMarkdown, headingSlug } from "@/lib/markdown";
 import { CLIENT_DEPLOYMENT_PLAYBOOK, PLAYBOOK_UPDATED } from "@/lib/playbook";
 
 export const metadata: Metadata = {
@@ -20,6 +32,15 @@ export const metadata: Metadata = {
   description:
     "How a client engagement is run: what has to exist first, the order the phases ship in, and when to stop and re-plan.",
 };
+
+/** The h2s, in document order. The rail is the document's own shape. */
+function sections(md: string): { id: string; label: string }[] {
+  return md
+    .split("\n")
+    .filter((l) => /^##\s+/.test(l))
+    .map((l) => l.replace(/^##\s+/, "").trim())
+    .map((label) => ({ id: headingSlug(label), label }));
+}
 
 export default function PlaybookPage() {
   /* The page owns the title and the updated date, so the document's own H1 and
@@ -31,6 +52,8 @@ export default function PlaybookPage() {
     "",
   );
   const html = renderMarkdown(body);
+  const toc = sections(body);
+
   return (
     <main className="wp-playbook" data-testid="client-deployment-playbook">
       <header className="wp-playbook-head">
@@ -41,12 +64,26 @@ export default function PlaybookPage() {
           argument; the dates inside them move as capability does.
         </p>
       </header>
-      {/* renderMarkdown escapes every piece of text and emits only a fixed tag
-          whitelist, so there is no caller-supplied HTML to sanitize here. */}
-      <article
-        className="wp-playbook-body"
-        dangerouslySetInnerHTML={{ __html: html }}
-      />
+
+      <div className="wp-playbook-layout">
+        <nav className="wp-playbook-toc" aria-label="Sections">
+          <p className="wp-playbook-toc-title">Contents</p>
+          <ol>
+            {toc.map((s) => (
+              <li key={s.id}>
+                <a href={`#${s.id}`}>{s.label}</a>
+              </li>
+            ))}
+          </ol>
+        </nav>
+
+        {/* renderMarkdown escapes every piece of text and emits only a fixed tag
+            whitelist, so there is no caller-supplied HTML to sanitize here. */}
+        <article
+          className="wp-playbook-body wp-md"
+          dangerouslySetInnerHTML={{ __html: html }}
+        />
+      </div>
     </main>
   );
 }
