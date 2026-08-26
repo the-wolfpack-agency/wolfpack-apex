@@ -145,3 +145,63 @@ describe("agents, and the gate", () => {
     expect(CLIENT_DEPLOYMENT_PLAYBOOK).toMatch(/Not in phase one/i);
   });
 });
+
+/**
+ * The questions a client asks, and whether we still answer them.
+ *
+ * Every answer in this section is a claim about something that exists today.
+ * That is exactly the kind of text that rots: a control gets renamed, a
+ * boundary gets softened to sound better, and nobody notices until it is being
+ * read back to us in a room. These pin the claims that would be embarrassing
+ * to have quietly lost, and the two boundaries we must never overstate.
+ */
+describe("the questions they will ask", () => {
+  it("keeps the section", () => {
+    expect(CLIENT_DEPLOYMENT_PLAYBOOK).toContain(
+      "The questions they will ask, and the answer we already have",
+    );
+  });
+
+  it.each([
+    ["separate databases per client", /One client, one database/i],
+    ["the build-failing tenancy scan", /fails the build if any workspace-scoped query is missing its filter/i],
+    ["redaction in both directions", /redacted for credentials and identifiers on\s*the way out and again on the way back/i],
+    ["not training on their data", /is not used to\s*train a model/i],
+    ["the audit log holding no content", /holds the reference, never the content/i],
+    ["an agent being unable to invent a capability", /cannot invent a capability/i],
+    ["a named accountable person", /who acted, and who authorised/i],
+    ["refusing rather than guessing", /refused rather than guessed/i],
+    ["untrusted retrieved text", /marked as untrusted/i],
+    ["the exportable source of truth", /It is their database/i],
+  ])("still answers on %s", (_label, pattern) => {
+    expect(CLIENT_DEPLOYMENT_PLAYBOOK).toMatch(pattern);
+  });
+
+  /* The ceiling, in the words that make it a control rather than a setting.
+     A ceiling that is not counted on refusals, or that opens when it cannot be
+     read, is not a ceiling, so the answer has to keep saying both. */
+  it("answers what stops an agent running away, and how", () => {
+    expect(CLIENT_DEPLOYMENT_PLAYBOOK).toMatch(/What stops it running away/i);
+    expect(CLIENT_DEPLOYMENT_PLAYBOOK).toMatch(/hourly ceiling/i);
+    expect(CLIENT_DEPLOYMENT_PLAYBOOK).toMatch(/per agent rather than per workspace/i);
+    expect(CLIENT_DEPLOYMENT_PLAYBOOK).toMatch(/Refused attempts are counted/i);
+    expect(CLIENT_DEPLOYMENT_PLAYBOOK).toMatch(/the agent does not\s*act/i);
+  });
+
+  /* Two claims we are not allowed to make. Both have a true version that is
+     nearly as good, and a false version that would be found out. */
+  it("says quantum-migration-ready and never quantum-safe today", () => {
+    expect(CLIENT_DEPLOYMENT_PLAYBOOK).toMatch(/quantum-migration-ready, not\s*quantum-safe today/i);
+  });
+
+  it("does not claim MFA anywhere, because it is not shipped", () => {
+    expect(CLIENT_DEPLOYMENT_PLAYBOOK).not.toMatch(/\bMFA\b|multi-factor/i);
+  });
+
+  /* Writes stay behind a person in the answer as well as in the phase table.
+     Two places saying it differently is how a promise drifts. */
+  it("keeps writes behind a person and behind phase five", () => {
+    expect(CLIENT_DEPLOYMENT_PLAYBOOK).toMatch(/Not until phase five/i);
+    expect(CLIENT_DEPLOYMENT_PLAYBOOK).toMatch(/requires an approval before it runs/i);
+  });
+});
