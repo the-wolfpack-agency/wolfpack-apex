@@ -256,10 +256,25 @@ const ASKS_ABOUT_US =
 export function gateUngroundedClaimAboutUs(
   question: string,
   hitCount: number | undefined,
+  answer = "",
 ): QualityFlag | null {
-  if (!question) return null;
   if ((hitCount ?? 0) > 0) return null;
-  if (!ASKS_ABOUT_US.test(question)) return null;
+  /* THE ANSWER COUNTS TOO, and this is the half that was missing.
+   *
+   * The question is not always where the tell is. "How do I register a demo
+   * vehicle" names nobody, so the gate stayed quiet - and the reply was a
+   * six-step walkthrough of screens in wolfpack-auto that do not exist:
+   * Navigate to Inventory Management, click Add Vehicle, set Vehicle Status
+   * to Demo. Fluent, numbered, and invented.
+   *
+   * An answer that describes OUR product with nothing retrieved behind it is
+   * fabricating whether or not the question mentioned us, and a dealer
+   * following those steps is the concrete harm. Suppressing the noisy hedge on
+   * this answer without closing this would have made it read as MORE
+   * authoritative, not less. */
+  const tells = `${question} ${answer}`;
+  if (!tells.trim()) return null;
+  if (!ASKS_ABOUT_US.test(tells)) return null;
   return {
     filter: "ungrounded_internal",
     reason: "asked about this organisation with no retrieved source to answer from",
@@ -457,6 +472,30 @@ export function validateEntities(
     unknowns.add(m[1]);
   }
   if (unknowns.size === 0) return null;
+  /* A LONG LIST IS EVIDENCE THE CHECK FAILED, NOT THAT THE ANSWER DID.
+   *
+   * Measured on a real answer about registering a demo vehicle: "16 unfamiliar
+   * name(s): Navigate, Inventory Management, Inventory". Those are a verb and
+   * two UI labels. A model does not invent sixteen people in one paragraph; a
+   * capitalisation heuristic run over a formatted answer finds sixteen
+   * capitalised things, which is a different fact entirely.
+   *
+   * Warning anyway is worse than staying quiet. The hedge is meant to make
+   * somebody look twice at a specific claim, and a list of sixteen makes them
+   * dismiss the hedge - which then also gets dismissed on the answer that
+   * really did invent a colleague. An unreliable warning spends the credibility
+   * of the reliable one.
+   *
+   * The threshold is deliberately generous: a genuine fabrication names one or
+   * two people, so anything past a handful is the heuristic misfiring on
+   * headings, lists and product nouns. Recorded either way, because how often
+   * this trips is the measurement that says whether the roster or the parser
+   * needs the work. */
+  const IMPLAUSIBLE_NAME_COUNT = 6;
+  if (unknowns.size >= IMPLAUSIBLE_NAME_COUNT) {
+    return null;
+  }
+
   return {
     filter: "entities",
     reason: `answer mentions ${unknowns.size} unfamiliar name(s): ${[...unknowns].slice(0, 3).join(", ")}`,
@@ -553,7 +592,11 @@ export function runAnswerQualityChecks(
   const fConfidence = gateConfidence(input.topScore, input.hitCount);
   if (fConfidence) flags.push(fConfidence);
 
-  const fUngrounded = gateUngroundedClaimAboutUs(input.question ?? "", input.hitCount);
+  const fUngrounded = gateUngroundedClaimAboutUs(
+    input.question ?? "",
+    input.hitCount,
+    input.answer,
+  );
   if (fUngrounded) flags.push(fUngrounded);
 
   if (input.knownNames) {

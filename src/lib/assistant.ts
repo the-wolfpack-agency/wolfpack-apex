@@ -2680,6 +2680,11 @@ async function callAI(
        * Turning it on today would buy a small model marking its own homework,
        * which is the weakest form of this idea and reads as assurance. */
       verify: true,
+      /* And let a second model fix it when the rules are unsatisfied. Only
+         fires on answers the free checks already doubted, so the cost lands
+         where it changes the outcome rather than on re-approving answers that
+         were fine. */
+      improve: true,
       // Govern the assistant's answers with the OGIAM Agent Constitution. The
       // router prepends it to `system` at the chokepoint.
       apply_constitution: true,
