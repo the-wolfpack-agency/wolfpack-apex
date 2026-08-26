@@ -78,7 +78,7 @@ export const PAGE_FACTS: Record<string, PageFact> = {
       "See how much work was done for you and how much time was your own, kept as two separate numbers.",
     ],
     how_to: [
-      "Open Routines from the left nav.",
+      "Open /routines directly. It is not in the left nav.",
       "To run one, type its command in the assistant.",
       "To make a new one, describe your day to the assistant and say yes when it offers to chain it.",
       "To have one meet you, say 'run my morning every weekday at 8am'.",
@@ -263,7 +263,7 @@ export const PAGE_FACTS: Record<string, PageFact> = {
       "See presence status (online / busy / away) for teammates on Microsoft Teams.",
     ],
     how_to: [
-      "Open People from the left nav.",
+      "Open /people directly. It is not in the left nav.",
       "Search by name or company, or scroll the contact list.",
       "Click a contact to open their profile and see every interaction you've had.",
     ],
@@ -281,7 +281,7 @@ export const PAGE_FACTS: Record<string, PageFact> = {
       "Invite a new teammate and set their starting role and permissions.",
     ],
     how_to: [
-      "Open Directory from the left nav.",
+      "Open /directory directly. It is not in the left nav.",
       "Filter by department, role, or search by name.",
       "Click a teammate to open their profile, or click Invite to add a new one.",
     ],
@@ -443,7 +443,7 @@ export const PAGE_FACTS: Record<string, PageFact> = {
       "Add sections (testimonials, pricing, FAQ) with one click.",
     ],
     how_to: [
-      "Open Sites from the left nav and click New site.",
+      "Open /sites directly (it is not in the left nav) and click New site.",
       "Describe the site in a short brief; review the draft preview.",
       "Adjust sections and theme, then click Publish to push it live.",
     ],
@@ -498,7 +498,7 @@ export const PAGE_FACTS: Record<string, PageFact> = {
     ],
     how_to: [
       "Make sure Microsoft 365 is connected on the Settings page.",
-      "Open Emails from the left nav to see your inbox.",
+      "Open /emails directly to see your inbox. It is not in the left nav.",
       "Click a message to read; use Reply or Link to client from the action bar.",
     ],
     related_pages: ["clients", "tasks", "settings"],
@@ -516,7 +516,7 @@ export const PAGE_FACTS: Record<string, PageFact> = {
     ],
     how_to: [
       "Make sure Microsoft 365 is connected on the Settings page.",
-      "Open Emails (the mailbox) from the left nav.",
+      "Open /emails directly. It is not in the left nav.",
       "Read and act on messages exactly like you would in Outlook.",
     ],
     related_pages: ["clients", "tasks", "settings"],
@@ -569,7 +569,7 @@ export const PAGE_FACTS: Record<string, PageFact> = {
       "Tune which notifications you receive in Settings.",
     ],
     how_to: [
-      "Click the bell icon in the top bar, or open Notifications from the left nav.",
+      "Click the bell icon in the top bar, or open /notifications directly.",
       "Read an alert and click it to act on it.",
       "Open Settings → Notifications to customize which alerts reach you.",
     ],
@@ -606,7 +606,7 @@ export const PAGE_FACTS: Record<string, PageFact> = {
     ],
     how_to: [
       "Make sure your role is admin (non-admins can't see this page).",
-      "Open Admin from the left nav.",
+      "Open /admin/audit directly. There is no single Admin entry in the left nav; Agents, Model Router, Compliance Scan and Site Analytics each have their own.",
       "Pick the tab you need: Audit, Users, or Policies.",
     ],
     related_pages: ["settings", "directory", "analytics"],
@@ -623,7 +623,7 @@ export const PAGE_FACTS: Record<string, PageFact> = {
       "View recent tool runs + their outcomes in the history panel.",
     ],
     how_to: [
-      "Open Tools from the left nav.",
+      "Open /tools directly. It is not in the left nav.",
       "Pick the tool you want (Browser Probe, Scanner, Smoke Test).",
       "Fill in the target, click Run, and review the result in the output panel.",
     ],
@@ -678,7 +678,7 @@ export const PAGE_FACTS: Record<string, PageFact> = {
       "Review a quick walkthrough of where key pages live.",
     ],
     how_to: [
-      "Open Setup from the left nav (new workspaces see it at the top).",
+      "Open /setup directly. It is not in the left nav.",
       "Work through the stages in order — each one saves as you go.",
       "Come back any time to re-run a step you skipped.",
     ],
@@ -851,7 +851,7 @@ export const PAGE_FACTS: Record<string, PageFact> = {
       "See running totals so you know where your time went this week.",
     ],
     how_to: [
-      "Open My Time from the left nav.",
+      "Open /time directly. It is not in the left nav.",
       "Pick a job code, enter hours and date, click Add.",
       "Check the Entries list to confirm the entry landed.",
     ],
@@ -869,7 +869,7 @@ export const PAGE_FACTS: Record<string, PageFact> = {
       "Filter the queue by status to focus on what needs attention.",
     ],
     how_to: [
-      "Open Finance → Invoices from the left nav.",
+      "Open /finance/invoices directly. It is not in the left nav; the Invoices entry there is a different page.",
       "Drop a PDF onto the upload area or click Upload.",
       "Review the extracted fields, approve, and mark paid when settled.",
     ],
@@ -886,7 +886,7 @@ export const PAGE_FACTS: Record<string, PageFact> = {
       "Search across object types from one entry point.",
     ],
     how_to: [
-      "Open Portal → Salesforce from the left nav.",
+      "Open /portal/salesforce directly. It is not in the left nav.",
       "Pick an object type (accounts / contacts / opportunities) from the pills.",
       "Search or click a row to drill in.",
     ],
