@@ -33,6 +33,7 @@
  * added here starts with neither, which is the correct starting position and
  * is deliberately inconvenient in the right direction.
  */
+import { decideEgress } from "@/lib/containment/allowlist";
 import type {
   AICompleteRequest,
   AICompleteResponse,
@@ -71,6 +72,34 @@ function envKey(id: string, suffix: string): string {
  * never appeared, because the failure lands on a user instead of on whoever
  * was setting it up.
  */
+/**
+ * The hosts an operator has deliberately pointed model traffic at.
+ *
+ * The egress allowlist names four vendors, which is right for the models this
+ * repo ships with and wrong for a feature whose whole design is "add a vendor
+ * by configuration". Without this a configured provider is refused by the
+ * guard, so the capability cannot be used at all - and the probe reporting
+ * "not answering" was telling the truth about a door we had bolted ourselves.
+ *
+ * This is opt-in rather than a wildcard: a host is permitted because somebody
+ * put it in AI_COMPAT_<ID>_BASE_URL, which is the same act as adding it to the
+ * list. Anything not configured is still refused.
+ */
+export function configuredModelHosts(
+  env: Record<string, string | undefined> = process.env,
+): string[] {
+  const hosts: string[] = [];
+  for (const cfg of configuredCompatibleProviders(env)) {
+    try {
+      hosts.push(new URL(cfg.baseUrl).hostname.toLowerCase());
+    } catch {
+      /* A base URL that will not parse cannot be called either; the provider
+         reports that at call time rather than here. */
+    }
+  }
+  return [...new Set(hosts)];
+}
+
 export function configuredCompatibleProviders(
   env: Record<string, string | undefined> = process.env,
 ): CompatibleProviderConfig[] {
@@ -178,8 +207,43 @@ export class OpenAICompatibleProvider implements AIProvider {
       ...req.messages.map((m) => ({ role: m.role, content: m.content })),
     ];
 
+    /* THE SAME GUARD EVERY OTHER OUTBOUND CALL ANSWERS TO.
+     *
+     * This provider never asked it, which is the wrong way round: it is the
+     * one whose destination comes from an environment variable rather than
+     * from code, so it is the one where an arbitrary host is actually
+     * possible. Every other model call was checked and the configurable one
+     * was not.
+     *
+     * The configured host is passed as an extra rather than added to the
+     * static list, so the permission is exactly "somebody configured this
+     * provider" and nothing wider. A base URL nobody configured is still
+     * refused, and http is still refused outright, because prompts and keys do
+     * not belong in clear. */
+    const url = chatCompletionsUrl(this.config.baseUrl);
+    /* WHAT THIS BUYS, STATED HONESTLY. The host comes from this provider's own
+       configuration, so passing it as permitted is not the guard vetting the
+       destination - an operator already chose it. What the guard still
+       enforces here is that the URL parses and that the scheme is https, which
+       is the part that matters when prompts and an API key are in the request,
+       and it keeps this provider on the same code path and the same refusal
+       vocabulary as every other outbound call rather than being the one
+       exception nobody thinks about.
+       The allowlist proper still governs the built-in vendors, and a host
+       nobody configured is still refused there. */
+    let ownHost = "";
+    try {
+      ownHost = new URL(this.config.baseUrl).hostname.toLowerCase();
+    } catch {
+      throw new Error(`${this.config.id} has a base URL that is not a URL`);
+    }
+    const verdict = decideEgress(url, "model-api", [ownHost]);
+    if (verdict.allowed !== true) {
+      throw new Error(`egress refused for ${this.config.id}: ${verdict.reason}`);
+    }
+
     const started = Date.now();
-    const res = await fetch(chatCompletionsUrl(this.config.baseUrl), {
+    const res = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
