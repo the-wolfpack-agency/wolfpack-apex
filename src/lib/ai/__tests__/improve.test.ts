@@ -83,3 +83,46 @@ describe("when the reviewer cannot be reached", () => {
     expect(r.reviewed).toBe(false);
   });
 });
+
+/**
+ * The reviewer that never ran.
+ *
+ * `improve: true` asks the reviewer only when the free rules are unsatisfied,
+ * and the free rules catch shape: empty, truncated, refused, deferred,
+ * placeholder. A competent model does not produce those. Production said so
+ * plainly: 28 verified assistant answers, 28 of them sufficient, the reviewer
+ * invoked zero times, while a client-facing document said a second model reads
+ * every answer.
+ *
+ * The failure a reviewer is for is the opposite kind, and verification.ts says
+ * so itself: relevance is the judgement a rule cannot make, and therefore the
+ * one place a second model earns its cost. Gating the reviewer on the rules
+ * failing aims it at the case it can least help with.
+ */
+describe("when the reviewer is asked", () => {
+  /* Mirrors the router's gate. If that expression changes, this is the test
+     that should have to change with it. */
+  function reviewWanted(improve: boolean | "always" | undefined, sufficient: boolean): boolean {
+    return improve === "always" ? true : Boolean(improve) && !sufficient;
+  }
+
+  it("does not run on a sound answer when improve is true, which is the old behaviour", () => {
+    expect(reviewWanted(true, true)).toBe(false);
+  });
+
+  it("runs on a sound answer when improve is always, which is the point", () => {
+    expect(reviewWanted("always", true)).toBe(true);
+  });
+
+  it("still runs on an unsound answer either way", () => {
+    expect(reviewWanted(true, false)).toBe(true);
+    expect(reviewWanted("always", false)).toBe(true);
+  });
+
+  /* Absent must not be read as always. Turning this on for every caller in the
+     product is a cost decision somebody makes deliberately. */
+  it("never runs when improve was not asked for", () => {
+    expect(reviewWanted(undefined, true)).toBe(false);
+    expect(reviewWanted(undefined, false)).toBe(false);
+  });
+});

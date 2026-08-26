@@ -1056,7 +1056,13 @@ class RouterClient implements AIClient {
        * families had to agree and any disagreement is recorded. That is the
        * argument for addressing several models at once rather than picking the
        * best one. */
-      if (req.improve && !verdict.sufficient && question) {
+      /* ALWAYS means every answered question, not every answer that already
+         failed a rule. See AICompleteRequest.improve: the rules catch shape,
+         a competent model does not produce broken shape, and so `true` gated
+         this behind a condition that did not occur. */
+      const reviewWanted =
+        req.improve === "always" ? true : Boolean(req.improve) && !verdict.sufficient;
+      if (reviewWanted && question) {
         const reviewer = judgeChoice?.candidate ?? null;
         const improved = await reviewAndImprove(
           question,

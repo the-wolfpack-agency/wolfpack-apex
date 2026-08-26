@@ -365,3 +365,74 @@ describe("router verification — independence of the judge", () => {
     expect(ev?.[3]).toHaveProperty("judge_lineage");
   });
 });
+
+/**
+ * The reviewer that never ran.
+ *
+ * `improve: true` asks a second model only when the free rules are
+ * unsatisfied, and those rules catch shape: empty, truncated, refused,
+ * deferred, placeholder. A competent model essentially never produces any of
+ * them, so the condition did not occur. Production is unambiguous: 28 verified
+ * assistant answers, 28 sufficient, the reviewer invoked zero times, while a
+ * client-facing document said a second model reads every answer.
+ *
+ * verification.ts names the failure the reviewer is actually for and says a
+ * rule cannot judge it. Gating the reviewer on the rules failing aims it at
+ * the one case it can least help with.
+ *
+ * These assert on the CALL COUNT, because that is both the proof the reviewer
+ * ran and the cost of running it.
+ */
+describe("the reviewer, and when it is asked", () => {
+  it("stays silent on a sound answer when improve is true", async () => {
+    /* The old behaviour, kept deliberately: an existing caller passing true
+       must not start paying for a second call. */
+    mockMessagesCreate.mockResolvedValue(reply("The invoice total is $4,200."));
+    await getAIClient().complete(request({ verify: true, improve: true }));
+    expect(mockMessagesCreate).toHaveBeenCalledTimes(1);
+    expect(mockTrackEvent.mock.calls.some((c) => c[0] === "ai.answer_improved")).toBe(false);
+  });
+
+  it("reads a sound answer when improve is always, which is the whole fix", async () => {
+    mockMessagesCreate
+      .mockResolvedValueOnce(reply("The invoice total is $4,200."))
+      .mockResolvedValueOnce(reply("SHIP"));
+    const res = await getAIClient().complete(request({ verify: true, improve: "always" }));
+    expect(mockMessagesCreate).toHaveBeenCalledTimes(2);
+    /* SHIP means the draft stands. Reviewed and unchanged is a real outcome
+       and must not look like not-reviewed. */
+    expect(res.content).toBe("The invoice total is $4,200.");
+    const ev = mockTrackEvent.mock.calls.find((c) => c[0] === "ai.answer_improved");
+    expect(ev).toBeDefined();
+    expect(ev![3]).toMatchObject({ reviewed: true, changed: false });
+  });
+
+  it("ships the correction when the reviewer supplies one", async () => {
+    mockMessagesCreate
+      .mockResolvedValueOnce(reply("The invoice total is $4,200."))
+      .mockResolvedValueOnce(reply("FIX: The invoice total is $4,200 excluding tax."));
+    const res = await getAIClient().complete(request({ verify: true, improve: "always" }));
+    expect(res.content).toBe("The invoice total is $4,200 excluding tax.");
+    const ev = mockTrackEvent.mock.calls.find((c) => c[0] === "ai.answer_improved");
+    expect(ev![3]).toMatchObject({ reviewed: true, changed: true });
+  });
+
+  /* Absent must not be read as always. Turning this on across the product is
+     a cost decision somebody makes on purpose. */
+  it("never reviews when improve was not asked for", async () => {
+    mockMessagesCreate.mockResolvedValue(reply("The invoice total is $4,200."));
+    await getAIClient().complete(request({ verify: true }));
+    expect(mockMessagesCreate).toHaveBeenCalledTimes(1);
+  });
+
+  /* One review, not a review of the review. The reviewer's own call sets
+     verify:false and improve:false, and this is what proves it. */
+  it("does not review the review", async () => {
+    mockMessagesCreate
+      .mockResolvedValueOnce(reply("The invoice total is $4,200."))
+      .mockResolvedValueOnce(reply("FIX: The invoice total is $4,200 excluding tax."))
+      .mockResolvedValue(reply("SHIP"));
+    await getAIClient().complete(request({ verify: true, improve: "always" }));
+    expect(mockMessagesCreate).toHaveBeenCalledTimes(2);
+  });
+});
