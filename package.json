@@ -32,7 +32,8 @@
     "vercel-build": "npm run migrate && npm run engineering:seed && next build",
     "verify": "bash scripts/verify.sh",
     "verify:devices": "npx tsx scripts/verify-devices.ts",
-    "verify:prod-env": "bash scripts/verify-prod-env.sh"
+    "verify:prod-env": "bash scripts/verify-prod-env.sh",
+    "integrations:evidence": "npx tsx scripts/integration-evidence.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.92.0",
