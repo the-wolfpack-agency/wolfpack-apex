@@ -64,8 +64,8 @@
   ],
   "enforcedTableCount": 0,
   "enforcedTables": [],
-  "filesScanned": 1538,
-  "filesTouchingScoped": 101,
+  "filesScanned": 1546,
+  "filesTouchingScoped": 102,
   "totalOffenders": 84,
   "counts": {
     "principal-resolve": 48,
