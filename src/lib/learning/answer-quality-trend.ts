@@ -1,81 +1,33 @@
 /**
- * Is the answer quality actually moving, or are we just saying it is?
+ * Reading the answer-quality trend out of the event log.
  *
- * The product records every time it caught something: a retrieval judged
- * irrelevant, an answer refused promotion into knowledge, a response flagged,
- * a draft corrected by a second model. Four events, all written, none ever
- * read. "The trend is measurable" was a claim about the events existing, and a
- * claim nobody can check is indistinguishable from a claim nobody made.
+ * SERVER ONLY: this imports the database driver. The shape and the arithmetic
+ * live in ./answer-quality so a client component can render the numbers
+ * without dragging pg into the bundle.
  *
- * A CATCH COUNT WITHOUT ITS DENOMINATOR IS UNREADABLE, and this is the whole
- * reason the shape below is what it is. If flagged responses fall from ten a
- * week to two, that is good news when volume held and hidden bad news when
- * volume collapsed or a checker stopped running. The same number means
- * opposite things. So every signal is returned next to the volume it was
- * measured against, and a rate over a zero denominator is null rather than
- * zero: "nothing happened" and "nothing was checked" must not render alike.
- *
- * WHAT EACH SIGNAL MEANS. They are not interchangeable, and a single "quality
- * score" folding them together would hide the one that moved.
- *
- *   flagged     A response carried a shape we refuse to pass on. Rising is bad.
- *   reviewed    A draft was checked by a second model at all.
- *   corrected   That check changed the answer. Rising means the checker is
- *               earning its cost; rising while `reviewed` is flat means the
- *               drafting model got worse.
- *   irrelevant  Retrieval returned something the judge threw out. Falling
- *               means retrieval improved. Falling to zero means the judge
- *               stopped running, which is why it is shown against volume.
- *   notPromoted An answer was refused entry into knowledge. This is the gate
- *               that caught a fabrication once, so zero is not a target.
+ * A CATCH COUNT WITHOUT ITS DENOMINATOR IS UNREADABLE, which is why every
+ * signal is selected next to the volume it was measured against. See
+ * ./answer-quality for what each one means and why they are not collapsed
+ * into a single score.
  */
 import { query } from "@/lib/db";
+import type { QualityWeek, QualityTrend } from "./answer-quality";
 
-export interface QualityWeek {
-  /** Monday of the week, as a date string. */
-  weekStart: string;
-  /** The denominator: model calls that week. */
-  modelCalls: number;
-  flagged: number;
-  reviewed: number;
-  corrected: number;
-  irrelevantRetrievals: number;
-  notPromoted: number;
-}
-
-export interface QualityTrend {
-  weeks: QualityWeek[];
-  /** True when no week in the window recorded a single model call. */
-  empty: boolean;
-}
-
-/**
- * Flagged responses per thousand model calls.
- *
- * Null, never zero, when nothing was called. A rate presented over an empty
- * denominator reads as a clean week to anybody scanning a column of numbers,
- * and that is exactly the week where nothing was being checked.
- */
-export function flaggedPerThousand(w: QualityWeek): number | null {
-  if (w.modelCalls <= 0) return null;
-  return (w.flagged / w.modelCalls) * 1000;
-}
-
-/**
- * What share of reviewed answers the reviewer actually changed.
- *
- * Measured against `reviewed` rather than against model calls, because the
- * question this answers is whether the second model is earning its cost, and
- * calls that were never reviewed say nothing about that either way.
- */
-export function correctionRate(w: QualityWeek): number | null {
-  if (w.reviewed <= 0) return null;
-  return w.corrected / w.reviewed;
-}
+export type { QualityWeek, QualityTrend } from "./answer-quality";
+export { flaggedPerThousand, correctionRate } from "./answer-quality";
 
 /** Older to newer, so a reader sees the direction rather than infers it. */
 export async function getAnswerQualityTrend(weeks = 8): Promise<QualityTrend> {
   const bounded = Math.max(1, Math.min(52, Math.floor(weeks)));
+  try {
+    return await readTrend(bounded);
+  } catch (err) {
+    console.warn("[answer-quality-trend]", (err as Error).message);
+    return { weeks: [], empty: true, readable: false };
+  }
+}
+
+async function readTrend(bounded: number): Promise<QualityTrend> {
   const { rows } = await query<{
     week_start: string;
     model_calls: string;
@@ -129,6 +81,7 @@ export async function getAnswerQualityTrend(weeks = 8): Promise<QualityTrend> {
   }));
 
   return {
+    readable: true,
     weeks: weeksOut,
     /* Empty is about the denominator, not about the rows. A window with rows
        but no model calls has nothing to measure quality against, and calling

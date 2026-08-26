@@ -13,6 +13,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth/require-capability";
+import { getAnswerQualityTrend } from "@/lib/learning/answer-quality-trend";
 import { getRouterInsights } from "@/lib/ai/models/insights";
 import { getDeterministicShare } from "@/lib/ai/models/deterministic-share";
 
@@ -29,6 +30,9 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /** Clamped so a caller cannot ask for an unbounded scan of the event table. */
+/* Eight weeks: long enough that a direction is visible, short enough that
+   a change made last month has not been averaged away. */
+const QUALITY_WEEKS = 8;
 const MAX_DAYS = 180;
 const DEFAULT_DAYS = 30;
 
@@ -57,12 +61,19 @@ export async function GET(req: NextRequest) {
      calls we made; the share describes the ones we did not, and that is
      the number this product is sold on. Fetched in parallel so adding it
      costs latency only where the two queries overlap. */
-  const [insights, deterministic] = await Promise.all([
+  /* The quality trend rides along here rather than on a route of its own.
+     The page already fetches this endpoint, and the question it answers is
+     the next one after "what did the router do and what did it cost": is what
+     it did getting better. Four events recorded that answer and nothing ever
+     read them, which made "the trend is measurable" a claim about the events
+     existing rather than about anybody being able to see it. */
+  const [insights, deterministic, quality] = await Promise.all([
     getRouterInsights(days),
     getDeterministicShare(days),
+    getAnswerQualityTrend(QUALITY_WEEKS),
   ]);
 
-  return NextResponse.json({ ...insights, deterministic, canProbe }, {
+  return NextResponse.json({ ...insights, deterministic, quality, canProbe }, {
     status: 200,
     headers: { "Cache-Control": "no-store, max-age=0" },
   });

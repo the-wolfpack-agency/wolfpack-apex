@@ -43,6 +43,7 @@ import { GlassPanel, MetricTile, SectionHeader, StatusPill, ConsoleGrid } from "
 import RouterFlow from "@/components/admin/RouterFlow";
 import RouterExplainer from "@/components/admin/RouterExplainer";
 import type { RouterInsights } from "@/lib/ai/models/insights";
+import { flaggedPerThousand, correctionRate } from "@/lib/learning/answer-quality";
 import type { ProbeReport } from "@/lib/ai/models/probe";
 
 /** Accept only well-shaped payloads. A response that is not what we expect must
@@ -66,6 +67,10 @@ function normalize(raw: unknown): RouterInsights | null {
     models: b.models,
     smallTierShare: typeof b.smallTierShare === "number" ? b.smallTierShare : null,
     headline: typeof b.headline === "string" ? b.headline : "",
+    /* Named here or it does not exist. See the warning below: this rebuilds
+       the payload field by field, and the actuals were lost for exactly this
+       reason. */
+    quality: b.quality,
     /* MEASURED SPEND, and it must be listed HERE or it does not exist.
        This function rebuilds the payload field by field, so a field the API
        started returning but this list does not name is silently dropped. That
@@ -288,6 +293,70 @@ export default function AiRouterPage() {
           decision -- which carry no redactable token and are the ones a client
           is actually held to. Each row names the rule, so a client can read
           the reasoning and argue with it rather than trusting a count. */}
+      {/* IS IT GETTING BETTER. The panel above says what the router refused;
+          this says whether the answers improved, week by week.
+
+          Every figure is shown NEXT TO THE VOLUME IT WAS MEASURED AGAINST,
+          which is the whole reason this looks like a table rather than four
+          headline numbers. Flagged falling from ten a week to two is good news
+          when volume held and hidden bad news when volume collapsed or a
+          checker stopped running: the same number, opposite meanings. A rate
+          over an empty denominator renders as "n/a" rather than 0%, because a
+          zero in a column of percentages reads as a clean week to anybody
+          scanning it, and that is exactly the week nothing was checked. */}
+      {data?.quality ? (
+        <GlassPanel
+          title="Is it getting better"
+          subtitle="What the product caught before a person saw it, each week, against the volume it was checking. Falling numbers only mean improvement when the volume held."
+        >
+          {!data.quality.readable ? (
+            <p data-testid="router-quality-unreadable">
+              The trend could not be read. This is not a clean week: it is an unmeasured one.
+            </p>
+          ) : data.quality.empty ? (
+            <p data-testid="router-quality-empty">
+              No model calls in this window, so there is nothing to measure quality against.
+            </p>
+          ) : (
+            <div className="wiki-table" data-testid="router-quality-table">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Week</th>
+                    <th>Model calls</th>
+                    <th>Flagged / 1k</th>
+                    <th>Reviewed</th>
+                    <th>Corrected</th>
+                    <th>Retrieval discarded</th>
+                    <th>Not promoted</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.quality.weeks.map((w) => {
+                    const flagged = flaggedPerThousand(w);
+                    const corrected = correctionRate(w);
+                    return (
+                      <tr key={w.weekStart}>
+                        <td>{w.weekStart}</td>
+                        <td>{w.modelCalls.toLocaleString()}</td>
+                        <td>{flagged === null ? "n/a" : flagged.toFixed(1)}</td>
+                        <td>{w.reviewed.toLocaleString()}</td>
+                        <td>
+                          {w.corrected.toLocaleString()}
+                          {corrected === null ? " (n/a)" : ` (${Math.round(corrected * 100)}%)`}
+                        </td>
+                        <td>{w.irrelevantRetrievals.toLocaleString()}</td>
+                        <td>{w.notPromoted.toLocaleString()}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </GlassPanel>
+      ) : null}
+
       {data?.refusals ? (
         <GlassPanel
           title="What the router would not let through"
