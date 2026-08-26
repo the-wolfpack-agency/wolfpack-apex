@@ -83,6 +83,93 @@ able to answer returns nothing rather than somebody else's file.
 becomes theirs. \`connectors.sharepoint.sync_resumed\` rising across runs is a
 sync making progress; flat at zero means it is starting over each time.
 
+## Phase 1, both sides: corporate and dealer
+
+Phase 1 above describes what we read. This describes who we serve with it, and
+it is the part that differentiates the engagement. Most vendors in this space
+pick a side: a corporate reporting tool that dealers resent, or a dealer tool
+corporate cannot see. Serving both from one ingest is available to us because
+we deploy a dashboard rather than building into their existing products, and
+that is a sequencing advantage more than a technical one.
+
+The model is the one that already worked. A Weekend with Porsche shipped a
+dealer-facing surface and a corporate view over the same data, and it worked
+because the dealer surface was useful on its own before anyone rolled anything
+up.
+
+### For the dealer: information that helps close
+
+The dealer side has to earn its place in a salesperson's day. What it carries:
+
+| Panel | What it answers |
+| --- | --- |
+| Client breakdown | Who this customer is, across every system that knows them |
+| Pre-client brief | What to know before walking into the conversation |
+| Finance position | What they currently hold, and what that implies |
+| Current lease | Term, maturity, and the window that makes a conversation timely |
+
+Every one of those exists somewhere already. The value is not new data, it is
+the join: the brief nobody has time to assemble by opening four systems before
+a customer walks in.
+
+### For corporate: an umbrella over dealers who are already served
+
+The corporate side is a roll-up of the same records. Group performance, the
+comparison between dealers, and the picture that no single dealer's system can
+produce because no single dealer has the others' data.
+
+It costs almost nothing to build once the dealer side exists, because it reads
+the same store. That is the whole argument for this shape.
+
+### The order is not negotiable, and it is the real insight
+
+**Dealer first. Corporate second.** Not because the corporate view is worth
+less, but because building it first makes it impossible.
+
+A roll-up that reports on dealers before it gives them anything is surveillance,
+and it is read that way inside a week. Dealers who feel measured supply the
+minimum, and a corporate dashboard fed by reluctant data is worse than no
+dashboard: it is confidently wrong at the exact altitude where decisions get
+made. A dealer tool that helps close a sale is used because it pays for itself,
+and once it is used the roll-up is a by-product rather than an imposition.
+
+So the corporate value is real and it is delivered second. Anyone proposing to
+invert that is proposing a slower path to the same place, with worse data.
+
+### What this deliberately does not depend on
+
+**DMS access, in phase 1.** The dealer management system is the slowest
+dependency in this industry: access is controlled by the vendor, negotiated
+rather than granted, and priced. A phase that cannot start until a DMS contract
+is signed is a phase that has not started.
+
+So phase 1 is built on what one tenant consent already reaches, and the DMS
+becomes phase 4, the second system chosen by use. If DMS access arrives early,
+it slots in. If it takes two quarters, nothing was waiting on it.
+
+### What changes because this is automotive
+
+A dealer arranging financing is a financial institution under the Gramm-Leach-
+Bliley Act, so customer finance and lease records fall under the Safeguards
+Rule. That is not an obstacle, it is the reason the controls we already built
+are worth more here than in most industries: scoped retrieval, an audit trail
+that records every document sent to a model, redaction at one chokepoint, and
+a written answer to who may see what.
+
+Confirm the client's own interpretation with their counsel rather than assuming
+ours. The point is that the questions their compliance function will ask have
+answers already, and those answers are in this document.
+
+### What actually gets built
+
+The real implementation is a separate repository: the client's own deployment,
+under whatever name they choose. What carries across is the substrate, not the
+screens. The gate, the router, the audit chain, the retrieval scoping and the
+tenancy model are the product; the dashboards are configuration over it.
+
+That is the same relationship the Porsche build has to this one, and it is why
+a second engagement costs a fraction of the first.
+
 ## Phase 2: the personas
 
 **What it is.** Each role sees the capabilities that belong to their job, in

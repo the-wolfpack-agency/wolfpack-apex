@@ -290,3 +290,62 @@ describe("the playbook renders as a document a person can read", () => {
     expect(screen.getByTestId("client-deployment-playbook").querySelector(".wp-md")).not.toBeNull();
   });
 });
+
+/**
+ * Phase 1 on both sides: corporate and dealer.
+ *
+ * The differentiating claim of the engagement, and the one most likely to get
+ * softened by a later edit into something that sounds agreeable and means
+ * nothing. The sequencing argument in particular is a constraint, not a
+ * preference: a corporate roll-up built before the dealer surface produces
+ * reluctant data, and reluctant data at that altitude is confidently wrong
+ * where decisions get made.
+ */
+describe("phase 1 on both sides", () => {
+  it("keeps the section", () => {
+    expect(CLIENT_DEPLOYMENT_PLAYBOOK).toContain(
+      "Phase 1, both sides: corporate and dealer",
+    );
+  });
+
+  it.each([
+    ["the dealer's client breakdown", /Client breakdown/],
+    ["the pre-client brief", /Pre-client brief/],
+    ["the finance position", /Finance position/i],
+    ["current lease terms", /Current lease/i],
+    ["the corporate umbrella", /umbrella over dealers/i],
+  ])("still carries %s", (_label, pattern) => {
+    expect(CLIENT_DEPLOYMENT_PLAYBOOK).toMatch(pattern);
+  });
+
+  /* The order is the insight. If a future edit presents these as two parallel
+     workstreams, the argument is gone even though every word still reads fine. */
+  it("states dealer first and says why inverting it fails", () => {
+    expect(CLIENT_DEPLOYMENT_PLAYBOOK).toMatch(/Dealer first\. Corporate second\./);
+    expect(CLIENT_DEPLOYMENT_PLAYBOOK).toMatch(/surveillance/i);
+    expect(CLIENT_DEPLOYMENT_PLAYBOOK).toMatch(/order is not negotiable/i);
+  });
+
+  /* The dependency most likely to be quietly re-added to phase 1, which would
+     make the phase unstartable until a vendor contract is signed. */
+  it("keeps the DMS out of phase 1", () => {
+    expect(CLIENT_DEPLOYMENT_PLAYBOOK).toMatch(/does not depend on/i);
+    expect(CLIENT_DEPLOYMENT_PLAYBOOK).toMatch(/DMS access, in phase 1/i);
+  });
+
+  /* Automotive-specific, and the reason the existing controls are worth more
+     here than elsewhere. Paired with the instruction to confirm with their
+     counsel, so it never reads as us giving legal advice. */
+  it("names the automotive compliance position without asserting their legal view", () => {
+    expect(CLIENT_DEPLOYMENT_PLAYBOOK).toMatch(/Gramm-Leach-\s*Bliley/i);
+    expect(CLIENT_DEPLOYMENT_PLAYBOOK).toMatch(/Safeguards\s+Rule/);
+    expect(CLIENT_DEPLOYMENT_PLAYBOOK).toMatch(/their counsel/i);
+  });
+
+  /* What is reusable is the substrate, not the screens. This is the sentence
+     that makes a second engagement cheap, and it is load-bearing commercially. */
+  it("says the dashboards are configuration over the substrate", () => {
+    expect(CLIENT_DEPLOYMENT_PLAYBOOK).toMatch(/separate repository/i);
+    expect(CLIENT_DEPLOYMENT_PLAYBOOK).toMatch(/substrate, not the\s+screens/i);
+  });
+});
