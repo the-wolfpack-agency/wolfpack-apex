@@ -144,11 +144,36 @@ function scoreAllDomains(lower: string): PageFactsMatch[] {
  * the 0.6 confidence floor below; this function returns matches at or
  * above 0.5 so tests can inspect sub-threshold behavior.
  */
+/**
+ * A question about a RULE is not a question about a page.
+ *
+ * "What is our policy on time off" scored the Time page, because the words
+ * time and off are in it, and answered with a tour of the time-logging screen:
+ * how to add an entry, how to edit one, where the totals are. The person asked
+ * how many days they get. "What is our expense policy" did the same to
+ * Financials.
+ *
+ * These are exactly the questions a document library exists to answer, and
+ * exactly what a client will ask first: leave, expenses, travel, conduct. A
+ * product tour is the one answer guaranteed to be wrong, and it arrives at
+ * full confidence because the page name genuinely does appear in the sentence.
+ *
+ * So page facts decline them and let retrieval have them. If nothing in the
+ * library answers, the honest "I could not find that" beats a confident tour
+ * of the wrong screen.
+ *
+ * Narrow on purpose: it asks whether the sentence is ABOUT a rule, not whether
+ * it mentions one. "How do I log time" and "my time" are untouched.
+ */
+const ASKS_ABOUT_A_RULE =
+  /\b(polic(?:y|ies)|entitlement|allowance|guidelines?|handbook|rules?\s+(?:on|about|for)|am\s+i\s+(?:entitled|allowed)|how\s+(?:many|much)\s+(?:days?|hours?|weeks?)\s+(?:of|do|can)|eligib(?:le|ility))\b/;
+
 export function matchPageFacts(
   question: string,
 ): { page: PageFact; confidence: number } | null {
   if (!question || !question.trim()) return null;
   const lower = question.toLowerCase();
+  if (ASKS_ABOUT_A_RULE.test(lower)) return null;
 
   const candidates = scoreAllDomains(lower);
   if (candidates.length === 0) return null;

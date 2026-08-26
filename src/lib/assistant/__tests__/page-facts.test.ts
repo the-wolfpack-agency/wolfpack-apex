@@ -404,3 +404,42 @@ describe("chat() integration — page_facts priority", () => {
     expect(assistantInsert).toBeDefined();
   });
 });
+
+/* ---------------------------------------------------------------------
+ * A question about a RULE is not a question about a page.
+ *
+ * Found by reading an answer, not a test. "What is our policy on time off"
+ * scored the Time page - the words time and off are in it - and replied with a
+ * tour of the time-logging screen: how to add an entry, how to edit one, where
+ * the totals are. The person asked how many days they get.
+ *
+ * These are the questions a document library exists to answer, and the first
+ * ones a client asks: leave, expenses, travel, conduct. A product tour is the
+ * one answer guaranteed to be wrong, and it arrives at full confidence because
+ * the page name genuinely does appear in the sentence.
+ * --------------------------------------------------------------- */
+describe("policy questions belong to the library, not to a page tour", () => {
+  it.each([
+    "what is our policy on time off",
+    "what is our expense policy",
+    "how many days of leave do I get",
+    "am I entitled to parental leave",
+    "what does the handbook say about travel",
+    "what are the guidelines on client gifts",
+  ])("%s is declined so retrieval can have it", (q) => {
+    expect(matchPageFacts(q)).toBeNull();
+  });
+
+  /* THE LINE THIS MUST NOT CROSS. Asking how to USE a screen is still a page
+     question, and the guard asks whether a sentence is about a rule rather
+     than whether it merely mentions one. */
+  it.each([
+    "my time",
+    "how do I log time",
+    "what is the financials page",
+    "where do I add a job code",
+    "show me my tasks",
+  ])("%s still reaches page facts", (q) => {
+    expect(matchPageFacts(q)).not.toBeNull();
+  });
+});
