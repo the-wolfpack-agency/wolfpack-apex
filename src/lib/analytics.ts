@@ -476,6 +476,12 @@ export type InstinctEventType =
      { feature, workspace_id, model, redacted_count, kinds }: kinds only,
      never a value. */
   | "ai.response_redacted"
+  /* A model response carrying a shape that is almost never innocent:
+     credentials read into a network call, a script piped to a shell,
+     instructions aimed at a downstream system, an irreversible command.
+     Recorded per model, because whether a model does this is the question
+     that decides if it can be trusted with traffic. */
+  | "ai.response_flagged"
   /* An answer the content policy would not let through as written. Redaction
      (above) finds shapes; this finds MEANING -- a quoted finance rate, a price
      guarantee, a warranty decision, an invented discount -- and withholds or

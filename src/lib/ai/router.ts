@@ -30,6 +30,7 @@ import { bridgeSelection, capabilityTierFor } from "./model-bridge";
 import { selectModel, logModelSelection } from "@/lib/ai/models";
 import { applyConstitutionToRequest } from "@/lib/constitution";
 import { redactMessages, redactText, NEVER_SEND_KINDS } from "./redaction";
+import { inspectResponse } from "./response-safety";
 import {
   applyPolicy,
   policyFor,
@@ -718,6 +719,41 @@ class RouterClient implements AIClient {
       count: 0,
       kinds: [],
     };
+    /* WHAT THE MODEL SENT BACK, READ BEFORE ANYBODY ACTS ON IT.
+     *
+     * Prompts are redacted outbound and responses redacted for secrets inbound,
+     * and verifyAnswer checks an answer's SHAPE. Nothing looked at what a
+     * response contains, which was defensible while every model was one we
+     * picked and stopped being so the moment a provider became three
+     * environment variables and no code.
+     *
+     * Recorded rather than blocked. These shapes are almost never innocent,
+     * but this product writes code for a living and a refusal on a false
+     * positive costs more trust than a flagged audit row does. What matters
+     * first is knowing whether it happens at all, per model, which nothing
+     * could answer before. If the count is non-zero for a model, that is the
+     * argument for gating it. */
+    try {
+      const suspect = inspectResponse(response.content);
+      if (suspect.length > 0) {
+        trackEvent(
+          "ai.response_flagged",
+          cReq.metadata?.user_id ?? "system",
+          cReq.metadata?.user_role ?? "system",
+          {
+            feature: cReq.metadata?.feature ?? "unknown",
+            model: response.model_used,
+            provider: response.provider_used,
+            /* The rule, never the fragment. An audit row holding the payload
+               is a second copy of the thing being warned about. */
+            risks: suspect.map((f) => f.risk).join(","),
+          },
+        );
+      }
+    } catch {
+      /* An inspector that throws must not cost the answer. */
+    }
+
     try {
       const outbound = redactText(response.content, NEVER_SEND_KINDS);
       if (outbound.redacted && outbound.hits.length > 0) {
