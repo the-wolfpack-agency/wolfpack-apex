@@ -59,6 +59,10 @@ export type InstinctEventType =
      working; flat at zero on a tenant with restricted libraries means it is
      not being applied at all. */
   | "brain.retrieval_audience_filtered"
+  /* An answer the quality gate would not stand behind, so it was not written
+     into the knowledge base. Rising says the prompt or the grounding needs
+     work; it was invisible while every answer was kept regardless. */
+  | "assistant.answer_not_promoted"
   // Upload-to-Brain widget pre-ingest filter lifecycle. Fires from the
   // /api/brain/upload route which runs the data-quality filter BEFORE
   // delegating to ingest(). `brain.upload_attempted` fires for every
