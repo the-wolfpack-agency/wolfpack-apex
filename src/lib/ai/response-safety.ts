@@ -44,8 +44,20 @@ export interface ResponseFinding {
 }
 
 /** Reading a secret. Ordinary on its own. */
+/* THE LEADING \b USED TO WRAP THIS WHOLE GROUP, and it silently killed four of
+   the seven branches. A word boundary before `$`, `~` or `.` requires a word
+   character immediately to the left, and shell variables and credential paths
+   are preceded by a space, a quote or an equals sign. So `$AWS_SECRET_ACCESS_KEY`,
+   `~/.aws/credentials`, `~/.ssh/id_rsa` and a standalone `.env` could never
+   match, while `process.env`, `os.environ` and `System.getenv(` always did
+   because they begin with word characters.
+
+   The tests all passed. Every one of them used the JavaScript form, so the
+   half of this rule aimed at shell payloads had never been exercised, and the
+   shell form is the one an exfiltration payload actually takes. The boundary
+   now sits on the branches it helps and nowhere else. */
 const SECRET_READ =
-  /\b(?:process\.env(?:\.\w+|\[['"][^'"]+['"]\])|os\.environ(?:\.get\()?|System\.getenv\(|\$\{?(?:AWS_SECRET|API_KEY|SECRET|TOKEN|PASSWORD)\w*\}?|~\/\.aws\/credentials|~\/\.ssh\/id_\w+|\.env\b)/i;
+  /\bprocess\.env(?:\.\w+|\[['"][^'"]+['"]\])|\bos\.environ(?:\.get\()?|\bSystem\.getenv\(|\$\{?(?:AWS_SECRET|API_KEY|SECRET|TOKEN|PASSWORD)\w*\}?|~\/\.aws\/credentials|~\/\.ssh\/id_\w+|(?<!\w)\.env\b/i;
 
 /** Sending something out. Ordinary on its own. */
 const NETWORK_SEND =
