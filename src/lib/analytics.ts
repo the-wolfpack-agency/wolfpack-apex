@@ -666,6 +666,10 @@ export type InstinctEventType =
   | "agent.write_approved"
   | "agent.write_rejected"
   | "agent.write_executed"
+  /* An agent asked to act more times in an hour than its owner allowed. */
+  | "agent.operation_ceiling_hit"
+  /* An accountable human changed an agent's hourly ceiling. */
+  | "agent.ceiling_changed"
   // agent.task_assigned   { agent_id, task_id, workspace_id }
   //   a human assigned work to an agent.
   // agent.task_completed  { agent_id, task_id, status, step_count, ran_count, blocked }

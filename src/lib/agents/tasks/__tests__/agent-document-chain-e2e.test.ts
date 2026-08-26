@@ -36,13 +36,16 @@ import { runAgentTask } from "@/lib/agents/tasks/executor";
    refusal path without meaning to. Containment itself is covered in
    src/lib/containment/__tests__. */
 import { _setContainmentStateForTests, _setRunSpendForTests } from "@/lib/containment/state";
+import { _setCeilingForTests, CEILING_NOT_UNDER_TEST } from "@/lib/agents/ceiling";
 beforeEach(() => {
   _setContainmentStateForTests({ agentsEnabled: true, readable: true });
   _setRunSpendForTests({ tokens: 0, durationMs: 0, egressCalls: 0, spendCents: 0 });
+  _setCeilingForTests(CEILING_NOT_UNDER_TEST);
 });
 afterAll(() => {
   _setContainmentStateForTests(null);
   _setRunSpendForTests(null);
+  _setCeilingForTests(null);
 });
 
 

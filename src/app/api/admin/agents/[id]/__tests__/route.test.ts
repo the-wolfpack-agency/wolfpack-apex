@@ -15,9 +15,11 @@ jest.mock("@/lib/auth/require-capability", () => ({
 
 const mockGetAgent = jest.fn();
 const mockSetAgentState = jest.fn();
+const mockSetAgentCeiling = jest.fn();
 jest.mock("@/lib/agents/store", () => ({
   getAgent: (...a: any[]) => mockGetAgent(...a),
   setAgentState: (...a: any[]) => mockSetAgentState(...a),
+  setAgentCeiling: (...a: any[]) => mockSetAgentCeiling(...a),
 }));
 
 const mockRecordAudit = jest.fn();
@@ -169,5 +171,73 @@ describe("PATCH /api/admin/agents/[id]", () => {
     const res = await PATCH(mkReq({ action: "revoke" }), ctx("missing"));
     expect(res.status).toBe(404);
     expect(mockRecordAudit).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Raising what an agent may do unsupervised.
+ *
+ * Same gate and same hash chain as pausing it: "who lifted the limit" is the
+ * question an incident review asks first, and an unaudited answer to it is not
+ * an answer.
+ */
+describe("PATCH set_ceiling", () => {
+  beforeEach(() => {
+    mockRequireCap.mockResolvedValue({ ok: true, user: CTO });
+  });
+
+  async function patchCeiling(body: unknown) {
+    const { PATCH } = await import("@/app/api/admin/agents/[id]/route");
+    return PATCH(mkReq(body), ctx());
+  }
+
+  /* A fractional or negative ceiling is not a smaller limit, it is an
+     unenforceable one. */
+  it("rejects a fractional ceiling", async () => {
+    const res = await patchCeiling({ action: "set_ceiling", maxOperationsPerHour: 2.5 });
+    expect(res.status).toBe(400);
+    expect(mockSetAgentCeiling).not.toHaveBeenCalled();
+  });
+
+  it("rejects a negative ceiling", async () => {
+    const res = await patchCeiling({ action: "set_ceiling", maxOperationsPerHour: -1 });
+    expect(res.status).toBe(400);
+    expect(mockSetAgentCeiling).not.toHaveBeenCalled();
+  });
+
+  /* Absent must not read as unlimited. That is the one mistake here that
+     silently removes the control instead of failing. */
+  it("rejects a missing ceiling rather than defaulting to unlimited", async () => {
+    const res = await patchCeiling({ action: "set_ceiling" });
+    expect(res.status).toBe(400);
+    expect(mockSetAgentCeiling).not.toHaveBeenCalled();
+  });
+
+  it("applies a valid ceiling, workspace-scoped, and hash-chains who did it", async () => {
+    mockSetAgentCeiling.mockResolvedValue({ ...SAMPLE_AGENT, maxOperationsPerHour: 120 });
+    const res = await patchCeiling({ action: "set_ceiling", maxOperationsPerHour: 120 });
+    expect(res.status).toBe(200);
+    expect(mockSetAgentCeiling).toHaveBeenCalledWith("a_1", "default", 120, {
+      userId: "u_cto",
+      role: "cto",
+    });
+    expect(mockRecordAudit).toHaveBeenCalledTimes(1);
+    expect(mockRecordAudit.mock.calls[0][0]).toMatchObject({
+      action: "agent.ceiling_changed",
+      resourceId: "a_1",
+    });
+  });
+
+  /* Zero is unlimited, and it is reachable only by passing it. */
+  it("accepts an explicit zero", async () => {
+    mockSetAgentCeiling.mockResolvedValue({ ...SAMPLE_AGENT, maxOperationsPerHour: 0 });
+    const res = await patchCeiling({ action: "set_ceiling", maxOperationsPerHour: 0 });
+    expect(res.status).toBe(200);
+  });
+
+  it("404s for an agent outside this workspace", async () => {
+    mockSetAgentCeiling.mockResolvedValue(null);
+    const res = await patchCeiling({ action: "set_ceiling", maxOperationsPerHour: 30 });
+    expect(res.status).toBe(404);
   });
 });
