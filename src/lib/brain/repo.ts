@@ -255,6 +255,37 @@ export async function updateDocumentSummary(
   );
 }
 
+/**
+ * Document-level context for a page of hits, in one query.
+ *
+ * Per-chunk lookups would be twenty round trips to decorate twenty results,
+ * which is how a fast search becomes a slow one for information that is the
+ * same for every chunk of the same document.
+ */
+export async function describeDocuments(
+  documentIds: string[],
+): Promise<Map<string, { summary: string | null; topics: string[] | null; webUrl: string | null }>> {
+  const out = new Map<string, { summary: string | null; topics: string[] | null; webUrl: string | null }>();
+  if (documentIds.length === 0 || !process.env.DATABASE_URL) return out;
+  try {
+    const res = await query<{
+      id: string;
+      summary: string | null;
+      topics: string[] | null;
+      web_url: string | null;
+    }>(
+      `SELECT id, summary, topics, web_url FROM brain_documents WHERE id = ANY($1)`,
+      [documentIds],
+    );
+    for (const r of res.rows) {
+      out.set(String(r.id), { summary: r.summary, topics: r.topics, webUrl: r.web_url });
+    }
+  } catch {
+    /* Decoration, not substance: a hit without a description is still a hit. */
+  }
+  return out;
+}
+
 export async function insertChunks(
   documentId: string,
   chunks: { idx: number; content: string; tokenEstimate: number }[],

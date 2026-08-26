@@ -31,6 +31,9 @@ const SOURCES: MeetingSources = {
       brainFacts: [],
     },
   ],
+  /* No documents in this fixture: synthesis must work without them, because a
+     workspace with an empty library is a real workspace. */
+  documents: [],
   versionMarkers: {
     crmLastModified: {},
     lastEmailReceivedAt: {},
