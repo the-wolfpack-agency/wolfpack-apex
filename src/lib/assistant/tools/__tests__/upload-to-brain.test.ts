@@ -105,3 +105,44 @@ describe("upload-to-brain handler", () => {
     expect(uploadToBrainTool.description.length).toBeGreaterThan(20);
   });
 });
+
+/**
+ * The way people actually ask to put a document in.
+ *
+ * A prompt sweep on 2026-08-26 found that "upload a document to the brain"
+ * and "add this file to the knowledge base" reached NO tool at all. Only the
+ * bare "upload to brain", the "/upload" slash form, and a few "I want to
+ * upload" openers worked.
+ *
+ * This is the path a client engagement opens with: phase one is their library
+ * read into the Brain, so the first thing anybody tries is putting a document
+ * in, named, with the destination said out loud. That sentence did nothing.
+ */
+describe("the sentences somebody actually types", () => {
+  it.each([
+    "upload a document to the brain",
+    "add this file to the knowledge base",
+    "put this doc in the brain",
+    "save the contract to the library",
+    "please add this pdf to the knowledge base",
+  ])("claims %s", (prompt) => {
+    expect(matchUploadToBrainIntent(prompt)).not.toBeNull();
+  });
+
+  /* THE DESTINATION IS THE TELL, and it is required rather than optional.
+     Without that, an upload verb alone claims sentences about other places. */
+  it.each([
+    "upload the deck to Dropbox",
+    "add this to my calendar",
+    "send the invoice to the client",
+    "put the notes in the shared folder",
+  ])("leaves %s alone", (prompt) => {
+    expect(matchUploadToBrainIntent(prompt)).toBeNull();
+  });
+
+  /* A URL or a path is the ingest-from-source flow, not this one. The guard
+     predates this change and must survive it. */
+  it("still defers a URL to the ingest flow", () => {
+    expect(matchUploadToBrainIntent("upload https://x.example/a.pdf to the brain")).toBeNull();
+  });
+});
