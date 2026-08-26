@@ -16,7 +16,9 @@ import { auditRouting, AUDIT_PROMPTS } from "../../../../scripts/routing-audit";
 describe("routing coverage", () => {
   /* THE RATCHET. Raise it when the number improves; it cannot fall without
      somebody deliberately editing this line, which is the point. */
-  const FLOOR = 22;
+  /* Raised from 22 on 2026-08-26 after the day cluster landed. The ratchet only
+     ever goes up, and it goes up in the same change that earns it. */
+  const FLOOR = 25;
 
   it(`routes at least ${FLOOR} of the audit prompts to exactly one tool`, async () => {
     const r = await auditRouting();

@@ -237,3 +237,47 @@ describe("good_morning_widget — meeting pre-brief", () => {
     );
   });
 });
+
+/**
+ * "plan my day" belongs here, not in plan_my_day.
+ *
+ * A routing audit on 2026-08-26 found "plan my day", "run my day" and "what
+ * should I work on" reaching no tool at all: the literal name of a feature,
+ * unreachable.
+ *
+ * plan_my_day is not their home. It takes a DESCRIBED day and says which steps
+ * the product can already do, so it requires forty characters of description
+ * and a bare command has none. What somebody typing "plan my day" wants is
+ * what this widget already assembles: today's meetings and what needs doing.
+ */
+describe("the day commands", () => {
+  it.each([
+    "plan my day",
+    "run my day",
+    "what should I work on",
+    "what should I do today",
+  ])("claims %s", (prompt) => {
+    expect(goodMorningWidgetTool.matchIntent!(prompt)).not.toBeNull();
+  });
+
+  /* The pattern is anchored, so a day command with an object is somebody
+     asking about a specific thing rather than for their briefing. */
+  /* Reserved for a chain runner by client-prompt-corpus: starting a chain is
+     not the same as being shown one. */
+  it("leaves start my day to the chain runner", () => {
+    expect(goodMorningWidgetTool.matchIntent!("start my day")).toBeNull();
+  });
+
+  it.each([
+    "plan my week with the client",
+    "what should I do about the invoice",
+    "run my report",
+  ])("leaves %s alone", (prompt) => {
+    expect(goodMorningWidgetTool.matchIntent!(prompt)).toBeNull();
+  });
+
+  it("still claims the original phrasings", () => {
+    expect(goodMorningWidgetTool.matchIntent!("good morning")).not.toBeNull();
+    expect(goodMorningWidgetTool.matchIntent!("brief me")).not.toBeNull();
+  });
+});

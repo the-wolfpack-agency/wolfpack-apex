@@ -72,8 +72,22 @@ interface GoodMorningData {
   actionItemCount: number;
 }
 
+/**
+ * "plan my day" belongs here, not in plan_my_day.
+ *
+ * A routing audit on 2026-08-26 found "plan my day", "run my day" and "what
+ * should I work on" reaching no tool at all: the literal name of a feature,
+ * unreachable. plan_my_day is not the home for them. It takes a DESCRIBED day
+ * and says which steps the product can already do, so it requires forty
+ * characters of description and a bare command has none.
+ *
+ * What somebody typing "plan my day" wants is the thing this widget already
+ * assembles: today's meetings and what needs doing. It answered "my day" and
+ * "my agenda" and not the two commonest imperatives, which is an accident of
+ * where the pattern stopped rather than a decision.
+ */
 const INTENT_RE =
-  /^(?:brief(?:ing)?|brief\s+me|my\s+brief(?:ing)?|daily\s+brief(?:ing)?|today'?s\s+brief(?:ing)?|today'?s\s+agenda|my\s+agenda|my\s+day|what'?s\s+on\s+(?:for\s+)?today|good\s+(?:morning|afternoon|evening)|morning|afternoon\s+brief(?:ing)?)[\s.?!]*$/i;
+  /^(?:brief(?:ing)?|brief\s+me|my\s+brief(?:ing)?|daily\s+brief(?:ing)?|today'?s\s+brief(?:ing)?|today'?s\s+agenda|my\s+agenda|my\s+day|(?:plan|run|walk\s+me\s+through)\s+my\s+day|what\s+should\s+i\s+(?:work\s+on|do)(?:\s+today)?|what'?s\s+on\s+(?:for\s+)?today|good\s+(?:morning|afternoon|evening)|morning|afternoon\s+brief(?:ing)?)[\s.?!]*$/i;
 
 function matchGoodMorningIntent(message: string): Params | null {
   if (!INTENT_RE.test(message.trim())) return null;
