@@ -44,6 +44,32 @@ interface UploadToBrainData {
 const SLASH_OR_BARE_RE = /^\s*\/?upload(?:\s+to\s+brain)?\s*[?.!]?\s*$/i;
 const NL_INTENT_RE =
   /^\s*(?:i\s+(?:want\s+to|would\s+like\s+to)|let\s+me|how\s+do\s+i)\s+upload(?:\s+(?:something|a\s+file|files?|to\s+(?:my\s+)?brain))?\s*[?.!]?\s*$/i;
+
+/**
+ * The way people actually ask, which was not covered.
+ *
+ * Found by a prompt sweep, 2026-08-26: "upload a document to the brain" and
+ * "add this file to the knowledge base" both reached NO tool. Only the bare
+ * "upload to brain", the "/upload" slash form, and a handful of "I want to
+ * upload" openers worked.
+ *
+ * This is the path a client engagement opens with. Phase one is their document
+ * library read into the Brain, so the first thing somebody tries is putting a
+ * document in, in a sentence naming the thing they are putting and the place
+ * it goes. That sentence did nothing.
+ *
+ * The verb is not always "upload" either: people add, put and send. The
+ * destination is the tell, so a destination is required rather than optional,
+ * which is what keeps "upload the deck to Dropbox" out.
+ */
+const DESTINATION = "(?:the\\s+)?(?:brain|knowledge\\s*base|kb|library|instinct)";
+const NL_IMPERATIVE_RE = new RegExp(
+  `^\\s*(?:please\\s+)?(?:upload|add|put|save|send)\\s+` +
+    `(?:this|that|these|a|an|the|my|our)?\\s*` +
+    `(?:new\\s+)?(?:file|files|doc|docs|document|documents|pdf|deck|report|contract|policy|spreadsheet|sheet)?\\s*` +
+    `(?:to|into|in|onto)\\s+${DESTINATION}\\s*[?.!]?\\s*$`,
+  "i",
+);
 /* Reject when the user clearly already has a URL or a filesystem-style
  * path token — that's a different flow (ingest-from-URL). NOTE: the
  * leading "/upload" slash-command form is NOT a path; the guard runs
@@ -63,6 +89,7 @@ export function matchUploadToBrainIntent(message: string): Params | null {
   if (SLASH_OR_BARE_RE.test(trimmed)) return {};
   if (URL_RE.test(trimmed) || PATH_RE.test(trimmed)) return null;
   if (NL_INTENT_RE.test(trimmed)) return {};
+  if (NL_IMPERATIVE_RE.test(trimmed)) return {};
   return null;
 }
 

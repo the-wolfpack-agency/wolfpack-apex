@@ -43,6 +43,16 @@ function claimants(message: string): string[] {
 const TOOL_PROMPTS: Record<string, string[]> = {
   /* DOCUMENTS. The SharePoint path a client engagement starts with: put a
      document in, then ask the library about it. */
+  /* The document path a client engagement opens with. "upload a document to
+     the brain" reached NO tool until 2026-08-26; only the bare "upload to
+     brain" and the slash form worked. */
+  upload_to_brain: [
+    "upload a document to the brain",
+    "add this file to the knowledge base",
+    "put this doc in the brain",
+    "save the contract to the library",
+    "upload to brain",
+  ],
   op_create_document: [
     "create a document called Q4 pilot notes",
     "make a new document for the client brief",
@@ -76,11 +86,6 @@ const UNREACHABLE: Array<{ prompt: string; shouldReach: string; note: string }> 
     prompt: "plan my day",
     shouldReach: "plan_my_day",
     note: "the exact name of the feature reaches no tool at all",
-  },
-  {
-    prompt: "upload a document to the brain",
-    shouldReach: "upload_to_brain",
-    note: "the document-ingest path a client engagement opens with",
   },
   {
     prompt: "delegate this to an agent",
@@ -195,7 +200,6 @@ const NEEDS_PROMPTS: string[] = [
   "search_mail",
   "task_list_widget",
   "update_external_record",
-  "upload_to_brain",
   "what_can_you_do",
 ];
 
@@ -255,6 +259,6 @@ describe("every tool can be reached by something", () => {
      a new tool landing without prompts is a choice somebody makes today, and
      this is where it stops. */
   it("does not let the gap grow", () => {
-    expect(NEEDS_PROMPTS.length).toBeLessThanOrEqual(51);
+    expect(NEEDS_PROMPTS.length).toBeLessThanOrEqual(50);
   });
 });
