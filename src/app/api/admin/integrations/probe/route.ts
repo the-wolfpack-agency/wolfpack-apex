@@ -23,7 +23,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { probeAll } from "@/lib/integrations/probe";
 import { getValidToken } from "@/lib/microsoft-graph";
-import { query } from "@/lib/db";
 import { recordAudit, extractRequestMetadata } from "@/lib/audit-log";
 
 export async function POST(req: NextRequest) {
@@ -32,23 +31,26 @@ export async function POST(req: NextRequest) {
 
   const workspaceId = auth.user.workspaceId ?? "default";
 
-  /* The account to probe as. Scoped to this workspace, because probing with
-     another tenant's token would answer a question nobody asked. */
-  const { rows } = await query<{ connected_by: string }>(
-    `SELECT connected_by
-       FROM instinct_ms_tokens
-      WHERE workspace_id = $1
-      ORDER BY updated_at DESC
-      LIMIT 1`,
-    [workspaceId],
-  );
-  const userId = rows[0]?.connected_by;
+  /* PROBE AS THE CALLER, using their own connected account.
+   *
+   * The first version selected the most recently updated row from
+   * instinct_ms_tokens "for this workspace". Two things were wrong with that.
+   * The table has no workspace_id column, so the query would have thrown on
+   * the first real request; and picking whichever account happened to be
+   * newest meant an administrator could spend a colleague's credential
+   * without either of them choosing it.
+   *
+   * getValidToken resolves by connected_by OR user_email, so the caller's own
+   * email is the right key: they authorised the connection, and the probe
+   * therefore reaches exactly what they can already reach.
+   */
+  const userId = auth.user.email;
   if (!userId) {
     return NextResponse.json(
       {
         probed: false,
         reason: "no_connected_account",
-        detail: "No Microsoft account is connected in this workspace, so there is nothing to probe.",
+        detail: "No Microsoft account is connected for this user, so there is nothing to probe.",
       },
       { status: 409 },
     );
