@@ -25,7 +25,7 @@ import { z } from "zod";
 import { trackEvent } from "@/lib/analytics";
 import { registerTool } from "./registry";
 import { getTools } from "./registry";
-import { canInvokeTool } from "./gate";
+import { canInvokeNamedTool, canInvokeTool } from "./gate";
 import { BUILT_IN_ROUTINES } from "@/lib/assistant/routines/catalogue";
 import { PROMPT_GUIDE } from "@/lib/assistant/prompt-corpus";
 import type { ToolDef, ToolResult } from "./types";
@@ -147,23 +147,43 @@ export const capabilitiesTool: ToolDef<Params, CapabilitiesData> = {
        cannot run would be a menu of disappointments, and a second copy of the
        permission logic here is how the menu and the runtime come to disagree. */
     const usable = all.filter(
-      (t) => canInvokeTool(ctx.userRole, t.capability) && t.name !== "what_can_you_do",
+      (t) => canInvokeNamedTool(ctx.userRole, t.name, t.capability) && t.name !== "what_can_you_do",
     );
     const withheldCount = all.length - usable.length - 1;
 
-    const routines = BUILT_IN_ROUTINES;
+    /* A ROUTINE IS ONLY OFFERED IF ITS STEPS ARE REACHABLE.
+     *
+     * A dealer asking what the assistant can do was shown "where do things
+     * stand - open PRs, open issues and what is blocked", which is not their
+     * world and which they cannot run. A menu whose first section is
+     * unusable teaches somebody the whole thing is not for them, and it is the
+     * first screen they ever see.
+     *
+     * Judged by the steps rather than by a second list, so a routine cannot
+     * drift from what its own tools require. */
+    const routines = BUILT_IN_ROUTINES.filter((r) =>
+      r.steps.every((step) =>
+        step.kind !== "tool"
+          ? true
+          : canInvokeNamedTool(ctx.userRole, step.tool, toolCapability(step.tool)),
+      ),
+    );
     const lines: string[] = [];
 
-    lines.push("**Whole jobs, in one command**");
-    lines.push("");
+    if (routines.length > 0) {
+      lines.push("**Whole jobs, in one command**");
+      lines.push("");
+    }
     for (const r of routines) {
       lines.push(`- \`${r.command}\` — ${r.description}`);
     }
-    lines.push("");
-    lines.push(
-      "Each of those runs several of the tools below in order and stops when it needs you. Nothing is sent, filed or told to anybody without you confirming it.",
-    );
-    lines.push("");
+    if (routines.length > 0) {
+      lines.push("");
+      lines.push(
+        "Each of those runs several of the tools below in order and stops when it needs you. Nothing is sent, filed or told to anybody without you confirming it.",
+      );
+      lines.push("");
+    }
 
     const byArea = new Map<string, string[]>();
     for (const t of usable) {
@@ -221,7 +241,7 @@ export const capabilitiesTool: ToolDef<Params, CapabilitiesData> = {
            to somebody reading the answer to it is the kind of thing that
            only shows up when you read the output rather than the code. */
         g.tool !== "what_can_you_do" &&
-        canInvokeTool(ctx.userRole, toolCapability(g.tool)),
+        canInvokeNamedTool(ctx.userRole, g.tool, toolCapability(g.tool)),
     ).slice(0, 3);
     if (openers.length > 0) {
       lines.push("");

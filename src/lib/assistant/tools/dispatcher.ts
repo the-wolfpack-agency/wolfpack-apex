@@ -25,7 +25,7 @@ import { ingestAgentAction } from "@/lib/agents/audit/brain-ingest";
 import { createPendingApproval } from "@/lib/agents/approvals/store";
 import { notify } from "@/lib/notifications/in-app";
 import type { OgiamDecision } from "@/lib/ogiam/types";
-import { canInvokeTool } from "./gate";
+import { canInvokeNamedTool } from "./gate";
 import { getTools, getToolByName } from "./registry";
 import type {
   ToolContext,
@@ -307,7 +307,7 @@ async function runOneTool<P, R>(
 
   /* 2. Role gate (shared with the agent self-onboarding scan, see ./gate).
         "*" = any authenticated principal. */
-  if (!canInvokeTool(ctx.userRole, tool.capability)) {
+  if (!canInvokeNamedTool(ctx.userRole, tool.name, tool.capability)) {
     return failure(
       "capability",
       `tool ${tool.name} requires role ${tool.capability} (you have ${ctx.userRole})`,
