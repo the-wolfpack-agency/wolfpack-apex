@@ -138,14 +138,16 @@ the phase column says when a client sees it.
 
 ### Shape
 
-    their people
-        |
-    the assistant  (one surface: ask, and be answered)
-        |
-    the gate       (who is this, what may they reach, what may they be told)
-        |
-    +---------------+---------------+----------------+
-    |               |               |                |
+\`\`\`text
+their people
+    |
+the assistant  (one surface: ask, and be answered)
+    |
+the gate       (who is this, what may they reach, what may they be told)
+    |
++---------------+---------------+----------------+
+|               |               |                |
+\`\`\`
   tools         retrieval       the router        connectors
   (their        (their          (only where       (their systems,
    systems,      documents,      judgement         read first,
@@ -234,13 +236,15 @@ disagreement is in the record.
 The nouns the system knows about, and how they relate. This is what makes
 cross-system answers possible, and it is the part that grows with each phase.
 
-    Person  --works at-->  Organisation
-      |                        |
-      |--attends-->  Meeting --covers--> Document --lives in--> Library
-      |                 |                    |                      |
-      |--owns-->    Task  |                Topic              Audience
-      |                    \                                       |
-      |--holds-->  Capability  <--governs--  Role  <----------------+
+\`\`\`text
+Person  --works at-->  Organisation
+  |                        |
+  |--attends-->  Meeting --covers--> Document --lives in--> Library
+  |                 |                    |                      |
+  |--owns-->    Task  |                Topic              Audience
+  |                    \                                       |
+  |--holds-->  Capability  <--governs--  Role  <----------------+
+\`\`\`
 
 - **Person, Role, Capability.** A person has a role; a role carries
   capabilities; a capability is checked at every call.

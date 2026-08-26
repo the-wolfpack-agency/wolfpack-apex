@@ -207,98 +207,12 @@ export default function EngineeringWiki({ pages }: EngineeringWikiProps) {
           }
           .wiki-nav[data-open="false"] { display: none; }
         }
-        .wiki-md {
-          color: var(--wp-text, #e8eaed);
-          font-size: 0.95rem;
-          line-height: 1.7;
-          overflow-wrap: break-word;
-          word-break: break-word;
-        }
-        .wiki-md h2, .wiki-md h3 {
-          color: var(--wp-gold, #e8b528);
-          font-weight: 700;
-          line-height: 1.3;
-          margin: 1.4rem 0 0.6rem;
-        }
-        .wiki-md h2 { font-size: 1.25rem; }
-        .wiki-md h3 { font-size: 1.08rem; }
-        .wiki-md h4, .wiki-md h5 {
-          color: var(--wp-text, #e8eaed);
-          font-weight: 700;
-          margin: 1.1rem 0 0.5rem;
-        }
-        .wiki-md h4 { font-size: 1rem; }
-        .wiki-md h5 { font-size: 0.92rem; }
-        .wiki-md p { margin: 0.7rem 0; }
-        /* Restore list markers: Tailwind Preflight resets list-style to none
-           globally, which flattened these into a wall of text. */
-        .wiki-md ul { list-style: disc outside; margin: 0.7rem 0; padding-left: 1.4rem; }
-        .wiki-md ol { list-style: decimal outside; margin: 0.7rem 0; padding-left: 1.6rem; }
-        .wiki-md li { margin: 0.4rem 0; padding-left: 0.25rem; line-height: 1.6; }
-        .wiki-md li::marker { color: var(--wp-gold, #e8b528); font-weight: 700; }
-        .wiki-md ul ul, .wiki-md ul ol, .wiki-md ol ul, .wiki-md ol ol { margin: 0.35rem 0; }
-        .wiki-md a { color: var(--wp-gold, #e8b528); text-decoration: underline; }
-        .wiki-md code {
-          background: var(--wp-dark-surface, rgba(255,255,255,0.06));
-          border: 1px solid var(--wp-dark-border, rgba(255,255,255,0.1));
-          border-radius: 4px;
-          padding: 0.1rem 0.35rem;
-          font-size: 0.85em;
-          font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-        }
-        .wiki-md pre {
-          background: var(--wp-dark-surface, rgba(255,255,255,0.06));
-          border: 1px solid var(--wp-dark-border, rgba(255,255,255,0.1));
-          border-radius: 8px;
-          padding: 0.9rem 1rem;
-          overflow-x: auto;
-          margin: 0.8rem 0;
-        }
-        .wiki-md pre code {
-          background: none;
-          border: none;
-          padding: 0;
-          font-size: 0.85rem;
-        }
-        .wiki-md blockquote {
-          border-left: 3px solid var(--wp-gold, #e8b528);
-          margin: 0.8rem 0;
-          padding: 0.2rem 0 0.2rem 1rem;
-          color: var(--wp-text-muted, #9aa0aa);
-        }
-        /* A table scrolls inside its own box rather than being squeezed by the
-           content column. Without this the browser shrank every column to fit,
-           which stacked "planned" one letter per line and still clipped the
-           last column at the pane edge. */
-        .wiki-md .wiki-table {
-          overflow-x: auto;
-          margin: 0.8rem 0 1.2rem;
-        }
-        .wiki-md table {
-          border-collapse: collapse;
-          margin: 0;
-          width: 100%;
-          /* Enough that each column gets its natural width; past this the box
-             scrolls instead of the columns collapsing. */
-          min-width: 560px;
-        }
-        .wiki-md th, .wiki-md td {
-          border: 1px solid var(--wp-dark-border, rgba(255,255,255,0.12));
-          padding: 0.5rem 0.7rem;
-          text-align: left;
-          vertical-align: top;
-          font-size: 0.88rem;
-          line-height: 1.45;
-        }
-        .wiki-md th {
-          background: var(--wp-dark-surface, rgba(255,255,255,0.05));
-          font-weight: 700;
-          /* A heading is short by definition: never stack it. */
-          white-space: nowrap;
-        }
-        /* A one-word status must not wrap. Applies to any cell whose whole
-           content is a single short word, which is what a state column is. */
-        .wiki-md td:nth-child(2):not(:last-child) {
+        /* The markdown rules live in globals.css under .wp-md, shared with
+           /playbook. They were here, which is why that page shipped with no
+           styling at all: the rules were not missing, they were unreachable.
+           What stays below is wiki-specific and does not belong to every
+           document that renders markdown. */
+        .wiki-md.wp-md td:nth-child(2):not(:last-child) {
           white-space: nowrap;
           width: 1%;
         }
@@ -391,7 +305,7 @@ export default function EngineeringWiki({ pages }: EngineeringWikiProps) {
             </div>
             {PAGE_DIAGRAMS[page.slug] ?? null}
             <div
-              className="wiki-md"
+              className="wiki-md wp-md"
               data-testid="wiki-content"
               dangerouslySetInnerHTML={{ __html: page.bodyHtml ?? "" }}
             />
