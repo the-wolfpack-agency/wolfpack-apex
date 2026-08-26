@@ -1436,6 +1436,14 @@ export async function chat(
         topScore: brainContext?.topScore,
         hitCount: brainContext?.hits.length,
         retrievedIds: validSourceIds,
+        /* THE TEXT THE ANSWER WAS WRITTEN FROM. A capitalised phrase the model
+           read in a retrieved chunk cannot have been invented by it, and
+           without this the check has only the team roster to compare against -
+           so every proper noun in a client's own documents reads as a
+           fabrication. Real venues in Porsche's own survey exports were being
+           reported as "unfamiliar names" by a product that had ingested them
+           itself. */
+        groundingText: (brainContext?.hits ?? []).map((h) => h.content).join("\n"),
       },
       { userId, userRole, strictness },
     );

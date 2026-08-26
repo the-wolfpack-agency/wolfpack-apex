@@ -575,3 +575,79 @@ describe("validateEntities — the openers reported on 2026-08-19", () => {
     expect(flag?.reason).toContain("Bartholomew");
   });
 });
+
+/* ---------------------------------------------------------------------
+ * A name the model READ cannot have been invented by it.
+ *
+ * #271 fixed the sentence-opener and contraction cases. It did not fix the
+ * larger one, and said so: the check compares against the team roster, so
+ * every proper noun in a client's own documents reads as a fabrication.
+ *
+ * Observed three times on 2026-08-26, against real answers:
+ *   "answer mentions 4 unfamiliar name(s): Ritz Carlton, Intercontinental,
+ *    Hilton Hotel."
+ *
+ * Those are training venues, in Porsche's own survey exports, which this
+ * product had ingested itself an hour earlier. Warning that a correct answer
+ * is invented is worse than not warning at all: it teaches people to distrust
+ * the answers that are good, and in front of a client it is the single most
+ * damaging sentence the product can emit.
+ * --------------------------------------------------------------- */
+describe("names corroborated by the material they came from", () => {
+  const ROSTER = ["jorge colon", "ashley lindsey"];
+
+  it("does not flag a venue that appears in the retrieved text", () => {
+    /* Opening on a listed word deliberately, so this asserts corroboration
+       and nothing else. Sentence-initial nouns are a separate class, still
+       imperfect after #271, and noted at the end of this block. */
+    const answer = "The training was held at the Ritz Carlton Las Colinas in August.";
+    const grounding =
+      "Survey Data PCBA_101 — training session held at the Ritz Carlton Las Colinas, August 17-21.";
+    expect(validateEntities(answer, ROSTER, grounding)).toBeNull();
+  });
+
+  it("flags the same venue when nothing retrieved mentions it", () => {
+    const answer = "The training was held at the Ritz Carlton Las Colinas in August.";
+    const flag = validateEntities(answer, ROSTER, "");
+    expect(flag).not.toBeNull();
+    expect(flag?.reason ?? "").toMatch(/Ritz Carlton/);
+  });
+
+  /* THE FAILURE THIS CHECK EXISTS FOR, and the reason the earlier attempt at
+     a general rule was reverted. Inventing a colleague must still be caught,
+     and Mortimer appears in no chunk. */
+  it("still catches an invented colleague", () => {
+    const flag = validateEntities(
+      "Mortimer joined the deal last week.",
+      ROSTER,
+      "The Greenfield account moved to stage three after a call with Jorge.",
+    );
+    expect(flag).not.toBeNull();
+    expect(flag?.reason ?? "").toMatch(/Mortimer/);
+  });
+
+  /* Corroboration is about what was read, not about how it was capitalised. */
+  it("matches regardless of case", () => {
+    expect(
+      validateEntities("The Hilton Hotel hosted it.", ROSTER, "held at the hilton hotel"),
+    ).toBeNull();
+  });
+
+  it("is unchanged when there is no grounding to check against", () => {
+    expect(validateEntities("Ready when you are.", ROSTER)).toBeNull();
+  });
+
+  /* THE SENTENCE-OPENER CLASS, WHICH THIS ALSO HELPS WITH, and I only found
+     out by writing the test.
+     "Sessions were held there" reports Sessions when there is nothing to check
+     against, because the word is neither on the roster nor on the closed list
+     #271 extended. It is corroborated the moment the material contains it,
+     which for an answer written FROM that material is the ordinary case. So
+     grounding narrows this class too, rather than only the proper-noun one. */
+  it("also corroborates an ordinary noun that opens a sentence", () => {
+    expect(validateEntities("Sessions were held there.", ROSTER, "")).not.toBeNull();
+    expect(
+      validateEntities("Sessions were held there.", ROSTER, "sessions were held"),
+    ).toBeNull();
+  });
+});

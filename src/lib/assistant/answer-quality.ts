@@ -134,6 +134,21 @@ export interface QualityCheckInput {
   hitCount?: number;
   /** Lowercase names of people / orgs known to the team. */
   knownNames?: string[];
+  /**
+   * The retrieved material this answer was written from.
+   *
+   * A capitalised phrase that appears in the text we just quoted is not
+   * invented, by definition: the model read it here. Without this, the check
+   * has only the team roster to compare against, so every proper noun in a
+   * client's own documents reads as a fabrication.
+   *
+   * Reported repeatedly: a correct answer about training venues carried "4
+   * unfamiliar name(s): Ritz Carlton, Intercontinental, Hilton Hotel" - real
+   * places, in Porsche's own survey exports, which this product had ingested
+   * itself. Warning that a right answer is invented is worse than not warning
+   * at all, because it teaches people to distrust the answers that are good.
+   */
+  groundingText?: string;
   /** IDs the answer might cite — for the citation check. */
   retrievedIds?: string[];
   /** When the answer's most-cited source was last updated, ISO date. */
@@ -311,8 +326,20 @@ const COMMON_NON_NAME_PHRASES = new Set([
 export function validateEntities(
   answer: string,
   knownNames: string[],
+  groundingText = "",
 ): QualityFlag | null {
   if (!answer) return null;
+  /* CORROBORATED BY THE SOURCE, not by the question.
+   *
+   * A previous attempt at this required a capitalised word to appear
+   * somewhere it did not have to be, which also silenced "Mortimer joined the
+   * deal" - and inventing a colleague is the failure this check exists to
+   * catch. It was rightly reverted.
+   *
+   * Grounding is a different test and a safe one. A name the model READ in
+   * the material cannot have been invented by it; a name it did not read is
+   * still caught, and Mortimer appears in no chunk. */
+  const grounding = groundingText.toLowerCase();
   const known = new Set(knownNames.map((n) => n.toLowerCase().trim()));
   /* Also index by first token of each known name so single-word matches
      ("Jorge" → "jorge colon") still pass. */
@@ -349,6 +376,10 @@ export function validateEntities(
     if (COMMON_NON_NAMES.has(phrase)) continue;
     if (COMMON_NON_NAME_PHRASES.has(phrase)) continue;
     if (known.has(phrase) || knownFirstTokens.has(phrase)) continue;
+    /* IT IS IN THE MATERIAL WE JUST QUOTED. Checked before the heuristics
+       below, because none of them can know that a name is real and this
+       does. */
+    if (grounding && grounding.includes(phrase)) continue;
     const tokens = phrase.split(/\s+/);
     const firstToken = tokens[0];
     if (known.has(firstToken) || knownFirstTokens.has(firstToken)) continue;
@@ -465,7 +496,11 @@ export function runAnswerQualityChecks(
   if (fConfidence) flags.push(fConfidence);
 
   if (input.knownNames) {
-    const fEntities = validateEntities(input.answer, input.knownNames);
+    const fEntities = validateEntities(
+      input.answer,
+      input.knownNames,
+      input.groundingText ?? "",
+    );
     if (fEntities) flags.push(fEntities);
   }
 
