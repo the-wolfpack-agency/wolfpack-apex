@@ -33,7 +33,8 @@
     "verify": "bash scripts/verify.sh",
     "verify:devices": "npx tsx scripts/verify-devices.ts",
     "verify:prod-env": "bash scripts/verify-prod-env.sh",
-    "integrations:evidence": "npx tsx scripts/integration-evidence.ts"
+    "integrations:evidence": "npx tsx scripts/integration-evidence.ts",
+    "integrations:probe": "npx tsx scripts/integration-probe.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.92.0",
