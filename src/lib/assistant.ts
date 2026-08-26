@@ -43,6 +43,7 @@ import {
   runAnswerQualityChecks,
   validateCitations,
 } from "@/lib/assistant/answer-quality";
+import { buildChoices } from "@/lib/assistant/choices";
 import { welcomePromptTextsForRole } from "@/lib/assistant/welcome-prompts";
 import {
   tryDispatchTool,
@@ -1539,7 +1540,20 @@ export async function chat(
        chips and fire one analytics event so we can measure how often
        the fallback affordance gets shown (numerator for chip-CTR). */
     if (quality.verdict === "reject") {
-      const fallbackChips = welcomePromptTextsForRole(userRole);
+      /* CHIPS THAT ANSWER THE QUESTION THAT WAS ASKED.
+         These were a fixed list per role, identical whatever somebody typed,
+         so a person who asked about the build got offered the weather. Worse,
+         the CTO list carried "what's our MRR", which dead-ends on a
+         disconnected accounting system: a chip that cannot work is the
+         role-mismatch defect wearing a friendlier coat, and it spends a click
+         to teach somebody the product is broken.
+         buildChoices ranks by overlap with what was typed and filters by the
+         same capability gate the tools enforce, and every query it returns is
+         one the prompt corpus asserts routes to a real tool. Falls back to the
+         role list when nothing scores, so somebody is never left with an empty
+         dead end. */
+      const ranked = buildChoices(message, userRole).map((c) => c.query);
+      const fallbackChips = ranked.length > 0 ? ranked : welcomePromptTextsForRole(userRole);
       trackEvent("assistant.fallback_chips_offered", userId, userRole, {
         role: userRole,
         chip_count: fallbackChips.length,
