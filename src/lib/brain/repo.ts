@@ -320,6 +320,20 @@ export async function markChunksEmbedded(
   );
 }
 
+/**
+ * Drop a document's chunks so it can be re-extracted in place.
+ *
+ * Reprocess cannot go through ingest(): that dedupes on the sha and would find
+ * the existing failed row and return it unchanged, which is exactly why ninety
+ * Word documents stayed failed after the parser was fixed. Re-extracting in
+ * place means clearing the old chunks first, or a partially-chunked document
+ * accumulates a second copy of itself and gets quoted twice.
+ */
+export async function deleteChunksForDocument(documentId: string): Promise<number> {
+  const res = await query(`DELETE FROM brain_chunks WHERE document_id = $1`, [documentId]);
+  return res.rowCount ?? 0;
+}
+
 export async function getChunksForDocument(documentId: string): Promise<BrainChunk[]> {
   const res = await query<BrainChunk>(
     `SELECT * FROM brain_chunks WHERE document_id = $1 ORDER BY chunk_idx ASC`,
