@@ -10,6 +10,7 @@ import { createHash } from "node:crypto";
 import { query } from "@/lib/db";
 import { trackEvent, type InstinctEventType } from "@/lib/analytics";
 import { readsEverything } from "./audience";
+import { nonCorpusExclusionSql, NON_CORPUS_UPLOADER_IDS } from "./corpus";
 import type {
   BrainChunk,
   BrainDocument,
@@ -430,6 +431,15 @@ export function buildKeywordSearchSql(
     args.push(opts.kind);
     where.push(`bd.kind = $${args.length + 1}`);
   }
+
+  /* THE CORPUS BOUNDARY. 744 of the 795 answerable documents were written by
+     the demo seeder or by the platform scanner rather than by anybody using
+     the product. Searching them means answering a question about somebody's
+     business by quoting a fixture, which is the difference between an
+     assistant that is wrong and one that is useless. See ./corpus.ts. */
+  args.push(NON_CORPUS_UPLOADER_IDS);
+  where.push(nonCorpusExclusionSql(args.length + 1));
+
   args.push(limit);
   const limitArg = `$${args.length + 1}`;
 

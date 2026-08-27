@@ -31,6 +31,7 @@
  * document does. It costs one round trip over at most a page of ids.
  */
 import { query } from "@/lib/db";
+import { nonCorpusExclusionSql, NON_CORPUS_UPLOADER_IDS } from "./corpus";
 
 /**
  * Roles that may read anything, including documents restricted to somebody
@@ -54,16 +55,26 @@ export async function readableDocumentIds(
   role: string,
 ): Promise<Set<string>> {
   if (documentIds.length === 0) return new Set();
-  if (readsEverything(role)) return new Set(documentIds);
 
+  /* THE CORPUS BOUNDARY IS NOT AN AUDIENCE QUESTION, so this runs for every
+     role including the ones that read everything. A CTO may read every
+     document in the library; that is not a reason to quote a demo fixture at
+     them. This short-circuited on readsEverything() and would have let the
+     744 synthetic documents straight back in through the semantic half. */
+  const everything = readsEverything(role);
   const asked = (role || "").toLowerCase();
   try {
     const { rows } = await query<{ id: string }>(
+      /* Same corpus boundary as the keyword side. A document the semantic half
+         surfaces is quoted exactly like a keyword hit, so excluding it in one
+         place and not the other would leave the fixtures reachable through
+         whichever half happened to be configured. */
       `SELECT id
-         FROM brain_documents
+         FROM brain_documents bd
         WHERE id = ANY($1)
-          AND (audience_roles IS NULL OR $2 = ANY(audience_roles))`,
-      [documentIds, asked],
+          AND ($2::boolean OR bd.audience_roles IS NULL OR $3 = ANY(bd.audience_roles))
+          AND ${nonCorpusExclusionSql(4)}`,
+      [documentIds, everything, asked, NON_CORPUS_UPLOADER_IDS],
     );
     return new Set(rows.map((r) => String(r.id)));
   } catch {
