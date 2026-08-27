@@ -642,7 +642,11 @@ a:hover { color: var(--wp-gold-hover); }
  * always that you are already a long way down the page.
  * ------------------------------------------------------------------------ */
 .wp-playbook {
-  max-width: 1180px;
+  /* 1180px capped the whole page, contents rail included, so on a 1920 screen
+     740px sat empty while the document scrolled. Wider cap plus a reading
+     measure on the prose itself: the article gets room without the lines
+     growing past what an eye tracks comfortably. */
+  max-width: 1440px;
   margin: 0 auto;
   padding: 1.75rem 1.5rem 5rem;
 }
@@ -713,6 +717,14 @@ a:hover { color: var(--wp-gold-hover); }
 .wp-playbook-toc a:hover,
 .wp-playbook-toc a:focus-visible { color: var(--wp-gold, #e8b528); }
 .wp-playbook-body { flex: 1 1 auto; min-width: 0; }
+/* A reading measure, applied to the PROSE rather than the column, so tables
+   and the two diagrams still use the full width they need. Roughly 90
+   characters: wider than a book because this is scanned as much as read, and
+   the complaint was scrolling rather than line length. */
+.wp-playbook-body > p,
+.wp-playbook-body > ul,
+.wp-playbook-body > ol,
+.wp-playbook-body > blockquote { max-width: 90ch; }
 /* An anchored heading must not land under the sticky header. */
 .wp-playbook-body h2,
 .wp-playbook-body h3 { scroll-margin-top: 1.5rem; }

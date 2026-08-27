@@ -72,6 +72,50 @@ export default async function PlaybookPage() {
         </p>
       </header>
 
+      {/* ABOVE THE LAYOUT, NOT INSIDE IT.
+
+          .wp-playbook-layout is display:flex, so a third child there does not
+          sit above the article, it sits BESIDE it and takes a share of the
+          row. Measured on the deployed page at a 1440px viewport: the shell is
+          1120px, the contents rail 232px, and the article had been squeezed to
+          366px, roughly 48 characters a line, when it should have had about
+          848px. A long document at 48 characters a line is the heavy scroll
+          that was reported, and it was a nesting mistake rather than a type
+          choice. */}
+      <div className="wp-playbook-readiness-wrap">
+        {/* MEASURED, NOT ASSERTED. Every number below is read when the page is
+            requested. The document used to say "eighteen integrations" while
+            twelve had ever run, and told clients a second model reviewed every
+            answer while it had reviewed none in ninety days. A figure that
+            cannot be read says so rather than showing a zero, because this is
+            the last page on which a zero should be allowed to mean
+            "unmeasured". */}
+        <section className="wp-playbook-readiness" data-testid="playbook-readiness">
+          {/* No `id`. An id here makes it an anchor target, and the contents
+              rail is built from the markdown's own headings, so it would be a
+              section of the document that the rail cannot reach. */}
+          <h2 className="wp-playbook-readiness-title">Where this stands, measured</h2>
+          <p className="wp-playbook-sub">
+            Read from the running system when you loaded this page, not written down. A line that
+            could not be measured says so; none of them will ever show a zero to mean
+            &quot;we did not look&quot;.
+          </p>
+          <dl>
+            {readiness.lines.map((l) => (
+              <div key={l.label} data-testid={`readiness-${l.label.toLowerCase().replace(/\W+/g, "-")}`}>
+                <dt>{l.label}</dt>
+                <dd>
+                  <strong data-unmeasured={l.value === null ? "true" : undefined}>
+                    {l.value ?? "not measurable right now"}
+                  </strong>
+                  <span>{l.detail}</span>
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </section>
+      </div>
+
       <div className="wp-playbook-layout">
         <nav className="wp-playbook-toc" aria-label="Sections">
           <p className="wp-playbook-toc-title">Contents</p>
@@ -83,48 +127,6 @@ export default async function PlaybookPage() {
             ))}
           </ol>
         </nav>
-
-        {/* NOT `wp-playbook-body`. That class belongs to the ARTICLE, and
-            playbook-readable.spec.ts keys two assertions on it: the first h2
-            inside it must look like a document heading, and every h2[id] inside
-            it must have a matching contents-rail entry. Reusing the class here
-            put this panel's heading first and added a section anchor the rail
-            does not know about, and both hard gates went red against the
-            deployed page. The panel is a panel; it is not a section of the
-            document. */}
-        <div className="wp-playbook-readiness-wrap">
-          {/* MEASURED, NOT ASSERTED. Every number below is read when the page is
-              requested. The document used to say "eighteen integrations" while
-              twelve had ever run, and told clients a second model reviewed every
-              answer while it had reviewed none in ninety days. A figure that
-              cannot be read says so rather than showing a zero, because this is
-              the last page on which a zero should be allowed to mean
-              "unmeasured". */}
-          <section className="wp-playbook-readiness" data-testid="playbook-readiness">
-            {/* No `id`. An id here makes it an anchor target, and the contents
-                rail is built from the markdown's own headings, so it would be a
-                section of the document that the rail cannot reach. */}
-            <h2 className="wp-playbook-readiness-title">Where this stands, measured</h2>
-            <p className="wp-playbook-sub">
-              Read from the running system when you loaded this page, not written down. A line that
-              could not be measured says so; none of them will ever show a zero to mean
-              &quot;we did not look&quot;.
-            </p>
-            <dl>
-              {readiness.lines.map((l) => (
-                <div key={l.label} data-testid={`readiness-${l.label.toLowerCase().replace(/\W+/g, "-")}`}>
-                  <dt>{l.label}</dt>
-                  <dd>
-                    <strong data-unmeasured={l.value === null ? "true" : undefined}>
-                      {l.value ?? "not measurable right now"}
-                    </strong>
-                    <span>{l.detail}</span>
-                  </dd>
-                </div>
-              ))}
-            </dl>
-          </section>
-        </div>
 
         {/* renderMarkdown escapes every piece of text and emits only a fixed tag
             whitelist, so there is no caller-supplied HTML to sanitize here. */}
