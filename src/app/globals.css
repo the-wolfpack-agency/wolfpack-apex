@@ -616,6 +616,46 @@ a:hover { color: var(--wp-gold-hover); }
 }
 /* The wrapper scrolls so the table keeps its natural column widths instead of
    being squeezed by the content column. */
+/* .wiki-table STYLED WHEREVER IT IS USED, not only inside markdown.
+ *
+ * Every rule for this class sat under .wp-md, so the same markup on the model
+ * router page rendered with no borders, no padding and no cell separation at
+ * all. The columns ran together and a row read as "2026-07-066": a date and a
+ * call count with nothing between them. Reported as a badly laid out chart,
+ * which it was.
+ *
+ * Same root cause as the playbook tables that rendered as "Microsoft 365
+ * tenant consentTheir IT": a style scoped to one context and then reused in
+ * another, where it silently does nothing. The base rules live here and .wp-md
+ * keeps its own spacing. */
+.wiki-table { overflow-x: auto; }
+.wiki-table table {
+  border-collapse: collapse;
+  width: 100%;
+  min-width: 560px;
+  font-size: 0.85rem;
+}
+.wiki-table th,
+.wiki-table td {
+  border: 1px solid var(--wp-dark-border, rgba(255, 255, 255, 0.12));
+  padding: 0.5rem 0.7rem;
+  text-align: left;
+  vertical-align: top;
+}
+.wiki-table th {
+  background: var(--wp-dark-surface, rgba(255, 255, 255, 0.05));
+  color: var(--wp-gold, #e8b528);
+  font-weight: 700;
+  /* A header that wraps is readable; one that truncates is a guess. */
+  white-space: normal;
+}
+/* Numbers line up when they are right-aligned and tabular. A column of counts
+   that does not line up cannot be scanned, which is the whole point of showing
+   a trend rather than a headline. */
+.wiki-table td + td {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
 .wp-md .wiki-table { overflow-x: auto; margin: 1rem 0 1.5rem; }
 .wp-md table { border-collapse: collapse; margin: 0; width: 100%; min-width: 560px; }
 .wp-md th,

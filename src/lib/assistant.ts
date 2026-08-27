@@ -22,6 +22,8 @@ import { matchSavedRoutine } from "@/lib/assistant/routines/saved";
 import { searchKnowledge, saveAnswer } from "@/lib/knowledge";
 import { queryBrain, markCited as markBrainCited } from "@/lib/brain/query";
 import { judgeRelevance } from "@/lib/brain/relevance";
+import { redactText, NEVER_QUOTE_KINDS } from "@/lib/ai/redaction";
+import { looksTabular } from "@/lib/brain/query";
 import { neutralizeInjection } from "@/lib/brain/security";
 import { getCitationRefs } from "@/lib/brain/repo";
 import { searchMeetingTranscripts } from "@/lib/plaud";
@@ -2453,15 +2455,56 @@ async function tryBrain(
     // that includes this message in its history. Matched patterns are
     // replaced with [filtered:<label>] tags so the user can see what
     // was flagged and the brain_query_log row records the labels.
+    /* A SPREADSHEET IS GOOD GROUNDING AND A BAD QUOTE.
+     *
+     * Verbatim quoting is right for prose: it is fast, free, and the document
+     * says it better than a paraphrase would. It is wrong for a spreadsheet,
+     * which chunks as raw CSV and prints column headers, UUIDs, usernames and
+     * participant names into the chat. Measured on the real assistant, "which
+     * hotels were surveyed in August" answered with a row containing a named
+     * dealer GM and their username.
+     *
+     * The same hits handed to a model come back as "Ritz Carlton, Aug 17:
+     * accommodations were very nice", which is what somebody asked for. So
+     * when the strong hits are mostly tabular, this declines to answer here
+     * and lets the grounded model path do it. Costs a cheap-tier call and buys
+     * an answer a client can read. */
+    const tabularCount = strong.filter((h) => looksTabular(h.content)).length;
+    if (tabularCount > strong.length / 2) {
+      trackEvent("assistant.brain_quote_declined_tabular", userId, userRole, {
+        strong_hits: strong.length,
+        tabular_hits: tabularCount,
+        module: "assistant",
+      });
+      /* Context still flows, so the model answers FROM these documents rather
+         than from memory. Declining to quote is not declining to answer. */
+      return { strong: null, context };
+    }
+
     const lines: string[] = [
       "Here's what the brain has on this:",
       "",
     ];
     const allMatchedLabels = new Set<string>();
+    const redactedKinds = new Set<string>();
     for (const h of strong.slice(0, 3)) {
       const raw = h.content.slice(0, 500).replace(/\s+/g, " ").trim();
-      const { text: safe, matchedLabels } = neutralizeInjection(raw);
+      const { text: injectionSafe, matchedLabels } = neutralizeInjection(raw);
       for (const l of matchedLabels) allMatchedLabels.add(l);
+      /* AND THE PEOPLE IN IT. neutralizeInjection defends the MODEL from a
+         hostile document; it does nothing for the person named inside an
+         ordinary one. A survey export chunks as raw CSV, so quoting it
+         verbatim printed a.person@example-dealer.com and another.person@example.com
+         into the chat, along with participant names and roles.
+       *
+         This path spends zero tokens, which is the product working as
+         designed, and is why it never reached the outbound redactor in the
+         router: the cheapest answers were the only unredacted ones. */
+      const outbound = redactText(injectionSafe, NEVER_QUOTE_KINDS);
+      const safe = outbound.text;
+      if (outbound.redacted) {
+        for (const hit of outbound.hits) redactedKinds.add(hit.kind);
+      }
       lines.push(
         `**${h.document_filename}** (chunk ${h.chunk_idx + 1})`,
       );
@@ -2473,6 +2516,10 @@ async function tryBrain(
       `${result.keyword_hits} keyword · ${result.semantic_hits} semantic · ` +
       `${result.latency_ms}ms` +
       (allMatchedLabels.size > 0 ? ` · filtered: ${[...allMatchedLabels].join(",")}` : "") +
+      /* Said out loud. A quote that silently lost a column reads as the
+         document being incomplete; naming the removal is the difference
+         between a redaction and a gap. */
+      (redactedKinds.size > 0 ? ` · removed: ${[...redactedKinds].sort().join(",")}` : "") +
       "*";
     lines.push(sourcesLine);
     // Dedupe source entries by document_id so the UI doesn't render 3
