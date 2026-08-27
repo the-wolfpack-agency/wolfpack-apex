@@ -1247,6 +1247,13 @@ export type InstinctEventType =
      documents instead. { strong_hits, tabular_hits }. A quote is fast and
      free; a CSV row printed verbatim names the people in it. */
   | "assistant.brain_quote_declined_tabular"
+  /* Personal data removed from an answer at the ANSWER boundary rather than
+     the model boundary. ai.response_redacted only ever covered the model path,
+     which is about 8% of answers, so it read zero while personal data went out
+     on the deterministic path. { source, removed, hit_count } so a zero here
+     is answerable: the path was covered and clean, not unwatched. */
+  | "assistant.answer_redacted"
+
 
   /* The assistant chose a question over an invented answer. Fires when no
      tool matched, no page facts hit and the Brain was empty, so a model would
