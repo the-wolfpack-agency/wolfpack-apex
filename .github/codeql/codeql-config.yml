@@ -48,9 +48,16 @@ query-filters:
   # action.ts     → sha256 over the REDACTED params, as a ledger integrity
   #                 hash. It is not a credential store and nothing verifies a
   #                 secret against it.
+  # external-agent-exercise.ts → mints a key through createApiKey to prove the
+  #                 bring-your-own-agent gate, then revokes it. It is a CALLER,
+  #                 and it is listed because the filter matches the flow's
+  #                 source path as well as its sink: the alert did not exist
+  #                 until this file called createApiKey, even though the hash
+  #                 it reaches is the same reviewed one. Adding a caller should
+  #                 not reopen a decision already made about the sink.
   - exclude:
       id: js/insufficient-password-hash
-      path-regex: ^src/lib/ogiam/api-keys\.ts$|^src/lib/ogiam/action\.ts$
+      path-regex: ^src/lib/ogiam/api-keys\.ts$|^src/lib/ogiam/action\.ts$|^src/lib/ogiam/external-agent-exercise\.ts$
 
   # ── User-controlled-bypass FP: `mode` is a scan-mode selector, not authz ─
   # body.mode is clamped to the enum static|api|http before use, and the
