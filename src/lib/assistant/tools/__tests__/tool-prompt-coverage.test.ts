@@ -113,6 +113,15 @@ const TOOL_PROMPTS: Record<string, string[]> = {
     "can an agent do this",
     "hand this off to an agent",
   ],
+  /* The first job worth handing to an agent, and reachable by a person in the
+     same words. */
+  pipeline_health: [
+    "is the brain healthy",
+    "is anything stuck",
+    "brain health",
+    "are our documents indexed",
+    "how many documents failed",
+  ],
   who_is: ["who is Jorge", "who is Ashley Martinez"],
   recent_workflow_runs: ["what happened in CI today", "show me the latest CI runs"],
   search_github_issues: ["search github issues for the login bug"],

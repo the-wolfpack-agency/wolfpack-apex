@@ -72,6 +72,8 @@ export const SEARCH_PROVIDER_EXEMPT_TOOLS: Record<string, string> = {
     "creates and lists standing appointments for routines, with no corpus to search",
   "platform-scan-tool.ts":
     "reports counts and coverage for the workspace's own scans, with no free-text corpus to search",
+  "ingestion-health-tool.ts":
+    "reports the state of the ingestion pipeline itself, which is a computed health reading rather than a corpus anybody would search",
   "pilot-status-tool.ts":
     "joins the calendar, the Brain and the task store into a live verdict on an engagement; each of the three is already searchable through its own connector and the join itself is a computed reading, not a stored corpus",
   "plan-my-day-tool.ts":

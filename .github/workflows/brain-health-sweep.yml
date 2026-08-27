@@ -1,0 +1,49 @@
+name: Brain · Ingestion health sweep
+
+# THE JOB THAT WOULD HAVE CAUGHT THIS MONTH.
+#
+# Every check behind this endpoint is something that actually went wrong and
+# was found by hand, late. Ten PDFs sat mid-ingest from 2026-05-16 to
+# 2026-08-27 because nothing was looking. Ninety Word documents stayed broken
+# for three months after the parser bug that broke them was fixed. 744 of 795
+# answerable documents were demo fixtures the assistant quoted as though they
+# were the client's own.
+#
+# None of those is a bug in a function, so no test could have caught them. They
+# are facts about accumulated state, and the only way to catch one of those is
+# to go and look on a schedule.
+#
+# READ-ONLY. It asks a question and fails when the answer is serious. It
+# changes nothing, which is why it is safe unattended and safe to hand to an
+# agent whose writes are held by the approval gate.
+#
+# Required repo secrets: PROD_URL, CRON_SECRET.
+# Skips rather than fails when they are absent, because a red job meaning
+# "nobody configured this" trains people to ignore red jobs.
+
+on:
+  schedule:
+    - cron: "20 7 * * *" # daily, after the overnight syncs
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: brain-health-sweep
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v4.0.4
+        with:
+          node-version: 20
+      - name: Ask the pipeline how it is
+        env:
+          PROD_URL: ${{ secrets.PROD_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: node scripts/brain-health-sweep.mjs
