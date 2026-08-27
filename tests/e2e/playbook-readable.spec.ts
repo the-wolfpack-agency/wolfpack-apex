@@ -26,7 +26,26 @@ test.describe("the client deployment playbook", () => {
     const root = page.getByTestId("client-deployment-playbook");
     await expect(root).toBeVisible({ timeout: 30_000 });
 
-    const body = page.locator(".wp-playbook-body");
+    /* THE ARTICLE, named precisely.
+     *
+     * This was `.wp-playbook-body`, used as a proxy for "the document". The
+     * proxy held only while exactly one element carried that class, and on
+     * 2026-08-26 a readiness panel was added above the article wearing the same
+     * class. The selector then matched two elements, `.first()` returned the
+     * panel's heading instead of the document's, and the count of section
+     * anchors picked up one the contents rail is not built from.
+     *
+     * Both assertions were right about what they meant and wrong about where to
+     * look. The document is the <article>; everything else on the page is
+     * chrome. Naming the element rather than a shared class is what makes this
+     * test true regardless of what is rendered around it. */
+    const body = page.locator("article.wp-playbook-body");
+    /* EXACTLY ONE. This is the assertion that would have caught the ambiguity
+       on the day it was introduced rather than three weeks later in CI: the
+       moment a second element answers to this name, the selector stops meaning
+       "the document" and every assertion below it is measuring something the
+       author did not choose. */
+    await expect(body).toHaveCount(1);
 
     /* The diagrams. Indented blocks are not code blocks to this renderer, so
        ASCII art written that way silently becomes a paragraph. */
@@ -66,7 +85,10 @@ test.describe("the client deployment playbook", () => {
     await expect(page.getByTestId("client-deployment-playbook")).toBeVisible({ timeout: 30_000 });
 
     const links = page.locator(".wp-playbook-toc a");
-    const anchors = page.locator(".wp-playbook-body h2[id]");
+    /* Scoped to the article for the same reason as above: the rail is built
+       from the MARKDOWN's headings, so only the article's headings are
+       entries. A heading rendered in page chrome is not a missing rail entry. */
+    const anchors = page.locator("article.wp-playbook-body h2[id]");
     const linkCount = await links.count();
     expect(linkCount).toBeGreaterThan(5);
     /* Every entry points at a heading that exists. A contents list with a dead

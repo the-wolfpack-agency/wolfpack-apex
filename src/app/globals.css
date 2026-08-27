@@ -849,7 +849,15 @@ a:hover { color: var(--wp-gold-hover); }
   margin-bottom: 2.5rem;
   background: var(--wp-dark-surface2, #1a1a1a);
 }
-.wp-playbook-readiness h2 { margin-top: 0; margin-bottom: 0.35rem; }
+/* Styled here rather than inherited from .wp-md, because this panel
+   deliberately sits outside the article. It still has to READ as a heading. */
+.wp-playbook-readiness-title {
+  margin-top: 0;
+  margin-bottom: 0.35rem;
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--wp-text, #eee);
+}
 .wp-playbook-readiness dl { margin: 1rem 0 0; display: grid; gap: 0.85rem; }
 .wp-playbook-readiness dt {
   font-size: 0.8rem;
