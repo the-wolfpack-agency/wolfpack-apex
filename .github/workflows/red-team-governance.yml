@@ -26,4 +26,15 @@ jobs:
       # Boolean per the reusable workflow's input type; the prior 'false'
       # string caused startup_failure on push (run 25887380989).
       apply: false
-    secrets: inherit
+    # The reusable workflow reads branch protection with
+    # `secrets.ADMIN_TOKEN || github.token`. No ADMIN_TOKEN was defined, so
+    # every run fell back to github.token, which cannot read branch protection
+    # at any permission level: reading it needs repo admin, and there is no
+    # `administration` key available to a workflow permissions block. The job
+    # had therefore failed on 403 every week since 2026-08-02, which is a scan
+    # of our governance that could not read our governance.
+    #
+    # `secrets: inherit` did not help, because inheriting a secret that was
+    # never defined still yields an empty value. Mapped explicitly instead.
+    secrets:
+      ADMIN_TOKEN: ${{ secrets.AGENTICQA_REPO_PAT }}
