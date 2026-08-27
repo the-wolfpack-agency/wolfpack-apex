@@ -40,10 +40,12 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getInstinctUser, fetchWithRefresh } from "@/lib/client-auth";
 import { GlassPanel, MetricTile, SectionHeader, StatusPill, ConsoleGrid } from "@/components/console";
+import type { SeverityTone } from "@/components/console";
 import RouterFlow from "@/components/admin/RouterFlow";
 import RouterExplainer from "@/components/admin/RouterExplainer";
 import type { RouterInsights } from "@/lib/ai/models/insights";
-import { flaggedPerThousand, correctionRate } from "@/lib/learning/answer-quality";
+import { summariseQuality, type SignalTrend } from "@/lib/learning/answer-quality";
+import type { QualityWeek } from "@/lib/learning/answer-quality";
 import type { ProbeReport } from "@/lib/ai/models/probe";
 
 /** Accept only well-shaped payloads. A response that is not what we expect must
@@ -293,21 +295,25 @@ export default function AiRouterPage() {
           decision -- which carry no redactable token and are the ones a client
           is actually held to. Each row names the rule, so a client can read
           the reasoning and argue with it rather than trusting a count. */}
-      {/* IS IT GETTING BETTER. The panel above says what the router refused;
-          this says whether the answers improved, week by week.
+      {/* WHAT EACH CHECK CAUGHT. The panel above says what the router refused;
+          this says what the checks around it did, one card per check.
 
-          Every figure is shown NEXT TO THE VOLUME IT WAS MEASURED AGAINST,
-          which is the whole reason this looks like a table rather than four
-          headline numbers. Flagged falling from ten a week to two is good news
-          when volume held and hidden bad news when volume collapsed or a
-          checker stopped running: the same number, opposite meanings. A rate
-          over an empty denominator renders as "n/a" rather than 0%, because a
-          zero in a column of percentages reads as a clean week to anybody
-          scanning it, and that is exactly the week nothing was checked. */}
+          Every figure is shown NEXT TO THE VOLUME IT WAS MEASURED AGAINST.
+          Flagged falling from ten a week to two is good news when volume held
+          and hidden bad news when volume collapsed or a checker stopped
+          running: the same number, opposite meanings. A rate over an empty
+          denominator renders as "n/a" rather than 0%, because a zero in a
+          column of rates reads as a clean week to anybody scanning it, and
+          that is exactly the week nothing was checked.
+
+          Each card also says whether the check CHANGED the delivered answer or
+          merely recorded one. That distinction was missing, and its absence
+          had the page telling a client that flagged answers were stopped when
+          the router logs them and delivers them. */}
       {data?.quality ? (
         <GlassPanel
-          title="Is it getting better"
-          subtitle="Every column is something the product stopped before a person saw it, week by week, next to the volume it was checking. A falling number is only good news when the volume held: the same drop means the opposite if the checks stopped running, so both are shown together. A rate over an empty week reads n/a rather than 0%."
+          title="What the router caught, and what it only recorded"
+          subtitle="One row per check, most recent week against everything before it. Rates are per 1,000 model answers so a busier week does not read as a worse one, and a direction is stated only where there is an earlier result to compare against."
         >
           {!data.quality.readable ? (
             <p data-testid="router-quality-unreadable">
@@ -318,46 +324,7 @@ export default function AiRouterPage() {
               No model calls in this window, so there is nothing to measure quality against.
             </p>
           ) : (
-            <div className="wiki-table" data-testid="router-quality-table">
-              <table>
-                <thead>
-                  {/* NAMED FOR WHAT THEY MEAN, not for the field they come
-                      from. "Flagged / 1k" and "Not promoted" are accurate and
-                      tell a reader nothing: promoted from what, to what, by
-                      whom. Every column here is a thing the product CAUGHT
-                      before a person saw it, so each says what was caught. */}
-                  <tr>
-                    <th>Week</th>
-                    <th>Answers needing a model</th>
-                    <th>Unsafe answers stopped, per 1,000</th>
-                    <th>Answers a second model checked</th>
-                    <th>Answers it corrected</th>
-                    <th>Irrelevant documents discarded</th>
-                    <th>Model versions held back</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.quality.weeks.map((w) => {
-                    const flagged = flaggedPerThousand(w);
-                    const corrected = correctionRate(w);
-                    return (
-                      <tr key={w.weekStart}>
-                        <td>{w.weekStart}</td>
-                        <td>{w.modelCalls.toLocaleString()}</td>
-                        <td>{flagged === null ? "n/a" : flagged.toFixed(1)}</td>
-                        <td>{w.reviewed.toLocaleString()}</td>
-                        <td>
-                          {w.corrected.toLocaleString()}
-                          {corrected === null ? " (n/a)" : ` (${Math.round(corrected * 100)}%)`}
-                        </td>
-                        <td>{w.irrelevantRetrievals.toLocaleString()}</td>
-                        <td>{w.notPromoted.toLocaleString()}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+            <QualityPanelBody weeks={data.quality.weeks} />
           )}
         </GlassPanel>
       ) : null}
@@ -677,6 +644,142 @@ export default function AiRouterPage() {
           </ul>
         </GlassPanel>
       )}
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------------------
+ * The quality panel
+ *
+ * WAS a seven-column table with one row per week. Against the real history it
+ * rendered a grid that was mostly zeros, because the checks it counts started
+ * firing in the most recent week and the six before it carried 107 model
+ * answers between them. A reader was asked to derive a direction from that.
+ *
+ * Now one card per check, because the comparison a reader wants is this week
+ * against before, per check, not week against week across seven columns. That
+ * also stops the layout collapsing on a narrow screen, which a seven-column
+ * table cannot avoid.
+ *
+ * The effect tag is the part that matters most. "Blocked" means the answer a
+ * person read was changed or the input never reached it. "Recorded" means an
+ * audit row was written and the answer was delivered unchanged. The previous
+ * panel called both of these "stopped before a person saw it", which was true
+ * of three checks and false of the rest.
+ * ------------------------------------------------------------------------- */
+
+const TREND_LABEL: Record<SignalTrend, string> = {
+  up: "Higher than before",
+  down: "Lower than before",
+  flat: "Unchanged",
+  "no-baseline": "No earlier result",
+  insufficient: "Not enough traffic",
+};
+
+/* Deliberately NOT green-for-down. On this panel a falling catch rate is not
+   automatically good news: it is also what a check that stopped running looks
+   like. Every trend renders neutral and the sentence underneath carries the
+   meaning, which is the only way to say "this rose, and that is the gate
+   working" without the colour contradicting it. */
+const TREND_TONE: Record<SignalTrend, SeverityTone> = {
+  up: "info",
+  down: "info",
+  flat: "neutral",
+  "no-baseline": "neutral",
+  insufficient: "neutral",
+};
+
+/* One decimal at every magnitude. A column that switches precision by size
+   reads as two different measurements, and "n/a" rather than "0.0" keeps a
+   week nobody checked from looking like a clean one. */
+function rateLabel(r: number | null): string {
+  return r === null ? "n/a" : r.toFixed(1);
+}
+
+function QualityPanelBody({ weeks }: { weeks: QualityWeek[] }) {
+  const summary = summariseQuality(weeks);
+
+  return (
+    <div data-testid="router-quality-panel">
+      <p data-testid="router-quality-verdict" style={{ margin: "0 0 1rem", lineHeight: 1.5 }}>
+        {summary.verdict}
+      </p>
+
+      <ul style={list}>
+        {summary.signals.map((sig) => (
+          <li key={sig.key} style={row} data-testid={`router-quality-signal-${sig.key}`}>
+            <div
+              style={{
+                display: "flex",
+                gap: "0.6rem",
+                alignItems: "baseline",
+                flexWrap: "wrap",
+                justifyContent: "space-between",
+              }}
+            >
+              <span style={{ fontWeight: 600 }}>{sig.label}</span>
+              <span style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
+                {/* What actually happened to the answer, said on every row so
+                    no reader has to infer it from the wording of the label. */}
+                <StatusPill
+                  status={sig.effect}
+                  tone={sig.effect === "blocked" ? "success" : "neutral"}
+                  label={
+                    sig.effect === "blocked"
+                      ? "Changed what was delivered"
+                      : sig.effect === "recorded"
+                        ? "Logged, answer still delivered"
+                        : "Volume, not a catch"
+                  }
+                  size="sm"
+                />
+                <StatusPill
+                  status={sig.trend}
+                  tone={TREND_TONE[sig.trend]}
+                  label={TREND_LABEL[sig.trend]}
+                  size="sm"
+                  testId={`router-quality-trend-${sig.key}`}
+                />
+              </span>
+            </div>
+
+            <div
+              style={{
+                display: "flex",
+                gap: "1.5rem",
+                flexWrap: "wrap",
+                margin: "0.55rem 0 0",
+                fontSize: "0.9rem",
+              }}
+            >
+              <span>
+                <strong>{sig.latest.toLocaleString()}</strong>
+                <span style={dim}>
+                  {" "}
+                  this week ({rateLabel(sig.latestRate)} per 1,000)
+                </span>
+              </span>
+              <span>
+                <strong>{sig.prior.toLocaleString()}</strong>
+                <span style={dim}>
+                  {" "}
+                  in the {weeks.length - 1} weeks before ({rateLabel(sig.priorRate)} per 1,000)
+                </span>
+              </span>
+            </div>
+
+            <p style={{ ...dim, margin: "0.4rem 0 0", lineHeight: 1.5 }}>{sig.reading}</p>
+          </li>
+        ))}
+      </ul>
+
+      <p style={{ ...dim, margin: "0.9rem 0 0", fontSize: "0.82rem", lineHeight: 1.5 }}>
+        Measured against {summary.latestVolume.toLocaleString()} model answers in the week of{" "}
+        {summary.latestWeek} and {summary.priorVolume.toLocaleString()} before it. Rates are per
+        1,000 model answers; a rate over a week with no model answers reads n/a rather than 0, because
+        a zero in a column of rates reads as a clean week to anyone scanning it, and that is exactly
+        the week nothing was checked.
+      </p>
     </div>
   );
 }

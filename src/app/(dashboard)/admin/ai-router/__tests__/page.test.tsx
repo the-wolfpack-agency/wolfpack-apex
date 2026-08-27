@@ -472,11 +472,74 @@ describe("the quality trend", () => {
   it("shows each catch beside the volume it was measured against", async () => {
     respond(insights({ quality: quality() }));
     render(<Page />);
-    const table = await screen.findByTestId("router-quality-table");
+    const panel = await screen.findByTestId("router-quality-panel");
     /* The denominator on screen next to the count. Without it, ten flagged
        responses is a number nobody can interpret. */
-    expect(table).toHaveTextContent("1,000");
-    expect(table).toHaveTextContent("10.0");
+    expect(panel).toHaveTextContent("1,000");
+    expect(panel).toHaveTextContent("10.0");
+  });
+
+  /* THE DEFECT THIS PANEL WAS REBUILT TO FIX. The router records a flagged
+     response and delivers the answer; the old panel column was headed
+     "Unsafe answers stopped, per 1,000". A client reading this page was being
+     told the product blocks something it does not. */
+  it("never claims a flagged answer was stopped", async () => {
+    respond(insights({ quality: quality() }));
+    render(<Page />);
+    const flagged = await screen.findByTestId("router-quality-signal-flagged");
+    expect(flagged).toHaveTextContent(/Logged, answer still delivered/i);
+    expect(flagged).not.toHaveTextContent(/stopped|blocked|prevented/i);
+  });
+
+  /* Only three of the checks change what a person reads. The old subtitle
+     said every column did. */
+  it("marks the checks that change the delivered answer, and only those", async () => {
+    respond(insights({ quality: quality() }));
+    render(<Page />);
+    await screen.findByTestId("router-quality-panel");
+    for (const key of ["corrected", "irrelevantRetrievals", "notPromoted"]) {
+      expect(screen.getByTestId(`router-quality-signal-${key}`)).toHaveTextContent(
+        /Changed what was delivered/i,
+      );
+    }
+    expect(screen.getByTestId("router-quality-signal-reviewed")).toHaveTextContent(
+      /Volume, not a catch/i,
+    );
+  });
+
+  /* A single week has nothing behind it. Reporting a direction there would be
+     inventing one out of the first data point. */
+  it("declines to state a direction when there is no earlier week", async () => {
+    respond(insights({ quality: quality() }));
+    render(<Page />);
+    const verdict = await screen.findByTestId("router-quality-verdict");
+    expect(verdict).toHaveTextContent(/Not enough history/i);
+    expect(screen.getByTestId("router-quality-trend-corrected")).toHaveTextContent(
+      /Not enough traffic/i,
+    );
+  });
+
+  /* Volume on both sides, but the check itself only started firing in the
+     latest week. Calling that a rise reports a deployment date as a quality
+     gain, which is the most flattering wrong number this panel could print. */
+  it("calls a first-ever result no earlier result, not an increase", async () => {
+    respond(
+      insights({
+        quality: quality({
+          weeks: [
+            { weekStart: "2026-08-17", modelCalls: 500, flagged: 0, reviewed: 0, corrected: 0, irrelevantRetrievals: 0, notPromoted: 0 },
+            { weekStart: "2026-08-24", modelCalls: 500, flagged: 0, reviewed: 0, corrected: 25, irrelevantRetrievals: 0, notPromoted: 0 },
+          ],
+        }),
+      }),
+    );
+    render(<Page />);
+    expect(await screen.findByTestId("router-quality-trend-corrected")).toHaveTextContent(
+      /No earlier result/i,
+    );
+    expect(screen.getByTestId("router-quality-verdict")).toHaveTextContent(
+      /No direction to report yet/i,
+    );
   });
 
   /* The bug this whole panel is shaped to avoid: a zero in a column of
@@ -501,8 +564,8 @@ describe("the quality trend", () => {
       }),
     );
     render(<Page />);
-    const table = await screen.findByTestId("router-quality-table");
-    expect(table).toHaveTextContent("n/a");
+    const panel = await screen.findByTestId("router-quality-panel");
+    expect(panel).toHaveTextContent("n/a");
   });
 
   /* Unreadable is not the same fact as empty, and the difference matters more
@@ -513,7 +576,7 @@ describe("the quality trend", () => {
     expect(await screen.findByTestId("router-quality-unreadable")).toHaveTextContent(
       /not a clean week/i,
     );
-    expect(screen.queryByTestId("router-quality-table")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("router-quality-panel")).not.toBeInTheDocument();
   });
 
   it("distinguishes an empty window from an unreadable one", async () => {
@@ -528,7 +591,7 @@ describe("the quality trend", () => {
   it("survives the normaliser rather than being dropped by it", async () => {
     respond(insights({ quality: quality() }));
     render(<Page />);
-    expect(await screen.findByTestId("router-quality-table")).toBeInTheDocument();
+    expect(await screen.findByTestId("router-quality-panel")).toBeInTheDocument();
   });
 
   /* An older deploy returns no quality field at all. It must render the rest
@@ -537,6 +600,6 @@ describe("the quality trend", () => {
     respond(insights());
     render(<Page />);
     expect(await screen.findByTestId("router-metric-cheap")).toBeInTheDocument();
-    expect(screen.queryByTestId("router-quality-table")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("router-quality-panel")).not.toBeInTheDocument();
   });
 });
