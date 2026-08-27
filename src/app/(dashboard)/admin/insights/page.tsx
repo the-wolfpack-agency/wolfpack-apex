@@ -323,7 +323,7 @@ export default function InsightsAdminPage() {
               ["capability-gate", "Agent actions gated", capability.gate.actionsAuthorized, ""],
               ["capability-checkpoints", "Ledger checkpoints signed", capability.gate.checkpointsSigned, ""],
               ["capability-redacted", "Answers needing redaction", capability.safety.responsesRedacted, ""],
-              ["capability-flagged", "Answers withheld as unsafe", capability.safety.responsesFlagged, ""],
+              ["capability-flagged", "Answers logged for review", capability.safety.responsesFlagged, ""],
               ["capability-embedded", "Passages answerable", capability.retrieval.chunksEmbeddedPct, "%"],
               ["capability-docs", "Documents quotable", capability.retrieval.answerableDocuments, ""],
             ] as Array<[string, string, Reading, string]>).map(([testid, label, reading, unit]) => (

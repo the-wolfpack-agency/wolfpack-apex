@@ -179,10 +179,19 @@ export async function readCapabilitySnapshot(windowDays = 90): Promise<Capabilit
           ? unreadable("The event store could not be read.")
           : {
               value: flagged,
+              /* RECORDED, NOT WITHHELD. This said "withheld or corrected
+                 before reaching a person". The router inspects every answer
+                 and writes an audit row when one carries a risky shape, then
+                 delivers it: its own comment says "Recorded rather than
+                 blocked", because a refusal on a false positive costs more
+                 trust in a product that writes code for a living than a
+                 flagged audit row does. Describing an audit trail as an
+                 interception is the product claiming a control it has
+                 deliberately chosen not to exercise. */
               detail:
                 flagged === 0
-                  ? "no model answer has been flagged as unsafe to return"
-                  : "model answers were withheld or corrected before reaching a person",
+                  ? "the inspector ran on every model answer and matched none"
+                  : "model answers carried a risky shape and were logged for review; the answer was still delivered",
             },
       /* The inspector is proved by router-verification.test.ts, which asserts
          it runs on an ordinary completion with nothing opted in, and stays
