@@ -50,6 +50,8 @@ export const CAPABILITY_ALLOWLIST: readonly string[] = [
   "src/app/api/admin/insights/unmet-intents/route.ts",
   "src/app/api/admin/insights/role-mismatches/route.ts",
   "src/app/api/admin/insights/capability/route.ts",
+  // Read-only pipeline health: same inline admin role gate as insights/*.
+  "src/app/api/admin/brain/health/route.ts",
   "src/app/api/admin/insights/routing-coverage/route.ts",
   "src/app/api/admin/templates/route.ts",
 

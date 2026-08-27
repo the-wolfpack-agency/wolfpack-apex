@@ -1200,6 +1200,16 @@ function emitCompletionEvent(
     ...(selectedModelId
       ? { selected_model_id: selectedModelId, selection: "router" }
       : { selection: takeNoSelectionReason() ?? "primary_override" }),
+    /* WHY THIS TIER, on the event that fires for every call.
+     *
+     * The caller already decides a tier and a reason, and already passes the
+     * reason in request metadata. The router dropped it, and it survived only
+     * on ai.model_selected, which fired FIVE times in ninety days against 134
+     * assistant completions. So spend could be grouped by tier and never by
+     * the rule that chose the tier, which is the only view that says what to
+     * change. 76 of those 134 went to standard and nobody could say which rule
+     * sent them there. */
+    ...(req.metadata?.routing_reason ? { routing_reason: req.metadata.routing_reason } : {}),
     input_tokens: response.input_tokens,
     output_tokens: response.output_tokens,
     cost_usd: response.cost_usd,
