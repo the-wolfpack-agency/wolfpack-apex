@@ -358,48 +358,153 @@ export interface KeywordHit {
   [key: string]: unknown;
 }
 
+/**
+ * Keyword search, plus how much of the match set this role may not read.
+ *
+ * WHY THE COUNT EXISTS. `brain.retrieval_audience_filtered` sat at zero for
+ * ninety days while the playbook told clients the assistant "only quoted what
+ * their role may read". The claim was TRUE: the predicate below has always
+ * filtered inside the query. The event was emitted only on the SEMANTIC branch
+ * of queryBrain, which is gated on an embedding deployment this tenant has
+ * never had, so the instrument was attached to a path that never runs.
+ *
+ * A working control with no evidence is indistinguishable from a broken one,
+ * and on 2026-08-26 this codebase found six controls that really were broken
+ * behind exactly that kind of zero. So the count is produced by the path that
+ * actually runs, in the same round trip.
+ *
+ * ALWAYS RETURNS THE COUNT, INCLUDING WHEN NOTHING IS READABLE. The lateral
+ * join is not decoration: a plain `WHERE readable` returns no rows at all for
+ * a role that may read none of the matches, which loses the withheld count in
+ * precisely the case most worth reporting.
+ */
+export interface KeywordSearchResult {
+  hits: KeywordHit[];
+  /** Chunks that matched the query but this role may not read. */
+  withheld: number;
+}
+
+/**
+ * Build the audience-aware keyword query.
+ *
+ * SEPARATED FROM THE EXECUTION ON PURPOSE. The app's pool rewrites every
+ * connection string to `sslmode=verify-full` (see normalizeDatabaseUrlSsl), so
+ * it cannot reach a throwaway local Postgres, and a *.db.test.ts must never be
+ * pointed at a hosted one. Exporting the builder and the mapper lets the db
+ * test run THIS EXACT SQL and THIS EXACT row handling against a real database
+ * rather than a retyped copy of them, which would prove nothing.
+ */
+export function buildKeywordSearchSql(
+  limit: number,
+  opts: { uploadedBy?: string; kind?: BrainKind; role?: string } = {},
+): { sql: string; args: unknown[] } {
+  const where: string[] = [`bc.tsv @@ websearch_to_tsquery('english', $1)`];
+  const args: unknown[] = [];
+  if (opts.uploadedBy) {
+    args.push(opts.uploadedBy);
+    where.push(`bd.uploaded_by = $${args.length + 1}`);
+  }
+  /* WHO IS ASKING, applied in the query rather than after it. Filtering
+     afterwards would mean a restricted document had already been ranked,
+     headlined and counted, and one missed branch would quote it. */
+  let readableExpr = "TRUE";
+  if (opts.role && !readsEverything(opts.role)) {
+    args.push(opts.role.toLowerCase());
+    readableExpr = `(bd.audience_roles IS NULL OR $${args.length + 1} = ANY(bd.audience_roles))`;
+  }
+  if (opts.kind) {
+    args.push(opts.kind);
+    where.push(`bd.kind = $${args.length + 1}`);
+  }
+  args.push(limit);
+  const limitArg = `$${args.length + 1}`;
+
+  const sql = `
+    WITH matched AS (
+      SELECT bc.id AS chunk_id,
+             bc.document_id,
+             bc.chunk_idx,
+             bd.filename,
+             bd.kind,
+             bc.content,
+             ts_rank_cd(bc.tsv, websearch_to_tsquery('english', $1)) AS score,
+             ts_headline('english', bc.content, websearch_to_tsquery('english', $1),
+                         'MaxFragments=2,MinWords=5,MaxWords=18') AS headline,
+             ${readableExpr} AS readable
+        FROM brain_chunks bc
+        JOIN brain_documents bd ON bd.id = bc.document_id
+       WHERE ${where.join(" AND ")}
+         AND bd.status = 'indexed'
+    ),
+    tot AS (
+      SELECT COUNT(*) FILTER (WHERE NOT readable)::int AS withheld FROM matched
+    )
+    SELECT t.withheld, m.*
+      FROM tot t
+      LEFT JOIN LATERAL (
+        SELECT chunk_id, document_id, chunk_idx, filename, kind, content, score, headline
+          FROM matched
+         WHERE readable
+         ORDER BY score DESC
+         LIMIT ${limitArg}
+      ) m ON TRUE
+  `;
+  return { sql, args };
+}
+
+/**
+ * Turn the query's rows into hits plus the withheld count.
+ *
+ * The lateral join yields ONE ALL-NULL ROW when the role may read none of the
+ * matches. That row is not a hit and must not be counted as one, and dropping
+ * it is the only reason the withheld count survives that case at all.
+ */
+export function mapKeywordSearchRows(
+  rows: Array<KeywordHit & { withheld: number }>,
+): KeywordSearchResult {
+  const withheld = rows[0]?.withheld ?? 0;
+  const hits = rows
+    .filter((r) => r.chunk_id != null)
+    .map(({ withheld: _w, ...hit }) => hit as KeywordHit);
+  return { hits, withheld };
+}
+
+export interface KeywordSearchResult {
+  hits: KeywordHit[];
+  /** Chunks that matched the query but this role may not read. */
+  withheld: number;
+}
+
+/**
+ * Keyword search, plus how much of the match set this role may not read.
+ *
+ * WHY THE COUNT EXISTS. `brain.retrieval_audience_filtered` sat at zero for
+ * ninety days while the playbook told clients the assistant "only quoted what
+ * their role may read". The claim was TRUE: the predicate has always filtered
+ * inside the query. The event was emitted only on the SEMANTIC branch of
+ * queryBrain, gated on an embedding deployment this tenant has never had, so
+ * the instrument was attached to a path nobody drives.
+ *
+ * A working control with no evidence is indistinguishable from a broken one,
+ * and this codebase has just found six controls that really were broken behind
+ * exactly that kind of zero.
+ */
+export async function keywordSearchWithAudience(
+  queryText: string,
+  limit: number,
+  opts: { uploadedBy?: string; kind?: BrainKind; role?: string } = {},
+): Promise<KeywordSearchResult> {
+  const { sql, args } = buildKeywordSearchSql(limit, opts);
+  const res = await query<KeywordHit & { withheld: number }>(sql, [queryText, ...args]);
+  return mapKeywordSearchRows(res.rows);
+}
+
 export async function keywordSearch(
   queryText: string,
   limit: number,
   opts: { uploadedBy?: string; kind?: BrainKind; role?: string } = {},
 ): Promise<KeywordHit[]> {
-  const where: string[] = [`bc.tsv @@ websearch_to_tsquery('english', $1)`];
-  const args: unknown[] = [queryText];
-  if (opts.uploadedBy) {
-    args.push(opts.uploadedBy);
-    where.push(`bd.uploaded_by = $${args.length}`);
-  }
-  /* WHO IS ASKING, applied in the query rather than after it. Filtering
-     afterwards would mean a restricted document had already been ranked,
-     headlined and counted, and one missed branch would quote it. */
-  if (opts.role && !readsEverything(opts.role)) {
-    args.push(opts.role.toLowerCase());
-    where.push(`(bd.audience_roles IS NULL OR $${args.length} = ANY(bd.audience_roles))`);
-  }
-  if (opts.kind) {
-    args.push(opts.kind);
-    where.push(`bd.kind = $${args.length}`);
-  }
-  args.push(limit);
-  const sql = `
-    SELECT bc.id AS chunk_id,
-           bc.document_id,
-           bc.chunk_idx,
-           bd.filename,
-           bd.kind,
-           bc.content,
-           ts_rank_cd(bc.tsv, websearch_to_tsquery('english', $1)) AS score,
-           ts_headline('english', bc.content, websearch_to_tsquery('english', $1),
-                       'MaxFragments=2,MinWords=5,MaxWords=18') AS headline
-      FROM brain_chunks bc
-      JOIN brain_documents bd ON bd.id = bc.document_id
-     WHERE ${where.join(" AND ")}
-       AND bd.status = 'indexed'
-     ORDER BY score DESC
-     LIMIT $${args.length}
-  `;
-  const res = await query<KeywordHit>(sql, args);
-  return res.rows;
+  return (await keywordSearchWithAudience(queryText, limit, opts)).hits;
 }
 
 // ── query log ──────────────────────────────────────────────────────
