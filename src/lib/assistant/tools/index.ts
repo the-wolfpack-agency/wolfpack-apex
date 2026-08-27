@@ -148,6 +148,11 @@ import "./cross-tool-insights-widget-tool";
  * capability, and the first question a client asks. Registered next to
  * cross-tool insights because it is the same idea (a fact no single
  * integration holds) pointed at an engagement rather than at efficiency. */
+/* Pipeline health: what the document library is quietly failing to do. The
+ * first job worth handing to an agent, because every check in it is something
+ * that went wrong this month and was found by hand, late. Read-only, so it can
+ * run on a schedule while the approval gate holds anything that writes. */
+import "./ingestion-health-tool";
 import "./pilot-status-tool";
 /* Integrations list — discoverability surface auto-discovered from
  * the search-provider + tool registries. */
