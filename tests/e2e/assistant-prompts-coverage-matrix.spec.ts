@@ -20,6 +20,7 @@ import {
   resolveSmokeTarget,
   stubInstinctSession,
 } from "./helpers/smoke-helpers";
+import { submitComposer } from "./helpers/assistant-composer";
 
 const target = resolveSmokeTarget();
 
@@ -276,7 +277,7 @@ test.describe("Assistant prompts coverage matrix", () => {
 
       const composer = page.getByTestId("assistant-composer-input");
       await composer.fill(c.prompt);
-      await composer.press("Enter");
+      await submitComposer(page);
 
       await expect(page.getByTestId(c.widgetTestId)).toBeVisible({
         timeout: 10_000,

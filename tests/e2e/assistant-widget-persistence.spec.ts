@@ -28,6 +28,7 @@ import {
   resolveSmokeTarget,
   stubInstinctSession,
 } from "./helpers/smoke-helpers";
+import { submitComposer } from "./helpers/assistant-composer";
 
 const target = resolveSmokeTarget();
 
@@ -155,7 +156,7 @@ test.describe("Assistant widget persistence", () => {
 
     const composer = page.getByTestId("assistant-composer-input");
     await composer.fill("show vercel deploys for wolfpack-auto");
-    await composer.press("Enter");
+    await submitComposer(page);
 
     /* Widget renders. */
     const widget = page.getByTestId("vercel-deployments-widget");
@@ -233,7 +234,7 @@ test.describe("Assistant widget persistence", () => {
 
     const composer = page.getByTestId("assistant-composer-input");
     await composer.fill("show vercel deploys for wolfpack-auto");
-    await composer.press("Enter");
+    await submitComposer(page);
 
     /* Widget renders from the POST response. */
     const widget = page.getByTestId("vercel-deployments-widget");
@@ -278,7 +279,7 @@ test.describe("Assistant widget persistence", () => {
 
     const composer = page.getByTestId("assistant-composer-input");
     await composer.fill("show vercel deploys for wolfpack-auto");
-    await composer.press("Enter");
+    await submitComposer(page);
 
     const widget = page.getByTestId("vercel-deployments-widget");
     await expect(widget).toBeVisible({ timeout: 10_000 });

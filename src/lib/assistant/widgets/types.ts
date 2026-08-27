@@ -20,6 +20,8 @@
  *     learning loop sees which interactive surfaces get used.
  */
 
+import type { Readiness, SourceState, StatusSignal } from "@/lib/pilot/status-shape";
+
 export interface CalendarWidgetEvent {
   id: string;
   subject: string;
@@ -266,6 +268,41 @@ export interface CrossToolInsightsWidgetSpec {
   lookbackDays: number;
   items: CrossToolInsightItem[];
   generatorOutcomes: Array<{ name: string; count: number; ok: boolean }>;
+}
+
+/**
+ * PILOT STATUS. The cross-system answer to "how is it going".
+ *
+ * Carries the per-source state rather than only the counts, because the
+ * renderer has to be able to show that a number is missing rather than zero.
+ * A status widget that draws an empty task column identically whether the
+ * store was empty or unreachable is the bug this whole surface exists to
+ * avoid. The shapes and arithmetic live in `@/lib/pilot/status-shape`, which
+ * is pure and safe for a client component to import.
+ */
+export interface PilotStatusSourceLine {
+  source: "calendar" | "documents" | "tasks";
+  state: SourceState;
+  /** Null when the source could not be read. NEVER coerced to 0. */
+  count: number | null;
+  /** One line of context, or the reason it is dark. */
+  detail: string;
+}
+
+export interface PilotStatusWidgetSpec {
+  kind: "pilot_status";
+  title: string;
+  subtitle?: string;
+  readiness: Readiness;
+  readinessLabel: string;
+  windowDays: number;
+  takenAt: string;
+  /** One row per source, always all three, dark ones included. */
+  sources: PilotStatusSourceLine[];
+  /** Cross-source observations first, then single-source, then dark. */
+  signals: StatusSignal[];
+  /** Next checkpoint, already formatted in the reader's zone. Null if none. */
+  nextCheckpoint: { subject: string; when: string } | null;
 }
 
 export interface IntegrationListItem {
@@ -662,4 +699,5 @@ export type WidgetSpec =
   | ScanInvoiceWidgetSpec
   | ScanHrDocWidgetSpec
   | ExecuteAgentWidgetSpec
-  | ClarifyWidgetSpec;
+  | ClarifyWidgetSpec
+  | PilotStatusWidgetSpec;

@@ -65,7 +65,6 @@ const KNOWN_UNRUN: string[] = [
   "tests/e2e/alicia-first-day.spec.ts",
   "tests/e2e/assistant-clarify-widget.spec.ts",
   "tests/e2e/assistant-cross-tab-sync.spec.ts",
-  "tests/e2e/assistant-cross-tool-insights.spec.ts",
   "tests/e2e/assistant-debug.spec.ts",
   "tests/e2e/assistant-meeting-grounded.spec.ts",
   "tests/e2e/assistant-prompts-coverage-matrix.spec.ts",

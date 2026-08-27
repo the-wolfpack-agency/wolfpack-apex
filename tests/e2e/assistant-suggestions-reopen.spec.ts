@@ -21,6 +21,7 @@ import {
   resolveSmokeTarget,
   stubInstinctSession,
 } from "./helpers/smoke-helpers";
+import { submitComposer } from "./helpers/assistant-composer";
 
 const target = resolveSmokeTarget();
 
@@ -121,7 +122,7 @@ test.describe("Persistent Suggestions overlay", () => {
     // 1. Send a message
     const composer = page.getByTestId("assistant-composer-input");
     await composer.fill("give me insights");
-    await composer.press("Enter");
+    await submitComposer(page);
     await expect(page.getByTestId("cross-tool-insights-widget")).toBeVisible({
       timeout: 10_000,
     });
@@ -142,7 +143,7 @@ test.describe("Persistent Suggestions overlay", () => {
 
     // 4. Slash command opens the overlay without firing another POST.
     await composer.fill("/help");
-    await composer.press("Enter");
+    await submitComposer(page);
     await expect(
       page.getByTestId("assistant-suggestions-overlay"),
     ).toBeVisible();

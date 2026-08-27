@@ -18,6 +18,7 @@ import {
   signInIfPossible,
   collectConsoleAndNetworkFailures,
 } from "./helpers/smoke-helpers";
+import { submitComposer } from "./helpers/assistant-composer";
 
 test.describe("/assistant — meeting prep tool", () => {
   test("typing 'prep for my next meeting' yields a tool-routed answer", async ({
@@ -60,7 +61,7 @@ test.describe("/assistant — meeting prep tool", () => {
     }
 
     await composer.fill("prep for my next meeting");
-    await composer.press("Enter");
+    await submitComposer(page);
 
     /* Either the meeting-prep widget renders OR the assistant returns
      * the empty-state answer ("I don't see a meeting in the next 8

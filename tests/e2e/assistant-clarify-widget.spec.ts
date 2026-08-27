@@ -11,6 +11,7 @@ import {
   resolveSmokeTarget,
   stubInstinctSession,
 } from "./helpers/smoke-helpers";
+import { submitComposer } from "./helpers/assistant-composer";
 
 const target = resolveSmokeTarget();
 
@@ -129,7 +130,7 @@ test.describe("Clarify widget (typo → chip → autosubmit)", () => {
 
     const composer = page.getByTestId("assistant-composer-input");
     await composer.fill("insighta");
-    await composer.press("Enter");
+    await submitComposer(page);
 
     // Clarify widget appears with chips for "insights" and "calendar"
     await expect(page.getByTestId("clarify-widget")).toBeVisible({
