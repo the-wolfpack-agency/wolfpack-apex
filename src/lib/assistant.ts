@@ -77,6 +77,10 @@ export type AssistantSource =
   | "brain"
   | "tool"
   | "ai"
+  /* A message the organisation sent to everybody, not an answer the assistant
+     produced. Kept as its own source precisely so it can never be treated as
+     one: see broadcast.ts for why that distinction is load-bearing. */
+  | "broadcast"
   | "fallback";
 
 export interface AssistantMessage {
@@ -384,6 +388,18 @@ async function findOrgQACacheHit(
           AND lower(regexp_replace(regexp_replace(u.content, '[?!.,;:''"()]', '', 'g'), '\\s+', ' ', 'g')) = $1
           AND u.created_at > NOW() - ($2::bigint || ' milliseconds')::interval
           AND a.source IS DISTINCT FROM 'fallback'
+          /* A BROADCAST IS NOT AN ANSWER. An announcement written into every
+             person's assistant is a message the organisation sent, not
+             something the product worked out, and replaying it to whoever asks
+             a vaguely similar question weeks later is how "submit expenses by
+             Friday" becomes this company's standing answer about expenses.
+
+             Three other conditions here happen to exclude it already: a
+             broadcast records no tokens, carries no grounding, and has no user
+             message in front of it. All three are incidental. Stating it
+             outright means the guarantee survives someone relaxing one of
+             them, which is exactly the kind of change that looks harmless. */
+          AND a.source IS DISTINCT FROM 'broadcast'
           AND a.tokens_used > 0
           /* NEVER REPLAY AN ANSWER THAT STOOD ON NOTHING.
              This cache runs BEFORE every other priority, including the Brain,
@@ -460,6 +476,18 @@ async function findOrgQACacheHit(
         WHERE u.role = 'user'
           AND u.created_at > NOW() - ($1::bigint || ' milliseconds')::interval
           AND a.source IS DISTINCT FROM 'fallback'
+          /* A BROADCAST IS NOT AN ANSWER. An announcement written into every
+             person's assistant is a message the organisation sent, not
+             something the product worked out, and replaying it to whoever asks
+             a vaguely similar question weeks later is how "submit expenses by
+             Friday" becomes this company's standing answer about expenses.
+
+             Three other conditions here happen to exclude it already: a
+             broadcast records no tokens, carries no grounding, and has no user
+             message in front of it. All three are incidental. Stating it
+             outright means the guarantee survives someone relaxing one of
+             them, which is exactly the kind of change that looks harmless. */
+          AND a.source IS DISTINCT FROM 'broadcast'
           AND a.tokens_used > 0
           /* THE SAME GUARD AS THE EXACT-MATCH QUERY ABOVE.
              I added it there, declared the cache fixed, and this fuzzy
