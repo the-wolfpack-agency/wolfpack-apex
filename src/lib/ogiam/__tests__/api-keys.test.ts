@@ -138,7 +138,19 @@ describe("createApiKey", () => {
     expect(out.id).toMatch(/^gak_/);
   });
 
-  it("stores ONLY the sha256 hash, never the plaintext", async () => {
+  /* WAS an assertion that the stored value equals sha256(key).
+   *
+   * That is now the wrong property. A bare digest can be confirmed offline by
+   * anyone holding a copy of the table, and lets them build a lookup for keys
+   * seen elsewhere. The hash is peppered with a server-side secret, so the
+   * database on its own is no longer enough to verify a key.
+   *
+   * The keys are 32 bytes of CSPRNG output, so a slow KDF was never the answer
+   * here: 256 bits is out of brute-force reach at any hashing speed, and
+   * verifyApiKey runs on every gate authorization where a slow hash is a
+   * latency cost and something an unauthenticated caller could lean on. The
+   * missing ingredient was a secret, not time. */
+  it("stores a peppered hash, never the plaintext and never a bare digest", async () => {
     const out = await createApiKey({
       workspaceId: "ws_a",
       agent: "acme.qa-bot",
@@ -147,9 +159,11 @@ describe("createApiKey", () => {
     });
     const row = store[0];
     expect(row.key_hash).not.toBe(out.plaintextKey);
-    expect(row.key_hash).toBe(
+    expect(row.key_hash).not.toBe(
       createHash("sha256").update(out.plaintextKey, "utf8").digest("hex"),
     );
+    /* Still a fixed-width digest, so nothing about the key is recoverable. */
+    expect(row.key_hash).toMatch(/^[0-9a-f]{64}$/);
     // No column anywhere holds the plaintext.
     for (const v of Object.values(row)) {
       expect(v).not.toBe(out.plaintextKey);
