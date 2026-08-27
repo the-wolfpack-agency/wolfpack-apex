@@ -838,3 +838,41 @@ a:hover { color: var(--wp-gold-hover); }
   .wp-pilot { padding: 1.25rem 1rem 4rem; }
   .wp-pilot-figures { grid-template-columns: 1fr; }
 }
+
+/* READINESS BLOCK on /playbook. The measured numbers sit above the document
+   and have to read as a panel rather than as more prose, or a client scrolls
+   past the only part of the page that is not an assertion. */
+.wp-playbook-readiness {
+  border: 1px solid var(--wp-dark-border, #333);
+  border-radius: 10px;
+  padding: 1.25rem 1.5rem;
+  margin-bottom: 2.5rem;
+  background: var(--wp-dark-surface2, #1a1a1a);
+}
+.wp-playbook-readiness h2 { margin-top: 0; margin-bottom: 0.35rem; }
+.wp-playbook-readiness dl { margin: 1rem 0 0; display: grid; gap: 0.85rem; }
+.wp-playbook-readiness dt {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--wp-text-muted, #6b7280);
+}
+.wp-playbook-readiness dd { margin: 0.15rem 0 0; }
+.wp-playbook-readiness dd strong {
+  display: block;
+  font-size: 1.5rem;
+  line-height: 1.2;
+  color: var(--wp-gold, #eab308);
+}
+/* An unmeasured line must not be mistaken for a headline figure at a glance. */
+.wp-playbook-readiness dd strong[data-unmeasured="true"] {
+  font-size: 1rem;
+  font-style: italic;
+  color: var(--wp-text-muted, #6b7280);
+}
+.wp-playbook-readiness dd span {
+  display: block;
+  font-size: 0.85rem;
+  color: var(--wp-text-dim, #aaa);
+  margin-top: 0.15rem;
+}

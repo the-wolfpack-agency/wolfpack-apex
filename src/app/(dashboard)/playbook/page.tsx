@@ -26,6 +26,7 @@
 import type { Metadata } from "next";
 import { renderMarkdown, headingSlug } from "@/lib/markdown";
 import { CLIENT_DEPLOYMENT_PLAYBOOK, PLAYBOOK_UPDATED } from "@/lib/playbook";
+import { readPlaybookReadiness } from "@/lib/playbook/readiness";
 
 export const metadata: Metadata = {
   title: "Client deployment playbook · Wolfpack Instinct",
@@ -42,7 +43,12 @@ function sections(md: string): { id: string; label: string }[] {
     .map((label) => ({ id: headingSlug(label), label }));
 }
 
-export default function PlaybookPage() {
+/* Read at request time, not at build time. A number baked into a bundle is a
+   number that was true when somebody deployed, and this page is handed to
+   clients weeks after a deploy. */
+export const dynamic = "force-dynamic";
+
+export default async function PlaybookPage() {
   /* The page owns the title and the updated date, so the document's own H1 and
      status line would be the same words twice. Dropped here rather than
      removed from the source, because the source is still readable as a
@@ -53,6 +59,7 @@ export default function PlaybookPage() {
   );
   const html = renderMarkdown(body);
   const toc = sections(body);
+  const readiness = await readPlaybookReadiness();
 
   return (
     <main className="wp-playbook" data-testid="client-deployment-playbook">
@@ -76,6 +83,37 @@ export default function PlaybookPage() {
             ))}
           </ol>
         </nav>
+
+        <div className="wp-playbook-body">
+          {/* MEASURED, NOT ASSERTED. Every number below is read when the page is
+              requested. The document used to say "eighteen integrations" while
+              twelve had ever run, and told clients a second model reviewed every
+              answer while it had reviewed none in ninety days. A figure that
+              cannot be read says so rather than showing a zero, because this is
+              the last page on which a zero should be allowed to mean
+              "unmeasured". */}
+          <section className="wp-playbook-readiness" data-testid="playbook-readiness">
+            <h2 id="where-this-stands">Where this stands, measured</h2>
+            <p className="wp-playbook-sub">
+              Read from the running system when you loaded this page, not written down. A line that
+              could not be measured says so; none of them will ever show a zero to mean
+              &quot;we did not look&quot;.
+            </p>
+            <dl>
+              {readiness.lines.map((l) => (
+                <div key={l.label} data-testid={`readiness-${l.label.toLowerCase().replace(/\W+/g, "-")}`}>
+                  <dt>{l.label}</dt>
+                  <dd>
+                    <strong data-unmeasured={l.value === null ? "true" : undefined}>
+                      {l.value ?? "not measurable right now"}
+                    </strong>
+                    <span>{l.detail}</span>
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </section>
+        </div>
 
         {/* renderMarkdown escapes every piece of text and emits only a fixed tag
             whitelist, so there is no caller-supplied HTML to sanitize here. */}

@@ -14,7 +14,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import { SURFACES, verdict, type Evidence } from "../../../../scripts/integration-evidence";
+import { SURFACES, verdict, type Evidence } from "@/lib/integrations/evidence";
 
 const DIR = path.resolve(__dirname, "..");
 
