@@ -39,6 +39,24 @@ interface ExecuteAgentData {
 
 const RUN_AGENT_RE =
   /^(?:run|execute|launch|start|kick\s*off)\s+(?:the\s+|an?\s+)?agent\b\s*(.*)$/i;
+
+/**
+ * HANDING WORK OVER WITHOUT NAMING WHO DOES IT.
+ *
+ * delegate_to_agent needs a named agent: "tell Agent1 to draft the brief". It
+ * is the right tool once somebody knows which agent exists. Nobody knows that
+ * the first time, so they say "delegate this to an agent" or "can an agent do
+ * this", and until 2026-08-27 those reached NO tool at all. The agent
+ * capability is the one a client asks about by name, and its plainest sentence
+ * was unreachable.
+ *
+ * This widget is the honest answer to an unnamed ask: it opens the picker with
+ * the agents that actually exist plus the task template, so the next sentence
+ * can name one. Deliberately NOT routed to delegate_to_agent, which would have
+ * to invent which agent was meant.
+ */
+const DELEGATE_UNNAMED_RE =
+  /^(?:can\s+(?:an?\s+)?agent\s+(?:do|handle|take)\s+this|(?:please\s+)?(?:delegate|hand)\s+(?:this|it|that)\s+(?:off\s+)?to\s+(?:an?\s+)?agent|(?:get|have)\s+an?\s+agent\s+to\s+.+|(?:get|have)\s+an?\s+agent\s+(?:do|handle)\s+(?:this|it|that))[\s.?!]*$/i;
 const PANEL_RE =
   /^(?:open\s+)?(?:the\s+)?agent\s+control\s+(?:panel|plane)[\s.?!]*$/i;
 
@@ -46,6 +64,8 @@ export function matchExecuteAgentIntent(message: string): Params | null {
   const t = (message ?? "").trim();
   if (!t) return null;
   if (PANEL_RE.test(t)) return {};
+  /* An unnamed handover opens the picker rather than reaching nothing. */
+  if (DELEGATE_UNNAMED_RE.test(t)) return {};
   const m = RUN_AGENT_RE.exec(t);
   if (!m) return null;
   let tail = (m[1] ?? "").trim().replace(/^(?:named|called)\s+/i, "");

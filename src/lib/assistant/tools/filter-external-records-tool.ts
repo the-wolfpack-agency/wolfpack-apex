@@ -148,8 +148,22 @@ function extractFilters(msg: string): FilterSpec {
  * Intent matching
  * ------------------------------------------------------------------- */
 
+/**
+ * Telling the assistant something is not asking it something.
+ *
+ * "owns" is a filter signal below, because "deals owned by Jorge" is a real
+ * CRM query. It also appears in the plainest way anybody states an org fact:
+ * "remember that Jorge owns the Porsche account". That sentence reached this
+ * tool, which read it as a query and answered confidently about the wrong
+ * thing, while the fact went unsaved.
+ *
+ * A leading imperative to remember settles it without weakening the filter for
+ * any question. */
+const TEACHING_RE = /^\s*(?:please\s+)?(?:remember|save|store|note|record)\b/i;
+
 function matchFilterIntent(message: string): Params | null {
   const trimmed = message.trim();
+  if (TEACHING_RE.test(trimmed)) return null;
   /* Must contain at least one filter signal AND name an object type.
      This keeps the tool from claiming "find Grimace" (no filter
      signal) or "deals" alone (no filter signal). */
