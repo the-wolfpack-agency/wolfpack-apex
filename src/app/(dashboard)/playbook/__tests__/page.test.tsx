@@ -11,13 +11,31 @@
  */
 import "@testing-library/jest-dom";
 import { render, screen, within } from "@testing-library/react";
+
+/* The page reads live figures, and that reader imports pg transitively, which
+   a jsdom suite cannot load. Mocked here rather than in the page, because this
+   suite is about the document rendering as a readable document; the readings
+   have their own tests in readiness.test.ts. */
+jest.mock("@/lib/playbook/readiness", () => ({
+  readPlaybookReadiness: async () => ({
+    takenAt: "2026-08-26T12:00:00.000Z",
+    lines: [
+      {
+        label: "Ordinary questions routed to a built answer",
+        value: "83%",
+        detail: "30 of 36 prompts reach exactly one tool.",
+      },
+    ],
+  }),
+}));
+
 import PlaybookPage from "../page";
 import { CLIENT_DEPLOYMENT_PLAYBOOK } from "@/lib/playbook";
 import { renderMarkdown, headingSlug } from "@/lib/markdown";
 
 describe("the client deployment playbook page", () => {
-  it("renders", () => {
-    render(<PlaybookPage />);
+  it("renders", async () => {
+    render(await PlaybookPage());
     expect(screen.getByTestId("client-deployment-playbook")).toBeInTheDocument();
     expect(
       screen.getByRole("heading", { name: /client deployment playbook/i }),
@@ -55,8 +73,8 @@ describe("the client deployment playbook page", () => {
     expect(promises).not.toMatch(/Qdrant|jsdom|serverless|regex/i);
   });
 
-  it("renders the tables the markdown relies on", () => {
-    render(<PlaybookPage />);
+  it("renders the tables the markdown relies on", async () => {
+    render(await PlaybookPage());
     expect(document.querySelectorAll("table").length).toBeGreaterThan(0);
   });
 });
@@ -273,8 +291,8 @@ describe("the playbook renders as a document a person can read", () => {
     }
   });
 
-  it("carries a contents entry for every section", () => {
-    render(<PlaybookPage />);
+  it("carries a contents entry for every section", async () => {
+    render(await PlaybookPage());
     const nav = screen.getByRole("navigation", { name: /sections/i });
     const links = within(nav).getAllByRole("link");
     const sectionCount = CLIENT_DEPLOYMENT_PLAYBOOK.split("\n").filter((l) =>
@@ -285,8 +303,8 @@ describe("the playbook renders as a document a person can read", () => {
 
   /* The body must claim the shared stylesheet. Without the class the page
      renders exactly as it shipped: correct, and unreadable. */
-  it("applies the shared markdown styling", () => {
-    render(<PlaybookPage />);
+  it("applies the shared markdown styling", async () => {
+    render(await PlaybookPage());
     expect(screen.getByTestId("client-deployment-playbook").querySelector(".wp-md")).not.toBeNull();
   });
 });

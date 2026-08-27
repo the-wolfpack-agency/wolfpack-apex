@@ -49,6 +49,7 @@ export const CAPABILITY_ALLOWLIST: readonly string[] = [
   // requireCapability, but genuinely authorized.
   "src/app/api/admin/insights/unmet-intents/route.ts",
   "src/app/api/admin/insights/role-mismatches/route.ts",
+  "src/app/api/admin/insights/routing-coverage/route.ts",
   "src/app/api/admin/templates/route.ts",
 
   // Provision health bot: authenticates inline via getUserFromRequest +

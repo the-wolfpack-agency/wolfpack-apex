@@ -40,6 +40,18 @@ function isAdmin(user: UserInfo | null): boolean {
   return !!user && (user.role === "ceo" || user.role === "cto" || user.role === "evp");
 }
 
+/** The routing score, and whether it could be read at all. */
+interface RoutingCoverage {
+  readable: boolean;
+  total?: number;
+  reachedOne?: number;
+  reachedNone?: number;
+  reachedMany?: number;
+  percent?: number | null;
+  deadClusters?: string[];
+  unreachable?: string[];
+}
+
 interface UnmetIntent {
   normalizedText: string;
   exampleText: string;
@@ -97,6 +109,7 @@ export default function InsightsAdminPage() {
     }
   }, [router]);
 
+  const [routing, setRouting] = useState<RoutingCoverage | null>(null);
   const [mismatches, setMismatches] = useState<RoleMismatch[] | null>(null);
   /* Unreadable is not the same fact as none, and rendering an empty table for
      both would claim no control in the product lies to anybody. */
@@ -106,11 +119,12 @@ export default function InsightsAdminPage() {
     setLoading(true);
     const failures: string[] = [];
     try {
-      const [intentRes, templateRes, healthRes, mismatchRes] = await Promise.all([
+      const [intentRes, templateRes, healthRes, mismatchRes, routingRes] = await Promise.all([
         fetchWithRefresh("/api/admin/insights/unmet-intents", { headers: authHeaders() }),
         fetchWithRefresh("/api/admin/templates", { headers: authHeaders() }),
         fetchWithRefresh("/api/health/integrations", { headers: authHeaders() }),
         fetchWithRefresh("/api/admin/insights/role-mismatches", { headers: authHeaders() }),
+        fetchWithRefresh("/api/admin/insights/routing-coverage", { headers: authHeaders() }),
       ]);
       if (intentRes.ok) {
         const body = await intentRes.json();
@@ -129,6 +143,9 @@ export default function InsightsAdminPage() {
         setMismatches(body.mismatches ?? []);
         setMismatchesReadable(body.readable !== false);
       } else failures.push(`role-mismatches: HTTP ${mismatchRes.status}`);
+      if (routingRes.ok) {
+        setRouting(await routingRes.json());
+      } else failures.push(`routing-coverage: HTTP ${routingRes.status}`);
     } catch (err) {
       failures.push((err as Error).message);
     }
@@ -242,6 +259,92 @@ export default function InsightsAdminPage() {
               ))}
             </tbody>
           </table>
+        )}
+      </section>
+
+      {/* BESIDE THE ROLE-MISMATCH PANEL, because they answer the same question
+          from opposite ends. That one names a control the product showed
+          somebody who could not use it. This one names a sentence somebody
+          typed that the product could not route anywhere at all. Both are
+          "where is this failing its users", and neither is visible in any
+          other number the company looks at. */}
+      <section data-testid="insights-routing-coverage" className="mb-8">
+        <h2 className="text-lg font-semibold mb-2" style={{ color: "var(--wp-text)" }}>
+          Ordinary sentences that reach a tool
+        </h2>
+        <p className="text-xs mb-3" style={{ color: "var(--wp-text-dim)" }}>
+          A fixed corpus of prompts a person would plainly type, scored against every tool&apos;s
+          intent matcher. Computed live, so it cannot be a number that was true at deploy time.
+          A prompt reaching NOTHING falls through to a model, which answers from whatever the
+          knowledge base had nearest.
+        </p>
+        {routing === null ? (
+          <p className="text-sm" style={{ color: "var(--wp-text-dim)" }}>Loading…</p>
+        ) : !routing.readable ? (
+          <p className="text-sm" data-testid="routing-unreadable" style={{ color: "var(--wp-text-dim)" }}>
+            This could not be read just now. That is not a score of zero: it is an unmeasured
+            window, and the difference matters.
+          </p>
+        ) : (
+          <>
+            <div className="flex items-baseline gap-6 mb-3">
+              <div>
+                <div
+                  data-testid="routing-percent"
+                  className="text-3xl font-semibold"
+                  style={{ color: "var(--wp-gold)" }}
+                >
+                  {routing.percent === null ? "n/a" : `${routing.percent}%`}
+                </div>
+                <div className="text-xs" style={{ color: "var(--wp-text-dim)" }}>
+                  {routing.reachedOne} of {routing.total} reach exactly one tool
+                </div>
+              </div>
+              <div>
+                <div className="text-2xl font-semibold" style={{ color: "var(--wp-text)" }}>
+                  {routing.reachedNone}
+                </div>
+                <div className="text-xs" style={{ color: "var(--wp-text-dim)" }}>reach nothing</div>
+              </div>
+              <div>
+                <div className="text-2xl font-semibold" style={{ color: "var(--wp-text-dim)" }}>
+                  {routing.reachedMany}
+                </div>
+                <div className="text-xs" style={{ color: "var(--wp-text-dim)" }}>
+                  more than one (may be fine)
+                </div>
+              </div>
+            </div>
+
+            {/* A whole cluster failing is a MISSING CAPABILITY, not a missing
+                phrasing, and it is a different decision for a different
+                person. Called out rather than buried in the list below. */}
+            {routing.deadClusters && routing.deadClusters.length > 0 && (
+              <p
+                data-testid="routing-dead-clusters"
+                className="text-sm mb-2"
+                style={{ color: "var(--wp-error, #dc2626)" }}
+              >
+                Whole clusters unreachable: {routing.deadClusters.join(", ")}. Every phrasing in
+                these fails, so no regex will fix them. Nothing is built that answers the question.
+              </p>
+            )}
+
+            {routing.unreachable && routing.unreachable.length > 0 && (
+              <details>
+                <summary className="text-xs cursor-pointer" style={{ color: "var(--wp-text-dim)" }}>
+                  {routing.unreachable.length} prompts reaching nothing
+                </summary>
+                <ul className="mt-2 space-y-1" data-testid="routing-unreachable-list">
+                  {routing.unreachable.map((p) => (
+                    <li key={p} className="text-sm" style={{ color: "var(--wp-text)" }}>
+                      {p}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
+          </>
         )}
       </section>
 
