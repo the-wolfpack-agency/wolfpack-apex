@@ -46,6 +46,7 @@ import {
   validateCitations,
 } from "@/lib/assistant/answer-quality";
 import { buildChoices } from "@/lib/assistant/choices";
+import { gateAnswer } from "@/lib/assistant/answer-gate";
 import { knownDisconnectedIntegrations } from "@/lib/assistant/disconnected-integrations";
 import { welcomePromptTextsForRole } from "@/lib/assistant/welcome-prompts";
 import {
@@ -115,6 +116,9 @@ export interface AssistantResponse {
   tierRequested?: string;
   conversationId: string;
   messageId?: string;
+  /** Personal data kinds removed at the answer boundary, so the UI can say
+   *  what was taken out instead of leaving an unexplained gap. */
+  redactedKinds?: string[];
   /** Source attributions surfaced to the UI. Empty array when the answer
    *  is generic (fallback / pure AI / etc.). */
   sources?: AssistantSourceRef[];
@@ -380,6 +384,22 @@ async function findOrgQACacheHit(
           AND u.created_at > NOW() - ($2::bigint || ' milliseconds')::interval
           AND a.source IS DISTINCT FROM 'fallback'
           AND a.tokens_used > 0
+          /* NEVER REPLAY AN ANSWER THAT STOOD ON NOTHING.
+             This cache runs BEFORE every other priority, including the Brain,
+             so one ungrounded answer is served to the whole workspace
+             indefinitely and no later improvement to retrieval can reach that
+             question. Measured 2026-08-27: "what training do brand
+             ambassadors get" returned generic text about brand ambassadors in
+             general, cached, while the Brain held the actual Learning Journal
+             and the PCNA Academy strategy.
+
+             ABSENT METADATA COUNTS AS UNGROUNDED. Entries written before this
+             column existed cannot be shown to have stood on anything, and the
+             honest reading of "we cannot tell" for an answer served to the
+             whole organisation is not to serve it. That empties the existing
+             cache, which is the point: it is currently full of answers nobody
+             checked. */
+          AND COALESCE((a.metadata->>'grounded')::int, 0) > 0
           /* Sentinel guard: never serve a "No X / not found" empty-tool
              answer from cache. Those came from narrow tool paths that
              didn't see the full data sources. The follow-up call must
@@ -440,6 +460,13 @@ async function findOrgQACacheHit(
           AND u.created_at > NOW() - ($1::bigint || ' milliseconds')::interval
           AND a.source IS DISTINCT FROM 'fallback'
           AND a.tokens_used > 0
+          /* THE SAME GUARD AS THE EXACT-MATCH QUERY ABOVE.
+             I added it there, declared the cache fixed, and this fuzzy
+             fallback kept serving the ungrounded answer. One function, two
+             queries, one of them patched: the same shape as the regex sweep
+             that missed four call sites earlier this month, and again it was
+             driving the real UI that caught it rather than any test. */
+          AND COALESCE((a.metadata->>'grounded')::int, 0) > 0
           /* THE SAME GUARDS AS THE EXACT MATCH ABOVE.
              This is the second lookup in this function and it had none of
              them, which is the whole reason the exclusions above appeared to
@@ -692,7 +719,42 @@ async function appendSourceFooter(
 // Main entry point
 // ---------------------------------------------------------------------------
 
+/**
+ * THE ANSWER BOUNDARY.
+ *
+ * chatInner has nineteen return points. Putting the gate on each of them is
+ * the sweep that misses four call sites, which this codebase has already done
+ * once this month. Wrapping is the only version where coverage is a property
+ * of the structure rather than of my diligence.
+ *
+ * Everything a person is told passes here, whatever produced it: a tool, the
+ * Brain, a cache, a model. The router covers roughly 8% of answers and holds
+ * every outbound control; this is the other 92%.
+ */
 export async function chat(
+  ...args: Parameters<typeof chatInner>
+): Promise<AssistantResponse> {
+  const res = await chatInner(...args);
+  const [, userId, userRole] = args;
+  const gated = gateAnswer({
+    text: res.response,
+    source: res.source,
+    userId,
+    userRole,
+    workflowId: res.workflowId,
+  });
+  if (gated.removed.length === 0) return res;
+  return {
+    ...res,
+    response: gated.text,
+    /* Said out loud. An answer that silently lost a value reads as the
+       document being incomplete; naming the removal is the difference between
+       a redaction and a gap. */
+    redactedKinds: gated.removed,
+  };
+}
+
+async function chatInner(
   message: string,
   userId: string,
   userRole: string,
@@ -1581,7 +1643,23 @@ export async function chat(
       );
     }
 
-    const msgId = await dbSaveMessage(convId, "assistant", safeContent, "ai", aiResult.tokensUsed);
+    /* WHETHER THIS ANSWER STOOD ON ANYTHING.
+     *
+     * Recorded so the org-wide cache can tell a grounded answer from a fluent
+     * one. It could not, and the cost was concrete: "what training do brand
+     * ambassadors get" was answered once from general knowledge, cached, and
+     * then served ahead of a Brain that holds the actual Learning Journal and
+     * Academy strategy. Every retrieval improvement made today was invisible
+     * to any question somebody had already asked. */
+    const groundedOn = (brainContext?.hits?.length ?? 0) + citationCheck.keptRefs.length;
+    const msgId = await dbSaveMessage(
+      convId,
+      "assistant",
+      safeContent,
+      "ai",
+      aiResult.tokensUsed,
+      { grounded: groundedOn },
+    );
     await dbUpdateConversationStats(convId, aiResult.tokensUsed);
 
     /* AI low-confidence reject path: the quality gate forced the
