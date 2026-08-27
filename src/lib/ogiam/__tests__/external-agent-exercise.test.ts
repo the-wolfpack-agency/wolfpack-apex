@@ -12,12 +12,10 @@
  */
 const mockCreate = jest.fn();
 const mockRevoke = jest.fn();
-const mockVerify = jest.fn();
 
 jest.mock("@/lib/ogiam/api-keys", () => ({
   createApiKey: (...a: unknown[]) => mockCreate(...a),
   revokeApiKey: (...a: unknown[]) => mockRevoke(...a),
-  verifyApiKey: (...a: unknown[]) => mockVerify(...a),
 }));
 
 import { runExternalAgentExercise } from "@/lib/ogiam/external-agent-exercise";
@@ -46,7 +44,6 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockCreate.mockResolvedValue({ id: "k1", plaintextKey: KEY, prefix: "ogk_ex", last4: "key" });
   mockRevoke.mockResolvedValue(true);
-  mockVerify.mockResolvedValue({ ok: false, reason: "revoked" });
 });
 
 describe("against a gate that behaves", () => {
@@ -89,14 +86,6 @@ describe("it goes red when the gate is wrong", () => {
     const report = await runExternalAgentExercise(deps(gate as never));
     expect(report.passed).toBe(false);
     expect(report.steps.find((s) => s.name.includes("unknown key"))?.passed).toBe(false);
-  });
-
-  /* A revoked key that reads as not_found would pass a weaker assertion while
-     telling us the row went missing rather than that revocation worked. */
-  it("fails when a revoked key reports the wrong reason", async () => {
-    mockVerify.mockResolvedValue({ ok: false, reason: "not_found" });
-    const report = await runExternalAgentExercise(deps(correctGate()));
-    expect(report.steps.find((s) => s.name.includes("revoked"))?.passed).toBe(false);
   });
 
   it("fails when a revoked key still works", async () => {

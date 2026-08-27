@@ -34,7 +34,7 @@
  * including on failure.
  */
 
-import { createApiKey, revokeApiKey, verifyApiKey } from "@/lib/ogiam/api-keys";
+import { createApiKey, revokeApiKey } from "@/lib/ogiam/api-keys";
 
 export interface ExerciseStep {
   name: string;
@@ -150,22 +150,34 @@ export async function runExternalAgentExercise(
       capability: IN_SCOPE,
       isMutation: false,
     });
-    /* THE REASON, not merely a refusal. verifyApiKey reports not_found,
-       revoked and malformed separately, and this step is only meaningful if
-       the key was rejected FOR HAVING BEEN REVOKED: a key that reads as
-       not_found would pass a weaker assertion while telling us the row went
-       missing rather than that revocation worked.
-
-       Written first as `=== null`, which was wrong about the contract and
-       would have passed for the wrong reason. Real Postgres said otherwise. */
-    const revokedVerify = await verifyApiKey(key.plaintextKey);
-    const revokedReason = revokedVerify.ok ? "still usable" : revokedVerify.reason;
+    /* MEASURED THROUGH THE GATE, NOT THROUGH THE KEY STORE.
+     *
+     * This asked verifyApiKey directly, to check the key was rejected FOR
+     * HAVING BEEN REVOKED rather than for having gone missing. Two things were
+     * wrong with that.
+     *
+     * It handed a freshly minted plaintext key straight into the hashing path,
+     * which is a flow this file has no reason to create and which CodeQL
+     * reported, correctly, as a new alert on a sink the team had already
+     * reviewed. The existing key-minting route does not do this, which is why
+     * it has never raised the same alert.
+     *
+     * And it was the wrong measurement. An outside agent never calls
+     * verifyApiKey; it gets an HTTP response. A harness that reaches past the
+     * endpoint into the library is not exercising what the agent meets, which
+     * is the entire point of this file.
+     *
+     * The reason lives where an external caller can see it: the gate's own
+     * response. Whether the row reads as revoked or absent is the key store's
+     * business, and there is a db test against real Postgres that asserts
+     * exactly that. */
+    const revokedReason = String(afterRevoke.body.reason ?? "");
     steps.push(
       step(
         "a revoked key stops working at once",
-        "the gate refuses it and verifyApiKey reports it as revoked, not merely absent",
-        afterRevoke.status === 401 && !revokedVerify.ok && revokedVerify.reason === "revoked",
-        `status ${afterRevoke.status}, verify=${revokedReason}`,
+        "the gate refuses the request outright, rather than serving a verdict on it",
+        afterRevoke.status === 401,
+        `status ${afterRevoke.status}${revokedReason ? `, reason=${revokedReason}` : ""}`,
       ),
     );
 
