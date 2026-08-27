@@ -41,6 +41,16 @@ export interface Choice {
   hint: string;
   /** Words that make this choice relevant to what was typed. */
   keywords: string[];
+  /**
+   * The integration this chip dead-ends without.
+   *
+   * Undefined means it works from the product's own data and can always be
+   * offered. Named means the chip is only shown when that integration is not
+   * KNOWN to be disconnected: QuickBooks has never held a token on this
+   * deployment, so "A financial figure" has been offered to every person who
+   * ever saw the fallback and has never once been able to answer.
+   */
+  requires?: "microsoft" | "quickbooks" | "github";
 }
 
 /**
@@ -68,6 +78,7 @@ export const CHOICES: Choice[] = [
   },
   {
     tool: "calendar_widget",
+    requires: "microsoft",
     label: "My calendar",
     query: "what's on my calendar today",
     hint: "Today's meetings",
@@ -75,6 +86,7 @@ export const CHOICES: Choice[] = [
   },
   {
     tool: "search_mail",
+    requires: "microsoft",
     label: "Search email",
     query: "find emails about",
     hint: "Your inbox and sent items",
@@ -89,6 +101,7 @@ export const CHOICES: Choice[] = [
   },
   {
     tool: "get_financials_metric",
+    requires: "quickbooks",
     label: "A financial figure",
     query: "what was our revenue last month",
     hint: "Revenue, profit, cash, invoices",
@@ -96,6 +109,7 @@ export const CHOICES: Choice[] = [
   },
   {
     tool: "recent_workflow_runs",
+    requires: "github",
     label: "CI status",
     query: "what happened in CI today",
     hint: "Recent workflow runs",
@@ -143,11 +157,30 @@ export function scoreChoice(question: string, choice: Choice): number {
  * reach nothing here. Offering chips that all refuse is worse than offering
  * none: it spends their click and teaches them the product is broken.
  */
+export interface BuildChoicesOpts {
+  limit?: number;
+  /**
+   * Integrations KNOWN to be disconnected. A chip requiring one of these is
+   * dropped.
+   *
+   * DELIBERATELY A DISCONNECTED SET RATHER THAN A CONNECTED ONE. If the
+   * connection lookup fails we know nothing, and an empty connected-set would
+   * silently hide every integration chip and leave somebody staring at two
+   * options. Naming only what we can positively prove is unusable means a
+   * transient database blip costs nothing, while the case that actually bites
+   * (QuickBooks, never connected, zero token rows) is still fixed.
+   */
+  knownDisconnected?: ReadonlySet<string>;
+}
+
 export function buildChoices(
   question: string,
   role: string,
-  limit = 4,
+  opts: BuildChoicesOpts | number = {},
 ): ClarifySuggestion[] {
+  /* Number form kept so existing callers and tests are untouched. */
+  const { limit = 4, knownDisconnected } =
+    typeof opts === "number" ? { limit: opts, knownDisconnected: undefined } : opts;
   /* The capability comes from the tool's own declaration rather than being
      repeated here. Two copies of a permission is how a chip comes to be
      offered for something the API will refuse. */
@@ -164,6 +197,10 @@ export function buildChoices(
        Dropped rather than offered, and the coverage test below fails so
        somebody fixes the list rather than the symptom. */
     if (capability === undefined) return false;
+    /* A CHIP THAT CANNOT WORK IS WORSE THAN NO CHIP. It spends somebody's
+       click to teach them the product is broken, which is the role-mismatch
+       defect wearing a friendlier coat. */
+    if (c.requires && knownDisconnected?.has(c.requires)) return false;
     return canInvokeNamedTool(role, c.tool, capability);
   });
   if (allowed.length === 0) return [];
