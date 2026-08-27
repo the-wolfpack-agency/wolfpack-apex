@@ -56,15 +56,56 @@ describe("authorization", () => {
 });
 
 describe("what it exercises", () => {
-  /* A hardcoded base URL would test whichever environment a variable named,
-     which is the one thing a selftest must not do. */
-  it("calls the gate on its own deployment, not a configured one", async () => {
-    await POST(req("https://example-deploy.vercel.app/api/admin/ogiam/external-agent-selftest"));
+  it("passes a gate caller and the caller's identity to the harness", async () => {
+    await POST(req());
     const deps = mockExercise.mock.calls[0][0] as { callGate: unknown };
     expect(typeof deps.callGate).toBe("function");
     expect(mockExercise).toHaveBeenCalledWith(
       expect.objectContaining({ workspaceId: "ws1", createdBy: "u1" }),
     );
+  });
+
+  /* SERVER-SIDE REQUEST FORGERY. This read the origin from req.url, which is
+     derived from the Host header and therefore chosen by the caller: a request
+     carrying an internal hostname would have made the server fetch that host
+     with a bearer token attached. In a route whose job is to demonstrate that
+     this product gates what agents may reach. */
+  it("never takes the target host from the request", async () => {
+    const fetchSpy = jest.spyOn(global, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ allowed: true }), { status: 200 }),
+    );
+    mockExercise.mockImplementation(async (deps: { callGate: (k: string, b: unknown) => Promise<unknown> }) => {
+      await deps.callGate("ogk_test", { tool: "t", capability: "c", isMutation: false });
+      return passingReport;
+    });
+
+    await POST(req("https://attacker.internal/api/admin/ogiam/external-agent-selftest"));
+
+    const called = String(fetchSpy.mock.calls[0]?.[0] ?? "");
+    expect(called).not.toContain("attacker.internal");
+    fetchSpy.mockRestore();
+  });
+
+  /* A loopback default in a deployed function means the function calls
+     ITSELF, which looks like a pass while proving nothing about the gate. */
+  it("refuses to run rather than call itself when no origin is configured", async () => {
+    const saved = {
+      vercel: process.env.VERCEL_URL,
+      own: process.env.SELFTEST_ORIGIN,
+      deployed: process.env.VERCEL,
+    };
+    delete process.env.VERCEL_URL;
+    delete process.env.SELFTEST_ORIGIN;
+    process.env.VERCEL = "1";
+
+    const res = await POST(req());
+    expect(res.status).toBe(503);
+    await expect(res.json()).resolves.toMatchObject({ error: "selftest_could_not_run" });
+
+    process.env.VERCEL_URL = saved.vercel;
+    process.env.SELFTEST_ORIGIN = saved.own;
+    if (saved.deployed === undefined) delete process.env.VERCEL;
+    else process.env.VERCEL = saved.deployed;
   });
 
   it("scopes the run to the caller's own workspace", async () => {

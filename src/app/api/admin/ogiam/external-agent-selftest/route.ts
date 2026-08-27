@@ -34,6 +34,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { recordAudit } from "@/lib/audit-log";
+import { resolveServiceUrl } from "@/lib/config/local-default";
 import { runExternalAgentExercise } from "@/lib/ogiam/external-agent-exercise";
 
 export const runtime = "nodejs";
@@ -45,10 +46,56 @@ export async function POST(req: NextRequest) {
 
   const workspaceId = auth.user.workspaceId ?? "default";
 
-  /* The deployment's own origin, taken from the request rather than from
-     configuration: a hardcoded base URL would test whichever environment the
-     env var happened to name, which is the one thing this must not do. */
-  const origin = new URL(req.url).origin;
+  /* THE ORIGIN COMES FROM CONFIGURATION, NEVER FROM THE REQUEST.
+   *
+   * This read `new URL(req.url).origin`, under a comment claiming it was "the
+   * deployment's own origin". It was not. That value derives from the Host
+   * header, which the caller controls, so a request carrying an internal
+   * hostname would have made the server fetch that host with a bearer token
+   * attached. Server-side request forgery, in a route whose whole job is to
+   * demonstrate that this product gates what agents may reach. CodeQL caught
+   * it before merge.
+   *
+   * resolveServiceUrl rather than a bare fallback: a loopback default in a
+   * deployed function means the function calls ITSELF, which looks like a pass
+   * while proving nothing about the real gate. It reports the missing variable
+   * instead, and that is a different outcome from the gate failing. */
+  const endpoint = resolveServiceUrl(
+    "SELFTEST_ORIGIN",
+    "http://127.0.0.1:3000",
+    /* VERCEL_URL is set by the platform per deployment and is not attacker
+       influenced, so it is preferred where it exists. */
+    process.env.VERCEL_URL
+      ? { ...process.env, SELFTEST_ORIGIN: `https://${process.env.VERCEL_URL}` }
+      : process.env,
+  );
+
+  if (!endpoint.configured) {
+    return NextResponse.json(
+      {
+        workspace_id: workspaceId,
+        error: "selftest_could_not_run",
+        detail: endpoint.reason,
+      },
+      { status: 503 },
+    );
+  }
+
+  let origin: string;
+  try {
+    /* Parsed and rebuilt rather than interpolated, so a malformed value fails
+       here instead of becoming part of a URL further down. */
+    origin = new URL(endpoint.url).origin;
+  } catch {
+    return NextResponse.json(
+      {
+        workspace_id: workspaceId,
+        error: "selftest_could_not_run",
+        detail: "the configured origin is not a usable URL",
+      },
+      { status: 503 },
+    );
+  }
 
   try {
     const report = await runExternalAgentExercise({
