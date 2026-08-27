@@ -1242,6 +1242,13 @@ export type InstinctEventType =
      chars } so the cost of reading a library is visible per document rather
      than arriving as a bill. */
   | "brain.document_ocred"
+  /* A sync that stopped on its own time budget rather than being killed by
+     the platform. { source_id, job_id, processed, skipped, remaining,
+     budget_ms }. A rising remaining count across runs means the folder is
+     growing faster than it can be ingested, which is a different problem from
+     a throttle and needs a different fix. */
+  | "connectors.sharepoint.sync_budget_reached"
+
   | "assistant.widget_offered"
   | "assistant.widget_rendered"
   | "assistant.widget_interaction"

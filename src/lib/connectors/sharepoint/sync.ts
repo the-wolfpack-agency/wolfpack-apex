@@ -35,6 +35,20 @@ export interface SyncResult {
   failCount: number;
   bytesIngested: number;
   error: string | null;
+  /** Files a previous run had already landed, so a resumed sync does not read
+   *  as having done nothing. */
+  skippedCount?: number;
+  /**
+   * True when the run stopped on its own time budget with files still to do.
+   *
+   * The caller should invoke the sync again; it resumes, because every file
+   * already in the Brain is skipped by drive-item id. NOT an error: it is the
+   * difference between a folder too big for one invocation and a folder that
+   * cannot be synced.
+   */
+  moreRemaining?: boolean;
+  /** How many files were still unprocessed when the budget ran out. */
+  remainingCount?: number;
 }
 
 interface DriveItem {
@@ -223,7 +237,32 @@ export interface SyncOpts {
   existingJobId?: string;
   /** Override the already-ingested lookup (for tests). */
   alreadyIngestedFn?: (ids: string[]) => Promise<Set<string>>;
+  /**
+   * How long this invocation may spend before it stops and reports the rest as
+   * remaining. Defaults to SYNC_TIME_BUDGET_MS.
+   */
+  budgetMs?: number;
+  /** Injectable clock, so the budget is testable without waiting. */
+  now?: () => number;
 }
+
+/**
+ * How long one sync invocation may run before it stops cleanly.
+ *
+ * THE ROUTE'S CEILING IS 300 SECONDS AND VERCEL ENFORCES IT BY KILLING THE
+ * FUNCTION. A kill happens mid-statement: finishJob() never runs, so the job
+ * row keeps status='running' with a null ended_at, and the admin UI shows
+ * "Syncing..." forever. The TEST source has read that way since 2026-05-16,
+ * survived three manual clears on 2026-08-27, and hung again within seconds
+ * each time, because clearing the row does nothing about the folder being
+ * bigger than one invocation.
+ *
+ * 240s leaves a full minute to finish the job row, emit the events and return
+ * a response. The work itself is already resumable: every file the Brain
+ * holds is skipped by drive-item id, so the next invocation continues rather
+ * than restarting. What was missing was stopping BEFORE the kill.
+ */
+export const SYNC_TIME_BUDGET_MS = 240_000;
 
 /** Run one sync of the given source. Never throws — failures surface
  *  through the returned SyncResult and the job row. */
@@ -238,6 +277,11 @@ export async function syncSource(
   const walkFn = opts.walkFn ?? walkFolder;
   const downloadFn = opts.downloadFn ?? downloadDriveItem;
   const alreadyIngested = opts.alreadyIngestedFn ?? findIngestedDriveItemIds;
+  const now = opts.now ?? Date.now;
+  const budgetMs = opts.budgetMs ?? SYNC_TIME_BUDGET_MS;
+  const deadline = now() + budgetMs;
+  let moreRemaining = false;
+  let remainingCount = 0;
 
   /* Caller can pre-create the job row (POST route does this so it can
    * return the jobId in the 202 response). When provided we wrap it
@@ -306,6 +350,28 @@ export async function syncSource(
         skippedCount++;
         continue;
       }
+
+      /* STOP BEFORE THE PLATFORM STOPS US.
+       *
+       * Checked before starting a file rather than after finishing one: a
+       * download plus an ingest can take tens of seconds, and beginning one
+       * with two seconds left is how the run gets killed anyway. Everything
+       * done so far is already durable in the Brain, so ending here loses no
+       * work and the next invocation resumes at this exact file. */
+      if (now() >= deadline) {
+        moreRemaining = true;
+        remainingCount = files.length - skippedCount - successCount - failCount;
+        trackEvent("connectors.sharepoint.sync_budget_reached", triggeredBy, triggeredByRole, {
+          source_id: source.id,
+          job_id: job.id,
+          processed: successCount + failCount,
+          skipped: skippedCount,
+          remaining: remainingCount,
+          budget_ms: budgetMs,
+        });
+        break;
+      }
+
       try {
         if (typeof f.size === "number" && f.size > MAX_FILE_BYTES) {
           /* Oversized media (video/audio): index a placeholder so the
@@ -403,6 +469,13 @@ export async function syncSource(
   /* Roll per-file failures into the job-level error so the UI and
    * audit log surface a meaningful diagnosis. Keep it bounded so the
    * column doesn't bloat. */
+  /* Said in the job's own error field, because that is what the admin UI
+     renders. An operator looking at "partial" with no explanation cannot tell
+     a throttled folder from one that is simply larger than one invocation. */
+  if (moreRemaining && !topLevelError) {
+    topLevelError = `stopped on the ${Math.round(budgetMs / 1000)}s budget with ${remainingCount} file(s) left. Run the sync again to continue; everything already ingested is skipped.`;
+  }
+
   if (!topLevelError && perFileErrors.length > 0) {
     const sample = perFileErrors.slice(0, 5).join("; ");
     const more = perFileErrors.length > 5 ? ` (+${perFileErrors.length - 5} more)` : "";
@@ -416,6 +489,11 @@ export async function syncSource(
   const walkerCrashed = topLevelError && fileCount === 0;
   const status: IngestJobStatus =
     walkerCrashed ? "failed" :
+    /* OUT OF TIME IS NOT OUT OF LUCK. A run that stopped on its budget with
+       files left is 'partial' even when every file it touched succeeded:
+       'succeeded' would tell the operator the folder is done, and the next
+       run would look like it had nothing to do. */
+    moreRemaining ? "partial" :
     failCount > 0 && successCount > 0 ? "partial" :
     failCount > 0 ? "failed" :
     "succeeded";
@@ -440,6 +518,9 @@ export async function syncSource(
     success_count: successCount,
     fail_count: failCount,
     bytes_ingested: bytesIngested,
+    skipped_count: skippedCount,
+    more_remaining: moreRemaining,
+    remaining_count: remainingCount,
   });
 
   return {
@@ -450,6 +531,9 @@ export async function syncSource(
     failCount,
     bytesIngested,
     error: topLevelError,
+    skippedCount,
+    moreRemaining,
+    remainingCount,
   };
 }
 

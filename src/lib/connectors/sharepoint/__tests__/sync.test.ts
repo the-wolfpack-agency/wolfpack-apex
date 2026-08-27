@@ -19,7 +19,7 @@ jest.mock("@/lib/brain/ingest", () => ({
   ingest: jest.fn(),
 }));
 
-import { syncSource } from "@/lib/connectors/sharepoint/sync";
+import { syncSource, SYNC_TIME_BUDGET_MS } from "@/lib/connectors/sharepoint/sync";
 import type { SharepointSource } from "@/lib/connectors/sharepoint/types";
 
 const source: SharepointSource = {
@@ -343,5 +343,122 @@ describe("a sync that has run before", () => {
     expect(ingestFn).toHaveBeenCalledWith(
       expect.objectContaining({ msDriveItemId: "f1" }),
     );
+  });
+});
+
+/**
+ * Stopping before the platform stops us.
+ *
+ * The sync route is synchronous with maxDuration=300. Vercel enforces that by
+ * KILLING the function, which happens mid-statement: finishJob() never runs,
+ * the job row keeps status='running' with a null ended_at, and the admin UI
+ * reads "Syncing..." forever. The TEST source has looked that way since
+ * 2026-05-16. On 2026-08-27 it was manually cleared three times and hung again
+ * within seconds of each clear, because clearing a row does nothing about a
+ * folder being bigger than one invocation.
+ *
+ * The work was ALREADY resumable: every file the Brain holds is skipped by
+ * drive-item id, so a second run continues rather than restarting. What was
+ * missing was ending the first run on purpose.
+ */
+describe("the time budget", () => {
+  function files(n: number) {
+    return Array.from({ length: n }, (_, i) => ({
+      id: `f${i}`, name: `file${i}.txt`, size: 10,
+      webUrl: `https://x/${i}`, file: { mimeType: "text/plain" },
+    }));
+  }
+
+  test("stops on the budget and reports the rest as remaining, not as done", async () => {
+    const repo = fakeRepo();
+    const walkFn = jest.fn().mockResolvedValue(files(5));
+    const downloadFn = jest.fn().mockResolvedValue(Buffer.from("x"));
+    const ingestFn = jest.fn().mockResolvedValue({ document_id: "d" });
+    /* Clock jumps past the deadline after the second file. */
+    let t = 0;
+    const now = () => (t += 100);
+
+    const result = await syncSource(source, "u1", "cto", {
+      repo, walkFn, downloadFn, ingestFn, budgetMs: 250, now,
+      alreadyIngestedFn: async () => new Set(),
+    });
+
+    expect(result.moreRemaining).toBe(true);
+    expect(result.remainingCount).toBeGreaterThan(0);
+    /* NOT "succeeded". Every file it touched worked, and saying succeeded
+       would tell the operator the folder is done. */
+    expect(result.status).toBe("partial");
+    expect(ingestFn.mock.calls.length).toBeLessThan(5);
+  });
+
+  test("closes the job row rather than leaving it running", async () => {
+    /* THE WHOLE POINT. A killed function never reaches finishJob, which is why
+       TEST has read "Syncing..." for three months. */
+    const repo = fakeRepo();
+    let t = 0;
+    await syncSource(source, "u1", "cto", {
+      repo,
+      walkFn: jest.fn().mockResolvedValue(files(5)),
+      downloadFn: jest.fn().mockResolvedValue(Buffer.from("x")),
+      ingestFn: jest.fn().mockResolvedValue({ document_id: "d" }),
+      budgetMs: 150, now: () => (t += 100),
+      alreadyIngestedFn: async () => new Set(),
+    });
+    expect(repo.finishJob).toHaveBeenCalledWith("job-1", expect.objectContaining({ status: "partial" }));
+  });
+
+  test("says in the job error how to continue, because the UI renders that field", async () => {
+    const repo = fakeRepo();
+    let t = 0;
+    await syncSource(source, "u1", "cto", {
+      repo,
+      walkFn: jest.fn().mockResolvedValue(files(5)),
+      downloadFn: jest.fn().mockResolvedValue(Buffer.from("x")),
+      ingestFn: jest.fn().mockResolvedValue({ document_id: "d" }),
+      budgetMs: 150, now: () => (t += 100),
+      alreadyIngestedFn: async () => new Set(),
+    });
+    const arg = repo.finishJob.mock.calls[0][1];
+    expect(String(arg.error)).toMatch(/Run the sync again/i);
+    expect(String(arg.error)).toMatch(/skipped/i);
+  });
+
+  test("a second run resumes instead of restarting", async () => {
+    /* The half that already worked, pinned so a budget change cannot break it.
+       Files the Brain holds are skipped by drive-item id. */
+    const repo = fakeRepo();
+    const ingestFn = jest.fn().mockResolvedValue({ document_id: "d" });
+    const result = await syncSource(source, "u1", "cto", {
+      repo,
+      walkFn: jest.fn().mockResolvedValue(files(4)),
+      downloadFn: jest.fn().mockResolvedValue(Buffer.from("x")),
+      ingestFn,
+      alreadyIngestedFn: async () => new Set(["f0", "f1", "f2"]),
+    });
+    expect(result.skippedCount).toBe(3);
+    expect(ingestFn).toHaveBeenCalledTimes(1);
+    expect(result.moreRemaining).toBe(false);
+  });
+
+  test("a folder that fits reports succeeded and nothing remaining", async () => {
+    /* The negative. A budget that fired on every run would make every sync
+       look partial and the signal would mean nothing. */
+    const repo = fakeRepo();
+    const result = await syncSource(source, "u1", "cto", {
+      repo,
+      walkFn: jest.fn().mockResolvedValue(files(3)),
+      downloadFn: jest.fn().mockResolvedValue(Buffer.from("x")),
+      ingestFn: jest.fn().mockResolvedValue({ document_id: "d" }),
+      alreadyIngestedFn: async () => new Set(),
+    });
+    expect(result.status).toBe("succeeded");
+    expect(result.moreRemaining).toBe(false);
+    expect(result.remainingCount).toBe(0);
+  });
+
+  test("the default budget leaves room to finish inside the route's 300s ceiling", async () => {
+    /* A budget at or above the ceiling is the same as having none. */
+    expect(SYNC_TIME_BUDGET_MS).toBeLessThanOrEqual(250_000);
+    expect(SYNC_TIME_BUDGET_MS).toBeGreaterThanOrEqual(120_000);
   });
 });
