@@ -29,6 +29,10 @@ export interface AuditAllowlistEntry {
 export const AUDIT_ALLOWLIST: ReadonlyArray<AuditAllowlistEntry> = [
   // Delegated auditing
   {
+    route: "src/app/api/assistant/broadcast/route.ts",
+    reason: "broadcastToAssistants() in src/lib/assistant/broadcast.ts records the hash-chained audit entry itself, naming the sender, the recipient count and how many were actually delivered, so the route delegates rather than double-auditing; the lib is the right place for it because the delivered and failed counts are only known after the fan-out",
+  },
+  {
     route: "src/app/api/admin/platform-scans/browser/authorize/route.ts",
     reason: "authorization-query endpoint; the gate (authorizeBrowserAction) writes the hash-chained audit for every allow/deny decision, so the route delegates rather than double-auditing",
   },

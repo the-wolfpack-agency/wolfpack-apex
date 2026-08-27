@@ -485,6 +485,7 @@ export type InstinctEventType =
      Recorded per model, because whether a model does this is the question
      that decides if it can be trusted with traffic. */
   | "ai.response_flagged"
+  | "assistant.broadcast_sent"
   /* A draft answer read by a second model before it was sent. Records whether
      it was reviewed at all and whether the reviewer changed anything, because
      "checked and fine" and "not checked" must never look alike. */
