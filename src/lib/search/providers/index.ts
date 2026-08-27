@@ -19,6 +19,7 @@ import { knowledgeProvider } from "./knowledge";
 import { crmProvider } from "./crm";
 import { dmsProvider } from "./dms";
 import { vercelProvider } from "./vercel";
+import { brainProvider } from "./brain";
 import type { SearchProvider } from "./types";
 
 export const SEARCH_PROVIDERS: SearchProvider[] = [
@@ -27,6 +28,11 @@ export const SEARCH_PROVIDERS: SearchProvider[] = [
   calendarProvider,
   channelsProvider,
   knowledgeProvider,
+  /* After curated knowledge, before the connectors. A hand-written answer
+     should still outrank a document chunk in the interleave, but the corpus
+     is the largest thing search can see and it belongs above the systems that
+     usually return nothing. */
+  brainProvider,
   crmProvider,
   dmsProvider,
   vercelProvider,

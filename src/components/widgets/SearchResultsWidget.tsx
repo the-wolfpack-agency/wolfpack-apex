@@ -45,6 +45,9 @@ const TYPE_LABELS: Record<SourceType, string> = {
   email: "Emails",
   calendar: "Calendar",
   knowledge: "Knowledge",
+  /* "Documents", not "Brain". The internal name for the corpus is not what a
+     person calls the file they are looking for. */
+  brain: "Documents",
   crm: "CRM",
   dms: "Inventory",
   vercel: "Vercel",
@@ -56,6 +59,7 @@ const TYPE_ORDER: SourceType[] = [
   "email",
   "calendar",
   "knowledge",
+  "brain",
   "crm",
   "dms",
   "vercel",
@@ -68,6 +72,7 @@ const COUNT_KEY: Record<SourceType, string> = {
   email: "emails",
   calendar: "calendar",
   knowledge: "knowledge",
+  brain: "brain",
   crm: "crm",
   dms: "dms",
   vercel: "vercel",

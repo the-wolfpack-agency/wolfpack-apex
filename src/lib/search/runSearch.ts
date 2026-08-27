@@ -36,15 +36,9 @@ import type { RunSearchContext, SearchProvider } from "./providers/types";
  * `type` is a value of this union, so a new provider that forgets to
  * extend the union fails at PR time, not at runtime.
  */
-export type SearchType =
-  | "chat"
-  | "channel"
-  | "email"
-  | "calendar"
-  | "knowledge"
-  | "crm"
-  | "dms"
-  | "vercel";
+import { SEARCH_TYPE_VALUES } from "./search-types";
+import type { SearchType } from "./search-types";
+export type { SearchType };
 
 export interface SearchResult {
   type: SearchType;
@@ -91,16 +85,18 @@ export interface RunSearchParams {
 
 export type { RunSearchContext };
 
-export const ALL_SEARCH_TYPES: ReadonlyArray<SearchType> = [
-  "chat",
-  "channel",
-  "email",
-  "calendar",
-  "knowledge",
-  "crm",
-  "dms",
-  "vercel",
-];
+/**
+ * DERIVED, NOT RESTATED. This array decides which providers actually run, and
+ * it was a separate hand-maintained copy of the type list. The Brain provider
+ * was registered, exported, unit tested and green, and never executed once,
+ * because its type was missing from here: normalizeTypes intersects the
+ * request against this array, brain fell out, and search returned "No results
+ * found" for questions the corpus could answer.
+ *
+ * Nothing failed. The provider tests passed against the provider directly, and
+ * only running the real pipeline showed the feature was dead.
+ */
+export const ALL_SEARCH_TYPES: ReadonlyArray<SearchType> = SEARCH_TYPE_VALUES;
 export const DEFAULT_LIMIT = 20;
 export const MAX_LIMIT = 50;
 /** Server-side cap on accepted query length. Mirrors the zod schema
