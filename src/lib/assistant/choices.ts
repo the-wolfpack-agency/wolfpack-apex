@@ -160,6 +160,16 @@ export function scoreChoice(question: string, choice: Choice): number {
 export interface BuildChoicesOpts {
   limit?: number;
   /**
+   * Only return choices that overlap with what was actually typed.
+   *
+   * buildChoices always returns something, falling back to declared order when
+   * nothing scores, which is right for a menu offered after a failed answer:
+   * an empty panel is a dead end. It is wrong for deciding whether the product
+   * has anything to offer AT ALL, because "the first four chips" would look
+   * like relevance and lead somebody further from what they asked.
+   */
+  relevantOnly?: boolean;
+  /**
    * Integrations KNOWN to be disconnected. A chip requiring one of these is
    * dropped.
    *
@@ -179,8 +189,10 @@ export function buildChoices(
   opts: BuildChoicesOpts | number = {},
 ): ClarifySuggestion[] {
   /* Number form kept so existing callers and tests are untouched. */
-  const { limit = 4, knownDisconnected } =
-    typeof opts === "number" ? { limit: opts, knownDisconnected: undefined } : opts;
+  const { limit = 4, knownDisconnected, relevantOnly = false } =
+    typeof opts === "number"
+      ? { limit: opts, knownDisconnected: undefined, relevantOnly: false }
+      : opts;
   /* The capability comes from the tool's own declaration rather than being
      repeated here. Two copies of a permission is how a chip comes to be
      offered for something the API will refuse. */
@@ -212,7 +224,9 @@ export function buildChoices(
        between asks is a menu people stop trusting. */
     .sort((a, b) => b.score - a.score || CHOICES.indexOf(a.c) - CHOICES.indexOf(b.c));
 
-  return scored.slice(0, limit).map(({ c }) => ({
+  const offered = relevantOnly ? scored.filter((x) => x.score > 0) : scored;
+
+  return offered.slice(0, limit).map(({ c }) => ({
     label: c.label,
     query: c.query,
     hint: c.hint,

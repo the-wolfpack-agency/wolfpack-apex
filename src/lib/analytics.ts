@@ -1242,6 +1242,12 @@ export type InstinctEventType =
      chars } so the cost of reading a library is visible per document rather
      than arriving as a bill. */
   | "brain.document_ocred"
+  /* The assistant chose a question over an invented answer. Fires when no
+     tool matched, no page facts hit and the Brain was empty, so a model would
+     have had nothing about this business to ground on. { message_text,
+     choice_count }. Rising means the corpus is thin in a nameable way. */
+  | "assistant.guided_instead_of_guessing"
+
   /* A sync that stopped on its own time budget rather than being killed by
      the platform. { source_id, job_id, processed, skipped, remaining,
      budget_ms }. A rising remaining count across runs means the folder is
