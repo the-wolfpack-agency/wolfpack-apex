@@ -10,7 +10,7 @@
  * Plain language only. Errors are full sentences.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchWithRefresh, jsonHeaders } from "@/lib/client-auth";
 import type {
   SharepointSource,
@@ -33,6 +33,12 @@ export default function AdminSharepointPage() {
   /* Progress that is NOT an error. Kept apart from syncErrors so a folder that
      simply needs another run is never styled or worded as a fault. */
   const [syncNotices, setSyncNotices] = useState<Record<string, string>>({});
+  /* Set when the operator asks a running continuation to stop. Read inside the
+     loop rather than passed in, so a click lands on the pass in flight. */
+  const cancelSyncRef = useRef(false);
+  const [syncProgress, setSyncProgress] = useState<
+    Record<string, { pass: number; ingested: number; remaining: number | null }>
+  >({});
   const [syncErrors, setSyncErrors] = useState<Record<string, string>>({});
   const [syncingId, setSyncingId] = useState<string | null>(null);
 
@@ -88,18 +94,43 @@ export default function AdminSharepointPage() {
     }
   }
 
+  /**
+   * Sync until the folder is finished, not until the clock runs out.
+   *
+   * A single invocation is bounded at 240 seconds by the server so it can
+   * close its job row before the platform kills it (#449). That made a large
+   * folder resumable and left the operator clicking. TEST/General holds 2,518
+   * files and one pass ingests about 272, so finishing it by hand is ten
+   * clicks over forty minutes, which is what "taking forever" meant.
+   *
+   * The work was already idempotent: every file the Brain holds is skipped by
+   * drive-item id, so a pass that repeats costs a listing and nothing else.
+   * All that was missing was the loop.
+   */
   async function handleSync(id: string) {
+    cancelSyncRef.current = false;
     setSyncingId(id);
     setSyncErrors((prev) => {
       const { [id]: _unused, ...rest } = prev;
       return rest;
     });
+    setSyncProgress((prev) => ({ ...prev, [id]: { pass: 0, ingested: 0, remaining: null } }));
     try {
       /* Synchronous sync: the route awaits syncSource() so the
        * response is the final result. No polling, no job-id juggling,
        * no infinite refresh. Bounded by the route's maxDuration
        * (300s on Pro). Large folders that exceed that need the
        * Clear stuck button + a separate queue worker (TODO). */
+      /* A cap, not a timeout. 2,518 files at roughly 272 a pass is ten; forty
+         leaves headroom for a much larger library without ever spinning
+         forever on a source that reports remaining work it never reduces. */
+      const MAX_PASSES = 40;
+      let pass = 0;
+      let ingestedTotal = 0;
+
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+      pass += 1;
       const res = await fetchWithRefresh(
         `/api/connectors/sharepoint/sources/${encodeURIComponent(id)}/sync`,
         { method: "POST", headers: jsonHeaders() },
@@ -144,16 +175,53 @@ export default function AdminSharepointPage() {
            durable. */
         const done = data.result?.successCount ?? 0;
         const left = data.result?.remainingCount ?? 0;
+        ingestedTotal += done;
+        setSyncProgress((prev) => ({ ...prev, [id]: { pass, ingested: ingestedTotal, remaining: left } }));
         setSyncNotices((prev) => ({
           ...prev,
-          [id]: `Ingested ${done} file(s), ${left} still to go. This folder is larger than one sync can finish, so it stopped cleanly rather than being cut off. Click Sync now again to continue; files already ingested are skipped.`,
+          [id]: `Pass ${pass}: ${ingestedTotal} file(s) ingested, ${left} to go. Continuing automatically; files already ingested are skipped.`,
         }));
+
+        if (cancelSyncRef.current) {
+          setSyncNotices((prev) => ({
+            ...prev,
+            [id]: `Stopped at ${ingestedTotal} file(s) with ${left} to go. Nothing is lost: Sync now continues from here.`,
+          }));
+          break;
+        }
+        if (pass >= MAX_PASSES) {
+          /* Said out loud rather than stopping quietly. A silent cap reads as
+             "finished" and would leave a folder half-ingested with a green
+             tick over it. */
+          setSyncErrors((prev) => ({
+            ...prev,
+            [id]: `Stopped after ${MAX_PASSES} passes with ${left} file(s) still to go. That is a lot more than this folder should need, so something is not reducing the remaining count. Check the job log before running it again.`,
+          }));
+          break;
+        }
+        /* Round again. */
+        continue;
       } else if (data.result?.status === "partial") {
         setSyncErrors((prev) => ({
           ...prev,
           [id]: `Sync finished with errors (${data.result?.failCount}/${data.result?.fileCount} files failed).`,
         }));
+      } else if (pass > 1) {
+        /* Finished, and it took more than one pass. Say the total, because the
+           last pass on its own reports only the handful it happened to land
+           and would read as though almost nothing had been ingested. */
+        ingestedTotal += data.result?.successCount ?? 0;
+        setSyncNotices((prev) => ({
+          ...prev,
+          [id]: `Finished. ${ingestedTotal} file(s) ingested across ${pass} passes.`,
+        }));
       }
+      /* Every path that reaches here is terminal: an error, a hard failure, a
+         partial-with-errors, or a completed folder. Only moreRemaining loops,
+         and it does so with `continue` above. */
+      break;
+      }
+
       await load();
     } catch (err) {
       setSyncErrors((prev) => ({ ...prev, [id]: (err as Error).message }));
@@ -326,7 +394,11 @@ export default function AdminSharepointPage() {
                       color: "var(--wp-gold, #eab308)",
                     }}
                   >
-                    {syncingId === s.id ? "Syncing..." : "Sync now"}
+                    {syncingId === s.id
+                      ? syncProgress[s.id]?.remaining != null
+                        ? `Syncing… ${syncProgress[s.id].ingested} done, ${syncProgress[s.id].remaining} left`
+                        : "Syncing…"
+                      : "Sync now"}
                   </button>
                   <button
                     onClick={() => handleClearStuck(s.id)}
@@ -355,6 +427,19 @@ export default function AdminSharepointPage() {
                   </button>
                 </div>
               </div>
+              {syncingId === s.id && (
+                <button
+                  type="button"
+                  data-testid={`stop-sync-${s.id}`}
+                  onClick={() => {
+                    cancelSyncRef.current = true;
+                  }}
+                  className="mt-2 text-xs underline"
+                  style={{ background: "none", border: "none", cursor: "pointer", color: "var(--wp-text-dim)", padding: 0 }}
+                >
+                  Stop after this pass
+                </button>
+              )}
               {syncNotices[s.id] && (
                 <div
                   data-testid={`sync-notice-${s.id}`}
