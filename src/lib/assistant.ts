@@ -1367,6 +1367,53 @@ export async function chat(
     };
   }
 
+  /* --- Priority 4b: nothing to ground an answer on ---
+   *
+   * Reaching here means no tool matched, no page facts hit, and the Brain
+   * returned nothing. The model would be asked a question about this business
+   * with no material about this business, and the only thing it can do is
+   * write something plausible. That is how the assistant invented a product
+   * and then remembered it as fact (#409).
+   *
+   * A question with concrete options moves somebody forward; an invented
+   * answer moves them backward and costs a model call to do it.
+   *
+   * ONLY when the chips are actually RELEVANT to what was typed. buildChoices
+   * falls back to declared order when nothing scores, which is right for a
+   * menu after a failed answer and wrong here: offering "the first four chips"
+   * to somebody asking about something else looks like relevance and leads
+   * them further away. With no relevant chip this falls through to the model
+   * exactly as before, so a general question still gets an answer. */
+  if (!hasAttachment && !pageContext && brainContext.hits.length === 0) {
+    const disconnected = await knownDisconnectedIntegrations(userId).catch(
+      () => new Set<string>(),
+    );
+    const guided = buildChoices(message, userRole, {
+      relevantOnly: true,
+      knownDisconnected: disconnected,
+    });
+    if (guided.length > 0) {
+      trackEvent("assistant.guided_instead_of_guessing", userId, userRole, {
+        message_text: message.slice(0, 200),
+        choice_count: guided.length,
+        module: "assistant",
+        workflow_id: workflowId,
+      });
+      const lead =
+        "I do not have anything on that yet, so I would rather ask than guess. Did you mean one of these?";
+      const msgId = await dbSaveMessage(convId, "assistant", lead, "tool", 0);
+      return {
+        response: lead,
+        source: "tool",
+        tokensUsed: 0,
+        conversationId: convId,
+        messageId: msgId,
+        workflowId,
+        fallbackChips: guided.map((c) => c.query),
+      };
+    }
+  }
+
   // --- Priority 5: AI call ---
   trackEvent("knowledge.answer_not_found", userId, userRole, {
     question_length: message.length,
