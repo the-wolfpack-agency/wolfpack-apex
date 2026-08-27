@@ -36,7 +36,8 @@
     "integrations:evidence": "npx tsx scripts/integration-evidence.ts",
     "integrations:probe": "npx tsx scripts/integration-probe.ts",
     "assistant:routing": "npx tsx scripts/routing-audit.ts",
-    "test:db": "bash scripts/db-test.sh"
+    "test:db": "bash scripts/db-test.sh",
+    "test:e2e:changed": "npx tsx scripts/e2e-for-changes.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.92.0",

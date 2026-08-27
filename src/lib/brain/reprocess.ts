@@ -116,10 +116,23 @@ export async function findCandidates(
   /* LIMIT is a bound parameter, not an interpolation. It is already clamped
      above, but the repo-wide guard is right that a clamped value today is an
      unclamped one after the next edit. */
+  /* ONLY ROWS THAT CAN ACTUALLY BE REPAIRED.
+   *
+   * The Brain stores text and chunks, never the original bytes, so a repair
+   * has to re-download the file from its drive. Measured on 2026-08-27: NONE
+   * of the 332 failed or skipped documents has an ms_drive_item_id. They are
+   * demo fixtures and hand uploads, and there is nowhere to fetch them from.
+   *
+   * Without this predicate the run would walk all 332, fail to fetch every
+   * one, and rewrite each row's status to failed with a new detail string:
+   * 332 pointless writes, a status change for the 167 that were merely
+   * skipped, and a report that reads like work happened. Selecting only what
+   * is repairable means an empty candidate list is the honest answer. */
   const { rows } = await query<BrainDocument>(
     `SELECT * FROM brain_documents
-      WHERE status IN ('failed','skipped')
-         OR (status = ANY($1::text[]) AND updated_at < NOW() - ($2::int * INTERVAL '1 minute'))
+      WHERE ms_drive_item_id IS NOT NULL
+        AND (status IN ('failed','skipped')
+             OR (status = ANY($1::text[]) AND updated_at < NOW() - ($2::int * INTERVAL '1 minute')))
       ORDER BY created_at DESC
       LIMIT $3`,
     [NON_TERMINAL as unknown as string[], stranded, limit],

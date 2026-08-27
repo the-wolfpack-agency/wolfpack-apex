@@ -55,10 +55,15 @@ async function buildSchema() {
     )`);
 }
 
-async function addDoc(filename: string, roles: string[] | null, content: string) {
+async function addDoc(
+  filename: string,
+  roles: string[] | null,
+  content: string,
+  uploadedBy: string | null = "real-person",
+) {
   const { rows } = await client.query<{ id: string }>(
-    `INSERT INTO brain_documents (filename, audience_roles) VALUES ($1, $2) RETURNING id`,
-    [filename, roles],
+    `INSERT INTO brain_documents (filename, audience_roles, uploaded_by) VALUES ($1, $2, $3) RETURNING id`,
+    [filename, roles, uploadedBy],
   );
   await client.query(`INSERT INTO brain_chunks (document_id, content) VALUES ($1, $2)`, [
     rows[0].id,
@@ -66,6 +71,27 @@ async function addDoc(filename: string, roles: string[] | null, content: string)
   ]);
   return rows[0].id;
 }
+
+/* ONE connection and ONE schema for every block in this file. These lived in
+   the first describe's beforeAll/afterAll, which closed the client before the
+   second block ran: the corpus tests then failed on a dead connection rather
+   than on anything they were asserting. */
+beforeAll(async () => {
+  if (!RAW) return;
+  const url = requireLocalTestDatabase(RAW);
+  client = new Client({ connectionString: url });
+  await client.connect();
+  await buildSchema();
+
+  /* One document the whole company may read, two that only HR may. */
+  await addDoc("handbook.pdf", null, "the holiday policy allows twenty days");
+  await addDoc("salaries.pdf", ["hr"], "the holiday policy for salary bands");
+  await addDoc("grievance.pdf", ["hr"], "holiday policy grievance procedure");
+});
+
+afterAll(async () => {
+  await client?.end();
+});
 
 describeIfDb("keywordSearchWithAudience against a real database", () => {
   /**
@@ -85,24 +111,6 @@ describeIfDb("keywordSearchWithAudience against a real database", () => {
     const res = await client.query(sql, [queryText, ...args]);
     return mapKeywordSearchRows(res.rows as never);
   }
-
-  beforeAll(async () => {
-    const url = requireLocalTestDatabase(RAW);
-    client = new Client({ connectionString: url });
-    await client.connect();
-    await buildSchema();
-
-    void url;
-
-    /* One document the whole company may read, two that only HR may. */
-    await addDoc("handbook.pdf", null, "the holiday policy allows twenty days");
-    await addDoc("salaries.pdf", ["hr"], "the holiday policy for salary bands");
-    await addDoc("grievance.pdf", ["hr"], "holiday policy grievance procedure");
-  });
-
-  afterAll(async () => {
-    await client?.end();
-  });
 
   it("withholds the restricted documents from a role that may not read them", async () => {
     const r = await search("holiday policy", 10, { role: "sales" });
@@ -164,5 +172,64 @@ describe("the safety guard on this file", () => {
   });
   it("refuses a url it cannot parse", () => {
     expect(() => requireLocalTestDatabase("not a url")).toThrow();
+  });
+});
+
+/**
+ * The corpus boundary, in SQL, against a real database.
+ *
+ * corpus.test.ts proves the helper agrees with itself. This proves the
+ * PREDICATE actually removes rows, which is the only version that matters:
+ * 744 of the Brain's 795 answerable documents are demo fixtures and scanner
+ * output, and a predicate that composed wrongly would leave every one of them
+ * reachable while the unit tests stayed green.
+ */
+describeIfDb("the corpus boundary excludes synthetic documents", () => {
+  beforeAll(async () => {
+    await addDoc("demo-fixture.pdf", null, "holiday policy demo fixture", "demo-cto");
+    await addDoc("scan-finding.txt", null, "holiday policy scanner finding", "platform-scan");
+    await addDoc("unknown-provenance.pdf", null, "holiday policy from nobody", null);
+  });
+
+  async function search(queryText: string, limit: number, opts: { role?: string } = {}) {
+    const { sql, args } = buildKeywordSearchSql(limit, opts as never);
+    const res = await client.query(sql, [queryText, ...args]);
+    return mapKeywordSearchRows(res.rows as never);
+  }
+
+  it("never returns the demo seeder's or the scanner's documents", async () => {
+    const r = await search("holiday policy", 50, { role: "cto" });
+    const names = r.hits.map((h) => h.filename);
+    expect(names).not.toContain("demo-fixture.pdf");
+    expect(names).not.toContain("scan-finding.txt");
+  });
+
+  it("still returns a real person's document", async () => {
+    /* The other half. An exclusion that removed everything would pass the
+       assertion above and be catastrophic. */
+    const r = await search("holiday policy", 50, { role: "cto" });
+    expect(r.hits.map((h) => h.filename)).toContain("handbook.pdf");
+  });
+
+  it("keeps a document whose uploader is unknown", async () => {
+    const r = await search("holiday policy", 50, { role: "cto" });
+    expect(r.hits.map((h) => h.filename)).toContain("unknown-provenance.pdf");
+  });
+
+  it("applies to a role that reads everything, because it is not an audience rule", async () => {
+    const asCto = await search("holiday policy", 50, { role: "cto" });
+    const asSales = await search("holiday policy", 50, { role: "sales" });
+    for (const r of [asCto, asSales]) {
+      expect(r.hits.map((h) => h.filename)).not.toContain("demo-fixture.pdf");
+    }
+  });
+
+  it("does not count an excluded document as withheld by AUDIENCE", async () => {
+    /* The withheld number means "your role may not read this". Folding the
+       corpus boundary into it would report a governance filter that never
+       happened, which is the exact class of wrong number this codebase spent
+       the week removing. */
+    const r = await search("holiday policy", 50, { role: "cto" });
+    expect(r.withheld).toBe(0);
   });
 });
