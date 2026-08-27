@@ -37,16 +37,7 @@ import { registerTool } from "./registry";
 import type { AssistantSourceRef } from "@/lib/assistant";
 import type { ToolDef, ToolResult } from "./types";
 
-const SEARCH_TYPE_VALUES = [
-  "chat",
-  "channel",
-  "email",
-  "calendar",
-  "knowledge",
-  "crm",
-  "dms",
-  "vercel",
-] as const;
+import { SEARCH_TYPE_VALUES } from "@/lib/search/search-types";
 
 const ParamSchema = z.object({
   query: z.string().min(1).max(200),
@@ -256,20 +247,55 @@ function matchSearchIntent(message: string): Params | null {
  * Answer rendering
  * ------------------------------------------------------------------- */
 
+/**
+ * What each bucket is called when it has something in it.
+ *
+ * Keyed by the provider's countKey. `search-summary-labels` in the tool tests
+ * asserts every registered provider has an entry, so a new provider cannot
+ * return results that the sentence has no word for.
+ */
+const COUNT_LABELS: Record<string, [singular: string, plural: string]> = {
+  chats: ["chat", "chats"],
+  channels: ["channel", "channels"],
+  emails: ["email", "emails"],
+  calendar: ["calendar event", "calendar events"],
+  knowledge: ["knowledge entry", "knowledge entries"],
+  brain: ["document", "documents"],
+  crm: ["CRM record", "CRM records"],
+  dms: ["inventory match", "inventory matches"],
+  vercel: ["deployment", "deployments"],
+};
+
+/**
+ * NAMES WHAT WAS FOUND, rather than reciting what was not.
+ *
+ * This used to enumerate every bucket in a fixed sentence, which had two
+ * problems. It read as broken: adding the document corpus produced "Found 3
+ * results for guest feedback: 0 chats, 0 channels, 0 emails, 0 calendar
+ * events, 0 knowledge entries, 0 CRM records, 0 inventory matches", because
+ * documents had no clause and every clause that existed was zero. A person
+ * reading that sees a contradiction, not an answer.
+ *
+ * And it drifted: the fixed sentence never mentioned deployments either, so
+ * that provider had been returning results into a summary that did not count
+ * them since the day it was added.
+ *
+ * Listing only non-empty buckets fixes both. A new provider appears in the
+ * sentence as soon as it returns anything.
+ */
 function summaryAnswer(query: string, body: SearchResponse): string {
-  const c = body.counts;
   const total = body.results.length;
   if (total === 0) return `No results found for "${query}".`;
-  return (
-    `Found ${total} result${total === 1 ? "" : "s"} for "${query}":` +
-    ` ${c.chats} chat${c.chats === 1 ? "" : "s"},` +
-    ` ${c.channels} channel${c.channels === 1 ? "" : "s"},` +
-    ` ${c.emails} email${c.emails === 1 ? "" : "s"},` +
-    ` ${c.calendar} calendar event${c.calendar === 1 ? "" : "s"},` +
-    ` ${c.knowledge} knowledge entr${c.knowledge === 1 ? "y" : "ies"},` +
-    ` ${c.crm} CRM record${c.crm === 1 ? "" : "s"},` +
-    ` ${c.dms} inventory match${c.dms === 1 ? "" : "es"}.`
-  );
+
+  const parts: string[] = [];
+  for (const [key, n] of Object.entries(body.counts)) {
+    if (!n) continue;
+    const label = COUNT_LABELS[key];
+    parts.push(`${n} ${label ? (n === 1 ? label[0] : label[1]) : key}`);
+  }
+
+  const breakdown = parts.length > 0 ? `: ${parts.join(", ")}` : "";
+  return `Found ${total} result${total === 1 ? "" : "s"} for "${query}"${breakdown}.`;
 }
 
 /** Map runSearch hits onto AssistantSourceRef shape. Each result type
@@ -280,6 +306,9 @@ function buildSources(body: SearchResponse): AssistantSourceRef[] {
     channel: "channel",
     email: "email",
     calendar: "meeting",
+    /* Documents cite as documents. The corpus is mostly SharePoint files, and
+       a reader who sees "document" knows what they are being shown. */
+    brain: "document",
     knowledge: "knowledge",
     crm: "crm",
     dms: "dms",

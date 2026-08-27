@@ -1609,6 +1609,10 @@ async function chatInner(
            backed the answer. Citation gate (A3) fires when factual
            claims aren't cited. */
         topScore: brainContext?.topScore,
+        topScoreIsSemantic: brainContext?.topScoreIsSemantic,
+        /* The floor the index enforced, handed over rather than re-declared,
+           so the gate and the retriever can never disagree about it. */
+        semanticFloor: SEMANTIC_SCORE_FLOOR,
         hitCount: brainContext?.hits.length,
         retrievedIds: validSourceIds,
         /* THE TEXT THE ANSWER WAS WRITTEN FROM. A capitalised phrase the model
@@ -2289,6 +2293,9 @@ interface BrainContext {
     score: number;
   }>;
   topScore: number;
+  /** Which index produced topScore. Keyword and semantic scores are different
+   *  measurements, and a threshold is meaningless without knowing which. */
+  topScoreIsSemantic?: boolean;
 }
 
 /**
@@ -2461,7 +2468,7 @@ async function tryBrain(
   userRole: string,
   conversationId: string,
 ): Promise<{ strong: BrainHitAnswer | null; context: BrainContext }> {
-  const emptyContext: BrainContext = { hits: [], topScore: 0 };
+  const emptyContext: BrainContext = { hits: [], topScore: 0, topScoreIsSemantic: false };
   try {
     const result = await queryBrain({
       userId,
@@ -2479,8 +2486,12 @@ async function tryBrain(
     const seen = new Set<string>();
     const ctxHits: BrainContext["hits"] = [];
     let topScore = 0;
+    let topScoreIsSemantic = false;
     for (const h of result.hits) {
-      if (h.score > topScore) topScore = h.score;
+      if (h.score > topScore) {
+        topScore = h.score;
+        topScoreIsSemantic = h.source.includes("semantic");
+      }
       const id = String(h.document_id);
       if (seen.has(id)) continue;
       seen.add(id);
@@ -2491,7 +2502,7 @@ async function tryBrain(
         score: h.score,
       });
     }
-    const context: BrainContext = { hits: ctxHits, topScore };
+    const context: BrainContext = { hits: ctxHits, topScore, topScoreIsSemantic };
 
     // Gate: require either a semantic-blended hit OR a keyword hit with
     // reasonable tsrank score. ts_rank_cd returns values typically in

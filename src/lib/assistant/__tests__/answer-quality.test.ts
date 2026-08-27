@@ -795,3 +795,61 @@ describe("an answer that describes us with nothing behind it", () => {
     ).toBeNull();
   });
 });
+
+/**
+ * One constant was being applied to two different measurements.
+ *
+ * topScore is max() over hits from two indexes. Semantic scores are cosine
+ * similarity, measured to separate at 0.36. Keyword scores are ts_rank_cd,
+ * where a real question about time-off policy scored 0.0404 and the word "yes"
+ * scored 0.5000, because the number tracks query length rather than relevance.
+ *
+ * Both were compared against 0.55, a constant with no derivation that predates
+ * semantic retrieval being switched on.
+ *
+ * Measured on production 2026-08-27: of 55 recorded Brain retrievals, 52
+ * scored between 0.36 and 0.54. Each one found a real document, paid for a
+ * model call, and had the answer replaced with "I don't have a confident
+ * answer for that". Three ever cleared 0.55.
+ */
+describe("the confidence gate judges each scale against its own floor", () => {
+  const FLOOR = 0.36;
+
+  /* The exact band that was being thrown away. */
+  it.each([0.36, 0.38, 0.41, 0.44, 0.46, 0.51, 0.53, 0.54])(
+    "keeps a semantic answer scoring %s, which the index already accepted",
+    (score) => {
+      expect(gateConfidence(score, 3, true, FLOOR)).toBeNull();
+    },
+  );
+
+  it("still blocks a semantic score below the floor the index enforced", () => {
+    const flag = gateConfidence(0.2, 3, true, FLOOR);
+    expect(flag?.severity).toBe("block");
+    expect(flag?.reason).toMatch(/semantic/);
+  });
+
+  /* ts_rank_cd is not on the cosine scale, so no cosine threshold applies.
+     Keyword relevance is held upstream by the subject-word test and by
+     judgeRelevance reading the material. */
+  it("applies no cosine threshold to a keyword score", () => {
+    expect(gateConfidence(0.0404, 3, false, FLOOR)).toBeNull();
+    expect(gateConfidence(0.5, 3, false, FLOOR)).toBeNull();
+  });
+
+  /* An unaware caller must not be silently ungated. */
+  it("falls back to the conservative threshold when the scale is not stated", () => {
+    expect(gateConfidence(0.44, 3, undefined, FLOOR)?.severity).toBe("block");
+    expect(gateConfidence(0.9, 3, undefined, FLOOR)).toBeNull();
+  });
+
+  it("still ignores an answer with no retrieval behind it at all", () => {
+    expect(gateConfidence(0, 0, true, FLOOR)).toBeNull();
+    expect(gateConfidence(undefined, 3, true, FLOOR)).toBeNull();
+  });
+
+  /* Belt and braces only works while the floor is actually supplied. */
+  it("does not invent a floor when none was passed", () => {
+    expect(gateConfidence(0.1, 3, true, undefined)).toBeNull();
+  });
+});

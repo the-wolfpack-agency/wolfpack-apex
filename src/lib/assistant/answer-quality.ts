@@ -131,8 +131,27 @@ export interface QualityCheckInput {
   /** What was asked. Needed to tell a question about the world from a
    *  question about us, which a model cannot answer without a source. */
   question?: string;
-  /** Top retrieval score (0..1). undefined when no retrieval. */
+  /** Top retrieval score. undefined when no retrieval.
+   *
+   *  NOT A SINGLE SCALE, which is the whole reason topScoreIsSemantic exists
+   *  next to it. See gateConfidence. */
   topScore?: number;
+  /**
+   * Whether the hit that produced topScore came from the semantic index.
+   *
+   * Keyword and semantic scores are different measurements and are not
+   * comparable to one another, so a threshold means nothing without knowing
+   * which one produced the number.
+   */
+  topScoreIsSemantic?: boolean;
+  /**
+   * The floor the semantic index itself already enforced.
+   *
+   * Passed in rather than imported: this module is reachable from analytics.ts,
+   * which client components import, and pulling the retrieval stack in behind
+   * it is how server-only code ends up in a browser bundle.
+   */
+  semanticFloor?: number;
   /** Number of retrieved hits. */
   hitCount?: number;
   /** Lowercase names of people / orgs known to the team. */
@@ -169,7 +188,14 @@ export interface QualityCheckResult {
 /* Constants                                                           */
 /* ------------------------------------------------------------------ */
 
-/** Below this score, retrieval is treated as "not really relevant." */
+/**
+ * Fallback floor, used only when the caller does not say which index produced
+ * the score.
+ *
+ * Kept because an unaware caller must not be silently ungated. It is NOT the
+ * threshold for semantic retrieval: that floor is measured, lives with the
+ * index that enforces it, and is passed in. See gateConfidence.
+ */
 export const MIN_CONFIDENCE_SCORE = 0.55;
 
 /** Docs older than this with present-tense claims are flagged. */
@@ -190,6 +216,8 @@ const FALLBACK_LOW_CONFIDENCE_MESSAGE =
 export function gateConfidence(
   topScore: number | undefined,
   hitCount: number | undefined,
+  topScoreIsSemantic?: boolean,
+  semanticFloor?: number,
 ): QualityFlag | null {
   if (typeof topScore !== "number") return null;
   /* Only fire when grounding was retrieved but is too weak. With zero
@@ -204,6 +232,56 @@ export function gateConfidence(
      general-knowledge response (regression reported 2026-05-14). */
   const hits = hitCount ?? 0;
   if (hits === 0) return null;
+
+  /* ONE CONSTANT WAS BEING APPLIED TO TWO DIFFERENT MEASUREMENTS.
+   *
+   * topScore is max() over every hit, and hits arrive from two indexes whose
+   * scores mean unrelated things. Semantic scores are cosine similarity, where
+   * the populations were measured and separate at 0.36: things we hold sit
+   * above it, things we do not sit at 0.23 to 0.34. Keyword scores are
+   * ts_rank_cd, where a real question about time-off policy scored 0.0404 and
+   * the word "yes" scored 0.5000, because the number tracks how short the
+   * query is rather than how relevant the chunk is.
+   *
+   * Both were compared against 0.55, a constant with no derivation behind it
+   * that predates semantic retrieval being switched on at all.
+   *
+   * WHAT THAT COST, measured on production 2026-08-27: of 55 recorded Brain
+   * retrievals, 52 scored between 0.36 and 0.54. Every one of them found a
+   * real document, paid for a model call to write an answer from it, and then
+   * had that answer replaced with "I don't have a confident answer for that."
+   * Three ever cleared 0.55. The confidence block fired 22 times, and it was
+   * firing hardest on exactly the questions retrieval was getting right.
+   *
+   * So each scale is now judged against its own floor:
+   *
+   *   semantic  The floor the index itself enforced. Qdrant already refused
+   *             everything below it, so this is belt and braces rather than a
+   *             second opinion, and that is the correct amount of gate for a
+   *             number that has already been thresholded once.
+   *
+   *   keyword   No numeric gate here, because no number on this scale means
+   *             what a cosine threshold would mean. Keyword relevance is held
+   *             by the subject-word test upstream, which refuses a query that
+   *             carries nothing to quote, and by judgeRelevance, which reads
+   *             the material and says whether it answers the question.
+   *
+   * When the caller does not say which index produced the score, the old
+   * conservative threshold still applies: an unaware caller must not be
+   * silently ungated. */
+  if (topScoreIsSemantic === true) {
+    const floor = semanticFloor;
+    if (typeof floor !== "number") return null;
+    if (topScore >= floor) return null;
+    return {
+      filter: "confidence",
+      reason: `top semantic score ${topScore.toFixed(2)} < ${floor} (hits=${hits})`,
+      severity: "block",
+    };
+  }
+
+  if (topScoreIsSemantic === false) return null;
+
   if (topScore >= MIN_CONFIDENCE_SCORE) return null;
   return {
     filter: "confidence",
@@ -589,7 +667,12 @@ export function runAnswerQualityChecks(
 ): QualityCheckResult {
   const flags: QualityFlag[] = [];
 
-  const fConfidence = gateConfidence(input.topScore, input.hitCount);
+  const fConfidence = gateConfidence(
+    input.topScore,
+    input.hitCount,
+    input.topScoreIsSemantic,
+    input.semanticFloor,
+  );
   if (fConfidence) flags.push(fConfidence);
 
   const fUngrounded = gateUngroundedClaimAboutUs(

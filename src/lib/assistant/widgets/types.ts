@@ -333,8 +333,11 @@ export interface IntegrationsListWidgetSpec {
  *  "widget specs are pure JSON shapes" convention every other widget
  *  follows. The fields are kept structurally identical and the
  *  guardrail test asserts that. */
+import type { SearchType } from "@/lib/search/search-types";
+
 export interface SearchResultsWidgetResult {
-  type: "chat" | "channel" | "email" | "calendar" | "knowledge" | "crm" | "dms" | "vercel";
+  /* Derived from the one list, so a new provider cannot render as nothing. */
+  type: SearchType;
   id: string;
   title: string;
   snippet: string;

@@ -25,6 +25,7 @@
 
 import { readdirSync, readFileSync } from "fs";
 import { join } from "path";
+import { SEARCH_TYPE_VALUES } from "@/lib/search/search-types";
 import { SEARCH_PROVIDERS } from "@/lib/search/providers";
 
 const TOOLS_DIR = join(__dirname, "..", "..", "assistant", "tools");
@@ -180,24 +181,30 @@ describe("Universal Search provider coverage", () => {
     );
   });
 
-  it("every registered provider's `type` is a value of the SearchType literal union", () => {
-    /* Compile-time guard: SearchType is a literal union with values
-       enumerated below. Any registered provider whose type isn't in
-       this set means SearchType wasn't extended when the provider
-       was added — the consumer-facing TypeScript surface would
-       silently widen. */
-    const SEARCH_TYPE_VALUES = new Set([
-      "chat",
-      "channel",
-      "email",
-      "calendar",
-      "knowledge",
-      "crm",
-      "dms",
-      "vercel",
-    ]);
+  it("every registered provider's `type` is a value of the SearchType union", () => {
+    /* READS THE REAL LIST rather than restating it.
+     *
+     * This assertion used to compare each provider against a literal set
+     * written out inside the test, which made it a fourth copy of the same
+     * list and gave it the drift it exists to prevent: adding a provider meant
+     * editing the union, the zod values, the widget and this set, and nothing
+     * failed if the last one was missed.
+     *
+     * SEARCH_TYPE_VALUES is now the single runtime source that the union, the
+     * schema and the widget all derive from, so comparing against it asserts
+     * something real. */
+    const permitted = new Set<string>(SEARCH_TYPE_VALUES);
     for (const provider of SEARCH_PROVIDERS) {
-      expect(SEARCH_TYPE_VALUES.has(provider.type)).toBe(true);
+      expect(permitted.has(provider.type)).toBe(true);
+    }
+  });
+
+  it("every value in the union is served by a registered provider", () => {
+    /* The other direction, which nothing checked. A type nobody produces is a
+       filter a user can select that always returns nothing. */
+    const served = new Set(SEARCH_PROVIDERS.map((p) => p.type));
+    for (const t of SEARCH_TYPE_VALUES) {
+      expect(served.has(t)).toBe(true);
     }
   });
 
@@ -207,6 +214,28 @@ describe("Universal Search provider coverage", () => {
     for (const file of Object.keys(SEARCH_PROVIDER_EXEMPT_TOOLS)) {
       const abs = join(TOOLS_DIR, file);
       expect(() => readFileSync(abs, "utf8")).not.toThrow();
+    }
+  });
+});
+
+/**
+ * Every provider has a word in the summary sentence.
+ *
+ * The assistant's search summary used to enumerate a fixed list of buckets.
+ * A provider missing from it returned results the sentence did not count: the
+ * deployments provider had been in that state since it was added, and adding
+ * the document corpus produced "Found 3 results: 0 chats, 0 channels, ..."
+ * which reads as a contradiction rather than an answer.
+ */
+describe("the search summary can name every provider", () => {
+  it("has a label for every registered provider's countKey", async () => {
+    const src = readFileSync(
+      join(__dirname, "..", "..", "assistant", "tools", "search.ts"),
+      "utf8",
+    );
+    const block = src.slice(src.indexOf("const COUNT_LABELS"), src.indexOf("};", src.indexOf("const COUNT_LABELS")));
+    for (const provider of SEARCH_PROVIDERS) {
+      expect(block).toContain(`${provider.countKey}:`);
     }
   });
 });
