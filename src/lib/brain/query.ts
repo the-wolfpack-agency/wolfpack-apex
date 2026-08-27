@@ -13,7 +13,7 @@
  */
 
 import { embedBatch, isEmbeddingConfigured } from "./embedder";
-import { keywordSearch, logQuery, markQueryCited } from "./repo";
+import { keywordSearchWithAudience, logQuery, markQueryCited } from "./repo";
 import { readableDocumentIds } from "./audience";
 import { describeDocuments } from "./repo";
 import { searchBrain } from "./qdrant";
@@ -67,13 +67,34 @@ export async function queryBrain(opts: QueryOpts): Promise<QueryExecution> {
   const t0 = Date.now();
 
   // 1. keyword (always)
-  const keyword = await keywordSearch(opts.query, limit, {
+  const keywordResult = await keywordSearchWithAudience(opts.query, limit, {
     uploadedBy: opts.uploadedBy,
     kind: opts.kind,
     /* Who is asking. Applied inside the query, so a document this role may not
        read is never ranked, never headlined and never counted. */
     role: opts.userRole,
   });
+  const keyword = keywordResult.hits;
+
+  /* THE AUDIENCE GATE, REPORTED FROM THE PATH THAT ACTUALLY RUNS.
+   *
+   * This event existed only in the semantic branch below, which is gated on an
+   * embedding deployment this tenant has never had. So it read zero for ninety
+   * days while the playbook told clients the assistant only quotes what a role
+   * may read. The claim was true and the evidence for it did not exist, which
+   * is the same thing as no control at all to anybody auditing it.
+   *
+   * Keyword runs on every single query, so counting here is what makes the
+   * number mean something. Rising is the gate working; flat at zero on a
+   * tenant with restricted libraries is now genuinely worth investigating,
+   * because the instrument is finally pointed at the road. */
+  if (keywordResult.withheld > 0) {
+    trackEvent("brain.retrieval_audience_filtered", opts.userId, opts.userRole, {
+      withheld: keywordResult.withheld,
+      returned: keyword.length,
+      stage: "keyword",
+    });
+  }
 
   /* 2. SEMANTIC. Best-effort, but no longer silent.
    *
@@ -111,6 +132,7 @@ export async function queryBrain(opts: QueryOpts): Promise<QueryExecution> {
                means it is not being applied. */
             withheld: raw.length - semantic.length,
             returned: semantic.length,
+            stage: "semantic",
           });
         }
         semanticStatus = semantic.length > 0 ? "ok" : "empty";
