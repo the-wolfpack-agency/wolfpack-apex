@@ -20,6 +20,10 @@ jest.mock("@/lib/ogiam/ledger", () => ({
 }));
 jest.mock("@/lib/analytics", () => ({ trackEvent: jest.fn() }));
 jest.mock("@/lib/db", () => ({
+  /* The write-approval gate reads instinct_agents.requires_write_approval.
+     FALSE is the shipped default and what every assertion here assumes: an
+     agent nobody has put behind the gate keeps working exactly as before. */
+  query: jest.fn(() => Promise.resolve({ rows: [{ requires_write_approval: false }] })),
   safeQuery: jest.fn(() => Promise.resolve({ rows: [] })),
   writeQuery: jest.fn(() => Promise.resolve({ rows: [] })),
 }));

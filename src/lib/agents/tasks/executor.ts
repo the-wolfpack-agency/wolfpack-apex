@@ -62,6 +62,7 @@ import {
 import type { TaskStatus, TaskStep } from "./types";
 import { decideStep, resolveBudget } from "@/lib/containment/budget";
 import { readContainmentState, readRunSpend, startRunSpend, markBreached, addRunSpend } from "@/lib/containment/state";
+import { holdWriteForApproval, isWriteOperation } from "@/lib/agents/approvals/gate";
 
 export interface ExecutableTask {
   id: string;
@@ -420,6 +421,28 @@ async function executeOperationOnBehalf(args: {
   try {
     const refused = await ceilingRefusal(task, `operation:${operation.id}`);
     if (refused) return refused;
+
+    /* APPROVAL BEFORE THE WRITE, which until now was a paragraph in /playbook
+       rather than a code path. agent.write_pending_approval had never fired in
+       ninety days: the approvals store was written and tested and nothing ever
+       called it.
+     *
+       Checked AFTER the ceiling and BEFORE anything is filled in or sent, so a
+       held write costs one row and no side effect at all. Only writes, and
+       only for agents whose owner asked for it, so the seventy-three tasks
+       that already run are untouched. */
+    if (isWriteOperation(operation.method)) {
+      const held = await holdWriteForApproval({
+        agentId: task.agentId,
+        workspaceId: task.workspaceId,
+        ownerUserId: task.ownerUserId,
+        operationId: operation.id,
+        method: operation.method,
+        params: operation.values,
+        capability: `operation:${operation.id}`,
+      });
+      if (held) return { kind: "blocked", detail: held.detail };
+    }
     // RESULT CHAINING. A body field declared as fillFromPriorResults draws from
     // the carried prior-step output when the instruction refers back to it
     // ("create a document summary of the results") and the field is otherwise

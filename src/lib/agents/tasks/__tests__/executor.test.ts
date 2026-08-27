@@ -7,6 +7,19 @@
 
 jest.mock("@/lib/analytics", () => ({ trackEvent: jest.fn() }));
 
+/* The write-approval gate reads instinct_agents.requires_write_approval before
+   an agent performs a write. This suite has no database, and the gate FAILS
+   CLOSED on an unreadable answer by design: an unapproved write to a client
+   system is not recoverable, while a held one is one click to release.
+   
+   So the flag is mocked to FALSE, which is the shipped default and what every
+   assertion below has always assumed: an agent nobody has put behind the gate
+   behaves exactly as it did before the gate existed. */
+jest.mock("@/lib/agents/approvals/gate", () => ({
+  isWriteOperation: (m: string) => ["POST", "PUT", "PATCH", "DELETE"].includes(m.toUpperCase()),
+  holdWriteForApproval: jest.fn(() => Promise.resolve(null)),
+}));
+
 import { trackEvent } from "@/lib/analytics";
 import {
   runAgentTask,
