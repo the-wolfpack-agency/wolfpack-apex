@@ -94,8 +94,26 @@ const TOOL_PROMPTS: Record<string, string[]> = {
     "where do our systems disagree about deals",
     "compare our contacts across systems",
   ],
+  /* Fixed 2026-08-27. Every pattern required a copula ("Jorge IS the owner"),
+     and nobody says that. The sentence people do say reached the CRM filter,
+     which answered a query nobody asked while the fact went unsaved. */
+  save_team_fact: [
+    "remember that Jorge owns the Porsche account",
+    "remember that Ashley runs the evals",
+    "remember that Sam reports to Jorge",
+    "note that Chris handles PCNA",
+  ],
+  /* Fixed 2026-08-27. delegate_to_agent needs a named agent, which nobody has
+     the first time they ask. An unnamed handover opens the picker instead of
+     reaching nothing. */
+  execute_agent_widget: [
+    "run the agent",
+    "execute agent task",
+    "delegate this to an agent",
+    "can an agent do this",
+    "hand this off to an agent",
+  ],
   who_is: ["who is Jorge", "who is Ashley Martinez"],
-  execute_agent_widget: ["run the agent", "execute agent task"],
   recent_workflow_runs: ["what happened in CI today", "show me the latest CI runs"],
   search_github_issues: ["search github issues for the login bug"],
   search_github_pull_requests: ["find open pull requests"],
@@ -119,11 +137,6 @@ const TOOL_PROMPTS: Record<string, string[]> = {
  * in the same change that makes it untrue.
  */
 const UNREACHABLE: Array<{ prompt: string; shouldReach: string; note: string }> = [
-  {
-    prompt: "delegate this to an agent",
-    shouldReach: "delegate_to_agent",
-    note: "the agent capability a client asks about by name",
-  },
 ];
 
 /**
@@ -138,11 +151,6 @@ const MISROUTED: Array<{ prompt: string; reaches: string; shouldReach: string }>
     prompt: "search my email for the Porsche contract",
     reaches: "dms_inventory_widget",
     shouldReach: "search_mail",
-  },
-  {
-    prompt: "remember that Jorge owns the Porsche account",
-    reaches: "filter_external_records",
-    shouldReach: "save_team_fact",
   },
   {
     prompt: "what's in the news today",
@@ -215,7 +223,6 @@ const NEEDS_PROMPTS: string[] = [
   "plan_my_day",
   "platform_scan_findings",
   "routine_templates",
-  "save_team_fact",
   "scan_invoice",
   "scan_receipt",
   "schedule_health",
@@ -240,13 +247,24 @@ describe("every prompt reaches the tool it is filed under", () => {
 
 describe("phrasings that reach nothing", () => {
   /* Recorded as facts the build checks. When one is fixed this fails, and the
-     line is removed in the same change that makes it untrue. */
-  it.each(UNREACHABLE.map((u) => [u.prompt, u.shouldReach, u.note] as const))(
-    "%s still reaches no tool (should be %s: %s)",
-    (prompt) => {
-      expect(claimants(prompt)).toEqual([]);
-    },
-  );
+     line is removed in the same change that makes it untrue.
+   *
+   * THE LIST IS EMPTY as of 2026-08-27, which is the outcome it existed for.
+   * Kept rather than deleted: the next phrasing somebody finds unreachable
+   * goes here and fails the build until it is fixed, and an empty list is a
+   * result worth being able to see. */
+  if (UNREACHABLE.length === 0) {
+    it("has no known-unreachable phrasings left", () => {
+      expect(UNREACHABLE).toEqual([]);
+    });
+  } else {
+    it.each(UNREACHABLE.map((u) => [u.prompt, u.shouldReach, u.note] as const))(
+      "%s still reaches no tool (should be %s: %s)",
+      (prompt) => {
+        expect(claimants(prompt)).toEqual([]);
+      },
+    );
+  }
 });
 
 describe("phrasings that reach the wrong tool", () => {

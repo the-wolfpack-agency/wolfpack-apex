@@ -57,6 +57,25 @@ const PATTERNS: Array<{ re: RegExp; build(m: RegExpExecArray): Params | null }> 
     }),
   },
   {
+    /* "remember that <subject> <verb> <object>".
+     *
+     * THE WAY PEOPLE STATE AN ORG FACT. The two patterns around this one both
+     * require a copula: "Jorge IS the owner", "his role IS x". Nobody says
+     * that. They say "Jorge owns the Porsche account", "Ashley runs the
+     * evals", "Sam handles PCNA". Measured 2026-08-27, that sentence reached
+     * filter_external_records, which read it as a CRM query and answered
+     * confidently about the wrong thing.
+     *
+     * The verb becomes the attribute, so "owns" is stored as the relationship
+     * rather than flattened into a copula the speaker never used. */
+    re: /^(?:remember|save|store|note|please\s+(?:remember|save|note))(?:\s+that)?\s+(.{2,80}?)\s+(owns|manages|runs|leads|handles|oversees|reports\s+to|works\s+on|is\s+responsible\s+for)\s+(?:the\s+)?(.{2,200}?)\.?$/i,
+    build: (m) => ({
+      subject: m[1].trim(),
+      attribute: m[2].trim().toLowerCase(),
+      value: m[3].trim(),
+    }),
+  },
+  {
     /* "remember/save that <subject> <attribute>: <value>" (colon form) */
     re: /^(?:remember|save|store|note)(?:\s+that)?\s+(.{2,80}?)\s+(.{2,60}?):\s+(.{1,300}?)\.?$/i,
     build: (m) => ({
