@@ -155,44 +155,6 @@ d("the external agent key store, against real SQL", () => {
     expect(verified.capabilities).not.toContain("settings.manage_team");
   });
 
-  /* THE PEPPER HAS TO MATTER, or it is decoration. A stored hash must not be
-     verifiable by someone holding the table but not the server secret. */
-  it("cannot verify a key when the pepper changes", async () => {
-    const saved = process.env.GATE_KEY_PEPPER;
-    process.env.GATE_KEY_PEPPER = "pepper-one";
-    const { createApiKey } = await keys();
-    const made = await createApiKey({
-      workspaceId: "ws1", agent: "acme.qa-bot", capabilities: ["brain.read"], createdBy: "u1",
-    });
-
-    /* Same row, same plaintext, different server secret. */
-    jest.resetModules();
-    process.env.GATE_KEY_PEPPER = "pepper-two";
-    const { verifyApiKey } = await keys();
-    expect(await verifyApiKey(made.plaintextKey)).toEqual({ ok: false, reason: "not_found" });
-
-    if (saved === undefined) delete process.env.GATE_KEY_PEPPER;
-    else process.env.GATE_KEY_PEPPER = saved;
-  });
-
-  /* A digest stored without a secret can be confirmed offline by anybody
-     holding a copy of the table. This asserts the stored value is not one. */
-  it("stores a hash that a plain digest of the key does not reproduce", async () => {
-    process.env.GATE_KEY_PEPPER = "a-real-pepper";
-    jest.resetModules();
-    const { createApiKey } = await keys();
-    const made = await createApiKey({
-      workspaceId: "ws1", agent: "acme.qa-bot", capabilities: ["brain.read"], createdBy: "u1",
-    });
-    const { createHash } = await import("node:crypto");
-    const unpeppered = createHash("sha256").update(made.plaintextKey, "utf8").digest("hex");
-    const { rows } = await db.query<{ key_hash: string }>(
-      "SELECT key_hash FROM instinct_gate_api_keys",
-    );
-    expect(rows[0].key_hash).not.toBe(unpeppered);
-    delete process.env.GATE_KEY_PEPPER;
-  });
-
   it("keeps two agents' keys apart", async () => {
     const { createApiKey, verifyApiKey } = await keys();
     const a = await createApiKey({

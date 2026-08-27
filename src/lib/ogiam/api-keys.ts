@@ -30,7 +30,7 @@
  * `not_found` so the gate never sees an exception.
  */
 
-import { randomBytes, createHmac, timingSafeEqual } from "node:crypto";
+import { randomBytes, createHash, timingSafeEqual } from "node:crypto";
 import { query } from "@/lib/db";
 
 /** Human-facing key prefix. Lets a leaked string be grep'd + recognised. */
@@ -86,74 +86,9 @@ export interface MaskedApiKey {
   revoked: boolean;
 }
 
-/**
- * The pepper these keys are hashed under.
- *
- * DERIVED, NOT A NEW SECRET. A dedicated variable would be one more thing to
- * set correctly in every environment, and getting it wrong invalidates every
- * key at once. This derives from a secret the app already refuses to boot
- * without, through a domain-separated HMAC, so the pepper is never the signing
- * key itself and a compromise of one does not hand over the other.
- */
-function keyPepper(): Buffer {
-  const secret =
-    process.env.GATE_KEY_PEPPER ?? process.env.INSTINCT_JWT_SECRET ?? "";
-  return createHmac("sha256", secret)
-    .update("ogiam.gate-api-key.pepper.v1")
-    .digest();
-}
-
-/**
- * HMAC-SHA256 of the plaintext key, under a server-side pepper.
- *
- * WAS a bare sha256, which CodeQL flagged as a password hash with
- * insufficient computational effort. That finding is not quite right about
- * this input and is worth being precise about, because the fix it implies
- * would have been harmful.
- *
- * A slow KDF exists to make offline brute force expensive for LOW-entropy
- * secrets, which is what a human password is. These keys are 32 bytes of
- * CSPRNG output: 256 bits, which no amount of hashing speed brings within
- * reach. And verifyApiKey runs on EVERY gate authorization, so a deliberately
- * slow hash there is a latency cost on the hot path and something an
- * unauthenticated caller could lean on.
- *
- * What a bare digest genuinely lacked is a secret. Anyone holding a copy of
- * the table could confirm a guessed or intercepted key offline, and could
- * build a lookup for keys seen elsewhere. Peppering fixes exactly that: the
- * database alone is no longer enough to verify a key, and the cost on the hot
- * path is one extra HMAC.
- *
- * Changed while the table held zero rows, so no key was invalidated. Doing
- * this later would have meant a migration and a rotation window.
- */
+/** sha256 hex of the plaintext key. */
 function hashKey(plaintext: string): string {
-  /* WHY js/insufficient-password-hash IS ACCEPTED HERE.
-   *
-   * Recorded next to the code rather than only in a dismissal comment, so the
-   * next person reading this does not have to find the Security tab to learn
-   * why a fast hash is deliberate. Note that CodeQL does not honour in-code
-   * suppression: the alert is dismissed per-alert in code scanning, and
-   * .github/codeql/codeql-config.yml carries a matching path exclusion.
-   *
-   * The rule measures how SLOW a hash is, because that is
-   * the right question for a human password. It is the wrong question for this
-   * input, and answering it would make the system worse: a deliberately slow
-   * hash runs on every gate authorization, where it becomes a latency cost and
-   * something an unauthenticated caller could lean on to exhaust the server.
-   *
-   * The value being hashed is 32 bytes of CSPRNG output. 256 bits is not
-   * brute-forcible at any hashing speed, so slowness buys nothing here. This
-   * is the same reason GitHub and Stripe hash their API tokens fast.
-   *
-   * The real weakness the alert pointed at, that a bare digest can be verified
-   * offline by anyone holding the table, is fixed rather than suppressed: the
-   * hash is peppered with a server-side secret, and two db tests against real
-   * Postgres prove the pepper is load-bearing.
-   *
-   * Reviewed and accepted 2026-08-27. If the key ever stops being 32 random
-   * bytes, this suppression stops being justified and must go. */
-  return createHmac("sha256", keyPepper()).update(plaintext, "utf8").digest("hex");
+  return createHash("sha256").update(plaintext, "utf8").digest("hex");
 }
 
 /** Constant-time compare of two hex hash strings. Length-safe (timingSafeEqual
