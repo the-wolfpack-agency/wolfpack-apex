@@ -128,9 +128,15 @@ function keyPepper(): Buffer {
  * this later would have meant a migration and a rotation window.
  */
 function hashKey(plaintext: string): string {
-  /* SUPPRESSED DELIBERATELY, AND NARROWLY, ON THIS LINE ONLY.
+  /* WHY js/insufficient-password-hash IS ACCEPTED HERE.
    *
-   * js/insufficient-password-hash measures how SLOW a hash is, because that is
+   * Recorded next to the code rather than only in a dismissal comment, so the
+   * next person reading this does not have to find the Security tab to learn
+   * why a fast hash is deliberate. Note that CodeQL does not honour in-code
+   * suppression: the alert is dismissed per-alert in code scanning, and
+   * .github/codeql/codeql-config.yml carries a matching path exclusion.
+   *
+   * The rule measures how SLOW a hash is, because that is
    * the right question for a human password. It is the wrong question for this
    * input, and answering it would make the system worse: a deliberately slow
    * hash runs on every gate authorization, where it becomes a latency cost and
@@ -147,7 +153,6 @@ function hashKey(plaintext: string): string {
    *
    * Reviewed and accepted 2026-08-27. If the key ever stops being 32 random
    * bytes, this suppression stops being justified and must go. */
-  // codeql[js/insufficient-password-hash]
   return createHmac("sha256", keyPepper()).update(plaintext, "utf8").digest("hex");
 }
 
