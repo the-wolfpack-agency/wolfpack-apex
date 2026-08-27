@@ -53,11 +53,29 @@ export const NON_CORPUS_UPLOADER_IDS: readonly string[] = NON_CORPUS_UPLOADERS.m
  * one, and silently dropping it would hide real documents.
  */
 export function nonCorpusExclusionSql(paramIndex: number, alias = "bd"): string {
-  return `(${alias}.uploaded_by IS NULL OR ${alias}.uploaded_by <> ALL($${paramIndex}))`;
+  /* DRIVE PROVENANCE WINS OVER UPLOADER.
+   *
+   * The uploader was the wrong key and I shipped it. The SharePoint sync of
+   * 2026-05-16 ran under the `demo-cto` user id, so 275 genuine client
+   * documents were attributed to the demo seeder and this predicate hid every
+   * one of them: a strategy deck, the BA101 and BA102 training days, the real
+   * material somebody would ask about first.
+   *
+   * "Who ran the sync" is not "is this real content". A document carrying an
+   * ms_drive_item_id came out of the client's own drive, whatever user id
+   * happened to be holding the token that day, and that is the fact worth
+   * keying on. */
+  return `(${alias}.ms_drive_item_id IS NOT NULL OR ${alias}.uploaded_by IS NULL OR ${alias}.uploaded_by <> ALL($${paramIndex}))`;
 }
 
 /** Whether a document would be quoted to somebody asking about their business. */
-export function isClientCorpus(uploadedBy: string | null | undefined): boolean {
+export function isClientCorpus(
+  uploadedBy: string | null | undefined,
+  msDriveItemId?: string | null,
+): boolean {
+  /* Came out of the client's drive, so it is theirs regardless of which user
+     id ran the sync that fetched it. */
+  if (msDriveItemId) return true;
   if (!uploadedBy) return true;
   return !NON_CORPUS_UPLOADER_IDS.includes(uploadedBy);
 }
