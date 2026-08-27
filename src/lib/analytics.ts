@@ -1230,6 +1230,18 @@ export type InstinctEventType =
   // fires assistant.widget_rendered when the chat surface actually
   // mounts the widget (for funnel analysis: offered vs. rendered vs.
   // interacted-with).
+  /* BRAIN REPAIR. A fix to an extractor is not finished until the documents it
+     was written for have been re-run; ninety Word documents stayed failed for
+     three months after their parser was fixed because nothing recorded that
+     the corpus had never been touched. These two make the repair itself
+     measurable: { document_id, kind, reason, before, chunks } per document and
+     { considered, repaired, still_failing } per run. */
+  | "brain.document_reprocessed"
+  | "brain.reprocess_run"
+  /* A scanned page read by OCR. { document_id, kind, route, estimated_cents,
+     chars } so the cost of reading a library is visible per document rather
+     than arriving as a bill. */
+  | "brain.document_ocred"
   | "assistant.widget_offered"
   | "assistant.widget_rendered"
   | "assistant.widget_interaction"

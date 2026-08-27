@@ -181,7 +181,7 @@ export function backoffMs(attempt: number, retryAfterHeader: string | null): num
  * are retryable. Anything else is a real error and still fails immediately -
  * a 404 does not get more true by asking again.
  */
-async function downloadDriveItem(
+export async function downloadDriveItem(
   userId: string,
   driveId: string,
   itemId: string,

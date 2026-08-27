@@ -29,6 +29,10 @@ import {
 import { getExternalRecordTool } from "./get-external-record-tool";
 import { getRelatedRecordsTool } from "./get-related-records-tool";
 import { filterExternalRecordsTool } from "./filter-external-records-tool";
+import { scanInvoiceTool } from "./scan-invoice";
+import { scanReceiptTool } from "./scan-receipt";
+import { scanHrDocTool } from "./scan-hr-doc";
+import { darkDataTool } from "./dark-data-tool";
 import { registerTool } from "./registry";
 import type { AssistantSourceRef } from "@/lib/assistant";
 import type { ToolDef, ToolResult } from "./types";
@@ -89,6 +93,49 @@ const SURFACE_TO_TYPE: Record<string, SearchType | "all"> = {
 const INTENT_RE =
   /^\s*(?:search(?:\s+for)?|look\s+up|find|show\s+me)\s+(.+?)(?:\s+in\s+(?:my\s+)?(messages|message|chats|chat|emails|email|calendar|knowledge|crm|salesforce|hubspot|dms|inventory|vehicles|everywhere))?\s*[?.!]?\s*$/i;
 
+/**
+ * ASKING WHAT A DOCUMENT SAYS.
+ *
+ * "find the contract" reached this tool. "what does the SOW say" reached
+ * NOTHING, and "summarize the SOW" reached op_create_document, which would
+ * have tried to CREATE a document called the SOW rather than read the one
+ * already in the library.
+ *
+ * That is the single most important sentence a SharePoint engagement has to
+ * answer. A client connects a document library and then asks a question about
+ * a document in it; the imperative "find X" is how an engineer phrases it and
+ * "what does X say" is how everybody else does.
+ *
+ * The subject is captured and handed to the same universal search the
+ * imperative form uses, so the Brain answers it with citations rather than a
+ * model answering from whatever it had nearest.
+ *
+ * NOT ANCHORED ON A DOCUMENT NOUN, deliberately: a client says "the SOW", "the
+ * contract", "the onboarding deck", "Jorge's proposal", and enumerating those
+ * would be the same mistake as requiring the literal word "task" for a task.
+ * The shape "what does <thing> say" is only ever a question about a document.
+ */
+const DOCUMENT_QUESTION_RE =
+  /^\s*(?:what|whats|what's)\s+(?:do(?:es)?|did)\s+(?:the\s+|our\s+|my\s+|this\s+)?(.+?)\s+say(?:\s+about\s+(.+?))?\s*[?.!]*\s*$|^\s*(?:what|whats|what's)\s+(?:is\s+)?in\s+(?:the\s+|our\s+|my\s+|this\s+)(.+?)\s*[?.!]*\s*$|^\s*summari[sz]e\s+(?:the\s+|our\s+|my\s+|this\s+)(.+?)\s*[?.!]*\s*$/i;
+
+/**
+ * Turn a document question into the same query the imperative form produces.
+ *
+ * "what does the SOW say about payment" searches for "SOW payment": the
+ * subject plus what was asked about it, because a search for the subject alone
+ * returns the whole document and buries the clause somebody wanted.
+ */
+export function matchDocumentQuestion(message: string): string | null {
+  const m = DOCUMENT_QUESTION_RE.exec(message.trim());
+  if (!m) return null;
+  const subject = (m[1] ?? m[3] ?? m[4] ?? "").trim();
+  if (!subject) return null;
+  /* A pronoun carries no search terms, so it would return the library. */
+  if (/^(it|this|that|they|these|those)$/i.test(subject)) return null;
+  const about = (m[2] ?? "").trim();
+  return about ? `${subject} ${about}` : subject;
+}
+
 /* ---------------------------------------------------------------------
  * CRM-shadow guard — narrowed for Universal Search v2
  * ---------------------------------------------------------------------
@@ -144,6 +191,31 @@ function crmToolClaims(message: string): boolean {
   return false;
 }
 
+/**
+ * Tools whose questions LOOK like document questions and are not.
+ *
+ * "what does this invoice say" is a scan of an attachment somebody just
+ * dropped in, not a search of the library. "what is in the legacy database
+ * that nobody uses" is a question about a SYSTEM, and dark_data answers it.
+ * Both match the "what does X say" / "what is in X" shape exactly.
+ *
+ * Deferring to the specific tool rather than blacklisting words: a list of
+ * banned nouns would need a new entry every time somebody phrases it
+ * differently, and it would silently stop deferring the day one of these
+ * tools widened its own matcher. Asking the tool is the only version that
+ * stays true. Same approach as crmToolClaims above, for the same reason.
+ */
+function specificToolClaims(message: string): boolean {
+  for (const t of [scanInvoiceTool, scanReceiptTool, scanHrDocTool, darkDataTool]) {
+    try {
+      if (t.matchIntent?.(message) != null) return true;
+    } catch {
+      /* A throwing matcher must not take universal search down with it. */
+    }
+  }
+  return false;
+}
+
 function matchSearchIntent(message: string): Params | null {
   const trimmed = (message ?? "").trim();
   if (!trimmed) return null;
@@ -151,6 +223,13 @@ function matchSearchIntent(message: string): Params | null {
      more-specific intent always wins regardless of registration
      order. */
   if (crmToolClaims(trimmed)) return null;
+
+  /* "what does the SOW say" is the question a document library exists to
+     answer, and it reached no tool at all until 2026-08-26. Checked before the
+     imperative form because it is a different shape, not a variant of it. */
+  const asked = matchDocumentQuestion(trimmed);
+  if (asked && !specificToolClaims(trimmed)) return { query: asked };
+
   const m = INTENT_RE.exec(trimmed);
   if (!m) return null;
   const query = m[1].trim().replace(/[?.!,]+$/g, "").trim();
