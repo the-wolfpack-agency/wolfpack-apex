@@ -29,6 +29,23 @@ describe("what counts as somebody's own content", () => {
     expect(isClientCorpus("bef8a32d-da1f-4292-beed-a4707bfe43dd")).toBe(true);
   });
 
+  it("keeps a document that came from the client's own drive, whoever ran the sync", () => {
+    /* THE BUG THIS FILE SHIPPED. The SharePoint sync of 2026-05-16 ran under
+       the demo-cto user id, so 275 genuine client documents were attributed to
+       the demo seeder and excluded from retrieval: a strategy deck, the BA101
+       and BA102 training days, the material somebody would ask about first.
+       "Who ran the sync" is not "is this real content". */
+    expect(isClientCorpus("demo-cto", "drive-item-123")).toBe(true);
+    expect(isClientCorpus("platform-scan", "drive-item-123")).toBe(true);
+  });
+
+  it("still excludes a synthetic document that came from nowhere", () => {
+    /* Provenance only rescues documents that actually have it. A fixture with
+       no drive item is still a fixture. */
+    expect(isClientCorpus("demo-cto", null)).toBe(false);
+    expect(isClientCorpus("platform-scan", undefined)).toBe(false);
+  });
+
   it("keeps a document whose uploader is unknown", () => {
     /* Unknown provenance is not the same claim as known-synthetic. Dropping it
        would hide real documents to be tidy, which is the more expensive
@@ -57,6 +74,12 @@ describe("the SQL predicate", () => {
   it("binds the parameter index it is given, so it composes", () => {
     expect(nonCorpusExclusionSql(4)).toContain("$4");
     expect(nonCorpusExclusionSql(1, "d")).toContain("d.uploaded_by");
+  });
+
+  it("lets a drive-sourced document through whatever the uploader", () => {
+    /* The predicate and the helper must agree, or documents go missing from
+       search and nowhere else says why. */
+    expect(nonCorpusExclusionSql(2)).toMatch(/ms_drive_item_id IS NOT NULL/);
   });
 
   it("lets a NULL uploader through, matching isClientCorpus", () => {

@@ -43,6 +43,7 @@ async function buildSchema() {
       kind text NOT NULL DEFAULT 'policy',
       status text NOT NULL DEFAULT 'indexed',
       uploaded_by text,
+      ms_drive_item_id text NULL,
       audience_roles text[] NULL
     )`);
   await client.query(`
@@ -187,6 +188,20 @@ describe("the safety guard on this file", () => {
 describeIfDb("the corpus boundary excludes synthetic documents", () => {
   beforeAll(async () => {
     await addDoc("demo-fixture.pdf", null, "holiday policy demo fixture", "demo-cto");
+    /* A real client document that the 2026-05-16 sync happened to ingest under
+       the demo-cto user id. Provenance, not the uploader, decides. */
+    await client.query(
+      `INSERT INTO brain_documents (filename, audience_roles, uploaded_by, ms_drive_item_id)
+       VALUES ($1,$2,$3,$4) RETURNING id`,
+      ["2026_STRATEGY_Updated.pdf", null, "demo-cto", "drive-item-1"],
+    );
+    const { rows } = await client.query<{ id: string }>(
+      `SELECT id FROM brain_documents WHERE filename = '2026_STRATEGY_Updated.pdf'`,
+    );
+    await client.query(`INSERT INTO brain_chunks (document_id, content) VALUES ($1,$2)`, [
+      rows[0].id,
+      "the holiday policy for the 2026 strategy",
+    ]);
     await addDoc("scan-finding.txt", null, "holiday policy scanner finding", "platform-scan");
     await addDoc("unknown-provenance.pdf", null, "holiday policy from nobody", null);
   });
@@ -196,6 +211,14 @@ describeIfDb("the corpus boundary excludes synthetic documents", () => {
     const res = await client.query(sql, [queryText, ...args]);
     return mapKeywordSearchRows(res.rows as never);
   }
+
+  it("DOES return a client document the sync ingested under the demo user id", async () => {
+    /* 275 genuine documents were hidden this way: the May sync ran as
+       demo-cto, so a strategy deck and the BA101 training days were treated as
+       fixtures and never quoted. */
+    const r = await search("holiday policy", 50, { role: "cto" });
+    expect(r.hits.map((h) => h.filename)).toContain("2026_STRATEGY_Updated.pdf");
+  });
 
   it("never returns the demo seeder's or the scanner's documents", async () => {
     const r = await search("holiday policy", 50, { role: "cto" });
