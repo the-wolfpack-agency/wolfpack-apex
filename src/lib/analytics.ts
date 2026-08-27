@@ -1238,6 +1238,10 @@ export type InstinctEventType =
      { considered, repaired, still_failing } per run. */
   | "brain.document_reprocessed"
   | "brain.reprocess_run"
+  /* A scanned page read by OCR. { document_id, kind, route, estimated_cents,
+     chars } so the cost of reading a library is visible per document rather
+     than arriving as a bill. */
+  | "brain.document_ocred"
   | "assistant.widget_offered"
   | "assistant.widget_rendered"
   | "assistant.widget_interaction"

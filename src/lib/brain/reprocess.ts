@@ -32,6 +32,8 @@ import { trackEvent } from "@/lib/analytics";
 import { capExtracted } from "./security";
 import { chunkText } from "./chunker";
 import { classifyKind, extract, isSyncExtractable } from "./extractor";
+import { decideOcrRoute, withinOcrBudget } from "./ocr-policy";
+import { ocrImage, isVisionConfigured } from "@/lib/azure/vision-ocr";
 import { embedBatch, isEmbeddingConfigured } from "./embedder";
 import { upsertBrainPoints, deleteByDocumentId } from "./qdrant";
 import {
@@ -66,6 +68,9 @@ export const FIXABLE: Array<{ id: string; test: RegExp; why: string }> = [
     why: "classified as a kind with no extractor, often a misclassified xlsx or docx",
   },
 ];
+
+/** What one document's OCR may cost before the repair refuses it. */
+export const OCR_CEILING_CENTS = 25;
 
 /** Non-terminal states. A document here is mid-flight or abandoned. */
 export const NON_TERMINAL = ["queued", "extracting", "chunking", "embedding"] as const;
@@ -192,15 +197,53 @@ async function reprocessOne(
   }
 
   await updateDocumentStatus(doc.id, "extracting");
-  const extracted = await extract(kind, buffer);
+  let extracted = await extract(kind, buffer);
+
+  /* NO TEXT IN A SCAN IS NOT A BROKEN PARSE. Sixty-two PDFs and forty-three
+     images are in the library with nothing to quote because the page is a
+     picture. The policy decides whether reading it is worth what it costs, and
+     picks the cheap purpose-built route before the vision model, which is one
+     to two orders of magnitude dearer per page. It is asked here, on the real
+     path, rather than being a module only its own test ever calls. */
   if (!extracted.ok) {
-    const status = extracted.reason === "empty" ? "failed" : "failed";
-    await updateDocumentStatus(doc.id, status, extracted.detail ?? "extraction failed");
+    const decision = decideOcrRoute(
+      { kind, failureDetail: extracted.detail ?? null },
+      { visionApi: isVisionConfigured(), visionModel: false },
+    );
+    const budget = withinOcrBudget({ pages: 1, decision, ceilingCents: OCR_CEILING_CENTS });
+
+    if (decision.route === "vision_api" && budget.allowed) {
+      const ocr = await ocrImage(buffer, {
+        triggeredBy: actor.userId,
+        triggeredByRole: actor.role,
+        documentId: doc.id,
+      });
+      if (ocr.ok && ocr.text.trim()) {
+        extracted = { ok: true, text: ocr.text };
+        trackEvent("brain.document_ocred", actor.userId, actor.role, {
+          document_id: doc.id,
+          kind,
+          route: decision.route,
+          estimated_cents: budget.estimatedCents ?? "unknown",
+          chars: ocr.text.length,
+        });
+      } else {
+        /* The reason is kept verbatim so a later run can tell a page the OCR
+           API refused (escalatable) from one it could not physically read. */
+        const why = ocr.ok ? "OCR returned no text" : `${ocr.reason}: ${ocr.detail ?? ""}`;
+        await updateDocumentStatus(doc.id, "failed", `ocr ${why}`);
+        return fail("failed", `ocr ${why}`);
+      }
+    }
+  }
+
+  if (!extracted.ok) {
+    await updateDocumentStatus(doc.id, "failed", extracted.detail ?? "extraction failed");
     await recordJob(doc.id, "extract", "failed", {
       error: extracted.detail ?? undefined,
       durationMs: Date.now() - started,
     });
-    return fail(status, extracted.detail ?? "extraction failed");
+    return fail("failed", extracted.detail ?? "extraction failed");
   }
 
   const capped = capExtracted(extracted.text);

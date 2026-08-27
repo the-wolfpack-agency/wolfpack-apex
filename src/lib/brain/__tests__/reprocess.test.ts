@@ -24,6 +24,8 @@ const mockRecordJob = jest.fn();
 const mockDeleteByDoc = jest.fn();
 const mockUpsert = jest.fn();
 const mockExtract = jest.fn();
+const mockOcrImage = jest.fn();
+const mockVisionConfigured = jest.fn();
 const mockEmbedConfigured = jest.fn();
 
 jest.mock("@/lib/analytics", () => ({ trackEvent: (...a: unknown[]) => mockTrack(...a) }));
@@ -48,6 +50,10 @@ jest.mock("../extractor", () => ({
   ...jest.requireActual("../extractor"),
   extract: (...a: unknown[]) => mockExtract(...a),
 }));
+jest.mock("@/lib/azure/vision-ocr", () => ({
+  ocrImage: (...a: unknown[]) => mockOcrImage(...a),
+  isVisionConfigured: () => mockVisionConfigured(),
+}));
 jest.mock("../chunker", () => ({
   chunkText: (t: string) => [{ content: t, token_estimate: 10 }],
 }));
@@ -71,6 +77,7 @@ function row(over: Record<string, unknown> = {}) {
 beforeEach(() => {
   jest.clearAllMocks();
   mockEmbedConfigured.mockReturnValue(false);
+  mockVisionConfigured.mockReturnValue(false);
   mockDeleteByDoc.mockResolvedValue(undefined);
   mockDeleteChunks.mockResolvedValue(1);
   mockUpsert.mockResolvedValue(undefined);
@@ -190,5 +197,78 @@ describe("repairing in place", () => {
     expect(names).toContain("brain.reprocess_run");
     const run = mockTrack.mock.calls.find((c) => c[0] === "brain.reprocess_run")!;
     expect(run[3]).toMatchObject({ considered: 1, repaired: 1, still_failing: 0 });
+  });
+});
+
+/**
+ * Scanned pages, and the cost of reading them.
+ *
+ * Sixty-two PDFs and forty-three images sit in the library with nothing to
+ * quote, because the page is a picture. OCR is the first thing here that
+ * spends money per DOCUMENT rather than per question, so the policy is asked
+ * on this path rather than being a module only its own test calls.
+ */
+describe("a scan with no extractable text", () => {
+  const fetchBytes = async () => Buffer.from("scan bytes");
+
+  function scannedPdf() {
+    mockQuery.mockResolvedValue({
+      rows: [row({ kind: "pdf", filename: "contract.pdf", status: "failed", status_detail: "sync extractor unavailable for pdf" })],
+    });
+    mockExtract.mockResolvedValue({ ok: false, reason: "empty", detail: "PDF contained no extractable text (scanned?)" });
+  }
+
+  it("is read by the OCR API when it is configured, and lands indexed", async () => {
+    scannedPdf();
+    mockVisionConfigured.mockReturnValue(true);
+    mockOcrImage.mockResolvedValue({ ok: true, text: "This agreement is between the parties." });
+
+    const r = await reprocessFixable(fetchBytes, ACTOR);
+    expect(r.repaired).toBe(1);
+    expect(mockOcrImage).toHaveBeenCalled();
+    expect(mockUpdateStatus).toHaveBeenCalledWith("d1", "indexed", null);
+  });
+
+  it("records what the page cost, per document", async () => {
+    scannedPdf();
+    mockVisionConfigured.mockReturnValue(true);
+    mockOcrImage.mockResolvedValue({ ok: true, text: "text" });
+
+    await reprocessFixable(fetchBytes, ACTOR);
+    const ev = mockTrack.mock.calls.find((c) => c[0] === "brain.document_ocred");
+    expect(ev).toBeDefined();
+    expect(ev![3]).toMatchObject({ route: "vision_api" });
+  });
+
+  it("is NOT sent anywhere when no OCR route is configured", async () => {
+    /* The honest outcome. Spending nothing and saying the document cannot be
+       read beats inventing a route that does not exist. */
+    scannedPdf();
+    mockVisionConfigured.mockReturnValue(false);
+
+    const r = await reprocessFixable(fetchBytes, ACTOR);
+    expect(mockOcrImage).not.toHaveBeenCalled();
+    expect(r.repaired).toBe(0);
+  });
+
+  it("keeps the OCR failure reason verbatim, so a later run can tell why", async () => {
+    /* A page the OCR API REFUSED can be escalated to a vision model. A page it
+       could not physically read cannot. Collapsing both to "ocr failed" throws
+       away the only signal that distinguishes them. */
+    scannedPdf();
+    mockVisionConfigured.mockReturnValue(true);
+    mockOcrImage.mockResolvedValue({ ok: false, reason: "low_confidence", detail: "handwriting" });
+
+    await reprocessFixable(fetchBytes, ACTOR);
+    expect(mockUpdateStatus).toHaveBeenCalledWith("d1", "failed", expect.stringMatching(/handwriting/));
+  });
+
+  it("does not send a .docx to OCR, because a broken parse is not a scan", async () => {
+    /* Paying a vision model to confirm a parser bug is the cost of a policy
+       that does not distinguish the two. */
+    mockVisionConfigured.mockReturnValue(true);
+    mockExtract.mockResolvedValue({ ok: false, reason: "failed", detail: "docx parse: broken" });
+    await reprocessFixable(fetchBytes, ACTOR);
+    expect(mockOcrImage).not.toHaveBeenCalled();
   });
 });
