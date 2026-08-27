@@ -91,6 +91,36 @@ export interface BridgedChoice {
  *     pretending otherwise would route a client's traffic to OUR Azure resource
  *     — which is a data-handling incident, not a routing bug.
  */
+/**
+ * Why the selection router did not choose a model.
+ *
+ * A NAMED ABSENCE. `selected_model_id` was simply omitted whenever bridging
+ * returned null, and 44% of completions carried no attribution at all:
+ * brain.retrieval_eval had none across 90 calls, model_drift none across 19.
+ * That is indistinguishable from a field somebody forgot to record, and the
+ * three reasons are not the same fact. An override is a deliberate human
+ * decision; no_model_available is an estate problem; a client model is
+ * correct behaviour that must never route through our tenant.
+ */
+export type NoSelectionReason =
+  | "primary_override"
+  | "no_model_available"
+  | "client_model"
+  | "provider_missing"
+  | "tier_unsupported";
+
+/**
+ * Why the most recent bridgeSelection declined, read by the caller that emits
+ * the completion event. Module-scoped rather than returned, so the signature
+ * every existing caller depends on is untouched.
+ */
+let lastNoSelectionReason: NoSelectionReason | null = null;
+
+/** The reason the last bridge attempt produced no selection, if it did not. */
+export function takeNoSelectionReason(): NoSelectionReason | null {
+  return lastNoSelectionReason;
+}
+
 export function bridgeSelection(
   tier: AIModelTier,
   providers: ProviderLookup,
@@ -100,15 +130,28 @@ export function bridgeSelection(
   const decision = select({ requiredTier: capabilityTierFor(tier) }, deps.env ?? process.env);
 
   // Selection had no real choice. Its answer is a placeholder, not a decision.
-  if (decision.reason === "no_model_available_using_default") return null;
+  if (decision.reason === "no_model_available_using_default") {
+    lastNoSelectionReason = "no_model_available";
+    return null;
+  }
 
   // A client's own model is served from a client endpoint. Routing it through
   // our Azure resource would send their prompt to our tenant.
-  if (isClientModel(decision.model)) return null;
+  if (isClientModel(decision.model)) {
+    lastNoSelectionReason = "client_model";
+    return null;
+  }
 
   const provider = decision.model.provider === "azure" ? providers.azure : providers.anthropic;
-  if (!provider) return null;
-  if (!provider.supportsTier(tier)) return null;
+  if (!provider) {
+    lastNoSelectionReason = "provider_missing";
+    return null;
+  }
+  if (!provider.supportsTier(tier)) {
+    lastNoSelectionReason = "tier_unsupported";
+    return null;
+  }
 
+  lastNoSelectionReason = null;
   return { selection: decision, spec: decision.model, provider };
 }

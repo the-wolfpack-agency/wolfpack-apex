@@ -26,7 +26,7 @@
  */
 
 import { trackEvent } from "@/lib/analytics";
-import { bridgeSelection, capabilityTierFor } from "./model-bridge";
+import { bridgeSelection, takeNoSelectionReason, capabilityTierFor } from "./model-bridge";
 import { selectModel, logModelSelection } from "@/lib/ai/models";
 import { applyConstitutionToRequest } from "@/lib/constitution";
 import { redactMessages, redactText, NEVER_SEND_KINDS } from "./redaction";
@@ -1189,7 +1189,17 @@ function emitCompletionEvent(
     // What the SELECTION router would have picked, recorded alongside what
     // actually ran so the two are joinable and any divergence is visible in
     // data rather than only discoverable by reading both routers.
-    ...(selectedModelId ? { selected_model_id: selectedModelId } : {}),
+    //
+    // AND WHEN IT PICKED NOTHING, WHY. This was an omission, so 44% of
+    // completions carried no attribution and there was no way to tell a
+    // deliberate override from a field nobody recorded. brain.retrieval_eval
+    // had none across ninety calls. The reasons are different facts: an
+    // override is somebody's decision, no_model_available is an estate
+    // problem, and a client model is correct behaviour that must never route
+    // through our tenant. Every completion now says which.
+    ...(selectedModelId
+      ? { selected_model_id: selectedModelId, selection: "router" }
+      : { selection: takeNoSelectionReason() ?? "primary_override" }),
     input_tokens: response.input_tokens,
     output_tokens: response.output_tokens,
     cost_usd: response.cost_usd,
