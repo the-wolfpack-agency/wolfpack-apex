@@ -30,6 +30,9 @@ export default function AdminSharepointPage() {
   /* Two separate error channels so a sync failure doesn't render
    * inside the Add Source form (the previous shared-state bug). */
   const [addError, setAddError] = useState<string | null>(null);
+  /* Progress that is NOT an error. Kept apart from syncErrors so a folder that
+     simply needs another run is never styled or worded as a fault. */
+  const [syncNotices, setSyncNotices] = useState<Record<string, string>>({});
   const [syncErrors, setSyncErrors] = useState<Record<string, string>>({});
   const [syncingId, setSyncingId] = useState<string | null>(null);
 
@@ -101,7 +104,21 @@ export default function AdminSharepointPage() {
         `/api/connectors/sharepoint/sources/${encodeURIComponent(id)}/sync`,
         { method: "POST", headers: jsonHeaders() },
       );
-      let data: { result?: { status?: string; successCount?: number; failCount?: number; fileCount?: number; error?: string | null }; error?: string } = {};
+      let data: {
+        result?: {
+          status?: string;
+          successCount?: number;
+          failCount?: number;
+          fileCount?: number;
+          skippedCount?: number;
+          /* Set when the run stopped on its own time budget with files left.
+             Not an error: running it again continues from where it stopped. */
+          moreRemaining?: boolean;
+          remainingCount?: number;
+          error?: string | null;
+        };
+        error?: string;
+      } = {};
       try {
         data = await res.json();
       } catch {
@@ -119,6 +136,18 @@ export default function AdminSharepointPage() {
           data?.error ??
           `Sync failed (HTTP ${res.status}).`;
         setSyncErrors((prev) => ({ ...prev, [id]: errMsg }));
+      } else if (data.result?.moreRemaining) {
+        /* MORE TO DO IS NOT A FAILURE, and saying "finished with errors" for it
+           would send somebody hunting for a fault that is not there. A folder
+           larger than one invocation is ordinary; the run stopped on purpose
+           before the platform could kill it, and everything it ingested is
+           durable. */
+        const done = data.result?.successCount ?? 0;
+        const left = data.result?.remainingCount ?? 0;
+        setSyncNotices((prev) => ({
+          ...prev,
+          [id]: `Ingested ${done} file(s), ${left} still to go. This folder is larger than one sync can finish, so it stopped cleanly rather than being cut off. Click Sync now again to continue; files already ingested are skipped.`,
+        }));
       } else if (data.result?.status === "partial") {
         setSyncErrors((prev) => ({
           ...prev,
@@ -326,6 +355,22 @@ export default function AdminSharepointPage() {
                   </button>
                 </div>
               </div>
+              {syncNotices[s.id] && (
+                <div
+                  data-testid={`sync-notice-${s.id}`}
+                  className="mt-2 rounded p-2 text-xs"
+                  style={{
+                    /* Gold, not red. This is progress with more to do, and
+                       colouring it as a failure would send somebody looking
+                       for a fault that is not there. */
+                    background: "rgba(234,179,8,0.08)",
+                    border: "1px solid rgba(234,179,8,0.4)",
+                    color: "var(--wp-gold, #eab308)",
+                  }}
+                >
+                  {syncNotices[s.id]}
+                </div>
+              )}
               {syncErrors[s.id] && (
                 <div
                   data-testid={`sync-error-${s.id}`}
