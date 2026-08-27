@@ -141,6 +141,7 @@ jobs:
           tests/e2e/sites-designer-journey.spec.ts
           tests/e2e/feature-requests-data-flow.spec.ts
           tests/e2e/feedback-screenshot-flow.spec.ts
+          tests/e2e/admin-broadcast.spec.ts
           tests/e2e/ogiam-shadow-flow.spec.ts
           tests/e2e/ogiam-adversarial-flow.spec.ts
           tests/e2e/ogiam-trends.spec.ts

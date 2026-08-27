@@ -93,6 +93,12 @@ export const NAV_ITEMS: NavItem[] = [
      only team managers see it. Placed by HR because an agent is onboarded the
      way a hire is. */
   { label: "Agents", href: "/admin/agents", roles: ["ceo", "cto", "evp", "vp", "cco"], icon: "M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m16-6h2m-2 6h2M7 7h10v10H7V7zm3 3h4v4h-4z" },
+  /* Announcements: one message into every person's assistant. Gated to the
+     same roles as Agents because the route enforces settings.manage_team, and
+     a menu item that leads to a 403 is a worse experience than no menu item.
+     Sits next to Agents rather than in the assistant group: this is an action
+     taken ON the team, not a way of using the assistant. */
+  { label: "Announcements", href: "/admin/broadcast", roles: ["ceo", "cto", "evp", "vp", "cco"], icon: "M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z" },
   { label: "Financials", href: "/financials", roles: ["ceo", "cto", "evp"], icon: "M12 6v12m-3-2.818l.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 11-18 0 9 9 0 0118 0z" },
   { label: "Analytics", href: "/analytics", icon: "M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" },
   /* Tools is intentionally hidden from the left nav (2026-08-02, operator
