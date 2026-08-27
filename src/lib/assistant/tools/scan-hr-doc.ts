@@ -23,8 +23,21 @@ type Params = z.infer<typeof ParamSchema>;
 
 interface ScanHrDocData { kind: "scan_hr_doc"; }
 
+/**
+ * A DETERMINER IS NOT A DIFFERENT REQUEST.
+ *
+ * This required the document word to follow "scan" immediately, so "scan
+ * license" worked and "scan this HR document", "scan a license" and "scan my
+ * passport" all reached NO tool. Nobody types the first form. Measured
+ * 2026-08-27: both natural phrasings failed, and the tool has been recorded as
+ * unreachable in tool-prompt-coverage since 2026-08-26.
+ *
+ * The optional determiner group is the whole fix. "document" is added as a
+ * noun in its own right because "scan this HR document" is the phrasing the
+ * tool's own description uses.
+ */
 const INTENT_RE =
-  /^\s*\/?(?:scan\s+(?:hr|license|passport|w-?2|w-?4|w-?9|i-?9|voided|driver|direct\s+deposit)|upload\s+hr|hr\s+doc|hr|i-?9|w-?9|w-?2|w-?4|license|passport)\b\s*(.*)$/i;
+  /^\s*\/?(?:scan\s+(?:this\s+|a\s+|an\s+|my\s+|the\s+)?(?:hr\s+(?:doc(?:ument)?)?|hr|license|passport|w-?2|w-?4|w-?9|i-?9|voided|driver|direct\s+deposit)|upload\s+(?:this\s+|a\s+|an\s+|my\s+|the\s+)?hr|hr\s+doc|hr|i-?9|w-?9|w-?2|w-?4|license|passport)\b\s*(.*)$/i;
 
 const DOC_KEYWORDS: Array<[RegExp, Params["doc_type"]]> = [
   [/license|driver/i, "license"],

@@ -55,13 +55,27 @@ const OBJECT_ALIAS: Record<string, string> = {
    emitted by the cross_source_overlap insight, which is the main way
    anyone arrives here. */
 const INTENT_RE =
-  /\bcompare\s+(?:my\s+|our\s+)?([a-z]{3,20})\s+across\s+(?:all\s+)?(?:my\s+|our\s+)?(?:systems?|sources?|tools?|both|connectors?)\b|\bwhere\s+do\s+(?:my|our)\s+systems?\s+disagree\s+(?:about\s+)?([a-z]{3,20})\b|\b([a-z]{3,20})\s+drift\s+(?:across|between)\s+(?:my\s+|our\s+)?systems?\b/i;
+  /* Alternation is ORDERED, so the longest form comes first: with `the` ahead
+     of `the two`, "where do the two systems disagree" matched `the`, then
+     required " systems" and met " two systems", and fell through to no tool at
+     all. The plainest phrasing of the product's central claim was unreachable
+     by one alternative being in the wrong place. The object tail is optional
+     AS A WHOLE: a mandatory \s+ after "disagree" meant the sentence had to
+     carry a trailing space, so the shortest form could never match either. */
+  /\bcompare\s+(?:my\s+|our\s+)?([a-z]{3,20})\s+across\s+(?:all\s+)?(?:my\s+|our\s+)?(?:systems?|sources?|tools?|both|connectors?)\b|\bwhere\s+do\s+(?:the\s+two|my|our|the|both)\s+systems?\s+disagree(?:\s+(?:about\s+|on\s+)?([a-z]{3,20}))?\b|\b([a-z]{3,20})\s+drift\s+(?:across|between)\s+(?:my\s+|our\s+)?systems?\b/i;
 
 function matchIntent(message: string): Params | null {
   const m = INTENT_RE.exec(message.trim());
   if (!m) return null;
   const raw = (m[1] ?? m[2] ?? m[3] ?? "").toLowerCase();
-  const objectType = OBJECT_ALIAS[raw];
+  /* "where do the two systems disagree" names no object, and it is the
+     plainest way anybody asks this. Contacts is the default because it is the
+     object every connected system holds; the handler still reports which
+     systems it actually compared, so a wrong default is visible rather than
+     silent. Cross-source reconciliation is the whole middleware argument, and
+     requiring the object noun made the argument unreachable by its own
+     sentence. */
+  const objectType = raw ? OBJECT_ALIAS[raw] : "contacts";
   if (!objectType) return null;
   return { objectType, limit: 100 };
 }

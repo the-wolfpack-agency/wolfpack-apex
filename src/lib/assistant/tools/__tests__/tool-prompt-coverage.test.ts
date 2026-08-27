@@ -77,6 +77,23 @@ const TOOL_PROMPTS: Record<string, string[]> = {
     "how's the rollout going",
     "what's outstanding on the pilot",
   ],
+  /* Fixed 2026-08-27. The noun had to follow "scan" immediately, so "scan
+     license" worked and every phrasing a person uses did not. */
+  scan_hr_doc: [
+    "scan this HR document",
+    "scan a license",
+    "scan my passport",
+    "scan hr doc",
+  ],
+  /* Fixed 2026-08-27, and the most important of the set: reading one object
+     out of two systems and reporting the disagreement IS the middleware
+     argument, and the plainest sentence for it reached no tool. */
+  compare_across_sources: [
+    "where do the two systems disagree",
+    "where do our systems disagree",
+    "where do our systems disagree about deals",
+    "compare our contacts across systems",
+  ],
   who_is: ["who is Jorge", "who is Ashley Martinez"],
   execute_agent_widget: ["run the agent", "execute agent task"],
   recent_workflow_runs: ["what happened in CI today", "show me the latest CI runs"],
@@ -106,11 +123,6 @@ const UNREACHABLE: Array<{ prompt: string; shouldReach: string; note: string }> 
     prompt: "delegate this to an agent",
     shouldReach: "delegate_to_agent",
     note: "the agent capability a client asks about by name",
-  },
-  {
-    prompt: "scan this HR document",
-    shouldReach: "scan_hr_doc",
-    note: "reaches nothing",
   },
 ];
 
@@ -169,7 +181,6 @@ const NEEDS_PROMPTS: string[] = [
   "aggregate_external_records",
   "calendar_widget",
   "clarify_widget",
-  "compare_across_sources",
   "create_calendar_event_form",
   "create_crm_record_form",
   "create_external_record",
@@ -205,7 +216,6 @@ const NEEDS_PROMPTS: string[] = [
   "platform_scan_findings",
   "routine_templates",
   "save_team_fact",
-  "scan_hr_doc",
   "scan_invoice",
   "scan_receipt",
   "schedule_health",
