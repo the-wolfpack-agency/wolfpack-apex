@@ -289,3 +289,34 @@ function truncate(s: string, n: number): string {
   if (s.length <= n) return s;
   return s.slice(0, n - 1) + "…";
 }
+
+/**
+ * Does this chunk read as a spreadsheet row rather than prose?
+ *
+ * WHY IT MATTERS. A spreadsheet chunks as raw CSV, so quoting it verbatim
+ * prints column headers, UUIDs, usernames and participant names into the chat.
+ * Measured 2026-08-27 by driving the real assistant: "which hotels were
+ * surveyed in August" answered with
+ *
+ *   3a931b25-...,Firstname,Lastname,ACTIVE,flastname,PCNA,PCNA Dealer General Manager
+ *
+ * which is both unreadable and a person's record. Redaction catches the email
+ * in that row and cannot catch the name, because a name in a CSV column is not
+ * a pattern. The row should not be quoted at all.
+ *
+ * The same content synthesised by a model reads as "Ritz Carlton, Aug 17:
+ * accommodations were very nice", which is the answer somebody wanted. So a
+ * tabular hit is still good GROUNDING and a bad QUOTE, and this is the
+ * distinction the retrieval layer never drew.
+ */
+export function looksTabular(content: string): boolean {
+  const sample = content.slice(0, 600);
+  if (!sample.trim()) return false;
+  const commas = (sample.match(/,/g) ?? []).length;
+  const uuids = (sample.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi) ?? []).length;
+  /* Sentences end. A CSV row does not. */
+  const sentenceEnds = (sample.match(/[.!?]\s+[A-Z]/g) ?? []).length;
+  /* A UUID is never prose. Two commas per sentence-ending is already a table. */
+  if (uuids >= 1) return true;
+  return commas >= 8 && commas > sentenceEnds * 4;
+}

@@ -307,7 +307,7 @@ export default function AiRouterPage() {
       {data?.quality ? (
         <GlassPanel
           title="Is it getting better"
-          subtitle="What the product caught before a person saw it, each week, against the volume it was checking. Falling numbers only mean improvement when the volume held."
+          subtitle="Every column is something the product stopped before a person saw it, week by week, next to the volume it was checking. A falling number is only good news when the volume held: the same drop means the opposite if the checks stopped running, so both are shown together. A rate over an empty week reads n/a rather than 0%."
         >
           {!data.quality.readable ? (
             <p data-testid="router-quality-unreadable">
@@ -321,14 +321,19 @@ export default function AiRouterPage() {
             <div className="wiki-table" data-testid="router-quality-table">
               <table>
                 <thead>
+                  {/* NAMED FOR WHAT THEY MEAN, not for the field they come
+                      from. "Flagged / 1k" and "Not promoted" are accurate and
+                      tell a reader nothing: promoted from what, to what, by
+                      whom. Every column here is a thing the product CAUGHT
+                      before a person saw it, so each says what was caught. */}
                   <tr>
                     <th>Week</th>
-                    <th>Model calls</th>
-                    <th>Flagged / 1k</th>
-                    <th>Reviewed</th>
-                    <th>Corrected</th>
-                    <th>Retrieval discarded</th>
-                    <th>Not promoted</th>
+                    <th>Answers needing a model</th>
+                    <th>Unsafe answers stopped, per 1,000</th>
+                    <th>Answers a second model checked</th>
+                    <th>Answers it corrected</th>
+                    <th>Irrelevant documents discarded</th>
+                    <th>Model versions held back</th>
                   </tr>
                 </thead>
                 <tbody>

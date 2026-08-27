@@ -501,6 +501,38 @@ export function redactMessages(
  * Callers who genuinely need the full set (the OGIAM ledger, agent actions)
  * keep passing nothing and keep getting everything.
  */
+/**
+ * What must not be shown when a DOCUMENT is quoted back to somebody.
+ *
+ * Wider than NEVER_SEND_KINDS, and for a different reason. That set governs
+ * what may leave for a model provider. This governs what appears on screen
+ * when the assistant quotes a chunk verbatim, and the risk is the opposite way
+ * round: nothing leaves the tenant, but a real person's name and address are
+ * printed to whoever asked.
+ *
+ * Measured 2026-08-27 by driving the real assistant. "which hotels were
+ * surveyed in August" returned survey spreadsheet rows containing
+ * a.person@example-dealer.com and another.person@example.com, along with participant
+ * names and roles. Spreadsheet exports chunk as raw CSV, so every column comes
+ * with them.
+ *
+ * That path spends ZERO tokens, which is the product working as designed, and
+ * is exactly why it never reached the outbound redactor in the router. The
+ * cheapest answers were the only unredacted ones.
+ */
+export const NEVER_QUOTE_KINDS: ReadonlySet<RedactionKind> = new Set([
+  "api_key",
+  "ssn",
+  "national_id",
+  "credit_card",
+  "iban",
+  /* A survey export identifies its respondents by both. Quoting a colleague's
+     personal address back into a chat window is not something the person
+     asking about hotel feedback asked for. */
+  "email",
+  "phone",
+]);
+
 export const NEVER_SEND_KINDS: ReadonlySet<RedactionKind> = new Set([
   "api_key",
   "ssn",

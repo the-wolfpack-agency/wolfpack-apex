@@ -1242,6 +1242,12 @@ export type InstinctEventType =
      chars } so the cost of reading a library is visible per document rather
      than arriving as a bill. */
   | "brain.document_ocred"
+  /* The Brain had good hits and declined to QUOTE them, because they are
+     spreadsheet rows rather than prose. The model answers from the same
+     documents instead. { strong_hits, tabular_hits }. A quote is fast and
+     free; a CSV row printed verbatim names the people in it. */
+  | "assistant.brain_quote_declined_tabular"
+
   /* The assistant chose a question over an invented answer. Fires when no
      tool matched, no page facts hit and the Brain was empty, so a model would
      have had nothing about this business to ground on. { message_text,
