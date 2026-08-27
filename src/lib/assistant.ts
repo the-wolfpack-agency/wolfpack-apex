@@ -44,6 +44,7 @@ import {
   validateCitations,
 } from "@/lib/assistant/answer-quality";
 import { buildChoices } from "@/lib/assistant/choices";
+import { knownDisconnectedIntegrations } from "@/lib/assistant/disconnected-integrations";
 import { welcomePromptTextsForRole } from "@/lib/assistant/welcome-prompts";
 import {
   tryDispatchTool,
@@ -1552,7 +1553,15 @@ export async function chat(
          one the prompt corpus asserts routes to a real tool. Falls back to the
          role list when nothing scores, so somebody is never left with an empty
          dead end. */
-      const ranked = buildChoices(message, userRole).map((c) => c.query);
+      /* Never offer a button that cannot work. QuickBooks has never held a
+         token here, so "A financial figure" has been offered to everybody who
+         ever saw this fallback and has never once been able to answer. */
+      const disconnected = await knownDisconnectedIntegrations(userId).catch(
+        () => new Set<string>(),
+      );
+      const ranked = buildChoices(message, userRole, {
+        knownDisconnected: disconnected,
+      }).map((c) => c.query);
       const fallbackChips = ranked.length > 0 ? ranked : welcomePromptTextsForRole(userRole);
       trackEvent("assistant.fallback_chips_offered", userId, userRole, {
         role: userRole,
