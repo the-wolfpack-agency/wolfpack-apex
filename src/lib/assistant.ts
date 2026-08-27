@@ -59,6 +59,7 @@ import {
 } from "@/lib/assistant/tools";
 import { getAIClient, NoProviderAvailableError } from "@/lib/ai";
 import { selectAssistantTier, parseTierDirective, type TierDirective } from "@/lib/assistant/model-tier";
+import { randomUUID } from "node:crypto";
 import { fenceUntrusted, type PromptPart } from "@/lib/ai/provenance";
 import { carriesEnoughToQuote } from "@/lib/brain/confidence";
 import { SEMANTIC_SCORE_FLOOR } from "@/lib/brain/qdrant";
@@ -531,13 +532,31 @@ const TOPIC_KEYWORDS: Record<string, string[]> = {
 };
 
 // ---------------------------------------------------------------------------
-// ID generation (no crypto dependency needed)
+// ID generation
 // ---------------------------------------------------------------------------
 
+/**
+ * Identifiers for conversations, messages, memory rows and the per-turn
+ * workflow id.
+ *
+ * WAS Math.random, under a comment saying no crypto dependency was needed.
+ * That was true of the dependency and not of the requirement: these are not
+ * cosmetic. A message id names a row somebody may be able to fetch, and
+ * Math.random is a predictable PRNG, so an id built from it is guessable by
+ * anybody who can observe a few others.
+ *
+ * CodeQL caught it as the value reached the answer-redaction gate: eight
+ * base36 characters of Math.random flowing into a security context. The honest
+ * fix is the source, not a suppression, and node:crypto is built in and
+ * already used across this codebase.
+ *
+ * The timestamp prefix is kept because it keeps ids roughly sortable, which is
+ * useful when reading a conversation in the database. Nothing parses the
+ * format, so widening the random half is safe.
+ */
 function generateId(): string {
   const ts = Date.now().toString(36);
-  const rand = Math.random().toString(36).slice(2, 10);
-  return `${ts}-${rand}`;
+  return `${ts}-${randomUUID().replace(/-/g, "").slice(0, 16)}`;
 }
 
 // ---------------------------------------------------------------------------
