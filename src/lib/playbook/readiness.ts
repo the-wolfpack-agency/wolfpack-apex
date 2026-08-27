@@ -41,41 +41,57 @@ const UNKNOWN = (label: string, why: string): ReadingLine => ({
 export async function readPlaybookReadiness(
   workspaceId = "default",
 ): Promise<PlaybookReadiness> {
+  /* ALL THREE AT ONCE.
+   *
+   * These ran in sequence, and this function renders on every request to
+   * /playbook. Sequential awaits against a hosted Postgres made the page take
+   * nine seconds to navigate to, against a tenth of a second for every other
+   * page in the product. The left-nav link gives no loading feedback, so nine
+   * seconds of silence was reported, correctly, as a button that does nothing.
+   *
+   * Independent readings, so the slowest one sets the latency rather than the
+   * sum. Each still contains its own failure: one unreadable source degrades
+   * that line and leaves the others alone. */
+  const [routing, evidence, snapshot] = await Promise.all([
+    auditRouting().catch((err) => ({ __error: (err as Error).message }) as const),
+    gatherEvidence(90).catch(() => null),
+    getPhaseOneSnapshot(workspaceId).catch(() => null),
+  ]);
+
   const lines: ReadingLine[] = [];
 
-  /* ROUTING. Pure functions over strings, so this one can always be taken. */
-  try {
-    const r = await auditRouting();
-    const pct = r.total > 0 ? Math.round((r.reachedOne / r.total) * 100) : null;
+  /* ROUTING. Pure functions over strings, so this one can almost always be
+     taken. */
+  if (routing && !("__error" in routing)) {
+    const pct = routing.total > 0 ? Math.round((routing.reachedOne / routing.total) * 100) : null;
     lines.push({
       label: "Ordinary questions routed to a built answer",
       value: pct === null ? null : `${pct}%`,
       detail:
         pct === null
           ? "The corpus was empty, so there is nothing to report."
-          : `${r.reachedOne} of ${r.total} prompts a person would plainly type reach exactly one tool. The rest fall through to a model.`,
+          : `${routing.reachedOne} of ${routing.total} prompts a person would plainly type reach exactly one tool. The rest fall through to a model.`,
     });
-  } catch (err) {
+  } else {
     lines.push(
       UNKNOWN(
         "Ordinary questions routed to a built answer",
-        `Not measurable: ${(err as Error).message}`,
+        `Not measurable: ${routing && "__error" in routing ? routing.__error : "unknown"}`,
       ),
     );
   }
 
   /* INTEGRATIONS. Built is not the same as run, and the difference is the
      number a client should be given. */
-  try {
-    const ev = await gatherEvidence(90);
-    const run = ev.filter((e) => verdict(e) !== "unproven").length;
+  if (evidence) {
+    const run = evidence.filter((e) => verdict(e) !== "unproven").length;
     lines.push({
       label: "Integrations that have run in production",
-      value: `${run} of ${ev.length}`,
+      value: `${run} of ${evidence.length}`,
       detail:
         "Counted from ninety days of events, not from the registry. The remainder are built and have never been exercised, which is a different claim.",
     });
-  } catch {
+  } else {
     lines.push(
       UNKNOWN(
         "Integrations that have run in production",
@@ -85,27 +101,22 @@ export async function readPlaybookReadiness(
   }
 
   /* DETERMINISTIC SHARE. The number the product is sold on. */
-  try {
-    const snap = await getPhaseOneSnapshot(workspaceId);
-    if (!snap.readable) {
-      lines.push(UNKNOWN("Answers given without a model", "The figures could not be read."));
-    } else {
-      const share = deterministicShare(snap);
-      lines.push({
-        label: "Answers given without a model",
-        value: share === null ? null : `${Math.round(share * 100)}%`,
-        detail:
-          share === null
-            ? "Nothing has been asked yet, so a share would be a division by zero rather than a zero."
-            : "Answered directly from connected systems. No tokens, and no opportunity to invent.",
-      });
-      lines.push({
-        label: "Passages indexed and answerable",
-        value: snap.passages.toLocaleString("en-US"),
-        detail: `Across ${snap.libraries} connected ${snap.libraries === 1 ? "library" : "libraries"}.`,
-      });
-    }
-  } catch {
+  if (snapshot?.readable) {
+    const share = deterministicShare(snapshot);
+    lines.push({
+      label: "Answers given without a model",
+      value: share === null ? null : `${Math.round(share * 100)}%`,
+      detail:
+        share === null
+          ? "Nothing has been asked yet, so a share would be a division by zero rather than a zero."
+          : "Answered directly from connected systems. No tokens, and no opportunity to invent.",
+    });
+    lines.push({
+      label: "Passages indexed and answerable",
+      value: snapshot.passages.toLocaleString("en-US"),
+      detail: `Across ${snapshot.libraries} connected ${snapshot.libraries === 1 ? "library" : "libraries"}.`,
+    });
+  } else {
     lines.push(UNKNOWN("Answers given without a model", "The figures could not be read."));
   }
 

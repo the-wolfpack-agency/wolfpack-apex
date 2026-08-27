@@ -70,29 +70,66 @@ export function verdict(e: Evidence): "active" | "stale" | "unproven" {
   return e.ageDays <= 14 ? "active" : "stale";
 }
 
+/** SQL LIKE semantics, applied in memory. Only `%` is used by SURFACES. */
+function likeToRegExp(pattern: string): RegExp {
+  const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`^${escaped.replace(/%/g, ".*")}$`, "i");
+}
+
 export async function gatherEvidence(days = 90): Promise<Evidence[]> {
   const query = db();
-  const out: Evidence[] = [];
-  for (const s of SURFACES) {
-    const clauses = s.patterns.map((_, i) => `event_type ILIKE $${i + 2}`).join(" OR ");
-    const { rows } = await query<{ n: string; last: string | null; age: string | null }>(
-      `SELECT count(*)::text AS n,
-              max(timestamp)::date::text AS last,
-              EXTRACT(DAY FROM NOW() - max(timestamp))::text AS age
-         FROM instinct_events
-        WHERE timestamp > NOW() - ($1::int * INTERVAL '1 day')
-          AND (${clauses})`,
-      [days, ...s.patterns],
-    );
-    const r = rows[0];
-    out.push({
+
+  /* GROUP FIRST, MATCH SECOND.
+   *
+   * This began as a query per surface inside a for-loop: twenty-one sequential
+   * round trips. Collapsing them into one query with twenty-one FILTER clauses
+   * removed the round trips and was still nine seconds, because the cost was
+   * never the round trips. instinct_events holds 1.9 MILLION rows over ninety
+   * days, and each surface carries two or three ILIKE patterns, so the single
+   * query evaluated roughly sixty pattern comparisons against every one of
+   * those rows.
+   *
+   * There are 343 DISTINCT event types. Aggregating by event_type first turns
+   * the same answer into one grouped scan plus pattern matching over a few
+   * hundred strings in memory.
+   *
+   * The reason this mattered: /playbook renders these figures on every request,
+   * so nine seconds of query time became a nine-second navigation, against a
+   * tenth of a second for every other page. The nav gives no feedback while it
+   * waits, so it was reported as a button that does nothing, which is exactly
+   * what it looked like. Latency invisible in a script is a defect the moment
+   * a page awaits it. */
+  const { rows } = await query<{ event_type: string; n: string; last: string | null }>(
+    `SELECT event_type,
+            count(*)::text AS n,
+            max(timestamp)::date::text AS last
+       FROM instinct_events
+      WHERE timestamp > NOW() - ($1::int * INTERVAL '1 day')
+      GROUP BY event_type`,
+    [days],
+  );
+
+  const now = Date.now();
+  const out: Evidence[] = SURFACES.map((s) => {
+    const res = s.patterns.map(likeToRegExp);
+    let events = 0;
+    let last: string | null = null;
+    for (const r of rows) {
+      if (!res.some((re) => re.test(r.event_type))) continue;
+      events += Number(r.n);
+      /* Most recent across every event type this surface matches. */
+      if (r.last && (last === null || r.last > last)) last = r.last;
+    }
+    const ageDays = last === null ? null : Math.floor((now - Date.parse(last)) / 86_400_000);
+    return {
       label: s.label,
       module: s.module,
-      events: Number(r?.n ?? 0),
-      lastSeen: r?.last ?? null,
-      ageDays: r?.age === null || r?.age === undefined ? null : Math.floor(Number(r.age)),
-    });
-  }
+      events,
+      lastSeen: last,
+      ageDays: ageDays === null || Number.isNaN(ageDays) ? null : ageDays,
+    };
+  });
+
   return out.sort((a, b) => b.events - a.events);
 }
 
