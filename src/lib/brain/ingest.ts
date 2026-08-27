@@ -23,6 +23,7 @@ import { embedBatch, isEmbeddingConfigured } from "./embedder";
 import { upsertBrainPoints } from "./qdrant";
 import {
   createDocument,
+  attachDriveItem,
   findDocumentBySha,
   insertChunks,
   markChunksEmbedded,
@@ -65,6 +66,20 @@ export async function ingest(req: IngestRequest): Promise<IngestResult> {
   // 2. dedupe
   const existing = await findDocumentBySha(digest);
   if (existing) {
+    /* CLAIM THE DRIVE ITEM, or the sync that found this file can never record
+       that it is done.
+     *
+     * Resume skips files by ms_drive_item_id. A duplicate returned here gained
+     * no such id, so the next pass saw it as outstanding, downloaded it again,
+     * deduped it again and counted it again. On TEST/General the remaining
+     * count went UP between passes: 2,143 then 2,153. The folder could not
+     * converge, however many times it ran.
+     *
+     * Only fills a NULL, so content that already belongs to a drive item keeps
+     * its first home rather than flipping on alternate syncs. */
+    if (req.msDriveItemId && !existing.ms_drive_item_id) {
+      await attachDriveItem(existing.id, req.msDriveItemId, req.webUrl ?? null).catch(() => false);
+    }
     return {
       document_id: existing.id,
       status: existing.status,

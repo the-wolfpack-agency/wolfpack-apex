@@ -51,6 +51,42 @@ export async function findDocumentBySha(sha: string): Promise<BrainDocument | nu
 }
 
 /**
+ * Attach a drive item to a document that already existed.
+ *
+ * WHY A SYNC CANNOT FINISH WITHOUT THIS. ingest() dedupes on the content hash
+ * and returns the existing row. Resume skips files via
+ * findIngestedDriveItemIds, which keys on ms_drive_item_id. A file whose bytes
+ * were already in the Brain from some earlier upload therefore came back as a
+ * SUCCESS, gained no drive item id, and was invisible to the skip on the next
+ * pass, so it was downloaded again, deduped again, and counted again, forever.
+ *
+ * Measured on TEST/General, 2,518 files: pass one reported 272 successes and
+ * left 2,143 remaining, pass two reported 262 and left 2,153. The remaining
+ * count went UP. 534 reported successes had produced 56 documents carrying a
+ * drive item id, because the other 478 were deduplicates that could never be
+ * marked done.
+ *
+ * Only fills a NULL. A document already bound to a drive item is not
+ * rebound, so the same content appearing in two folders keeps its first home
+ * rather than flipping between them on alternate syncs.
+ */
+export async function attachDriveItem(
+  documentId: string,
+  msDriveItemId: string,
+  webUrl?: string | null,
+): Promise<boolean> {
+  const res = await query(
+    `UPDATE brain_documents
+        SET ms_drive_item_id = $2,
+            web_url = COALESCE(web_url, $3),
+            updated_at = NOW()
+      WHERE id = $1 AND ms_drive_item_id IS NULL`,
+    [documentId, msDriveItemId, webUrl ?? null],
+  );
+  return (res.rowCount ?? 0) > 0;
+}
+
+/**
  * Documents already taken from a set of Graph drive items.
  *
  * Answered in ONE query for a whole folder rather than one per file: a sync
