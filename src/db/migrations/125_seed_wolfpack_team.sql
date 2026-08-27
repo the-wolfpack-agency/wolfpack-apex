@@ -10,6 +10,25 @@
 --      anyone has logged in.
 --
 -- password_hash is NULL — these accounts are MS-sign-in primary.
+--
+-- THE NARROW CONSTRAINT FROM 001 IS DROPPED FIRST, and without it this
+-- migration cannot run on a fresh database at all.
+--
+-- 001 created instinct_team_members with CHECK (role IN ('cto','dev','sales',
+-- 'ops')), auto-named apex_team_members_role_check. This file seeds a 'ceo'
+-- row. 145 widens the constraint to the full role set, but it runs twenty
+-- migrations later, so on an empty database the chain stops here with
+-- "violates check constraint apex_team_members_role_check" and no environment
+-- can be built from scratch.
+--
+-- It never surfaced because every existing deployment predates this file, so
+-- nothing replayed the chain from zero until 2026-08-27.
+--
+-- Dropping it here rather than editing 001 keeps the history honest: 001
+-- describes what was true when it was written. The DROP is idempotent and a
+-- no-op on any database where 145 has already removed it.
+ALTER TABLE instinct_team_members
+  DROP CONSTRAINT IF EXISTS apex_team_members_role_check;
 -- The existing /api/auth/login (password) path stays online as a
 -- fallback for the transition window per the leadership decision.
 -- Once everyone has signed in via MS at least once, the password
