@@ -40,6 +40,7 @@
 import { isTargetVerified } from "../authorization";
 import { establishSession } from "../session";
 import { mapDataFlows, type DataFlowMap } from "../mapping/data-flow";
+import { findInconsistencies, type Inconsistency } from "../mapping/consistency";
 import { recommendFromDataFlows } from "../recommend/from-data-flows";
 import type { AutomationRecommendation } from "../recommend/types";
 import { discoverRoutes, crawlRoutes } from "../discover";
@@ -91,6 +92,14 @@ export interface ClientAssessmentResult {
    */
   dataFlows: DataFlowMap;
   /**
+   * Places the system disagrees with itself.
+   *
+   * A missing protection everywhere is a decision. A missing protection on one
+   * page out of twelve is an accident, and the accident is both the more
+   * useful finding and the cheaper one to fix.
+   */
+  inconsistencies: Inconsistency[];
+  /**
    * What to do about it.
    *
    * A recon that ends in a list of facts leaves the client to work out what
@@ -127,7 +136,8 @@ const REFUSED = (
   criticalCount: 0,
   internalSurfaces: 0,
   externalSurfaces: 0,
-  dataFlows: { entryPoints: [], exitPoints: [], pagesRead: 0 },
+  dataFlows: { entryPoints: [], exitPoints: [], pagesRead: 0, pages: [] },
+  inconsistencies: [],
   recommendations: [],
   notAssessed: [],
 });
@@ -296,7 +306,7 @@ export async function runClientAssessment(
   /* THE MAP, not just the faults. A finding list says what is broken; this
      says what the system IS. Drawn with the session when there is one, because
      the forms that matter most are usually behind the login. */
-  let dataFlows: DataFlowMap = { entryPoints: [], exitPoints: [], pagesRead: 0 };
+  let dataFlows: DataFlowMap = { entryPoints: [], exitPoints: [], pagesRead: 0, pages: [] };
   try {
     dataFlows = await mapFlows(baseUrl, limited.map((r) => r.path));
   } catch {
@@ -356,6 +366,9 @@ export async function runClientAssessment(
     internalSurfaces,
     externalSurfaces,
     dataFlows,
+    /* Read from the observations the flow map already collected, so it costs
+       no additional requests against somebody else's production system. */
+    inconsistencies: findInconsistencies(dataFlows.pages),
     /* Derived rather than stored: the plan is a reading of the map, and a
        stale copy of it would be worse than none. */
     recommendations: recommendFromDataFlows(dataFlows),

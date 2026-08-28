@@ -16,7 +16,7 @@ import {
 } from "@/lib/platform-scan/recommend/from-data-flows";
 import type { DataFlowMap } from "@/lib/platform-scan/mapping/data-flow";
 
-const empty: DataFlowMap = { entryPoints: [], exitPoints: [], pagesRead: 0 };
+const empty: DataFlowMap = { entryPoints: [], exitPoints: [], pagesRead: 0, pages: [] };
 
 const form = (over: Partial<DataFlowMap["entryPoints"][number]> = {}) => ({
   page: "https://client.example.com/checkout",
