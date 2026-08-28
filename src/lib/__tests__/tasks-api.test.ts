@@ -15,6 +15,7 @@ jest.mock("@/lib/analytics", () => ({
 }));
 
 const mockListCached = jest.fn();
+const mockListLive = jest.fn();
 const mockCreateTask = jest.fn();
 const mockUpdateTask = jest.fn();
 const mockCompleteTask = jest.fn();
@@ -42,6 +43,7 @@ jest.mock("@/lib/integrations/microsoft-tasks", () => ({
     "@/lib/integrations/microsoft-tasks",
   ).validateOutlookTaskFields,
   listCachedTasks: (...args: unknown[]) => mockListCached(...args),
+  listOpenTasksLive: (...args: unknown[]) => mockListLive(...args),
   createTask: (...args: unknown[]) => mockCreateTask(...args),
   updateTask: (...args: unknown[]) => mockUpdateTask(...args),
   completeTask: (...args: unknown[]) => mockCompleteTask(...args),
@@ -83,6 +85,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   _resetRateLimit();
   mockResolveDefault.mockResolvedValue("default-list");
+  mockListLive.mockResolvedValue({ ok: true, tasks: [] });
 });
 
 // ---------------------------------------------------------------------------
@@ -96,14 +99,48 @@ describe("GET /api/tasks", () => {
     expect(res.status).toBe(401);
   });
 
-  it("returns tasks from cache with nextCursor", async () => {
+  /* THE PLAIN READ GOES TO MICROSOFT NOW. instinct_ms_tasks has never held a
+     row in production and nothing schedules the sync that would fill it, so
+     this path returned nothing to everybody. This test named the cache because
+     the cache was all there was. */
+  it("returns tasks read live from Microsoft", async () => {
     mockGetUser.mockReturnValue({ id: "u", role: "cto" });
-    mockListCached.mockResolvedValue({ tasks: [{ id: "t1" }], nextCursor: "t1" });
+    mockListLive.mockResolvedValue({ ok: true, tasks: [{ id: "t1" }] });
     const res = await tasksGET(mkReq({ auth: "Bearer x", url: "http://test/api/tasks?limit=10" }));
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.tasks).toHaveLength(1);
+    expect(data.source).toBe("live");
+    expect(mockListCached).not.toHaveBeenCalled();
+  });
+
+  /* A named reason rather than an empty list, because "not connected" and
+     "you have no tasks" are different sentences and the page draws them
+     differently. */
+  it("reports why it could not read rather than returning an empty list", async () => {
+    mockGetUser.mockReturnValue({ id: "u", role: "cto" });
+    mockListLive.mockResolvedValue({ ok: false, reason: "scope_missing" });
+    const res = await tasksGET(mkReq({ auth: "Bearer x", url: "http://test/api/tasks" }));
+    const data = await res.json();
+    expect(data.tasks).toEqual([]);
+    expect(data.unavailableReason).toBe("scope_missing");
+    expect(data.everSynced).toBe(false);
+  });
+
+  /* A FILTERED REQUEST STILL USES THE MIRROR, deliberately. Graph has no
+     cursor over a filtered union of lists, and answering a filtered request
+     with an unfiltered live list would be a worse bug than answering from what
+     the mirror has. */
+  it("uses the mirror for a filtered request, and says so", async () => {
+    mockGetUser.mockReturnValue({ id: "u", role: "cto" });
+    mockListCached.mockResolvedValue({ tasks: [{ id: "t1" }], nextCursor: "t1" });
+    const res = await tasksGET(
+      mkReq({ auth: "Bearer x", url: "http://test/api/tasks?status=notStarted" }),
+    );
+    const data = await res.json();
     expect(data.nextCursor).toBe("t1");
+    expect(data.source).toBe("mirror");
+    expect(mockListLive).not.toHaveBeenCalled();
   });
 
   it("400 on invalid status param", async () => {

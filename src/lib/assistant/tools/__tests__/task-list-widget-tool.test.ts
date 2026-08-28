@@ -2,24 +2,17 @@
  * task_list_widget tool — intent matching + handler shape.
  */
 
-const mockListCachedTasks = jest.fn();
+const mockListOpenTasksLive = jest.fn();
 const mockTrackEvent = jest.fn();
 
 jest.mock("@/lib/integrations/microsoft-tasks", () => ({
-  listCachedTasks: (...a: unknown[]) => mockListCachedTasks(...a),
+  listOpenTasksLive: (...a: unknown[]) => mockListOpenTasksLive(...a),
 }));
 jest.mock("@/lib/analytics", () => ({
   trackEvent: (...a: unknown[]) => mockTrackEvent(...a),
 }));
 jest.mock("@/lib/db", () => ({ safeQuery: jest.fn() }));
-/* Default to "a sync has run", so every test below is about the tasks
-   themselves. The unsynced case is its own describe at the bottom, because it
-   is a different question and used to be answered wrong. */
-const mockUnsyncedNotice = jest.fn();
-jest.mock("@/lib/ms-graph/sync-state", () => ({
-  unsyncedNotice: (...a: unknown[]) => mockUnsyncedNotice(...a),
-  getSyncState: async () => ({ everSynced: true, lastSyncedAt: null }),
-}));
+
 
 import { taskListWidgetTool } from "@/lib/assistant/tools/task-list-widget-tool";
 
@@ -27,10 +20,8 @@ const match = (q: string) => taskListWidgetTool.matchIntent!(q);
 const CTX = { userId: "u1", userRole: "member" };
 
 beforeEach(() => {
-  mockListCachedTasks.mockReset();
+  mockListOpenTasksLive.mockReset();
   mockTrackEvent.mockReset();
-  mockUnsyncedNotice.mockReset();
-  mockUnsyncedNotice.mockResolvedValue(null);
 });
 
 describe("task_list_widget intent matching", () => {
@@ -67,8 +58,7 @@ describe("task_list_widget handler", () => {
   test("maps cached tasks + counts overdue", async () => {
     const past = new Date(Date.now() - 86400000).toISOString();
     const future = new Date(Date.now() + 86400000).toISOString();
-    mockListCachedTasks.mockResolvedValue({
-      tasks: [
+    mockListOpenTasksLive.mockResolvedValue({ ok: true, tasks: [
         {
           id: "t1",
           msTaskId: "ms-t1",
@@ -118,21 +108,20 @@ describe("task_list_widget handler", () => {
     );
   });
 
-  /* ONLY ONCE A SYNC HAS RUN. This asserted the answer unconditionally, which
-     made it a test that pinned a bug: instinct_ms_tasks has never held a row
-     in production, so in reality this branch was telling everybody they had no
-     tasks regardless of their To-Do list. The unsynced half is asserted in its
-     own describe below. */
-  test("empty task list returns 'no open tasks' when the mirror has been synced", async () => {
-    mockListCachedTasks.mockResolvedValue({ tasks: [], nextCursor: null });
-    mockUnsyncedNotice.mockResolvedValue(null);
+  /* This asserted the answer unconditionally, which made it a test that pinned
+     a bug: the mirror it read had never held a row, so in reality the branch
+     told everybody they had no tasks regardless of their To-Do list. It now
+     names the case it covers, which is a SUCCESSFUL live read that returned
+     nothing. The failure cases have their own describe below. */
+  test("empty task list returns 'no open tasks' when Microsoft answered with none", async () => {
+    mockListOpenTasksLive.mockResolvedValue({ ok: true, tasks: [] });
     const res = await taskListWidgetTool.handler({ limit: 20 }, CTX);
     if (!res.ok) return;
     expect(res.answer).toMatch(/no open tasks/i);
   });
 
   test("cache failure → friendly answer, empty widget", async () => {
-    mockListCachedTasks.mockRejectedValue(new Error("DB down"));
+    mockListOpenTasksLive.mockRejectedValue(new Error("DB down"));
     const res = await taskListWidgetTool.handler({ limit: 20 }, CTX);
     if (!res.ok) return;
     expect((res.widget as { tasks: unknown[] }).tasks).toEqual([]);
@@ -141,40 +130,45 @@ describe("task_list_widget handler", () => {
 });
 
 /**
- * AN EMPTY MIRROR IS NOT AN EMPTY TO-DO LIST.
+ * THE MIRROR IS NO LONGER READ AT ALL.
  *
- * Added 2026-08-28. instinct_ms_tasks has never held a row in production and
- * no cron syncs it, so this tool answered "You have no open tasks. Nice." to
- * everybody regardless of what was in their Microsoft To-Do. Nothing failed:
- * the read returned [] exactly as designed, and [] is a fine answer to a
- * question nobody had checked was askable.
+ * #498 taught this tool to say "your tasks have not been synced yet" instead
+ * of "you have no open tasks", because instinct_ms_tasks had never held a row
+ * and nothing scheduled the sync that would fill it. This change removes the
+ * reason to say either: the read is live, so Microsoft is actually asked.
+ *
+ * What replaces the unsynced notice is a named reason per failure, because
+ * "not connected", "no permission" and "rate limited" lead somewhere different
+ * and none of them is "you have no tasks".
  */
-describe("an unsynced mirror never claims you have nothing", () => {
-  it("says the tasks were never synced rather than that there are none", async () => {
-    mockListCachedTasks.mockResolvedValue({ tasks: [], nextCursor: null });
-    mockUnsyncedNotice.mockResolvedValue(
-      "Your Microsoft tasks have not been synced yet, so I cannot tell you whether there are any. Connect Microsoft 365 in Settings.",
-    );
+describe("a failure names itself and never reads as an empty list", () => {
+  it.each([
+    ["not_connected", /not connected yet/i],
+    ["scope_missing", /permission/i],
+    ["rate_limited", /rate-limiting/i],
+    ["unavailable", /could not reach Microsoft/i],
+  ])("reports %s in its own words", async (reason, expected) => {
+    mockListOpenTasksLive.mockResolvedValue({ ok: false, reason });
     const res = await taskListWidgetTool.handler({ limit: 20 }, CTX);
-    if (!res.ok) throw new Error("expected a result");
-    expect(res.answer).toContain("not been synced");
-    expect(res.answer).not.toContain("no open tasks");
+    if (!res.ok) throw new Error("expected a served result");
+    expect(res.answer).toMatch(expected);
+    /* THE ASSERTION THAT MATTERS. Every one of these used to render as an
+       empty task list, which a reader cannot tell from having no tasks. */
+    expect(res.answer).not.toMatch(/no open tasks/i);
   });
 
-  it("asks about tasks using the reader's word for them", async () => {
-    mockListCachedTasks.mockResolvedValue({ tasks: [], nextCursor: null });
-    await taskListWidgetTool.handler({ limit: 20 }, CTX);
-    expect(mockUnsyncedNotice).toHaveBeenCalledWith("u1", "tasks", "tasks");
+  /* An empty list from a successful read is genuinely empty: Microsoft was
+     asked and said so. Refusing to say it would be its own lie. */
+  it("still says you have none when Microsoft answers with none", async () => {
+    mockListOpenTasksLive.mockResolvedValue({ ok: true, tasks: [] });
+    const res = await taskListWidgetTool.handler({ limit: 20 }, CTX);
+    if (!res.ok) throw new Error("expected a served result");
+    expect(res.answer).toBe("You have no open tasks. Nice.");
   });
 
-  /* Never asked when there ARE tasks: the question does not arise, and asking
-     would spend a query per answer to learn something irrelevant. */
-  it("does not ask when the list is not empty", async () => {
-    mockListCachedTasks.mockResolvedValue({
-      tasks: [{ id: "1", title: "A", status: "notStarted", importance: "normal", dueAt: null, listId: "L" }],
-      nextCursor: null,
-    });
+  it("reads live rather than from the mirror", async () => {
+    mockListOpenTasksLive.mockResolvedValue({ ok: true, tasks: [] });
     await taskListWidgetTool.handler({ limit: 20 }, CTX);
-    expect(mockUnsyncedNotice).not.toHaveBeenCalled();
+    expect(mockListOpenTasksLive).toHaveBeenCalledWith("u1", { limit: 20 });
   });
 });

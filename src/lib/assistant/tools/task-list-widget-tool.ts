@@ -13,8 +13,7 @@
  */
 
 import { z } from "zod";
-import { listCachedTasks } from "@/lib/integrations/microsoft-tasks";
-import { unsyncedNotice } from "@/lib/ms-graph/sync-state";
+import { listOpenTasksLive } from "@/lib/integrations/microsoft-tasks";
 import { trackEvent } from "@/lib/analytics";
 import { registerTool } from "./registry";
 import type { ToolDef, ToolResult } from "./types";
@@ -113,7 +112,40 @@ export const taskListWidgetTool: ToolDef<Params, TaskWidgetData> = {
        * by reading all and filtering client-side, since the cached helper
        * already excludes completed when status is not set. We pull a
        * generous limit and trim. */
-      const res = await listCachedTasks(ctx.userId, { limit: params.limit });
+      /* LIVE, NOT THE MIRROR. instinct_ms_tasks has never held a row and
+         nothing schedules the sync that would fill it, so this read returned
+         [] for everybody. #498 made that honest by saying "not synced yet";
+         this removes the reason to say it. Asking Microsoft at question time
+         needs nothing synced, is never stale, and leaves no copy of their task
+         list in our database. */
+      const live = await listOpenTasksLive(ctx.userId, { limit: params.limit });
+      if (!live.ok) {
+        /* NAMED, NOT AN EMPTY LIST. Each reason leads somewhere different: a
+           missing connection is a setup step, a missing scope is an admin
+           decision, throttling is worth retrying. Rendering any of them as
+           "no tasks" is the bug this whole change replaces. */
+        const why =
+          live.reason === "not_connected"
+            ? "Microsoft is not connected yet, so I cannot read your tasks. Connect it in Settings and I will be able to."
+            : live.reason === "scope_missing"
+              ? "I do not have permission to read your tasks yet. Whoever administers Microsoft 365 can grant it."
+              : live.reason === "rate_limited"
+                ? "Microsoft is rate-limiting us at the moment, so I could not read your tasks. Worth trying again shortly."
+                : "I could not reach Microsoft to read your tasks just now. Open Tasks from the sidebar to retry.";
+        trackEvent("assistant.widget_offered", ctx.userId, ctx.userRole, {
+          widget_kind: "task_list",
+          outcome: `live_${live.reason}`,
+        });
+        return {
+          ok: true,
+          data: { kind: "task_list", taskCount: 0, overdueCount: 0 },
+          answer: why,
+          /* An empty widget beside the reason, so the panel is present and
+             obviously empty rather than absent and ambiguous. */
+          widget: { kind: "task_list", tasks: [], title: "Your tasks" },
+        };
+      }
+      const res = { tasks: live.tasks, nextCursor: null };
       const now = Date.now();
       tasks = res.tasks
         .filter((t) => t.status !== "completed")
@@ -135,14 +167,15 @@ export const taskListWidgetTool: ToolDef<Params, TaskWidgetData> = {
          Nice." regardless of what was actually in their Microsoft To-Do.
          Confident, cheerful and false is the worst answer this product can
          give, because the reader cannot tell it from the truth. */
-      const notice = tasks.length === 0 ? await unsyncedNotice(ctx.userId, "tasks", "tasks") : null;
+      /* Now the read is live, an empty list genuinely means empty: Microsoft
+         was asked and said so. The unsynced notice #498 added here no longer
+         applies, because there is nothing left to be unsynced. */
       answer =
-        notice ??
-        (tasks.length === 0
+        tasks.length === 0
           ? "You have no open tasks. Nice."
-          : `You have ${tasks.length} open task${tasks.length === 1 ? "" : "s"}${overdueCount > 0 ? ` (${overdueCount} overdue)` : ""}. Click any row to open it.`);
+          : `You have ${tasks.length} open task${tasks.length === 1 ? "" : "s"}${overdueCount > 0 ? ` (${overdueCount} overdue)` : ""}. Click any row to open it.`;
     } catch (err) {
-      console.warn("[task-list-widget] listCachedTasks failed:", (err as Error).message);
+      console.warn("[task-list-widget] live task read failed:", (err as Error).message);
       answer =
         "I couldn't load your tasks just now. Open Tasks from the sidebar to retry.";
     }

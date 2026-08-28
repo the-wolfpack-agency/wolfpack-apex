@@ -773,3 +773,131 @@ export function verifyWebhookClientState(received: string | null): boolean {
   }
   return mismatch === 0;
 }
+
+// ---------------------------------------------------------------------------
+// Live reads
+// ---------------------------------------------------------------------------
+
+/**
+ * The user's open tasks, read from Graph at question time.
+ *
+ * WHY THIS REPLACES THE CACHE READ. instinct_ms_tasks has never held a row in
+ * production. The mirror is a write-behind cache with no writer: the sync
+ * worker is well built, nothing schedules it, and its own docstring asks for a
+ * poller that was never written. Every read returned [], and the assistant
+ * reported that as "You have no open tasks. Nice."
+ *
+ * Rather than write the missing poller, this asks Microsoft. The answer is
+ * always current, needs nothing synced first, is scoped by the user's own
+ * delegated token, and leaves no copy of their task list in our database. One
+ * fewer moving part, and the compliance story is simply that we do not hold it.
+ *
+ * FANS OUT ACROSS LISTS, BOUNDED. Graph has no "all my tasks" endpoint; tasks
+ * belong to lists. So this lists the lists and gathers across them in parallel,
+ * capped, because an account with forty lists must not turn one question into
+ * forty sequential round trips.
+ *
+ * NEVER THROWS. Callers are chat tools and route handlers where a bad day at
+ * Microsoft must degrade to a named reason, not a stack trace. The reason is
+ * carried so a caller can tell "you have none" from "we could not ask", which
+ * is the distinction the cache read could never make.
+ */
+export type LiveTasksResult =
+  | { ok: true; tasks: MsTask[] }
+  | { ok: false; reason: "not_connected" | "scope_missing" | "rate_limited" | "unavailable" };
+
+/** Lists to fan out across. Beyond this the latency is worse than the value. */
+const LIVE_LIST_CAP = 8;
+
+function graphTaskToMsTask(userId: string, listId: string, g: GraphTask): MsTask {
+  const iso = (d?: { dateTime: string } | null): string | null =>
+    d?.dateTime ? new Date(d.dateTime).toISOString() : null;
+  return {
+    /* No local row exists, so the Graph id is the identity. Callers use it to
+       open the task, which is the only thing the id is for here. */
+    id: g.id,
+    msTaskId: g.id,
+    userId,
+    listId,
+    title: g.title,
+    body: g.body?.content ?? null,
+    status: g.status,
+    importance: g.importance ?? "normal",
+    dueAt: iso(g.dueDateTime),
+    startAt: iso(g.startDateTime),
+    reminderAt: iso(g.reminderDateTime),
+    isReminderOn: Boolean(g.isReminderOn),
+    categories: g.categories ?? [],
+    completedAt: iso(g.completedDateTime),
+    createdAt: g.createdDateTime ?? new Date(0).toISOString(),
+    updatedAt: g.lastModifiedDateTime ?? new Date(0).toISOString(),
+    etag: (g["@odata.etag"] as string | undefined) ?? null,
+    /* Read live, so it is current as of now rather than as of a sync that
+       never ran. Filling this with the read time is the truthful answer to
+       "how fresh is this", not a placeholder. */
+    syncedAt: new Date().toISOString(),
+    payload: g as unknown as Record<string, unknown>,
+  };
+}
+
+function liveFailureReason(err: unknown): LiveTasksResult {
+  const status = err instanceof GraphTasksError ? err.status : 0;
+  if (status === 401) return { ok: false, reason: "not_connected" };
+  if (status === 403) return { ok: false, reason: "scope_missing" };
+  if (status === 429) return { ok: false, reason: "rate_limited" };
+  return { ok: false, reason: "unavailable" };
+}
+
+export async function listOpenTasksLive(
+  userId: string,
+  opts: { limit?: number } = {},
+): Promise<LiveTasksResult> {
+  const limit = Math.min(Math.max(opts.limit ?? 20, 1), 100);
+
+  let lists: GraphList[];
+  try {
+    lists = await listTaskLists(userId);
+  } catch (err) {
+    return liveFailureReason(err);
+  }
+
+  /* No lists at all is a real, readable answer: the account exists and holds
+     nothing. Distinct from a failure, and the caller may say so. */
+  if (lists.length === 0) return { ok: true, tasks: [] };
+
+  const settled = await Promise.allSettled(
+    lists.slice(0, LIVE_LIST_CAP).map((l) =>
+      listTasks(userId, l.id, { top: limit, status: "notStarted" }).then((tasks) =>
+        tasks.map((t) => graphTaskToMsTask(userId, l.id, t)),
+      ),
+    ),
+  );
+
+  /* EVERY LIST FAILING IS A FAILURE; ONE FAILING IS NOT.
+     Returning a partial list as though it were complete is how "you have two
+     tasks" gets said to somebody who has nine. But refusing to answer because
+     one list of eight was briefly unavailable would be worse than a slightly
+     short list, so the distinction is all-or-some. */
+  const fulfilled = settled.filter((s) => s.status === "fulfilled");
+  if (fulfilled.length === 0) {
+    const firstErr = settled.find((s) => s.status === "rejected");
+    return liveFailureReason(
+      firstErr && firstErr.status === "rejected" ? firstErr.reason : undefined,
+    );
+  }
+
+  const tasks = fulfilled
+    .flatMap((s) => (s as PromiseFulfilledResult<MsTask[]>).value)
+    .filter((t) => t.status !== "completed")
+    /* Oldest due date first, undated last: the order somebody reads a to-do
+       list in, rather than the order Graph happened to return lists. */
+    .sort((a, b) => {
+      if (!a.dueAt && !b.dueAt) return 0;
+      if (!a.dueAt) return 1;
+      if (!b.dueAt) return -1;
+      return Date.parse(a.dueAt) - Date.parse(b.dueAt);
+    })
+    .slice(0, limit);
+
+  return { ok: true, tasks };
+}
