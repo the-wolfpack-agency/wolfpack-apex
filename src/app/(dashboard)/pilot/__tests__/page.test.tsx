@@ -330,3 +330,72 @@ describe("the capability figures", () => {
     expect(screen.queryByTestId("pilot-capability")).not.toBeInTheDocument();
   });
 });
+/**
+ * THE COST COMPARISON.
+ *
+ * "We spent 77 cents" means nothing alone. It means something beside what the
+ * identical traffic costs at a premium vendor's list price, which is what a
+ * product routing everything to one large model actually pays.
+ */
+describe("what the same work costs elsewhere", () => {
+  const tokenUsage = {
+    calls: 905,
+    inputTokens: 852969,
+    outputTokens: 124050,
+    actualUsd: 0.7714,
+  };
+
+  it("shows what we paid alongside what the alternatives would have cost", async () => {
+    respond({ ...base, tokenUsage });
+    render(<PilotPage />);
+
+    const section = await screen.findByTestId("pilot-cost-comparison");
+    expect(section).toHaveTextContent("$0.77");
+    expect(section).toHaveTextContent("Claude Opus");
+    expect(section).toHaveTextContent("$22.10");
+    expect(section).toHaveTextContent("GPT-4o");
+  });
+
+  it("shows the traffic the comparison is based on", async () => {
+    respond({ ...base, tokenUsage });
+    render(<PilotPage />);
+
+    const section = await screen.findByTestId("pilot-cost-comparison");
+    expect(section).toHaveTextContent("852,969");
+    expect(section).toHaveTextContent("124,050");
+  });
+
+  /* THE ASSUMPTION HAS TO BE ON THE PAGE, not just in the code comment. Holding
+     the token count fixed and changing only the price is the only comparison
+     our own data supports, and presenting it as a forecast of another
+     product's bill would be a guess about their behaviour. */
+  it("states its own assumption and dates its prices", async () => {
+    respond({ ...base, tokenUsage });
+    render(<PilotPage />);
+
+    const section = await screen.findByTestId("pilot-cost-comparison");
+    expect(section).toHaveTextContent(/holds the token count fixed/i);
+    expect(section).toHaveTextContent(/list prices recorded/i);
+    /* And it credits the bigger saving honestly, which is not on the table. */
+    expect(section).toHaveTextContent(/without a model in the first place/i);
+  });
+
+  /* No usage is not a finding about pricing. A table of zeros would read as
+     "every model is free". */
+  it("renders nothing when there is no usage to compare", async () => {
+    respond({ ...base, tokenUsage: { calls: 0, inputTokens: 0, outputTokens: 0, actualUsd: 0 } });
+    render(<PilotPage />);
+
+    await screen.findByTestId("pilot-passages");
+    expect(screen.queryByTestId("pilot-cost-comparison")).not.toBeInTheDocument();
+  });
+
+  it("renders nothing when the token log could not be read", async () => {
+    respond({ ...base, tokenUsage: null });
+    render(<PilotPage />);
+
+    await screen.findByTestId("pilot-passages");
+    expect(screen.queryByTestId("pilot-cost-comparison")).not.toBeInTheDocument();
+  });
+});
+

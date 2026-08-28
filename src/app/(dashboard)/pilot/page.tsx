@@ -28,6 +28,11 @@
 import { useEffect, useState } from "react";
 import type { CapabilitySnapshot } from "@/lib/insights/capability-snapshot";
 import {
+  compareCosts,
+  PRICES_RECORDED_ON,
+  type TokenUsage,
+} from "@/lib/pilot/model-cost-comparison";
+import {
   adoptionVerdict,
   reachedShare,
   neverStarted,
@@ -81,6 +86,7 @@ export default function PilotPage() {
     | (PhaseOneSnapshot & {
         adoption?: AdoptionSnapshot;
         capability?: CapabilitySnapshot;
+        tokenUsage?: TokenUsage | null;
       })
     | null
   >(null);
@@ -102,6 +108,7 @@ export default function PilotPage() {
         const data = (await res.json()) as PhaseOneSnapshot & {
           adoption?: AdoptionSnapshot;
           capability?: CapabilitySnapshot;
+          tokenUsage?: TokenUsage | null;
         };
         if (live) setSnap(data);
       } catch {
@@ -113,6 +120,10 @@ export default function PilotPage() {
     };
   }, []);
 
+  /* Computed on the client from the token counts the API returned, so the
+     price table is one constant to update rather than a stored figure that
+     goes stale silently. */
+  const comparison = snap?.tokenUsage ? compareCosts(snap.tokenUsage) : [];
   const share = snap ? deterministicShare(snap) : null;
   const answers = snap ? answersGiven(snap) : 0;
   const unreadable = failed || (snap !== null && !snap.readable);
@@ -271,6 +282,51 @@ export default function PilotPage() {
                 {snap.capability.safety.inspectorProven
                   ? `${snap.capability.safety.responsesRedacted.value ?? 0} answers had something removed before they reached anyone. The check runs on every answer, so a low number here is the result rather than the absence of one.`
                   : "Redaction runs on every answer, but we cannot currently evidence it firing, so we are not reporting a count you could mistake for a clean bill of health."}
+              </p>
+            </section>
+          ) : null}
+
+          {/* THE NUMBER 77 CENTS ONLY MEANS SOMETHING NEXT TO SOMETHING ELSE.
+              What the identical traffic would have cost at another vendor's
+              published rate is the comparison a client can check, and it is
+              the one a product routing everything to one large model is
+              actually paying. */}
+          {comparison.length > 0 && snap.tokenUsage ? (
+            <section className="wp-pilot-section" data-testid="pilot-cost-comparison">
+              <h2>What the same work costs elsewhere</h2>
+              <p className="wp-pilot-aside">
+                {snap.tokenUsage.inputTokens.toLocaleString()} tokens in and{" "}
+                {snap.tokenUsage.outputTokens.toLocaleString()} out, across{" "}
+                {snap.tokenUsage.calls.toLocaleString()} model calls. Below is what that
+                exact traffic would have cost at each vendor&rsquo;s published list price.
+              </p>
+              <ul className="wp-pilot-list" data-testid="pilot-cost-rows">
+                <li>
+                  <strong>What we actually paid.</strong> $
+                  {snap.tokenUsage.actualUsd.toFixed(2)}, because most questions never
+                  reach a model at all and the ones that do are routed to the smallest
+                  model that can answer them.
+                </li>
+                {comparison.map((c) => (
+                  <li key={c.label} data-testid={`pilot-cost-${c.label.replace(/\s+/g, "-").toLowerCase()}`}>
+                    <strong>{c.label}.</strong> ${c.wouldHaveCostUsd.toFixed(2)}
+                    {c.multipleOfActual !== null
+                      ? ` — ${c.multipleOfActual}\u00d7 what we paid.`
+                      : "."}
+                  </li>
+                ))}
+              </ul>
+              <p className="wp-pilot-aside">
+                {/* THE ASSUMPTION, SAID OUT LOUD. Holding the token count fixed
+                    and changing only the price is the only comparison our own
+                    data supports. Presenting it as a prediction of another
+                    product's bill would be a guess about their behaviour. */}
+                This holds the token count fixed and changes only the price, so it is the
+                cost of our traffic at their rates rather than a forecast of another
+                product&rsquo;s bill: a different model would not use exactly the same
+                tokens. Published list prices recorded {PRICES_RECORDED_ON}, before any
+                negotiated discount. The larger saving is not on this table at all, it is
+                that most questions are answered without a model in the first place.
               </p>
             </section>
           ) : null}

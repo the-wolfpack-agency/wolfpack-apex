@@ -17,6 +17,7 @@ import { requireCapability } from "@/lib/auth/require-capability";
 import { getPhaseOneSnapshot } from "@/lib/pilot/phase-one";
 import { getAdoptionSnapshot } from "@/lib/pilot/adoption";
 import { readCapabilitySnapshot } from "@/lib/insights/capability-snapshot";
+import { getTokenUsage } from "@/lib/pilot/token-usage";
 
 const DEFAULT_DAYS = 60;
 const MAX_DAYS = 365;
@@ -44,13 +45,17 @@ export async function GET(req: NextRequest) {
 
      Read here rather than proxied, so this page owns its own figures and does
      not depend on an admin endpoint a client's role cannot call. */
-  const [snapshot, adoption, capability] = await Promise.all([
+  const [snapshot, adoption, capability, tokenUsage] = await Promise.all([
     getPhaseOneSnapshot(workspaceId, days),
     getAdoptionSnapshot(workspaceId, days),
     readCapabilitySnapshot(days).catch(() => null),
+    /* Real token counts from the completion log, so the cost comparison rests
+       on what was actually consumed rather than an estimate from message
+       lengths. */
+    getTokenUsage(days).catch(() => null),
   ]);
 
-  return NextResponse.json({ ...snapshot, adoption, capability }, {
+  return NextResponse.json({ ...snapshot, adoption, capability, tokenUsage }, {
     status: 200,
     /* Never cached: a dashboard figure that is minutes old invites somebody to
        act on a number that has already moved. */
