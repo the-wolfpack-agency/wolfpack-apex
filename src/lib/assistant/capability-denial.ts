@@ -107,12 +107,49 @@ export function deniesCapability(answer: string): boolean {
  * @param col  Column reference, already qualified by the caller.
  * @throws     When `col` is not a bare or table-qualified identifier.
  */
-export function capabilityDenialSql(col: string): string {
+/**
+ * The same rule, but only for answers a MODEL wrote.
+ *
+ * WHY THIS EXISTS. capabilityDenialSql applies to every row regardless of who
+ * wrote it, and that is right for the write guard, which only ever sees model
+ * output. On the READ side it is too broad: a person deliberately curating
+ * "I cannot approve anything over ten thousand without a second signature"
+ * would have their own entry silently hidden from search and from the
+ * Knowledge page, with nothing to tell them why.
+ *
+ * Measured on production before changing it: 3 rows are currently hidden by
+ * the unscoped filter and all three are source=ai, so nothing human is being
+ * suppressed today. This closes the gap before somebody writes the sentence
+ * that would be, which is cheaper than discovering it from a confused
+ * colleague.
+ *
+ * A human writing a refusal is making a decision. A model writing one is
+ * usually wrong about this product, which is the whole finding behind #494.
+ *
+ * @param answerCol  Column holding the answer text.
+ * @param sourceCol  Column holding provenance. Rows that are not model-written
+ *                   are kept regardless of what they say.
+ */
+export function capabilityDenialSqlForModelAnswers(
+  answerCol: string,
+  sourceCol: string,
+): string {
+  assertIdentifier(answerCol);
+  assertIdentifier(sourceCol);
+  return `(${sourceCol} IS DISTINCT FROM 'ai' OR (${capabilityDenialSql(answerCol)}))`;
+}
+
+/** Shared guard: refuse to build SQL around anything that is not a column. */
+function assertIdentifier(col: string): void {
   if (!/^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?$/.test(col)) {
     throw new Error(
-      `capabilityDenialSql: refusing to build SQL around ${JSON.stringify(col)}; expected a column identifier`,
+      `capability-denial: refusing to build SQL around ${JSON.stringify(col)}; expected a column identifier`,
     );
   }
+}
+
+export function capabilityDenialSql(col: string): string {
+  assertIdentifier(col);
   const fragments = [
     "%I cannot %",
     "%I can not %",
