@@ -9,6 +9,7 @@
 export type BrainKind =
   | "pdf"
   | "docx"
+  | "pptx"
   | "xlsx"
   | "text"
   | "markdown"
@@ -173,6 +174,14 @@ export function classifyKind(contentType: string, filename: string): BrainKind {
     fn.endsWith(".docx")
   ) {
     return "docx";
+  }
+  if (
+    ct === "application/vnd.openxmlformats-officedocument.presentationml.presentation" ||
+    ct === "application/vnd.ms-powerpoint" ||
+    fn.endsWith(".pptx") ||
+    fn.endsWith(".ppt")
+  ) {
+    return "pptx";
   }
   if (
     ct === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
