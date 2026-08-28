@@ -16,6 +16,14 @@ jest.mock("@/lib/assistant/tools/calendar-availability", () => ({
 }));
 
 const mockRunMailSearch = jest.fn();
+/* The mailbox is reachable by default, so the tests below are about the SEARCH
+   rather than about the connection. The unconnected case is its own test: it
+   used to be indistinguishable from a search that found nothing, which is the
+   bug the connection check was added for. */
+const mockGetValidToken = jest.fn();
+jest.mock("@/lib/microsoft-graph", () => ({
+  getValidToken: (...a: unknown[]) => mockGetValidToken(...a),
+}));
 jest.mock("@/lib/assistant/tools/mail-search", () => ({
   runMailSearch: (...a: any[]) => mockRunMailSearch(...a),
 }));
@@ -133,11 +141,38 @@ describe("search_mail — handler", () => {
     }
   });
 
-  test("returns empty-state when underlying returns null", async () => {
+  test("returns empty-state naming the query when the mailbox IS reachable", async () => {
+    mockGetValidToken.mockResolvedValue({ accessToken: "tok", userEmail: "a@b.co" });
     mockRunMailSearch.mockResolvedValueOnce(null);
     const r = await searchMailTool.handler({ from: "Ghost" }, ctx);
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.answer).toContain("Ghost");
+  });
+
+  /* AN UNCONNECTED MAILBOX IS NOT AN EMPTY ONE.
+     The matcher returns [] when there is no token, which is the same [] it
+     returns when nothing matched, so this rendered both as "I didn't find any
+     emails about pricing". Measured against a client-facing starter prompt on
+     2026-08-28. The reader cannot tell "nothing matched" from "we never
+     looked", and only one of them is worth acting on. */
+  test("says Microsoft is not connected rather than claiming no emails", async () => {
+    mockGetValidToken.mockResolvedValue(null);
+    mockRunMailSearch.mockResolvedValueOnce(null);
+    const r = await searchMailTool.handler({ topic: "pricing" }, ctx);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.answer).toMatch(/not connected/i);
+      expect(r.answer).not.toMatch(/didn't find any emails/i);
+    }
+  });
+
+  /* The connection is only checked when the result is empty, so an ordinary
+     answer costs no extra call. */
+  test("does not check the connection when there are results", async () => {
+    mockGetValidToken.mockClear();
+    mockRunMailSearch.mockResolvedValueOnce({ messages: [], count: 3, answer: "3 emails from Max" });
+    await searchMailTool.handler({ from: "Max" }, ctx);
+    expect(mockGetValidToken).not.toHaveBeenCalled();
   });
 });
 

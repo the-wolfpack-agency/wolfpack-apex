@@ -21,6 +21,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { sweepAllWorkspaces } from "@/lib/health/integration-probes";
+import { runAssistantSelfCheck } from "@/lib/health/assistant-selfcheck";
 import { trackEvent } from "@/lib/analytics";
 
 function isAuthorizedCron(req: NextRequest): boolean {
@@ -32,12 +33,26 @@ function isAuthorizedCron(req: NextRequest): boolean {
 async function runSweep(actorId: string, actorRole: string): Promise<NextResponse> {
   try {
     const result = await sweepAllWorkspaces();
+
+    /* THE PRODUCT ASKS ITSELF THE QUESTIONS THAT WERE WRONG.
+       The integration probes above answer "can we reach it". This answers "does
+       it still give the right answer", which is a different question and the
+       one that was false all day on 2026-08-28 while every probe would have
+       read green. Runs after the probes so a Graph outage shows up as an
+       integration failure rather than as six mysterious behaviour failures. */
+    const selfCheck = await runAssistantSelfCheck().catch(() => null);
     trackEvent("integration.health_sweep", actorId, actorRole, {
       workspaces: result.workspaces,
       probes: result.probes,
       drift_count: result.drifted.length,
     });
-    return NextResponse.json({ ok: true, ...result });
+    return NextResponse.json({
+      ok: true,
+      ...result,
+      selfCheck: selfCheck
+        ? { ran: selfCheck.ran, failed: selfCheck.failed.map((f) => `${f.id}: ${f.reason}`) }
+        : { ran: 0, failed: ["self-check did not run"] },
+    });
   } catch (err) {
     console.error("[cron/integration-health]", (err as Error).message);
     return NextResponse.json({ ok: true, workspaces: 0, probes: 0, drifted: [] });

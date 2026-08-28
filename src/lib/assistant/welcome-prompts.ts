@@ -199,8 +199,15 @@ const ROLE_KITS: Record<string, WelcomePrompt[]> = {
       description: "High-value pipeline closing this month, from the CRM.",
     },
     {
-      text: "tell me about our company",
-      description: "One-line org summary pulled from the knowledge store.",
+      /* WAS "tell me about our company", WHICH DEAD-ENDED.
+         It routes to the verified-facts store, which holds facts somebody
+         entered by hand and is empty for almost every tenant. Measured against
+         production 2026-08-28: "I don't have any verified facts about 'our
+         company' yet." A starter prompt is a promise, and the one thing it
+         must not do is fail on the first click. This asks the documents
+         instead, which every tenant has from day one. */
+      text: "what do our documents say about our process",
+      description: "Reads across every connected library and cites what it finds.",
     },
   ],
   pm: [
@@ -300,8 +307,14 @@ const ROLE_KITS: Record<string, WelcomePrompt[]> = {
       description: "High-value pipeline with a close date this month.",
     },
     {
-      text: "search the CRM for a contact",
-      description: "Universal-search phrasing that fans into the CRM alongside chat, email, calendar, and knowledge.",
+      /* WAS "search the CRM for a contact", WHICH SEARCHED DOCUMENTS.
+         Measured 2026-08-28: it answered "Found 3 results for 'the CRM for a
+         contact': 3 documents". The phrase reads like an instruction to a
+         search box, so universal search took the whole thing as the query and
+         looked for those words. Nobody types a placeholder; they type a name,
+         and the typed-object phrasing is what the CRM tools claim. */
+      text: "find the contact for Acme",
+      description: "Looks the company up in the CRM and shows who is on the account.",
     },
   ],
   ops: [
@@ -319,8 +332,11 @@ const ROLE_KITS: Record<string, WelcomePrompt[]> = {
       description: "Open the new-task form without leaving the chat.",
     },
     {
-      text: "tell me about our company",
-      description: "One-line org summary from the knowledge store.",
+      /* Same dead end as the CEO kit had: the verified-facts store is empty
+         until somebody has corrected an answer, which has not happened on a
+         tenant's first day and is exactly when this prompt is shown. */
+      text: "what do our documents say about our process",
+      description: "Reads across every connected library and cites what it finds.",
     },
     {
       text: "top news",
