@@ -39,6 +39,9 @@
 
 import { isTargetVerified } from "../authorization";
 import { establishSession } from "../session";
+import { mapDataFlows, type DataFlowMap } from "../mapping/data-flow";
+import { recommendFromDataFlows } from "../recommend/from-data-flows";
+import type { AutomationRecommendation } from "../recommend/types";
 import { discoverRoutes, crawlRoutes } from "../discover";
 import { scanPlatform } from "../engine";
 import { recordScan } from "../store";
@@ -80,6 +83,22 @@ export interface ClientAssessmentResult {
   /** Routes that answered without a session at all. */
   externalSurfaces: number;
   /**
+   * Where information arrives and where it leaves.
+   *
+   * The part a client most often cannot produce themselves. Nobody has a
+   * current list of every form on their estate or every vendor their pages
+   * contact, and the second is exactly what a privacy review asks for.
+   */
+  dataFlows: DataFlowMap;
+  /**
+   * What to do about it.
+   *
+   * A recon that ends in a list of facts leaves the client to work out what
+   * matters. This ends in an ordered plan: data leaving to a third party
+   * first, then the automations the vendors they already use make possible.
+   */
+  recommendations: AutomationRecommendation[];
+  /**
    * The honest boundary of this run.
    *
    * Every entry is something a reader might otherwise assume was covered. A
@@ -108,6 +127,8 @@ const REFUSED = (
   criticalCount: 0,
   internalSurfaces: 0,
   externalSurfaces: 0,
+  dataFlows: { entryPoints: [], exitPoints: [], pagesRead: 0 },
+  recommendations: [],
   notAssessed: [],
 });
 
@@ -128,6 +149,7 @@ export interface GrantedAccess {
 export interface ClientAssessmentDeps {
   isVerified?: typeof isTargetVerified;
   login?: typeof establishSession;
+  mapFlows?: typeof mapDataFlows;
   discover?: typeof discoverRoutes;
   crawl?: typeof crawlRoutes;
   scan?: typeof scanPlatform;
@@ -146,6 +168,7 @@ export async function runClientAssessment(
 ): Promise<ClientAssessmentResult> {
   const isVerified = deps.isVerified ?? isTargetVerified;
   const login = deps.login ?? establishSession;
+  const mapFlows = deps.mapFlows ?? mapDataFlows;
   const discover = deps.discover ?? discoverRoutes;
   const crawl = deps.crawl ?? crawlRoutes;
   const scan = deps.scan ?? scanPlatform;
@@ -270,6 +293,16 @@ export async function runClientAssessment(
     result = internal;
   }
 
+  /* THE MAP, not just the faults. A finding list says what is broken; this
+     says what the system IS. Drawn with the session when there is one, because
+     the forms that matter most are usually behind the login. */
+  let dataFlows: DataFlowMap = { entryPoints: [], exitPoints: [], pagesRead: 0 };
+  try {
+    dataFlows = await mapFlows(baseUrl, limited.map((r) => r.path));
+  } catch {
+    /* A map we could not draw is not a reason to lose the findings. */
+  }
+
   /* recordScan is the one place a scan becomes durable: it dedupes,
      auto-resolves what is now fixed, alerts on critical and feeds the learning
      loop. The authenticated pass is the one persisted when there was one,
@@ -322,6 +355,10 @@ export async function runClientAssessment(
     ...(loginFailed ? { loginFailed } : {}),
     internalSurfaces,
     externalSurfaces,
+    dataFlows,
+    /* Derived rather than stored: the plan is a reading of the map, and a
+       stale copy of it would be worse than none. */
+    recommendations: recommendFromDataFlows(dataFlows),
     routesDiscovered: limited.length,
     discoveredVia,
     findingCount: recorded?.findingCount ?? result.findings.length,
