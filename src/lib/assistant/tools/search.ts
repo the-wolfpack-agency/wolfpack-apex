@@ -343,6 +343,53 @@ const PRODUCT_NOUN_SINGLE_WORD =
 const CONVERSATIONAL_SINGLE_WORD =
   /^(?:hello+|hey+|thanks?|thankyou|cheers|morning|afternoon|evening|goodbye|whatever|anything|everything|something|nothing|nevermind|understood|acknowledged|interesting|excellent|perfect|awesome|brilliant|continue|proceed|nonsense|seriously|honestly|obviously|apparently|basically|actually)$/i;
 
+/**
+ * A postal address, typed on its own.
+ *
+ * WHY IT BELONGS TO SEARCH. Somebody pasting an address is looking it up:
+ * against a receipt, a venue, a client site, a contact record. Measured on a
+ * real turn 2026-08-28, "69 West 43rd street New York, NY 10009" reached no
+ * tool, went to a model, and came back "No results found... If this is a
+ * search for a specific contact, record, or document, please clarify" for
+ * 1,659 tokens and several seconds. The model was paid to say what the search
+ * already knew.
+ *
+ * Measured across ninety days: 81 per cent of model answers with no grounding
+ * at all say nothing useful. This does not act on that whole class, because
+ * the remainder includes genuinely good conversational turns and one safety
+ * response. It acts on the shape that is unambiguously a lookup.
+ *
+ * NARROW ON PURPOSE. Requires a leading house number, a street-type word, AND
+ * either a postcode or a two-letter state. "43 things to do" and "10 Downing
+ * Street is famous" do not match, because one has no street type and the other
+ * has no number-leading start plus locality. A false positive here sends a
+ * real question to search, which answers "no results" and is a worse product
+ * than a model answering it well.
+ */
+const STREET_TYPE =
+  /\b(?:street|st|avenue|ave|road|rd|boulevard|blvd|drive|dr|lane|ln|way|court|ct|place|pl|parkway|pkwy|highway|hwy|suite|ste)\b/i;
+/**
+ * US ZIP and ZIP+4, the two-letter-state-plus-ZIP form, and a UK postcode.
+ *
+ * The UK form was missing on the first pass and "221 Baker Street, London NW1
+ * 6XE" fell through to a model. This engagement is US-centred, but an address
+ * is an address and the pattern costs one alternation.
+ */
+const POSTAL_TAIL =
+  /\b(?:\d{5}(?:-\d{4})?|[A-Z]{2}\s+\d{5}|[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2})\b/;
+const US_STATE = /,\s*(?:[A-Z]{2}|Alabama|Alaska|Arizona|California|Colorado|Florida|Georgia|Illinois|Michigan|New York|Ohio|Texas|Virginia|Washington)\b/i;
+
+export function addressQuery(message: string): Params | null {
+  const t = message.trim().replace(/[?.!]+$/, "");
+  /* Must start with a house number: the single strongest signal that this is
+     an address rather than a sentence mentioning a street. */
+  if (!/^\d{1,6}\s+\S/.test(t)) return null;
+  if (t.length < 12 || t.length > 160) return null;
+  if (!STREET_TYPE.test(t)) return null;
+  if (!POSTAL_TAIL.test(t) && !US_STATE.test(t)) return null;
+  return { query: t };
+}
+
 export function bareIdentifierQuery(message: string): Params | null {
   const t = message.trim().replace(/[?.!,]+$/, "");
   /* One token. A space means it is a sentence, and sentences are handled by
@@ -393,7 +440,7 @@ function matchSearchIntent(message: string): Params | null {
   if (asked && !specificToolClaims(trimmed)) return { query: asked };
 
   const m = INTENT_RE.exec(trimmed);
-  if (!m) return bareIdentifierQuery(trimmed);
+  if (!m) return addressQuery(trimmed) ?? bareIdentifierQuery(trimmed);
   const query = m[1].trim().replace(/[?.!,]+$/g, "").trim();
   if (!query) return null;
   /* Reject queries that look like a CRM ID lookup — these still get
