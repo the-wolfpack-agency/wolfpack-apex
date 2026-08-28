@@ -26,7 +26,37 @@ import { downloadDriveItem } from "@/lib/connectors/sharepoint/sync";
 import { query } from "@/lib/db";
 import { recordAudit } from "@/lib/audit-log";
 
+/**
+ * Cron secret check. Mirrors src/app/api/cron/agent-failover/route.ts so every
+ * cron-triggered endpoint in this repo shares one mental model. Returns false
+ * when CRON_SECRET is unset (local dev) so the session path is the only way in.
+ */
+function isAuthorizedCron(req: NextRequest): boolean {
+  const secret = process.env.CRON_SECRET;
+  if (!secret) return false;
+  const header = req.headers.get("authorization") ?? "";
+  return header === `Bearer ${secret}`;
+}
+
+/**
+ * TWO WAYS IN, AND THE SECOND ONE IS THE POINT.
+ *
+ * This repair was written for ninety Word documents that failed on a parser
+ * bug fixed in #402. Measured 2026-08-27: it had never run. Not once. Zero
+ * events, and the ninety documents were still failed, months after the fix
+ * that was supposed to rescue them shipped.
+ *
+ * A repair that needs somebody to remember it is a repair that does not
+ * happen, which is the same shape as a control declared and never executed.
+ * So it now runs on a schedule as well as by hand.
+ */
 async function gate(req: NextRequest) {
+  if (isAuthorizedCron(req)) {
+    /* The scheduled path has no session. It acts as the system, and the audit
+       row says so rather than attributing the repair to whoever last logged
+       in. */
+    return { user: { id: "cron", role: "system", workspaceId: "default" } as const };
+  }
   const auth = await requireCapability(req, "settings.manage_team");
   if (!auth.ok) return { error: auth.response };
   return { user: auth.user };
