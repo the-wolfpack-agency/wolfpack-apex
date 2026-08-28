@@ -380,14 +380,14 @@ export default function PilotPage() {
                 <h3 className="wp-pilot-subhead">How we move these numbers</h3>
                 <ul className="wp-pilot-list">
                   <li>
-                    <strong>The ones who never started</strong> get reached where they
+                    <strong>The ones who never started.</strong> They get reached where they
                     already work rather than in another tool: the weekly briefing, mail,
                     and Teams all carry the same short prompt, written for the job they
                     actually do. One person&rsquo;s first useful question is worth more
                     than ten broadcasts.
                   </li>
                   <li>
-                    <strong>Every repeated failure above is a real request</strong> that
+                    <strong>Every repeated failure above is a real request.</strong> One that
                     nobody filed as one. Each becomes either a connected source or an
                     honest &ldquo;we do not hold that&rdquo;, and the person who asked is
                     told which. That is how the list gets shorter.
@@ -399,7 +399,7 @@ export default function PilotPage() {
                     a feature announcement.
                   </li>
                   <li>
-                    <strong>Drift is treated as a question, not a churn number.</strong>
+                    <strong>Drift is treated as a question, not a churn number.</strong>{" "}
                     Somebody who used it and stopped is asked what they went back to. That
                     answer is the cheapest research in the pilot.
                   </li>

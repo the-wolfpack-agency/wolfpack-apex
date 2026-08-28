@@ -152,6 +152,59 @@ it("renders nothing at all when the API does not carry adoption", async () => {
   expect(screen.queryByTestId("pilot-adoption")).not.toBeInTheDocument();
 });
 
+/* WORDS RUNNING INTO EACH OTHER, REPORTED FROM THE LIVE PAGE.
+   "...not a churn number.Somebody who used it and stopped..." rendered with no
+   gap at all, because the sentence after the bold lead began on the next source
+   line and JSX strips a whitespace gap containing a newline. Invisible in
+   review, obvious to a reader: the worst combination, so it is asserted rather
+   than watched for.
+
+   The other three leads DID have their spaces in the DOM, proven by rendering
+   the component and reading textContent, and still read as joined because a
+   bold phrase with no terminal punctuation runs visually into what follows.
+   Each lead now ends in a full stop. */
+it("never runs a bold lead into the sentence after it", async () => {
+  respond({
+    ...base,
+    adoption: {
+      readable: true,
+      invited: 10,
+      everAsked: 6,
+      activeRecently: 4,
+      lapsed: 1,
+      unansweredQuestions: 12,
+      repeatedFailures: [],
+    },
+  });
+  render(<PilotPage />);
+
+  const plan = await screen.findByTestId("pilot-adoption-plan");
+
+  /* PER ITEM, NOT ACROSS THE WHOLE BLOCK. textContent concatenates adjacent
+     list items with no separator, so reading the block as one string reports
+     every boundary between bullets as a missing space. The first version of
+     this test did exactly that and failed on correct markup. */
+  const items = Array.from(plan.querySelectorAll("li"));
+  expect(items.length).toBeGreaterThan(0);
+  for (const li of items) {
+    const text = li.textContent ?? "";
+    /* A letter immediately after a full stop, inside one bullet, is the
+       signature of a collapsed gap. */
+    expect(text).not.toMatch(/[a-z]\.[A-Za-z]/);
+    /* And no bold lead may run straight into its sentence. */
+    const lead = li.querySelector("strong")?.textContent ?? "";
+    if (lead) {
+      const after = text.slice(lead.length);
+      expect(after.startsWith(" ")).toBe(true);
+    }
+  }
+
+  const whole = plan.textContent ?? "";
+  for (const join of ["startedget", "requestthat", "number.Somebody", "invitation.When"]) {
+    expect(whole).not.toContain(join);
+  }
+});
+
 /* The plan is the half a client acts on. A scoreboard with no next move is
    the thing this panel was built not to be. */
 it("names what we do about the numbers, next to them", async () => {
