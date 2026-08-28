@@ -426,6 +426,56 @@ a:hover { color: var(--wp-gold-hover); }
  * count-up entrance helper. Every animation is reduced-motion safe.
  * ──────────────────────────────────────────────────────────────────── */
 
+/* Page frame for console surfaces.
+ *
+ * Owns width, rhythm and the ambient backdrop, so three pages a client moves
+ * between stop looking like three products. The gradient is deliberately
+ * faint: it gives the glass panels something to be glass against, which is
+ * what makes backdrop-filter read as depth rather than as a slightly grey box.
+ * Anything stronger competes with the content, and these are working surfaces
+ * people spend a day in. */
+.wp-console-shell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 1.5rem 1rem 3rem;
+  min-height: 100%;
+}
+
+/* The ambient wash. One soft pool of brand light from the top-left and a
+ * cooler one from the right, both far below the content and non-interactive.
+ * radial-gradient rather than an image so it costs nothing to load and scales
+ * to any viewport. */
+.wp-console-shell::before {
+  content: "";
+  position: absolute;
+  inset: -10% -5% auto;
+  height: 420px;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(60% 60% at 12% 0%, color-mix(in srgb, var(--wp-gold, #e8b528) 7%, transparent), transparent 70%),
+    radial-gradient(50% 50% at 88% 10%, color-mix(in srgb, var(--wp-info, #3b82f6) 6%, transparent), transparent 70%);
+}
+
+/* Content sits above the wash. */
+.wp-console-shell > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* A surface that owns the viewport, like a conversation, rather than a
+ * document that scrolls. Without this the shell would add a second scroll
+ * container and the chat would scroll inside a page that also scrolls. */
+.wp-console-shell-fill {
+  height: 100%;
+  min-height: 0;
+  padding-bottom: 0;
+}
+
 /* Frosted glass panel — the base surface every console primitive sits on.
  * backdrop-filter blurs whatever is behind it; the inset box-shadow paints a
  * faint top highlight so it reads as a pane of glass. Degrades cleanly where

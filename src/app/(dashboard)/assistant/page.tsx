@@ -3,6 +3,7 @@
 import { useState } from "react";
 import InstinctChat from "@/components/InstinctChat";
 import { AssistantSupportPanel } from "@/components/AssistantSupportPanel";
+import { ConsoleShell } from "@/components/console";
 
 /**
  * /assistant — the wolfpack's daily-driver chat surface.
@@ -25,29 +26,38 @@ import { AssistantSupportPanel } from "@/components/AssistantSupportPanel";
 export default function AssistantPage() {
   const [supportOpen, setSupportOpen] = useState(false);
   return (
-    <div className="flex flex-col h-full">
-      <div className="px-4 pt-3 pb-1 flex items-center gap-2 flex-wrap">
-        <button
-          type="button"
-          data-testid="assistant-support-pill"
-          onClick={() => setSupportOpen((v) => !v)}
-          className="text-xs px-3 py-1 rounded-full font-semibold transition-colors border"
-          style={{
-            background: supportOpen ? "var(--wp-gold)" : "var(--wp-dark-surface2)",
-            borderColor: "var(--wp-dark-border)",
-            color: supportOpen ? "var(--wp-dark)" : "var(--wp-text)",
-          }}
-        >
-          {supportOpen ? "Close support" : "Ask a support question"}
-        </button>
-        <span className="text-xs" style={{ color: "var(--wp-text-dim)" }}>
-          Get a quick self-serve answer before submitting a ticket.
-        </span>
+    /* THE SHARED FRAME. This page used none of the console kit, while
+       /admin/agents and /admin/ai-router both did, so three surfaces a client
+       moves between looked like three products.
+
+       `fill` because a conversation owns the viewport rather than flowing as a
+       document: without it the shell adds a second scroll container and the
+       chat scrolls inside a page that also scrolls. */
+    <ConsoleShell fill testId="assistant-shell">
+      <div className="flex flex-col h-full">
+        <div className="pb-2 flex items-center gap-2 flex-wrap">
+          <button
+            type="button"
+            data-testid="assistant-support-pill"
+            onClick={() => setSupportOpen((v) => !v)}
+            className="text-xs px-3 py-1 rounded-full font-semibold transition-colors border"
+            style={{
+              background: supportOpen ? "var(--wp-gold)" : "var(--wp-dark-surface2)",
+              borderColor: "var(--wp-dark-border)",
+              color: supportOpen ? "var(--wp-dark)" : "var(--wp-text)",
+            }}
+          >
+            {supportOpen ? "Close support" : "Ask a support question"}
+          </button>
+          <span className="text-xs" style={{ color: "var(--wp-text-dim)" }}>
+            Get a quick self-serve answer before submitting a ticket.
+          </span>
+        </div>
+        {supportOpen && <AssistantSupportPanel />}
+        <div className="flex-1 min-h-0">
+          <InstinctChat />
+        </div>
       </div>
-      {supportOpen && <AssistantSupportPanel />}
-      <div className="flex-1 min-h-0">
-        <InstinctChat />
-      </div>
-    </div>
+    </ConsoleShell>
   );
 }
