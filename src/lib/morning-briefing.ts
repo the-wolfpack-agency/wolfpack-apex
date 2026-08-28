@@ -275,12 +275,33 @@ async function fetchFinancialData() {
 
 async function fetchTeamActivity(): Promise<{ activeMembers: number; recentHighlights: string[] }> {
   const { rows } = await safeQuery<{ user_id: string; event_type: string; metadata: string }>(
-    `SELECT DISTINCT user_id, event_type, metadata
-     FROM instinct_events
-     WHERE timestamp > NOW() - INTERVAL '24 hours'
-       AND event_type NOT IN ('system.page_viewed', 'system.login')
-     ORDER BY timestamp DESC
-     LIMIT 20`,
+    /* DISTINCT ON in a subquery, because plain DISTINCT cannot order by a
+       column it does not select.
+     *
+     * This read `SELECT DISTINCT user_id, event_type, metadata ... ORDER BY
+     * timestamp DESC`, which Postgres refuses: "for SELECT DISTINCT, ORDER BY
+     * expressions must appear in select list". safeQuery caught the error and
+     * returned no rows, so the briefing reported zero active members and no
+     * highlights every single time, for everyone, while looking like a quiet
+     * day rather than a broken query.
+     *
+     * Adding timestamp to the select list would have compiled and been wrong:
+     * every row carries a different timestamp, so DISTINCT would dedupe
+     * nothing and each person would appear once per event.
+     *
+     * DISTINCT ON keeps one row per person per event type, the newest, and the
+     * outer query restores the recency order the briefing wants. */
+    `SELECT user_id, event_type, metadata
+       FROM (
+         SELECT DISTINCT ON (user_id, event_type)
+                user_id, event_type, metadata, timestamp
+           FROM instinct_events
+          WHERE timestamp > NOW() - INTERVAL '24 hours'
+            AND event_type NOT IN ('system.page_viewed', 'system.login')
+          ORDER BY user_id, event_type, timestamp DESC
+       ) recent
+      ORDER BY timestamp DESC
+      LIMIT 20`,
   );
 
   if (rows.length === 0) {
