@@ -1,6 +1,6 @@
 # Wolfpack Instinct — repo context
 
-Internal OS for Wolfpack Agency: briefing, assistant, knowledge, HR, clients, sites, financials. Next.js App Router on Vercel with Postgres (Neon) as source of truth, Microsoft Graph as the enterprise integration backbone, and triple-write fan-out (Postgres + Qdrant + Neo4j) for every durable entity.
+Internal OS for Wolfpack Agency: briefing, assistant, knowledge, HR, clients, sites, financials. Next.js App Router on Vercel with Postgres (Neon) as source of truth, Microsoft Graph as the enterprise integration backbone, and a fan-out writer for durable entities. In production that fan-out reaches Postgres and Qdrant: Neo4j has never been configured there, so the deployment is a double write. Writing about it as a triple write is how the gap stayed invisible for the life of the product.
 
 @AGENTS.md
 

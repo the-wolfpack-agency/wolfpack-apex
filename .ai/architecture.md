@@ -58,7 +58,11 @@ HTTP request
 - Qdrant vector — embedding for semantic retrieval in the assistant.
 - Neo4j edge — relational context (author → doc → topic → team).
 
-No feature writes to only one store. If Qdrant or Neo4j is down, triple-write degrades to Postgres-only and logs `system.triple_write_degraded` — never throws.
+No feature writes to only one store, and a store that is down never throws: the write degrades and records `system.triple_write_degraded`.
+
+Read that sentence carefully against production before repeating it. Neo4j has never been configured on this deployment, so it has always been a DOUBLE write, and until 2026-08-28 the degrade signal could not fire at all: both writers return `Promise<void>`, so the inspector matched neither of the shapes it was looking for and the event count was zero. A silent signal reads exactly like a healthy one.
+
+The inspector now asks each store whether it is configured rather than inferring it from a return value that carries no information, and reports the transition once rather than once per write.
 
 ## Auth model
 

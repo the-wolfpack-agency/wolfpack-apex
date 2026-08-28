@@ -19,15 +19,19 @@ const mockQuery = jest.fn();
 jest.mock("@/lib/db", () => ({ query: (...a: unknown[]) => mockQuery(...a) }));
 
 const mockQdrant = jest.fn();
+const mockQdrantConfigured = jest.fn(() => true);
 jest.mock("@/lib/qdrant", () => ({
   upsertKnowledgePoint: (...a: unknown[]) => mockQdrant(...a),
   getQdrantHealth: jest.fn(async () => true),
+  isQdrantConfigured: () => mockQdrantConfigured(),
 }));
 
 const mockNeo = jest.fn();
+const mockNeoConfigured = jest.fn(() => true);
 jest.mock("@/lib/neo4j", () => ({
   recordKnowledgeInteraction: (...a: unknown[]) => mockNeo(...a),
   getNeo4jHealth: jest.fn(async () => false),
+  isNeo4jConfigured: () => mockNeoConfigured(),
 }));
 
 const ORIGINAL = process.env.DATABASE_URL;
@@ -136,5 +140,92 @@ describe("the diagnostic cannot break what it is diagnosing", () => {
     const { tripleWriteKnowledge } = await import("../triple-write");
     await tripleWriteKnowledge("k1", "q", "a", "src", "u1", []);
     expect(degradeRows()).toHaveLength(0);
+  });
+});
+
+
+/**
+ * THE CASE THAT COULD NOT FIRE.
+ *
+ * Both store writers return Promise<void>. They swallow their own errors, and
+ * when the store is not configured they return early. So every settled result
+ * was { status: "fulfilled", value: undefined }, and the old inspect() matched
+ * neither "rejected" nor "value === false".
+ *
+ * That is why a deployment where Neo4j has never been configured has recorded
+ * zero degrade events. The signal was not quiet because nothing was wrong. It
+ * was quiet because it could not speak.
+ */
+describe("a store that is not configured at all", () => {
+  beforeEach(async () => {
+    jest.clearAllMocks();
+    process.env.DATABASE_URL = "postgres://test";
+    mockQdrantConfigured.mockReturnValue(true);
+    mockNeoConfigured.mockReturnValue(true);
+    mockQuery.mockResolvedValue({ rows: [] });
+    const mod = await import("@/lib/triple-write");
+    mod.__resetDegradedReportingForTests();
+  });
+
+  afterAll(() => {
+    if (ORIGINAL === undefined) delete process.env.DATABASE_URL;
+    else process.env.DATABASE_URL = ORIGINAL;
+  });
+
+  it("reports the graph store as degraded when it was never configured", async () => {
+    mockNeoConfigured.mockReturnValue(false);
+    /* Resolving undefined is exactly what the real writer does when it has no
+       URL: it returns early, having written nothing. */
+    mockNeo.mockResolvedValue(undefined);
+    mockQdrant.mockResolvedValue(undefined);
+
+    const { tripleWriteKnowledge } = await import("@/lib/triple-write");
+    await tripleWriteKnowledge("k1", "q", "a", "src", "u1", []);
+
+    const rows = degradeRows();
+    expect(rows).toHaveLength(1);
+    expect(JSON.parse(String(rows[0][1]![3]))).toMatchObject({
+      store: "neo4j",
+      reason: "not configured",
+    });
+  });
+
+  it("says nothing when both stores are configured and the writes land", async () => {
+    mockNeo.mockResolvedValue(undefined);
+    mockQdrant.mockResolvedValue(undefined);
+
+    const { tripleWriteKnowledge } = await import("@/lib/triple-write");
+    await tripleWriteKnowledge("k1", "q", "a", "src", "u1", []);
+
+    expect(degradeRows()).toHaveLength(0);
+  });
+
+  /* An unconfigured store fails on every write, so one event per write would
+     be tens of thousands of identical rows a day. That is a worse kind of
+     silence than none. */
+  it("reports the transition once, not once per write", async () => {
+    mockNeoConfigured.mockReturnValue(false);
+    mockNeo.mockResolvedValue(undefined);
+    mockQdrant.mockResolvedValue(undefined);
+
+    const { tripleWriteKnowledge } = await import("@/lib/triple-write");
+    for (let i = 0; i < 5; i++) {
+      await tripleWriteKnowledge(`k${i}`, "q", "a", "src", "u1", []);
+    }
+
+    expect(degradeRows()).toHaveLength(1);
+  });
+
+  it("reports each store separately", async () => {
+    mockNeoConfigured.mockReturnValue(false);
+    mockQdrantConfigured.mockReturnValue(false);
+    mockNeo.mockResolvedValue(undefined);
+    mockQdrant.mockResolvedValue(undefined);
+
+    const { tripleWriteKnowledge } = await import("@/lib/triple-write");
+    await tripleWriteKnowledge("k1", "q", "a", "src", "u1", []);
+
+    const stores = degradeRows().map((c) => JSON.parse(String(c[1]![3])).store).sort();
+    expect(stores).toEqual(["neo4j", "qdrant"]);
   });
 });
