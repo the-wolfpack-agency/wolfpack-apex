@@ -46,8 +46,47 @@ export const PROMPT_GUIDE: PromptGroup[] = [
   {
     goal: "See what is waiting on you",
     tool: "task_list_widget",
-    say: ["what is waiting on me", "what is on my plate", "anything overdue", "my open tasks"],
+    /* "how many open tasks do I have" reached no tool at all until 2026-08-28.
+       It went to the Brain and came back with a screenshot and two training
+       PDFs about flipcharting your daily tasks, while this tool was answering
+       "what should I work on today" correctly in the same session. A count is
+       a different sentence from a list request and had to be said out loud. */
+    say: [
+      "what is waiting on me",
+      "what is on my plate",
+      "anything overdue",
+      "my open tasks",
+      "how many open tasks do I have",
+    ],
     gives: "Your open items, oldest first.",
+  },
+  {
+    goal: "Find out who holds a role",
+    tool: "who_is",
+    /* "who runs engineering" reached nothing, went to a model, and was answered
+       "I cannot determine who runs engineering", citing two brand-ambassador
+       training PDFs. The roster it should have read names a CTO. A question
+       about our own org chart answered from a client's training slides is the
+       same shape that once put a client's staff forward as our sales team. */
+    say: ["who runs engineering", "who leads sales", "who is in charge of ops"],
+    gives:
+      "Whoever the roster records for that area, with their role. When nobody matches, the roles we do record, so you can ask again.",
+  },
+  {
+    goal: "Find out whether we hold anything on a subject",
+    tool: "search",
+    /* The question somebody asks before they trust the product with a real one.
+       "what documents do we have about pcna" got "I don't have a confident
+       answer" while the Brain held that client's entire SharePoint, and "do we
+       have anything on the porsche program" was claimed by the verified-facts
+       tool, which is nearly always empty, and answered as though nothing
+       existed. */
+    say: [
+      "what documents do we have about pcna",
+      "do we have anything on the porsche program",
+      "is there anything on the sow",
+    ],
+    gives: "Everything across the connected libraries, knowledge and records, with links.",
   },
   {
     goal: "Get ready for a meeting",

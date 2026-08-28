@@ -98,17 +98,67 @@ function matchWhoIsIntent(message: string): Params | null {
 const ROSTER_RE =
   /^\s*(?:who(?:'s|\s+is|\s+are)?\s+(?:on\s+(?:the|our|my)\s+team|here|we|us)|who\s+works\s+here|who\s+(?:do\s+we|does\s+the\s+team)\s+have(?:\s+in\s+(?<area>.{2,40}?))?|show\s+me\s+(?:the|our)\s+team|list\s+(?:the|our)\s+team)\s*[?.!]*\s*$/i;
 
+/**
+ * Who holds a role, which is a different question from who is on the team.
+ *
+ * THE MISS. Measured 2026-08-28 against the deployed assistant: "who runs
+ * engineering" reached no tool at all, went to a model, and came back "I cannot
+ * determine who runs engineering based on the information provided", citing two
+ * brand-ambassador training PDFs as its sources. The roster it should have read
+ * lists a CTO by name.
+ *
+ * That is the same failure the roster matcher above was written for, one shape
+ * further out. "Who is on the team" was fixed; "who runs engineering", which is
+ * how anybody actually asks about a specific function, was not. A question
+ * about our own org chart answered from a client's training slides is the exact
+ * shape that put a client's staff forward as our sales team.
+ *
+ * WHY IT MAPS TO THE SAME ANSWER. The roster carries a role per person, and
+ * listTeam already filters by it. "Engineering" is not literally "cto", so the
+ * filter is a fuzzy ILIKE and the answer names the roles it found rather than
+ * asserting a match: saying "here is who we have, with their roles" is true,
+ * and "Nick Homyk runs engineering" would be an inference from a job title.
+ *
+ * NOT ANCHORED ON A VERB LIST BY ACCIDENT. Runs, leads, heads, owns and manages
+ * are the five verbs; "who owns the Detroit account" is deliberately in reach
+ * and answers with the roster, which is better than the model inventing an
+ * owner. What is NOT in reach is a bare "who ...", which would swallow every
+ * question about a person and undo the tool this lives in.
+ */
+const ROLE_HOLDER_RE =
+  /^\s*who\s+(?:runs|leads|heads(?:\s+up)?|owns|manages|is\s+(?:in\s+charge\s+of|responsible\s+for)|is\s+(?:the|our)\s+head\s+of)\s+(?:the\s+|our\s+)?(?<area>.{2,40}?)\s*[?.!]*\s*$/i;
+
 export interface RosterQuestion {
   /** A role or area to filter by, when the question named one. */
   area?: string;
+  /**
+   * True when they asked who RUNS something rather than who is on the team.
+   *
+   * Carried so the answer can be phrased honestly. A role lookup that finds
+   * nobody must say the roster has no one recorded for that area, not "no one
+   * is on the team", and one that does find somebody is reporting a job title
+   * rather than confirming they run it.
+   */
+  byRole?: boolean;
 }
 
 /** Whether this is a roster question, and what it asked to narrow by. */
 export function matchRosterQuestion(message: string): RosterQuestion | null {
-  const m = ROSTER_RE.exec(message.trim());
-  if (!m) return null;
-  const area = m.groups?.area?.trim();
-  return area ? { area } : {};
+  const trimmed = message.trim();
+  const m = ROSTER_RE.exec(trimmed);
+  if (m) {
+    const area = m.groups?.area?.trim();
+    return area ? { area } : {};
+  }
+  /* "who runs engineering" is a roster question with a role attached, and it
+     is answered from the same table. Second so the whole-team shapes keep
+     priority: "who is on the team" must never be read as a role lookup. */
+  const role = ROLE_HOLDER_RE.exec(trimmed);
+  if (role) {
+    const area = role.groups?.area?.trim();
+    return area ? { area, byRole: true } : { byRole: true };
+  }
+  return null;
 }
 
 /**
@@ -172,6 +222,39 @@ export async function listTeam(
       area ? [`%${area}%`] : [],
     );
     return r.rows.filter((m) => !isAutomation(m));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * The roles the roster actually records, for when a lookup finds none.
+ *
+ * WHY AN EMPTY ANSWER IS NOT GOOD ENOUGH. "who runs engineering" filters the
+ * roster on a role ILIKE and finds nothing, because the roles recorded are cto,
+ * ceo, ops, vp, evp and cco. "No one has a role matching engineering" is true
+ * and leaves the person exactly where they started, holding a correct sentence
+ * they cannot act on, when the CTO they were asking about is one row away.
+ *
+ * Naming the roles that DO exist turns a dead end into a next question. It also
+ * stops short of the thing that would be wrong: inferring that whoever holds
+ * the CTO title runs engineering. That may be true here and is not ours to
+ * assert from a job title.
+ */
+export async function listRecordedRoles(): Promise<string[]> {
+  if (!process.env.DATABASE_URL) return [];
+  try {
+    const r = await safeQuery<{ role: string; name: string; email: string }>(
+      `SELECT DISTINCT role, name, '' AS email
+         FROM instinct_team_members
+        WHERE is_active = true AND role IS NOT NULL AND btrim(role) <> ''
+        ORDER BY role ASC
+        LIMIT 30`,
+    );
+    /* Automation accounts carry roles too, and listing "ci" as one of the
+       roles the team holds is the same embarrassment the roster filter exists
+       to prevent. */
+    return [...new Set(r.rows.filter((m) => !isAutomation(m)).map((m) => m.role.trim()))];
   } catch {
     return [];
   }
@@ -299,6 +382,21 @@ async function searchCrmContacts(
   }
 }
 
+/**
+ * What to say when a role lookup found nobody.
+ *
+ * Names the roles the roster does hold, so the reader has a next move rather
+ * than a correct dead end. Falls back to the bare sentence when the roster
+ * records no roles at all, because listing an empty set would be noise.
+ */
+async function roleMissAnswer(area: string): Promise<string> {
+  const roles = await listRecordedRoles();
+  if (roles.length === 0) {
+    return `No one on the team has a role matching "${area}". You can see everyone at /people.`;
+  }
+  return `No one on the roster has a role recorded as "${area}". The roles we do record are: ${roles.join(", ")}. Everyone is listed at /people.`;
+}
+
 export const whoIsTool: ToolDef<Params, WhoIsResult> = {
   name: "who_is",
   description:
@@ -327,7 +425,7 @@ export const whoIsTool: ToolDef<Params, WhoIsResult> = {
           team.length > 0
             ? renderRoster(team, area || undefined)
             : area
-              ? `No one on the team has a role matching "${area}". You can see everyone at /people.`
+              ? await roleMissAnswer(area)
               : "The team roster is empty. People are added at /people.",
       };
     }

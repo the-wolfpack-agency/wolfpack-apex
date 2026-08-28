@@ -106,6 +106,34 @@ function matchDmsIntent(message: string): Params | null {
   ) {
     return null;
   }
+  /* A QUESTION ABOUT DOCUMENTS IS NOT A QUESTION ABOUT CARS.
+   *
+   * "do we have anything on the porsche program" contains a make and two of
+   * the dealership verbs above ("have", "any"), so this tool claimed it.
+   * Measured 2026-08-28: it was one of two claimants on a question whose
+   * answer was the client's entire SharePoint.
+   *
+   * The tell is the preposition. Inventory questions put the make in the
+   * object position: "do we have any Porsches", "any Porsche in stock". A
+   * document question puts a topic after on/about/regarding, and the make is
+   * part of that topic rather than a thing on the forecourt.
+   *
+   * Same shape and same reasoning as the broken-page guard above: the moment
+   * somebody asks what we hold about their programme is the moment a list of
+   * cars is most obviously wrong.
+   *
+   * The noun and the preposition are allowed up to 30 characters apart,
+   * because English puts the verb between them: "what DOCUMENTS do we have
+   * ABOUT porsche". Written first as an adjacent pair, which caught "anything
+   * on X" and missed that one entirely. Bounded so it cannot span a sentence,
+   * and stopped at ., ? and ! for the same reason. */
+  if (
+    /\b(?:documents?|docs?|files?|records?|info(?:rmation)?|anything)\b[^.?!]{0,30}?\b(?:on|about|regarding)\b/i.test(
+      trimmed,
+    )
+  ) {
+    return null;
+  }
   /* Tighten: also require a "search-y" verb so casual mentions
    * ("I drive a Toyota") don't fire the tool. */
   if (!/\b(show|find|search|look\s+up|list|browse|any|got|have|inventory|stock|dms|how\s+many|available)\b/i.test(trimmed)) {

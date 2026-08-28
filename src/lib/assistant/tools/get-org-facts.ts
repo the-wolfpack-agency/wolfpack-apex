@@ -48,7 +48,17 @@ const INTENT_PATTERNS: RegExp[] = [
   /\btell\s+me\s+about\s+(.{2,80}?)\??$/i,
   /\bwhat\s+(?:are|is)\s+the\s+facts?\s+(?:on|about|for)\s+(.{2,80}?)\??$/i,
   /\bwhat'?s\s+known\s+about\s+(.{2,80}?)\??$/i,
-  /\bdo\s+we\s+have\s+anything\s+on\s+(.{2,80}?)\??$/i,
+  /* "do we have anything on X" USED TO BE HERE, and it was the wrong question
+     for this tool. This reads instinct_org_facts, which holds facts somebody
+     verified by hand and is empty for almost every subject. Measured
+     2026-08-28: "do we have anything on the porsche program" was claimed here
+     and answered "I don't have any verified facts about the porsche program
+     yet", while the Brain held the client's entire SharePoint on it.
+
+     "What do we know about X" is a question about what we have established.
+     "Do we have anything on X" is a question about whether anything exists at
+     all, and the honest place to answer it is search, which can see the
+     documents. The split is the words people chose, not a technicality. */
 ];
 
 function matchOrgFactsIntent(message: string): Params | null {

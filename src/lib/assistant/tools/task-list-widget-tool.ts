@@ -73,6 +73,20 @@ const INTENT_RE = new RegExp(
     `\\bmy\\s+open\\s+(?:tasks|items|work)\\b`,
     `\\bwhat\\s+am\\s+i\\s+supposed\\s+to\\s+be\\s+doing\\b`,
     `\\bwhat\\s+(?:should|do)\\s+i\\s+(?:need\\s+to\\s+)?(?:do|work\\s+on)\\s+(?:today|next)\\b`,
+    /* THE COUNT QUESTION, which is a different sentence from the list request
+       and reached nothing at all. Measured 2026-08-28: "how many open tasks do
+       I have" matched no tool, went to the Brain, and came back with a
+       screenshot and two brand-ambassador training PDFs about flipcharting
+       your daily tasks. The tool had answered "You have no open tasks. Nice."
+       to "what should I work on today" moments earlier, so the capability was
+       there and only the phrasing missed.
+
+       Anchored on the task nouns, not on "how many". "How many invoices do I
+       have" and "how many people are on the team" are real questions belonging
+       to other tools, and a task list answering them would be the same
+       trespass the warranty case was. */
+    `\\bhow\\s+many\\s+(?:open\\s+|outstanding\\s+|overdue\\s+)?(?:tasks?|to-?dos?|items?)\\s+(?:do|have)\\s+i\\s+(?:have|got)\\b`,
+    `\\bhow\\s+many\\s+(?:tasks?|to-?dos?)\\s+(?:are|am\\s+i)\\s+(?:open|outstanding|overdue|left)\\b`,
   ].join("|"),
   "i",
 );

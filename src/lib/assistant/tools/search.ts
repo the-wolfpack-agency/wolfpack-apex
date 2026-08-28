@@ -116,6 +116,35 @@ const DOCUMENT_QUESTION_RE = new RegExp(
     String.raw`^\s*(?:what|whats|what's)\s+(?:is\s+)?in\s+(?:the\s+|our\s+|my\s+|this\s+)?(?<inSubject>.+?)(?:\s+about\s+(?<inAbout>.+?))?\s*[?.!]*\s*$`,
     /* "summarize the SOW" */
     String.raw`^\s*summari[sz]e\s+(?:the\s+|our\s+|my\s+|this\s+)?(?<sumSubject>.+?)\s*[?.!]*\s*$`,
+    /* DO WE HOLD ANYTHING ABOUT THIS. The question somebody asks before they
+       trust the product with a real one, and it reached nothing.
+
+       Measured 2026-08-28 against the deployed assistant: "what documents do
+       we have about pcna" got "I don't have a confident answer for that",
+       while the Brain held that client's entire SharePoint. "Do we have
+       anything on the porsche program" was claimed by the verified-facts tool
+       and answered "I don't have any verified facts about the porsche program
+       yet", which reads as an empty product to somebody whose documents are
+       all in there.
+
+       Both are existence questions, and search is the only thing that can
+       answer one honestly, because it is the only thing that can see
+       everything. */
+    String.raw`^\s*(?:what|which)\s+(?:documents?|docs?|files?|records?|papers?)\s+(?:do|does)\s+(?:we|i|the\s+team)\s+have\s+(?:on|about|for|regarding)\s+(?<haveAbout>.+?)\s*[?.!]*\s*$`,
+    String.raw`^\s*do\s+(?:we|i)\s+have\s+(?:anything|any\s+(?:documents?|docs?|files?|records?|info(?:rmation)?))\s+(?:on|about|for|regarding)\s+(?<anythingAbout>.+?)\s*[?.!]*\s*$`,
+    /* "is there anything on X", the same question phrased impersonally. */
+    String.raw`^\s*is\s+there\s+(?:anything|any\s+(?:documents?|docs?|files?|info(?:rmation)?))\s+(?:on|about|for|regarding)\s+(?<thereAbout>.+?)\s*[?.!]*\s*$`,
+    /* THE POLICY QUESTION. "find the pto policy" reached search and "whats our
+       policy on pto" reached nothing, which is the wrong way round: the second
+       is how anybody actually asks. An internal OS holding HR documents is
+       asked this constantly, and it was answered by a model reading whatever
+       it had nearest.
+
+       Both orders, because people say "our policy on X" and "our X policy"
+       interchangeably. The topic is the search term either way; "policy" is
+       kept in the query because the document is usually called one. */
+    String.raw`^\s*(?:what(?:'?s| is| are)?|where(?:'?s| is)?)\s+(?:the\s+|our\s+|my\s+)?polic(?:y|ies)\s+(?:on|about|for|regarding)\s+(?<policyOn>.+?)\s*[?.!]*\s*$`,
+    String.raw`^\s*(?:what(?:'?s| is| are)?|where(?:'?s| is)?)\s+(?:the\s+|our\s+|my\s+)?(?<policyFor>.+?)\s+polic(?:y|ies)\s*[?.!]*\s*$`,
   ].join("|"),
   "i",
 );
@@ -148,6 +177,27 @@ export function matchDocumentQuestion(message: string): string | null {
   const m = DOCUMENT_QUESTION_RE.exec(message.trim());
   if (!m) return null;
   const g = (m.groups ?? {}) as Record<string, string | undefined>;
+
+  /* The existence shapes carry their topic in a single group and have no
+     subject to combine it with: "do we have anything on the porsche program"
+     is asking about the topic, full stop. Handled before the subject/about
+     pairing below rather than folded into it, because the container rule does
+     not apply. Somebody asking "do we have anything on SharePoint" means the
+     product, and searching for it is the right thing to do. */
+  const existence = (g.haveAbout ?? g.anythingAbout ?? g.thereAbout ?? "").trim();
+  if (existence) {
+    if (/^(it|this|that|they|these|those)$/i.test(existence)) return null;
+    return existence;
+  }
+
+  /* A policy question searches for the topic AND the word policy, because the
+     document is nearly always called one and the topic alone returns every
+     mention of it. */
+  const policy = (g.policyOn ?? g.policyFor ?? "").trim();
+  if (policy) {
+    if (/^(it|this|that|they|these|those)$/i.test(policy)) return null;
+    return `${policy} policy`;
+  }
 
   const subject = (g.saySubject ?? g.inSubject ?? g.sumSubject ?? "").trim();
   if (!subject) return null;
@@ -252,6 +302,82 @@ function specificToolClaims(message: string): boolean {
   return false;
 }
 
+/**
+ * A single unfamiliar word, typed alone.
+ *
+ * "wolfpackxpcna" was typed 13 times in sixty days and answered nothing every
+ * time. It is the name of the client's own SharePoint site. Somebody typing
+ * only that is asking us to look it up, and the product's answer was "I don't
+ * have a confident answer for that", thirteen times, to a person who was
+ * telling us exactly what they wanted.
+ *
+ * WHY THIS IS NARROW AND STAYS NARROW. A rule that searched every bare word
+ * would search "hello", "thanks" and "ok", which is a worse product than one
+ * that says nothing. So it requires a single token of at least eight
+ * characters with no spaces, which no greeting or acknowledgement reaches, and
+ * an explicit list for the few long ones that exist. Names, site names, project
+ * codes and file stems clear the bar; conversation does not.
+ *
+ * LAST RESORT BY CONSTRUCTION. Reached only after every other shape in this
+ * file has declined, and search is the tool of last resort anyway: a miss
+ * returns "no results for X", which is a true sentence somebody can act on,
+ * and is what should have been said thirteen times.
+ */
+/**
+ * Single words the product itself owns.
+ *
+ * "briefing" is eight characters, so it cleared the length bar and search
+ * became a second claimant on a word the morning panel already answers.
+ * Nobody typing one of these alone wants a document search; they want the
+ * feature. Listed rather than inferred, because the alternative is asking
+ * every tool whether it claims the message, and a search tool that consults
+ * the whole registry to decide is the kind of coupling that makes a routing
+ * change unpredictable.
+ *
+ * Only words of eight characters or more need to be here. Anything shorter
+ * never reaches this check.
+ */
+const PRODUCT_NOUN_SINGLE_WORD =
+  /^(?:briefing|calendar|dashboard|inventory|knowledge|integrations|settings|analytics|financials|documents|meetings|contacts|reminders|notifications)$/i;
+
+const CONVERSATIONAL_SINGLE_WORD =
+  /^(?:hello+|hey+|thanks?|thankyou|cheers|morning|afternoon|evening|goodbye|whatever|anything|everything|something|nothing|nevermind|understood|acknowledged|interesting|excellent|perfect|awesome|brilliant|continue|proceed|nonsense|seriously|honestly|obviously|apparently|basically|actually)$/i;
+
+export function bareIdentifierQuery(message: string): Params | null {
+  const t = message.trim().replace(/[?.!,]+$/, "");
+  /* One token. A space means it is a sentence, and sentences are handled by
+     every shape above this one. */
+  if (/\s/.test(t)) return null;
+  if (t.length < 8 || t.length > 60) return null;
+  /* Letters, digits and the separators that appear in site names and file
+     stems. A token with punctuation beyond these is not something to search
+     for. */
+  if (!/^[a-z0-9][a-z0-9._-]*$/i.test(t)) return null;
+  if (CONVERSATIONAL_SINGLE_WORD.test(t)) return null;
+  if (PRODUCT_NOUN_SINGLE_WORD.test(t)) return null;
+  /* AN OPAQUE RECORD ID IS NOT A SEARCH TERM.
+     "003g500000GemUXAAZ" is a Salesforce id and belongs to get_external_record.
+     The guard that already existed for this sits inside the "find X" branch
+     and only covers 3 to 12 characters, so an 18-character id walked straight
+     into this one: the first version of this function claimed it, and the
+     search suite caught it.
+     
+     The tell is INTERLEAVING. An opaque id alternates digits and letters
+     throughout ("003g500000GemUXAAZ", "a1b2c3d4e5f6g7"); a name written by a
+     person puts its digits at the end if it has any ("porschecenter2026") or
+     has a separator ("BA101_Day1", "20250814_FXa1584").
+
+     Written first as "contains a digit at all", which rejected
+     porschecenter2026: a perfectly ordinary site name, and exactly the kind of
+     thing this function exists to look up. A digit followed by a letter is the
+     narrower test and keeps it. */
+  if (t.length >= 12 && !/[._-]/.test(t) && /\d[a-z]/i.test(t)) return null;
+  /* An email address belongs to the CRM and people shapes, which run first;
+     this is a backstop so a stray one never lands here. */
+  if (t.includes("@")) return null;
+  return { query: t };
+}
+
 function matchSearchIntent(message: string): Params | null {
   const trimmed = (message ?? "").trim();
   if (!trimmed) return null;
@@ -267,7 +393,7 @@ function matchSearchIntent(message: string): Params | null {
   if (asked && !specificToolClaims(trimmed)) return { query: asked };
 
   const m = INTENT_RE.exec(trimmed);
-  if (!m) return null;
+  if (!m) return bareIdentifierQuery(trimmed);
   const query = m[1].trim().replace(/[?.!,]+$/g, "").trim();
   if (!query) return null;
   /* Reject queries that look like a CRM ID lookup — these still get
