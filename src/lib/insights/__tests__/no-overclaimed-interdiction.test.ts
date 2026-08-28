@@ -39,11 +39,25 @@ describe("flagged answers are never described as withheld", () => {
     expect(router).toMatch(/Recorded rather than blocked/);
   });
 
-  it("the insights tile does not claim the answer was withheld", () => {
-    const page = read("src/app/(dashboard)/admin/insights/page.tsx");
-    const tile = page.match(/\["capability-flagged",\s*"([^"]+)"/);
+  /* FOLLOWED THE TILE TO THE CLIENT DASHBOARD. The capability figures moved
+     from /admin/insights to /pilot when the two pages were split by audience,
+     and this assertion moved with them: the wording matters most on the page a
+     client actually reads, which is now /pilot. */
+  it("the client dashboard tile does not claim the answer was withheld", () => {
+    const page = read("src/app/(dashboard)/pilot/page.tsx");
+    const tile = page.match(/label="([^"]*flagged[^"]*)"/i);
     expect(tile).not.toBeNull();
     expect(tile![1]).not.toMatch(INTERDICTION);
+  });
+
+  /* The note beside it is read as part of the claim, so it is held to the same
+     rule. "Recorded and delivered, not blocked" is the honest description and
+     must not drift into an interdiction verb. */
+  it("the note beside the tile does not promise an interception", () => {
+    const page = read("src/app/(dashboard)/pilot/page.tsx");
+    const block = page.slice(page.indexOf("pilot-cap-flagged") - 700, page.indexOf("pilot-cap-flagged"));
+    const note = block.match(/note="([^"]+)"/g)?.pop() ?? "";
+    expect(note).not.toMatch(INTERDICTION);
   });
 
   it("the snapshot detail does not claim the answer was withheld", () => {
