@@ -328,9 +328,74 @@ const COUNT_LABELS: Record<string, [singular: string, plural: string]> = {
  * Listing only non-empty buckets fixes both. A new provider appears in the
  * sentence as soon as it returns anything.
  */
-function summaryAnswer(query: string, body: SearchResponse): string {
+
+/**
+ * Words too common to narrow anything, and too common to be the typo.
+ *
+ * Kept short deliberately. A long stop-list starts removing the words that
+ * carried the meaning.
+ */
+const NOISE_WORDS = new Set([
+  "the", "a", "an", "our", "my", "your", "this", "that", "these", "those",
+  "of", "for", "about", "on", "in", "at", "to", "and", "or", "with", "from",
+  "is", "are", "was", "were", "be", "please", "show", "me", "find", "get",
+]);
+
+/**
+ * A second attempt when the exact phrase found nothing.
+ *
+ * WHY THIS EXISTS, and it is the clearest evidence in the product. Measured on
+ * production over 60 days: 130 answers were dead ends, and 36 of them were the
+ * same query, "coaching calls spreasheet". One person, one typo, thirty-six
+ * attempts, nothing back every time. They were not told the file might be
+ * there under a slightly different name. They were told nothing was found, and
+ * eventually they stopped asking.
+ *
+ * A search engine that only matches what was typed puts the burden of spelling
+ * on the person asking. Dropping the least common word is a cheap way to lift
+ * it: "coaching calls spreasheet" retried as "coaching calls" finds the thing,
+ * and the answer can say what it looked for instead.
+ *
+ * LONGEST WORD FIRST, because a misspelling is usually the longest and most
+ * specific token in a phrase. "spreasheet" goes before "calls", so the retry
+ * keeps the words most likely to be right.
+ */
+export function relaxQuery(query: string): string | null {
+  const words = query
+    .split(/\s+/)
+    .map((w) => w.replace(/[^\p{L}\p{N}'-]/gu, ""))
+    .filter(Boolean);
+
+  const meaningful = words.filter((w) => !NOISE_WORDS.has(w.toLowerCase()));
+  /* One meaningful word cannot be relaxed: dropping it leaves nothing to
+     search for, and a search for the noise words would match everything. */
+  if (meaningful.length < 2) return null;
+
+  const longest = meaningful.reduce((a, b) => (b.length > a.length ? b : a));
+  const kept = meaningful.filter((w) => w !== longest);
+  return kept.length > 0 ? kept.join(" ") : null;
+}
+
+function summaryAnswer(query: string, body: SearchResponse, relaxedFrom?: string): string {
   const total = body.results.length;
   if (total === 0) return `No results found for "${query}".`;
+
+  /* SAY WHAT IT ACTUALLY LOOKED FOR. A person who typed one thing and is shown
+     results for another will not trust either, and the difference is usually
+     the word they misspelled. */
+  if (relaxedFrom) {
+    const parts: string[] = [];
+    for (const [key, n] of Object.entries(body.counts)) {
+      if (!n) continue;
+      const label = COUNT_LABELS[key];
+      parts.push(`${n} ${label ? (n === 1 ? label[0] : label[1]) : key}`);
+    }
+    const breakdown = parts.length > 0 ? `: ${parts.join(", ")}` : "";
+    return (
+      `I could not find "${relaxedFrom}", so I looked for "${query}" instead ` +
+      `and found ${total} result${total === 1 ? "" : "s"}${breakdown}.`
+    );
+  }
 
   const parts: string[] = [];
   for (const [key, n] of Object.entries(body.counts)) {
@@ -397,11 +462,41 @@ export const searchTool: ToolDef<Params, SearchResponse> = {
         ...(params.types ? { types: params.types } : {}),
         ...(typeof params.limit === "number" ? { limit: params.limit } : {}),
       };
-      const body = await runSearch(runParams, {
+      const searchCtx = {
         userId: ctx.userId,
         ...(ctx.workspaceId ? { workspaceId: ctx.workspaceId } : {}),
         ...(ctx.workflowId ? { workflowId: ctx.workflowId } : {}),
-      });
+      };
+      let body = await runSearch(runParams, searchCtx);
+
+      /* A SECOND ATTEMPT BEFORE GIVING UP.
+       *
+       * Measured on production over 60 days: 130 answers were dead ends, and
+       * 36 of them were one query, "coaching calls spreasheet". One person,
+       * one typo, thirty-six attempts, nothing back every time. They were
+       * never told the file might be there under a slightly different name.
+       *
+       * Retrying without the least likely word costs one query on the rare
+       * path where the first found nothing, and turns the commonest dead end
+       * in the product into an answer. */
+      let relaxedFrom: string | undefined;
+      if (body.results.length === 0) {
+        const relaxed = relaxQuery(params.query);
+        if (relaxed) {
+          const second = await runSearch({ ...runParams, query: relaxed }, searchCtx);
+          if (second.results.length > 0) {
+            relaxedFrom = params.query;
+            runParams.query = relaxed;
+            body = second;
+            trackEvent("assistant.search_relaxed", ctx.userId, ctx.userRole, {
+              original_length: params.query.length,
+              relaxed_length: relaxed.length,
+              results: second.results.length,
+              ...(ctx.workflowId ? { workflow_id: ctx.workflowId } : {}),
+            });
+          }
+        }
+      }
 
       const typesLabel = (params.types ?? [
         "chat",
@@ -438,7 +533,7 @@ export const searchTool: ToolDef<Params, SearchResponse> = {
       return {
         ok: true,
         data: body,
-        answer: summaryAnswer(params.query, body),
+        answer: summaryAnswer(runParams.query, body, relaxedFrom),
         sources: buildSources(body),
         /* Inline interactive surface: the SearchResultsWidget renders
          *  the per-source filter checkboxes + result rows in chat so
