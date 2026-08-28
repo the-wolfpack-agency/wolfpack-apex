@@ -31,7 +31,35 @@ export interface WelcomePrompt {
   label?: string;
   /** One-line hover description rendered as a tooltip / explainer. */
   description: string;
+  /**
+   * What has to be connected for this prompt to answer.
+   *
+   * The comment on the GitHub chips below already had the right instinct:
+   * "chips that 400 on click are a worse first impression than chips that
+   * don't exist". It was applied by hardcoding a role, which cannot know
+   * whether a source is actually reachable today.
+   *
+   * Measured on production: "financials are not connected yet, so there is no
+   * figure to read" was answered six times in sixty days. Every one of those
+   * was somebody following a suggestion into a wall.
+   *
+   * Omitted means the prompt always works: it reads something local, or asks
+   * the assistant about itself.
+   */
+  requires?: PromptRequirement;
 }
+
+/**
+ * Sources a prompt can depend on.
+ *
+ * Deliberately coarse. A finer list would need a finer availability check, and
+ * a suggestion filtered by a signal we cannot read is a suggestion we have
+ * guessed about.
+ */
+export type PromptRequirement = "calendar" | "mail" | "documents" | "tasks";
+
+/** What is actually reachable right now, for filtering suggestions. */
+export type AvailableSources = Partial<Record<PromptRequirement, boolean>>;
 
 /* Generic kit used when role is unknown OR role is anything other
  * than `dev`. Non-dev users (the bulk of the team) get the same
@@ -48,11 +76,13 @@ const GENERIC_KIT: WelcomePrompt[] = [
     text: "what's on my calendar today",
     label: "today's calendar",
     description: "Your meetings and events for today.",
+    requires: "calendar",
   },
   {
     text: "show me my recent emails",
     label: "inbox",
     description: "Recent unread + flagged emails.",
+    requires: "mail",
   },
   {
     /* Free zero-token capability so a brand-new user with no
@@ -83,6 +113,7 @@ const ROLE_KITS: Record<string, WelcomePrompt[]> = {
     {
       text: "what is on my calendar this week",
       description: "Week-at-a-glance for the schedule.",
+      requires: "calendar",
     },
     {
       text: "what's our MRR",
@@ -106,11 +137,13 @@ const ROLE_KITS: Record<string, WelcomePrompt[]> = {
       text: "what's on my calendar today",
       label: "today's calendar",
       description: "Your meetings and events for today.",
+      requires: "calendar",
     },
     {
       text: "show me my recent emails",
       label: "inbox",
       description: "Recent unread + flagged emails.",
+      requires: "mail",
     },
     {
       text: "what's our MRR",
@@ -119,6 +152,7 @@ const ROLE_KITS: Record<string, WelcomePrompt[]> = {
     {
       text: "upload to brain",
       description: "Drop a file into your Brain so the Assistant can cite it later.",
+      requires: "documents",
     },
   ],
   vp: [
@@ -129,10 +163,12 @@ const ROLE_KITS: Record<string, WelcomePrompt[]> = {
     {
       text: "am I free Thursday at 2pm",
       description: "Quick availability check before booking a call.",
+      requires: "calendar",
     },
     {
       text: "find emails about pricing",
       description: "Pull a recent thread by topic. Swap in any subject you care about.",
+      requires: "mail",
     },
     {
       text: "deals over $50k closing this month",
@@ -177,10 +213,12 @@ const ROLE_KITS: Record<string, WelcomePrompt[]> = {
     {
       text: "find emails about pricing",
       description: "Pull a recent thread by topic; swap in any subject you care about.",
+      requires: "mail",
     },
     {
       text: "upload to brain",
       description: "Drop a brief, deck, or reference into your Brain.",
+      requires: "documents",
     },
     {
       text: "search Q2 planning",
@@ -208,6 +246,7 @@ const ROLE_KITS: Record<string, WelcomePrompt[]> = {
     {
       text: "upload to brain",
       description: "Drop a doc into your Brain so the Assistant can cite it later.",
+      requires: "documents",
     },
     {
       text: "open issues in wolfpack-instinct",
@@ -226,6 +265,7 @@ const ROLE_KITS: Record<string, WelcomePrompt[]> = {
     {
       text: "find emails about pricing",
       description: "Pull a recent thread by topic. Swap in any subject you care about.",
+      requires: "mail",
     },
     {
       text: "deals over $50k closing this month",
@@ -278,6 +318,7 @@ const ROLE_KITS: Record<string, WelcomePrompt[]> = {
     {
       text: "upload to brain",
       description: "Drop an HR policy or doc into your Brain so the Assistant can cite it.",
+      requires: "documents",
     },
   ],
 };
@@ -301,4 +342,58 @@ export function welcomePromptsForRole(role: string | undefined | null): WelcomeP
  */
 export function welcomePromptTextsForRole(role: string | undefined | null): string[] {
   return welcomePromptsForRole(role).map((p) => p.text);
+}
+
+/**
+ * Suggestions filtered to what will actually answer.
+ *
+ * WHY THIS IS NOT JUST welcomePromptsForRole. That picks by role, which is a
+ * guess about what somebody wants. This removes what cannot work, which is a
+ * fact about the system, and the two are different questions.
+ *
+ * Measured on production over sixty days: "financials are not connected yet,
+ * so there is no figure to read" was answered six times. Every one of those
+ * was somebody following a suggestion into a wall. A chip that dead-ends
+ * teaches a new user that the product does not work, on their first try, which
+ * is the most expensive moment to teach them that.
+ *
+ * UNKNOWN IS NOT UNAVAILABLE. A source we could not read is left in. Hiding a
+ * capability because a status check timed out would quietly shrink the product
+ * every time something was briefly slow, and a user who never sees a feature
+ * cannot ask for it. Only an explicit false removes a prompt.
+ *
+ * NEVER RETURNS NOTHING. If filtering would empty the list, the unconditional
+ * prompts are returned instead. An empty starter screen is a worse first
+ * impression than one that offers something general, and somebody with no
+ * integrations connected still deserves a way in.
+ */
+export function welcomePromptsFor(
+  role: string | undefined | null,
+  available: AvailableSources = {},
+): WelcomePrompt[] {
+  const kit = welcomePromptsForRole(role);
+
+  const usable = kit.filter((p) => {
+    if (!p.requires) return true;
+    /* Explicit false only. undefined means "we did not check" or "we could not
+       tell", and neither is a reason to hide a capability. */
+    return available[p.requires] !== false;
+  });
+
+  if (usable.length > 0) return usable;
+  return kit.filter((p) => !p.requires);
+}
+
+/**
+ * The plain strings, filtered the same way.
+ *
+ * Used by the server-side fallback path, which offers somewhere to go next
+ * when an answer came back thin. Suggesting a dead end at exactly that moment
+ * is the worst possible time to do it.
+ */
+export function welcomePromptTextsFor(
+  role: string | undefined | null,
+  available: AvailableSources = {},
+): string[] {
+  return welcomePromptsFor(role, available).map((p) => p.text);
 }
