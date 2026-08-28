@@ -38,6 +38,7 @@
  */
 
 import { isTargetVerified } from "../authorization";
+import { establishSession } from "../session";
 import { discoverRoutes, crawlRoutes } from "../discover";
 import { scanPlatform } from "../engine";
 import { recordScan } from "../store";
@@ -48,6 +49,18 @@ import type { ScanRouteSpec } from "../types";
 export interface ClientAssessmentResult {
   platform: string;
   baseUrl: string;
+  /**
+   * Whether the run carried a session.
+   *
+   * The single most important field for reading the rest. An unauthenticated
+   * run sees the front door; an authenticated one sees the building. Two
+   * reports with the same finding count mean entirely different things
+   * depending on this, and a reader who cannot tell them apart will
+   * misjudge both.
+   */
+  authenticated: boolean;
+  /** Set when a login was attempted and did not work. */
+  loginFailed?: string;
   /** Set when nothing was assessed, naming the reason in the client's terms. */
   refused?: string;
   /** Surfaces found, and how they were found. */
@@ -55,6 +68,17 @@ export interface ClientAssessmentResult {
   discoveredVia: "sitemap" | "crawl" | "none";
   findingCount: number;
   criticalCount: number;
+  /**
+   * Routes that answered only once we were signed in.
+   *
+   * The interesting half of a recon. A page that redirects to login when
+   * anonymous and returns content when authenticated is a surface that exists
+   * and was invisible from outside, which is exactly what an engagement needs
+   * mapped before anybody plans work against it.
+   */
+  internalSurfaces: number;
+  /** Routes that answered without a session at all. */
+  externalSurfaces: number;
   /**
    * The honest boundary of this run.
    *
@@ -77,15 +101,33 @@ const REFUSED = (
   platform,
   baseUrl,
   refused,
+  authenticated: false,
   routesDiscovered: 0,
   discoveredVia: "none",
   findingCount: 0,
   criticalCount: 0,
+  internalSurfaces: 0,
+  externalSurfaces: 0,
   notAssessed: [],
 });
 
+/**
+ * Credentials the client granted, for mapping what is behind the login.
+ *
+ * OPTIONAL, AND ABSENT IS A VALID ASSESSMENT. A first pass usually runs
+ * anonymously, and pretending otherwise would push operators to ask for
+ * credentials before there is any reason to trust us with them.
+ */
+export interface GrantedAccess {
+  loginPath: string;
+  username: string;
+  password: string;
+  sessionCookieName?: string;
+}
+
 export interface ClientAssessmentDeps {
   isVerified?: typeof isTargetVerified;
+  login?: typeof establishSession;
   discover?: typeof discoverRoutes;
   crawl?: typeof crawlRoutes;
   scan?: typeof scanPlatform;
@@ -97,10 +139,13 @@ export async function runClientAssessment(
     platform: string;
     baseUrl: string;
     actor: { userId: string; role: string };
+    /** Credentials the client granted. Omitted means an anonymous pass. */
+    access?: GrantedAccess;
   },
   deps: ClientAssessmentDeps = {},
 ): Promise<ClientAssessmentResult> {
   const isVerified = deps.isVerified ?? isTargetVerified;
+  const login = deps.login ?? establishSession;
   const discover = deps.discover ?? discoverRoutes;
   const crawl = deps.crawl ?? crawlRoutes;
   const scan = deps.scan ?? scanPlatform;
@@ -156,17 +201,79 @@ export async function runClientAssessment(
 
   const limited = routes.slice(0, MAX_ROUTES);
 
-  const result = await scan({
-    workspaceId,
-    platform,
-    baseUrl,
-    routes: limited,
-  });
+  /* THE KEYS, IF WE WERE GIVEN ANY.
+   *
+   * An anonymous scan sees the front door. Signing in is what turns a scan
+   * into a recon: a page that redirects to login when anonymous and returns
+   * content when authenticated is a surface that exists and was invisible from
+   * outside, which is exactly what has to be mapped before anybody plans work
+   * against it.
+   *
+   * A login that fails does NOT abort the run. The anonymous findings are
+   * still worth having, and an assessment that returns nothing because a
+   * password was wrong is an assessment nobody will run twice. It is reported
+   * instead, so the reader knows which of the two reports they are holding. */
+  let sessionCookie: string | null = null;
+  let loginFailed: string | undefined;
+
+  if (input.access) {
+    try {
+      const session = await login({
+        baseUrl,
+        loginPath: input.access.loginPath,
+        username: input.access.username,
+        password: input.access.password,
+        ...(input.access.sessionCookieName
+          ? { sessionCookieName: input.access.sessionCookieName }
+          : {}),
+      });
+      if (session?.cookie) sessionCookie = session.cookie;
+      else loginFailed = "The credentials were not accepted, so only public pages were assessed.";
+    } catch {
+      loginFailed = "The sign-in attempt failed, so only public pages were assessed.";
+    }
+  }
+
+  /* ALWAYS THE ANONYMOUS PASS FIRST, even when we hold credentials.
+   *
+   * It is the only way to learn which surfaces are actually protected. A
+   * single authenticated crawl cannot tell a page that is public from one that
+   * is correctly gated, and "which of these is reachable without signing in"
+   * is the first question a security review asks. */
+  const external = await scan({ workspaceId, platform, baseUrl, routes: limited });
+
+  /* okCount is the scanner's own tally of routes that answered with content
+     rather than a redirect to a login. Reusing it rather than re-deriving one
+     means this cannot disagree with what the scan recorded. */
+  const externalSurfaces = external.okCount;
+
+  let result = external;
+  let internalSurfaces = 0;
+
+  if (sessionCookie) {
+    /* authenticated:true flips the scanner's semantics. Anonymously a bounce
+       to login is correct enforcement; with a session it is the session not
+       being honoured, which is a bug rather than a control. */
+    const internal = await scan({
+      workspaceId,
+      platform,
+      baseUrl,
+      routes: limited,
+      headers: { Cookie: sessionCookie },
+      authenticated: true,
+    });
+
+    const reachableInternally = internal.okCount;
+    /* The surfaces that only exist once signed in. Not the total: a page
+       reachable both ways was never hidden. */
+    internalSurfaces = Math.max(0, reachableInternally - externalSurfaces);
+    result = internal;
+  }
 
   /* recordScan is the one place a scan becomes durable: it dedupes,
      auto-resolves what is now fixed, alerts on critical and feeds the learning
-     loop. It also returns the counts, so there is no second query and no
-     chance of this function disagreeing with the stored record. */
+     loop. The authenticated pass is the one persisted when there was one,
+     because it is the fuller picture. */
   const recorded = await recordScan({
     workspaceId,
     actorId: input.actor.userId,
@@ -175,11 +282,18 @@ export async function runClientAssessment(
   }).catch(() => null);
 
   /* SAID OUT LOUD, in the reader's terms rather than ours. */
-  const notAssessed: string[] = [
-    "Anything behind a login. This run carried no session, so pages that require sign-in were seen only as redirects.",
+  const notAssessed: string[] = [];
+  if (!sessionCookie) {
+    notAssessed.push(
+      "Anything behind a login. This run carried no session, so pages that require sign-in were seen only as redirects.",
+    );
+  }
+  notAssessed.push(
     "The application's own code. Source-level review needs repository access and models things a surface scan cannot reach, such as how data is stored and which permissions guard it.",
-    "Integrations and background jobs, which leave no trace on a public page.",
-  ];
+  );
+  notAssessed.push(
+    "Integrations and background jobs, which leave no trace on a page.",
+  );
   if (routes.length > MAX_ROUTES) {
     notAssessed.push(
       `${routes.length - MAX_ROUTES} further pages were found and not scanned in this first pass.`,
@@ -204,6 +318,10 @@ export async function runClientAssessment(
   return {
     platform,
     baseUrl,
+    authenticated: sessionCookie !== null,
+    ...(loginFailed ? { loginFailed } : {}),
+    internalSurfaces,
+    externalSurfaces,
     routesDiscovered: limited.length,
     discoveredVia,
     findingCount: recorded?.findingCount ?? result.findings.length,
