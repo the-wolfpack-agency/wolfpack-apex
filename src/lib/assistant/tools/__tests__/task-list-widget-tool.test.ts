@@ -12,6 +12,14 @@ jest.mock("@/lib/analytics", () => ({
   trackEvent: (...a: unknown[]) => mockTrackEvent(...a),
 }));
 jest.mock("@/lib/db", () => ({ safeQuery: jest.fn() }));
+/* Default to "a sync has run", so every test below is about the tasks
+   themselves. The unsynced case is its own describe at the bottom, because it
+   is a different question and used to be answered wrong. */
+const mockUnsyncedNotice = jest.fn();
+jest.mock("@/lib/ms-graph/sync-state", () => ({
+  unsyncedNotice: (...a: unknown[]) => mockUnsyncedNotice(...a),
+  getSyncState: async () => ({ everSynced: true, lastSyncedAt: null }),
+}));
 
 import { taskListWidgetTool } from "@/lib/assistant/tools/task-list-widget-tool";
 
@@ -21,6 +29,8 @@ const CTX = { userId: "u1", userRole: "member" };
 beforeEach(() => {
   mockListCachedTasks.mockReset();
   mockTrackEvent.mockReset();
+  mockUnsyncedNotice.mockReset();
+  mockUnsyncedNotice.mockResolvedValue(null);
 });
 
 describe("task_list_widget intent matching", () => {
@@ -108,8 +118,14 @@ describe("task_list_widget handler", () => {
     );
   });
 
-  test("empty task list returns 'no open tasks'", async () => {
+  /* ONLY ONCE A SYNC HAS RUN. This asserted the answer unconditionally, which
+     made it a test that pinned a bug: instinct_ms_tasks has never held a row
+     in production, so in reality this branch was telling everybody they had no
+     tasks regardless of their To-Do list. The unsynced half is asserted in its
+     own describe below. */
+  test("empty task list returns 'no open tasks' when the mirror has been synced", async () => {
     mockListCachedTasks.mockResolvedValue({ tasks: [], nextCursor: null });
+    mockUnsyncedNotice.mockResolvedValue(null);
     const res = await taskListWidgetTool.handler({ limit: 20 }, CTX);
     if (!res.ok) return;
     expect(res.answer).toMatch(/no open tasks/i);
@@ -121,5 +137,44 @@ describe("task_list_widget handler", () => {
     if (!res.ok) return;
     expect((res.widget as { tasks: unknown[] }).tasks).toEqual([]);
     expect(res.answer).toMatch(/couldn't load/i);
+  });
+});
+
+/**
+ * AN EMPTY MIRROR IS NOT AN EMPTY TO-DO LIST.
+ *
+ * Added 2026-08-28. instinct_ms_tasks has never held a row in production and
+ * no cron syncs it, so this tool answered "You have no open tasks. Nice." to
+ * everybody regardless of what was in their Microsoft To-Do. Nothing failed:
+ * the read returned [] exactly as designed, and [] is a fine answer to a
+ * question nobody had checked was askable.
+ */
+describe("an unsynced mirror never claims you have nothing", () => {
+  it("says the tasks were never synced rather than that there are none", async () => {
+    mockListCachedTasks.mockResolvedValue({ tasks: [], nextCursor: null });
+    mockUnsyncedNotice.mockResolvedValue(
+      "Your Microsoft tasks have not been synced yet, so I cannot tell you whether there are any. Connect Microsoft 365 in Settings.",
+    );
+    const res = await taskListWidgetTool.handler({ limit: 20 }, CTX);
+    if (!res.ok) throw new Error("expected a result");
+    expect(res.answer).toContain("not been synced");
+    expect(res.answer).not.toContain("no open tasks");
+  });
+
+  it("asks about tasks using the reader's word for them", async () => {
+    mockListCachedTasks.mockResolvedValue({ tasks: [], nextCursor: null });
+    await taskListWidgetTool.handler({ limit: 20 }, CTX);
+    expect(mockUnsyncedNotice).toHaveBeenCalledWith("u1", "tasks", "tasks");
+  });
+
+  /* Never asked when there ARE tasks: the question does not arise, and asking
+     would spend a query per answer to learn something irrelevant. */
+  it("does not ask when the list is not empty", async () => {
+    mockListCachedTasks.mockResolvedValue({
+      tasks: [{ id: "1", title: "A", status: "notStarted", importance: "normal", dueAt: null, listId: "L" }],
+      nextCursor: null,
+    });
+    await taskListWidgetTool.handler({ limit: 20 }, CTX);
+    expect(mockUnsyncedNotice).not.toHaveBeenCalled();
   });
 });

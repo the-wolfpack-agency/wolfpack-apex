@@ -14,6 +14,7 @@
 
 import { z } from "zod";
 import { listCachedTasks } from "@/lib/integrations/microsoft-tasks";
+import { unsyncedNotice } from "@/lib/ms-graph/sync-state";
 import { trackEvent } from "@/lib/analytics";
 import { registerTool } from "./registry";
 import type { ToolDef, ToolResult } from "./types";
@@ -128,10 +129,18 @@ export const taskListWidgetTool: ToolDef<Params, TaskWidgetData> = {
             listId: t.listId,
           };
         });
+      /* AN EMPTY MIRROR IS NOT AN EMPTY TO-DO LIST.
+         instinct_ms_tasks has never held a row in production and no cron syncs
+         it, so this branch was telling everybody "You have no open tasks.
+         Nice." regardless of what was actually in their Microsoft To-Do.
+         Confident, cheerful and false is the worst answer this product can
+         give, because the reader cannot tell it from the truth. */
+      const notice = tasks.length === 0 ? await unsyncedNotice(ctx.userId, "tasks", "tasks") : null;
       answer =
-        tasks.length === 0
+        notice ??
+        (tasks.length === 0
           ? "You have no open tasks. Nice."
-          : `You have ${tasks.length} open task${tasks.length === 1 ? "" : "s"}${overdueCount > 0 ? ` (${overdueCount} overdue)` : ""}. Click any row to open it.`;
+          : `You have ${tasks.length} open task${tasks.length === 1 ? "" : "s"}${overdueCount > 0 ? ` (${overdueCount} overdue)` : ""}. Click any row to open it.`);
     } catch (err) {
       console.warn("[task-list-widget] listCachedTasks failed:", (err as Error).message);
       answer =

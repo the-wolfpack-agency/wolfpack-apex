@@ -9,6 +9,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getUserFromRequest } from "@/lib/auth";
 import { trackEvent } from "@/lib/analytics";
+import { getSyncState } from "@/lib/ms-graph/sync-state";
 import {
   listCachedTasks,
   createTask,
@@ -56,7 +57,19 @@ export async function GET(req: NextRequest) {
     cursor: cursor || undefined,
   });
 
-  return NextResponse.json({ tasks, nextCursor });
+  /* THE PAGE HAS TO BE ABLE TO TELL THESE APART.
+     instinct_ms_tasks has never held a row in production and no cron syncs it,
+     so an empty list here has always meant "we have never looked" and has
+     always rendered as "you have no tasks". Reported alongside the rows rather
+     than inferred by the client, because the client cannot see the cursor
+     table and would have to guess. */
+  const sync = await getSyncState(user.id, "tasks");
+  return NextResponse.json({
+    tasks,
+    nextCursor,
+    everSynced: sync.everSynced,
+    lastSyncedAt: sync.lastSyncedAt?.toISOString() ?? null,
+  });
 }
 
 export async function POST(req: NextRequest) {
