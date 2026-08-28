@@ -15,6 +15,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { getPhaseOneSnapshot } from "@/lib/pilot/phase-one";
+import { getAdoptionSnapshot } from "@/lib/pilot/adoption";
 
 const DEFAULT_DAYS = 60;
 const MAX_DAYS = 365;
@@ -28,9 +29,15 @@ export async function GET(req: NextRequest) {
     Number.isFinite(raw) && raw > 0 ? Math.min(Math.floor(raw), MAX_DAYS) : DEFAULT_DAYS;
 
   const workspaceId = auth.user.workspaceId ?? "default";
-  const snapshot = await getPhaseOneSnapshot(workspaceId, days);
+  /* Fetched together because the page shows them together, and a pilot judged
+     on adoption should not have to wait for a second round trip to learn
+     whether anybody is using it. */
+  const [snapshot, adoption] = await Promise.all([
+    getPhaseOneSnapshot(workspaceId, days),
+    getAdoptionSnapshot(workspaceId, days),
+  ]);
 
-  return NextResponse.json(snapshot, {
+  return NextResponse.json({ ...snapshot, adoption }, {
     status: 200,
     /* Never cached: a dashboard figure that is minutes old invites somebody to
        act on a number that has already moved. */
