@@ -106,8 +106,36 @@ const INTENT_RE =
  * would be the same mistake as requiring the literal word "task" for a task.
  * The shape "what does <thing> say" is only ever a question about a document.
  */
-const DOCUMENT_QUESTION_RE =
-  /^\s*(?:what|whats|what's)\s+(?:do(?:es)?|did)\s+(?:the\s+|our\s+|my\s+|this\s+)?(.+?)\s+say(?:\s+about\s+(.+?))?\s*[?.!]*\s*$|^\s*(?:what|whats|what's)\s+(?:is\s+)?in\s+(?:the\s+|our\s+|my\s+|this\s+)(.+?)\s*[?.!]*\s*$|^\s*summari[sz]e\s+(?:the\s+|our\s+|my\s+|this\s+)(.+?)\s*[?.!]*\s*$/i;
+const DOCUMENT_QUESTION_RE = new RegExp(
+  [
+    /* "what does the SOW say about payment" */
+    String.raw`^\s*(?:what|whats|what's)\s+(?:do(?:es)?|did)\s+(?:the\s+|our\s+|my\s+|this\s+)?(?<saySubject>.+?)\s+say(?:\s+about\s+(?<sayAbout>.+?))?\s*[?.!]*\s*$`,
+    /* "what is in the SharePoint about training". The article is optional so
+       "what is in SharePoint about training" lands here too, and the topic is
+       captured rather than swallowed into the subject. */
+    String.raw`^\s*(?:what|whats|what's)\s+(?:is\s+)?in\s+(?:the\s+|our\s+|my\s+|this\s+)?(?<inSubject>.+?)(?:\s+about\s+(?<inAbout>.+?))?\s*[?.!]*\s*$`,
+    /* "summarize the SOW" */
+    String.raw`^\s*summari[sz]e\s+(?:the\s+|our\s+|my\s+|this\s+)?(?<sumSubject>.+?)\s*[?.!]*\s*$`,
+  ].join("|"),
+  "i",
+);
+
+/**
+ * Words that name WHERE the documents are, not what they are about.
+ *
+ * THE BUG THIS FIXES. "what is in the SharePoint about training" captured
+ * "SharePoint about training" as the thing to search for, and no document
+ * contains the word SharePoint, so a question about a library we had fully
+ * ingested returned "No results found". Measured 2026-08-27 against the real
+ * pipeline: four similar phrasings returned documents and this one returned
+ * nothing, purely because the sentence named the container.
+ *
+ * A client says "what's in SharePoint about X", "what's in our files about X",
+ * "what's in the drive about X". They are naming the filing cabinet. The
+ * search term is what follows "about".
+ */
+const CONTAINER_ONLY_RE =
+  /^(?:share\s?point|one\s?drive|the\s+drive|drive|document\s+library|library|files|docs|documents|folder|folders|knowledge\s*base|brain|system|platform)$/i;
 
 /**
  * Turn a document question into the same query the imperative form produces.
@@ -119,11 +147,28 @@ const DOCUMENT_QUESTION_RE =
 export function matchDocumentQuestion(message: string): string | null {
   const m = DOCUMENT_QUESTION_RE.exec(message.trim());
   if (!m) return null;
-  const subject = (m[1] ?? m[3] ?? m[4] ?? "").trim();
+  const g = (m.groups ?? {}) as Record<string, string | undefined>;
+
+  const subject = (g.saySubject ?? g.inSubject ?? g.sumSubject ?? "").trim();
   if (!subject) return null;
   /* A pronoun carries no search terms, so it would return the library. */
   if (/^(it|this|that|they|these|those)$/i.test(subject)) return null;
-  const about = (m[2] ?? "").trim();
+
+  const about = (g.sayAbout ?? g.inAbout ?? "").trim();
+
+  /* THE SUBJECT NAMES THE FILING CABINET, so the search term is the topic.
+     Searching for the container returns nothing, because no document contains
+     the word "SharePoint". */
+  if (CONTAINER_ONLY_RE.test(subject)) {
+    if (!about) {
+      /* "what is in SharePoint", with nothing asked about. There is no query
+         that answers this, and inventing one guarantees an empty result that
+         reads as an empty library. Declining lets another tool try. */
+      return null;
+    }
+    return about;
+  }
+
   return about ? `${subject} ${about}` : subject;
 }
 
