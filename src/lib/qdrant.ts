@@ -15,6 +15,18 @@ function getQdrantUrl(): string | null {
 }
 
 /**
+ * Whether writes to this store can land at all.
+ *
+ * Exported so triple-write can tell "wrote nothing because it is not
+ * configured" apart from "wrote nothing because there was nothing to write".
+ * The writers below return void either way, which is why the degrade signal
+ * could never fire from their return values.
+ */
+export function isQdrantConfigured(): boolean {
+  return getQdrantUrl() !== null;
+}
+
+/**
  * Store a knowledge point as a vector in Qdrant.
  * Uses a 4-dim zero vector with rich metadata payload.
  * Real embeddings will replace the zero vector when OpenAI key is added.

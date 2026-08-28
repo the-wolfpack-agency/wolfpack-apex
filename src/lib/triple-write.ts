@@ -9,8 +9,8 @@
  */
 
 import { query } from "@/lib/db";
-import { upsertKnowledgePoint, getQdrantHealth } from "@/lib/qdrant";
-import { recordKnowledgeInteraction, getNeo4jHealth } from "@/lib/neo4j";
+import { isQdrantConfigured, upsertKnowledgePoint, getQdrantHealth } from "@/lib/qdrant";
+import { isNeo4jConfigured, recordKnowledgeInteraction, getNeo4jHealth } from "@/lib/neo4j";
 
 export interface TripleWriteStatus {
   pg: boolean;
@@ -72,11 +72,36 @@ async function reportDegraded(store: "qdrant" | "neo4j", reason: string): Promis
   }
 }
 
-/** Read the settled results and report the first failure of each store. */
+/**
+ * WHY THIS ALSO CHECKS CONFIGURATION, and why the previous version could
+ * never fire.
+ *
+ * inspect() reported on a rejected promise or a literal false. Both writers
+ * return Promise<void>: they swallow their own errors, and when the store is
+ * not configured they return early. So every settled result was
+ * { status: "fulfilled", value: undefined }, neither branch matched, and the
+ * degrade signal was unreachable code.
+ *
+ * That is why the count of degrade events ever recorded is zero on a
+ * deployment where Neo4j has never been configured. The signal was not quiet
+ * because nothing was wrong. It was quiet because it could not speak.
+ *
+ * A store that is not configured is asked BEFORE the write rather than
+ * inferred from a return value that carries no information. The two checks
+ * live with the stores themselves, so there is one source of truth for what
+ * "configured" means.
+ */
 function inspect(results: PromiseSettledResult<unknown>[], stores: Array<"qdrant" | "neo4j">): void {
   results.forEach((r, i) => {
     const store = stores[i];
     if (!store) return;
+
+    const configured = store === "qdrant" ? isQdrantConfigured() : isNeo4jConfigured();
+    if (!configured) {
+      void reportDegraded(store, "not configured");
+      return;
+    }
+
     if (r.status === "rejected") {
       void reportDegraded(store, String((r.reason as Error)?.message ?? r.reason ?? "unknown"));
     } else if (r.value === false) {
@@ -85,6 +110,11 @@ function inspect(results: PromiseSettledResult<unknown>[], stores: Array<"qdrant
       void reportDegraded(store, "not configured");
     }
   });
+}
+
+/** Test seam: the report-once guard is process-lifetime by design. */
+export function __resetDegradedReportingForTests(): void {
+  reported.clear();
 }
 
 /**

@@ -14,6 +14,18 @@ function getNeo4jUrl(): string | null {
   return process.env.NEO4J_URI || process.env.NEO4J_URL || null;
 }
 
+/**
+ * Whether writes to this store can land at all.
+ *
+ * Exported so triple-write can tell "wrote nothing because it is not
+ * configured" apart from "wrote nothing because there was nothing to write".
+ * Measured on production 2026-08-23 and still true: this returns false there,
+ * and has for the life of the deployment.
+ */
+export function isNeo4jConfigured(): boolean {
+  return getNeo4jUrl() !== null;
+}
+
 function getNeo4jAuth(): { username: string; password: string } {
   return {
     username: process.env.NEO4J_USER || "neo4j",
