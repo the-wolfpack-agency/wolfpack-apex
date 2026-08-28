@@ -43,7 +43,7 @@ export type ExtractResult = ExtractSuccess | ExtractSkipped | ExtractFailed;
  * the document sits in `status = 'skipped'` meanwhile so it's visible
  * in the UI with a clear label instead of silently failing.
  */
-const SYNC_KINDS: ReadonlySet<BrainKind> = new Set(["pdf", "docx", "xlsx", "text", "markdown", "csv", "html"]);
+const SYNC_KINDS: ReadonlySet<BrainKind> = new Set(["pdf", "docx", "pptx", "xlsx", "text", "markdown", "csv", "html"]);
 
 export function isSyncExtractable(kind: BrainKind): boolean {
   if (SYNC_KINDS.has(kind)) return true;
@@ -65,6 +65,8 @@ export async function extract(
         return await extractPdf(buffer);
       case "docx":
         return await extractDocx(buffer);
+      case "pptx":
+        return await extractPptx(buffer);
       case "xlsx":
         return extractXlsx(buffer);
       case "text":
@@ -181,6 +183,37 @@ async function extractDocx(buffer: Buffer): Promise<ExtractResult> {
   }
   if (!text) {
     return { ok: false, reason: "empty", detail: "DOCX had no extractable text" };
+  }
+  return { ok: true, text };
+}
+
+/**
+ * .pptx text, slide by slide.
+ *
+ * Measured on production 2026-08-27: 75 PowerPoint files in the Brain, none
+ * with a single chunk. There was no pptx kind and no extractor, so they
+ * classified as "other" and were skipped at ingest while the UI listed them
+ * as present. A library of training decks was invisible to every question
+ * asked of it.
+ *
+ * Decks are where the material somebody teaches from lives, so "what does the
+ * training say about X" is precisely the question these files answer and
+ * precisely the one that came back empty.
+ *
+ * An empty deck is reported as "empty" rather than "failed", because a deck of
+ * exported images genuinely has no text and needs OCR, which is a different
+ * fix from a parse error and must not be filed under the same reason.
+ */
+async function extractPptx(buffer: Buffer): Promise<ExtractResult> {
+  const { pptxBufferToText } = await import("./pptx");
+  let text: string;
+  try {
+    text = (await pptxBufferToText(buffer)).trim();
+  } catch (err) {
+    return { ok: false, reason: "failed", detail: `pptx parse: ${(err as Error).message}` };
+  }
+  if (!text) {
+    return { ok: false, reason: "empty", detail: "PPTX had no extractable text (images only?)" };
   }
   return { ok: true, text };
 }
