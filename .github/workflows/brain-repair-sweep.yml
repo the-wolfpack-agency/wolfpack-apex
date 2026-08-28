@@ -1,0 +1,43 @@
+# Re-run extraction on documents whose failure reason has since been fixed.
+#
+# WHY THIS EXISTS. The repair endpoint was written for ninety Word documents
+# that failed on a parser bug fixed in #402. Measured 2026-08-27, it had never
+# been called. Zero events. The fix shipped and the corpus it was written for
+# was never re-run, so every one of those documents was still unreadable.
+#
+# That is the recurring failure in this repo: a control built, described
+# accurately, and never executed. The answer is a timer, not a reminder.
+#
+# Runs after the health sweep so the two do not compete for Graph throughput.
+#
+# Required repo secrets: PROD_URL, CRON_SECRET.
+# Skips rather than fails when they are absent, because a red job meaning
+# "nobody configured this" trains people to ignore red jobs.
+name: Brain repair sweep
+
+on:
+  schedule:
+    - cron: "50 7 * * *" # daily, half an hour after the health sweep
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: brain-repair-sweep
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v4.0.4
+        with:
+          node-version: 20
+      - name: Repair what can now be read
+        env:
+          PROD_URL: ${{ secrets.PROD_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: node scripts/brain-repair-sweep.mjs

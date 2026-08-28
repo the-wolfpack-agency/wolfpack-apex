@@ -12,6 +12,7 @@ const mockFind = jest.fn();
 const mockReprocess = jest.fn();
 const mockQuery = jest.fn();
 const mockDownload = jest.fn();
+const mockRecordAudit = jest.fn().mockResolvedValue(undefined);
 
 jest.mock("@/lib/auth/require-capability", () => ({
   requireCapability: (...a: unknown[]) => mockRequireCapability(...a),
@@ -24,6 +25,7 @@ jest.mock("@/lib/connectors/sharepoint/sync", () => ({
   downloadDriveItem: (...a: unknown[]) => mockDownload(...a),
 }));
 jest.mock("@/lib/db", () => ({ query: (...a: unknown[]) => mockQuery(...a) }));
+jest.mock("@/lib/audit-log", () => ({ recordAudit: (...a: unknown[]) => mockRecordAudit(...a) }));
 
 import { GET, POST } from "../route";
 
@@ -133,4 +135,84 @@ describe("the run", () => {
     expect(res.status).toBe(500);
     expect((await res.json()).error).toContain("graph down");
   });
+});
+
+/**
+ * The scheduled path.
+ *
+ * This repair was written for ninety Word documents that failed on a parser
+ * bug fixed in #402. Measured 2026-08-27, it had never run. Zero events, and
+ * every one of those documents was still unreadable months after the fix that
+ * was supposed to rescue them.
+ *
+ * A repair that waits for somebody to remember it is a repair that does not
+ * happen, so it now runs on a schedule. That adds an unauthenticated-looking
+ * way into an admin route, which is what most of this block is about.
+ */
+describe("the cron path", () => {
+  const cronReq = (auth: string, body?: unknown) =>
+    ({
+      headers: { get: (h: string) => (h.toLowerCase() === "authorization" ? auth : null) },
+      json: async () => body ?? {},
+      nextUrl: { searchParams: new URLSearchParams() },
+    }) as never;
+
+  const withSecret = (secret: string | undefined, fn: () => Promise<void>) => async () => {
+    const saved = process.env.CRON_SECRET;
+    if (secret === undefined) delete process.env.CRON_SECRET;
+    else process.env.CRON_SECRET = secret;
+    try {
+      await fn();
+    } finally {
+      if (saved === undefined) delete process.env.CRON_SECRET;
+      else process.env.CRON_SECRET = saved;
+    }
+  };
+
+  it(
+    "lets the scheduler in with the right secret, without a session",
+    withSecret("s3cret", async () => {
+      mockRequireCapability.mockResolvedValue({ ok: false, response: new Response(null, { status: 401 }) });
+      const res = await GET(cronReq("Bearer s3cret"));
+      expect(res.status).toBe(200);
+      expect(mockRequireCapability).not.toHaveBeenCalled();
+    }),
+  );
+
+  it(
+    "refuses a wrong secret and falls back to the session gate",
+    withSecret("s3cret", async () => {
+      mockRequireCapability.mockResolvedValue({ ok: false, response: new Response(null, { status: 401 }) });
+      const res = await GET(cronReq("Bearer wrong"));
+      expect(res.status).toBe(401);
+      expect(mockRequireCapability).toHaveBeenCalled();
+    }),
+  );
+
+  /* THE ONE THAT MATTERS. With no secret configured, a bare "Bearer " must not
+     become a way in. Local dev has no CRON_SECRET, and a comparison against an
+     empty string would open the route to anyone. */
+  it(
+    "is not an open door when no secret is configured",
+    withSecret(undefined, async () => {
+      mockRequireCapability.mockResolvedValue({ ok: false, response: new Response(null, { status: 401 }) });
+      for (const header of ["Bearer ", "Bearer undefined", ""]) {
+        const res = await GET(cronReq(header));
+        expect(res.status).toBe(401);
+      }
+    }),
+  );
+
+  it(
+    "acts as the system rather than borrowing a person's identity",
+    withSecret("s3cret", async () => {
+      await POST(cronReq("Bearer s3cret", { limit: 5 }));
+      /* The audit row for a scheduled repair must not name whoever last
+         logged in. */
+      const audited = mockRecordAudit.mock.calls.some(
+        (c) => (c[0] as { actor?: { user_id?: string } })?.actor?.user_id === "cron",
+      );
+      expect(audited).toBe(true);
+    }),
+  );
 });
