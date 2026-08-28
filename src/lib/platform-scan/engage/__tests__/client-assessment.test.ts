@@ -39,7 +39,8 @@ const deps = (over: Record<string, unknown> = {}) => ({
   isVerified: jest.fn(async () => true),
   discover: jest.fn(async () => routes(3)),
   crawl: jest.fn(async () => []),
-  scan: jest.fn(async () => ({ findings: [], coverage: {} })),
+  scan: jest.fn(async () => ({ findings: [], coverage: {}, okCount: 3, routeCount: 3 })),
+  login: jest.fn(async () => ({ cookie: "session=abc" })),
   ...over,
 });
 
@@ -200,5 +201,114 @@ describe("the record", () => {
       "cto",
       expect.objectContaining({ mode: "client_assessment", discovered_via: "sitemap" }),
     );
+  });
+});
+
+
+/**
+ * Getting the keys.
+ *
+ * An anonymous scan sees the front door. Signing in is what turns a scan into
+ * a recon: a page that redirects to login when anonymous and returns content
+ * when authenticated is a surface that exists and was invisible from outside,
+ * which is exactly what has to be mapped before anybody plans work against it.
+ */
+describe("with credentials the client granted", () => {
+  const access = { loginPath: "/login", username: "svc@example.com", password: "pw" };
+
+  it("signs in before mapping", async () => {
+    const d = deps();
+    await runClientAssessment({ ...base, access }, d as never);
+    expect(d.login).toHaveBeenCalledWith(
+      expect.objectContaining({ baseUrl: base.baseUrl, loginPath: "/login" }),
+    );
+  });
+
+  /* THE ANONYMOUS PASS RUNS ANYWAY. It is the only way to learn which surfaces
+     are actually protected: a single authenticated crawl cannot tell a public
+     page from a correctly gated one. */
+  it("scans anonymously first, even when it holds credentials", async () => {
+    const d = deps();
+    await runClientAssessment({ ...base, access }, d as never);
+
+    const calls = (d.scan as jest.Mock).mock.calls;
+    expect(calls).toHaveLength(2);
+    expect(calls[0][0].authenticated).toBeUndefined();
+    expect(calls[0][0].headers).toBeUndefined();
+  });
+
+  /* authenticated:true flips the scanner's semantics: anonymously a bounce to
+     login is correct enforcement, with a session it is the session not being
+     honoured, which is a bug rather than a control. */
+  it("tells the scanner the second pass carries a session", async () => {
+    const d = deps();
+    await runClientAssessment({ ...base, access }, d as never);
+
+    const second = (d.scan as jest.Mock).mock.calls[1][0];
+    expect(second.authenticated).toBe(true);
+    expect(second.headers).toMatchObject({ Cookie: "session=abc" });
+  });
+
+  it("counts only the surfaces that signing in revealed", async () => {
+    const d = deps({
+      scan: jest
+        .fn()
+        .mockResolvedValueOnce({ findings: [], coverage: {}, okCount: 3, routeCount: 10 })
+        .mockResolvedValueOnce({ findings: [], coverage: {}, okCount: 9, routeCount: 10 }),
+    });
+    const out = await runClientAssessment({ ...base, access }, d as never);
+
+    expect(out.externalSurfaces).toBe(3);
+    /* Nine reachable signed in, three of which were already public. */
+    expect(out.internalSurfaces).toBe(6);
+    expect(out.authenticated).toBe(true);
+  });
+
+  it("reports no hidden surfaces when everything was already public", async () => {
+    const d = deps({
+      scan: jest.fn(async () => ({ findings: [], coverage: {}, okCount: 5, routeCount: 5 })),
+    });
+    const out = await runClientAssessment({ ...base, access }, d as never);
+    expect(out.internalSurfaces).toBe(0);
+  });
+
+  /* An assessment that returns nothing because a password was wrong is an
+     assessment nobody runs twice. */
+  it("still reports the public findings when the login fails", async () => {
+    const d = deps({ login: jest.fn(async () => null) });
+    const out = await runClientAssessment({ ...base, access }, d as never);
+
+    expect(out.refused).toBeUndefined();
+    expect(out.authenticated).toBe(false);
+    expect(out.loginFailed).toMatch(/not accepted/i);
+    expect((d.scan as jest.Mock).mock.calls).toHaveLength(1);
+  });
+
+  it("survives a login that throws", async () => {
+    const d = deps({
+      login: jest.fn(async () => {
+        throw new Error("connection reset");
+      }),
+    });
+    const out = await runClientAssessment({ ...base, access }, d as never);
+    expect(out.authenticated).toBe(false);
+    expect(out.loginFailed).toMatch(/sign-in attempt failed/i);
+  });
+
+  /* The boundary statement has to change when the boundary changes, or it
+     becomes a stock paragraph nobody reads. */
+  it("stops claiming it could not see behind the login once it could", async () => {
+    const anon = await runClientAssessment(base, deps() as never);
+    expect(anon.notAssessed.join(" ")).toMatch(/behind a login/i);
+
+    const authed = await runClientAssessment({ ...base, access }, deps() as never);
+    expect(authed.notAssessed.join(" ")).not.toMatch(/behind a login/i);
+  });
+
+  it("runs anonymously when no credentials were granted", async () => {
+    const d = deps();
+    const out = await runClientAssessment(base, d as never);
+    expect(d.login).not.toHaveBeenCalled();
+    expect(out.authenticated).toBe(false);
   });
 });

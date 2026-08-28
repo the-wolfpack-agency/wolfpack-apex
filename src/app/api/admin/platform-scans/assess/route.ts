@@ -40,7 +40,7 @@ export async function POST(req: NextRequest) {
   if (!auth.ok) return auth.response;
   const { user } = auth;
 
-  let body: { platform?: unknown; base_url?: unknown } = {};
+  let body: { platform?: unknown; base_url?: unknown; access?: unknown } = {};
   try {
     body = (await req.json()) as typeof body;
   } catch {
@@ -73,11 +73,35 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  /* CREDENTIALS THE CLIENT GRANTED, and they are optional on purpose. A first
+     pass usually runs anonymously, and requiring credentials up front would
+     mean asking to be trusted with them before there is any reason to be.
+
+     Read from the request and used for this run only. Nothing here stores
+     them: a scan that quietly retains a client's password is a liability that
+     outlives the engagement. */
+  const rawAccess = body.access as Record<string, unknown> | undefined;
+  const access =
+    rawAccess &&
+    typeof rawAccess.login_path === "string" &&
+    typeof rawAccess.username === "string" &&
+    typeof rawAccess.password === "string"
+      ? {
+          loginPath: rawAccess.login_path,
+          username: rawAccess.username,
+          password: rawAccess.password,
+          ...(typeof rawAccess.session_cookie_name === "string"
+            ? { sessionCookieName: rawAccess.session_cookie_name }
+            : {}),
+        }
+      : undefined;
+
   const result = await runClientAssessment({
     workspaceId: user.workspaceId ?? "default",
     platform,
     baseUrl,
     actor: { userId: user.id, role: user.role },
+    ...(access ? { access } : {}),
   });
 
   /* AUDITED BECAUSE IT REACHES SOMEBODY ELSE'S SYSTEM. "Who pointed us at that
@@ -88,11 +112,17 @@ export async function POST(req: NextRequest) {
     actor: { user_id: user.id, role: user.role },
     action: "platform.client_assessment_run",
     resourceType: "platform_scan",
+    /* THE CREDENTIALS ARE NEVER WRITTEN. That a signed-in scan happened is the
+       auditable fact; the password is not, and an audit log holding one is a
+       permanent copy of a client's secret in the one table designed never to
+       be edited. */
     afterState: {
       platform,
       base_url: baseUrl,
       refused: result.refused ?? null,
+      authenticated: result.authenticated,
       routes: result.routesDiscovered,
+      internal_surfaces: result.internalSurfaces,
       findings: result.findingCount,
     },
   }).catch(() => undefined);

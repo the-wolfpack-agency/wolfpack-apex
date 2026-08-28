@@ -141,3 +141,65 @@ describe("the record", () => {
     expect((await POST(req({ platform: "p", base_url: "https://x.example.com" }))).status).toBe(200);
   });
 });
+
+
+/**
+ * Credentials a client granted.
+ *
+ * Optional on purpose: a first pass usually runs anonymously, and requiring
+ * credentials up front means asking to be trusted with them before there is
+ * any reason to be.
+ */
+describe("granted access", () => {
+  const access = {
+    login_path: "/login",
+    username: "svc@example.com",
+    password: "hunter2",
+    session_cookie_name: "sid",
+  };
+
+  it("passes credentials through for the signed-in pass", async () => {
+    await POST(req({ platform: "p", base_url: "https://x.example.com", access }));
+    expect(mockAssess).toHaveBeenCalledWith(
+      expect.objectContaining({
+        access: {
+          loginPath: "/login",
+          username: "svc@example.com",
+          password: "hunter2",
+          sessionCookieName: "sid",
+        },
+      }),
+    );
+  });
+
+  it("runs anonymously when none were given", async () => {
+    await POST(req({ platform: "p", base_url: "https://x.example.com" }));
+    expect(mockAssess.mock.calls[0][0].access).toBeUndefined();
+  });
+
+  /* A half-filled credential block is a mistake, not an instruction. Treating
+     it as one would produce a login attempt with an empty password. */
+  it.each<[string, Record<string, unknown>]>([
+    ["no password", { login_path: "/login", username: "u" }],
+    ["no username", { login_path: "/login", password: "p" }],
+    ["no path", { username: "u", password: "p" }],
+  ])("ignores an incomplete grant: %s", async (_label, partial) => {
+    await POST(req({ platform: "p", base_url: "https://x.example.com", access: partial }));
+    expect(mockAssess.mock.calls[0][0].access).toBeUndefined();
+  });
+
+  /* THE ONE THAT MATTERS. An audit log holding a client's password is a
+     permanent copy of their secret in the one table designed never to be
+     edited. That a signed-in scan happened is the auditable fact. */
+  it("never writes the password to the audit log", async () => {
+    mockAssess.mockResolvedValue({ ...ok, authenticated: true, internalSurfaces: 6 });
+    await POST(req({ platform: "p", base_url: "https://x.example.com", access }));
+
+    const written = JSON.stringify(mockAudit.mock.calls[0][0]);
+    expect(written).not.toContain("hunter2");
+    expect(written).not.toContain("svc@example.com");
+    /* It does record that the run was authenticated, which is the fact worth
+       keeping. */
+    expect(written).toContain("authenticated");
+  });
+});
