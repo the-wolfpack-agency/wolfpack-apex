@@ -303,3 +303,64 @@ describe("getSharePointFileText", () => {
     expect(r.code).toBe("invalid_input");
   });
 });
+
+/**
+ * THE SCOPE WE ACTUALLY HOLD.
+ *
+ * Added 2026-08-28 after measuring 171 consecutive 401s in production going
+ * back to 2026-05-06. The tokens were never the problem: refresh succeeded
+ * 15,855 times, most recently an hour before the measurement. The request
+ * asked for three entity types and the token covered one.
+ *
+ * Sites.Read.All was removed from the OAuth request on 2026-05-20 because it
+ * requires tenant admin consent and was blocking every non-admin teammate from
+ * connecting Microsoft at all. That trade-off is written down in
+ * microsoft-graph.ts and is still the right call. What was not noticed is that
+ * asking Graph for an entity type the token cannot cover fails the WHOLE
+ * request rather than degrading to the ones it can.
+ */
+describe("asks only for what our scopes cover", () => {
+  /* Uses the file's own fetchMock and ok() helper rather than standing up a
+     second one: a shadowing mock fought the beforeEach above and made three
+     passing assertions look like failures. */
+  function sentEntityTypes(): string[] {
+    const init = fetchMock.mock.calls[0][1] as { body: string };
+    return JSON.parse(init.body).requests[0].entityTypes;
+  }
+
+  beforeEach(() => {
+    fetchMock.mockResolvedValue(ok({ value: [{ hitsContainers: [{ hits: [] }] }] }));
+  });
+
+  /* driveItem is covered by Files.ReadWrite.All, which every connected account
+     already holds. This assertion is what keeps SharePoint search working for
+     a tenant that has not granted admin consent, which is every tenant we
+     onboard on day one. */
+  it("searches driveItem alone by default, which Files.ReadWrite.All covers", async () => {
+    const { searchSharePoint } = await import("@/lib/integrations/microsoft-sharepoint");
+    await searchSharePoint("tok", { query: "coaching calls" });
+    expect(sentEntityTypes()).toEqual(["driveItem"]);
+  });
+
+  /* Naming them explicitly is how a caller with admin consent opts in. It must
+     stay possible, or a tenant that HAS granted Sites.Read.All silently loses
+     the pages and sites it is entitled to search. */
+  it("still lets a caller ask for more when the scope has been granted", async () => {
+    const { searchSharePoint } = await import("@/lib/integrations/microsoft-sharepoint");
+    await searchSharePoint("tok", {
+      query: "coaching calls",
+      entityTypes: ["driveItem", "listItem", "site"],
+    });
+    expect(sentEntityTypes()).toEqual(["driveItem", "listItem", "site"]);
+  });
+
+  /* The specific regression. If this list silently regains listItem or site by
+     default, every non-admin tenant goes straight back to 401 on every search,
+     and it reads to them as an empty document library. */
+  it("never asks by default for an entity type needing admin consent", async () => {
+    const { searchSharePoint } = await import("@/lib/integrations/microsoft-sharepoint");
+    await searchSharePoint("tok", { query: "anything" });
+    expect(sentEntityTypes()).not.toContain("listItem");
+    expect(sentEntityTypes()).not.toContain("site");
+  });
+});

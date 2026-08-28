@@ -30,6 +30,10 @@ export const SEARCH_TYPE_VALUES = [
   "crm",
   "dms",
   "vercel",
+  /* SharePoint searched in place, with the reader's own token, rather than our
+     ingested copy of it. Sits alongside "brain" rather than replacing it: one
+     finds the file, the other answers what is inside it. */
+  "sharepoint",
 ] as const;
 
 export type SearchType = (typeof SEARCH_TYPE_VALUES)[number];
