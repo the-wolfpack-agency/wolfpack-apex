@@ -26,7 +26,7 @@ jest.mock("@/lib/assistant/connectors", () => ({
   buildRestConnectorForWorkspace: (...a: unknown[]) => mockBuildRest(...a),
 }));
 
-import { whoIsTool } from "@/lib/assistant/tools/who-is-tool";
+import { whoIsTool, matchRosterQuestion, isAutomationForTests } from "@/lib/assistant/tools/who-is-tool";
 
 const CTX = {
   userId: "u1",
@@ -250,5 +250,80 @@ describe("asking what somebody does", () => {
 
   it("still claims the plain form", () => {
     expect(whoIsTool.matchIntent!("who is Jorge")).not.toBeNull();
+  });
+});
+
+/**
+ * Questions about the whole team, not about one person.
+ *
+ * WHO_IS_RE is `who is (.{2,120})`, so "who is on the team" captured "on the
+ * team" as somebody's name and the assistant answered "No one named 'on the
+ * team' on the team roster". Absurd, on a completely reasonable question, and
+ * one of the first things a new user types.
+ *
+ * The variants that fell through were worse. "who works here" reached the
+ * answer cache and cited four SharePoint documents that had nothing to do with
+ * the question. "who do we have in sales" reached a model, which read a
+ * client's survey spreadsheet and presented that client's staff as our sales
+ * team. A roster question that escapes the roster gets answered from whatever
+ * documents happen to mention people.
+ */
+describe("roster questions", () => {
+  it.each([
+    "who is on the team",
+    "who's on the team",
+    "who is on our team",
+    "who works here",
+    "show me the team",
+    "list our team",
+  ])("recognises %s as a roster question", (q) => {
+    expect(matchRosterQuestion(q)).not.toBeNull();
+  });
+
+  it("picks up the area when one was named", () => {
+    expect(matchRosterQuestion("who do we have in sales")).toEqual({ area: "sales" });
+    expect(matchRosterQuestion("who do we have in ops")).toEqual({ area: "ops" });
+  });
+
+  /* A real name lookup must still reach the person path, or fixing the roster
+     question would break the question the tool was built for. */
+  it.each(["who is Jorge", "who is Nick Homyk", "who is the CEO of Porsche"])(
+    "leaves %s to the person lookup",
+    (q) => {
+      expect(matchRosterQuestion(q)).toBeNull();
+    },
+  );
+});
+
+/**
+ * Machinery is not a colleague.
+ *
+ * Measured against the real roster: 11 of 19 active members are automation.
+ * Seven copies of "E2E (automated tests)", a CI smoke account, a health bot,
+ * and one called "TEST". Nobody asking who is on the team means "and your
+ * continuous integration credentials".
+ */
+describe("what a roster answer leaves out", () => {
+  const asMember = (name: string) => ({ name, email: "x@example.com" });
+
+  it.each([
+    "E2E (automated tests)",
+    "E2E dev (automated tests)",
+    "CI Smoke E2E",
+    "AgenticQA Health Bot",
+    "TEST",
+  ])("treats %s as machinery", (name) => {
+    expect(isAutomationForTests(asMember(name))).toBe(true);
+  });
+
+  /* Narrow and anchored, so it cannot hide a real person. */
+  it.each([
+    "Max Fuerst",
+    "Alicia Zulker",
+    "Nick Homyk",
+    "Testa Rossi",
+    "Roberta Bott",
+  ])("leaves %s alone", (name) => {
+    expect(isAutomationForTests(asMember(name))).toBe(false);
   });
 });
