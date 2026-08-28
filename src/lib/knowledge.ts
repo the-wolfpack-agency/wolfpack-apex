@@ -7,7 +7,10 @@
  */
 
 import { query, safeQuery } from "@/lib/db";
-import { deniesCapability, capabilityDenialSql } from "@/lib/assistant/capability-denial";
+import {
+  deniesCapability,
+  capabilityDenialSqlForModelAnswers,
+} from "@/lib/assistant/capability-denial";
 import { trackEvent } from "@/lib/analytics";
 import { tripleWriteKnowledge } from "@/lib/triple-write";
 import { recordKnowledgeInteraction } from "@/lib/neo4j";
@@ -118,7 +121,7 @@ export async function askQuestion(
       `SELECT * FROM instinct_knowledge
        WHERE similarity(question, $1) > 0.3
          AND rating IS NOT NULL AND rating >= 3
-         AND ${capabilityDenialSql("answer")}
+         AND ${capabilityDenialSqlForModelAnswers("answer", "source")}
        ORDER BY similarity(question, $1) DESC, view_count DESC
        LIMIT 1`,
       [question],
@@ -439,7 +442,7 @@ export async function getPopularQuestions(limit: number = 10): Promise<Knowledge
        piece of knowledge is the same lie, printed somewhere a client browses
        at their leisure. */
     `SELECT * FROM instinct_knowledge
-      WHERE ${capabilityDenialSql("answer")}
+      WHERE ${capabilityDenialSqlForModelAnswers("answer", "source")}
       ORDER BY view_count DESC LIMIT $1`,
     [limit],
   );
@@ -459,7 +462,7 @@ export async function getRecentKnowledge(
 
   const { rows } = await safeQuery<Record<string, unknown>>(
     `SELECT * FROM instinct_knowledge
-     WHERE ${capabilityDenialSql("answer")}
+     WHERE ${capabilityDenialSqlForModelAnswers("answer", "source")}
      ORDER BY COALESCE(updated_at, created_at) DESC
      LIMIT $1 OFFSET $2`,
     [limit, Math.max(0, offset)],
@@ -537,7 +540,7 @@ export async function searchKnowledge(
              OR question ILIKE '%' || $1 || '%'
              OR answer ILIKE '%' || $1 || '%'
            )
-       AND ${capabilityDenialSql("answer")}
+       AND ${capabilityDenialSqlForModelAnswers("answer", "source")}
      ORDER BY sim DESC, view_count DESC
      LIMIT $2`,
     [searchQuery, limit],

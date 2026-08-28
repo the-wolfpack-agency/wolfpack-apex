@@ -125,3 +125,60 @@ describe("the SQL form, which guards the cache read and the purge", () => {
     }
   });
 });
+
+/**
+ * WHO WROTE IT DECIDES WHETHER IT IS SUPPRESSED.
+ *
+ * The unscoped filter above is right for the WRITE guard, which only ever sees
+ * model output. On the READ side it was too broad: a person deliberately
+ * curating "I cannot approve anything over ten thousand without a second
+ * signature" would have their own entry silently hidden from search and from
+ * the Knowledge page, with nothing to tell them why.
+ *
+ * Measured on production before the change: 3 rows hidden, all source=ai, so
+ * nothing human was being suppressed. Measured after: the same 3, with all 9
+ * human and 16 docs rows served. This closes the gap before somebody writes
+ * the sentence that would have hit it.
+ *
+ * A human writing a refusal is making a decision. A model writing one is
+ * usually wrong about this product, which is the finding behind the whole file.
+ */
+import { capabilityDenialSqlForModelAnswers } from "@/lib/assistant/capability-denial";
+
+describe("the read filter only suppresses what a model wrote", () => {
+  it("lets any non-model row through whatever it says", () => {
+    const sql = capabilityDenialSqlForModelAnswers("answer", "source");
+    expect(sql).toContain("source IS DISTINCT FROM 'ai'");
+  });
+
+  /* IS DISTINCT FROM rather than <>, because a NULL source would make a plain
+     inequality evaluate to NULL and drop the row. An entry with no recorded
+     provenance is not a model answer and must not be suppressed as one. */
+  it("keeps rows whose provenance is unrecorded", () => {
+    expect(capabilityDenialSqlForModelAnswers("answer", "source")).toMatch(
+      /IS DISTINCT FROM/,
+    );
+  });
+
+  it("still applies the full denial test to model answers", () => {
+    const sql = capabilityDenialSqlForModelAnswers("answer", "source");
+    expect(sql).toContain("answer NOT ILIKE");
+    expect(sql.match(/answer NOT ILIKE/g)!.length).toBeGreaterThan(5);
+  });
+
+  /* Both columns are interpolated, so both need the same structural proof the
+     single-column form has. A caller that passed reader input for either would
+     otherwise have written an injection. */
+  it.each([
+    ["answer; DROP TABLE x", "source"],
+    ["answer", "source; DROP TABLE x"],
+    ["", "source"],
+  ])("refuses to build SQL around %j / %j", (a, b) => {
+    expect(() => capabilityDenialSqlForModelAnswers(a, b)).toThrow();
+  });
+
+  it("accepts ordinary and table-qualified column names", () => {
+    expect(() => capabilityDenialSqlForModelAnswers("answer", "source")).not.toThrow();
+    expect(() => capabilityDenialSqlForModelAnswers("k.answer", "k.source")).not.toThrow();
+  });
+});
