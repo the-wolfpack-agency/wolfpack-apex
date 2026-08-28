@@ -60,6 +60,42 @@ jobs:
 
       - run: npm ci
 
+      # CAN A CLIENT ENVIRONMENT STILL BE BUILT FROM NOTHING?
+      #
+      # Deploying to a client means an empty database, and on 2026-08-27 the
+      # chain could not fill one. It stopped three separate times: 125 seeded a
+      # 'ceo' row against a constraint that does not permit it until 145, 129
+      # asserted three seeded principles a new database does not have, and 137
+      # added a foreign key to a workspace row that migration 015 never
+      # inserts.
+      #
+      # Every existing deployment predates those files, so the chain had never
+      # been replayed from zero and nothing was red. The product was one
+      # onboarding away from discovering it in front of a client.
+      #
+      # Runs BEFORE the contract tests so a broken chain reports as a broken
+      # chain, rather than as a hundred confusing test failures downstream.
+      - name: A fresh database can be built from the migrations
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/fresh_install
+        run: |
+          set -euo pipefail
+          PGPASSWORD=postgres psql -h localhost -U postgres -c 'CREATE DATABASE fresh_install;'
+          npm run migrate
+
+      - name: Running them again changes nothing
+        # A migration that is not idempotent breaks the next deploy rather than
+        # this one, which is the worst time to find out.
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/fresh_install
+        run: |
+          set -euo pipefail
+          npm run migrate 2>&1 | tee replay.log
+          if grep -q '\[migrate\] applied' replay.log; then
+            echo "::error::A second run applied migrations again. The chain is not idempotent."
+            exit 1
+          fi
+
       - name: Run the database contract tests
         env:
           TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/instinct_test

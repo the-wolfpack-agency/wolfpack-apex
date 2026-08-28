@@ -89,8 +89,27 @@ BEGIN
            LOWER('Pushback is Expected')
          )
      AND retired_at IS NULL;
-  ASSERT p_count = 3,
-    format('expected 3 active target principles, found %s', p_count);
+  -- ZERO IS A FRESH DATABASE, NOT A FAULT.
+  --
+  -- This asserted p_count = 3, which held on every database that already
+  -- carried the seeded principles and failed on every database that did not.
+  -- A new environment has no principles yet, so the chain stopped here and no
+  -- client environment could be built from scratch. It went unnoticed because
+  -- every existing deployment predates this file, so nothing replayed the
+  -- chain from zero until 2026-08-27.
+  --
+  -- The inserts above are already no-ops when the principles are absent: they
+  -- are INSERT ... SELECT against the same titles, so they add nothing and
+  -- there is nothing for this migration to have got wrong.
+  --
+  -- One or two is still a failure, and deliberately so. That means the
+  -- principles exist but not all three, which is real drift and the exact case
+  -- this assertion was written to catch.
+  ASSERT p_count IN (0, 3),
+    format(
+      'expected 3 active target principles or a fresh database with none, found %s',
+      p_count
+    );
 END $$;
 
 COMMIT;
