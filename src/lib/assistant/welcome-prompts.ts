@@ -56,7 +56,23 @@ export interface WelcomePrompt {
  * a suggestion filtered by a signal we cannot read is a suggestion we have
  * guessed about.
  */
-export type PromptRequirement = "calendar" | "mail" | "documents" | "tasks";
+/**
+ * The sources a prompt can depend on, as a runtime list so the type and the
+ * checks that walk it cannot disagree.
+ *
+ * Written first as a bare union with the guardrail restating its members by
+ * hand, which meant adding "financials" broke the guardrail rather than being
+ * covered by it. A list that has to be edited in two places drifts in one.
+ */
+export const PROMPT_REQUIREMENTS = [
+  "calendar",
+  "mail",
+  "documents",
+  "tasks",
+  "financials",
+] as const;
+
+export type PromptRequirement = (typeof PROMPT_REQUIREMENTS)[number];
 
 /** What is actually reachable right now, for filtering suggestions. */
 export type AvailableSources = Partial<Record<PromptRequirement, boolean>>;
@@ -140,6 +156,13 @@ const ROLE_KITS: Record<string, WelcomePrompt[]> = {
     {
       text: "what's our MRR",
       description: "Current monthly recurring revenue from the financials store.",
+      /* DECLARED, BELATEDLY. This is the prompt that most obviously depends on
+         a connector and it declared nothing, so the availability filter could
+         never hide it. Measured 2026-08-28: offered to a CEO on a workspace
+         with no QuickBooks, answering "financials are not connected yet".
+         Honest, and still a chip that dead-ends on the first click, which the
+         filter above exists to prevent. */
+      requires: "financials",
     },
     {
       text: "what are our OKRs",
@@ -171,6 +194,13 @@ const ROLE_KITS: Record<string, WelcomePrompt[]> = {
     {
       text: "what's our MRR",
       description: "Current monthly recurring revenue from the financials store.",
+      /* DECLARED, BELATEDLY. This is the prompt that most obviously depends on
+         a connector and it declared nothing, so the availability filter could
+         never hide it. Measured 2026-08-28: offered to a CEO on a workspace
+         with no QuickBooks, answering "financials are not connected yet".
+         Honest, and still a chip that dead-ends on the first click, which the
+         filter above exists to prevent. */
+      requires: "financials",
     },
     {
       text: "upload to brain",

@@ -76,8 +76,33 @@ const EMAIL_RE = /[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b/g;
  * number leaked past the guardrail. The area-code alternation forces
  * backtracking to give those digits back so the full number is redacted.
  */
+/*
+ * THE AREA CODE AND EXCHANGE MUST BE DIALLABLE.
+ *
+ * This accepted any three digits, and with the separators optional that means
+ * ANY bare ten-digit run was a phone number. Measured on a real answer
+ * 2026-08-28:
+ *
+ *   "North Star: Hit $1B in Revenue = 1000000000 $"
+ *   -> "North Star: Hit $1B in Revenue = [PHONE_1] $"
+ *
+ * A revenue target, an invoice total, a record count: every one of them
+ * mangled in front of whoever asked, and the answer left reading as nonsense.
+ *
+ * In the North American plan neither the area code nor the exchange may begin
+ * with 0 or 1, so 100-000-0000 is not a number anybody can dial. Requiring
+ * [2-9] for both discriminates a phone from a large round number using the
+ * numbering plan itself rather than a guess about context.
+ *
+ * DELIBERATELY NOT A RELAXATION OF PII PROTECTION. Every genuine format still
+ * redacts: 555-867-5309, (555) 867-5309, +1 415 555 2671, and the bare
+ * 5558675309. What stops matching is the set of digit runs that could never
+ * have been a phone number in the first place. An ambiguous run that IS
+ * diallable, like 4332356789, is still redacted, because between leaking a
+ * number and mangling one, leaking is the one that cannot be undone.
+ */
 const PHONE_RE =
-  /(?<!\d)(?:\+?\d{1,3}[\s.()-]{0,2})?(?:\(\d{3}\)|\d{3})[\s.()-]{0,2}\d{3}[\s.()-]{0,2}\d{4}(?!\d)/g;
+  /(?<!\d)(?:\+?\d{1,3}[\s.()-]{0,2})?(?:\(\d{3}\)|[2-9]\d{2})[\s.()-]{0,2}[2-9]\d{2}[\s.()-]{0,2}\d{4}(?!\d)/g;
 
 /*
  * SSN, US Social Security Number: xxx-xx-xxxx (dashed only for the
