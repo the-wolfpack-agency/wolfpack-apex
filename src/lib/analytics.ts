@@ -1305,6 +1305,10 @@ export type InstinctEventType =
   // re-prompt API is added. Metadata: { widget_kind, query, types,
   // workflow_id? }.
   | "assistant.search_refilter_requested"
+  /* The exact phrase found nothing and a relaxed one did. Counting these is
+     how we learn which words people misspell, and whether the recovery is
+     earning its extra query. */
+  | "assistant.search_relaxed"
   // User-feedback capture (`/feedback`) - slash command + dedicated
   // widget the team-onboarding session (2026-05) uses to solicit
   // honest reactions without first wiring Slack/Linear.

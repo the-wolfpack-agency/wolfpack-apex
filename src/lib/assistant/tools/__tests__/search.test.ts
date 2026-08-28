@@ -32,7 +32,7 @@ jest.mock("@/lib/analytics", () => ({
   trackEvent: (...a: unknown[]) => mockTrackEvent(...a),
 }));
 
-import { searchTool, matchDocumentQuestion } from "@/lib/assistant/tools/search";
+import { searchTool, matchDocumentQuestion, relaxQuery } from "@/lib/assistant/tools/search";
 
 const ctx = { userId: "u1", userRole: "cto" };
 
@@ -465,5 +465,42 @@ describe("questions that name where the documents live", () => {
     ["what does our security policy say", "security policy"],
   ])("leaves %s alone", (question, expected) => {
     expect(matchDocumentQuestion(question)).toBe(expected);
+  });
+});
+
+/**
+ * The commonest dead end in the product.
+ *
+ * Measured on production over 60 days: 130 assistant answers were dead ends,
+ * and 36 of them were one query, "coaching calls spreasheet". One person, one
+ * typo, thirty-six attempts, nothing back every time. They were never told the
+ * file might be there under a slightly different name. They were told nothing
+ * was found, and eventually they stopped asking.
+ *
+ * A search that only matches what was typed puts the burden of spelling on the
+ * person asking.
+ */
+describe("relaxing a query that found nothing", () => {
+  /* A misspelling is usually the longest and most specific token, so it is the
+     first to go and the words most likely to be right are kept. */
+  it("drops the longest meaningful word", () => {
+    expect(relaxQuery("coaching calls spreasheet")).toBe("coaching calls");
+  });
+
+  it("ignores filler when choosing what to drop", () => {
+    expect(relaxQuery("the report about onboarding")).toBe("report");
+  });
+
+  /* Dropping the only meaningful word leaves nothing to search for, and a
+     search for the filler would match everything. */
+  it.each(["invoices", "the invoices", "show me the report"])(
+    "refuses to relax %s, because dropping its one real word leaves nothing",
+    (q) => {
+      expect(relaxQuery(q)).toBeNull();
+    },
+  );
+
+  it("survives punctuation without producing empty tokens", () => {
+    expect(relaxQuery("q3 revenue, forecasted?")).toBe("q3 revenue");
   });
 });
