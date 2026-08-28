@@ -10,6 +10,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getUserFromRequest } from "@/lib/auth";
 import { trackEvent } from "@/lib/analytics";
 import { getSyncState } from "@/lib/ms-graph/sync-state";
+import { listOpenTasksLive } from "@/lib/integrations/microsoft-tasks";
 import {
   listCachedTasks,
   createTask,
@@ -47,6 +48,42 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Invalid status" }, { status: 400 });
   }
 
+  /* LIVE FOR THE PLAIN READ, which is what the page actually does on load.
+     instinct_ms_tasks has never held a row, so this returned nothing to
+     everybody. Asking Microsoft needs nothing synced and leaves no copy here.
+
+     The filtered and paginated shapes still go through the cache read below:
+     Graph has no equivalent of a cursor over a filtered union of lists, and
+     silently returning an unfiltered live list in answer to a filtered request
+     would be worse than returning what the mirror has. They degrade to empty
+     exactly as before, which everySynced still explains. */
+  const plainRead = !status && !listId && !dueBefore && !dueAfter && !search && !cursor;
+  if (plainRead) {
+    const live = await listOpenTasksLive(user.id, {
+      limit: limitStr ? parseInt(limitStr, 10) : 50,
+    });
+    if (live.ok) {
+      return NextResponse.json({
+        tasks: live.tasks,
+        nextCursor: null,
+        /* Read live, so it is current now. Kept in the response so the page
+           does not have to know which path served it. */
+        everSynced: true,
+        lastSyncedAt: new Date().toISOString(),
+        source: "live",
+      });
+    }
+    return NextResponse.json({
+      tasks: [],
+      nextCursor: null,
+      everSynced: false,
+      lastSyncedAt: null,
+      source: "live",
+      /* Named so the page can say why rather than drawing an empty list. */
+      unavailableReason: live.reason,
+    });
+  }
+
   const { tasks, nextCursor } = await listCachedTasks(user.id, {
     status: (status as TaskStatus) || undefined,
     listId: listId || undefined,
@@ -69,6 +106,7 @@ export async function GET(req: NextRequest) {
     nextCursor,
     everSynced: sync.everSynced,
     lastSyncedAt: sync.lastSyncedAt?.toISOString() ?? null,
+    source: "mirror",
   });
 }
 
