@@ -67,6 +67,10 @@ export type InstinctEventType =
      wrong on 2026-08-28 and records whether it still gets them right. A rising
      failed count is a regression nobody had to notice by hand. */
   | "assistant.selfcheck_completed"
+  /* The insight agent asking a client's own data the questions worth asking.
+     The EMPTY count is the useful figure: it is how much of their corpus we
+     cannot yet answer from, which is the gap a pilot exists to close. */
+  | "insights.data_questions_run"
   /* Somebody acted on a control their role could never use. The API refusing
      is correct; the control being on their screen is the defect. */
   | "ui.role_mismatch_click"

@@ -14,6 +14,7 @@
  */
 import {
   welcomePromptsFor,
+  PROMPT_REQUIREMENTS,
   welcomePromptTextsFor,
   welcomePromptsForRole,
 } from "@/lib/assistant/welcome-prompts";
@@ -33,6 +34,11 @@ describe("filtering by what is connected", () => {
       mail: false,
       documents: false,
       tasks: false,
+      /* Added when MRR finally declared its dependency. It is the prompt that
+         most obviously needs a connector and it declared nothing, so the
+         filter could never hide it and a CEO on a workspace with no QuickBooks
+         was offered it anyway. */
+      financials: false,
     });
     expect(out.length).toBeGreaterThan(0);
     expect(out.every((p) => !p.requires)).toBe(true);
@@ -98,7 +104,10 @@ describe("the kits themselves", () => {
   /* A requirement nobody can satisfy would silently remove a prompt forever.
      This catches a typo in a tag. */
   it("only uses requirements the filter understands", () => {
-    const known = new Set(["calendar", "mail", "documents", "tasks", undefined]);
+    /* DERIVED, NOT RESTATED. This was a hand-written list, so adding a fifth
+       requirement broke it rather than being covered by it. A guardrail whose
+       own list has to be edited by hand is a guardrail that drifts. */
+    const known = new Set<string | undefined>([...PROMPT_REQUIREMENTS, undefined]);
     for (const role of ["cto", "dev", "sales", "ops", "hr", "unknown-role"]) {
       for (const p of welcomePromptsForRole(role)) {
         expect(known.has(p.requires)).toBe(true);
