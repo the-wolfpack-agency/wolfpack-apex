@@ -167,8 +167,25 @@ export const goodMorningWidgetTool: ToolDef<Params, GoodMorningData> = {
       const prebriefSuffix = defaultMeeting
         ? `, next: ${defaultMeeting.subject}`
         : "";
-      answer =
-        eventCount === 0 && actionCount === 0 && !defaultMeeting
+      /* TWO SOURCES, AND THEY CAN DISAGREE.
+       *
+       * eventCount comes from the briefing's own Graph fetch. defaultMeeting
+       * comes from listUpcomingMeetings, a separate call over a separate
+       * window. When the first fails it yields an empty list, and the sentence
+       * became "0 meetings today, 0 action items, next: Lunch with Cedar &
+       * Stone", which contradicts itself in eleven words. Observed on
+       * production 2026-08-28 in the same conversation where the calendar tool
+       * reported six meetings.
+       *
+       * A count of zero next to a named meeting is not a quiet day, it is a
+       * failed read, and this is the one place both facts are in scope at
+       * once. Saying so costs a sentence and buys back the trust that a
+       * self-contradicting answer spends. */
+      const countContradicted = eventCount === 0 && defaultMeeting != null;
+
+      answer = countContradicted
+        ? `I could not read your full schedule just now, but your next meeting is ${defaultMeeting.subject}.`
+        : eventCount === 0 && actionCount === 0 && !defaultMeeting
           ? "Your day's clear. Here's the panel."
           : `${eventCount} meeting${eventCount === 1 ? "" : "s"} today, ${actionCount} action item${actionCount === 1 ? "" : "s"}${prebriefSuffix}.`;
     } catch (err) {

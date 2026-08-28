@@ -281,3 +281,90 @@ describe("the day commands", () => {
     expect(goodMorningWidgetTool.matchIntent!("brief me")).not.toBeNull();
   });
 });
+
+/**
+ * Two sources, and they can disagree.
+ *
+ * eventCount comes from the briefing's own Graph fetch. defaultMeeting comes
+ * from listUpcomingMeetings, a separate call over a separate window. When the
+ * first fails it yields an empty list, and the sentence became "0 meetings
+ * today, 0 action items, next: Lunch with Cedar & Stone", which contradicts
+ * itself in eleven words.
+ *
+ * Observed on production 2026-08-28, in the same conversation where the
+ * calendar tool reported six meetings for the same day.
+ */
+describe("when the two calendar sources disagree", () => {
+  const emptyBriefing = {
+    generatedAt: "2026-08-28T11:00:00Z",
+    greeting: "Good morning",
+    summary: "",
+    calendar: { eventCount: 0, nextEvent: null, events: [] },
+    email: { unreadCount: 0, importantEmails: [] },
+    actionItems: [],
+    notConnected: false,
+  };
+
+  const meeting = {
+    id: "m1",
+    subject: "Lunch — Cedar & Stone Partnership",
+    start: "2026-08-28T12:30:00Z",
+    end: "2026-08-28T13:30:00Z",
+    attendees: [],
+    isOnlineMeeting: false,
+    minutesUntil: 90,
+    inProgress: false,
+  };
+
+  /* A count of zero next to a named meeting is not a quiet day, it is a
+     failed read, and this is the one place both facts are in scope. */
+  it("does not claim zero meetings while naming the next one", async () => {
+    mockGenerateBriefing.mockResolvedValue(emptyBriefing);
+    mockListUpcomingMeetings.mockResolvedValue([meeting]);
+    mockPickDefaultMeeting.mockReturnValue(meeting);
+
+    const r = await goodMorningWidgetTool.handler({}, CTX);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+
+    expect(r.answer).not.toMatch(/^0 meetings/);
+    expect(r.answer).toMatch(/could not read your full schedule/i);
+    expect(r.answer).toContain("Lunch — Cedar & Stone Partnership");
+  });
+
+  /* A genuinely clear day still reads as a clear day. The fix must not turn
+     every quiet morning into a scary message about a failed read. */
+  it("still says the day is clear when nothing is scheduled anywhere", async () => {
+    mockGenerateBriefing.mockResolvedValue(emptyBriefing);
+    mockListUpcomingMeetings.mockResolvedValue([]);
+    mockPickDefaultMeeting.mockReturnValue(null);
+
+    const r = await goodMorningWidgetTool.handler({}, CTX);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.answer).toMatch(/day's clear/i);
+  });
+
+  /* When the count is real, it is reported, next meeting and all. */
+  it("reports the count when the sources agree", async () => {
+    mockGenerateBriefing.mockResolvedValue({
+      ...emptyBriefing,
+      calendar: {
+        eventCount: 2,
+        nextEvent: null,
+        events: [
+          { subject: "Standup", startTime: "2026-08-28T10:00:00Z", endTime: "2026-08-28T10:15:00Z", attendees: [] },
+          { subject: "Review", startTime: "2026-08-28T14:00:00Z", endTime: "2026-08-28T15:00:00Z", attendees: [] },
+        ],
+      },
+    });
+    mockListUpcomingMeetings.mockResolvedValue([meeting]);
+    mockPickDefaultMeeting.mockReturnValue(meeting);
+
+    const r = await goodMorningWidgetTool.handler({}, CTX);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.answer).toMatch(/^2 meetings today/);
+    expect(r.answer).toContain("next: Lunch");
+  });
+});
