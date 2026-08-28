@@ -49,6 +49,7 @@ import { buildCompatibleProviders } from "./openai-compatible-provider";
 import type {
   AIClient,
   AICompleteRequest,
+  AIModelTier,
   AICompleteResponse,
   AIProvider,
 } from "./types";
@@ -201,6 +202,42 @@ function pickFallback(
   // Azure is primary; Anthropic is the fallback only if its key is set.
   if (isAnthropicConfigured()) return registry.anthropic;
   return null;
+}
+
+/**
+ * A deployment that is named but does not exist.
+ *
+ * WHY THIS IS NOT AN ORDINARY 4xx. isRetryableError deliberately refuses to
+ * retry 4xx, and it is right to: a malformed request fails identically on the
+ * second attempt. This one is different. A 404 from a provider means the model
+ * we asked for is not there, which says nothing about the request and
+ * everything about our configuration, and routing around an unavailable model
+ * is the entire job of this file.
+ *
+ * Observed on production 2026-08-28: an assistant turn escalated to the
+ * premium tier, Azure answered "The API deployment for this resource does not
+ * exist", no second provider was configured, and the answer was lost. The
+ * premium deployment name was set 122 days ago and points at something that is
+ * no longer there. A stale environment variable in one tier should not destroy
+ * a user's answer.
+ */
+function isMissingDeployment(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const status = (err as { status?: unknown }).status;
+  if (status !== 404) return false;
+  const message = String((err as { message?: unknown }).message ?? "");
+  /* Precision over breadth: a 404 that is not about a deployment is somebody
+     else's bug and should surface rather than be quietly retried. */
+  return /deployment|model/i.test(message);
+}
+
+/** Tiers in descending cost, for degrading to one that exists. */
+const TIER_LADDER: readonly AIModelTier[] = ["premium", "standard", "cheap"];
+
+/** The next cheaper tier, or null at the bottom. */
+function nextTierDown(tier: AIModelTier): AIModelTier | null {
+  const i = TIER_LADDER.indexOf(tier);
+  return i >= 0 && i < TIER_LADDER.length - 1 ? TIER_LADDER[i + 1]! : null;
 }
 
 function isRetryableError(err: unknown): boolean {
@@ -613,6 +650,42 @@ class RouterClient implements AIClient {
     } catch (err) {
       primarySpan.setAttribute("error_message", (err as Error).message);
       primarySpan.end("error");
+      /* THE TIER IS MISSING, NOT THE PROVIDER.
+       *
+       * pickFallback swaps to the OTHER provider, which is the right answer
+       * when a provider is down and no answer at all when only one is
+       * configured. That is this deployment: Azure alone, so a premium
+       * deployment that does not exist meant the turn was simply lost.
+       *
+       * A named-but-absent deployment says nothing about the request and
+       * everything about our configuration, so the same provider can almost
+       * certainly still answer at a tier that does exist. Degrading is
+       * strictly better than returning nothing, and cheaper too.
+       *
+       * Recorded rather than absorbed. A silent degrade would hide the stale
+       * variable forever, and the whole reason this bug survived 122 days is
+       * that nothing said the tier was broken. */
+      if (isMissingDeployment(err)) {
+        const lower = nextTierDown(cReq.model_tier);
+        if (lower) {
+          trackEvent(
+            "ai.tier_degraded_missing_deployment",
+            cReq.metadata?.user_id ?? "system",
+            cReq.metadata?.user_role ?? "system",
+            {
+              provider: primary.name,
+              requested_tier: cReq.model_tier,
+              served_tier: lower,
+              feature: cReq.metadata?.feature ?? "unknown",
+            },
+          );
+          console.warn(
+            `[ai/router] ${primary.name} has no deployment for tier ${cReq.model_tier}; serving ${lower} instead`,
+          );
+          return this.complete({ ...cReq, model_tier: lower });
+        }
+      }
+
       const fallback = pickFallback(primary, this.registry, cReq);
       if (fallback && isRetryableError(err)) {
         console.warn(
