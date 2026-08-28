@@ -67,7 +67,28 @@ export type AvailableSources = Partial<Record<PromptRequirement, boolean>>;
  * chips are gated to `dev` because Nick is the only teammate with a
  * GitHub login wired up — chips that 400 on click are a worse first
  * impression than chips that don't exist. */
+/**
+ * The question the document corpus exists to answer.
+ *
+ * ADDED BECAUSE NOTHING POINTED AT IT. On 2026-08-28 the Brain held 1,251
+ * documents, 665 of them synced from SharePoint, all searchable, and not one
+ * starter prompt in this file mentioned asking about them. The four that came
+ * close were about UPLOADING. A capability nobody is told about is a
+ * capability nobody uses, and this is the largest one the product has.
+ *
+ * Phrased as a question rather than a command because that is how people ask
+ * about a document. "What do our documents say about onboarding" is what
+ * somebody types; "search onboarding" is what an engineer types.
+ */
+const ASK_DOCUMENTS: WelcomePrompt = {
+  text: "what do our documents say about onboarding",
+  label: "ask our documents",
+  description: "Search everything synced from SharePoint and answer with the source attached.",
+  requires: "documents",
+};
+
 const GENERIC_KIT: WelcomePrompt[] = [
+  ASK_DOCUMENTS,
   {
     text: "briefing",
     description: "Your morning summary: schedule, emails, action items.",
@@ -102,6 +123,7 @@ const GENERIC_KIT: WelcomePrompt[] = [
 
 const ROLE_KITS: Record<string, WelcomePrompt[]> = {
   ceo: [
+    ASK_DOCUMENTS,
     {
       text: "briefing",
       description: "Morning panel: today's schedule + flagged emails + action items.",
@@ -125,6 +147,7 @@ const ROLE_KITS: Record<string, WelcomePrompt[]> = {
     },
   ],
   cto: [
+    ASK_DOCUMENTS,
     /* CTO defaults to the non-dev kit: briefing + calendar + inbox.
      * GitHub chips are reserved for `dev` (Nick switches role to dev
      * to opt in). Non-dev demo surface is more valuable to the team
@@ -156,6 +179,7 @@ const ROLE_KITS: Record<string, WelcomePrompt[]> = {
     },
   ],
   vp: [
+    ASK_DOCUMENTS,
     {
       text: "briefing",
       description: "Today's prep at a glance.",
@@ -180,6 +204,7 @@ const ROLE_KITS: Record<string, WelcomePrompt[]> = {
     },
   ],
   pm: [
+    ASK_DOCUMENTS,
     {
       text: "briefing",
       description: "Your day in one panel.",
@@ -202,6 +227,7 @@ const ROLE_KITS: Record<string, WelcomePrompt[]> = {
     },
   ],
   designer: [
+    ASK_DOCUMENTS,
     {
       text: "briefing",
       description: "Today's schedule + flagged emails.",
@@ -226,6 +252,7 @@ const ROLE_KITS: Record<string, WelcomePrompt[]> = {
     },
   ],
   dev: [
+    ASK_DOCUMENTS,
     /* `dev` is the ONLY role that surfaces GitHub chips on the welcome
      * modal. Nick is the only teammate with a wired-up GitHub login,
      * so other roles get calendar/inbox chips instead — see GENERIC_KIT
@@ -254,6 +281,7 @@ const ROLE_KITS: Record<string, WelcomePrompt[]> = {
     },
   ],
   sales: [
+    ASK_DOCUMENTS,
     {
       text: "briefing",
       description: "Today's pipeline-relevant briefing.",
@@ -277,6 +305,7 @@ const ROLE_KITS: Record<string, WelcomePrompt[]> = {
     },
   ],
   ops: [
+    ASK_DOCUMENTS,
     {
       text: "briefing",
       description: "Today's schedule + flagged emails.",
@@ -299,6 +328,7 @@ const ROLE_KITS: Record<string, WelcomePrompt[]> = {
     },
   ],
   hr: [
+    ASK_DOCUMENTS,
     {
       text: "briefing",
       description: "Today's prep at a glance.",
@@ -380,8 +410,24 @@ export function welcomePromptsFor(
     return available[p.requires] !== false;
   });
 
-  if (usable.length > 0) return usable;
-  return kit.filter((p) => !p.requires);
+  if (usable.length === 0) return kit.filter((p) => !p.requires);
+
+  /* LEAD WITH WHAT IS CONFIRMED WORKING.
+   *
+   * Filtering stops us pointing at walls. It does not tell anybody what just
+   * became possible, and that is the other half: a module lands, the product
+   * can suddenly do something it could not last week, and the front door still
+   * offers the same list it always did.
+   *
+   * A prompt whose source is confirmed present goes first. Confirmed means an
+   * explicit true, not merely "not false", so an unchecked source never
+   * outranks one we know works.
+   *
+   * Stable within each group, so the order written in the kit still expresses
+   * what matters for that role. This promotes; it does not reshuffle. */
+  const confirmed = usable.filter((p) => p.requires && available[p.requires] === true);
+  const rest = usable.filter((p) => !(p.requires && available[p.requires] === true));
+  return [...confirmed, ...rest];
 }
 
 /**

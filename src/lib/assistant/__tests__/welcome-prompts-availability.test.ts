@@ -115,3 +115,51 @@ describe("the kits themselves", () => {
     },
   );
 });
+
+/**
+ * Leading with what just became possible.
+ *
+ * Filtering stops us pointing at walls. It does not tell anybody what the
+ * product can now do. On 2026-08-28 the Brain held 1,251 documents, 665 of
+ * them from SharePoint, all searchable, and not one starter prompt mentioned
+ * asking about them. The four that came close were about uploading.
+ *
+ * A capability nobody is told about is a capability nobody uses.
+ */
+describe("surfacing a capability that is confirmed working", () => {
+  it("offers the document question in every kit", () => {
+    for (const role of ["cto", "dev", "sales", "ops", "hr", "unknown-role"]) {
+      const texts = welcomePromptsForRole(role).map((p) => p.text);
+      expect(texts.some((t) => /documents say/i.test(t))).toBe(true);
+    }
+  });
+
+  it("puts a confirmed source first", () => {
+    const out = welcomePromptsFor("cto", { documents: true });
+    expect(out[0].requires).toBe("documents");
+  });
+
+  /* Confirmed means an explicit true. An unchecked source must not outrank one
+     we know works, or the ordering is just noise. */
+  it("does not promote a source that was merely not ruled out", () => {
+    const out = welcomePromptsFor("cto", {});
+    expect(out).toEqual(welcomePromptsForRole("cto"));
+  });
+
+  /* This promotes; it does not reshuffle. The order written in each kit still
+     expresses what matters for that role. */
+  it("keeps the kit's own order within each group", () => {
+    const kit = welcomePromptsForRole("cto");
+    const out = welcomePromptsFor("cto", { documents: true });
+
+    const unconfirmed = out.filter((p) => p.requires !== "documents").map((p) => p.text);
+    const kitOrder = kit.filter((p) => p.requires !== "documents").map((p) => p.text);
+    expect(unconfirmed).toEqual(kitOrder);
+  });
+
+  it("still hides a confirmed-unavailable source while promoting a confirmed one", () => {
+    const out = welcomePromptsFor("cto", { documents: true, calendar: false });
+    expect(out[0].requires).toBe("documents");
+    expect(out.some((p) => p.requires === "calendar")).toBe(false);
+  });
+});
