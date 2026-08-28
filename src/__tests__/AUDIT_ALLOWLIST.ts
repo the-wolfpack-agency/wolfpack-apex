@@ -29,6 +29,10 @@ export interface AuditAllowlistEntry {
 export const AUDIT_ALLOWLIST: ReadonlyArray<AuditAllowlistEntry> = [
   // Delegated auditing
   {
+    route: "src/app/api/gate/complete/route.ts",
+    reason: "external-agent inference served through the model router; recordRouterCall writes the hash-chained AI ledger entry for every completion (counts, rule ids and cost, never content), which is where the model, provider and spend are actually known, so the route delegates rather than writing a second, thinner record",
+  },
+  {
     route: "src/app/api/assistant/broadcast/route.ts",
     reason: "broadcastToAssistants() in src/lib/assistant/broadcast.ts records the hash-chained audit entry itself, naming the sender, the recipient count and how many were actually delivered, so the route delegates rather than double-auditing; the lib is the right place for it because the delivered and failed counts are only known after the fan-out",
   },

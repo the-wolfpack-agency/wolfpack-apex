@@ -841,6 +841,10 @@ export type InstinctEventType =
   // OGIAM gate to authorize an action via an API key. Every external decision is a
   // learning surface. authorized { agent, tool, outcome } / blocked { reason }
   | "platform.gate_api_authorized"
+  /* An external agent's reasoning served through our model router, so its
+     thinking carries the same redaction, residency and budget controls as
+     ours rather than going straight to its own vendor. */
+  | "platform.gate_api_completed"
   | "platform.gate_api_blocked"
   // Tier-2 agentic journey-friction: a gated journey attempt was evaluated for
   // excessive steps / dead-ends. { platform, journey, steps, expected, friction }
