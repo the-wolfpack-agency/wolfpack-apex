@@ -39,7 +39,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getInstinctUser, fetchWithRefresh } from "@/lib/client-auth";
-import { GlassPanel, MetricTile, SectionHeader, StatusPill, ConsoleGrid } from "@/components/console";
+import { GlassPanel, MetricTile, SectionHeader, StatusPill, ConsoleGrid, ConsoleShell } from "@/components/console";
 import type { SeverityTone } from "@/components/console";
 import RouterFlow from "@/components/admin/RouterFlow";
 import RouterExplainer from "@/components/admin/RouterExplainer";
@@ -158,7 +158,10 @@ export default function AiRouterPage() {
   }, [router, load]);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
+    /* The shared frame, so this page, /admin/agents and /assistant read as one
+       product rather than three. The shell owns width, rhythm and the ambient
+       backdrop; everything inside is unchanged. */
+    <ConsoleShell testId="ai-router-shell">
       <SectionHeader
         as="h1"
         eyebrow="OGIAM"
@@ -644,7 +647,7 @@ export default function AiRouterPage() {
           </ul>
         </GlassPanel>
       )}
-    </div>
+    </ConsoleShell>
   );
 }
 

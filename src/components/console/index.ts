@@ -8,6 +8,9 @@
  * Reuse these primitives; do not duplicate them per page.
  */
 
+export { ConsoleShell, default as ConsoleShellDefault } from "./ConsoleShell";
+export type { ConsoleShellProps } from "./ConsoleShell";
+
 export { GlassPanel, default as GlassPanelDefault } from "./GlassPanel";
 export type { GlassPanelProps, GlassGlow } from "./GlassPanel";
 
