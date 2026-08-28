@@ -36,6 +36,25 @@ UPDATE instinct_invites      SET workspace_id = 'default' WHERE workspace_id IS 
 CREATE INDEX IF NOT EXISTS idx_team_members_workspace
   ON instinct_team_members (workspace_id);
 
+-- THE DEFAULT WORKSPACE ROW HAS TO EXIST BEFORE THE FK DOES.
+--
+-- The comment at the top of this file says workspace "default" was created by
+-- migration 015. 015 creates the TABLE and never inserts that row, so on a
+-- fresh database instinct_workspace is empty while every team member seeded by
+-- 125 already carries workspace_id = 'default'. Adding the foreign key then
+-- fails with "violates foreign key constraint", and the chain stops: no client
+-- environment can be built from scratch.
+--
+-- It never surfaced because every existing deployment created the row through
+-- the app before this migration ran. Nothing replayed the chain from zero
+-- until 2026-08-27.
+--
+-- ON CONFLICT DO NOTHING, so this is a no-op everywhere the row already
+-- exists, and the column defaults supply the rest.
+INSERT INTO instinct_workspace (id, name)
+     VALUES ('default', 'My Workspace')
+ON CONFLICT (id) DO NOTHING;
+
 -- FK only if instinct_workspace exists in this environment (migration 015).
 DO $$
 BEGIN
