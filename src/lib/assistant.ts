@@ -31,6 +31,10 @@ import { searchMeetingTranscripts } from "@/lib/plaud";
 import { trackEvent } from "@/lib/analytics";
 import { safeQuery } from "@/lib/db";
 import { matchPageFacts } from "@/lib/assistant/page-facts-matcher";
+import { capabilityDenialSql } from "@/lib/assistant/capability-denial";
+import { ASSISTANT_IDENTITY_PROMPT } from "@/lib/prompts/definitions/assistant-identity";
+import { getTools } from "@/lib/assistant/tools/registry";
+import { canInvokeTool } from "@/lib/assistant/tools/gate";
 import { formatPageFactsAnswer } from "@/lib/assistant/page-facts";
 import { getRelevantContext } from "@/lib/assistant/context-resolver";
 import {
@@ -442,6 +446,15 @@ async function findOrgQACacheHit(
           /* And never the canned refusal: it is an absence of an answer, not
              an answer, and caching it makes the absence permanent. */
           AND a.content NOT ILIKE '%don''t have a confident answer%'
+          /* AND NEVER A DENIAL OF OUR OWN PRODUCT. Two of the three worst
+             answers measured on 2026-08-28 came back from this cache, not
+             from a model: "I cannot send emails directly" and "I don't have
+             direct access to your file system". Both were generated once
+             under a system prompt that described a different product, then
+             served instantly and free ever since. Blocked on the read as
+             well as the write, because a conversation is somebody's history
+             and is not ours to delete. */
+          AND ${capabilityDenialSql("a.content")}
         ORDER BY u.created_at DESC
         LIMIT 1`,
       [normalized, ttlMs],
@@ -517,6 +530,15 @@ async function findOrgQACacheHit(
              filter that only works some of the time. */
           AND a.content NOT ILIKE '%may need a second look%'
           AND a.content NOT ILIKE '%don''t have a confident answer%'
+          /* AND NEVER A DENIAL OF OUR OWN PRODUCT. Two of the three worst
+             answers measured on 2026-08-28 came back from this cache, not
+             from a model: "I cannot send emails directly" and "I don't have
+             direct access to your file system". Both were generated once
+             under a system prompt that described a different product, then
+             served instantly and free ever since. Blocked on the read as
+             well as the write, because a conversation is somebody's history
+             and is not ours to delete. */
+          AND ${capabilityDenialSql("a.content")}
           AND a.content NOT ILIKE 'No meetings recorded%'
           AND a.content NOT ILIKE 'No meetings found%'
           AND a.content NOT ILIKE 'No results found%'
@@ -2708,11 +2730,24 @@ function buildSystemPrompt(
   userMemory: UserMemoryEntry[],
   conversationSummary?: string,
 ): string {
-  const parts: string[] = [
-    "You are the OGIAM Assistant. You have deep knowledge of the wolfpack-auto dealer platform (Next.js 15, PostgreSQL, 215+ API routes, 55 migrations, 110+ tables). Answer questions directly and specifically. Never use em dashes. Use plain, professional language.",
-  ];
+  /* IDENTITY COMES FROM THE PROMPT REGISTRY, not from a string typed here.
+     What used to be on this line named the wrong product, described a
+     different client's platform, and told the model nothing about what it
+     could do, so it answered capability questions as a generic chatbot with
+     access to nothing. prompts/definitions/assistant-identity.ts carries the
+     old text and what it cost.
 
-  parts.push(`The user's role is: ${userRole}.`);
+     The capability half is read from the LIVE tool registry through the same
+     role gate the dispatcher enforces, so the sentence the model is given IS
+     the set of tools that will run. A typed list drifts the day somebody adds
+     a tool, which is precisely how the old string survived a product rename. */
+  const usableTools = getTools()
+    .filter((t) => canInvokeTool(userRole, t.capability))
+    .map((t) => t.name);
+
+  const parts: string[] = [
+    ASSISTANT_IDENTITY_PROMPT.render({ userRole, capabilities: usableTools }),
+  ];
 
   const expertise = userMemory.filter((m) => m.memoryType === "expertise" || m.memoryType === "topic");
   if (expertise.length > 0) {

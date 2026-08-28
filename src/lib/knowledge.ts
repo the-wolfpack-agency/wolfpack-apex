@@ -7,6 +7,7 @@
  */
 
 import { query, safeQuery } from "@/lib/db";
+import { deniesCapability, capabilityDenialSql } from "@/lib/assistant/capability-denial";
 import { trackEvent } from "@/lib/analytics";
 import { tripleWriteKnowledge } from "@/lib/triple-write";
 import { recordKnowledgeInteraction } from "@/lib/neo4j";
@@ -110,9 +111,14 @@ export async function askQuestion(
 
   try {
     const result = await query<Record<string, unknown>>(
+      /* THE knowledge_cache PATH. This is the query that served "I cannot
+         send emails directly" at zero tokens on 2026-08-28. A rating of 3+
+         was treated as sufficient warrant, and somebody had rated a refusal
+         well, presumably because it was polite. */
       `SELECT * FROM instinct_knowledge
        WHERE similarity(question, $1) > 0.3
          AND rating IS NOT NULL AND rating >= 3
+         AND ${capabilityDenialSql("answer")}
        ORDER BY similarity(question, $1) DESC, view_count DESC
        LIMIT 1`,
       [question],
@@ -224,6 +230,18 @@ export async function saveAnswer(
   if (answerImpliesFuturePastEvent(answer)) {
     trackEvent("knowledge.answer_rejected", userId, "dev", {
       reason: "past_event_future_date",
+      source,
+      tokens_used: tokensUsed ?? 0,
+    });
+    return null;
+  }
+  /* Reject an answer that denies a capability this product has. The clarifying
+     filter below has caught "did you mean" since May and never considered that
+     the model might refuse its own product, so that whole class was stored as
+     fact and replayed at zero cost. See assistant/capability-denial.ts. */
+  if (deniesCapability(answer)) {
+    trackEvent("knowledge.answer_rejected", userId, "dev", {
+      reason: "capability_denial",
       source,
       tokens_used: tokensUsed ?? 0,
     });
@@ -417,7 +435,12 @@ export async function getPopularQuestions(limit: number = 10): Promise<Knowledge
   if (!process.env.DATABASE_URL) return DEMO_ENTRIES;
 
   const { rows } = await safeQuery<Record<string, unknown>>(
-    `SELECT * FROM instinct_knowledge ORDER BY view_count DESC LIMIT $1`,
+    /* The Knowledge page, not the assistant. A refusal listed as a popular
+       piece of knowledge is the same lie, printed somewhere a client browses
+       at their leisure. */
+    `SELECT * FROM instinct_knowledge
+      WHERE ${capabilityDenialSql("answer")}
+      ORDER BY view_count DESC LIMIT $1`,
     [limit],
   );
   return rows.map(rowToKnowledge);
@@ -436,6 +459,7 @@ export async function getRecentKnowledge(
 
   const { rows } = await safeQuery<Record<string, unknown>>(
     `SELECT * FROM instinct_knowledge
+     WHERE ${capabilityDenialSql("answer")}
      ORDER BY COALESCE(updated_at, created_at) DESC
      LIMIT $1 OFFSET $2`,
     [limit, Math.max(0, offset)],
@@ -493,12 +517,27 @@ export async function searchKnowledge(
      * generating noise. Return empty; the LLM path will run. */
     return [];
   }
+  /* NEVER SERVE A REFUSAL, WHATEVER IS IN THE TABLE.
+     saveAnswer refuses to write one and migration 245 removed the sixteen
+     already stored, and neither of those helps here. This is the read path,
+     and it is the one that was actually serving them: measured 2026-08-28,
+     "can you send an email for me" came back from this query, at zero tokens,
+     with "I cannot send emails directly", which is false.
+     
+     Guarded on the read as well as the write because the two fixes protect
+     against different things. The write filter stops tomorrow's poison; this
+     stops anything already in the table, anything a restore puts back, and
+     anything that arrives by a path neither of us has thought of. A cache is
+     the wrong place to rely on a single control. */
   const { rows } = await safeQuery<Record<string, unknown>>(
     `SELECT *, similarity(question, $1) AS sim
      FROM instinct_knowledge
-     WHERE similarity(question, $1) > 0.55
-        OR question ILIKE '%' || $1 || '%'
-        OR answer ILIKE '%' || $1 || '%'
+     WHERE (
+             similarity(question, $1) > 0.55
+             OR question ILIKE '%' || $1 || '%'
+             OR answer ILIKE '%' || $1 || '%'
+           )
+       AND ${capabilityDenialSql("answer")}
      ORDER BY sim DESC, view_count DESC
      LIMIT $2`,
     [searchQuery, limit],

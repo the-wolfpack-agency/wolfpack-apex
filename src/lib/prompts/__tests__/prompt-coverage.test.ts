@@ -28,7 +28,6 @@ const LIB = join(__dirname, "..", "..");
 const KNOWN_INLINE_PROMPTS: readonly string[] = [
   "agents/tasks/reasoning.ts",
   "ai/draft-provider.ts",
-  "assistant.ts",
   "automations/meeting-insights/analyzer/index.ts",
   "claude-report-generator.ts",
   "insights/meeting-prep-synthesize.ts",
@@ -79,6 +78,11 @@ describe("inline system prompts are a shrinking list", () => {
     // 12 -> 10: support.categorize and support.auto_acknowledge are registered.
     // 10 -> 7: document.classify, brief.extract, knowledge.answer and
     // support.self_serve_answer are registered.
-    expect(KNOWN_INLINE_PROMPTS.length).toBe(7);
+    // 7 -> 6: assistant.identity is registered. That one was the assistant's
+    // own system prompt, so it was the most-used string in the product and the
+    // least reviewed: it still named a different client's platform four months
+    // after the rename, and told the model nothing about what it could do. It
+    // is the clearest case this ratchet was built to argue for.
+    expect(KNOWN_INLINE_PROMPTS.length).toBe(6);
   });
 });

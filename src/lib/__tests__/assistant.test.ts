@@ -954,8 +954,14 @@ describe("context grounding via getRelevantContext", () => {
     expect(mockAIComplete).toHaveBeenCalledTimes(1);
     const req = mockAIComplete.mock.calls[0][0];
     expect(req.system).toContain(groundingBlock);
-    /* Base assistant prompt must still be present. */
-    expect(req.system).toContain("OGIAM Assistant");
+    /* Base assistant prompt must still be present.
+       This asserted "OGIAM Assistant", which was the wrong product name: the
+       string it was pinning also described a different client's platform and
+       its stack, four months after the rename, and it made the assistant deny
+       capabilities it has. A test that asserts the exact wording of a prompt
+       pins whatever that prompt says, including its bugs, so this now asserts
+       the identity rather than the sentence. */
+    expect(req.system).toContain("Wolfpack Instinct");
   });
 
   test("AI call still fires with unchanged system prompt when getRelevantContext throws", async () => {
@@ -980,7 +986,7 @@ describe("context grounding via getRelevantContext", () => {
     const req = mockAIComplete.mock.calls[0][0];
     /* No grounding header was prepended. */
     expect(req.system).not.toContain("Internal context");
-    expect(req.system).toContain("OGIAM Assistant");
+    expect(req.system).toContain("Wolfpack Instinct");
   });
 });
 
