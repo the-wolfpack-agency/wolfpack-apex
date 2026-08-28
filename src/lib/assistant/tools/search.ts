@@ -435,6 +435,10 @@ const COUNT_LABELS: Record<string, [singular: string, plural: string]> = {
   crm: ["CRM record", "CRM records"],
   dms: ["inventory match", "inventory matches"],
   vercel: ["deployment", "deployments"],
+  /* Distinct from "document", which is our ingested copy. A reader seeing both
+     words in one sentence is being told something true: some of these we hold,
+     and some are still sitting in their SharePoint where we found them. */
+  sharepoint: ["SharePoint file", "SharePoint files"],
 };
 
 /**
@@ -542,6 +546,9 @@ function buildSources(body: SearchResponse): AssistantSourceRef[] {
     channel: "channel",
     email: "email",
     calendar: "meeting",
+    /* A SharePoint hit cites as a document: it IS one, and the reader does not
+       need to know whether we found it in our index or in theirs. */
+    sharepoint: "document",
     /* Documents cite as documents. The corpus is mostly SharePoint files, and
        a reader who sees "document" knows what they are being shown. */
     brain: "document",

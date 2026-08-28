@@ -402,14 +402,40 @@ export interface SearchSharePointOptions {
   topN?: number;
   /** Optional Graph site id to scope the search (`{tenant}.sharepoint.com,{guid},{guid}`). */
   siteId?: string;
+  /**
+   * Which Graph entity types to search.
+   *
+   * Defaults to driveItem alone, because that is the only one the scopes we
+   * actually hold can cover. listItem and site need Sites.Read.All, and asking
+   * for an entity type the token cannot cover fails the entire request rather
+   * than degrading to the ones it can.
+   */
+  entityTypes?: Array<"driveItem" | "listItem" | "site">;
 }
+
+/** Covered by Files.ReadWrite.All, which every connected account already has. */
+export const DEFAULT_ENTITY_TYPES: Array<"driveItem" | "listItem" | "site"> = ["driveItem"];
 
 /**
  * Search across SharePoint via Graph's /search/query endpoint.
  *
- * Uses entityTypes ["driveItem","listItem","site"] which is the cleanest
- * cross-surface query — covers documents, list items (e.g. SharePoint
- * pages, custom lists) and sites without three separate calls.
+ * ENTITY TYPES ARE A SCOPE DECISION, NOT A COVERAGE ONE.
+ *
+ * This asked for ["driveItem","listItem","site"], which reads as the cleanest
+ * cross-surface query and was, on paper. listItem and site both require
+ * Sites.Read.All, and that scope was deliberately removed from the OAuth
+ * request on 2026-05-20 because it needs tenant admin consent and was blocking
+ * every non-admin teammate from connecting Microsoft at all.
+ *
+ * Graph fails the WHOLE request when the token cannot cover every entity type
+ * asked for, so requesting three when we hold the scope for one returned 401
+ * every time. Measured on 2026-08-28: 171 lookups, 401 on every one, from
+ * 2026-05-06 to that morning. Tokens were fine throughout - refresh succeeded
+ * 15,855 times, most recently an hour before the measurement.
+ *
+ * So the default is driveItem alone, which Files.ReadWrite.All already covers
+ * and which is what somebody looking for a document actually wants. Callers
+ * that know Sites.Read.All has been granted can ask for more.
  *
  * Graph's /search/query is delegated-only (it always runs as the calling
  * user) so the result set is automatically scoped to what the user can see.
@@ -446,7 +472,7 @@ export async function searchSharePoint(
   const body = {
     requests: [
       {
-        entityTypes: ["driveItem", "listItem", "site"],
+        entityTypes: opts.entityTypes ?? DEFAULT_ENTITY_TYPES,
         query: { queryString },
         from: 0,
         size: topN,

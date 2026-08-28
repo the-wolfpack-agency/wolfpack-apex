@@ -48,6 +48,10 @@ const TYPE_LABELS: Record<SourceType, string> = {
   /* "Documents", not "Brain". The internal name for the corpus is not what a
      person calls the file they are looking for. */
   brain: "Documents",
+  /* "SharePoint", named for the system it came from, because that is what
+     tells a reader this file is theirs and still sitting where they left it
+     rather than a copy we hold. */
+  sharepoint: "SharePoint",
   crm: "CRM",
   dms: "Inventory",
   vercel: "Vercel",
@@ -63,6 +67,7 @@ const TYPE_ORDER: SourceType[] = [
   "crm",
   "dms",
   "vercel",
+  "sharepoint",
 ];
 
 /** Map a SourceType onto the `counts` key the SearchResponse uses. */
@@ -73,6 +78,7 @@ const COUNT_KEY: Record<SourceType, string> = {
   calendar: "calendar",
   knowledge: "knowledge",
   brain: "brain",
+  sharepoint: "sharepoint",
   crm: "crm",
   dms: "dms",
   vercel: "vercel",

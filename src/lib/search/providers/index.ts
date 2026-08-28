@@ -19,6 +19,7 @@ import { knowledgeProvider } from "./knowledge";
 import { crmProvider } from "./crm";
 import { dmsProvider } from "./dms";
 import { vercelProvider } from "./vercel";
+import { sharepointProvider } from "./sharepoint";
 import { brainProvider } from "./brain";
 import type { SearchProvider } from "./types";
 
@@ -36,6 +37,10 @@ export const SEARCH_PROVIDERS: SearchProvider[] = [
   crmProvider,
   dmsProvider,
   vercelProvider,
+  /* LAST IN THE LIST, FIRST IN USEFULNESS FOR A NEW CLIENT. Every provider
+     above searches something we hold; this one searches what THEY hold, with
+     their own permissions, and needs nothing ingested first. */
+  sharepointProvider,
 ];
 
 export type { SearchProvider, RunSearchContext } from "./types";
