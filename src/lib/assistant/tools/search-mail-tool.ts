@@ -11,6 +11,7 @@
 
 import { z } from "zod";
 import { runMailSearch, type MailSearchResult } from "./mail-search";
+import { getValidToken } from "@/lib/microsoft-graph";
 import { registerTool } from "./registry";
 import type { ToolDef, ToolResult } from "./types";
 
@@ -82,6 +83,19 @@ function matchMailIntent(message: string): Params | null {
   return null;
 }
 
+/**
+ * Whether we can reach this person's mailbox at all.
+ *
+ * Separate from the search itself so the empty case can say which kind of
+ * empty it is. A token that exists but is refused by Graph reports as
+ * unreachable too, which is the honest answer: we could not read the mailbox,
+ * whatever the reason.
+ */
+async function mailboxReachable(userId: string): Promise<boolean> {
+  const auth = await getValidToken(userId).catch(() => null);
+  return Boolean(auth?.accessToken);
+}
+
 export const searchMailTool: ToolDef<Params, MailSearchResult> = {
   name: "search_mail",
   description:
@@ -104,6 +118,27 @@ export const searchMailTool: ToolDef<Params, MailSearchResult> = {
         topic: params.topic,
         limit: 10,
       });
+      if (!result || (result as { count?: number }).count === 0) {
+        /* AN UNCONNECTED MAILBOX IS NOT AN EMPTY ONE.
+           The matcher returns [] when getValidToken finds no token, which is
+           the same [] it returns when the search genuinely found nothing, and
+           this rendered both as "I didn't find any emails about pricing". That
+           is the shape that told everybody they had no tasks for months: the
+           reader cannot tell "nothing matched" from "we never looked", and
+           only one of them is worth acting on.
+
+           Checked only when the result is empty, so a normal answer costs
+           nothing extra. */
+        const connected = await mailboxReachable(ctx.userId);
+        if (!connected) {
+          return {
+            ok: true,
+            data: { messages: [], count: 0 } as unknown as MailSearchResult,
+            answer:
+              "Microsoft is not connected yet, so I cannot read your mail. Connect it in Settings and I will be able to search it.",
+          };
+        }
+      }
       if (!result) {
         return {
           ok: true,
