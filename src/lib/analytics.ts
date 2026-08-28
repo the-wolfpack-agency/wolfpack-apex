@@ -845,6 +845,9 @@ export type InstinctEventType =
      thinking carries the same redaction, residency and budget controls as
      ours rather than going straight to its own vendor. */
   | "platform.gate_api_completed"
+  /* A task handed TO an external agent, rather than one it asked about. The
+     direction is the point: this is us leading it, not authorizing it. */
+  | "platform.gate_api_delegated"
   | "platform.gate_api_blocked"
   // Tier-2 agentic journey-friction: a gated journey attempt was evaluated for
   // excessive steps / dead-ends. { platform, journey, steps, expected, friction }

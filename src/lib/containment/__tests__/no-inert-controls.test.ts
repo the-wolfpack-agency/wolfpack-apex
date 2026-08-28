@@ -71,6 +71,14 @@ const KNOWN_INERT: Readonly<Record<string, string>> = {
   "lib/agents/evals/behavior-eval.ts#gateBatch": "read-only: rolls runs into one verdict for a batch gate not yet built",
   "lib/platform-scan/anomaly/declared.ts#declaredHostList": "flattener for observations.unexplained(); run.ts uses explanationFor() directly",
   "lib/platform-scan/compliance/findings.ts#contactedThirdParties": "read-only appendix helper for a client report format not yet shipped",
+
+  // 2026-08-28. Published for the OTHER side of the contract. An agent
+  // operator receiving one of our delegations has to verify the signature we
+  // send, and describing the construction in prose is how two implementations
+  // end up disagreeing about whether a trailing newline is included. It has no
+  // caller here because we sign; they verify. Its counterpart
+  // delegationSignature IS called in production, so the pair cannot drift.
+  "lib/ogiam/delegate.ts#verifyDelegationSignature": "published for external agent operators to verify a delegation we signed; we sign, they verify, so there is no caller on our side",
   "lib/ogiam/trends.ts#bucketSurfaces": "read-only: trend bucketing for a chart not yet built",
   "lib/ogiam/trends.ts#bucketRedTeam": "read-only: trend bucketing for a chart not yet built",
   "lib/ogiam/ledger.ts#computeOgiamEntryHash": "hash helper; the ledger writer computes the chain inline",

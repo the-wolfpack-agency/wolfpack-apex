@@ -312,3 +312,58 @@ export async function listApiKeys(
     revoked: r.revoked_at !== null,
   }));
 }
+
+
+/**
+ * Load an external agent as a delegation target, including its signing secret.
+ *
+ * RETURNS A SECRET, which is why it is a separate function with a name that
+ * says so rather than a field quietly added to the masked list. listApiKeys
+ * exists precisely so an admin surface can show keys without touching a hash;
+ * this is the one caller that genuinely needs one.
+ *
+ * The stored hash is the signing secret, deliberately. The agent can derive
+ * the same value from the key it already holds, so a delegation is verifiable
+ * without distributing a second credential that would then need its own
+ * rotation story. It never leaves this process: it signs the body, and the
+ * signature travels, not the secret.
+ */
+export async function getDelegationTarget(
+  keyId: string,
+  workspaceId: string,
+): Promise<
+  | { ok: true; keyId: string; workspaceId: string; agent: string; delegationUrl: string | null; capabilities: string[]; signingSecret: string }
+  | { ok: false; reason: "not_found" | "revoked" }
+> {
+  const { rows } = await query<{
+    id: string;
+    workspace_id: string;
+    agent: string;
+    delegation_url: string | null;
+    capabilities: string[] | null;
+    key_hash: string;
+    revoked_at: string | null;
+  }>(
+    `SELECT id, workspace_id, agent, delegation_url, capabilities, key_hash, revoked_at
+       FROM instinct_gate_api_keys
+      WHERE id = $1 AND workspace_id = $2`,
+    [keyId, workspaceId],
+  );
+
+  const row = rows[0];
+  if (!row) return { ok: false, reason: "not_found" };
+  /* A revoked key is not a delegation target. Revocation has to mean the agent
+     stops being part of the system, not merely that it stops being able to
+     call in. */
+  if (row.revoked_at) return { ok: false, reason: "revoked" };
+
+  return {
+    ok: true,
+    keyId: row.id,
+    workspaceId: row.workspace_id,
+    agent: row.agent,
+    delegationUrl: row.delegation_url,
+    capabilities: row.capabilities ?? [],
+    signingSecret: row.key_hash,
+  };
+}
