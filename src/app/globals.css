@@ -986,3 +986,31 @@ a:hover { color: var(--wp-gold-hover); }
   color: var(--wp-text-dim, #aaa);
   margin-top: 0.15rem;
 }
+
+/* Adoption panel on /pilot. The list carries prose lines rather than data
+   rows, so it is set for reading width rather than scanned like a table. */
+.wp-pilot-subhead {
+  margin: 1.75rem 0 0.75rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--wp-text-dim, #b4bcc8);
+}
+.wp-pilot-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-width: 62ch;
+}
+.wp-pilot-list li {
+  font-size: 0.9375rem;
+  line-height: 1.6;
+  color: var(--wp-text-muted, #929cad);
+  padding-left: 0.875rem;
+  border-left: 2px solid var(--wp-dark-border, rgba(255, 255, 255, 0.12));
+}
+.wp-pilot-list li strong { color: var(--wp-text, #e8eaed); font-weight: 600; }

@@ -26,6 +26,12 @@
  * filter, and that is what surfaced the missing gate.
  */
 import { useEffect, useState } from "react";
+import {
+  adoptionVerdict,
+  reachedShare,
+  neverStarted,
+  type AdoptionSnapshot,
+} from "@/lib/pilot/adoption-shape";
 import { fetchWithRefresh, getInstinctUser } from "@/lib/client-auth";
 import {
   deterministicShare,
@@ -54,7 +60,7 @@ function Figure({
 }
 
 export default function PilotPage() {
-  const [snap, setSnap] = useState<PhaseOneSnapshot | null>(null);
+  const [snap, setSnap] = useState<(PhaseOneSnapshot & { adoption?: AdoptionSnapshot }) | null>(null);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
@@ -70,7 +76,7 @@ export default function PilotPage() {
       try {
         const res = await fetchWithRefresh("/api/pilot/phase-one");
         if (!res.ok) throw new Error(String(res.status));
-        const data = (await res.json()) as PhaseOneSnapshot;
+        const data = (await res.json()) as PhaseOneSnapshot & { adoption?: AdoptionSnapshot };
         if (live) setSnap(data);
       } catch {
         if (live) setFailed(true);
@@ -175,6 +181,124 @@ export default function PilotPage() {
               see turns that into a promise.
             </p>
           </section>
+
+          {/* WHETHER ANYBODY IS ACTUALLY USING IT.
+              Every other figure on this page describes the product working.
+              None of them says whether the people it was bought for have taken
+              it up, and a pilot can post good numbers while most of the team
+              never opened it.
+
+              The numbers here are deliberately unflattering. Anyone can report
+              active users; this reports who never started, who stopped, and
+              who kept asking without getting an answer, because those are the
+              three a client otherwise discovers at the end of the pilot. */}
+          {snap.adoption ? (
+            <section className="wp-pilot-section" data-testid="pilot-adoption">
+              <h2>Is the team using it</h2>
+              {!snap.adoption.readable ? (
+                <p className="wp-pilot-aside" data-testid="pilot-adoption-unreadable">
+                  Adoption could not be read just now. That is not the same as nobody
+                  using it, and this panel will not guess which.
+                </p>
+              ) : (
+                <>
+                  <div className="wp-pilot-figures">
+                    <Figure
+                      value={`${snap.adoption.everAsked} of ${snap.adoption.invited}`}
+                      label="Have asked something"
+                      note={
+                        reachedShare(snap.adoption) !== null
+                          ? `${Math.round((reachedShare(snap.adoption) as number) * 100)}% of the people with access`
+                          : "No one has been given access yet"
+                      }
+                      testId="pilot-adoption-reach"
+                    />
+                    <Figure
+                      value={snap.adoption.activeRecently.toLocaleString()}
+                      label="Active this week"
+                      note="Asked something in the last seven days"
+                      testId="pilot-adoption-active"
+                    />
+                    <Figure
+                      value={(neverStarted(snap.adoption) ?? 0).toLocaleString()}
+                      label="Never started"
+                      note="Have access and have never asked anything"
+                      testId="pilot-adoption-never"
+                    />
+                    <Figure
+                      value={snap.adoption.lapsed.toLocaleString()}
+                      label="Drifted away"
+                      note="Used it, then nothing for a fortnight"
+                      testId="pilot-adoption-lapsed"
+                    />
+                  </div>
+
+                  {/* THE SIGNAL THAT NEVER ARRIVES AS A COMPLAINT. Somebody
+                      asking the same thing repeatedly and getting nothing looks
+                      identical, from the outside, to somebody losing interest. */}
+                  {snap.adoption.repeatedFailures.length > 0 ? (
+                    <div data-testid="pilot-adoption-failures">
+                      <p className="wp-pilot-aside">
+                        Asked more than once and never answered. Each one is somebody who
+                        kept trying, and none of them arrived as a complaint.
+                      </p>
+                      <ul className="wp-pilot-list">
+                        {snap.adoption.repeatedFailures.map((f) => (
+                          <li key={f.question}>
+                            <strong>{f.attempts}&times;</strong> {f.question}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+
+                  <p className="wp-pilot-aside">
+                    {adoptionVerdict(snap.adoption) === "slipping"
+                      ? "More people have drifted away than are using it. Worth asking them why while the pilot is still running."
+                      : adoptionVerdict(snap.adoption) === "narrow"
+                        ? "It has taken hold with a few people rather than the team. The ones who never started are the cheapest to win back."
+                        : adoptionVerdict(snap.adoption) === "not_started"
+                          ? "Nobody has asked anything yet."
+                          : "Most of the team has tried it and few have drifted away."}
+                  </p>
+
+              {/* WHAT WE DO ABOUT IT, named next to the number that triggers it.
+                  A dashboard that reports adoption and stops is a scoreboard.
+                  Each line below is tied to a figure above, so the plan moves
+                  when the figure does rather than being restated every month. */}
+              <div data-testid="pilot-adoption-plan">
+                <h3 className="wp-pilot-subhead">How we move these numbers</h3>
+                <ul className="wp-pilot-list">
+                  <li>
+                    <strong>The ones who never started</strong> get reached where they
+                    already work rather than in another tool: the weekly briefing, mail,
+                    and Teams all carry the same short prompt, written for the job they
+                    actually do. One person&rsquo;s first useful question is worth more
+                    than ten broadcasts.
+                  </li>
+                  <li>
+                    <strong>Every repeated failure above is a real request</strong> that
+                    nobody filed as one. Each becomes either a connected source or an
+                    honest &ldquo;we do not hold that&rdquo;, and the person who asked is
+                    told which. That is how the list gets shorter.
+                  </li>
+                  <li>
+                    <strong>A new source earns its own invitation.</strong> When a library
+                    or system connects, the people whose work lives in it are the ones who
+                    hear about it, with examples drawn from their own material rather than
+                    a feature announcement.
+                  </li>
+                  <li>
+                    <strong>Drift is treated as a question, not a churn number.</strong>
+                    Somebody who used it and stopped is asked what they went back to. That
+                    answer is the cheapest research in the pilot.
+                  </li>
+                </ul>
+              </div>
+                </>
+              )}
+            </section>
+          ) : null}
         </>
       )}
     </main>
