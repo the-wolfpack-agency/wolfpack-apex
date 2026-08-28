@@ -22,6 +22,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { sweepAllWorkspaces } from "@/lib/health/integration-probes";
 import { runAssistantSelfCheck } from "@/lib/health/assistant-selfcheck";
+import { recordSearchLatency } from "@/lib/health/search-latency-check";
 import { trackEvent } from "@/lib/analytics";
 
 function isAuthorizedCron(req: NextRequest): boolean {
@@ -41,6 +42,14 @@ async function runSweep(actorId: string, actorRole: string): Promise<NextRespons
        read green. Runs after the probes so a Graph outage shows up as an
        integration failure rather than as six mysterious behaviour failures. */
     const selfCheck = await runAssistantSelfCheck().catch(() => null);
+
+    /* EVERY INTEGRATION JOINS THE FAN-OUT, AND THE SLOWEST ONE IS THE SEARCH.
+       Connecting a client's systems is the product, so each new source widens
+       what we answer AND lands a latency risk on every question. #503 stopped a
+       slow provider holding the rest up; this notices that it happened, which
+       is the half that was missing when one provider made the whole product
+       feel broken for weeks without anybody attributing it. */
+    const latency = await recordSearchLatency().catch(() => null);
     trackEvent("integration.health_sweep", actorId, actorRole, {
       workspaces: result.workspaces,
       probes: result.probes,
@@ -52,6 +61,12 @@ async function runSweep(actorId: string, actorRole: string): Promise<NextRespons
       selfCheck: selfCheck
         ? { ran: selfCheck.ran, failed: selfCheck.failed.map((f) => `${f.id}: ${f.reason}`) }
         : { ran: 0, failed: ["self-check did not run"] },
+      searchLatency: latency
+        ? {
+            budgetMs: latency.budgetMs,
+            overBudget: latency.overBudget.map((p) => `${p.provider}: p95 ${p.p95Ms}ms`),
+          }
+        : { budgetMs: 0, overBudget: ["latency check did not run"] },
     });
   } catch (err) {
     console.error("[cron/integration-health]", (err as Error).message);

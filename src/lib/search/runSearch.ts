@@ -144,7 +144,7 @@ interface ProviderRun {
  * cuts off a provider having a slightly slow day would trade a real result for
  * a small time saving.
  */
-const PROVIDER_BUDGET_MS = 6_000;
+export const PROVIDER_BUDGET_MS = 6_000;
 
 /**
  * Resolve to a sentinel rather than reject, so a slow provider is recorded as
