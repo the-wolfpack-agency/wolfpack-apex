@@ -485,6 +485,10 @@ export type InstinctEventType =
      Recorded per model, because whether a model does this is the question
      that decides if it can be trusted with traffic. */
   | "ai.response_flagged"
+  /* A tier was requested that the provider has no deployment for, so a cheaper
+     one served the answer instead. Recorded rather than absorbed: a silent
+     degrade hides a stale deployment name forever. */
+  | "ai.tier_degraded_missing_deployment"
   | "assistant.broadcast_sent"
   /* A draft answer read by a second model before it was sent. Records whether
      it was reviewed at all and whether the reviewer changed anything, because
