@@ -124,6 +124,86 @@ const MS_GRAPH_SCHEMA_ENDPOINTS: Record<string, string> = {
   message: "me/messages?$top=1&$select=id,subject,from,toRecipients",
 };
 
+/**
+ * Probe SharePoint search itself, because that is what actually broke.
+ *
+ * WHY IT IS NOT A SCHEMA PROBE. The others hash the field set from a GET with
+ * $top=1. SharePoint search is a POST to /search/query, and its failure mode
+ * was never a changed field set: it was a 401 on every call for four months,
+ * because the request asked for entity types the granted scopes could not
+ * cover. A probe that only watched field names would have sat green through
+ * all of it.
+ *
+ * So this runs the real search path with a harmless query and records whether
+ * Microsoft answered. Hits are not required and not asserted: a tenant may
+ * genuinely hold nothing matching, and demanding results would make the probe
+ * fail for a reason that is not a fault. What is recorded is whether the call
+ * was SERVED, which is exactly the thing that was false since May.
+ */
+async function probeSharePointSearch(ctx: ProbeContext): Promise<ProbeResult> {
+  const started = Date.now();
+  if (!ctx.userId) {
+    return {
+      vendor: "microsoft",
+      probeKind: "schema",
+      objectType: "sharepoint",
+      ok: false,
+      errorMessage: "userId required",
+      durationMs: Date.now() - started,
+    };
+  }
+  try {
+    const token = await getValidToken(ctx.userId);
+    if (!token?.accessToken) {
+      return {
+        vendor: "microsoft",
+        probeKind: "schema",
+        objectType: "sharepoint",
+        ok: false,
+        errorMessage: "No valid token",
+        notConfigured: true,
+        durationMs: Date.now() - started,
+      };
+    }
+    const { searchSharePoint } = await import("@/lib/integrations/microsoft-sharepoint");
+    const res = await searchSharePoint(token.accessToken, { query: "report", topN: 1 });
+    if (!res.ok) {
+      return {
+        vendor: "microsoft",
+        probeKind: "schema",
+        objectType: "sharepoint",
+        ok: false,
+        errorMessage: res.code,
+        /* A missing scope is a real, actionable fault and must alert. It is the
+           precise condition that hid for four months, so it is emphatically
+           NOT "not configured". */
+        notConfigured: res.code === "not_connected",
+        durationMs: Date.now() - started,
+      };
+    }
+    return {
+      vendor: "microsoft",
+      probeKind: "schema",
+      objectType: "sharepoint",
+      ok: true,
+      /* Hash the shape, not the contents: a hit count changes constantly and
+         would report drift every night. */
+      schemaHash: hashSchema({ served: true }),
+      schemaPayload: { hits: res.value.hits.length, query_sent: res.value.query_string_sent },
+      durationMs: Date.now() - started,
+    };
+  } catch (err) {
+    return {
+      vendor: "microsoft",
+      probeKind: "schema",
+      objectType: "sharepoint",
+      ok: false,
+      errorMessage: (err as Error).message?.slice(0, 200) ?? "probe failed",
+      durationMs: Date.now() - started,
+    };
+  }
+}
+
 async function probeMicrosoftSchema(
   objectType: string,
   ctx: ProbeContext,
@@ -474,7 +554,9 @@ export async function runProbe(
   if (vendor === "microsoft") {
     return probeKind === "connectivity"
       ? probeMicrosoftConnectivity(ctx)
-      : probeMicrosoftSchema(objectType ?? "task", ctx);
+      : objectType === "sharepoint"
+        ? probeSharePointSearch(ctx)
+        : probeMicrosoftSchema(objectType ?? "task", ctx);
   }
   if (vendor === "quickbooks") {
     return probeQuickbooksConnectivity(ctx);
@@ -567,7 +649,10 @@ export async function getLastKnownGoodHash(
 /* The vendors + object types the nightly sweep covers. Mirrors DEFAULT_VENDORS
  * in the read route (consolidate the two when that route is next touched). */
 const DEFAULT_PROBE_VENDORS: Array<{ vendor: string; objects: string[]; needsUserId: boolean }> = [
-  { vendor: "microsoft", objects: ["task", "event", "message"], needsUserId: true },
+  /* sharepoint joins task/event/message so the nightly sweep exercises the
+     search path that returned 401 on every call from 2026-05-06 to 2026-08-28
+     without anything noticing. */
+  { vendor: "microsoft", objects: ["task", "event", "message", "sharepoint"], needsUserId: true },
   { vendor: "salesforce", objects: ["deal", "contact", "account"], needsUserId: false },
   { vendor: "hubspot", objects: ["deal", "contact", "account"], needsUserId: false },
   { vendor: "quickbooks", objects: [], needsUserId: false },
@@ -619,6 +704,45 @@ export async function sweepWorkspace(workspaceId: string, opts: { userId?: strin
  * connector. CRM connectors use workspace-scoped creds, so the unattended sweep
  * covers them; per-user vendors (Microsoft) are probed on their own user path.
  */
+/**
+ * A Microsoft account in this workspace to probe as.
+ *
+ * WHY THE SWEEP NEEDED THIS. The Microsoft probe requires a userId, because
+ * Graph access is delegated: there is no tenant-wide "is it healthy" call, only
+ * "can THIS person reach it". sweepAllWorkspaces never passed one, so the probe
+ * short-circuited on its own guard every night.
+ *
+ * Measured 2026-08-28: 157 Microsoft probes recorded, ZERO successful. 94 read
+ * "Not connected" and 63 read "userId required for Microsoft Graph probe",
+ * the most recent from that morning's cron. A health check that has never once
+ * succeeded is not a health check, and this is the monitoring that should have
+ * caught SharePoint returning 401 for four months.
+ *
+ * Picks the most recently refreshed token, because a stale one tells you less:
+ * probing as somebody who has not signed in for months would report a problem
+ * with that account rather than with the integration.
+ */
+async function resolveMicrosoftProbeUser(workspaceId: string): Promise<string | undefined> {
+  try {
+    const { rows } = await safeQuery<{ connected_by: string }>(
+      `SELECT t.connected_by
+         FROM instinct_ms_tokens t
+         JOIN instinct_team_members m ON m.id::text = t.connected_by
+        WHERE m.workspace_id = $1
+          AND COALESCE(m.is_active, TRUE) = TRUE
+        ORDER BY t.updated_at DESC NULLS LAST
+        LIMIT 1`,
+      [workspaceId],
+    );
+    return rows[0]?.connected_by ?? undefined;
+  } catch {
+    /* A probe that cannot pick a user reports "userId required" exactly as
+       before. Degrading is right here: the sweep must not fail because one
+       lookup did. */
+    return undefined;
+  }
+}
+
 export async function sweepAllWorkspaces(): Promise<{ workspaces: number; probes: number; drifted: string[] }> {
   const { rows } = await safeQuery<{ workspace_id: string }>(
     `SELECT DISTINCT workspace_id FROM instinct_connector_credentials WHERE is_active = true`,
@@ -626,7 +750,10 @@ export async function sweepAllWorkspaces(): Promise<{ workspaces: number; probes
   let probes = 0;
   const drifted: string[] = [];
   for (const r of rows) {
-    const res = await sweepWorkspace(r.workspace_id);
+    /* Resolved per workspace rather than passed in, so the nightly cron probes
+       Microsoft as a real connected account instead of failing its own guard. */
+    const userId = await resolveMicrosoftProbeUser(r.workspace_id);
+    const res = await sweepWorkspace(r.workspace_id, userId ? { userId } : {});
     probes += res.probes;
     drifted.push(...res.drifted);
   }
