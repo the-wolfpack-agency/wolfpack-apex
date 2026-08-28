@@ -172,3 +172,108 @@ it("names what we do about the numbers, next to them", async () => {
 
   expect(await screen.findByTestId("pilot-adoption-plan")).toBeInTheDocument();
 });
+
+/**
+ * WHAT IT COSTS TO RUN.
+ *
+ * Moved here from /admin/insights, which is gated to three roles and mixes
+ * these figures with our own backlog signals. Those are our questions; what a
+ * model costs and how little of the product needs one are the client's, and
+ * they were on the wrong page for the wrong audience.
+ */
+describe("the capability figures", () => {
+  const capability = {
+    windowDays: 60,
+    takenAt: "2026-08-28T00:00:00.000Z",
+    gate: {
+      actionsAuthorized: { value: 3675, detail: "" },
+      checkpointsSigned: { value: 12, detail: "" },
+    },
+    efficiency: {
+      deterministicSharePct: { value: 98, detail: "" },
+      modelCalls: { value: 167, detail: "" },
+      cheapTierPct: { value: 87, detail: "" },
+      spendUsd: { value: 0.77, detail: "" },
+    },
+    safety: {
+      responsesRedacted: { value: 0, detail: "" },
+      responsesFlagged: { value: 0, detail: "" },
+      inspectorProven: true,
+    },
+  };
+
+  it("shows what the product costs and what it checked", async () => {
+    respond({ ...base, capability });
+    render(<PilotPage />);
+
+    expect(await screen.findByTestId("pilot-cap-deterministic")).toHaveTextContent("98%");
+    expect(await screen.findByTestId("pilot-cap-spend")).toHaveTextContent("$0.77");
+    expect(await screen.findByTestId("pilot-cap-cheap")).toHaveTextContent("87%");
+    expect(await screen.findByTestId("pilot-cap-gate")).toHaveTextContent("3,675");
+  });
+
+  /* A ZERO IS ONLY GOOD NEWS IF THE CHECK RUNS. Reporting "nothing needed
+     redacting" from an inspector that never fired is the same lie as an empty
+     library reading as a quiet one, and this product has shipped that mistake
+     before: a degrade signal that could not fire read as a healthy system for
+     the life of the product. */
+  it("will not present an unproven zero as a clean bill of health", async () => {
+    respond({
+      ...base,
+      capability: {
+        ...capability,
+        safety: { ...capability.safety, inspectorProven: false },
+      },
+    });
+    render(<PilotPage />);
+
+    const section = await screen.findByTestId("pilot-capability");
+    expect(section).toHaveTextContent(/cannot currently evidence it firing/i);
+    expect(section).not.toHaveTextContent(/0 answers had something removed/i);
+  });
+
+  /* A figure that could not be measured reads as n/a, never as zero. */
+  it("renders an unmeasurable figure as n/a rather than zero", async () => {
+    respond({
+      ...base,
+      capability: {
+        ...capability,
+        efficiency: { ...capability.efficiency, spendUsd: { value: null, detail: "" } },
+      },
+    });
+    render(<PilotPage />);
+
+    expect(await screen.findByTestId("pilot-cap-spend")).toHaveTextContent("n/a");
+  });
+
+  /* Ported from the admin page when this panel moved: a zero that IS real
+     must still be shown. Hiding a genuine zero is as dishonest as inventing
+     one, and "nothing needed removing" is a fact worth stating. */
+  it("shows a real zero rather than hiding it", async () => {
+    respond({ ...base, capability });
+    render(<PilotPage />);
+
+    const section = await screen.findByTestId("pilot-capability");
+    expect(section).toHaveTextContent(/0 answers had something removed/i);
+  });
+
+  /* Also ported: a failed read says so. undefined is an older deployment and
+     renders nothing; null is a read that failed and must not be silently
+     omitted, which would hide exactly what this page promises to surface. */
+  it("says the figures could not be read rather than omitting them", async () => {
+    respond({ ...base, capability: null });
+    render(<PilotPage />);
+
+    expect(await screen.findByTestId("pilot-capability-unreadable")).toBeInTheDocument();
+    expect(screen.queryByTestId("pilot-cap-spend")).not.toBeInTheDocument();
+  });
+
+  /* An older deployment without the figures must not render an empty panel. */
+  it("renders nothing when the API does not carry capability", async () => {
+    respond({ ...base });
+    render(<PilotPage />);
+
+    await screen.findByTestId("pilot-passages");
+    expect(screen.queryByTestId("pilot-capability")).not.toBeInTheDocument();
+  });
+});

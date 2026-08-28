@@ -26,6 +26,7 @@
  * filter, and that is what surfaced the missing gate.
  */
 import { useEffect, useState } from "react";
+import type { CapabilitySnapshot } from "@/lib/insights/capability-snapshot";
 import {
   adoptionVerdict,
   reachedShare,
@@ -38,6 +39,22 @@ import {
   answersGiven,
   type PhaseOneSnapshot,
 } from "@/lib/pilot/phase-one-shape";
+
+/**
+ * A figure that might not have been measurable.
+ *
+ * Null is never zero. The whole page rests on that distinction and it has to
+ * survive being rendered: "n/a" tells a reader we could not measure it, and a
+ * zero would tell them the product did nothing.
+ */
+function reading(
+  r: { value: number | null } | undefined,
+  suffix = "",
+  prefix = "",
+): string {
+  if (!r || r.value === null || r.value === undefined) return "n/a";
+  return `${prefix}${r.value.toLocaleString()}${suffix}`;
+}
 
 function Figure({
   value,
@@ -60,7 +77,13 @@ function Figure({
 }
 
 export default function PilotPage() {
-  const [snap, setSnap] = useState<(PhaseOneSnapshot & { adoption?: AdoptionSnapshot }) | null>(null);
+  const [snap, setSnap] = useState<
+    | (PhaseOneSnapshot & {
+        adoption?: AdoptionSnapshot;
+        capability?: CapabilitySnapshot;
+      })
+    | null
+  >(null);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
@@ -76,7 +99,10 @@ export default function PilotPage() {
       try {
         const res = await fetchWithRefresh("/api/pilot/phase-one");
         if (!res.ok) throw new Error(String(res.status));
-        const data = (await res.json()) as PhaseOneSnapshot & { adoption?: AdoptionSnapshot };
+        const data = (await res.json()) as PhaseOneSnapshot & {
+          adoption?: AdoptionSnapshot;
+          capability?: CapabilitySnapshot;
+        };
         if (live) setSnap(data);
       } catch {
         if (live) setFailed(true);
@@ -164,6 +190,90 @@ export default function PilotPage() {
               predictable, and it is the opposite of how a chatbot works.
             </p>
           </section>
+
+          {/* WHAT IT COSTS AND WHAT IT STOPPED.
+              Moved here from /admin/insights, which is gated to three roles
+              and mixes these with our own backlog signals: unmet intents,
+              routing coverage, controls shown to the wrong role. Those are OUR
+              questions. What a model costs and how little of the product needs
+              one are the CLIENT'S, and they were on the wrong page for the
+              wrong audience. */}
+          {/* UNDEFINED AND NULL MEAN DIFFERENT THINGS HERE.
+              undefined is a deployment whose API predates these figures, and
+              rendering an error for that would be wrong. null is a read that
+              FAILED, and silently omitting the section for that would hide it,
+              which is the mistake this page exists to avoid. */}
+          {snap.capability === null ? (
+            <section className="wp-pilot-section" data-testid="pilot-capability">
+              <h2>What it costs to run</h2>
+              <p className="wp-pilot-aside" data-testid="pilot-capability-unreadable">
+                These figures could not be read just now. That is not a product
+                doing nothing, and the difference matters enough to say so rather
+                than leave the section out.
+              </p>
+            </section>
+          ) : snap.capability ? (
+            <section className="wp-pilot-section" data-testid="pilot-capability">
+              <h2>What it costs to run</h2>
+              <div className="wp-pilot-figures">
+                <Figure
+                  value={reading(snap.capability.efficiency.deterministicSharePct, "%")}
+                  label="Answered without AI"
+                  note="Read straight from connected systems, at no model cost"
+                  testId="pilot-cap-deterministic"
+                />
+                <Figure
+                  value={reading(snap.capability.efficiency.spendUsd, "", "$")}
+                  label="Model spend"
+                  note={`Everything a model was needed for, across ${snap.capability.windowDays} days`}
+                  testId="pilot-cap-spend"
+                />
+                <Figure
+                  value={reading(snap.capability.efficiency.cheapTierPct, "%")}
+                  label="Served by the cheapest model"
+                  note="The router picks the smallest model that can answer"
+                  testId="pilot-cap-cheap"
+                />
+                <Figure
+                  value={reading(snap.capability.gate.actionsAuthorized)}
+                  label="Agent actions checked"
+                  note="Every action an agent took passed a gate before it ran"
+                  testId="pilot-cap-gate"
+                />
+                <Figure
+                  value={reading(snap.capability.safety.responsesFlagged)}
+                  /* FLAGGED, NOT WITHHELD, AND THE DISTINCTION IS ENFORCED.
+                     The router records a risky shape and DELIVERS the answer
+                     anyway; its own comment reads "Recorded rather than
+                     blocked", because in a product that writes code a refusal
+                     on a false positive costs more trust than an audit row.
+                     This tile read "Answers withheld as unsafe" on the admin
+                     page once, which a client reasonably read as the product
+                     blocking them. A guardrail asserts this wording against
+                     the router's actual behaviour. */
+                  label="Answers flagged for review"
+                  /* Phrased without the verb at all. "Recorded and delivered,
+                     not blocked" was honest and still tripped the guardrail,
+                     which matches on the word rather than the sentence. That
+                     bluntness is deliberate: a check that tried to understand
+                     negation could be talked around, and this copy is read by
+                     clients. So the claim is made positively instead. */
+                  note="Recorded for review, and the answer still reaches the reader. The audit row is the control."
+                  testId="pilot-cap-flagged"
+                />
+              </div>
+              <p className="wp-pilot-aside">
+                {/* A ZERO HERE IS ONLY GOOD NEWS IF THE CHECK RUNS. Reporting
+                    "nothing needed redacting" from an inspector that never
+                    fired is the same lie as an empty library reading as a
+                    quiet one, and this product has shipped that mistake
+                    before. */}
+                {snap.capability.safety.inspectorProven
+                  ? `${snap.capability.safety.responsesRedacted.value ?? 0} answers had something removed before they reached anyone. The check runs on every answer, so a low number here is the result rather than the absence of one.`
+                  : "Redaction runs on every answer, but we cannot currently evidence it firing, so we are not reporting a count you could mistake for a clean bill of health."}
+              </p>
+            </section>
+          ) : null}
 
           <section className="wp-pilot-section">
             <h2>What we declined to answer</h2>

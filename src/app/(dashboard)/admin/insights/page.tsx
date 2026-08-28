@@ -286,82 +286,16 @@ export default function InsightsAdminPage() {
         )}
       </section>
 
-      {/* FIRST ON THE PAGE, above everything.
-       *
-       * This surface is the Phase 1 shop window: the pre-built version of what
-       * a client is shown before their own infrastructure exists. The panels
-       * below it answer "where is the product failing its users", which is the
-       * right question for us and the wrong first impression for them. This
-       * one answers "what does it demonstrably do", from ninety days of what
-       * it has actually done.
-       *
-       * THE ZEROS ARE HERE ON PURPOSE. Outbound redaction has never fired, and
-       * the honest way to show that is the count plus the fact that the
-       * inspector ran on every answer. A blank tile or a hidden panel would be
-       * the same failure this codebase spent a week removing, pointed at a
-       * client instead of at us. */}
-      <section data-testid="insights-capability" className="mb-8">
-        <h2 className="text-lg font-semibold mb-2" style={{ color: "var(--wp-text)" }}>
-          What this product is doing{capability ? ` (last ${capability.windowDays} days)` : ""}
-        </h2>
-        <p className="text-xs mb-3" style={{ color: "var(--wp-text-dim)" }}>
-          Read from the running system when you loaded this page, not written down. A figure that
-          could not be measured says so rather than showing a zero.
-        </p>
-        {!capabilityReadable ? (
-          <p className="text-sm" data-testid="capability-unreadable" style={{ color: "var(--wp-text-dim)" }}>
-            This could not be read just now. That is not the same as the product doing nothing.
-          </p>
-        ) : capability === null ? (
-          <p className="text-sm" style={{ color: "var(--wp-text-dim)" }}>Loading…</p>
-        ) : (
-          <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(210px,1fr))" }}>
-            {([
-              ["capability-deterministic", "Answered without AI", capability.efficiency.deterministicSharePct, "%"],
-              ["capability-spend", "Model spend", capability.efficiency.spendUsd, " USD"],
-              ["capability-cheap-tier", "Served by the cheapest model", capability.efficiency.cheapTierPct, "%"],
-              ["capability-gate", "Agent actions gated", capability.gate.actionsAuthorized, ""],
-              ["capability-checkpoints", "Ledger checkpoints signed", capability.gate.checkpointsSigned, ""],
-              ["capability-redacted", "Answers needing redaction", capability.safety.responsesRedacted, ""],
-              ["capability-flagged", "Answers logged for review", capability.safety.responsesFlagged, ""],
-              ["capability-embedded", "Passages answerable", capability.retrieval.chunksEmbeddedPct, "%"],
-              ["capability-docs", "Documents quotable", capability.retrieval.answerableDocuments, ""],
-            ] as Array<[string, string, Reading, string]>).map(([testid, label, reading, unit]) => (
-              <div
-                key={testid}
-                data-testid={testid}
-                className="rounded p-3"
-                style={{
-                  background: "var(--wp-dark-surface2, #1a1a1a)",
-                  border: "1px solid var(--wp-dark-border, #333)",
-                }}
-              >
-                <div className="text-[10px] uppercase tracking-wider" style={{ color: "var(--wp-text-muted)" }}>
-                  {label}
-                </div>
-                <div
-                  className={reading.value === null ? "text-sm font-semibold italic" : "text-2xl font-semibold"}
-                  style={{ color: reading.value === null ? "var(--wp-text-muted)" : "var(--wp-gold)" }}
-                >
-                  {/* THE WORD, never a dash and never a 0, when it could not be
-                      measured. A punctuation mark in a number slot reads as
-                      "none"; the word cannot be mistaken for one. */}
-                  {reading.value === null ? "not measurable" : `${reading.value}${unit}`}
-                </div>
-                <div className="text-[11px] mt-1 leading-tight" style={{ color: "var(--wp-text-dim)" }}>
-                  {reading.detail}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-        {capability?.safety.inspectorProven && (
-          <p className="text-xs mt-2" data-testid="capability-inspector-note" style={{ color: "var(--wp-text-dim)" }}>
-            A zero above is good news rather than an unrun control: the response inspector is proved
-            to run on an ordinary answer with nothing opted into, and to stay silent on a clean one.
-          </p>
-        )}
-      </section>
+      {/* THE CAPABILITY FIGURES MOVED TO /pilot.
+              What a model costs, how little of the product needs one, and what
+              the router stopped from leaving are the CLIENT'S questions. They
+              were here, on a page gated to three roles, mixed in with OUR
+              backlog signals: unmet intents, routing coverage, controls shown
+              to a role that cannot use them.
+
+              Two audiences sharing one page is most of why this page read as
+              jumbled and overwhelming. This page is now ours alone: what to
+              build next. The client dashboard is /pilot. */}
 
       {/* BESIDE THE ROLE-MISMATCH PANEL, because they answer the same question
           from opposite ends. That one names a control the product showed
