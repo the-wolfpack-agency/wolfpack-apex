@@ -32,7 +32,7 @@ jest.mock("@/lib/analytics", () => ({
   trackEvent: (...a: unknown[]) => mockTrackEvent(...a),
 }));
 
-import { searchTool } from "@/lib/assistant/tools/search";
+import { searchTool, matchDocumentQuestion } from "@/lib/assistant/tools/search";
 
 const ctx = { userId: "u1", userRole: "cto" };
 
@@ -422,5 +422,48 @@ describe("handler — analytics + result framing", () => {
     expect(exec?.[3]).toEqual(
       expect.objectContaining({ workflow_id: "wf-123" }),
     );
+  });
+});
+
+/**
+ * Naming the filing cabinet is not naming the document.
+ *
+ * "what is in the SharePoint about training" captured "SharePoint about
+ * training" as the search subject. No document contains the word SharePoint,
+ * so a question about a library we had fully ingested answered "No results
+ * found". Measured against the real pipeline on 2026-08-27: four similar
+ * phrasings returned documents and this one returned nothing, purely because
+ * the sentence named the container it lives in.
+ *
+ * A client says "what's in SharePoint about X", "what's in our files about X",
+ * "what's in the drive about X". The search term is what follows "about".
+ */
+describe("questions that name where the documents live", () => {
+  it.each([
+    ["what is in the SharePoint about training", "training"],
+    ["whats in SharePoint about brand ambassadors", "brand ambassadors"],
+    ["what's in our files about onboarding", "onboarding"],
+    ["what is in the drive about pricing", "pricing"],
+    ["what is in the document library about expenses", "expenses"],
+    ["what is in our knowledge base about refunds", "refunds"],
+  ])("%s searches for %s", (question, expected) => {
+    expect(matchDocumentQuestion(question)).toBe(expected);
+  });
+
+  /* Nothing was asked ABOUT anything. There is no query that answers this, and
+     inventing one guarantees an empty result that reads as an empty library. */
+  it("declines when a container is named with no topic", () => {
+    expect(matchDocumentQuestion("what is in SharePoint")).toBeNull();
+    expect(matchDocumentQuestion("what is in the drive")).toBeNull();
+  });
+
+  /* The container rule must not swallow real document names. */
+  it.each([
+    ["what is in the contract", "contract"],
+    ["what does the SOW say about payment", "SOW payment"],
+    ["summarize the onboarding deck", "onboarding deck"],
+    ["what does our security policy say", "security policy"],
+  ])("leaves %s alone", (question, expected) => {
+    expect(matchDocumentQuestion(question)).toBe(expected);
   });
 });
