@@ -376,7 +376,13 @@ async function findOrgQACacheHit(
       `SELECT a.id AS message_id, a.content AS answer, a.source, a.tokens_used
          FROM instinct_messages u
          JOIN LATERAL (
-           SELECT m2.id, m2.content, m2.source, m2.tokens_used, m2.created_at
+           SELECT m2.id, m2.content, m2.source, m2.tokens_used, m2.created_at,
+                  /* metadata is SELECTED because the grounded filter below
+                     reads a.metadata. Without it the whole statement fails
+                     with "column a.metadata does not exist", the caller treats
+                     the error as a cache miss, and the entire org-cache layer
+                     goes quiet while looking healthy. */
+                  m2.metadata
              FROM instinct_messages m2
             WHERE m2.conversation_id = u.conversation_id
               AND m2.role = 'assistant'
@@ -465,7 +471,13 @@ async function findOrgQACacheHit(
               a.source, a.tokens_used
          FROM instinct_messages u
          JOIN LATERAL (
-           SELECT m2.id, m2.content, m2.source, m2.tokens_used, m2.created_at
+           SELECT m2.id, m2.content, m2.source, m2.tokens_used, m2.created_at,
+                  /* metadata is SELECTED because the grounded filter below
+                     reads a.metadata. Without it the whole statement fails
+                     with "column a.metadata does not exist", the caller treats
+                     the error as a cache miss, and the entire org-cache layer
+                     goes quiet while looking healthy. */
+                  m2.metadata
              FROM instinct_messages m2
             WHERE m2.conversation_id = u.conversation_id
               AND m2.role = 'assistant'
