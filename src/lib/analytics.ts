@@ -416,6 +416,11 @@ export type InstinctEventType =
   // other providers' results still flow through. Payload: { provider,
   // message } - no PII, error text only.
   | "system.search_provider_failed"
+  /* A provider that ran out of its time budget. Distinct from failed: it may
+     have been about to return results, and a provider that starts timing out
+     is a trend worth seeing rather than a gradual slowdown nobody attributes
+     to anything. */
+  | "system.search_provider_timed_out"
   | "system.analytics_queried"
   // Tenant-isolation coverage scan (/api/cron/tenant-isolation-scan). One event
   // per recorded scan so the learning loop tracks the cross-tenant-leak gap over
