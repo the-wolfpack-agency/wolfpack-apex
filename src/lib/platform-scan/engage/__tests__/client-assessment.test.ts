@@ -41,6 +41,7 @@ const deps = (over: Record<string, unknown> = {}) => ({
   crawl: jest.fn(async () => []),
   scan: jest.fn(async () => ({ findings: [], coverage: {}, okCount: 3, routeCount: 3 })),
   login: jest.fn(async () => ({ cookie: "session=abc" })),
+  mapFlows: jest.fn(async () => ({ entryPoints: [], exitPoints: [], pagesRead: 0 })),
   ...over,
 });
 
@@ -310,5 +311,62 @@ describe("with credentials the client granted", () => {
     const out = await runClientAssessment(base, d as never);
     expect(d.login).not.toHaveBeenCalled();
     expect(out.authenticated).toBe(false);
+  });
+});
+
+
+/**
+ * The map, not just the faults.
+ *
+ * A finding list says what is broken. A data-flow map says what the system IS,
+ * and it is the part a client usually cannot produce themselves: nobody has a
+ * current list of every form on their estate or every vendor their pages
+ * contact.
+ */
+describe("data flows", () => {
+  it("maps the routes it assessed", async () => {
+    const d = deps();
+    await runClientAssessment(base, d as never);
+    expect(d.mapFlows).toHaveBeenCalledWith(
+      base.baseUrl,
+      expect.arrayContaining(["/p0", "/p1", "/p2"]),
+    );
+  });
+
+  it("returns the entry and exit points it found", async () => {
+    const d = deps({
+      mapFlows: jest.fn(async () => ({
+        entryPoints: [
+          { page: "/checkout", action: "https://pay.vendor.io/x", method: "POST", crossOrigin: true, sensitiveFields: ["card_number"] },
+        ],
+        exitPoints: [{ origin: "https://pay.vendor.io", via: ["form"], pages: ["/checkout"] }],
+        pagesRead: 4,
+      })),
+    });
+    const out = await runClientAssessment(base, d as never);
+
+    expect(out.dataFlows.entryPoints[0].crossOrigin).toBe(true);
+    expect(out.dataFlows.exitPoints[0].origin).toBe("https://pay.vendor.io");
+    expect(out.dataFlows.pagesRead).toBe(4);
+  });
+
+  /* A map we could not draw is not a reason to lose the findings. */
+  it("still reports the scan when the map fails", async () => {
+    const d = deps({
+      mapFlows: jest.fn(async () => {
+        throw new Error("network");
+      }),
+    });
+    const out = await runClientAssessment(base, d as never);
+
+    expect(out.refused).toBeUndefined();
+    expect(out.routesDiscovered).toBe(3);
+    expect(out.dataFlows).toEqual({ entryPoints: [], exitPoints: [], pagesRead: 0 });
+  });
+
+  it("does not attempt a map when nothing was reachable", async () => {
+    const d = deps({ discover: jest.fn(async () => []), crawl: jest.fn(async () => []) });
+    await runClientAssessment(base, d as never);
+    expect(d.mapFlows).not.toHaveBeenCalled();
   });
 });
