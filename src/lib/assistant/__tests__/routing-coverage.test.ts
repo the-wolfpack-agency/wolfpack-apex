@@ -22,7 +22,12 @@ describe("routing coverage", () => {
      cluster was the last WHOLLY dead group in the audit: three prompts, no
      tool, because no tool existed. Measured 27 before and 30 after, on the
      same 36-prompt corpus. */
-  const FLOOR = 30;
+  /* Raised from 30 to 31 on 2026-08-28 by the capability-question shape.
+     "can you send an email for me" reached no tool, went to a model, and was
+     answered "I cannot send emails directly" - false, and produced live minutes
+     after the system prompt was rewritten to forbid exactly that. An
+     instruction is not a control; a lookup against the registry is. */
+  const FLOOR = 31;
 
   it(`routes at least ${FLOOR} of the audit prompts to exactly one tool`, async () => {
     const r = await auditRouting();
