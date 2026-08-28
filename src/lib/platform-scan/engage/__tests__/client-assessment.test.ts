@@ -41,7 +41,7 @@ const deps = (over: Record<string, unknown> = {}) => ({
   crawl: jest.fn(async () => []),
   scan: jest.fn(async () => ({ findings: [], coverage: {}, okCount: 3, routeCount: 3 })),
   login: jest.fn(async () => ({ cookie: "session=abc" })),
-  mapFlows: jest.fn(async () => ({ entryPoints: [], exitPoints: [], pagesRead: 0 })),
+  mapFlows: jest.fn(async () => ({ entryPoints: [], exitPoints: [], pagesRead: 0, pages: [] })),
   ...over,
 });
 
@@ -341,6 +341,7 @@ describe("data flows", () => {
         ],
         exitPoints: [{ origin: "https://pay.vendor.io", via: ["form"], pages: ["/checkout"] }],
         pagesRead: 4,
+        pages: [],
       })),
     });
     const out = await runClientAssessment(base, d as never);
@@ -361,7 +362,7 @@ describe("data flows", () => {
 
     expect(out.refused).toBeUndefined();
     expect(out.routesDiscovered).toBe(3);
-    expect(out.dataFlows).toEqual({ entryPoints: [], exitPoints: [], pagesRead: 0 });
+    expect(out.dataFlows).toEqual({ entryPoints: [], exitPoints: [], pagesRead: 0, pages: [] });
   });
 
   it("does not attempt a map when nothing was reachable", async () => {
@@ -394,6 +395,7 @@ describe("the plan of attack", () => {
         ],
         exitPoints: [],
         pagesRead: 3,
+        pages: [],
       })),
     });
     const out = await runClientAssessment(base, d as never);
@@ -407,6 +409,7 @@ describe("the plan of attack", () => {
         entryPoints: [],
         exitPoints: [{ origin: "https://js.stripe.com", via: ["script"], pages: ["/a"] }],
         pagesRead: 1,
+        pages: [],
       })),
     });
     const out = await runClientAssessment(base, d as never);
@@ -418,5 +421,51 @@ describe("the plan of attack", () => {
   it("recommends nothing when there is nothing to recommend", async () => {
     const out = await runClientAssessment(base, deps() as never);
     expect(out.recommendations).toEqual([]);
+  });
+});
+
+
+/**
+ * Places the system disagrees with itself.
+ *
+ * A missing protection everywhere is a decision somebody made. A missing
+ * protection on one page out of twelve is an accident, and the accident is
+ * both the more useful finding and the cheaper one to fix.
+ */
+describe("inconsistencies", () => {
+  const served = (url: string, headerNames: string[]) => ({ url, status: 200, headerNames });
+
+  it("reports the page that differs from the rest", async () => {
+    const d = deps({
+      mapFlows: jest.fn(async () => ({
+        entryPoints: [],
+        exitPoints: [],
+        pagesRead: 5,
+        pages: [
+          served("/a", ["strict-transport-security"]),
+          served("/b", ["strict-transport-security"]),
+          served("/c", ["strict-transport-security"]),
+          served("/d", ["strict-transport-security"]),
+          served("/odd", []),
+        ],
+      })),
+    });
+    const out = await runClientAssessment(base, d as never);
+
+    expect(out.inconsistencies).toHaveLength(1);
+    expect(out.inconsistencies[0].outliers).toEqual(["/odd"]);
+  });
+
+  it("says nothing when the site is consistent", async () => {
+    const d = deps({
+      mapFlows: jest.fn(async () => ({
+        entryPoints: [],
+        exitPoints: [],
+        pagesRead: 4,
+        pages: Array.from({ length: 4 }, (_, i) => served(`/p${i}`, ["strict-transport-security"])),
+      })),
+    });
+    const out = await runClientAssessment(base, d as never);
+    expect(out.inconsistencies).toEqual([]);
   });
 });

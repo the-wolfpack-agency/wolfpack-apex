@@ -49,11 +49,30 @@ export interface ExitPoint {
   pages: string[];
 }
 
+/**
+ * What one page answered with.
+ *
+ * Captured from the requests the flow map already makes rather than by probing
+ * again. A consistency check needs to compare pages against each other, and
+ * asking the same server twice for the same bytes to answer a second question
+ * is rude on somebody else's production system.
+ */
+export interface PageObservation {
+  url: string;
+  status: number;
+  /** Lower-cased header names present on the response. Names only: the values
+   *  are not needed to tell whether a protection is applied, and not keeping
+   *  them means a map cannot leak a session cookie into a report. */
+  headerNames: string[];
+}
+
 export interface DataFlowMap {
   entryPoints: EntryPoint[];
   exitPoints: ExitPoint[];
   /** Pages actually read, so coverage can be judged rather than assumed. */
   pagesRead: number;
+  /** One entry per page read, for the consistency pass. */
+  pages: PageObservation[];
 }
 
 /* Field names worth flagging. Deliberately short: a long list of guesses
@@ -213,6 +232,7 @@ export async function mapDataFlows(
   const fetchImpl = deps.fetchImpl ?? fetch;
   const entryPoints: EntryPoint[] = [];
   const byOrigin = new Map<string, { via: Set<string>; pages: Set<string> }>();
+  const pages: PageObservation[] = [];
   let pagesRead = 0;
 
   for (const path of paths.slice(0, MAX_PAGES)) {
@@ -228,6 +248,13 @@ export async function mapDataFlows(
 
       const html = (await res.text()).slice(0, MAX_HTML_CHARS);
       pagesRead += 1;
+
+      /* Names only, never values. Whether a protection is applied is answerable
+         from the name, and not keeping values means this map cannot leak a
+         session cookie into a client report. */
+      const headerNames: string[] = [];
+      res.headers?.forEach?.((_v: string, k: string) => headerNames.push(k.toLowerCase()));
+      pages.push({ url: pageUrl, status: res.status, headerNames });
 
       const found = extractDataFlows(html, pageUrl);
       entryPoints.push(...found.entryPoints);
@@ -254,5 +281,5 @@ export async function mapDataFlows(
        on a single archived article. */
     .sort((a, b) => b.pages.length - a.pages.length);
 
-  return { entryPoints, exitPoints, pagesRead };
+  return { entryPoints, exitPoints, pagesRead, pages };
 }
