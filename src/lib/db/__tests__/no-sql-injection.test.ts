@@ -46,6 +46,8 @@ const SRC = join(__dirname, "..", "..", "..");
  * The bar for an entry is that the value provably cannot be attacker text.
  */
 const QUOTED_INTERPOLATION_OK: Readonly<Record<string, string>> = {
+  "lib/assistant.ts":
+    "${capabilityDenialSql(\"a.content\")} — the fragment is built from a module-constant array of literals in assistant/capability-denial.ts, and that function rejects any argument that is not a bare or table-qualified identifier before building anything. No reader value reaches it: the only call site passes a string literal, and a future call site that passed one would throw rather than interpolate. Tested in assistant/__tests__/capability-denial.test.ts.",
   "app/api/insights/ai-cost/route.ts":
     "INTERVAL '${days} days' — days is Number.parseInt then Math.min(365, Math.max(1, n)), so it is an integer 1..365 before it reaches the string. Postgres cannot take a placeholder inside an interval literal.",
 };
