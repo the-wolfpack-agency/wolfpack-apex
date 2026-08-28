@@ -28,14 +28,29 @@ describe("get_org_facts — intent matching", () => {
     ["tell me about Project Q3", "Project Q3"],
     ["what are the facts on Max Fuerst", "Max Fuerst"],
     ["What's known about the new pricing", "the new pricing"],
-    ["do we have anything on the Tuesday meeting?", "the Tuesday meeting"],
   ])("matches '%s' and extracts subject '%s'", (message, expectedSubject) => {
     const params = getOrgFactsTool.matchIntent(message);
     expect(params).not.toBeNull();
     expect(params?.subject).toBe(expectedSubject);
   });
 
+  /* "DO WE HAVE ANYTHING ON X" MOVED TO SEARCH, and this is where that is
+     pinned so the split cannot be undone by accident.
+
+     It used to match here. This tool reads instinct_org_facts, which holds
+     facts somebody verified by hand and is empty for almost every subject, so
+     measured on 2026-08-28 "do we have anything on the porsche program" was
+     answered "I don't have any verified facts about the porsche program yet"
+     while the Brain held that client's entire SharePoint.
+
+     "What do we know about X" asks what we have established, and stays here.
+     "Do we have anything on X" asks whether anything exists at all, and only
+     search can answer that honestly because only search can see everything.
+     The split follows the words people chose. */
   test.each([
+    "do we have anything on the Tuesday meeting?",
+    "do we have anything on the porsche program",
+    "what documents do we have about pcna",
     "how do i open a ticket",
     "schedule a meeting with Max",
     "did Acme pay this month",
