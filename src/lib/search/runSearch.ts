@@ -113,6 +113,68 @@ interface ProviderRun {
   results: SearchResult[];
   ok: boolean;
   tookMs: number;
+  /** True when this provider was still running when the budget expired. */
+  timedOut?: boolean;
+}
+
+/**
+ * How long any single provider may hold up the whole search.
+ *
+ * MEASURED, NOT GUESSED. Per-provider latency over seven days of production
+ * traffic, in milliseconds:
+ *
+ *   Microsoft Teams channels   avg 5515   p95 22454   max 129458
+ *   Microsoft Teams chats      avg  594   p95  2681   max   5024
+ *   CRM                        avg 1168   p95  1805   max   3116
+ *   Documents                  avg  705   p95  1187   max   3321
+ *   SharePoint                 avg  403   p95  1615   max   2181
+ *   Outlook calendar           avg  250   p95  1230   max   2955
+ *   Outlook emails             avg  103   p95   527   max   2475
+ *   Instinct knowledge         avg   38   p95   102   max    219
+ *
+ * One provider is the entire problem. Channel search took over two minutes at
+ * its worst and 22 seconds at p95, while every other provider finished inside
+ * 3.4 seconds even in its worst observed case. The fan-out is parallel, so the
+ * slowest provider IS the search: a reader typing a question waited on Teams
+ * channels and nothing else.
+ *
+ * 6000ms sits above the worst observed case of every other provider and well
+ * below Teams channels' p95, so this bounds the outlier and changes nothing
+ * about the rest. It is deliberately not tuned to the average: a budget that
+ * cuts off a provider having a slightly slow day would trade a real result for
+ * a small time saving.
+ */
+const PROVIDER_BUDGET_MS = 6_000;
+
+/**
+ * Resolve to a sentinel rather than reject, so a slow provider is recorded as
+ * SLOW rather than as failed, and never as empty.
+ *
+ * The distinction matters for the same reason it has mattered everywhere else
+ * in this codebase: "found nothing" and "did not finish" lead to different
+ * actions, and a reader cannot tell them apart from an empty list.
+ */
+const TIMED_OUT = Symbol("provider-timed-out");
+
+function withBudget<T>(work: Promise<T>, ms: number): Promise<T | typeof TIMED_OUT> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => resolve(TIMED_OUT), ms);
+    work.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (err) => {
+        clearTimeout(timer);
+        /* RE-THROWN, NOT SWALLOWED. Written first as resolve(TIMED_OUT), which
+           relabelled every genuine provider failure as a timeout and would
+           have hidden a broken connector behind a latency story. The test for
+           a rejecting provider caught it. A rejection belongs to the caller's
+           catch, which records it as failed. */
+        reject(err);
+      },
+    );
+  });
 }
 
 function normalizeTypes(types: SearchType[] | undefined): Set<SearchType> {
@@ -194,8 +256,21 @@ export async function runSearch(
     enabled.map(async (provider): Promise<ProviderRun> => {
       const start = Date.now();
       try {
-        const results = await provider.search(q, perType, ctx);
+        const outcome = await withBudget(provider.search(q, perType, ctx), PROVIDER_BUDGET_MS);
         const tookMs = Date.now() - start;
+        if (outcome === TIMED_OUT) {
+          /* Recorded as its own event so a provider that starts timing out is
+             visible as a trend rather than as a gradual slowdown nobody
+             attributes to anything. */
+          trackEvent("system.search_provider_timed_out", ctx.userId, "system", {
+            provider: provider.name,
+            budget_ms: PROVIDER_BUDGET_MS,
+            query_length: q.length,
+            ...(ctx.workflowId ? { workflow_id: ctx.workflowId } : {}),
+          });
+          return { provider, results: [], ok: false, tookMs, timedOut: true };
+        }
+        const results = outcome;
         trackEvent(
           "assistant.search_provider_executed",
           ctx.userId,
