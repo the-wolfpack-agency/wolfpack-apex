@@ -22,7 +22,7 @@ const SEV_RANK: Record<RecPriority, number> = { critical: 0, high: 1, medium: 2,
 const maxPriority = (a: RecPriority, b: RecPriority): RecPriority => (SEV_RANK[a] <= SEV_RANK[b] ? a : b);
 
 /** Integration name -> a tailored automation opportunity. */
-const INTEGRATION_PLAYS: Record<string, { title: string; action: string }> = {
+export const INTEGRATION_PLAYS: Record<string, { title: string; action: string }> = {
   Salesforce: { title: "Automate CRM lead sync and enrichment", action: "Connect the CRM and run a gated agent task to sync + enrich new leads on a schedule." },
   HubSpot: { title: "Automate CRM lead sync and enrichment", action: "Connect the CRM and run a gated agent task to sync + enrich new leads on a schedule." },
   Stripe: { title: "Automate payment reconciliation and failed-charge alerts", action: "Schedule a gated job to reconcile charges and alert on failed/disputed payments." },
