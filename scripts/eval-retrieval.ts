@@ -34,6 +34,7 @@ import { readFileSync } from "node:fs";
 import { queryBrain } from "@/lib/brain/query";
 import { isEmbeddingConfigured } from "@/lib/brain/embedder";
 import { query } from "@/lib/db";
+import { mapWithConcurrency } from "@/lib/search/providers/util";
 import {
   gradeRetrieval,
   describeEval,
@@ -78,19 +79,26 @@ async function main(): Promise<void> {
     process.exit(2);
   }
 
-  const cache = new Map<string, RankedResult[]>();
-  for (const p of pairs) {
+  /* CONCURRENT, BOUNDED. Sequential was fine for six pairs and will not hold
+     at two hundred: each one is a Postgres query plus an embedding call plus a
+     Qdrant search, so a serial run is minutes of mostly waiting. Bounded so an
+     eval cannot behave like a load test against the same index the product is
+     serving from, and reusing the search helper rather than growing a second
+     concurrency primitive. */
+  const EVAL_CONCURRENCY = 6;
+  const results = await mapWithConcurrency(pairs, EVAL_CONCURRENCY, async (p) => {
     const r = await queryBrain({
       userId: me.id,
       userRole: me.role,
       query: p.question,
       limit: 8,
     });
-    cache.set(
-      p.question,
-      r.hits.map((h) => ({ filename: String(h.document_filename ?? "") })),
-    );
-  }
+    return {
+      question: p.question,
+      hits: r.hits.map((h) => ({ filename: String(h.document_filename ?? "") })),
+    };
+  });
+  const cache = new Map<string, RankedResult[]>(results.map((r) => [r.question, r.hits]));
 
   const report = gradeRetrieval(pairs, (q) => cache.get(q) ?? []);
   console.log("Full retrieval, keyword + semantic:\n");
