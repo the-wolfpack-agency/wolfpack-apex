@@ -1,0 +1,62 @@
+# Walk a deployment's first day and report what a person actually gets.
+#
+# WHY THIS IS ON DEMAND AND NOT ON EVERY PUSH. It types real questions into a
+# real deployment, which spends model tokens and writes conversation rows. It
+# runs when somebody is standing an instance up or checking one before a
+# walkthrough, which is exactly when the answer matters.
+#
+# POINT IT AT A CLIENT DEPLOYMENT: Actions -> Deployment journey -> Run
+# workflow, and set `url` to their instance. Defaults to ours.
+#
+# WHAT IT CATCHES THAT CI CANNOT. Unit tests run against fixtures and health
+# probes prove a connector responds. Neither can see a healthy stack that still
+# hands somebody the wrong thing. On its first run, 2026-08-29, it caught the
+# onboarding's own "ask our documents" prompt returning a tour of the Docs page
+# while SharePoint was connected, search worked, and the same question phrased
+# naturally answered with a citation in 1.8 seconds.
+
+name: Deployment journey
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "Deployment to walk (e.g. https://client.vercel.app)"
+        required: true
+        default: "https://wolfpack-instinct.vercel.app"
+  schedule:
+    # Weekly, so a deployment that quietly stops answering is noticed by
+    # something other than a client.
+    - cron: "0 7 * * 1"
+
+jobs:
+  journey:
+    name: first day on the deployment
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+
+      - name: Walk the first day
+        env:
+          PROD_URL: ${{ github.event.inputs.url || 'https://wolfpack-instinct.vercel.app' }}
+          JOURNEY_EMAIL: ${{ secrets.ADMIN_E2E_EMAIL }}
+          JOURNEY_PASSWORD: ${{ secrets.ADMIN_E2E_PASSWORD }}
+        # Workers 1: the report is about one deployment, not about parallel
+        # load, and the steps share one account.
+        run: npx playwright test tests/e2e/first-day-journey.spec.ts --workers=1 --reporter=line
+
+      - name: Keep the evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: journey-evidence
+          path: test-results/
+          retention-days: 14
+          if-no-files-found: ignore

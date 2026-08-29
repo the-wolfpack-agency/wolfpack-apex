@@ -203,6 +203,33 @@ const ASKS_ABOUT_STATE =
 const ASKS_ABOUT_PEOPLE =
   /^\s*who\b(?!\s+(?:is\s+)?(?:the\s+)?(?:page|screen|tab)\b)/;
 
+/**
+ * An instruction to SEARCH a corpus is not a question about a page.
+ *
+ * Found by driving the deployed product as a new user would, 2026-08-29:
+ *
+ *   "ask our documents" -> a tour of the Docs page: what you can do, how to
+ *   use it, open Docs from the left. Returned in 489ms at full confidence,
+ *   because the word "documents" is the Docs page's own name.
+ *
+ * That prompt is offered BY THE ONBOARDING MODAL, described there as "search
+ * everything synced from SharePoint and answer with the source attached", so
+ * it is many people's first ever query and the first thing a client sees in a
+ * walkthrough. Everything underneath it was healthy: SharePoint connected,
+ * search working, and the same intent phrased as "what are the payment terms
+ * in our SOW?" answered from a real document with a citation in 1,790ms.
+ *
+ * Fourth instance of the defect this file already guards three times. The tell
+ * here is different from the others: it is not the SUBJECT that gives it away
+ * but the VERB. "Ask", "search", "look through" applied to a body of content
+ * is a retrieval instruction, and no page tour can satisfy it.
+ *
+ * Narrow on purpose: the verb must govern the corpus. "Where do I find the
+ * docs page" and "how do I search" are untouched.
+ */
+const ASKS_TO_SEARCH_A_CORPUS =
+  /\b(?:ask|search|query|look\s+(?:through|in|inside)|dig\s+through)\b(?:\s+\w+){0,2}\s+(?:our|the|my|all)\s+(?:own\s+)?(?:documents?|docs?|files?|library|knowledge(?:\s+base)?|sharepoint|drive|brain)\b/;
+
 export function matchPageFacts(
   question: string,
 ): { page: PageFact; confidence: number } | null {
@@ -213,6 +240,9 @@ export function matchPageFacts(
      find that" beats a confident tour of the wrong screen. */
   if (ASKS_ABOUT_STATE.test(lower)) return null;
   if (ASKS_ABOUT_PEOPLE.test(lower)) return null;
+  /* A retrieval instruction. No tour of a screen can satisfy it, and the
+     onboarding modal offers one of these as a starter prompt. */
+  if (ASKS_TO_SEARCH_A_CORPUS.test(lower)) return null;
 
   const candidates = scoreAllDomains(lower);
   if (candidates.length === 0) return null;
