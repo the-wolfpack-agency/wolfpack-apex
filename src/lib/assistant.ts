@@ -21,7 +21,7 @@ import {
 import { matchSavedRoutine } from "@/lib/assistant/routines/saved";
 import { searchKnowledge, saveAnswer } from "@/lib/knowledge";
 import { queryBrain, markCited as markBrainCited } from "@/lib/brain/query";
-import { judgeRelevance } from "@/lib/brain/relevance";
+import { judgeRelevance, RELEVANCE_MATERIAL_PER_HIT } from "@/lib/brain/relevance";
 import { redactText, NEVER_QUOTE_KINDS } from "@/lib/ai/redaction";
 import { looksTabular } from "@/lib/brain/query";
 import { neutralizeInjection } from "@/lib/brain/security";
@@ -2704,9 +2704,37 @@ async function tryBrain(
      * Judged only when we are ABOUT TO QUOTE, so the cost lands on the turns
      * that would otherwise be confidently wrong rather than on every query.
      * One cheap-tier call, which is the argument the router exists to make. */
+    /* ENOUGH OF EACH CHUNK THAT THE JUDGE CAN SEE THE ANSWER.
+     *
+     * This showed the first 500 characters of each hit. Measured against the
+     * real corpus 2026-08-29, the median chunk is 2,262 characters and the
+     * longest is 2,627, so the judge was shown roughly the first fifth of each
+     * document: headers, titles and boilerplate.
+     *
+     * What that did, on the chunk holding the answer to "how much do we owe
+     * upfront?":
+     *
+     *   chunk length      2,589 characters
+     *   "30 days" at      position 741      -> past the cutoff
+     *   "50%" at          position 2,101    -> past the cutoff
+     *
+     * Both figures were outside the window. The judge ruled IRRELEVANT on what
+     * it had been shown, correctly, and tryBrain then discarded the context.
+     * gateUngroundedClaimAboutUs reads an empty context as "nothing retrieved"
+     * and rejects, so the reader got "I don't have a confident answer" for a
+     * question the corpus answers in one line.
+     *
+     * It fired 123 times between 2026-08-25 and 2026-08-29.
+     *
+     * SIZED TO THE CORPUS, not guessed: 2,400 covers a whole median chunk and
+     * nearly the longest. Three hits is about 7,000 characters, roughly 1,800
+     * input tokens on the cheap tier, which is a fraction of a cent on the
+     * turns that would otherwise be confidently wrong or wrongly refused. The
+     * whole argument for the judge was that this is the cheapest place to
+     * spend, and starving it of the text defeated that. */
     const material = strong
       .slice(0, 3)
-      .map((h) => h.content.slice(0, 500))
+      .map((h) => h.content.slice(0, RELEVANCE_MATERIAL_PER_HIT))
       .join("\n\n");
     const relevance = await judgeRelevance(message, material, async (input) => {
       const res = await getAIClient().complete({
