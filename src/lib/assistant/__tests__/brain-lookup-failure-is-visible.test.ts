@@ -64,3 +64,39 @@ describe("tryBrain reports why it came back empty", () => {
     expect(analytics).toContain('"assistant.brain_lookup_failed"');
   });
 });
+
+/**
+ * What tryBrain RECEIVED, as distinct from what queryBrain logged.
+ *
+ * Measured against the deployed URL 2026-08-29, one turn, no exception:
+ *
+ *   20:13:22.744  brain_query_log   "when do we have to pay?"  ->  5 hits
+ *   20:13:23.446  intent_unmatched  same question              ->  has_brain_context false
+ *
+ * queryBrain logs hitChunkIds.length and returns that same array, the loop
+ * building the context cannot turn five hits into none, and nothing threw.
+ * Each is verified; together they are impossible, so one is not what it
+ * appears. The number nobody had seen is what this function received.
+ */
+describe("tryBrain records what it received", () => {
+  it("emits the returned hit count before deciding anything", () => {
+    const body = tryBrainBody();
+    expect(body).toContain("assistant.brain_lookup_returned");
+    expect(body).toMatch(/returned_hits/);
+    /* Before the early return, or a zero-hit lookup records nothing and the
+       case being chased is exactly the zero-hit one. */
+    const emitAt = body.indexOf("assistant.brain_lookup_returned");
+    const earlyReturnAt = body.indexOf("if (result.hits.length === 0)");
+    expect(emitAt).toBeGreaterThan(-1);
+    expect(earlyReturnAt).toBeGreaterThan(emitAt);
+  });
+
+  it("carries the query log id so the records can be joined", () => {
+    expect(tryBrainBody()).toMatch(/query_log_id/);
+  });
+
+  it("registers the event type", () => {
+    const analytics = readFileSync("src/lib/analytics.ts", "utf8");
+    expect(analytics).toContain('"assistant.brain_lookup_returned"');
+  });
+});

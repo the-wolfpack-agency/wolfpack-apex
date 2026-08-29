@@ -80,6 +80,10 @@ export type InstinctEventType =
      same empty answer and the same silence for months; only this tells them
      apart. Any non-zero count here is a dependency failing, not a thin corpus. */
   | "assistant.brain_lookup_failed"
+  /* What tryBrain actually RECEIVED from queryBrain, as distinct from what
+     queryBrain logged. Added because those two disagreed in production and no
+     record existed of the first one. */
+  | "assistant.brain_lookup_returned"
   /* The insight agent asking a client's own data the questions worth asking.
      The EMPTY count is the useful figure: it is how much of their corpus we
      cannot yet answer from, which is the gap a pilot exists to close. */
