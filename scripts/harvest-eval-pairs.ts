@@ -38,7 +38,21 @@ interface Candidate {
   reviewed: boolean;
 }
 
+/**
+ * How far back a citation is still worth trusting.
+ *
+ * Defaults to this week, because retrieval changed repeatedly inside it. Pass a
+ * different number once the corpus and the ranking have been stable for longer.
+ */
+const DEFAULT_WINDOW_DAYS = 7;
+
 async function main(): Promise<void> {
+  const windowDays = Number(process.argv[2] ?? DEFAULT_WINDOW_DAYS);
+  if (!Number.isFinite(windowDays) || windowDays < 1) {
+    console.error("usage: npx tsx scripts/harvest-eval-pairs.ts [windowDays]");
+    process.exit(2);
+  }
+
   const { rows } = await query<{
     question: string;
     filename: string;
@@ -55,6 +69,19 @@ async function main(): Promise<void> {
            and "ok" cite whatever the previous turn used and label nothing. */
         AND length(btrim(q.query)) > 12
         AND d.status = 'indexed'
+        /* RECENT ONLY, AND THIS IS THE IMPORTANT FILTER.
+         *
+         * A citation records which document the system chose AT THE TIME. This
+         * week retrieval changed repeatedly: the relevance judge's input window
+         * widened, filenames became searchable and then weighted, extensions
+         * stopped gluing to the last token. An answer cited before those
+         * changes reflects a system that no longer exists, so grading today's
+         * retrieval against it measures the gap between two versions rather
+         * than whether the answer is right.
+         *
+         * Older pairs are not merely weaker evidence, they are MISLEADING
+         * evidence, because they look exactly like good ones. */
+        AND q.created_at > now() - ($1 || ' days')::interval
       GROUP BY q.query, d.filename
       /* Asked more than once: a one-off is as likely to be somebody probing as
          a question worth grading, and repetition is the cheapest signal that
@@ -62,6 +89,7 @@ async function main(): Promise<void> {
      HAVING count(*) > 1
       ORDER BY count(*) DESC
       LIMIT 200`,
+    [String(windowDays)],
   );
 
   /* One document per question. A question that cited two different files is
@@ -85,7 +113,8 @@ async function main(): Promise<void> {
   const candidates = [...best.values()].sort((a, b) => b.timesCited - a.timesCited);
   console.log(JSON.stringify(candidates, null, 2));
   console.error(
-    `\n${candidates.length} candidates from ${rows.length} question/document pairs.\n` +
+    `\n${candidates.length} candidates from ${rows.length} pairs cited in the last ` +
+      `${windowDays} days.\n` +
       `NONE of these is ground truth yet: citation means the system used a document,\n` +
       `not that it was the right one. Read them, delete the wrong ones, and set\n` +
       `reviewed: true on what survives.\n`,
