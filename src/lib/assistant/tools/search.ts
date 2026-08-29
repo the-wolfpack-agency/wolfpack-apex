@@ -114,31 +114,38 @@ const DOCUMENT_QUESTION_RE = new RegExp(
        "what is in SharePoint about training" lands here too, and the topic is
        captured rather than swallowed into the subject. */
     String.raw`^\s*(?:what|whats|what's)\s+(?:is\s+)?in\s+(?:the\s+|our\s+|my\s+|this\s+)?(?<inSubject>.+?)(?:\s+about\s+(?<inAbout>.+?))?\s*[?.!]*\s*$`,
-    /* SUMMARISE IS DELIBERATELY ABSENT.
+    /* SUMMARISE STAYS HERE, AND THE ATTEMPT TO MOVE IT IS WORTH RECORDING.
      *
-     * "summarize the SOW" used to be captured here and handed to universal
-     * search, on the reasoning that search is what can see the corpus. What
-     * comes back from search is a browsable LIST, so somebody who asked for a
-     * summary received a filing cabinet. Measured 2026-08-29 on the live
-     * deployment: "summarize the onboarding document" returned "Found 3
-     * results" plus result rows, at zero tokens, because nothing synthesised
-     * anything.
+     * "summarize the onboarding document" returns a browsable LIST, so
+     * somebody who asked for a summary receives a filing cabinet. The obvious
+     * fix was to stop claiming it here and let it reach retrieval, which
+     * synthesises: the same corpus asked directly answers with figures and a
+     * citation.
      *
-     * Declining sends it to retrieval, which does synthesise: the same corpus,
-     * asked directly, answered "The final payment is due within 30 days of the
-     * software configuration in the production environment" in 552ms.
+     * That shipped, and validation against the deployed URL on 2026-08-29
+     * showed it made things WORSE, not better:
      *
-     * SAFE FOR HUMANS, CHECKED RATHER THAN ASSUMED. The comment above warns
-     * that "summarize the SOW" once reached op_create_document, which would
-     * try to CREATE a document by that name. That tool still exists and its
-     * matcher still fires on the phrase. It is agentOnly, and the dispatcher
-     * skips agent-only tools for a human caller (dispatcher.ts:75), so a
-     * person cannot reach it. Verified against the live registry: of 57
-     * human-facing tools, `search` was the only one claiming this phrase, so
-     * declining it here falls through to retrieval and nowhere else.
+     *   before  "summarize the onboarding document" -> Found 3 results, plus
+     *           three document rows in the results widget
+     *   after   -> "I do not have anything on that yet, so I would rather ask
+     *           than guess."
+     *   after   "summarise the SOW" -> "Provide the statement of work (SOW)
+     *           document or specify which SOW you are referring to, and I'll
+     *           summarize it for you."
      *
-     * EXISTENCE questions below are untouched, because a list IS the right
-     * answer to "what documents do we have about X". */
+     * Declining did not route to retrieval. It fell through to a model answer
+     * with no document context at all, which then asked the reader to paste
+     * the document we already hold. Three relevant documents beat that.
+     *
+     * So the premise was wrong: reaching the Brain is not simply what happens
+     * when nothing else claims a sentence, and "what are the payment terms in
+     * our SOW?" gets there by some other route that "summarize the SOW" does
+     * not take. A real fix has to send summarise to retrieval EXPLICITLY
+     * rather than by omission, and that is a different change.
+     *
+     * Reverted rather than left, because a list is a worse answer than a
+     * summary and a much better one than nothing. */
+    String.raw`^\s*summari[sz]e\s+(?:the\s+|our\s+|my\s+|this\s+)?(?<sumSubject>.+?)\s*[?.!]*\s*$`,
     /* DO WE HOLD ANYTHING ABOUT THIS. The question somebody asks before they
        trust the product with a real one, and it reached nothing.
 

@@ -124,24 +124,27 @@ const DOCUMENTS: ModuleCapability = {
          rows. Recording it as supported would make this file the second place
          the truth is not. */
       returns: "list",
-      /* STILL DECLARED AS A GAP, DELIBERATELY.
+      /* STILL A GAP, AND THE FIRST ATTEMPT AT IT MADE THINGS WORSE.
        *
-       * Search no longer claims this phrase, so it now falls through to
-       * retrieval, which synthesises. That is the intended fix and it is
-       * verified in unit tests: nothing a human can reach claims it.
+       * Stopping search from claiming the phrase, so it would reach retrieval,
+       * shipped and was validated against the deployed URL on 2026-08-29:
        *
-       * It is NOT promoted to `supported` here, because supported means
-       * measured against a real deployment and this change has not shipped
-       * yet. Promoting on the strength of a code change would make this file
-       * exactly what it exists to prevent, which is a place the truth is not.
+       *   before  -> Found 3 results, plus three document rows in the widget
+       *   after   -> "I do not have anything on that yet, so I would rather
+       *              ask than guess."
        *
-       * The route to promotion: merge, deploy, run the journey, and if
-       * summarise synthesises, change this to `supported` and drop
-       * behavesLike. The test asserting it routes elsewhere will fail at that
-       * point and force the two to move together. */
+       * It fell through to a model with no document context rather than to
+       * retrieval, so it was reverted. A list is a worse answer than a summary
+       * and a far better one than nothing.
+       *
+       * This declaration never moved to `supported`, which is the contract
+       * doing its job: had it been promoted on the strength of the code change,
+       * the registry would have claimed a working summarise for the hours the
+       * regression was live. Promotion requires a measurement, and the
+       * measurement is what said no. */
       status: "routes_elsewhere",
       behavesLike: "documents.find",
-      because: "People ask for this constantly. Fix shipped, awaiting live verification.",
+      because: "People ask for this constantly. Returns the matching documents instead.",
     },
   ],
 };
