@@ -425,6 +425,58 @@ export function bareIdentifierQuery(message: string): Params | null {
   return { query: t };
 }
 
+/**
+ * Strip instructions about the ANSWER'S SHAPE from the search query.
+ *
+ * Found by driving the deployed product as a user, 2026-08-29:
+ *
+ *   "summarize our SOW payment terms in two sentences"
+ *     -> searched for "SOW payment terms in two sentences"
+ *     -> Found 2 results ... Go to: Docs
+ *
+ * The same question without the instruction answers correctly from the document
+ * with the figures and a citation. So the retrieval was never the problem: four
+ * words about formatting were handed to the index as though they were subject
+ * matter, and they match nothing, because no document is about being two
+ * sentences long.
+ *
+ * Worse than a miss, it is a CONFIDENT miss. The reader asked for a summary and
+ * got a result count, with no hint that their own words caused it.
+ *
+ * TRAILING ONLY, AND FROM A CLOSED LIST. A general "remove formatting words"
+ * rule would eat real queries: "the two sentences clause", "brief for the
+ * board", "short form agreement". These phrases only mean formatting when they
+ * come last, after the thing being asked about, which is exactly where a person
+ * puts them.
+ */
+const OUTPUT_INSTRUCTION_RE =
+  /\s+(?:in|as|using)?\s*(?:a\s+|an\s+)?(?:short|brief|quick|plain|simple)?\s*(?:one|two|three|1|2|3|\d+)?\s*(?:sentences?|paragraphs?|bullets?|bullet\s+points?|lines?|words?|summary|list|english)\s*$/i;
+
+/* "terms" was in that list for "in plain terms" and had to come out: it turned
+   "SOW payment terms" into "SOW payment", mangling the exact query this
+   product answers best. A rare phrasing is not worth breaking a common one,
+   and the boundary test caught it before it shipped. */
+
+/** Verbs that mean "give me a shorter version", which carry the same tail. */
+const TRAILING_BREVITY_RE = /\s+(?:briefly|concisely|in\s+short|in\s+summary|tl;?dr)\s*$/i;
+
+export function stripOutputInstruction(query: string): string {
+  let out = query.trim();
+  /* Twice: "summarize this briefly in two sentences" carries both shapes, and
+     one pass would leave the other behind. Bounded rather than looped so a
+     pathological input cannot spin. */
+  for (let i = 0; i < 2; i++) {
+    const next = out.replace(OUTPUT_INSTRUCTION_RE, "").replace(TRAILING_BREVITY_RE, "").trim();
+    if (next === out) break;
+    out = next;
+  }
+  /* NEVER RETURN LESS THAN A QUERY. "summarize in two sentences" with no
+     subject would strip to nothing, and an empty search is worse than a
+     literal one: it matches everything or errors. When stripping empties it,
+     the original was the whole question, so keep it. */
+  return out.length >= 3 ? out : query.trim();
+}
+
 function matchSearchIntent(message: string): Params | null {
   const trimmed = (message ?? "").trim();
   if (!trimmed) return null;
@@ -437,11 +489,11 @@ function matchSearchIntent(message: string): Params | null {
      answer, and it reached no tool at all until 2026-08-26. Checked before the
      imperative form because it is a different shape, not a variant of it. */
   const asked = matchDocumentQuestion(trimmed);
-  if (asked && !specificToolClaims(trimmed)) return { query: asked };
+  if (asked && !specificToolClaims(trimmed)) return { query: stripOutputInstruction(asked) };
 
   const m = INTENT_RE.exec(trimmed);
   if (!m) return addressQuery(trimmed) ?? bareIdentifierQuery(trimmed);
-  const query = m[1].trim().replace(/[?.!,]+$/g, "").trim();
+  const query = stripOutputInstruction(m[1].trim().replace(/[?.!,]+$/g, "").trim());
   if (!query) return null;
   /* Reject queries that look like a CRM ID lookup — these still get
      captured by the broad "find <X>" arm but belong to

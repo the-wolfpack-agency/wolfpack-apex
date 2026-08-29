@@ -71,6 +71,11 @@ export type InstinctEventType =
      deterministically rather than buying a sentence from a model: the router
      had already removed it, so the fact was established before the call. */
   | "assistant.sensitive_paste_declined"
+  /* Somebody asked about their own calendar, mail or week and Microsoft is not
+     connected, so it was answered deterministically instead of by a model.
+     Counts the ONBOARDING gap: rising means people are not getting connected,
+     which is a different problem from the assistant answering badly. */
+  | "assistant.personal_data_unconnected"
   /* The insight agent asking a client's own data the questions worth asking.
      The EMPTY count is the useful figure: it is how much of their corpus we
      cannot yet answer from, which is the gap a pilot exists to close. */

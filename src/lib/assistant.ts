@@ -32,6 +32,8 @@ import { trackEvent } from "@/lib/analytics";
 import { safeQuery } from "@/lib/db";
 import { matchPageFacts } from "@/lib/assistant/page-facts-matcher";
 import { detectSensitivePaste } from "@/lib/assistant/sensitive-paste";
+import { checkPersonalDataQuestion } from "@/lib/assistant/personal-data-without-graph";
+import { getValidToken } from "@/lib/microsoft-graph";
 import { capabilityDenialSql } from "@/lib/assistant/capability-denial";
 import { ASSISTANT_IDENTITY_PROMPT } from "@/lib/prompts/definitions/assistant-identity";
 import { getTools } from "@/lib/assistant/tools/registry";
@@ -1306,6 +1308,46 @@ async function chatInner(
       conversationId: convId,
       messageId: msgId,
     };
+  }
+
+  /* --- Priority -1.5: their own week, with nothing connected to read it from ---
+   *
+   * Placed HERE, after tool dispatch, on purpose. A tool that can answer should
+   * answer, and an unconnected user asking "what are my tasks?" gets the task
+   * tool's specific message rather than this general one. This is for the
+   * questions that match no tool and would otherwise reach the model.
+   *
+   * "What did I miss this week?" was one of those. It cost 5,189ms and a model
+   * call to produce "I cannot access your personal information like your
+   * calendar, tasks, or emails", which reads as a policy refusal rather than
+   * an unfinished setup step, and contradicts the answer the task tool gives
+   * for the same underlying cause in the same minute.
+   *
+   * Degrades to the old behaviour on any error: an unreachable token store
+   * must not cost somebody their answer, so it falls through to the model
+   * exactly as before. */
+  try {
+    const msToken = await getValidToken(userId);
+    const personal = checkPersonalDataQuestion(message, msToken !== null);
+    if (personal.answer) {
+      trackEvent("assistant.personal_data_unconnected", userId, userRole, {
+        /* Counts how often somebody asks for their own week and cannot have
+           it. Rising means onboarding is not getting people connected, which
+           is a different problem from the assistant being wrong. */
+        feature: "assistant",
+      });
+      const msgId = await dbSaveMessage(convId, "assistant", personal.answer, "tool", 0);
+      await dbUpdateConversationStats(convId, 0);
+      return {
+        response: personal.answer,
+        source: "tool",
+        tokensUsed: 0,
+        conversationId: convId,
+        messageId: msgId,
+      };
+    }
+  } catch {
+    /* Fall through to the model, which is what happened before this existed. */
   }
 
   // --- Priority -1: Org-wide exact-match Q/A cache ---
