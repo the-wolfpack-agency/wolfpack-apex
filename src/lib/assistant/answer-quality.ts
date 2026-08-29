@@ -785,6 +785,26 @@ export function runAnswerQualityChecks(
         reason: flag.reason,
         verdict,
         strictness,
+        /* WHAT WAS ASKED, AND WHAT RETRIEVAL FOUND.
+         *
+         * Without these the event says an answer was rejected as "ungrounded"
+         * and cannot say which question, or whether anything was retrieved. So
+         * the one number that decides that gate is the one number missing.
+         *
+         * Cost an afternoon on 2026-08-29. Three paraphrases of a question
+         * whose answer sits in the corpus were rejected in production.
+         * brain_query_log showed 4 and 5 hits for two of them, the gate fires
+         * only on zero, and nothing could join the two records, so which
+         * rejection belonged to which query stayed a guess through three wrong
+         * hypotheses.
+         *
+         * The question rather than the answer: the question is what somebody
+         * needs to reproduce this, and the answer may carry content the reader
+         * should not have to store a second copy of. Truncated, because an
+         * unbounded field puts arbitrary user text into an analytics row. */
+        message_text: (input.question ?? "").slice(0, 200),
+        hit_count: input.hitCount ?? 0,
+        top_score: input.topScore ?? 0,
       },
     );
   }

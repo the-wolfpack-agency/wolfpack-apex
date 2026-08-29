@@ -934,3 +934,77 @@ describe("meta-commentary is blocked, not hedged", () => {
     expect(result.flags.map((f) => f.filter)).toContain("meta_commentary");
   });
 });
+
+/**
+ * A rejection has to say what was asked and what retrieval found.
+ *
+ * The event recorded filter, reason, verdict and severity, and neither the
+ * question nor the hit count — and hitCount is the ONLY input the ungrounded
+ * gate reads.
+ *
+ * Cost an afternoon on 2026-08-29. Three paraphrases of a question whose
+ * answer sits in the corpus were rejected in production. brain_query_log
+ * showed 4 and 5 hits for two of them, the gate fires only on zero, and
+ * nothing could join the two records. Which rejection belonged to which query
+ * stayed a guess through three wrong hypotheses.
+ */
+describe("a quality flag records enough to reproduce it", () => {
+  beforeEach(() => {
+    mockTrack.mockClear();
+  });
+
+  /* Uses the file's existing analytics mock rather than requireMock, so there
+     is one seam here instead of two. */
+  function flagEvents(): Array<Record<string, unknown>> {
+    return mockTrack.mock.calls
+      .filter((c: unknown[]) => c[0] === "assistant.quality_flag_raised")
+      .map((c: unknown[]) => c[3] as Record<string, unknown>);
+  }
+
+  it("carries the question and the hit count that decided it", () => {
+    runAnswerQualityChecks(
+      {
+        answer: "Our onboarding process starts with a welcome call and a laptop.",
+        question: "what is our onboarding process?",
+        topScore: 0,
+        hitCount: 0,
+      },
+      { userId: "u1", userRole: "ops" },
+    );
+
+    const ungrounded = flagEvents().find((e) => e.filter === "ungrounded_internal");
+    expect(ungrounded).toBeDefined();
+    /* The two facts that were missing. */
+    expect(ungrounded!.message_text).toBe("what is our onboarding process?");
+    expect(ungrounded!.hit_count).toBe(0);
+  });
+
+  /* The distinction the whole afternoon turned on. Rejected-with-nothing and
+     rejected-despite-hits look identical without this, and they are completely
+     different bugs: one is retrieval, the other is the gate. */
+  it("distinguishes a rejection with hits from one without", () => {
+    runAnswerQualityChecks(
+      {
+        answer: "The payment terms are net 30 from the invoice date.",
+        question: "how much do we owe upfront?",
+        topScore: 0.41,
+        hitCount: 4,
+      },
+      { userId: "u1", userRole: "ops" },
+    );
+    for (const e of flagEvents()) {
+      expect(e.hit_count).toBe(4);
+      expect(e.top_score).toBeCloseTo(0.41, 4);
+    }
+  });
+
+  it("truncates a long question rather than storing it whole", () => {
+    runAnswerQualityChecks(
+      { answer: "x", question: "q".repeat(400), topScore: 0, hitCount: 0 },
+      { userId: "u1", userRole: "ops" },
+    );
+    for (const e of flagEvents()) {
+      expect(String(e.message_text).length).toBeLessThanOrEqual(200);
+    }
+  });
+});
