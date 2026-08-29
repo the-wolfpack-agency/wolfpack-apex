@@ -74,3 +74,46 @@ describe("what it must never take", () => {
     expect(intercepts("write me a note about the repair order")).toBe(false);
   });
 });
+
+/**
+ * "Work order" belongs to documents, not to the DMS.
+ *
+ * This check runs in the API route and SHORT-CIRCUITS before retrieval, so a
+ * phrase it claims never gets the chance to be a document question. That makes
+ * an ambiguous noun expensive.
+ *
+ * Measured on the deployed URL 2026-08-29, walking a realistic task. Asked
+ * "what are the payment terms in the viaPeople work order?" — about a document
+ * sitting in SharePoint — the assistant replied:
+ *
+ *   "I cannot answer that yet: nothing connected to me holds your repair
+ *    orders. Connect your DMS."
+ *
+ * The document exists, is indexed, and answers the question. "Work order" is a
+ * standard business document long before it is a dealership record, and real
+ * corpora are full of files called one.
+ */
+describe("ambiguous nouns do not short-circuit document questions", () => {
+  it.each([
+    "what are the payment terms in the viaPeople work order?",
+    "show me the work order",
+    "what does the work order say about payment",
+  ])("lets %s reach retrieval", (q) => {
+    expect(detectUnreachable(q)).toBeNull();
+  });
+
+  /* The unambiguous dealership terms stay claimed: nobody names a contract
+     "repair order 4471". */
+  it.each([
+    "what is the status of repair order 4471?",
+    "show me the repair orders from today",
+  ])("still claims %s for the DMS", (q) => {
+    expect(detectUnreachable(q)).not.toBeNull();
+  });
+
+  /* Warranty and parts are untouched by this change. */
+  it("still claims warranty and parts lookups", () => {
+    expect(detectUnreachable("what is the status of my warranty claim?")).not.toBeNull();
+    expect(detectUnreachable("show me the parts order")).not.toBeNull();
+  });
+});

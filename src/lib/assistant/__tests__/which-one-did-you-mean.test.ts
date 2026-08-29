@@ -57,7 +57,24 @@ describe("asking which one", () => {
   });
 
   it("says what to do next", () => {
-    expect(whichOneDidYouMean("q", DOCS)!.answer).toMatch(/ask again naming/i);
+    expect(whichOneDidYouMean("q", DOCS)!.answer).toMatch(/name it and I will read it/i);
+  });
+
+  /* DOES NOT CLAIM THESE ARE RELATED. They are what the relevance judge just
+     decided do NOT answer the question. Calling them related claims something
+     we were told is false, and turns an honest refusal into a menu of wrong
+     answers: asked "when do we have to pay?" on 2026-08-29 it offered a UPS
+     invoice and three date-stamped receipts as things that "look related". */
+  it("does not assert the documents are related", () => {
+    const a = whichOneDidYouMean("when do we have to pay?", DOCS)!.answer.toLowerCase();
+    expect(a).not.toContain("look related");
+    expect(a).toContain("closest");
+  });
+
+  /* And admits the alternative, so somebody is not left assuming one of four
+     wrong options must be right. */
+  it("allows that none of them may be it", () => {
+    expect(whichOneDidYouMean("q", DOCS)!.answer).toMatch(/if none of them is/i);
   });
 
   /* One candidate is not a choice: "did you mean X" when X is all there is
@@ -65,7 +82,7 @@ describe("asking which one", () => {
   it("states the single candidate rather than offering a choice of one", () => {
     const r = whichOneDidYouMean("q", ["Only Doc.pdf"])!;
     expect(r.choices).toHaveLength(1);
-    expect(r.answer).toMatch(/closest thing I have/i);
+    expect(r.answer).toMatch(/closest thing I hold/i);
   });
 
   it("caps the list so it stays a choice rather than a document dump", () => {

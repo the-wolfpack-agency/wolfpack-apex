@@ -449,7 +449,25 @@ export function buildKeywordSearchSql(
   limit: number,
   opts: { uploadedBy?: string; kind?: BrainKind; role?: string } = {},
 ): { sql: string; args: unknown[] } {
-  const where: string[] = [`bc.tsv @@ websearch_to_tsquery('english', $1)`];
+  /* THE FILENAME IS SEARCHABLE TOO.
+   *
+   * bc.tsv is built from chunk CONTENT. The filename was selected for display
+   * and never matched against, so a document could not be found by its name:
+   * asked for "the viaPeople work order" the Brain returned CIC Training Print,
+   * a ScottLeder receipt and a survey export, and not the viaPeople work order
+   * sitting in the index. Measured on the deployed URL 2026-08-29.
+   *
+   * That is the most natural thing a person does after being shown a list and
+   * asked which one they meant, so it also made the clarify path a dead end: it
+   * asks a question whose answer does not work.
+   *
+   * Matched as a query rather than baked into bc.tsv, which would need a
+   * migration and a backfill of 5,006 rows to fix something a JOIN already has
+   * in hand. */
+  const where: string[] = [
+    `(bc.tsv @@ websearch_to_tsquery('english', $1)
+      OR to_tsvector('english', replace(bd.filename, '_', ' ')) @@ websearch_to_tsquery('english', $1))`,
+  ];
   const args: unknown[] = [];
   if (opts.uploadedBy) {
     args.push(opts.uploadedBy);
@@ -487,7 +505,17 @@ export function buildKeywordSearchSql(
              bd.filename,
              bd.kind,
              bc.content,
-             ts_rank_cd(bc.tsv, websearch_to_tsquery('english', $1)) AS score,
+             /* The better of the two matches. A document whose NAME is what
+                was asked for should not rank below one that merely mentions
+                the words in passing, and taking the greater keeps a content
+                match from being diluted when the filename is unrelated. */
+             GREATEST(
+               ts_rank_cd(bc.tsv, websearch_to_tsquery('english', $1)),
+               ts_rank_cd(
+                 to_tsvector('english', replace(bd.filename, '_', ' ')),
+                 websearch_to_tsquery('english', $1)
+               )
+             ) AS score,
              ts_headline('english', bc.content, websearch_to_tsquery('english', $1),
                          'MaxFragments=2,MinWords=5,MaxWords=18') AS headline,
              ${readableExpr} AS readable

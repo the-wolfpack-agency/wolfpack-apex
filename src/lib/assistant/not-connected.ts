@@ -44,7 +44,29 @@ const UNREACHABLE_DOMAINS: Array<{
     source: "your warranty system",
   },
   {
-    nouns: ["repair order", "repair orders", "ro number", "work order", "work orders"],
+    /* "WORK ORDER" IS NOT HERE, AND THAT IS DELIBERATE.
+     *
+     * It was, and it cost a client-facing failure. Asked "what are the payment
+     * terms in the viaPeople work order?" — about a document sitting in
+     * SharePoint — the assistant answered "nothing connected to me holds your
+     * repair orders. Connect your DMS." Measured on the deployed URL
+     * 2026-08-29.
+     *
+     * This check runs in the API route and SHORT-CIRCUITS before retrieval, so
+     * a phrase it claims never gets the chance to be a document question. That
+     * makes an ambiguous noun expensive: "work order" is a standard business
+     * document long before it is a dealership record, and real corpora are
+     * full of files called one.
+     *
+     * "repair order" and "ro number" stay, because nobody names a contract
+     * that.
+     *
+     * THE PLURAL STAYS TOO, and the split is the useful part. "List the work
+     * orders from yesterday" is a class of records and belongs to the DMS.
+     * "The viaPeople work order" is one named thing and is almost always a
+     * document. Number is the signal a person is already using, so the rule
+     * costs the reader nothing to learn. */
+    nouns: ["repair order", "repair orders", "ro number", "work orders"],
     label: "repair orders",
     source: "your DMS",
   },
