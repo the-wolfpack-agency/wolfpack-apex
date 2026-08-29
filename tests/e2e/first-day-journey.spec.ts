@@ -22,7 +22,11 @@
  * with a citation in 1.8 seconds.
  */
 import { test, expect, type Page } from "@playwright/test";
-import { FIRST_DAY } from "../../src/lib/deployment/first-day-journey";
+import {
+  buildJourney,
+  WOLFPACK_PROBES,
+  type CorpusProbe,
+} from "../../src/lib/deployment/first-day-journey";
 import { classifyAnswer, scoreJourney, type StepResult } from "../../src/lib/deployment/journey";
 
 const URL = process.env.PROD_URL?.replace(/\/$/, "");
@@ -30,6 +34,35 @@ const EMAIL = process.env.JOURNEY_EMAIL ?? process.env.ADMIN_E2E_EMAIL;
 const PASSWORD = process.env.JOURNEY_PASSWORD ?? process.env.ADMIN_E2E_PASSWORD;
 
 const MSG = '[data-testid^="assistant-msg-content-"]';
+
+/**
+ * Questions THIS deployment's own documents can answer, as JSON.
+ *
+ *   JOURNEY_PROBES='[{"ask":"what is our refund window?"}]'
+ *
+ * Omitted entirely on a client instance until somebody supplies theirs, and
+ * the run then reports that document retrieval was not covered rather than
+ * passing on the universal steps alone. Defaults to ours ONLY when pointed at
+ * our own deployment, because our probes are configuration and mean nothing
+ * anywhere else.
+ */
+function corpusProbes(): CorpusProbe[] {
+  const raw = process.env.JOURNEY_PROBES;
+  if (raw) {
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed as CorpusProbe[];
+    } catch {
+      /* Reported below rather than thrown: a malformed variable should not
+         take down the universal steps, but it must not pass silently either. */
+      console.warn("JOURNEY_PROBES is not valid JSON; running universal steps only.");
+    }
+    return [];
+  }
+  return URL?.includes("wolfpack-instinct") ? WOLFPACK_PROBES : [];
+}
+
+const STEPS = buildJourney({ corpusProbes: corpusProbes() });
 
 async function signIn(page: Page): Promise<void> {
   await page.goto(`${URL}/login`, { waitUntil: "domcontentloaded" });
@@ -97,7 +130,7 @@ test.describe("the first day on this deployment", () => {
 
   const results: StepResult[] = [];
 
-  for (const step of FIRST_DAY) {
+  for (const step of STEPS) {
     test(`${step.id}: ${step.ask}`, async ({ page }) => {
       await signIn(page);
       const { latencyMs, answer } = await ask(page, step.ask, step.budgetMs);
@@ -125,6 +158,25 @@ test.describe("the first day on this deployment", () => {
         `${report.slowestMs !== null ? `, slowest ${report.slowestMs}ms` : ""}.`,
     );
     for (const p of report.problems) console.log(`  FAIL ${p.step.id}: ${p.problem}`);
-    if (report.ready) console.log("  Deployment is ready for somebody's first day.");
+
+    /* WHAT WAS NOT CHECKED, SAID OUT LOUD. Without probes this run proves the
+       product responds, refuses cleanly and does not confabulate. It proves
+       NOTHING about whether their documents can be searched, and a green run
+       that implied otherwise would be the more dangerous outcome. */
+    const corpusSteps = results.filter((r) => r.step.id.startsWith("corpus-"));
+    if (corpusSteps.length === 0) {
+      console.log(
+        "  NOT COVERED: document retrieval. Supply JOURNEY_PROBES with a question\n" +
+          "  this deployment's own documents answer, e.g.\n" +
+          `  JOURNEY_PROBES='[{"ask":"what is our refund window?"}]'`,
+      );
+    }
+    if (report.ready) {
+      console.log(
+        corpusSteps.length > 0
+          ? "  Deployment is ready for somebody's first day."
+          : "  Universal checks passed. Document retrieval still unverified.",
+      );
+    }
   });
 });

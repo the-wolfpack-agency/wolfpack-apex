@@ -24,6 +24,13 @@ on:
         description: "Deployment to walk (e.g. https://client.vercel.app)"
         required: true
         default: "https://wolfpack-instinct.vercel.app"
+      probes:
+        # Questions THIS deployment's own documents can answer. Without them the
+        # run proves the product responds, refuses cleanly and does not
+        # confabulate, and proves nothing about their corpus — which it says.
+        description: 'Questions their documents answer, as JSON: [{"ask":"what is our refund window?"}]'
+        required: false
+        default: ""
   schedule:
     # Weekly, so a deployment that quietly stops answering is noticed by
     # something other than a client.
@@ -48,6 +55,7 @@ jobs:
           PROD_URL: ${{ github.event.inputs.url || 'https://wolfpack-instinct.vercel.app' }}
           JOURNEY_EMAIL: ${{ secrets.ADMIN_E2E_EMAIL }}
           JOURNEY_PASSWORD: ${{ secrets.ADMIN_E2E_PASSWORD }}
+          JOURNEY_PROBES: ${{ github.event.inputs.probes }}
         # Workers 1: the report is about one deployment, not about parallel
         # load, and the steps share one account.
         run: npx playwright test tests/e2e/first-day-journey.spec.ts --workers=1 --reporter=line

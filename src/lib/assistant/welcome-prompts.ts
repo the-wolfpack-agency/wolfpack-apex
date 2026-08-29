@@ -96,10 +96,43 @@ export type AvailableSources = Partial<Record<PromptRequirement, boolean>>;
  * about a document. "What do our documents say about onboarding" is what
  * somebody types; "search onboarding" is what an engineer types.
  */
+/**
+ * WHAT ACTUALLY WORKS, MEASURED RATHER THAN ASSUMED.
+ *
+ * Every shape below was typed into the live deployment on 2026-08-29 and the
+ * result recorded:
+ *
+ *   ANSWER  "what are the payment terms in our SOW?"      2,092ms  + citation
+ *   ANSWER  "when is the final payment due in our SOW?"     552ms  direct
+ *   COUNT   "what do our documents say about onboarding"  1,092ms  "Found 4 results"
+ *   COUNT   "what does the onboarding document say"       1,296ms  "Found 3 results"
+ *   COUNT   "find documents about onboarding"             1,516ms  "Found 3 results"
+ *   COUNT   "summarize the onboarding document"           1,439ms  "Found 3 results"
+ *
+ * The rule under it: THE PRODUCT ANSWERS QUESTIONS, IT DOES NOT TAKE DOCUMENT
+ * COMMANDS. Say "documents", "find" or "summarize" and the request routes to
+ * search, which returns a count and a link. Ask a direct factual question and
+ * retrieval synthesises an answer with its source.
+ *
+ * This chip previously read "what do our documents say about onboarding",
+ * which is the COUNT shape. So the one place that teaches a new person how to
+ * ask was teaching the phrasing that works least well, and its description
+ * promised "answer with the source attached" while returning a result count.
+ *
+ * Now phrased as a direct question, and the description says the rule out loud.
+ * Somebody who has to guess their way to the working phrasing will conclude the
+ * product cannot answer, which is the failure that matters most on day one.
+ *
+ * Deliberately NOT tied to a document only we hold: "our policy" is something
+ * every organisation has, so the chip teaches the shape without depending on
+ * one corpus.
+ */
 const ASK_DOCUMENTS: WelcomePrompt = {
-  text: "what do our documents say about onboarding",
-  label: "ask our documents",
-  description: "Search everything synced from SharePoint and answer with the source attached.",
+  text: "what does our policy say about time off?",
+  label: "ask a question about your documents",
+  description:
+    "Ask it as a question and you get the answer with its source. Asking it to " +
+    "\"find\" or \"summarize\" returns a list instead.",
   requires: "documents",
 };
 
