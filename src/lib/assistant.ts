@@ -2603,6 +2603,32 @@ async function tryBrain(
       limit: 5,
       conversationId,
     });
+    /* THE LAST HIDING PLACE.
+     *
+     * Measured against the deployed URL 2026-08-29, one turn, no exception:
+     *
+     *   20:13:22.744  brain_query_log   "when do we have to pay?"  ->  5 hits
+     *   20:13:23.446  intent_unmatched  same question              ->  has_brain_context false
+     *
+     * queryBrain logs hitChunkIds.length and returns that same array, the loop
+     * below cannot turn five hits into none, and tryBrain did not throw. Each
+     * of those is verified, and together they are impossible, so one of them is
+     * not what it appears.
+     *
+     * This records what THIS function actually received, which is the only
+     * number nobody has seen. Five hypotheses have died guessing at it: the
+     * score floor, the query phrasing, whether semantic ran, an unguarded
+     * analytics await, and an exception being swallowed. */
+    trackEvent("assistant.brain_lookup_returned", userId, userRole, {
+      feature: "assistant",
+      message_text: message.slice(0, 200),
+      returned_hits: result.hits.length,
+      keyword_hits: result.keyword_hits,
+      semantic_hits: result.semantic_hits,
+      /* Joins this to brain_query_log directly, rather than by timestamp,
+         which is how the two records stayed ambiguous for so long. */
+      query_log_id: result.query_log_id,
+    });
     if (result.hits.length === 0) return { strong: null, context: emptyContext };
 
     /* Compute context regardless of strong-hit verdict — even weak hits
