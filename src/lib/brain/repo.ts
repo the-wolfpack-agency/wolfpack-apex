@@ -505,15 +505,35 @@ export function buildKeywordSearchSql(
              bd.filename,
              bd.kind,
              bc.content,
-             /* The better of the two matches. A document whose NAME is what
-                was asked for should not rank below one that merely mentions
-                the words in passing, and taking the greater keeps a content
-                match from being diluted when the filename is unrelated. */
+             /* NAMING A DOCUMENT IS THE MOST EXPLICIT SIGNAL A PERSON CAN
+                GIVE, AND IT WAS LOSING ON A SCALE IT CANNOT WIN.
+                
+                Measured 2026-08-29: a filename match on "the viaPeople work
+                order" scores 0.10000 from ts_rank_cd, while semantic hits on
+                the same query score 0.42 to 0.45. Fusing them by raw magnitude
+                buried the exact match under fuzzy ones, so asking for a
+                document by name returned three unrelated files and the
+                document itself was nowhere.
+                
+                The two numbers measure different things and were never
+                comparable: one is lexical density over a short string, the
+                other is cosine distance in embedding space. Parity between
+                them is meaningless, so the filename rank is scaled to sit
+                where its EVIDENCE belongs rather than where its arithmetic
+                happens to land. Somebody who names a file is telling us which
+                document they want; that outranks a topical resemblance.
+                
+                Capped at 1.0 so it cannot exceed a perfect match, and it is
+                still a match requirement rather than a free boost: a filename
+                that does not match contributes nothing. */
              GREATEST(
                ts_rank_cd(bc.tsv, websearch_to_tsquery('english', $1)),
-               ts_rank_cd(
-                 to_tsvector('english', replace(bd.filename, '_', ' ')),
-                 websearch_to_tsquery('english', $1)
+               LEAST(
+                 1.0,
+                 ts_rank_cd(
+                   to_tsvector('english', replace(bd.filename, '_', ' ')),
+                   websearch_to_tsquery('english', $1)
+                 ) * ${FILENAME_MATCH_WEIGHT}
                )
              ) AS score,
              ts_headline('english', bc.content, websearch_to_tsquery('english', $1),
@@ -577,6 +597,19 @@ export interface KeywordSearchResult {
  * and this codebase has just found six controls that really were broken behind
  * exactly that kind of zero.
  */
+/**
+ * How much a filename match is worth against a semantic one.
+ *
+ * ts_rank_cd returns about 0.1 for a filename hit; semantic hits on the same
+ * query run 0.42 to 0.45. Nine brings a name match to roughly 0.9, above any
+ * topical resemblance, which is where the evidence belongs: somebody naming a
+ * file is telling us which document they want.
+ *
+ * Named rather than inlined so the number is arguable. It is a judgement about
+ * evidence, not a measurement, and the next person should be able to see that.
+ */
+export const FILENAME_MATCH_WEIGHT = 9;
+
 export async function keywordSearchWithAudience(
   queryText: string,
   limit: number,

@@ -24,6 +24,16 @@ on:
         description: "Deployment to walk (e.g. https://client.vercel.app)"
         required: true
         default: "https://wolfpack-instinct.vercel.app"
+      document:
+        # A document in THEIR corpus, named as somebody would say it. Without
+        # it the multi-turn scenarios run only their portable half, and say so.
+        description: 'A document in this deployment, e.g. "the master services agreement"'
+        required: false
+        default: ""
+      contains:
+        description: 'A distinctive string that document contains, e.g. "30 days"'
+        required: false
+        default: ""
       probes:
         # Questions THIS deployment's own documents can answer. Without them the
         # run proves the product responds, refuses cleanly and does not
@@ -59,6 +69,18 @@ jobs:
         # Workers 1: the report is about one deployment, not about parallel
         # load, and the steps share one account.
         run: npx playwright test tests/e2e/first-day-journey.spec.ts --workers=1 --reporter=line
+
+      - name: Walk whole jobs, not single questions
+        # Separate step so a failure here is reported as "a job broke" rather
+        # than folded into the single-question results. They answer different
+        # questions and a client cares about the second one.
+        env:
+          PROD_URL: ${{ github.event.inputs.url || 'https://wolfpack-instinct.vercel.app' }}
+          JOURNEY_EMAIL: ${{ secrets.ADMIN_E2E_EMAIL }}
+          JOURNEY_PASSWORD: ${{ secrets.ADMIN_E2E_PASSWORD }}
+          SCENARIO_DOCUMENT: ${{ github.event.inputs.document }}
+          SCENARIO_CONTAINS: ${{ github.event.inputs.contains }}
+        run: npx playwright test tests/e2e/scenarios.spec.ts --workers=1 --reporter=line
 
       - name: Keep the evidence
         if: always()
