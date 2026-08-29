@@ -34,6 +34,7 @@
  * for questions, not commands.
  */
 import type { JourneyStep } from "./journey";
+import { MODULE_CAPABILITIES, type ModuleAction } from "@/lib/modules/capabilities";
 
 /** One fact the deployment's owner knows the answer to. */
 export interface CorpusProbe {
@@ -109,6 +110,40 @@ export const UNIVERSAL_STEPS: JourneyStep[] = [
  * Universal steps always run. Corpus steps appear only when somebody supplied
  * a question their own documents can answer.
  */
+/**
+ * Turn every module's SUPPORTED actions into steps.
+ *
+ * THIS IS WHY THE CONTRACT IS WORTH THE STRUCTURE. Declaring DMS or CRM
+ * capabilities adds their verification here automatically, so a module cannot
+ * ship claiming an action nobody ever drove against a real deployment. Written
+ * by hand instead, each module's coverage would depend on somebody remembering,
+ * and documents is the evidence for how that goes.
+ *
+ * Only `supported` actions become steps. An action declared as routing
+ * elsewhere is a known gap, and failing the journey on a gap already written
+ * down turns the report into noise.
+ *
+ * The expectation comes from the DECLARED shape, so a module claiming a
+ * synthesised answer and returning a list fails here rather than in front of a
+ * client. `empty` is allowed alongside: a fresh deployment holds nothing, and
+ * that is not the module being broken.
+ */
+function stepForAction(a: ModuleAction): JourneyStep {
+  return {
+    id: `module-${a.id}`,
+    ask: a.example,
+    expect: a.returns === "synthesised" ? ["substantive", "empty"] : ["substantive", "empty", "needs_setup"],
+    budgetMs: 10_000,
+    because: `${a.verb}: ${a.because}`,
+  };
+}
+
+export function moduleSteps(): JourneyStep[] {
+  return MODULE_CAPABILITIES.flatMap((m) =>
+    m.actions.filter((a) => a.status === "supported").map(stepForAction),
+  );
+}
+
 export function buildJourney(config: JourneyConfig = {}): JourneyStep[] {
   const corpus = (config.corpusProbes ?? []).map(
     (probe, i): JourneyStep => ({
@@ -122,7 +157,9 @@ export function buildJourney(config: JourneyConfig = {}): JourneyStep[] {
       because: "A question this deployment's own documents are known to answer.",
     }),
   );
-  return [...UNIVERSAL_STEPS, ...corpus];
+  /* Universal behaviour, then every module's declared capability, then the
+     deployment's own corpus questions. */
+  return [...UNIVERSAL_STEPS, ...moduleSteps(), ...corpus];
 }
 
 /**
