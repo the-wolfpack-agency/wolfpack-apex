@@ -225,7 +225,26 @@ export async function queryBrain(opts: QueryOpts): Promise<QueryExecution> {
    * Kept switchable while it is new: BRAIN_FUSION=score restores the previous
    * behaviour. A ranking change that cannot be reverted in one environment
    * variable is one nobody will risk deploying. */
-  const useRrf = process.env.BRAIN_FUSION !== "score";
+  /* DEFAULT REVERTED TO SCORE FUSION, BY MEASUREMENT.
+   *
+   * RRF was adopted on a six-pair eval set: MRR 0.557 -> 0.700, and "what are
+   * the payment terms in our work order?" moving from rank 7 to rank 1. On a
+   * cleaned twelve-pair set the result reverses:
+   *
+   *   score addition     50% ranked first, MRR 0.544
+   *   reciprocal rank    42% ranked first, MRR 0.503
+   *
+   * Six pairs was too few to decide anything — one question is 17% of that
+   * score — which I said before adopting it and then did anyway. The larger
+   * set is still small and the gap is close to noise, so this is not a
+   * verdict that RRF is wrong. It is that it has not earned the change, and
+   * the rule was written for exactly this: ties go to the incumbent, because
+   * churn in ranking is how a corpus gets quietly worse one defensible step
+   * at a time.
+   *
+   * BRAIN_FUSION=rrf re-enables it, so the next person with a bigger set can
+   * settle it rather than re-implement it. */
+  const useRrf = process.env.BRAIN_FUSION === "rrf";
   const hits = useRrf
     ? reciprocalRankFusion(
         keyword.map((h) => ({ ...h, id: h.chunk_id })),
