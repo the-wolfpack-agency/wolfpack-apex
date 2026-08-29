@@ -12,7 +12,7 @@
  */
 
 import "@testing-library/jest-dom";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 const mockFetch = jest.fn();
 jest.mock("@/lib/client-auth", () => ({
@@ -299,5 +299,64 @@ describe("AssistantWelcomeModal — does not re-open across re-renders", () => {
       <AssistantWelcomeModal userRole="pm" onPickPrompt={() => undefined} />,
     );
     expect(screen.queryByTestId("assistant-welcome-modal")).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * Escape closes it.
+ *
+ * It did not, and the modal covers the answer. Measured against the live
+ * deployment 2026-08-29: click-outside dismissed it and the dismissal persisted
+ * correctly across a reload, but Escape did nothing. Anybody whose reflex is
+ * Escape sits looking at a panel over their own results and concludes it is
+ * stuck.
+ *
+ * Invisible to every existing test here, because a test that clicks never
+ * presses a key. It cost me several screenshots of a modal covering the very
+ * answers I was trying to read before I checked which dismissal methods
+ * actually worked.
+ */
+describe("dismissing with the keyboard", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  it("closes when Escape is pressed", async () => {
+    render(<AssistantWelcomeModal userName="Nick" userRole="cto" onPickPrompt={() => {}} />);
+    expect(await screen.findByText(/I.m Instinct/i)).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    await waitFor(() => {
+      expect(screen.queryByText(/I.m Instinct/i)).not.toBeInTheDocument();
+    });
+  });
+
+  /* Same contract as the other dismissal routes: having closed it once, it
+     must not come back on the next visit. A close that does not persist is a
+     close somebody has to do every single time. */
+  it("stays dismissed after Escape, like the other dismissal routes", async () => {
+    const { unmount } = render(
+      <AssistantWelcomeModal userName="Nick" userRole="cto" onPickPrompt={() => {}} />,
+    );
+    expect(await screen.findByText(/I.m Instinct/i)).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByText(/I.m Instinct/i)).not.toBeInTheDocument());
+    unmount();
+
+    render(<AssistantWelcomeModal userName="Nick" userRole="cto" onPickPrompt={() => {}} />);
+    await waitFor(() => {
+      expect(screen.queryByText(/I.m Instinct/i)).not.toBeInTheDocument();
+    });
+  });
+
+  /* Only Escape. A modal that closed on any keypress would vanish while
+     somebody was reading it. */
+  it("ignores other keys", async () => {
+    render(<AssistantWelcomeModal userName="Nick" userRole="cto" onPickPrompt={() => {}} />);
+    expect(await screen.findByText(/I.m Instinct/i)).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "a" });
+    fireEvent.keyDown(window, { key: "Enter" });
+    expect(screen.getByText(/I.m Instinct/i)).toBeInTheDocument();
   });
 });

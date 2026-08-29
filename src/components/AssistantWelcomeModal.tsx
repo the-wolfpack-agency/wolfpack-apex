@@ -70,6 +70,31 @@ export function AssistantWelcomeModal({
     }
   }, [userRole]);
 
+  /* ESCAPE CLOSES IT.
+   *
+   * It did not, and the modal covers the answer. Measured against the live
+   * deployment 2026-08-29: click-outside dismissed it and the dismissal
+   * persisted correctly across a reload, but Escape did nothing, so anybody
+   * whose reflex is Escape sits looking at a panel over their own results and
+   * concludes it is stuck.
+   *
+   * Cheap to get wrong in a demo and invisible in every test that clicks,
+   * because a test that clicks never presses a key.
+   *
+   * Bound while OPEN only, so this adds no listener to a page whose modal is
+   * already dismissed, and removed on close. */
+  useEffect(() => {
+    if (!open || typeof window === "undefined") return;
+    function onKey(e: KeyboardEvent): void {
+      if (e.key === "Escape") handleDismiss("escape");
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    /* handleDismiss is stable for the life of the open modal: it closes over
+       setOpen and userRole only, and userRole is in the dependency list. */
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, userRole]);
+
   function markSeen(): void {
     if (typeof window !== "undefined") {
       try {
@@ -80,7 +105,7 @@ export function AssistantWelcomeModal({
     }
   }
 
-  function handleDismiss(method: "x_button" | "click_outside"): void {
+  function handleDismiss(method: "x_button" | "click_outside" | "escape"): void {
     setOpen(false);
     markSeen();
     track("assistant.welcome_dismissed", { method, role: userRole ?? "unknown" });
