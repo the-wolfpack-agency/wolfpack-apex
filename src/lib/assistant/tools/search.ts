@@ -553,9 +553,53 @@ export function relaxQuery(query: string): string | null {
   return kept.length > 0 ? kept.join(" ") : null;
 }
 
+/**
+ * Name the providers that never answered, in words a reader recognises.
+ *
+ * Returns null on a healthy search, which is the common case and reads exactly
+ * as it did before.
+ */
+function degradedNote(body: SearchResponse): string | null {
+  const d = body.degraded ?? [];
+  if (d.length === 0) return null;
+
+  const names = d.map((x) => x.provider);
+  const list =
+    names.length === 1
+      ? names[0]
+      : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+  /* "did not answer" rather than "timed out": the distinction between a
+     timeout and a failure matters to us and not to the person waiting, and
+     both mean the same thing to them, which is that this was not searched. */
+  return `${list} did not answer in time, so ${d.length === 1 ? "it was" : "they were"} not searched`;
+}
+
+/* Exported for tests only. The wording IS the behaviour here: the defect this
+   guards was a sentence that asserted something untrue, so it has to be
+   assertable directly rather than through the whole tool. */
+export { summaryAnswer as summaryAnswerForTests };
+
 function summaryAnswer(query: string, body: SearchResponse, relaxedFrom?: string): string {
   const total = body.results.length;
-  if (total === 0) return `No results found for "${query}".`;
+  const degraded = degradedNote(body);
+
+  if (total === 0) {
+    /* THE LIE THIS REMOVES. "No results found" asserts that everything was
+       searched and held nothing. When a provider timed out that is simply
+       untrue, and it is the worst kind of untrue: confident, silent, and
+       pointing the reader away from data that may be sitting right there.
+       Measured 2026-08-29, the Teams channels provider ran at a p95 of
+       22,136ms against a 6,000ms budget, so it routinely did not answer and
+       every one of those searches still reported a clean empty result. */
+    /* LEADS WITH THE FACT, THEN QUALIFIES IT. "No results found" is true: none
+       were found. The lie was never that sentence, it was the silence after
+       it. Keeping the opening also keeps the contract the 2026-05-19 eval
+       guards, which is that the zero-results path answers from the tool
+       instead of falling through to a model that would confabulate. */
+    return degraded
+      ? `No results found for "${query}". Note that ${degraded}, so this is not a complete answer and it is worth asking again.`
+      : `No results found for "${query}".`;
+  }
 
   /* SAY WHAT IT ACTUALLY LOOKED FOR. A person who typed one thing and is shown
      results for another will not trust either, and the difference is usually
@@ -568,9 +612,10 @@ function summaryAnswer(query: string, body: SearchResponse, relaxedFrom?: string
       parts.push(`${n} ${label ? (n === 1 ? label[0] : label[1]) : key}`);
     }
     const breakdown = parts.length > 0 ? `: ${parts.join(", ")}` : "";
+    const note = degraded ? ` ${degraded[0]!.toUpperCase()}${degraded.slice(1)}.` : "";
     return (
       `I could not find "${relaxedFrom}", so I looked for "${query}" instead ` +
-      `and found ${total} result${total === 1 ? "" : "s"}${breakdown}.`
+      `and found ${total} result${total === 1 ? "" : "s"}${breakdown}.${note}`
     );
   }
 
@@ -582,7 +627,12 @@ function summaryAnswer(query: string, body: SearchResponse, relaxedFrom?: string
   }
 
   const breakdown = parts.length > 0 ? `: ${parts.join(", ")}` : "";
-  return `Found ${total} result${total === 1 ? "" : "s"} for "${query}"${breakdown}.`;
+  /* PARTIAL RESULTS ARE THE SAME LIE, QUIETLY. "Found 3 results" reads as the
+     complete set, and somebody who stops reading there never learns that a
+     source was skipped. Naming it costs one clause and is the difference
+     between an answer they can act on and one they cannot. */
+  const suffix = degraded ? ` ${degraded[0]!.toUpperCase()}${degraded.slice(1)}.` : "";
+  return `Found ${total} result${total === 1 ? "" : "s"} for "${query}"${breakdown}.${suffix}`;
 }
 
 /** Map runSearch hits onto AssistantSourceRef shape. Each result type

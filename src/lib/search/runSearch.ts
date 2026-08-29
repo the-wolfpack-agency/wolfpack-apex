@@ -69,10 +69,32 @@ export interface SearchResponseCounts {
   [key: string]: number;
 }
 
+/** A provider that did not answer, and why. */
+export interface SearchDegradation {
+  /** The provider's display name, as a reader would recognise it. */
+  provider: string;
+  reason: "timed_out" | "failed";
+}
+
 export interface SearchResponse {
   results: SearchResult[];
   took_ms: number;
   counts: SearchResponseCounts;
+  /**
+   * PROVIDERS THAT NEVER ANSWERED. Empty on a healthy search.
+   *
+   * Without this a caller cannot tell "this workspace holds nothing about
+   * that" from "we did not finish looking", because both arrive as zero
+   * results. Measured 2026-08-29: the Teams channels provider has a p95 of
+   * 22,136ms against a 6,000ms budget, so it exceeds the budget routinely and
+   * every one of those searches reported an empty Teams result set as though
+   * Teams had been searched and found nothing.
+   *
+   * The timeout was already detected and recorded to analytics. It simply had
+   * nowhere to go in the response, so the one reader who most needed it, the
+   * person who asked the question, was the only one not told.
+   */
+  degraded: SearchDegradation[];
 }
 
 export interface RunSearchParams {
@@ -244,7 +266,10 @@ export async function runSearch(
   };
 
   if (enabled.length === 0) {
-    return { results: [], took_ms: Date.now() - t0, counts };
+    /* No provider was asked, so nothing degraded. Zero results here genuinely
+       means "nothing was searched", which the caller already knows because it
+       chose the empty provider set. */
+    return { results: [], took_ms: Date.now() - t0, counts, degraded: [] };
   }
 
   const perType = perTypeLimitFor(enabled.length, limit);
@@ -323,9 +348,19 @@ export async function runSearch(
     idx += 1;
   }
 
+  /* Reported in a stable order so two identical searches read identically. */
+  const degraded: SearchDegradation[] = runs
+    .filter((r) => !r.ok)
+    .map((r) => ({
+      provider: r.provider.name,
+      reason: r.timedOut ? ("timed_out" as const) : ("failed" as const),
+    }))
+    .sort((a, b) => a.provider.localeCompare(b.provider));
+
   return {
     results: merged,
     took_ms: Date.now() - t0,
     counts,
+    degraded,
   };
 }
