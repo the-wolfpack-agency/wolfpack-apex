@@ -72,10 +72,36 @@ export function parseRelevanceReply(raw: string): RelevanceResult {
   };
 }
 
+/**
+ * How much of each retrieved chunk the judge is shown.
+ *
+ * Measured against the real corpus 2026-08-29: the median chunk is 2,262
+ * characters and the longest is 2,627, so 2,400 covers a whole median chunk
+ * and nearly the longest.
+ *
+ * It was 500. On the chunk holding the answer to "how much do we owe
+ * upfront?", "30 days" sits at character 741 and "50%" at 2,101, so both
+ * figures were outside the window. The judge ruled IRRELEVANT on what it had
+ * been shown, correctly, and the caller discarded the retrieval. 123 answers
+ * were refused that way between 2026-08-25 and 2026-08-29.
+ *
+ * Exported so the caller slices to the same size this function will accept.
+ * Two independent numbers is how one of them ends up smaller than the other
+ * and silently truncates the material a second time.
+ */
+export const RELEVANCE_MATERIAL_PER_HIT = 2400;
+
+/**
+ * Total material budget: three hits at the per-hit size, with headroom for the
+ * separators. Sized FROM the per-hit figure rather than picked, so raising one
+ * cannot leave the other clipping.
+ */
+export const RELEVANCE_MATERIAL_MAX = RELEVANCE_MATERIAL_PER_HIT * 3 + 64;
+
 export function buildRelevancePrompt(question: string, material: string): string {
   return fenceUntrusted([
     { provenance: "external", label: "question", text: question },
-    { provenance: "retrieved", label: "material", text: material.slice(0, 1500) },
+    { provenance: "retrieved", label: "material", text: material.slice(0, RELEVANCE_MATERIAL_MAX) },
   ]).text;
 }
 
