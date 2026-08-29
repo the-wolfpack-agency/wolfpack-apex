@@ -27,6 +27,7 @@
     "test:e2e:reality": "playwright test tests/e2e/sites-preview-reality-check.spec.ts tests/e2e/sites-upload-reality-check.spec.ts tests/e2e/sites-designer-journey.spec.ts --config=playwright.config.ts",
     "test:e2e:smoke": "playwright test tests/e2e/smoke.spec.ts --config=playwright.config.ts",
     "test:e2e:smoke-self-check": "PROD_URL=http://127.0.0.1:9 playwright test tests/e2e/smoke-probe-waits.spec.ts --config=playwright.config.ts",
+    "test:e2e:deployed": "PROD_URL=${PROD_URL:-https://wolfpack-instinct.vercel.app} playwright test tests/e2e/deployed-url-smoke.spec.ts --config=playwright.config.ts --reporter=line",
     "test:qr-download": "playwright test --config=playwright.qr.config.ts",
     "test:spec-diff": "playwright test --config=playwright.specdiff.config.ts",
     "vercel-build": "npm run migrate && npm run engineering:seed && next build",
