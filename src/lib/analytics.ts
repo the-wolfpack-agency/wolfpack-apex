@@ -84,6 +84,10 @@ export type InstinctEventType =
      queryBrain logged. Added because those two disagreed in production and no
      record existed of the first one. */
   | "assistant.brain_lookup_returned"
+  /* The corpus held something close and the question did not say which one, so
+     we asked instead of refusing. Rising means people are asking good questions
+     the product cannot yet disambiguate: a guidance problem, not retrieval. */
+  | "assistant.asked_which_document"
   /* The insight agent asking a client's own data the questions worth asking.
      The EMPTY count is the useful figure: it is how much of their corpus we
      cannot yet answer from, which is the gap a pilot exists to close. */

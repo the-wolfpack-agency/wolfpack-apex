@@ -32,6 +32,7 @@ import { trackEvent } from "@/lib/analytics";
 import { safeQuery } from "@/lib/db";
 import { matchPageFacts } from "@/lib/assistant/page-facts-matcher";
 import { detectSensitivePaste } from "@/lib/assistant/sensitive-paste";
+import { whichOneDidYouMean } from "@/lib/assistant/which-one-did-you-mean";
 import { checkPersonalDataQuestion } from "@/lib/assistant/personal-data-without-graph";
 import { getValidToken } from "@/lib/microsoft-graph";
 import { capabilityDenialSql } from "@/lib/assistant/capability-denial";
@@ -1569,7 +1570,11 @@ async function chatInner(
   // (score >= 0.5 OR keyword+semantic match), we return a citation-
   // linked answer at zero model tokens. Otherwise we pass the hits as
   // context to the AI call below via pageContext.
-  const { strong: brainResult, context: brainContext } = await tryBrain(
+  const {
+    strong: brainResult,
+    context: brainContext,
+    nearMisses: brainNearMisses,
+  } = await tryBrain(
     message,
     userId,
     userRole,
@@ -1621,6 +1626,45 @@ async function chatInner(
    * to somebody asking about something else looks like relevance and leads
    * them further away. With no relevant chip this falls through to the model
    * exactly as before, so a general question still gets an answer. */
+  /* WE FOUND DOCUMENTS AND COULD NOT TELL WHICH ONE. ASK.
+   *
+   * Placed before the generic guided path on purpose: that one offers starter
+   * chips, and named files from the reader's own library are strictly better
+   * than a menu when we are holding the files.
+   *
+   * Measured against the deployed URL 2026-08-29: "when do we have to pay?"
+   * retrieves five real documents, the relevance judge rules that none answers
+   * that particular question, which is fair (pay for what?), and the reader is
+   * told "I don't have a confident answer, could you rephrase, or open a
+   * support ticket". That is untrue, and it routes a four-word clarification to
+   * a human.
+   *
+   * Zero tokens, because the documents are already in hand. */
+  if (brainNearMisses && brainNearMisses.length > 0) {
+    const ask = whichOneDidYouMean(message, brainNearMisses);
+    if (ask) {
+      trackEvent("assistant.asked_which_document", userId, userRole, {
+        feature: "assistant",
+        message_text: message.slice(0, 200),
+        /* How often the corpus holds something close but the question is
+           underspecified. Rising means people are asking good questions the
+           product cannot yet disambiguate, which is a prompt-guidance problem,
+           not a retrieval one. */
+        choice_count: ask.choices.length,
+        workflow_id: workflowId,
+      });
+      const msgId = await dbSaveMessage(convId, "assistant", ask.answer, "tool", 0);
+      await dbUpdateConversationStats(convId, 0);
+      return {
+        response: ask.answer,
+        source: "tool",
+        tokensUsed: 0,
+        conversationId: convId,
+        messageId: msgId,
+      };
+    }
+  }
+
   if (!hasAttachment && !pageContext && brainContext.hits.length === 0) {
     const disconnected = await knownDisconnectedIntegrations(userId).catch(
       () => new Set<string>(),
@@ -2593,7 +2637,19 @@ async function tryBrain(
   userId: string,
   userRole: string,
   conversationId: string,
-): Promise<{ strong: BrainHitAnswer | null; context: BrainContext }> {
+): Promise<{
+  strong: BrainHitAnswer | null;
+  context: BrainContext;
+  /**
+   * Documents that came back and were judged not to answer THIS question.
+   *
+   * Kept rather than discarded because they are the best thing we have when we
+   * cannot answer: real files from the reader's own library, named. A generic
+   * "could you rephrase" throws that away and tells somebody to open a ticket
+   * about documents we are holding in our hand.
+   */
+  nearMisses?: string[];
+}> {
   const emptyContext: BrainContext = { hits: [], topScore: 0, topScoreIsSemantic: false };
   try {
     const result = await queryBrain({
@@ -2761,8 +2817,15 @@ async function tryBrain(
       /* THE CONTEXT GOES TOO. Having decided this material does not answer the
          question, handing it to the model as grounding would be the same
          mistake one layer down, and the model would quote it with our
-         confidence rather than its own. */
-      return { strong: null, context: emptyContext };
+         confidence rather than its own.
+         
+         THE FILENAMES DO NOT GO. They are not grounding and cannot be quoted
+         from, so none of the reasoning above applies to them, and they are the
+         difference between "I could not answer" and "I found these three, which
+         did you mean". Deduplicated, because four chunks of one document is one
+         document to the person reading. */
+      const nearMisses = [...new Set(strong.map((h) => h.document_filename))].slice(0, 4);
+      return { strong: null, context: emptyContext, nearMisses };
     }
 
     // Format zero-LLM-token response. Each chunk is passed through
