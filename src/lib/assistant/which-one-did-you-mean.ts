@@ -82,10 +82,25 @@ export function whichOneDidYouMean(question: string, documents: string[]): Which
   /* One candidate is not a choice. Saying "did you mean X" when X is the only
      thing there is asks a question we already know the answer to; better to
      name it and let them confirm by asking again about it. */
+  /* HONEST ABOUT WHAT THESE ARE.
+   *
+   * This said "I found N documents that look related". They are the documents
+   * the relevance judge just decided do NOT answer the question, so calling
+   * them related claims something we were told is false, and it converts an
+   * honest refusal into a menu of wrong answers.
+   *
+   * Seen doing exactly that on the deployed URL 2026-08-29: asked "when do we
+   * have to pay?" it offered a UPS invoice and three date-stamped receipts as
+   * things that "look related". A client evaluating four bad options has been
+   * given more work than one who was simply told we could not answer.
+   *
+   * So it says what is true: no clear answer, here is the closest material,
+   * and you decide whether any of it is the one. That is a weaker claim and a
+   * more useful one. */
   const lead =
     readable.length === 1
-      ? `I could not tell whether this is what you meant. The closest thing I have is **${readable[0]}**.`
-      : `I found ${readable.length} documents that look related, but not which one you meant:`;
+      ? `I could not find a clear answer. The closest thing I hold is **${readable[0]}**.`
+      : `I could not find a clear answer to that. The closest things I hold are:`;
 
   const list = readable.length === 1 ? "" : `\n\n${readable.map((r) => `- **${r}**`).join("\n")}`;
 
@@ -94,7 +109,8 @@ export function whichOneDidYouMean(question: string, documents: string[]): Which
       `${lead}${list}\n\n` +
       /* Names the next move rather than asking them to "rephrase", which is a
          request to guess what we wanted. */
-      `Ask again naming the one you want, and I will answer from it.`,
+      `If one of those is the one you mean, name it and I will read it. ` +
+      `If none of them is, it may not be in the documents I can see.`,
     choices: readable,
   };
 }
