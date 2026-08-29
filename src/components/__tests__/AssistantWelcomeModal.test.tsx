@@ -375,24 +375,27 @@ describe("dismissing with the keyboard", () => {
  * had simply never been introduced to each other.
  */
 describe("only promising what is connected", () => {
-  const originalFetch = global.fetch;
-
-  beforeEach(() => {
-    window.localStorage.clear();
-  });
-  afterEach(() => {
-    global.fetch = originalFetch;
-  });
-
-  function mockStatus(body: unknown, ok = true): void {
-    global.fetch = jest.fn().mockResolvedValue({
-      ok,
-      json: async () => body,
-    }) as unknown as typeof fetch;
+  /* USES THE FILE'S EXISTING mockFetch, NOT global.fetch.
+   *
+   * Written first as `global.fetch = jest.fn()`, which passed locally and
+   * failed CI: jest deletes objects set on the global scope between test
+   * files, so the NEXT file in that worker lost fetch entirely and its
+   * provider calls hung to a 5s timeout. runSearch.test.ts, which this change
+   * never touches, failed twice for that reason.
+   *
+   * The module mock at the top of this file was already the right seam. It is
+   * reset in beforeEach, scoped to this file, and cannot leak into another. */
+  function statusReturns(body: unknown, ok = true): void {
+    mockFetch.mockImplementation((url: string) =>
+      String(url).includes("/api/integrations/status")
+        ? Promise.resolve({ ok, status: ok ? 200 : 500, json: async () => body })
+        : /* Analytics and anything else keep the default success shape. */
+          Promise.resolve({ ok: true, status: 200, json: async () => ({}) }),
+    );
   }
 
   it("hides a prompt whose connector is not set up", async () => {
-    mockStatus({ microsoft: { connected: true }, quickbooks: { connected: false } });
+    statusReturns({ microsoft: { connected: true }, quickbooks: { connected: false } });
     render(<AssistantWelcomeModal userName="Nick" userRole="ops" onPickPrompt={() => {}} />);
 
     await waitFor(() => {
@@ -400,10 +403,10 @@ describe("only promising what is connected", () => {
     });
   });
 
-  /* The claim becomes TRUE once the list is filtered, which is the point:
-     the fix is to make the sentence honest rather than to weaken it. */
+  /* The claim becomes TRUE once the list is filtered, which is the point: the
+     fix is to make the sentence honest rather than to weaken it. */
   it("only claims no setup needed once it has checked", async () => {
-    mockStatus({ microsoft: { connected: true }, quickbooks: { connected: true } });
+    statusReturns({ microsoft: { connected: true }, quickbooks: { connected: true } });
     render(<AssistantWelcomeModal userName="Nick" userRole="ops" onPickPrompt={() => {}} />);
     await waitFor(() => {
       expect(screen.getByText(/no setup needed/i)).toBeInTheDocument();
@@ -413,7 +416,11 @@ describe("only promising what is connected", () => {
   /* A failed status call must not hide working capabilities, and must not let
      the strong claim stand either. Both halves matter. */
   it("keeps the prompts but drops the claim when the check fails", async () => {
-    global.fetch = jest.fn().mockRejectedValue(new Error("offline")) as unknown as typeof fetch;
+    mockFetch.mockImplementation((url: string) =>
+      String(url).includes("/api/integrations/status")
+        ? Promise.reject(new Error("offline"))
+        : Promise.resolve({ ok: true, status: 200, json: async () => ({}) }),
+    );
     render(<AssistantWelcomeModal userName="Nick" userRole="ops" onPickPrompt={() => {}} />);
 
     expect(await screen.findByText(/I.m Instinct/i)).toBeInTheDocument();
@@ -430,7 +437,7 @@ describe("only promising what is connected", () => {
      from somebody dropping a file in, so there is no flag meaning "no
      documents". Hiding it would remove the one thing being sold. */
   it("still offers the document prompt with nothing connected", async () => {
-    mockStatus({ microsoft: { connected: false }, quickbooks: { connected: false } });
+    statusReturns({ microsoft: { connected: false }, quickbooks: { connected: false } });
     render(<AssistantWelcomeModal userName="Nick" userRole="ops" onPickPrompt={() => {}} />);
 
     await waitFor(() => {
