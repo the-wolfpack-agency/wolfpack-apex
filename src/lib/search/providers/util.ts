@@ -29,3 +29,38 @@ export function buildSnippet(body: string, q: string): string {
     (end < text.length ? "..." : "")
   );
 }
+
+/**
+ * Run `work` over `items` with at most `limit` in flight, preserving input order.
+ *
+ * WHY THIS EXISTS. The channels provider awaited one Graph call at a time
+ * across up to 8 teams and 160 channels. Measured 2026-08-29 in production it
+ * ran at a p95 of 22,136ms and a max of 129,458ms against a 6,000ms fan-out
+ * budget, so it routinely produced nothing at all: the budget abandoned it and
+ * the user was told Teams held no matches.
+ *
+ * ORDER IS PRESERVED ON PURPOSE. Results are written to their input slot rather
+ * than pushed on completion, so two identical searches return identically
+ * ordered results. Ranking that shuffles with network timing is not ranking.
+ *
+ * BOUNDED, NOT UNLIMITED. Firing 160 Graph calls at once trades a slow provider
+ * for a throttled one: Graph answers 429 and the retry costs more than the
+ * sequencing saved.
+ */
+export async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  limit: number,
+  work: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const out = new Array<R>(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, async () => {
+    for (;;) {
+      const i = next++;
+      if (i >= items.length) return;
+      out[i] = await work(items[i]!, i);
+    }
+  });
+  await Promise.all(workers);
+  return out;
+}
