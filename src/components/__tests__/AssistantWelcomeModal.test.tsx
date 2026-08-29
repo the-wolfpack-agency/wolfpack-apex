@@ -360,3 +360,82 @@ describe("dismissing with the keyboard", () => {
     expect(screen.getByText(/I.m Instinct/i)).toBeInTheDocument();
   });
 });
+
+/**
+ * Do not promise that six things work without asking whether they do.
+ *
+ * The modal offered six prompts under "each one works right now, no setup
+ * needed", built from welcomePromptsForRole, which does not filter. Measured
+ * on the live deployment 2026-08-29: a workspace with no QuickBooks was shown
+ * "what's our MRR" and answered "financials are not connected yet". On a
+ * documents-only Phase 1 deployment four of the six need a connector nobody
+ * has set up, so the front door would be mostly walls.
+ *
+ * welcomePromptsFor and /api/integrations/status both already existed. They
+ * had simply never been introduced to each other.
+ */
+describe("only promising what is connected", () => {
+  const originalFetch = global.fetch;
+
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+
+  function mockStatus(body: unknown, ok = true): void {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok,
+      json: async () => body,
+    }) as unknown as typeof fetch;
+  }
+
+  it("hides a prompt whose connector is not set up", async () => {
+    mockStatus({ microsoft: { connected: true }, quickbooks: { connected: false } });
+    render(<AssistantWelcomeModal userName="Nick" userRole="ops" onPickPrompt={() => {}} />);
+
+    await waitFor(() => {
+      expect(screen.queryByText(/MRR/i)).not.toBeInTheDocument();
+    });
+  });
+
+  /* The claim becomes TRUE once the list is filtered, which is the point:
+     the fix is to make the sentence honest rather than to weaken it. */
+  it("only claims no setup needed once it has checked", async () => {
+    mockStatus({ microsoft: { connected: true }, quickbooks: { connected: true } });
+    render(<AssistantWelcomeModal userName="Nick" userRole="ops" onPickPrompt={() => {}} />);
+    await waitFor(() => {
+      expect(screen.getByText(/no setup needed/i)).toBeInTheDocument();
+    });
+  });
+
+  /* A failed status call must not hide working capabilities, and must not let
+     the strong claim stand either. Both halves matter. */
+  it("keeps the prompts but drops the claim when the check fails", async () => {
+    global.fetch = jest.fn().mockRejectedValue(new Error("offline")) as unknown as typeof fetch;
+    render(<AssistantWelcomeModal userName="Nick" userRole="ops" onPickPrompt={() => {}} />);
+
+    expect(await screen.findByText(/I.m Instinct/i)).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByText(/no setup needed/i)).not.toBeInTheDocument();
+    });
+    /* Still offers something: hiding a working capability because a status
+       call failed is the worse error. */
+    expect(screen.getByText(/Try one of these/i)).toBeInTheDocument();
+  });
+
+  /* DOCUMENTS IS NEVER HIDDEN. It is the Phase 1 capability and is not gated
+     on a connector: a workspace can hold documents from a SharePoint sync or
+     from somebody dropping a file in, so there is no flag meaning "no
+     documents". Hiding it would remove the one thing being sold. */
+  it("still offers the document prompt with nothing connected", async () => {
+    mockStatus({ microsoft: { connected: false }, quickbooks: { connected: false } });
+    render(<AssistantWelcomeModal userName="Nick" userRole="ops" onPickPrompt={() => {}} />);
+
+    await waitFor(() => {
+      /* The chip renders the LABEL, not the prompt text it submits. */
+      expect(screen.getByText(/ask a question about your documents/i)).toBeInTheDocument();
+    });
+  });
+});

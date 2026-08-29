@@ -22,11 +22,32 @@
 import { useEffect, useRef, useState } from "react";
 import { fetchWithRefresh, jsonHeaders } from "@/lib/client-auth";
 import {
+  welcomePromptsFor,
   welcomePromptsForRole,
+  type AvailableSources,
   type WelcomePrompt,
 } from "@/lib/assistant/welcome-prompts";
 
 const STORAGE_KEY = "instinct_welcome_seen";
+
+/**
+ * Which connector backs which prompt requirement.
+ *
+ * `documents` is deliberately ABSENT. It is the Phase 1 capability and is not
+ * gated on a connector: a workspace can hold documents from a SharePoint sync
+ * or from somebody dropping a file in, so there is no single flag that means
+ * "no documents". Leaving it unmapped leaves it undefined, and welcomePromptsFor
+ * hides only what is explicitly false, so the document prompt always shows.
+ * That is the right default for the one thing this product is being sold on.
+ */
+function sourcesFromStatus(status: {
+  microsoft?: { connected?: boolean };
+  quickbooks?: { connected?: boolean };
+}): AvailableSources {
+  const ms = status.microsoft?.connected === true;
+  const qbo = status.quickbooks?.connected === true;
+  return { calendar: ms, mail: ms, tasks: ms, financials: qbo };
+}
 
 function track(event: string, metadata: Record<string, unknown>): void {
   if (typeof window === "undefined") return;
@@ -55,7 +76,22 @@ export function AssistantWelcomeModal({
   onPickPrompt,
 }: AssistantWelcomeModalProps) {
   const [open, setOpen] = useState(false);
+  /**
+   * What the deployment can actually do, once we have asked.
+   *
+   * Null until the check completes or fails. The distinction matters: it is
+   * the difference between "these six work" and "these six exist", and the
+   * modal says something different in each case rather than claiming the
+   * stronger one by default.
+   */
+  const [available, setAvailable] = useState<AvailableSources | null>(null);
+  /* Unfiltered fallback, used while the check is in flight or if it fails. A
+     prompt we could not verify is still worth offering; hiding a working
+     capability because a status call failed is the worse error. */
   const promptsRef = useRef<WelcomePrompt[]>(welcomePromptsForRole(userRole));
+  const prompts = available
+    ? welcomePromptsFor(userRole, available)
+    : promptsRef.current;
 
   /* First-visit gate: open the modal once, persist the flag on close
    * so a future visit doesn't re-open. Reading sessionStorage at
@@ -94,6 +130,38 @@ export function AssistantWelcomeModal({
        setOpen and userRole only, and userRole is in the dependency list. */
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, userRole]);
+
+  /* ASK WHAT IS CONNECTED BEFORE PROMISING IT WORKS.
+   *
+   * The modal offered six prompts under "each one works right now, no setup
+   * needed", built from welcomePromptsForRole, which does not filter. So a
+   * workspace with no QuickBooks was shown "what's our MRR" and answered
+   * "financials are not connected yet" — measured on the live deployment
+   * 2026-08-29. On a documents-only Phase 1 deployment four of the six need a
+   * connector nobody has set up.
+   *
+   * welcomePromptsFor and /api/integrations/status both already existed; they
+   * had simply never been introduced to each other.
+   *
+   * Only while OPEN: a dismissed modal must not cost a request on every page. */
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetchWithRefresh("/api/integrations/status");
+        if (!res.ok) return;
+        const status = (await res.json()) as Parameters<typeof sourcesFromStatus>[0];
+        if (!cancelled) setAvailable(sourcesFromStatus(status));
+      } catch {
+        /* Leave it null. The modal then shows the unfiltered kit and softens
+           its claim, rather than hiding capabilities because a call failed. */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
 
   function markSeen(): void {
     if (typeof window !== "undefined") {
@@ -180,11 +248,12 @@ export function AssistantWelcomeModal({
           className="text-sm mb-5"
           style={{ color: "var(--wp-text-dim, #aaa)" }}
         >
-          Try one of these to get started. Each one works right now &mdash;
-          no setup needed.
+          {available
+            ? "Try one of these to get started. Each one works right now — no setup needed."
+            : "Try one of these to get started."}
         </p>
         <ul className="space-y-2">
-          {promptsRef.current.map((p) => (
+          {prompts.map((p) => (
             <li key={p.text}>
               <button
                 type="button"
