@@ -82,6 +82,28 @@ test.describe("the deployed site, in a browser", () => {
     await expect(submit).toBeEnabled({ timeout: 15_000 });
   });
 
+  /* CREDENTIALS MUST NEVER RENDER ON THE PUBLIC LOGIN PAGE.
+   *
+   * login/page.tsx carries a demo-credentials block listing five accounts and
+   * their shared password in plaintext. It is gated on NEXT_PUBLIC_SHOW_DEMO_CREDS
+   * and that gate is currently off in production, so this passes today.
+   *
+   * It is asserted anyway because the gate is one environment variable away from
+   * publishing five working logins on a page that requires no authentication to
+   * read, and nothing else would notice. A comment saying "local dev only" is
+   * not a control. */
+  test("no demo credentials are published on the login page", async ({ page }) => {
+    await page.goto(`${PROD_URL}/login`, { waitUntil: "domcontentloaded" });
+    await page.waitForLoadState("networkidle").catch(() => undefined);
+
+    await expect(page.getByTestId("login-demo-credentials")).toHaveCount(0);
+
+    const body = (await page.textContent("body")) ?? "";
+    expect(body).not.toMatch(/Demo Credentials/i);
+    /* The shared seed password, which is what would actually be usable. */
+    expect(body).not.toMatch(/@wolfpack\.dev\s*\/\s*apex/i);
+  });
+
   test("the deployed commit is reported, so a stale alias is visible", async ({ request }) => {
     const res = await request.get(`${PROD_URL}/api/version`);
     expect(res.status()).toBe(200);

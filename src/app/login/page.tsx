@@ -270,7 +270,12 @@ function LoginContent() {
                 borderColor: "var(--wp-dark-border)",
                 color: "var(--wp-text)",
               }}
-              placeholder="you@wolfpack.dev"
+              /* NEUTRAL ON PURPOSE. This read "you@wolfpack.dev", which put our
+                 domain on the first screen a client's staff ever sees, and
+                 wolfpack.dev is a parked seed domain we do not own (Null MX).
+                 A placeholder exists to show the SHAPE of the input, and any
+                 real domain in it is either wrong for the reader or an advert. */
+              placeholder="you@company.com"
             />
           </div>
 
