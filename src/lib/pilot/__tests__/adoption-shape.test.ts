@@ -88,3 +88,56 @@ describe("the numbers a pilot most needs", () => {
     expect(reachedShare(snap({ invited: 10, everAsked: 6 }))).toBeCloseTo(0.6);
   });
 });
+
+/**
+ * A BARE STRING OF DIGITS IS NOT SOMEBODY STRUGGLING.
+ *
+ * Reported from the live dashboard 2026-08-29. The repeated-failures panel,
+ * under the heading "somebody who kept trying, and none of them arrived as a
+ * complaint", was showing:
+ *
+ *   36x find coaching calls spreasheet     <- real
+ *   20x 6601354223758494                   <- an operator testing card handling
+ *   19x 9142133456                         <- the same
+ *   17x 1453674323456767                   <- the same
+ *   13x wolfpackxpcna                      <- real
+ *
+ * Three of the five were an operator checking whether the product rejects a
+ * card-shaped number, rendered on a client-facing page as user demand that
+ * does not exist.
+ *
+ * The panel's entire value is that it is believable: it is the section a
+ * competitor will not show. One fabricated-looking row costs more credibility
+ * than the real rows earn, so the filter belongs in the query rather than in
+ * somebody's judgement at demo time.
+ */
+describe("the repeated-failures panel shows questions, not keystrokes", () => {
+  /** The predicate the SQL applies: at least two letters. */
+  function looksLikeAQuestion(q: string): boolean {
+    return /[a-z]/i.test(q) && q.replace(/[^a-z]/gi, "").length >= 2;
+  }
+
+  it.each([
+    "6601354223758494",
+    "9142133456",
+    "1453674323456767",
+    "111111111111111111",
+    "4111 1111 1111 1111",
+    "   ",
+  ])("excludes %j, which nobody asked as a question", (noise) => {
+    expect(looksLikeAQuestion(noise)).toBe(false);
+  });
+
+  it.each([
+    "find coaching calls spreasheet",
+    "wolfpackxpcna",
+    "what does the sow say about payment terms",
+    "what's our mrr",
+    /* A real question that happens to contain a number must survive: the rule
+       is "has words", not "has no digits". */
+    "what does the 2026 sow say about payment terms",
+    "who is on team 4",
+  ])("keeps %j, which somebody genuinely asked", (question) => {
+    expect(looksLikeAQuestion(question)).toBe(true);
+  });
+});

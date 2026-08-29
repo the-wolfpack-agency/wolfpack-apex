@@ -99,3 +99,51 @@ describe("what it refuses to claim", () => {
     }
   });
 });
+
+/**
+ * THE SAVING THAT COMPOUNDS.
+ *
+ * The first version of this section said "the larger saving is that most
+ * questions are answered without a model in the first place". True, and it
+ * credited only the routing while saying nothing about the engineering that
+ * makes the gap widen with use: an answer that DID need a model is worked out
+ * once and then kept, so the next person to ask gets it free. A product
+ * billing per ask charges for every one of those again, forever.
+ *
+ * Measured over sixty days: 7,196 answers, 185 needed a model, 1,889 served
+ * from work already done. Those 1,889 would cost roughly $46 at Claude Opus
+ * rates, and would cost it again next month.
+ */
+import { repeatSavings } from "@/lib/pilot/model-cost-comparison";
+
+const OPUS = COMPARISON_PRICES.find((p) => p.label === "Claude Opus")!;
+
+describe("what a per-ask product would charge for the repeats", () => {
+  it("prices the reused answers at our own average call size", () => {
+    const withReuse = { ...REAL, reusedAnswers: 1889, totalAnswers: 7196 };
+    /* 905 calls averaged 942 in / 137 out, so 1,889 repeats is roughly
+       1.78M in and 0.26M out: about $46 at $15/$75 per million. */
+    expect(repeatSavings(withReuse, OPUS)).toBeCloseTo(46.1, 0);
+  });
+
+  /* Null rather than zero when there is nothing to estimate from. A zero
+     would claim the reuse saved nothing, which is the opposite of true. */
+  it("returns null rather than zero when nothing was reused", () => {
+    expect(repeatSavings({ ...REAL, reusedAnswers: 0 }, OPUS)).toBeNull();
+    expect(repeatSavings(REAL, OPUS)).toBeNull();
+  });
+
+  it("returns null when there are no calls to average from", () => {
+    expect(
+      repeatSavings({ calls: 0, inputTokens: 0, outputTokens: 0, actualUsd: 0, reusedAnswers: 500 }, OPUS),
+    ).toBeNull();
+  });
+
+  /* More reuse is a bigger saving. Getting this backwards would invert the
+     entire argument the section makes. */
+  it("grows with the number of reused answers", () => {
+    const few = repeatSavings({ ...REAL, reusedAnswers: 100 }, OPUS)!;
+    const many = repeatSavings({ ...REAL, reusedAnswers: 2000 }, OPUS)!;
+    expect(many).toBeGreaterThan(few);
+  });
+});

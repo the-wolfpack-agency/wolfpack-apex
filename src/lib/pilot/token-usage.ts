@@ -41,11 +41,38 @@ export async function getTokenUsage(days: number): Promise<TokenUsage | null> {
 
     const r = rows[0];
     if (!r) return null;
+
+    /* ANSWERS SERVED FROM WORK ALREADY DONE.
+       The number that makes the saving compound: a product billing per ask
+       charges for every one of these again, every time. Read separately
+       because it comes from the message log rather than the completion log,
+       and a failure here must not lose the token figures. */
+    let reusedAnswers: number | undefined;
+    let totalAnswers: number | undefined;
+    try {
+      const { rows: a } = await query<{ reused: string; total: string }>(
+        `SELECT count(*) FILTER (WHERE source LIKE '%cache%')::text AS reused,
+                count(*)::text AS total
+           FROM instinct_messages
+          WHERE role = 'assistant'
+            AND created_at > NOW() - ($1::int * INTERVAL '1 day')`,
+        [bounded],
+      );
+      if (a[0]) {
+        reusedAnswers = Number(a[0].reused);
+        totalAnswers = Number(a[0].total);
+      }
+    } catch {
+      /* Leave undefined. The table still renders; only the compounding line
+         is omitted, which is honest about what could not be read. */
+    }
+
     return {
       calls: Number(r.calls),
       inputTokens: Number(r.inp),
       outputTokens: Number(r.out),
       actualUsd: Number(r.usd),
+      ...(reusedAnswers !== undefined ? { reusedAnswers, totalAnswers } : {}),
     };
   } catch {
     return null;

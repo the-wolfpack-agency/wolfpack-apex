@@ -13,6 +13,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getUserFromRequest } from "@/lib/auth";
 import { readCapabilitySnapshot } from "@/lib/insights/capability-snapshot";
+import { getTokenUsage } from "@/lib/pilot/token-usage";
 
 const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n));
 
@@ -27,9 +28,17 @@ export async function GET(req: NextRequest) {
   const days = Number.isFinite(raw) && raw > 0 ? clamp(Math.floor(raw), 1, 365) : 90;
 
   try {
-    const snapshot = await readCapabilitySnapshot(days);
+    /* TOKEN USAGE FOR THE INTERNAL VIEW OF THE SAME QUESTION.
+       /pilot shows a client what our routing saves them. This page asks the
+       maintenance question instead: is the routing still doing that. A rising
+       multiple here means work has drifted onto a bigger model, and it is
+       cheaper to notice as a trend than as a bill. */
+    const [snapshot, tokenUsage] = await Promise.all([
+      readCapabilitySnapshot(days),
+      getTokenUsage(days).catch(() => null),
+    ]);
     return NextResponse.json(
-      { readable: true, snapshot },
+      { readable: true, snapshot, tokenUsage },
       { status: 200, headers: { "Cache-Control": "no-store, max-age=0" } },
     );
   } catch (err) {

@@ -356,6 +356,20 @@ describe("what the same work costs elsewhere", () => {
     expect(section).toHaveTextContent("GPT-4o");
   });
 
+  /* "across 905model calls" appeared on the live page: the number and the word
+     after it ran together because the interpolation ended a JSX line and the
+     text resumed on the next, where a whitespace gap containing a newline is
+     stripped. Same class as the bold-lead join, in a different section. */
+  it("never runs a number into the word after it", async () => {
+    respond({ ...base, tokenUsage });
+    render(<PilotPage />);
+
+    const section = await screen.findByTestId("pilot-cost-comparison");
+    const text = section.textContent ?? "";
+    expect(text).not.toMatch(/\d(?:model|calls|tokens|out|in)\b/i);
+    expect(text).toMatch(/905\s+model calls/i);
+  });
+
   it("shows the traffic the comparison is based on", async () => {
     respond({ ...base, tokenUsage });
     render(<PilotPage />);
@@ -374,10 +388,22 @@ describe("what the same work costs elsewhere", () => {
     render(<PilotPage />);
 
     const section = await screen.findByTestId("pilot-cost-comparison");
-    expect(section).toHaveTextContent(/holds the token count fixed/i);
+    /* Asserts the CLAIM, not the sentence. Written first as "holds the token
+       count fixed", which broke when the copy was reworded to "holds that
+       token count fixed" - a test pinning exact wording pins the wording, and
+       this repo has already been bitten by one that pinned a wrong product
+       name into place for four months. */
+    expect(section).toHaveTextContent(/holds\s+\w*\s*token count fixed/i);
     expect(section).toHaveTextContent(/list prices recorded/i);
-    /* And it credits the bigger saving honestly, which is not on the table. */
-    expect(section).toHaveTextContent(/without a model in the first place/i);
+    /* AND IT CREDITS THE BIGGER SAVINGS, WHICH ARE NOT ON THE TABLE.
+       This asserted the exact phrase "without a model in the first place",
+       which broke when the copy was corrected: saying only that most questions
+       skip a model credited the routing and said nothing about the answers
+       that DID need one being kept rather than bought again. That reuse is
+       what makes the saving compound. The assertion now covers both claims by
+       meaning rather than by wording. */
+    expect(section).toHaveTextContent(/straight from connected systems/i);
+    expect(section).toHaveTextContent(/kept rather than bought again/i);
   });
 
   /* No usage is not a finding about pricing. A table of zeros would read as

@@ -19,6 +19,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getInstinctUser, authHeaders, fetchWithRefresh } from "@/lib/client-auth";
+import {
+  compareCosts,
+  PRICES_RECORDED_ON,
+  type TokenUsage,
+} from "@/lib/pilot/model-cost-comparison";
 
 interface UserInfo {
   role: string;
@@ -107,6 +112,7 @@ export default function InsightsAdminPage() {
   const router = useRouter();
   const [user, setUser] = useState<UserInfo | null>(null);
 
+  const [tokenUsage, setTokenUsage] = useState<TokenUsage | null>(null);
   const [intents, setIntents] = useState<UnmetIntent[] | null>(null);
   const [templates, setTemplates] = useState<IntegrationTemplate[] | null>(null);
   const [health, setHealth] = useState<HealthVendor[] | null>(null);
@@ -168,6 +174,10 @@ export default function InsightsAdminPage() {
       if (capabilityRes.ok) {
         const body = await capabilityRes.json();
         setCapability(body.snapshot ?? null);
+        /* Same endpoint, because the token counts and the capability figures
+           are read from the same window and a second round trip would let them
+           disagree about which sixty days they describe. */
+        setTokenUsage(body.tokenUsage ?? null);
         setCapabilityReadable(body.readable !== false);
       } else failures.push(`capability: HTTP ${capabilityRes.status}`);
     } catch (err) {
@@ -183,6 +193,8 @@ export default function InsightsAdminPage() {
 
   if (!user) return null;
   if (!isAdmin(user)) return null;
+  const costRows = tokenUsage ? compareCosts(tokenUsage) : [];
+
 
   return (
     <div className="p-6 max-w-6xl mx-auto" data-testid="insights-admin-page">
@@ -285,6 +297,54 @@ export default function InsightsAdminPage() {
           </table>
         )}
       </section>
+
+      {/* WHAT OUR ROUTING IS SAVING, AS A MAINTENANCE QUESTION.
+              /pilot shows a client what they are not paying. This asks whether
+              the routing is still doing its job: a rising multiple means work
+              has drifted onto a bigger model, and that is cheaper to catch as
+              a trend here than as a bill later. Same data, different question,
+              which is why it belongs on both pages rather than neither. */}
+      {costRows.length > 0 && tokenUsage ? (
+        <section data-testid="insights-cost-comparison" className="mb-8">
+          <h2 className="text-lg font-semibold mb-2" style={{ color: "var(--wp-text)" }}>
+            Model spend against the alternatives
+          </h2>
+          <p className="text-xs mb-3" style={{ color: "var(--wp-text-dim)" }}>
+            {tokenUsage.calls.toLocaleString()} model calls,{" "}
+            {tokenUsage.inputTokens.toLocaleString()} tokens in and{" "}
+            {tokenUsage.outputTokens.toLocaleString()} out. What that exact traffic
+            would cost at each vendor&rsquo;s published list price, recorded{" "}
+            {PRICES_RECORDED_ON}. Holds the token count fixed and changes only the
+            price, so it is our traffic at their rates rather than a forecast of
+            their bill.
+          </p>
+          <table className="w-full text-sm">
+            <thead>
+              <tr style={{ color: "var(--wp-text-dim)" }}>
+                <th className="text-left font-medium pb-1">Model</th>
+                <th className="text-right font-medium pb-1">Would cost</th>
+                <th className="text-right font-medium pb-1">vs actual</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr style={{ color: "var(--wp-text)" }}>
+                <td className="py-1">What we paid</td>
+                <td className="py-1 text-right">${tokenUsage.actualUsd.toFixed(2)}</td>
+                <td className="py-1 text-right">&mdash;</td>
+              </tr>
+              {costRows.map((c) => (
+                <tr key={c.label} style={{ color: "var(--wp-text-dim)" }}>
+                  <td className="py-1">{c.label}</td>
+                  <td className="py-1 text-right">${c.wouldHaveCostUsd.toFixed(2)}</td>
+                  <td className="py-1 text-right">
+                    {c.multipleOfActual !== null ? `${c.multipleOfActual}\u00d7` : "\u2014"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      ) : null}
 
       {/* THE CAPABILITY FIGURES MOVED TO /pilot.
               What a model costs, how little of the product needs one, and what
