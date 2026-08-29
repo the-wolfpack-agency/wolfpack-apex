@@ -24,6 +24,7 @@ import { useAmbientRefresh } from "@/lib/hooks/useAmbientRefresh";
 import { useEmailArrivalPoll } from "@/lib/hooks/useEmailArrivalPoll";
 import { NAV_ITEMS, PINNED_NAV_HREFS, defaultHiddenForRole, canSeeNavItem } from "@/lib/dashboard-nav";
 import { BOOT_SPLASH_TESTID, BOOT_SPLASH_TEXT } from "@/lib/ui/boot-splash";
+import { APP_SHELL_BAR_HEIGHT } from "@/lib/ui/app-shell";
 
 interface User {
   id: string;
@@ -268,7 +269,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
       >
         {/* Logo */}
         <div
-          className="flex items-center gap-3 px-5 py-4 border-b"
+          className={`flex items-center gap-3 px-5 ${APP_SHELL_BAR_HEIGHT} border-b`}
           style={{ borderColor: "var(--wp-dark-border)" }}
         >
           <span
@@ -406,7 +407,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
       <div className="flex-1 flex flex-col min-w-0">
         {/* Mobile header */}
         <header
-          className="lg:hidden flex items-center gap-3 px-4 py-3 border-b"
+          className={`lg:hidden flex items-center gap-3 px-4 ${APP_SHELL_BAR_HEIGHT} border-b`}
           style={{ borderColor: "var(--wp-dark-border)" }}
         >
           <button
@@ -432,7 +433,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
 
         {/* Desktop top bar (bell lives here; sidebar owns nav) */}
         <header
-          className="hidden lg:flex items-center justify-end gap-2 px-6 py-2 border-b"
+          className={`hidden lg:flex items-center justify-end gap-2 px-6 ${APP_SHELL_BAR_HEIGHT} border-b`}
           style={{ borderColor: "var(--wp-dark-border)" }}
         >
           <TeamsUnreadBadge />
