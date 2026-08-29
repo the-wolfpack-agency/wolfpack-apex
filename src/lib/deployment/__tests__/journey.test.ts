@@ -16,6 +16,7 @@ import {
 } from "@/lib/deployment/journey";
 import {
   buildJourney,
+  moduleSteps,
   UNIVERSAL_STEPS,
   WOLFPACK_PROBES,
 } from "@/lib/deployment/first-day-journey";
@@ -193,13 +194,18 @@ describe("the journey must not depend on our data", () => {
 
   it("runs on a deployment with no configuration at all", () => {
     const steps = buildJourney();
-    expect(steps.length).toBe(UNIVERSAL_STEPS.length);
+    /* Universal behaviour plus every module's declared capability. Both are
+       portable by construction; only the corpus probes are deployment-specific,
+       and there are none here. */
+    expect(steps.length).toBe(UNIVERSAL_STEPS.length + moduleSteps().length);
     expect(steps.every((s) => s.ask.length > 0)).toBe(true);
   });
 
   it("adds corpus steps only when somebody supplies their own question", () => {
     const steps = buildJourney({ corpusProbes: [{ ask: "what is our refund window?" }] });
-    expect(steps.length).toBe(UNIVERSAL_STEPS.length + 1);
+    expect(steps.length).toBe(UNIVERSAL_STEPS.length + moduleSteps().length + 1);
+    /* Corpus probes come last, so a reader sees portable checks before
+       deployment-specific ones. */
     expect(steps.at(-1)!.ask).toBe("what is our refund window?");
   });
 
@@ -251,5 +257,53 @@ describe("the journey must not depend on our data", () => {
   it("never allows an invented answer to the impossible question", () => {
     const nonsense = UNIVERSAL_STEPS.find((s) => s.id === "nonsense")!;
     expect(nonsense.expect).not.toContain("substantive");
+  });
+});
+
+/**
+ * The journey generates from the module contract.
+ *
+ * This is the reason the contract is worth a file of its own. Declaring DMS or
+ * CRM capabilities adds their verification automatically, so a module cannot
+ * ship claiming an action nobody ever drove against a real deployment. Written
+ * by hand, each module's coverage depends on somebody remembering, and
+ * documents is the evidence for how that goes: it shipped a "summarise" the
+ * engine never honoured and nothing noticed for as long as nobody typed it.
+ */
+describe("module capabilities become journey steps", () => {
+  it("verifies every supported action", () => {
+    const ids = moduleSteps().map((s) => s.id);
+    expect(ids).toContain("module-documents.ask");
+    expect(ids).toContain("module-documents.find");
+  });
+
+  /* A gap already written down must not fail the journey, or the report
+     becomes noise and people stop reading it. */
+  it("does not test an action declared as routing elsewhere", () => {
+    expect(moduleSteps().map((s) => s.id)).not.toContain("module-documents.summarise");
+  });
+
+  /* The expectation comes from the DECLARED shape, so a module claiming a
+     synthesised answer and returning a list fails here rather than in front of
+     a client. */
+  it("holds a synthesised action to a synthesised answer", () => {
+    const ask = moduleSteps().find((s) => s.id === "module-documents.ask")!;
+    expect(ask.expect).toContain("substantive");
+    expect(ask.expect).not.toContain("needs_setup");
+  });
+
+  /* A fresh deployment holds nothing, and that is not the module being broken. */
+  it("allows an empty corpus", () => {
+    for (const s of moduleSteps()) expect(s.expect).toContain("empty");
+  });
+
+  it("includes them in the built journey", () => {
+    const ids = buildJourney().map((s) => s.id);
+    expect(ids).toContain("module-documents.ask");
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("explains each step using the action's own reason", () => {
+    for (const s of moduleSteps()) expect(s.because.length).toBeGreaterThan(20);
   });
 });

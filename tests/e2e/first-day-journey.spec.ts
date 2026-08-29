@@ -73,7 +73,25 @@ async function signIn(page: Page): Promise<void> {
   const submit = page.locator('button[type="submit"]').first();
   await expect(submit).toBeEnabled({ timeout: 20_000 });
   await submit.click();
-  await page.waitForURL((u) => !u.pathname.startsWith("/login"), { timeout: 30_000 });
+
+  /* WAIT FOR THE APP, NOT FOR A NAVIGATION EVENT.
+   *
+   * This waited on waitForURL, which resolves on a navigation until "load".
+   * The app routes client-side after login, so under any load that event may
+   * not arrive even though the person is signed in and looking at the
+   * composer. It failed exactly once across eight logins in a run against
+   * production, and passed on retry, which is the signature of waiting on the
+   * wrong signal rather than of a real fault.
+   *
+   * Being signed in means the app shell is there. Either condition proves it,
+   * so whichever arrives first ends the wait. */
+  await Promise.race([
+    page.waitForURL((u) => !u.pathname.startsWith("/login"), { timeout: 45_000 }),
+    page
+      .locator('input[placeholder*="Ask anything"], textarea[placeholder*="Ask anything"], nav, aside')
+      .first()
+      .waitFor({ state: "visible", timeout: 45_000 }),
+  ]);
 }
 
 async function ask(page: Page, question: string, budgetMs: number): Promise<StepResult["latencyMs"] extends never ? never : { latencyMs: number | null; answer: string }> {

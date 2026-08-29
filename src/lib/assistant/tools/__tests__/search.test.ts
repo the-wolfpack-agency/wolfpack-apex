@@ -461,7 +461,12 @@ describe("questions that name where the documents live", () => {
   it.each([
     ["what is in the contract", "contract"],
     ["what does the SOW say about payment", "SOW payment"],
-    ["summarize the onboarding deck", "onboarding deck"],
+    /* Was "summarize the onboarding deck". Summarise is deliberately no longer
+       claimed as a search: it returned a browsable list to somebody who asked
+       for a summary, and now falls through to retrieval, which synthesises.
+       The claim THIS test makes is about the container rule not swallowing a
+       real document name, so the example is swapped rather than dropped. */
+    ["what is in the onboarding deck", "onboarding deck"],
     ["what does our security policy say", "security policy"],
   ])("leaves %s alone", (question, expected) => {
     expect(matchDocumentQuestion(question)).toBe(expected);
