@@ -27,9 +27,14 @@ const SOURCE = readFileSync("src/lib/assistant.ts", "utf8");
 function tryBrainBody(): string {
   const start = SOURCE.indexOf("async function tryBrain(");
   expect(start).toBeGreaterThan(-1);
-  /* To the end of the function, which is the first line-start brace after it. */
-  const end = SOURCE.indexOf("\n}", start);
-  return SOURCE.slice(start, end);
+  /* To the next top-level declaration, NOT to the first line-start brace.
+     tryBrain's return type is a multi-line object literal whose closing line
+     begins "}> {", so searching for "\n}" stopped at the signature and handed
+     every assertion below an empty body. Five tests failed on a change that
+     touched none of what they check. */
+  const rest = SOURCE.slice(start + 1);
+  const nextDecl = rest.search(/\n(?:export )?(?:async )?function /);
+  return nextDecl === -1 ? rest : rest.slice(0, nextDecl);
 }
 
 describe("tryBrain reports why it came back empty", () => {
