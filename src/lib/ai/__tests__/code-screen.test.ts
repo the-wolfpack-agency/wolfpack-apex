@@ -252,11 +252,32 @@ describe("the task corpus", () => {
     const { existsSync } = require("node:fs") as typeof import("node:fs");
     const { TASKS } = require("@/lib/ai/code-screen-tasks") as typeof import("@/lib/ai/code-screen-tasks");
 
+    /* CI CLONES SHALLOW, AND THAT IS WHY THIS IS CONDITIONAL.
+     *
+     * A base commit only resolves when the history is actually present. On a
+     * shallow checkout it is absent, and asserting on it would fail for a
+     * reason that has nothing to do with the corpus being correct.
+     *
+     * So when the history is there the commit MUST resolve, and when it is not
+     * the check is unmeasured rather than passing: the shape of the sha is
+     * still checked, and the screener itself refuses to run with a message
+     * naming the fix. Reporting an unmeasurable check as green is the failure
+     * this codebase keeps finding. */
+    const shallow =
+      execFileSync("git", ["rev-parse", "--is-shallow-repository"], { encoding: "utf8" }).trim() ===
+      "true";
+
     expect(TASKS.length).toBeGreaterThan(0);
     for (const t of TASKS) {
-      expect(() =>
-        execFileSync("git", ["cat-file", "-e", `${t.baseCommit}^{commit}`], { stdio: "ignore" }),
-      ).not.toThrow();
+      /* Always checkable: a base commit has to look like an abbreviated sha
+         whatever the checkout depth. */
+      expect(`${t.id}:${/^[0-9a-f]{7,40}$/.test(t.baseCommit)}`).toBe(`${t.id}:true`);
+
+      if (!shallow) {
+        expect(() =>
+          execFileSync("git", ["cat-file", "-e", `${t.baseCommit}^{commit}`], { stdio: "ignore" }),
+        ).not.toThrow();
+      }
       for (const g of t.gradedBy) {
         /* The task id rides in the asserted value so a failure names the task
            rather than just saying false !== true. Jest's expect takes one

@@ -135,6 +135,20 @@ async function attemptTask(
 
   let original: string;
   try {
+    /* A SHALLOW CLONE CANNOT RUN THIS, AND SHOULD SAY SO.
+     *
+     * The whole design rests on checking out the commit BEFORE the change, so
+     * a checkout without that history cannot screen anything. Left to git this
+     * surfaces as an opaque "invalid reference" halfway through a paid run. */
+    try {
+      execSync(`git cat-file -e ${task.baseCommit}^{commit}`, { cwd: REPO, stdio: "ignore" });
+    } catch {
+      throw new Error(
+        `base commit ${task.baseCommit} is not in this checkout. ` +
+          `The screen needs history before the change; run: git fetch --unshallow`,
+      );
+    }
+
     execSync(`git worktree add --detach -q "${worktree}" ${task.baseCommit}`, {
       cwd: REPO,
       stdio: "ignore",
