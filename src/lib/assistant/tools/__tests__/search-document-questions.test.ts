@@ -84,34 +84,42 @@ describe("routing end to end", () => {
 });
 
 /**
- * Summarise is not a search.
+ * Summarise stays with search, and the attempt to move it is worth recording.
  *
- * It was captured here and handed to universal search, on the reasoning that
- * search is what can see the corpus. What search returns is a browsable LIST,
- * so somebody who asked for a summary received a filing cabinet. Measured on
- * the live deployment 2026-08-29: "summarize the onboarding document" returned
- * "Found 3 results" plus result rows, at zero tokens, because nothing
- * synthesised anything.
+ * "summarize the onboarding document" returns a browsable LIST, so somebody
+ * who asked for a summary receives a filing cabinet. The obvious fix was to
+ * stop claiming it as a search and let it reach retrieval, which synthesises.
  *
- * Declining sends it to retrieval, which does synthesise. The same corpus
- * asked directly answered "The final payment is due within 30 days of the
- * software configuration in the production environment" in 552ms.
+ * That shipped, and validation against the deployed URL on 2026-08-29 showed
+ * it made things worse:
+ *
+ *   before  "summarize the onboarding document" -> Found 3 results, plus three
+ *           document rows in the results widget
+ *   after   -> "I do not have anything on that yet, so I would rather ask than
+ *           guess."
+ *   after   "summarise the SOW" -> "Provide the statement of work (SOW)
+ *           document or specify which SOW you are referring to, and I'll
+ *           summarize it for you."
+ *
+ * Declining did not route to retrieval. It fell through to a model answer with
+ * no document context, which then asked the reader to paste a document we
+ * already hold.
+ *
+ * The premise was wrong: reaching the Brain is not what happens when nothing
+ * claims a sentence. A real fix must route summarise to retrieval explicitly.
  */
-describe("summarise goes to retrieval, not to search", () => {
+describe("summarise is claimed by search, and that is currently the better answer", () => {
   it.each(["summarize the SOW", "summarise the contract", "summarize the onboarding deck"])(
-    "%s is not claimed as a search",
+    "%s is claimed, so the reader gets matching documents rather than nothing",
     (prompt) => {
-      expect(matchDocumentQuestion(prompt)).toBeNull();
+      expect(matchDocumentQuestion(prompt)).not.toBeNull();
     },
   );
 
-  /* THE RISK THAT HAD TO BE CHECKED. An older comment in search.ts warns that
-     "summarize the SOW" once reached op_create_document, which would try to
-     CREATE a document by that name. That tool still exists and its matcher
-     still fires on the phrase, so declining here would be dangerous if a human
-     could reach it. It is agentOnly and the dispatcher skips agent-only tools
-     for a human caller, which is what makes this safe rather than lucky. */
-  it("is claimed by nothing a human can reach", async () => {
+  /* THE MEASUREMENT THAT FORCED THE REVERT. Pinned so the next person to try
+     this reads the result before repeating it: declining is not enough,
+     because nothing downstream picks it up. */
+  it("is claimed by search specifically, not left to fall through", async () => {
     await import("@/lib/assistant/tools");
     const { getTools } = await import("@/lib/assistant/tools/registry");
     const humanClaimants = (
@@ -124,17 +132,16 @@ describe("summarise goes to retrieval, not to search", () => {
       .filter((t) => !t.agentOnly && typeof t.matchIntent === "function")
       .filter((t) => t.matchIntent!("summarize the onboarding document") != null)
       .map((t) => t.name);
-    expect(humanClaimants).toEqual([]);
+    expect(humanClaimants).toEqual(["search"]);
   });
 
-  /* EXISTENCE QUESTIONS ARE UNTOUCHED. A list IS the right answer to "what
-     documents do we have about X", and moving those to retrieval would break
-     the one thing search is genuinely best at. */
+  /* Existence questions are unaffected either way: a list IS the right answer
+     to "what documents do we have about X". */
   it.each([
     "what documents do we have about onboarding",
     "do we have anything on invoices",
     "is there anything on training",
-  ])("still routes %s to search, where a list is the right answer", (prompt) => {
+  ])("still routes %s to search", (prompt) => {
     expect(matchDocumentQuestion(prompt)).not.toBeNull();
   });
 });
