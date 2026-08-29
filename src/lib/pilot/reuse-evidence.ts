@@ -122,3 +122,118 @@ export function describeReuse(e: ReuseEvidence, v: ReuseVerdict): string[] {
   );
   return lines;
 }
+
+/* ------------------------------------------------------------------ */
+/* Is reuse GROWING? The hypothesis, kept falsifiable                   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * One week of question traffic.
+ *
+ * `askers` is the count of distinct humans, and it is the field that decides
+ * whether the week is worth reading at all.
+ */
+export interface ReuseWeek {
+  week: string;
+  asked: number;
+  distinct: number;
+  askers: number;
+}
+
+export type TrendVerdict =
+  /** Repeat rate is climbing week over week. The hypothesis holds here. */
+  | "rising"
+  /** Measurable and not climbing. */
+  | "flat"
+  /** Repeat rate is falling: more novel questions over time. */
+  | "declining"
+  /** Not enough weeks, or too few people, to mean anything either way. */
+  | "not_measurable";
+
+export interface TrendResult {
+  verdict: TrendVerdict;
+  /** Repeat rate per week, oldest first. */
+  rates: number[];
+  /** One sentence a reader can act on. */
+  reason: string;
+}
+
+/**
+ * WHY THIS EXISTS AND WHY IT USUALLY REFUSES TO ANSWER.
+ *
+ * The hypothesis is that reuse GROWS as a workforce accumulates shared
+ * questions: a dealer network where hundreds of people ask overlapping things
+ * should get cheaper per answer over time, not merely cheap.
+ *
+ * That is a real and testable claim, and OUR deployment cannot test it. It is a
+ * handful of internal accounts plus automated traffic against a fixed corpus,
+ * and its repeat rate has sat at ceiling since the first week. Reporting that
+ * flat line as "flat" would read as a refutation of a hypothesis it never had
+ * the population to examine.
+ *
+ * So a deployment below the thresholds returns `not_measurable` with the reason,
+ * never a verdict. Answering with authority from a sample that cannot support
+ * one is how a measurement becomes worse than no measurement.
+ */
+
+/** Below this many distinct humans, one person's habits are the whole signal. */
+export const MIN_ASKERS_FOR_TREND = 20;
+/** Below this many weeks, a trend line is drawn through noise. */
+export const MIN_WEEKS_FOR_TREND = 8;
+
+export function assessReuseTrend(weeks: ReuseWeek[]): TrendResult {
+  const usable = weeks.filter((w) => w.asked > 0);
+  const rates = usable.map((w) => (w.asked - w.distinct) / w.asked);
+
+  if (usable.length < MIN_WEEKS_FOR_TREND) {
+    return {
+      verdict: "not_measurable",
+      rates,
+      reason: `${usable.length} weeks of traffic; a trend needs at least ${MIN_WEEKS_FOR_TREND}.`,
+    };
+  }
+  const peakAskers = Math.max(...usable.map((w) => w.askers));
+  if (peakAskers < MIN_ASKERS_FOR_TREND) {
+    return {
+      verdict: "not_measurable",
+      rates,
+      /* The reason names the population, because somebody reading this on our
+         own instance should understand it is the wrong place to look rather
+         than that the idea failed. */
+      reason:
+        `peak of ${peakAskers} distinct people asking; below ${MIN_ASKERS_FOR_TREND} the repeat rate ` +
+        `tracks one person's habits, not a workforce sharing questions.`,
+    };
+  }
+
+  /* Compare the halves rather than fitting a line: robust to a single spike,
+     and the question is "is the back half higher", which is what the
+     hypothesis actually says. */
+  const mid = Math.floor(rates.length / 2);
+  const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
+  const first = mean(rates.slice(0, mid));
+  const second = mean(rates.slice(mid));
+  const delta = second - first;
+  /* Two points either side of a percentage point is noise at this scale. */
+  const MEANINGFUL = 0.02;
+
+  if (delta > MEANINGFUL) {
+    return {
+      verdict: "rising",
+      rates,
+      reason: `repeat rate rose from ${(first * 100).toFixed(1)}% to ${(second * 100).toFixed(1)}% across the window.`,
+    };
+  }
+  if (delta < -MEANINGFUL) {
+    return {
+      verdict: "declining",
+      rates,
+      reason: `repeat rate fell from ${(first * 100).toFixed(1)}% to ${(second * 100).toFixed(1)}%: more novel questions over time.`,
+    };
+  }
+  return {
+    verdict: "flat",
+    rates,
+    reason: `repeat rate held near ${(second * 100).toFixed(1)}% across the window.`,
+  };
+}

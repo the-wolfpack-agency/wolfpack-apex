@@ -104,3 +104,82 @@ describe("how it is stated", () => {
     }
   });
 });
+
+/**
+ * The compounding hypothesis, kept falsifiable rather than answered.
+ *
+ * The idea is that reuse GROWS as a workforce accumulates shared questions: a
+ * dealer network where hundreds of people ask overlapping things should get
+ * cheaper per answer over time, not merely cheap.
+ *
+ * Our own deployment cannot test that. It is a handful of internal accounts
+ * plus automated traffic against a fixed corpus, and its repeat rate has sat at
+ * ceiling since the first week. Reporting that flat line as "flat" would read
+ * as a refutation of a hypothesis it never had the population to examine.
+ */
+import {
+  assessReuseTrend,
+  MIN_ASKERS_FOR_TREND,
+  MIN_WEEKS_FOR_TREND,
+  type ReuseWeek,
+} from "@/lib/pilot/reuse-evidence";
+
+const week = (n: number, asked: number, distinct: number, askers: number): ReuseWeek => ({
+  week: `2026-0${n}`,
+  asked,
+  distinct,
+  askers,
+});
+
+describe("the compounding hypothesis", () => {
+  /* THE POINT OF THE WHOLE FUNCTION. Our instance must not produce a verdict. */
+  it("refuses to answer from a handful of internal accounts", () => {
+    const ours = Array.from({ length: 12 }, (_, i) => week(i, 1000, 80, 4));
+    const r = assessReuseTrend(ours);
+    expect(r.verdict).toBe("not_measurable");
+    expect(r.reason).toMatch(/distinct people/i);
+  });
+
+  it("refuses to answer from too few weeks", () => {
+    const short = Array.from({ length: MIN_WEEKS_FOR_TREND - 1 }, () => week(1, 500, 50, 100));
+    expect(assessReuseTrend(short).verdict).toBe("not_measurable");
+  });
+
+  /* What the hypothesis holding would look like: more people, and the back
+     half of the window repeating more than the front. */
+  it("reports rising when a real workforce repeats more over time", () => {
+    const weeks: ReuseWeek[] = [
+      ...Array.from({ length: 5 }, () => week(1, 1000, 400, MIN_ASKERS_FOR_TREND + 30)),
+      ...Array.from({ length: 5 }, () => week(2, 1000, 150, MIN_ASKERS_FOR_TREND + 30)),
+    ];
+    const r = assessReuseTrend(weeks);
+    expect(r.verdict).toBe("rising");
+    expect(r.reason).toMatch(/rose from/);
+  });
+
+  it("reports declining when questions keep getting more novel", () => {
+    const weeks: ReuseWeek[] = [
+      ...Array.from({ length: 5 }, () => week(1, 1000, 150, MIN_ASKERS_FOR_TREND + 30)),
+      ...Array.from({ length: 5 }, () => week(2, 1000, 400, MIN_ASKERS_FOR_TREND + 30)),
+    ];
+    expect(assessReuseTrend(weeks).verdict).toBe("declining");
+  });
+
+  /* A couple of points of movement is noise at this scale and must not read as
+     a trend, or every deployment "compounds" the moment it wobbles. */
+  it("calls a small wobble flat rather than a trend", () => {
+    const weeks = Array.from({ length: 10 }, (_, i) =>
+      week(1, 1000, 200 + (i % 2) * 5, MIN_ASKERS_FOR_TREND + 30),
+    );
+    expect(assessReuseTrend(weeks).verdict).toBe("flat");
+  });
+
+  it("ignores weeks with no traffic rather than dividing by zero", () => {
+    const weeks = [
+      ...Array.from({ length: 10 }, () => week(1, 1000, 200, MIN_ASKERS_FOR_TREND + 30)),
+      week(2, 0, 0, 0),
+    ];
+    expect(() => assessReuseTrend(weeks)).not.toThrow();
+    expect(assessReuseTrend(weeks).rates).toHaveLength(10);
+  });
+});
