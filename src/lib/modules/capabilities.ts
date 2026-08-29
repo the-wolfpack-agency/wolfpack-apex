@@ -105,7 +105,12 @@ const DOCUMENTS: ModuleCapability = {
       example: "what does our policy say about time off?",
       returns: "synthesised",
       status: "supported",
-      because: "The answer, in prose, with the document it came from.",
+      /* A GOAL, NOT A RESTATEMENT OF THE RESULT. This read "The answer, in
+         prose, with the document it came from", which is what `returns`
+         already says, so the generated client guide printed the same sentence
+         twice under different headings. `because` answers why somebody would
+         do this; `returns` answers what they get. */
+      because: "Get a straight answer to a question your documents can settle.",
     },
     {
       id: "documents.find",
@@ -113,7 +118,7 @@ const DOCUMENTS: ModuleCapability = {
       example: "what documents do we have about onboarding?",
       returns: "list",
       status: "supported",
-      because: "See everything on a topic before picking one.",
+      because: "See everything you hold on a topic before picking one.",
     },
     {
       id: "documents.summarise",
