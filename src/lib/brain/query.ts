@@ -236,20 +236,49 @@ export async function queryBrain(opts: QueryOpts): Promise<QueryExecution> {
     // non-blocking — the user still gets their answer
   }
 
-  if (hits.length > 0) {
-    await trackEvent("brain.query_hit", opts.userId, opts.userRole, {
-      query_len: opts.query.length,
-      hit_count: hits.length,
-      keyword_hits: keyword.length,
-      semantic_hits: semantic.length,
-      latency_ms,
-    });
-  } else {
-    await trackEvent("brain.query_miss", opts.userId, opts.userRole, {
-      query_len: opts.query.length,
-      latency_ms,
-    });
-  }
+  /* ANALYTICS MUST NEVER COST SOMEBODY THEIR ANSWER.
+   *
+   * These two awaits were unguarded, sitting between the query log write and
+   * the return. logQuery directly above has always been wrapped, with the
+   * comment "non-blocking — the user still gets their answer". These were not,
+   * so a throw here discarded a retrieval that had already succeeded.
+   *
+   * What that looked like from the outside, measured 2026-08-29:
+   *
+   *   brain_query_log  "how much do we owe upfront?"  ->  4 hits
+   *   quality gate     same question, same second     ->  hit_count 0,
+   *                    "asked about this organisation with no retrieved
+   *                     source to answer", verdict reject
+   *   the person       -> "I don't have a confident answer for that."
+   *
+   * Both records were true. The hits were found, logged, and then thrown away
+   * by an exception a few lines later: queryBrain threw, tryBrain caught it and
+   * returned its empty context, and the gate reads hitCount as the only thing
+   * that decides whether an answer is grounded.
+   *
+   * It presents as a relevance problem, which is why it survived three wrong
+   * hypotheses. It is not: retrieval worked every time. Same shape as the
+   * failures this codebase keeps finding, a store that can be empty for two
+   * different reasons and a caller that only knows one of them.
+   *
+   * Fire-and-forget rather than try/catch around an await, so a slow analytics
+   * write cannot add latency to a question either. */
+  const usage =
+    hits.length > 0
+      ? trackEvent("brain.query_hit", opts.userId, opts.userRole, {
+          query_len: opts.query.length,
+          hit_count: hits.length,
+          keyword_hits: keyword.length,
+          semantic_hits: semantic.length,
+          latency_ms,
+        })
+      : trackEvent("brain.query_miss", opts.userId, opts.userRole, {
+          query_len: opts.query.length,
+          latency_ms,
+        });
+  void Promise.resolve(usage).catch(() => {
+    /* Recording that a search happened is worth less than the search. */
+  });
 
   return {
     query: opts.query,
