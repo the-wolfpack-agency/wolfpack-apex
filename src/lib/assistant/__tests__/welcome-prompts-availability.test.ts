@@ -136,10 +136,25 @@ describe("the kits themselves", () => {
  * A capability nobody is told about is a capability nobody uses.
  */
 describe("surfacing a capability that is confirmed working", () => {
-  it("offers the document question in every kit", () => {
+  /* Asserts the CLAIM, not the wording. This matched /documents say/i, which
+     pinned the exact phrase "what do our documents say about X" — and that
+     phrasing was measured on 2026-08-29 returning a result count rather than
+     an answer, so it had to change. The claim worth guarding is that every kit
+     offers a way into the corpus, not that it uses one particular sentence. */
+  it("offers a document question in every kit", () => {
     for (const role of ["cto", "dev", "sales", "ops", "hr", "unknown-role"]) {
-      const texts = welcomePromptsForRole(role).map((p) => p.text);
-      expect(texts.some((t) => /documents say/i.test(t))).toBe(true);
+      const prompts = welcomePromptsForRole(role);
+      expect(`${role}: ${prompts.some((p) => p.requires === "documents")}`).toBe(`${role}: true`);
+    }
+  });
+
+  /* And it must stay a question. The product answers questions and returns a
+     count for document commands, so a kit that taught "find" or "summarize"
+     would be teaching the shape that works least well. */
+  it("phrases that document prompt as a question in every kit", () => {
+    for (const role of ["cto", "dev", "sales", "ops", "hr", "unknown-role"]) {
+      const doc = welcomePromptsForRole(role).find((p) => p.requires === "documents");
+      expect(`${role}: ${doc?.text.trim().endsWith("?")}`).toBe(`${role}: true`);
     }
   });
 

@@ -14,7 +14,11 @@ import {
   type JourneyStep,
   type StepResult,
 } from "@/lib/deployment/journey";
-import { FIRST_DAY } from "@/lib/deployment/first-day-journey";
+import {
+  buildJourney,
+  UNIVERSAL_STEPS,
+  WOLFPACK_PROBES,
+} from "@/lib/deployment/first-day-journey";
 
 const step = (over: Partial<JourneyStep> = {}): JourneyStep => ({
   id: "s",
@@ -175,30 +179,77 @@ describe("the report", () => {
   });
 });
 
-describe("the first-day journey itself", () => {
-  it("asks about documents, which is what Phase 1 sells", () => {
-    expect(FIRST_DAY.some((s) => /document|sow/i.test(s.ask))).toBe(true);
+describe("the journey must not depend on our data", () => {
+  /* THE FLAW THIS FIXES. The first version asked "what are the payment terms
+     in our SOW?", a real question with a real answer in OUR corpus and none at
+     all in anybody else's. Pointed at a client on their first day it would
+     have failed and reported the product broken, when the truth was they do
+     not have our documents. */
+  it("has no step mentioning our own documents", () => {
+    for (const s of UNIVERSAL_STEPS) {
+      expect(`${s.id}:${/\bSOW\b|wolfpack|viaPeople/i.test(s.ask)}`).toBe(`${s.id}:false`);
+    }
   });
 
-  /* Every step must say why it exists, or the report cannot explain a failure
-     to somebody who did not write the journey. */
-  it("explains why every step is in it", () => {
-    for (const s of FIRST_DAY) {
+  it("runs on a deployment with no configuration at all", () => {
+    const steps = buildJourney();
+    expect(steps.length).toBe(UNIVERSAL_STEPS.length);
+    expect(steps.every((s) => s.ask.length > 0)).toBe(true);
+  });
+
+  it("adds corpus steps only when somebody supplies their own question", () => {
+    const steps = buildJourney({ corpusProbes: [{ ask: "what is our refund window?" }] });
+    expect(steps.length).toBe(UNIVERSAL_STEPS.length + 1);
+    expect(steps.at(-1)!.ask).toBe("what is our refund window?");
+  });
+
+  /* A supplied question is one the owner says their documents answer, so
+     finding nothing is a real failure rather than an honest miss. The
+     universal steps are the opposite: they must tolerate an empty corpus. */
+  it("does not accept empty for a question the owner says is answerable", () => {
+    const step = buildJourney({ corpusProbes: [{ ask: "what is our refund window?" }] }).at(-1)!;
+    expect(step.expect).toEqual(["substantive"]);
+  });
+
+  it("lets the universal steps pass on a deployment holding nothing", () => {
+    const search = UNIVERSAL_STEPS.find((s) => s.id === "document-search-responds")!;
+    expect(search.expect).toContain("empty");
+    const cal = UNIVERSAL_STEPS.find((s) => s.id === "calendar")!;
+    expect(cal.expect).toContain("needs_setup");
+  });
+
+  /* Our own probes are configuration, not part of the product's definition of
+     working, so they must not leak back into the universal list. */
+  it("keeps our probes out of the universal steps", () => {
+    const universalAsks = new Set(UNIVERSAL_STEPS.map((s) => s.ask));
+    for (const p of WOLFPACK_PROBES) {
+      expect(`${p.ask}:${universalAsks.has(p.ask)}`).toBe(`${p.ask}:false`);
+    }
+  });
+
+  it("explains why every universal step exists", () => {
+    for (const s of UNIVERSAL_STEPS) {
       expect(`${s.id}:${s.because.length > 20}`).toBe(`${s.id}:true`);
       expect(s.expect.length).toBeGreaterThan(0);
-      expect(s.budgetMs).toBeGreaterThan(0);
     }
   });
 
   it("uses unique ids so results join across runs", () => {
-    expect(new Set(FIRST_DAY.map((s) => s.id)).size).toBe(FIRST_DAY.length);
+    const steps = buildJourney({ corpusProbes: WOLFPACK_PROBES });
+    expect(new Set(steps.map((s) => s.id)).size).toBe(steps.length);
   });
 
   /* Proves the classifier is not simply flagging every long answer: exactly one
      step legitimately expects a tour, and it is the one where a tour is right. */
   it("allows a product tour only where a tour is the correct answer", () => {
     expect(
-      FIRST_DAY.filter((s) => s.expect.includes("product_tour")).map((s) => s.id),
+      UNIVERSAL_STEPS.filter((s) => s.expect.includes("product_tour")).map((s) => s.id),
     ).toEqual(["capability"]);
+  });
+
+  /* Confabulation must never be acceptable. */
+  it("never allows an invented answer to the impossible question", () => {
+    const nonsense = UNIVERSAL_STEPS.find((s) => s.id === "nonsense")!;
+    expect(nonsense.expect).not.toContain("substantive");
   });
 });

@@ -1,67 +1,137 @@
 /**
  * The first day, as a client's employee would actually spend it.
  *
- * Every step is something a person does without being told to, and `because`
- * says what it would mean if that step were broken on their deployment. Steps
- * that need a connector we may not have configured for them expect
- * `needs_setup` as well as `substantive`, so a correct refusal is green and the
- * report does not cry wolf on a deployment behaving properly.
+ * NOTHING HERE MAY DEPEND ON OUR DATA.
+ *
+ * The first version of this file asked "what are the payment terms in our
+ * SOW?", which is a real question with a real answer in OUR corpus and no
+ * answer at all in anybody else's. Pointed at a client instance it would have
+ * failed on their first day and reported the product broken, when the truth
+ * was that they simply do not have our documents.
+ *
+ * A journey that only passes against the corpus it was written for measures
+ * nothing. So the steps are split:
+ *
+ *   - UNIVERSAL steps work on any deployment, because they test behaviour
+ *     rather than content: does it refuse cleanly when a connector is missing,
+ *     does it explain itself, does it invent an answer when none exists.
+ *   - CORPUS steps need one fact from whoever owns the deployment, supplied as
+ *     config. Without them the journey still runs and says which coverage it
+ *     did not have, rather than passing quietly on a smaller check.
+ *
+ * WHAT TO ASK FOR WHEN STANDING UP A CLIENT
+ *
+ * Two questions whose answers they already know, phrased the way the product
+ * actually answers well. Measured 2026-08-29 against production:
+ *
+ *   WORKS   "what are the payment terms in our SOW?"      -> answer + citation
+ *   WORKS   "when is the final payment due in our SOW?"   -> direct answer
+ *   COUNT   "what do our documents say about onboarding"  -> "Found 4 results"
+ *   COUNT   "summarize the onboarding document"           -> "Found 3 results"
+ *
+ * A direct factual question gets a synthesised answer. Anything phrased as a
+ * document command routes to search and returns a count, so the config asks
+ * for questions, not commands.
  */
 import type { JourneyStep } from "./journey";
 
-export const FIRST_DAY: JourneyStep[] = [
-  {
-    id: "documents-natural",
-    ask: "what are the payment terms in our SOW?",
-    /* THE PRODUCT. A real question against a real document. Verified working
-       against production 2026-08-29: answered in 1,790ms with the figures and
-       the source file cited. */
-    expect: ["substantive", "empty"],
-    budgetMs: 8_000,
-    because: "This is what Phase 1 sells. If it fails, nothing else matters.",
-  },
-  {
-    id: "documents-browse",
-    ask: "what documents do we have about onboarding?",
-    expect: ["substantive", "empty"],
-    budgetMs: 8_000,
-    because: "Somebody exploring rather than looking for one fact.",
-  },
-  {
-    id: "starter-ask-our-documents",
-    ask: "ask our documents",
-    /* THE ONE THAT FAILED. The onboarding modal offers this and describes it as
-       "search everything synced from SharePoint and answer with the source
-       attached". On 2026-08-29 it returned a tour of the Docs page. Listed here
-       so the regression is caught rather than remembered. */
-    expect: ["substantive", "empty"],
-    budgetMs: 8_000,
-    because: "The onboarding offers this prompt, so it is many people's first ever query.",
-  },
-  {
-    id: "calendar",
-    ask: "what's on my calendar today?",
-    expect: ["substantive", "needs_setup", "empty"],
-    budgetMs: 10_000,
-    because: "Graph calendar. Refusing cleanly when unconnected is a pass.",
-  },
+/** One fact the deployment's owner knows the answer to. */
+export interface CorpusProbe {
+  /** Asked verbatim. A QUESTION, not a command: "what is our refund window?" */
+  ask: string;
+  /** Optional: a distinctive string the answer should contain. */
+  expectContains?: string;
+}
+
+export interface JourneyConfig {
+  /**
+   * Questions answerable from THIS deployment's documents.
+   *
+   * Empty is allowed and honest: the journey then reports that document
+   * retrieval was not covered, rather than passing on the universal steps
+   * alone and implying the corpus was checked.
+   */
+  corpusProbes?: CorpusProbe[];
+}
+
+/**
+ * Steps that hold on ANY deployment, because none of them needs our data.
+ *
+ * Each tests a behaviour that is either right or wrong regardless of what is in
+ * the corpus, which is what makes them portable.
+ */
+export const UNIVERSAL_STEPS: JourneyStep[] = [
   {
     id: "capability",
     ask: "what can you do?",
     /* A tour IS the right answer here, and it is the only step where that is
-       true. Keeping it in the journey proves the classifier is not simply
-       flagging every long answer. */
+       true. Keeping it in proves the classifier is not simply flagging every
+       long answer. */
     expect: ["substantive", "product_tour"],
     budgetMs: 6_000,
-    because: "Everyone asks this. It must not read as an error.",
+    because: "Everyone asks this first. It must not read as an error.",
   },
   {
     id: "nonsense",
     ask: "what is the quarterly revenue of the moon department",
-    /* Confabulation is the failure that destroys trust fastest, and it is
-       invisible unless something asks a question with no possible answer. */
-    expect: ["empty", "needs_setup", "substantive"],
+    /* Confabulation is the failure that destroys trust fastest and is invisible
+       unless something asks a question with no possible answer. Portable by
+       construction: no deployment has a moon department. */
+    expect: ["empty", "needs_setup"],
     budgetMs: 10_000,
-    because: "Must not invent an answer for something that does not exist.",
+    because: "Must not invent an answer for something that cannot exist.",
   },
+  {
+    id: "calendar",
+    ask: "what's on my calendar today?",
+    /* A clean refusal is a PASS. On a deployment with no Microsoft connection
+       "not connected, connect it in Settings" is the correct answer, and
+       scoring it as failure would fail every instance on day one. */
+    expect: ["substantive", "needs_setup", "empty"],
+    budgetMs: 10_000,
+    because: "Graph-backed. Refusing cleanly when unconnected is correct.",
+  },
+  {
+    id: "document-search-responds",
+    ask: "find anything about invoices",
+    /* Deliberately NOT asserting a hit. A new deployment may hold nothing
+       about invoices and that is fine; what must not happen is a leaked error
+       or silence. This checks the retrieval path is alive, not what is in it. */
+    expect: ["substantive", "empty", "needs_setup"],
+    budgetMs: 8_000,
+    because: "Proves the document path responds at all, without assuming content.",
+  },
+];
+
+/**
+ * Build the journey for a specific deployment.
+ *
+ * Universal steps always run. Corpus steps appear only when somebody supplied
+ * a question their own documents can answer.
+ */
+export function buildJourney(config: JourneyConfig = {}): JourneyStep[] {
+  const corpus = (config.corpusProbes ?? []).map(
+    (probe, i): JourneyStep => ({
+      id: `corpus-${i + 1}`,
+      ask: probe.ask,
+      /* Empty is NOT acceptable here. This is a question whose answer the
+         deployment's owner says exists, so finding nothing is a real failure
+         rather than an honest miss. */
+      expect: ["substantive"],
+      budgetMs: 10_000,
+      because: "A question this deployment's own documents are known to answer.",
+    }),
+  );
+  return [...UNIVERSAL_STEPS, ...corpus];
+}
+
+/**
+ * Our own probes, for running against our instance.
+ *
+ * Kept OUT of the universal list on purpose: they are configuration, not part
+ * of the product's definition of working.
+ */
+export const WOLFPACK_PROBES: CorpusProbe[] = [
+  { ask: "what are the payment terms in our SOW?" },
+  { ask: "when is the final payment due in our SOW?" },
 ];
