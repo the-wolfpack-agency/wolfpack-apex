@@ -31,6 +31,7 @@ import { searchMeetingTranscripts } from "@/lib/plaud";
 import { trackEvent } from "@/lib/analytics";
 import { safeQuery } from "@/lib/db";
 import { matchPageFacts } from "@/lib/assistant/page-facts-matcher";
+import { detectSensitivePaste } from "@/lib/assistant/sensitive-paste";
 import { capabilityDenialSql } from "@/lib/assistant/capability-denial";
 import { ASSISTANT_IDENTITY_PROMPT } from "@/lib/prompts/definitions/assistant-identity";
 import { getTools } from "@/lib/assistant/tools/registry";
@@ -1149,6 +1150,38 @@ async function chatInner(
     };
   }
 
+  /* --- Priority -3: somebody pasted a secret and nothing else ---
+   *
+   * Before any tool, cache or model. The router already redacts these before a
+   * prompt leaves the process, and the analytics prove it fired, so the system
+   * KNOWS a card was pasted and that it removed it. Paying a model to phrase a
+   * sentence about that cost 1,532 tokens on 2026-08-29 and produced "I can't
+   * process credit card information directly", which leaves somebody wondering
+   * what happened to the number they just typed.
+   *
+   * A safety answer should not be improvised either: the same paste deserves
+   * the same reply today and next week, not whatever the model produces on the
+   * day. Deterministic, instant, free, and it says the reassuring part.
+   *
+   * Only when the message is essentially JUST the value. A real question with
+   * a card in it goes down the normal path, where the card is redacted and the
+   * question is answered. */
+  const pasted = detectSensitivePaste(message);
+  if (pasted) {
+    trackEvent("assistant.sensitive_paste_declined", userId, userRole, {
+      kinds: pasted.kinds.join(","),
+    });
+    const msgId = await dbSaveMessage(convId, "assistant", pasted.answer, "tool", 0);
+    await dbUpdateConversationStats(convId, 0);
+    return {
+      response: pasted.answer,
+      source: "tool",
+      tokensUsed: 0,
+      conversationId: convId,
+      messageId: msgId,
+    };
+  }
+
   // --- Priority -2: Deterministic tool dispatch ---
   // Phase 1 of the agentic-executor work. Before any cache / RAG / LLM,
   // try to match the question to a deterministic tool (see
@@ -1243,10 +1276,27 @@ async function chatInner(
         messageId: msgId,
       };
     }
+    /* A REFUSAL IS READ BY A PERSON, NOT A MAINTAINER.
+     *
+     * This said "That tool (meeting_prep) needs a higher-privilege role than
+     * yours", and the runtime error behind it read "tool good_morning_widget
+     * requires role * (you have dealer_manager)". Measured 2026-08-29 by
+     * asking a dealer "brief me on my next meeting" and a Center manager
+     * "what is waiting on me": both perfectly reasonable questions, both
+     * answered with an internal tool name and a permission grade.
+     *
+     * The menu is already honest, so neither role is OFFERED what it cannot
+     * run. This is what happens when somebody asks anyway, which they will,
+     * and it should read as an explanation rather than as a system error with
+     * our internals showing.
+     *
+     * Names what they asked for, not what we call it. Says who can help,
+     * because a refusal that leaves somebody stuck is the failure the roster
+     * lookup already had to fix once. */
     const failureMsg =
       toolResult.result.code === "capability"
-        ? `That tool (${toolResult.tool}) needs a higher-privilege role than yours.`
-        : `I couldn't run ${toolResult.tool}: ${toolResult.result.message.slice(0, 200)}`;
+        ? "That is not part of what your access covers. Whoever administers this workspace can widen it, and \"what can you do\" will show everything available to you right now."
+        : `I could not finish that just now. ${sanitizeRefusal(toolResult.result.message)}`;
     const msgId = await dbSaveMessage(convId, "assistant", failureMsg, "tool", 0);
     await dbUpdateConversationStats(convId, 0);
     return {
@@ -2724,6 +2774,30 @@ async function tryBrain(
 // ---------------------------------------------------------------------------
 // Priority 5: AI call
 // ---------------------------------------------------------------------------
+
+/**
+ * Strip our internals out of a failure a person is about to read.
+ *
+ * Tool names, role grades and capability strings are how the system talks
+ * about itself. In a message to somebody who just asked a question they read
+ * as a stack trace, and they tell a client nothing they can act on.
+ *
+ * Keeps the sentence when there is nothing internal in it, because a genuine
+ * reason ("Microsoft is not connected yet") is worth passing through intact.
+ */
+export function sanitizeRefusal(message: string): string {
+  const cleaned = message
+    /* "tool good_morning_widget requires role * (you have dealer_manager)" */
+    .replace(/\btool\s+[a-z0-9_]+\s+requires\s+role\s+\S+\s*(\(you have [^)]*\))?/gi, "")
+    /* Bare snake_case tool names anywhere else in the sentence. */
+    .replace(/\b[a-z0-9]+(?:_[a-z0-9]+){1,}\b/g, "")
+    .replace(/\s{2,}/g, " ")
+    .replace(/^[\s:,.-]+/, "")
+    .trim();
+  return cleaned.length > 3
+    ? cleaned
+    : "Try asking a different way, or type \"what can you do\" to see what is available to you.";
+}
 
 function buildSystemPrompt(
   userRole: string,

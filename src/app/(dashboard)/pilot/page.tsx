@@ -29,6 +29,8 @@ import { useEffect, useState } from "react";
 import type { CapabilitySnapshot } from "@/lib/insights/capability-snapshot";
 import {
   compareCosts,
+  repeatSavings,
+  COMPARISON_PRICES,
   PRICES_RECORDED_ON,
   type TokenUsage,
 } from "@/lib/pilot/model-cost-comparison";
@@ -124,6 +126,12 @@ export default function PilotPage() {
      price table is one constant to update rather than a stored figure that
      goes stale silently. */
   const comparison = snap?.tokenUsage ? compareCosts(snap.tokenUsage) : [];
+  /* Priced at the most expensive alternative, which is the comparison the
+     table already leads with, so the two figures describe the same vendor. */
+  const reuseCost =
+    snap?.tokenUsage && comparison.length > 0
+      ? repeatSavings(snap.tokenUsage, COMPARISON_PRICES.find((p) => p.label === comparison[0].label)!)
+      : null;
   const share = snap ? deterministicShare(snap) : null;
   const answers = snap ? answersGiven(snap) : 0;
   const unreadable = failed || (snap !== null && !snap.readable);
@@ -286,47 +294,118 @@ export default function PilotPage() {
             </section>
           ) : null}
 
-          {/* THE NUMBER 77 CENTS ONLY MEANS SOMETHING NEXT TO SOMETHING ELSE.
-              What the identical traffic would have cost at another vendor's
-              published rate is the comparison a client can check, and it is
-              the one a product routing everything to one large model is
-              actually paying. */}
+          {/* THE STRONGEST NUMBER THIS PRODUCT HAS, GIVEN THE WEIGHT OF ONE.
+              This was a bulleted list under two paragraphs of prose. Every
+              figure was correct and the whole thing read as a footnote, which
+              for the clearest commercial argument the product can make is a
+              presentation bug rather than a taste one.
+
+              The contrast leads now: what we paid, against the premium
+              alternative, as one sentence. The bars carry the multiple
+              visually so a reader sees 28x rather than parsing it, and they
+              are drawn from the same numbers as the figures beside them
+              rather than hand-set. The assumptions stay, moved below where
+              they inform rather than delay. */}
           {comparison.length > 0 && snap.tokenUsage ? (
             <section className="wp-pilot-section" data-testid="pilot-cost-comparison">
               <h2>What the same work costs elsewhere</h2>
-              <p className="wp-pilot-aside">
-                {snap.tokenUsage.inputTokens.toLocaleString()} tokens in and{" "}
-                {snap.tokenUsage.outputTokens.toLocaleString()} out, across{" "}
-                {snap.tokenUsage.calls.toLocaleString()} model calls. Below is what that
-                exact traffic would have cost at each vendor&rsquo;s published list price.
-              </p>
-              <ul className="wp-pilot-list" data-testid="pilot-cost-rows">
-                <li>
-                  <strong>What we actually paid.</strong> $
-                  {snap.tokenUsage.actualUsd.toFixed(2)}, because most questions never
-                  reach a model at all and the ones that do are routed to the smallest
-                  model that can answer them.
-                </li>
-                {comparison.map((c) => (
-                  <li key={c.label} data-testid={`pilot-cost-${c.label.replace(/\s+/g, "-").toLowerCase()}`}>
-                    <strong>{c.label}.</strong> ${c.wouldHaveCostUsd.toFixed(2)}
-                    {c.multipleOfActual !== null
-                      ? ` — ${c.multipleOfActual}\u00d7 what we paid.`
-                      : "."}
+
+              <div className="wp-cost-hero">
+                <div className="wp-cost-hero-ours">
+                  <p className="wp-cost-hero-value">
+                    ${snap.tokenUsage.actualUsd.toFixed(2)}
+                  </p>
+                  <p className="wp-cost-hero-label">what we paid</p>
+                </div>
+                <div className="wp-cost-hero-vs">
+                  <p className="wp-cost-hero-value wp-cost-hero-value-alt">
+                    ${comparison[0].wouldHaveCostUsd.toFixed(2)}
+                  </p>
+                  <p className="wp-cost-hero-label">
+                    the same work on {comparison[0].label}
+                  </p>
+                </div>
+                {comparison[0].multipleOfActual !== null ? (
+                  <p className="wp-cost-hero-multiple" data-testid="pilot-cost-headline">
+                    {comparison[0].multipleOfActual}&times;
+                  </p>
+                ) : null}
+              </div>
+
+              <ul className="wp-cost-bars" data-testid="pilot-cost-rows">
+                {[
+                  {
+                    label: "Wolfpack Instinct",
+                    cost: snap.tokenUsage.actualUsd,
+                    ours: true,
+                    multiple: null as number | null,
+                  },
+                  ...comparison.map((c) => ({
+                    label: c.label,
+                    cost: c.wouldHaveCostUsd,
+                    ours: false,
+                    multiple: c.multipleOfActual,
+                  })),
+                ].map((row) => (
+                  <li key={row.label} className={row.ours ? "wp-cost-bar-row is-ours" : "wp-cost-bar-row"}>
+                    <span className="wp-cost-bar-label">{row.label}</span>
+                    <span className="wp-cost-bar-track">
+                      <span
+                        className="wp-cost-bar-fill"
+                        /* Width from the real figures, so the picture cannot
+                           disagree with the numbers printed beside it. A
+                           floor of 1.5% keeps our own bar visible rather than
+                           vanishing, which would read as missing data. */
+                        style={{
+                          width: `${Math.max(
+                            1.5,
+                            (row.cost / comparison[0].wouldHaveCostUsd) * 100,
+                          )}%`,
+                        }}
+                      />
+                    </span>
+                    <span className="wp-cost-bar-value">
+                      ${row.cost.toFixed(2)}
+                      {row.multiple !== null ? (
+                        <em className="wp-cost-bar-multiple">{row.multiple}&times;</em>
+                      ) : null}
+                    </span>
                   </li>
                 ))}
               </ul>
+
+              {/* THE SAVING THAT COMPOUNDS, AND THE ONE THIS TABLE CANNOT SHOW.
+                  An answer that needed a model is worked out once and then
+                  kept, so the next person to ask gets it for nothing. A
+                  product that bills per ask charges for every one of those
+                  again, every time. Stating only "most questions never reach a
+                  model" credited the routing and said nothing about the
+                  engineering that makes the gap widen with use. */}
+              {reuseCost !== null && snap.tokenUsage.reusedAnswers ? (
+                <p className="wp-cost-compounds" data-testid="pilot-cost-reuse">
+                  <strong>
+                    {snap.tokenUsage.reusedAnswers.toLocaleString()} answers came from
+                    work already done.
+                  </strong>{" "}
+                  Each was worked out once and has been free ever since. A product
+                  that bills for every ask would have charged roughly $
+                  {reuseCost.toFixed(2)} to answer those same repeats at{" "}
+                  {comparison[0].label} rates, and would charge again the next time
+                  anyone asks. That gap widens with use rather than staying flat.
+                </p>
+              ) : null}
+
               <p className="wp-pilot-aside">
-                {/* THE ASSUMPTION, SAID OUT LOUD. Holding the token count fixed
-                    and changing only the price is the only comparison our own
-                    data supports. Presenting it as a prediction of another
-                    product's bill would be a guess about their behaviour. */}
-                This holds the token count fixed and changes only the price, so it is the
-                cost of our traffic at their rates rather than a forecast of another
-                product&rsquo;s bill: a different model would not use exactly the same
-                tokens. Published list prices recorded {PRICES_RECORDED_ON}, before any
-                negotiated discount. The larger saving is not on this table at all, it is
-                that most questions are answered without a model in the first place.
+                Based on {snap.tokenUsage.inputTokens.toLocaleString()} tokens in and{" "}
+                {snap.tokenUsage.outputTokens.toLocaleString()} out across{" "}
+                {snap.tokenUsage.calls.toLocaleString()} model calls. It holds that token
+                count fixed and changes only the price, so it is the cost of our traffic at
+                their rates rather than a forecast of another product&rsquo;s bill.
+                Published list prices recorded {PRICES_RECORDED_ON}, before any negotiated
+                discount. This table prices only the traffic that genuinely reached a
+                model, so it is the smallest of the savings: most questions are answered
+                straight from connected systems, and the answers that did need a model are
+                kept rather than bought again.
               </p>
             </section>
           ) : null}

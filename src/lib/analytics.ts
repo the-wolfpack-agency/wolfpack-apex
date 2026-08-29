@@ -67,6 +67,10 @@ export type InstinctEventType =
      wrong on 2026-08-28 and records whether it still gets them right. A rising
      failed count is a regression nobody had to notice by hand. */
   | "assistant.selfcheck_completed"
+  /* Somebody pasted a card, an SSN or a key and nothing else. Answered
+     deterministically rather than buying a sentence from a model: the router
+     had already removed it, so the fact was established before the call. */
+  | "assistant.sensitive_paste_declined"
   /* The insight agent asking a client's own data the questions worth asking.
      The EMPTY count is the useful figure: it is how much of their corpus we
      cannot yet answer from, which is the gap a pilot exists to close. */

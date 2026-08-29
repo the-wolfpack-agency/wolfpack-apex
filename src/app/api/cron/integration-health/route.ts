@@ -23,6 +23,7 @@ import { requireCapability } from "@/lib/auth/require-capability";
 import { sweepAllWorkspaces } from "@/lib/health/integration-probes";
 import { runAssistantSelfCheck } from "@/lib/health/assistant-selfcheck";
 import { recordSearchLatency } from "@/lib/health/search-latency-check";
+import { recordProviderReadiness } from "@/lib/health/model-provider-check";
 import { trackEvent } from "@/lib/analytics";
 
 function isAuthorizedCron(req: NextRequest): boolean {
@@ -50,6 +51,16 @@ async function runSweep(actorId: string, actorRole: string): Promise<NextRespons
        is the half that was missing when one provider made the whole product
        feel broken for weeks without anybody attributing it. */
     const latency = await recordSearchLatency().catch(() => null);
+
+    /* WHICH MODELS WE CAN ACTUALLY REACH.
+       The product is sold on routing to the cheapest model that can answer,
+       and 99.8% of every call in its life went to one vendor because that is
+       the only one with credentials. Production carries ANTHROPIC_MODEL and no
+       ANTHROPIC_API_KEY, so three Claude models the registry advertises have
+       never been able to run, and nothing reported it: the router correctly
+       fell through to the provider that worked, which looks identical to a
+       product that only supports one vendor. */
+    const modelProviders = await recordProviderReadiness().catch(() => null);
     trackEvent("integration.health_sweep", actorId, actorRole, {
       workspaces: result.workspaces,
       probes: result.probes,
@@ -61,6 +72,14 @@ async function runSweep(actorId: string, actorRole: string): Promise<NextRespons
       selfCheck: selfCheck
         ? { ran: selfCheck.ran, failed: selfCheck.failed.map((f) => `${f.id}: ${f.reason}`) }
         : { ran: 0, failed: ["self-check did not run"] },
+      modelProviders: modelProviders
+        ? {
+            reachable: modelProviders.providers.filter((p) => p.configured).map((p) => p.provider),
+            unreachable: modelProviders.unreachable.map(
+              (p) => `${p.provider}: ${p.missing.join(", ")} not set`,
+            ),
+          }
+        : { reachable: [], unreachable: ["provider check did not run"] },
       searchLatency: latency
         ? {
             budgetMs: latency.budgetMs,

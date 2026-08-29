@@ -308,9 +308,15 @@ async function runOneTool<P, R>(
   /* 2. Role gate (shared with the agent self-onboarding scan, see ./gate).
         "*" = any authenticated principal. */
   if (!canInvokeNamedTool(ctx.userRole, tool.name, tool.capability)) {
+    /* The MESSAGE is for the log and for a routine's step summary, both of
+       which a person can end up reading: a routine reported "This stopped at
+       'Reading today's calendar': tool good_morning_widget requires role *
+       (you have dealer_manager)" to a Center manager on 2026-08-29. The code
+       carries the machine-readable fact; the sentence should not need our
+       internals to be understood. */
     return failure(
       "capability",
-      `tool ${tool.name} requires role ${tool.capability} (you have ${ctx.userRole})`,
+      "that step is not part of what your access covers",
     );
   }
 

@@ -129,6 +129,35 @@ export async function getAdoptionSnapshot(
          SELECT question, count(*)::text AS attempts
            FROM pairs a
           WHERE ${deadEnd("a.answer")}
+            /* A BARE STRING OF DIGITS IS NOT SOMEBODY STRUGGLING.
+               Reported from the live dashboard 2026-08-29: this panel was
+               showing "20x 6601354223758494", "19x 9142133456" and
+               "17x 1453674323456767" beside a real one, under the heading
+               "somebody who kept trying". They were an operator testing
+               whether the product rejects a card-shaped number, and on a
+               client-facing page they read as user demand that does not
+               exist.
+
+               The panel's whole value is that it is believable, and a
+               fabricated-looking entry costs more credibility than the real
+               entries earn. A question with no letters in it is not a
+               question anybody asked twice in frustration. */
+            AND a.question ~ '[a-z]'
+            /* Two letters, so a stray character next to a number does not
+               readmit the same noise. */
+            AND length(regexp_replace(a.question, '[^a-z]', '', 'g')) >= 2
+            /* AT LEAST TWO WORDS, AND THE REASON IS NOT GRAMMAR.
+               A single bare token is a search term, not a question somebody
+               asked twice in frustration, and it is where names surface: the
+               live panel was showing "13x wolfpackxpcna", the name of a
+               SharePoint site belonging to another client of ours.
+
+               This page is what a prospective client is shown. Telling them
+               their product was proved against a different client's material,
+               and naming that client, is not a thing to leave to whoever is
+               driving the demo. A real question is a sentence; a sentence
+               does not usually carry somebody else's account name. */
+            AND a.question ~ '[a-z]\\s+\\S'  
           GROUP BY question
          HAVING count(*) > 1
           ORDER BY count(*) DESC

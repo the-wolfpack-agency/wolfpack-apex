@@ -1014,3 +1014,119 @@ a:hover { color: var(--wp-gold-hover); }
   border-left: 2px solid var(--wp-dark-border, rgba(255, 255, 255, 0.12));
 }
 .wp-pilot-list li strong { color: var(--wp-text, #e8eaed); font-weight: 600; }
+
+/* THE COST COMPARISON ON /pilot.
+   The clearest commercial argument the product makes, so it is given the
+   weight of one: the contrast reads first, the bars carry the multiple
+   visually, and the assumptions sit below where they inform rather than
+   delay. It was a bulleted list under two paragraphs of prose, and every
+   figure in it was correct and unnoticed. */
+.wp-cost-hero {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 1.25rem 2.5rem;
+  padding: 1.25rem 0 1.5rem;
+  border-bottom: 1px solid var(--wp-dark-border, rgba(255, 255, 255, 0.12));
+  margin-bottom: 1.25rem;
+}
+.wp-cost-hero-value {
+  margin: 0;
+  font-size: clamp(2.1rem, 5vw, 3.1rem);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  color: var(--wp-gold, #e8b528);
+}
+/* The alternative is stated plainly rather than alarmingly: it is a real
+   price somebody pays, not a scare figure. */
+.wp-cost-hero-value-alt { color: var(--wp-text-muted, #929cad); }
+.wp-cost-hero-label {
+  margin: 0.4rem 0 0;
+  font-size: 0.82rem;
+  color: var(--wp-text-muted, #929cad);
+}
+.wp-cost-hero-multiple {
+  margin: 0 0 0 auto;
+  font-size: clamp(1.6rem, 4vw, 2.4rem);
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: var(--wp-text, #e8eaed);
+  opacity: 0.55;
+}
+
+.wp-cost-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  margin: 0 0 1.25rem;
+  padding: 0;
+  list-style: none;
+}
+.wp-cost-bar-row {
+  display: grid;
+  /* Label, bar, value. The bar takes the slack so every row's fill starts and
+     ends on the same axis and the lengths are honestly comparable. */
+  grid-template-columns: minmax(7.5rem, 10rem) 1fr minmax(5.5rem, auto);
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.88rem;
+  color: var(--wp-text-muted, #929cad);
+}
+.wp-cost-bar-row.is-ours { color: var(--wp-text, #e8eaed); font-weight: 600; }
+.wp-cost-bar-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wp-cost-bar-track {
+  height: 0.55rem;
+  border-radius: 999px;
+  background: var(--wp-dark-surface2, rgba(255, 255, 255, 0.07));
+  overflow: hidden;
+}
+.wp-cost-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--wp-text-muted, #929cad);
+  opacity: 0.5;
+}
+.wp-cost-bar-row.is-ours .wp-cost-bar-fill {
+  background: var(--wp-gold, #e8b528);
+  opacity: 1;
+}
+.wp-cost-bar-value {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.wp-cost-bar-multiple {
+  font-style: normal;
+  margin-left: 0.5rem;
+  opacity: 0.6;
+  font-size: 0.8rem;
+}
+
+@media (max-width: 640px) {
+  .wp-cost-hero-multiple { margin-left: 0; }
+  .wp-cost-bar-row { grid-template-columns: 1fr minmax(5rem, auto); }
+  /* The track spans both columns on a narrow screen rather than being
+     squeezed into a few pixels, where the comparison it exists to make would
+     be unreadable. */
+  .wp-cost-bar-track { grid-column: 1 / -1; order: 3; }
+}
+
+/* The compounding saving. Given its own emphasis because it is the mechanism
+   a competitor cannot copy by switching models: an answer bought once and
+   kept, versus one billed on every ask. */
+.wp-cost-compounds {
+  margin: 0 0 1rem;
+  padding: 0.85rem 1rem;
+  border-left: 2px solid var(--wp-gold, #e8b528);
+  background: var(--wp-dark-surface, rgba(255, 255, 255, 0.04));
+  border-radius: 0 8px 8px 0;
+  font-size: 0.9rem;
+  line-height: 1.65;
+  color: var(--wp-text-dim, #b4bcc8);
+  max-width: 68ch;
+}
+.wp-cost-compounds strong { color: var(--wp-text, #e8eaed); font-weight: 600; }

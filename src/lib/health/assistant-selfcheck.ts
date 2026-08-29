@@ -124,10 +124,17 @@ export const CHECKS: Check[] = [
           : null,
   },
   {
-    /* Typed 13 times in sixty days and answered nothing every time. It is the
-       name of the client's own SharePoint site. */
+    /* WHY NOT THE REAL SITE NAME. The shape being tested is a bare identifier
+       typed on its own, which reached no tool and was answered nothing 13
+       times before it was fixed. The original probe used the actual name of a
+       client's SharePoint site, which meant this check typed that client's
+       name into production every night and kept it at the top of the
+       repeated-failures panel on a page shown to prospective clients.
+
+       The check does not need the real name to test the shape. Any bare
+       identifier exercises the same routing, and this one is ours. */
     id: "routing_bare_site_name",
-    ask: "wolfpackxpcna",
+    ask: "instinctselfcheck",
     expect: (_answer, source) =>
       !servedWithoutModel(source) ? "reached a model rather than search" : null,
   },
