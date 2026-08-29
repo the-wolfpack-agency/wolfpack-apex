@@ -116,8 +116,43 @@ export function gradeRetrieval(
  * churn, and churn in ranking is how a corpus quietly gets worse one defensible
  * step at a time.
  */
+/**
+ * Below this many pairs, a comparison decides nothing.
+ *
+ * On six pairs one question is 17% of the score. RRF was adopted on exactly
+ * that basis (MRR 0.557 -> 0.700) and reversed on twelve (0.544 vs 0.503). I
+ * had written that six was too few BEFORE adopting it, which is the point: a
+ * rule somebody has to remember is a rule that gets skipped by the person in a
+ * hurry, and that person is usually the one who wrote it.
+ */
+export const MIN_PAIRS_FOR_A_VERDICT = 12;
+
+export type Verdict = "better" | "worse" | "no_change" | "not_enough_evidence";
+
+/**
+ * Did the change help?
+ *
+ * Returns `not_enough_evidence` rather than a guess when the set is too small,
+ * because a wrong verdict is worse than no verdict: it gets shipped.
+ *
+ * Ties go to the incumbent. A change that cannot show an improvement is churn,
+ * and churn in ranking is how a corpus gets quietly worse one defensible step
+ * at a time.
+ */
+export function judgeChange(before: EvalReport, after: EvalReport): Verdict {
+  const n = Math.min(before.outcomes.length, after.outcomes.length);
+  if (n < MIN_PAIRS_FOR_A_VERDICT) return "not_enough_evidence";
+  if (after.mrr > before.mrr) return "better";
+  if (after.mrr < before.mrr) return "worse";
+  return "no_change";
+}
+
+/**
+ * Kept for callers that only want the boolean, and it now REQUIRES a verdict:
+ * "not enough evidence" is not "better", which is the whole correction.
+ */
 export function isBetter(before: EvalReport, after: EvalReport): boolean {
-  return after.mrr > before.mrr;
+  return judgeChange(before, after) === "better";
 }
 
 /** The report as a line somebody can paste into a pull request. */

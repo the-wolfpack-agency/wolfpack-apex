@@ -16,6 +16,8 @@
 import {
   gradeRetrieval,
   isBetter,
+  judgeChange,
+  MIN_PAIRS_FOR_A_VERDICT,
   describeEval,
   type LabelledPair,
   type RankedResult,
@@ -75,8 +77,16 @@ describe("deciding whether a ranking change helped", () => {
   const before = gradeRetrieval([PAIRS[0]!], () => results("a", "b", "Acme Work Order.pdf"));
   const after = gradeRetrieval([PAIRS[0]!], () => results("Acme Work Order.pdf", "a", "b"));
 
-  it("prefers the ranking that puts the answer higher", () => {
-    expect(isBetter(before, after)).toBe(true);
+  /* MRR sees the improvement. Whether that improvement is DECIDABLE is a
+     separate question, and on one pair it is not: this originally asserted
+     isBetter() here and passed, which is the same one-pair confidence that
+     shipped RRF. */
+  it("scores the ranking that puts the answer higher above the one that does not", () => {
+    expect(after.mrr).toBeGreaterThan(before.mrr);
+  });
+
+  it("still refuses to call it a win on a single pair", () => {
+    expect(isBetter(before, after)).toBe(false);
   });
 
   /* TIES GO TO THE INCUMBENT. A change that cannot show an improvement is
@@ -108,5 +118,64 @@ describe("the summary line", () => {
     expect(line).toMatch(/labelled questions/);
     expect(line).toMatch(/MRR/);
     expect(line).toMatch(/never found/);
+  });
+});
+
+/**
+ * A small set must not be allowed to decide.
+ *
+ * RRF was adopted on six pairs (MRR 0.557 -> 0.700) and reversed on twelve
+ * (0.544 vs 0.503). The warning that six was too few was written BEFORE
+ * adopting it, by the person who then adopted it. A rule somebody has to
+ * remember is a rule that gets skipped by whoever is in a hurry, and that is
+ * usually its author.
+ */
+describe("refusing to decide on too little evidence", () => {
+  const pairs = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({
+      question: `q${i}`,
+      expectFilename: `doc${i}`,
+    }));
+
+  const runAt = (rank: number) => (q: string) => {
+    const i = Number(q.slice(1));
+    const out = Array.from({ length: 8 }, (_, j) => ({ filename: `filler${j}` }));
+    out[rank - 1] = { filename: `doc${i}` };
+    return out;
+  };
+
+  it("calls a clear improvement on a small set not-enough-evidence", () => {
+    const small = pairs(MIN_PAIRS_FOR_A_VERDICT - 1);
+    const before = gradeRetrieval(small, runAt(5));
+    const after = gradeRetrieval(small, runAt(1));
+    /* Genuinely better, and still refused. */
+    expect(after.mrr).toBeGreaterThan(before.mrr);
+    expect(judgeChange(before, after)).toBe("not_enough_evidence");
+    expect(isBetter(before, after)).toBe(false);
+  });
+
+  it("decides once the set is big enough", () => {
+    const big = pairs(MIN_PAIRS_FOR_A_VERDICT);
+    expect(judgeChange(gradeRetrieval(big, runAt(5)), gradeRetrieval(big, runAt(1)))).toBe("better");
+  });
+
+  it("names a regression rather than merely refusing it", () => {
+    const big = pairs(MIN_PAIRS_FOR_A_VERDICT);
+    expect(judgeChange(gradeRetrieval(big, runAt(1)), gradeRetrieval(big, runAt(5)))).toBe("worse");
+  });
+
+  it("calls an identical result no_change, not better", () => {
+    const big = pairs(MIN_PAIRS_FOR_A_VERDICT);
+    const r = gradeRetrieval(big, runAt(2));
+    expect(judgeChange(r, r)).toBe("no_change");
+    expect(isBetter(r, r)).toBe(false);
+  });
+
+  /* The smaller of the two sets governs: comparing twelve against six is a
+     comparison against six. */
+  it("uses the smaller set when the two differ", () => {
+    const big = gradeRetrieval(pairs(MIN_PAIRS_FOR_A_VERDICT), runAt(1));
+    const small = gradeRetrieval(pairs(3), runAt(5));
+    expect(judgeChange(small, big)).toBe("not_enough_evidence");
   });
 });
