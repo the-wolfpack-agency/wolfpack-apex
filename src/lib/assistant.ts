@@ -2808,7 +2808,37 @@ async function tryBrain(
       },
       context,
     };
-  } catch {
+  } catch (err) {
+    /* SAY WHY, BECAUSE THIS SWALLOWED FOUR DIAGNOSES.
+     *
+     * This catch was bare. Anything failing inside queryBrain came back as an
+     * empty context, which gateUngroundedClaimAboutUs reads as "nothing was
+     * retrieved" and rejects the answer as ungrounded. So a broken retrieval
+     * and an empty corpus produced the same sentence for the reader and the
+     * same record for us.
+     *
+     * Measured against the deployed URL 2026-08-29:
+     *
+     *   brain_query_log  "how much do we owe upfront?"  ->  4 hits
+     *   quality gate     same question                  ->  hit_count 0
+     *
+     * Both true at once, and there was no way to tell whether queryBrain had
+     * returned nothing or had thrown on the way. Four hypotheses died against
+     * that gap: the score floor, the query phrasing, whether semantic ran at
+     * all, and an unguarded analytics write. Each was plausible, each was
+     * measured, and none of them was this.
+     *
+     * The failure stays non-fatal, which is right. It stops being invisible,
+     * which was not. */
+    trackEvent("assistant.brain_lookup_failed", userId, userRole, {
+      feature: "assistant",
+      message_text: message.slice(0, 200),
+      /* The message, not the stack: a reader needs to know which dependency
+         gave out, and the class plus first line says that without storing a
+         trace on an analytics row. */
+      error: (err as Error)?.message?.slice(0, 200) ?? "unknown",
+      error_name: (err as Error)?.name ?? "unknown",
+    });
     return { strong: null, context: emptyContext };
   }
 }
