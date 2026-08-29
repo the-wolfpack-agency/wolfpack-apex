@@ -114,8 +114,31 @@ const DOCUMENT_QUESTION_RE = new RegExp(
        "what is in SharePoint about training" lands here too, and the topic is
        captured rather than swallowed into the subject. */
     String.raw`^\s*(?:what|whats|what's)\s+(?:is\s+)?in\s+(?:the\s+|our\s+|my\s+|this\s+)?(?<inSubject>.+?)(?:\s+about\s+(?<inAbout>.+?))?\s*[?.!]*\s*$`,
-    /* "summarize the SOW" */
-    String.raw`^\s*summari[sz]e\s+(?:the\s+|our\s+|my\s+|this\s+)?(?<sumSubject>.+?)\s*[?.!]*\s*$`,
+    /* SUMMARISE IS DELIBERATELY ABSENT.
+     *
+     * "summarize the SOW" used to be captured here and handed to universal
+     * search, on the reasoning that search is what can see the corpus. What
+     * comes back from search is a browsable LIST, so somebody who asked for a
+     * summary received a filing cabinet. Measured 2026-08-29 on the live
+     * deployment: "summarize the onboarding document" returned "Found 3
+     * results" plus result rows, at zero tokens, because nothing synthesised
+     * anything.
+     *
+     * Declining sends it to retrieval, which does synthesise: the same corpus,
+     * asked directly, answered "The final payment is due within 30 days of the
+     * software configuration in the production environment" in 552ms.
+     *
+     * SAFE FOR HUMANS, CHECKED RATHER THAN ASSUMED. The comment above warns
+     * that "summarize the SOW" once reached op_create_document, which would
+     * try to CREATE a document by that name. That tool still exists and its
+     * matcher still fires on the phrase. It is agentOnly, and the dispatcher
+     * skips agent-only tools for a human caller (dispatcher.ts:75), so a
+     * person cannot reach it. Verified against the live registry: of 57
+     * human-facing tools, `search` was the only one claiming this phrase, so
+     * declining it here falls through to retrieval and nowhere else.
+     *
+     * EXISTENCE questions below are untouched, because a list IS the right
+     * answer to "what documents do we have about X". */
     /* DO WE HOLD ANYTHING ABOUT THIS. The question somebody asks before they
        trust the product with a real one, and it reached nothing.
 

@@ -20,8 +20,6 @@ describe("questions about a document", () => {
     ["what's in the SOW", "SOW"],
     ["what is in the contract", "contract"],
     ["what does our contract say", "contract"],
-    ["summarize the onboarding deck", "onboarding deck"],
-    ["summarise the SOW", "SOW"],
     ["what did the proposal say", "proposal"],
   ])("%s searches for %s", (prompt, expected) => {
     expect(matchDocumentQuestion(prompt)).toBe(expected);
@@ -76,12 +74,67 @@ describe("routing end to end", () => {
     "what does the SOW say",
     "what's in the SOW",
     "what does the contract say about payment",
-    "summarize the SOW",
   ])("%s reaches search and nothing else", async (prompt) => {
     expect(await claimants(prompt)).toEqual(["search"]);
   });
 
   it("leaves the imperative form working", async () => {
     expect(await claimants("find the contract")).toContain("search");
+  });
+});
+
+/**
+ * Summarise is not a search.
+ *
+ * It was captured here and handed to universal search, on the reasoning that
+ * search is what can see the corpus. What search returns is a browsable LIST,
+ * so somebody who asked for a summary received a filing cabinet. Measured on
+ * the live deployment 2026-08-29: "summarize the onboarding document" returned
+ * "Found 3 results" plus result rows, at zero tokens, because nothing
+ * synthesised anything.
+ *
+ * Declining sends it to retrieval, which does synthesise. The same corpus
+ * asked directly answered "The final payment is due within 30 days of the
+ * software configuration in the production environment" in 552ms.
+ */
+describe("summarise goes to retrieval, not to search", () => {
+  it.each(["summarize the SOW", "summarise the contract", "summarize the onboarding deck"])(
+    "%s is not claimed as a search",
+    (prompt) => {
+      expect(matchDocumentQuestion(prompt)).toBeNull();
+    },
+  );
+
+  /* THE RISK THAT HAD TO BE CHECKED. An older comment in search.ts warns that
+     "summarize the SOW" once reached op_create_document, which would try to
+     CREATE a document by that name. That tool still exists and its matcher
+     still fires on the phrase, so declining here would be dangerous if a human
+     could reach it. It is agentOnly and the dispatcher skips agent-only tools
+     for a human caller, which is what makes this safe rather than lucky. */
+  it("is claimed by nothing a human can reach", async () => {
+    await import("@/lib/assistant/tools");
+    const { getTools } = await import("@/lib/assistant/tools/registry");
+    const humanClaimants = (
+      getTools() as unknown as Array<{
+        name: string;
+        agentOnly?: boolean;
+        matchIntent?: (m: string) => unknown;
+      }>
+    )
+      .filter((t) => !t.agentOnly && typeof t.matchIntent === "function")
+      .filter((t) => t.matchIntent!("summarize the onboarding document") != null)
+      .map((t) => t.name);
+    expect(humanClaimants).toEqual([]);
+  });
+
+  /* EXISTENCE QUESTIONS ARE UNTOUCHED. A list IS the right answer to "what
+     documents do we have about X", and moving those to retrieval would break
+     the one thing search is genuinely best at. */
+  it.each([
+    "what documents do we have about onboarding",
+    "do we have anything on invoices",
+    "is there anything on training",
+  ])("still routes %s to search, where a list is the right answer", (prompt) => {
+    expect(matchDocumentQuestion(prompt)).not.toBeNull();
   });
 });

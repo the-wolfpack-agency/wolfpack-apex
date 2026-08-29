@@ -124,9 +124,24 @@ const DOCUMENTS: ModuleCapability = {
          rows. Recording it as supported would make this file the second place
          the truth is not. */
       returns: "list",
+      /* STILL DECLARED AS A GAP, DELIBERATELY.
+       *
+       * Search no longer claims this phrase, so it now falls through to
+       * retrieval, which synthesises. That is the intended fix and it is
+       * verified in unit tests: nothing a human can reach claims it.
+       *
+       * It is NOT promoted to `supported` here, because supported means
+       * measured against a real deployment and this change has not shipped
+       * yet. Promoting on the strength of a code change would make this file
+       * exactly what it exists to prevent, which is a place the truth is not.
+       *
+       * The route to promotion: merge, deploy, run the journey, and if
+       * summarise synthesises, change this to `supported` and drop
+       * behavesLike. The test asserting it routes elsewhere will fail at that
+       * point and force the two to move together. */
       status: "routes_elsewhere",
       behavesLike: "documents.find",
-      because: "People ask for this constantly. Today it returns the matches instead.",
+      because: "People ask for this constantly. Fix shipped, awaiting live verification.",
     },
   ],
 };
