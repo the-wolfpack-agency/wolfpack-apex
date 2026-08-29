@@ -17,6 +17,7 @@ jest.mock("@/lib/db", () => ({
 
 import {
   gateUngroundedClaimAboutUs,
+  gateMetaCommentary,
   MIN_CONFIDENCE_SCORE,
   STALE_DOC_AGE_MS,
   gateConfidence,
@@ -851,5 +852,85 @@ describe("the confidence gate judges each scale against its own floor", () => {
   /* Belt and braces only works while the floor is actually supplied. */
   it("does not invent a floor when none was passed", () => {
     expect(gateConfidence(0.1, 3, true, undefined)).toBeNull();
+  });
+});
+
+/**
+ * An answer that talks ABOUT an answer instead of being one.
+ *
+ * Found by driving the deployed product as a user, 2026-08-29. Asking for a
+ * "coaching calls spreadsheet" returned a critique of a draft the reader never
+ * saw, prefixed with a warning that the answer "mentions 1 unfamiliar name:
+ * Corrected" — the entities filter having taken the word "Corrected" for a
+ * person.
+ *
+ * So the reader got meta-commentary, wrapped in an alarming and incorrect
+ * note. Nothing else caught the commentary itself: it is fluent, on topic,
+ * long enough to pass every length check, and grounded in nothing at all.
+ */
+describe("meta-commentary is blocked, not hedged", () => {
+  /* VERBATIM from production. */
+  it("catches the answer that shipped", () => {
+    const flag = gateMetaCommentary(
+      "The question asks for a coaching calls spreadsheet, but the draft does not address whether one exists, provide any relevant information, or summarize data that might have been retrieved.",
+    );
+    expect(flag).not.toBeNull();
+    expect(flag!.filter).toBe("meta_commentary");
+  });
+
+  /* BLOCK, not warn, and that is the whole point. Every other filter hedges an
+     answer that might still help. This one has nothing to hedge: an answer
+     about "the draft" carries no content for the person who asked, so a
+     warning label on it is worse than the deterministic fallback, which at
+     least offers something they can ask instead. */
+  it("blocks rather than warns, so the reader gets the fallback", () => {
+    expect(gateMetaCommentary("The draft answer fails to mention the payment terms.")!.severity).toBe(
+      "block",
+    );
+  });
+
+  it.each([
+    "The draft answer fails to mention the payment terms.",
+    "The answer should include the invoice total.",
+    "This response does not address the question asked.",
+  ])("catches %s", (answer) => {
+    expect(gateMetaCommentary(answer)).not.toBeNull();
+  });
+
+  /* NARROW ON PURPOSE. The words "answer", "question" and "draft" appear in
+     plenty of legitimate replies, and a filter that fired on those would block
+     correct answers, which is far worse than the defect it fixes. The last
+     case is the trap: it mentions a draft document, not a draft answer. */
+  it.each([
+    "The answer is net 30 from the invoice date.",
+    "Here is the answer to your question about payment terms.",
+    "The question of scope is covered in section 3 of the SOW.",
+    "Final payment is due within 30 days of configuration.",
+    "I could not find that. The draft SOW is in Docs if you want to look.",
+  ])("leaves a real answer alone: %s", (answer) => {
+    expect(gateMetaCommentary(answer)).toBeNull();
+  });
+
+  it("is quiet on an empty answer, which other filters already handle", () => {
+    expect(gateMetaCommentary("")).toBeNull();
+  });
+
+  /* It must reach `reject`, or the fix stops at the flag and the reader still
+     sees the commentary with a note on top. */
+  it("drives the overall verdict to reject", () => {
+    const result = runAnswerQualityChecks(
+      {
+        /* Deliberately high score and hit count: this must reject on the
+           commentary alone, not because retrieval was weak. In production it
+           arrived alongside real hits. */
+        answer:
+          "The question asks for a coaching calls spreadsheet, but the draft does not address whether one exists.",
+        topScore: 0.9,
+        hitCount: 3,
+      },
+      { userId: "u1", userRole: "cto" },
+    );
+    expect(result.verdict).toBe("reject");
+    expect(result.flags.map((f) => f.filter)).toContain("meta_commentary");
   });
 });

@@ -120,7 +120,14 @@ export function __resetStrictnessCacheForTests(): void {
 export type QualityVerdict = "ok" | "low_confidence" | "reject";
 
 export interface QualityFlag {
-  filter: "confidence" | "entities" | "citations" | "stale" | "org_facts" | "ungrounded_internal";
+  filter:
+    | "confidence"
+    | "entities"
+    | "citations"
+    | "stale"
+    | "org_facts"
+    | "ungrounded_internal"
+    | "meta_commentary";
   reason: string;
   severity: "warn" | "block";
 }
@@ -582,6 +589,52 @@ export function validateEntities(
 }
 
 /* ------------------------------------------------------------------ */
+/* A2b — the answer is ABOUT an answer                                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A model that narrates what a good answer would contain, instead of writing
+ * one.
+ *
+ * Found by driving the deployed product as a user, 2026-08-29. Asking for a
+ * "coaching calls spreadsheet" returned:
+ *
+ *   "The question asks for a coaching calls spreadsheet, but the draft does
+ *    not address whether one exists, provide any relevant information, or
+ *    leave the question unanswered. Since no specifics or data were included,
+ *    the answer should be: ..."
+ *
+ * The reader asked for a file and received a critique of an answer they never
+ * saw. Nothing else caught it: it is fluent, on topic, grounded in nothing, and
+ * long enough to pass every length and confidence check. The entities filter
+ * did fire, but on the word "Corrected", which it took for a person's name, so
+ * the note shown above it was both alarming and wrong.
+ *
+ * BLOCK, NOT WARN. Every other filter hedges an answer that might still help.
+ * This one cannot: an answer discussing "the draft" or "the response" has no
+ * salvageable content for the person who asked, so hedging it just puts a
+ * warning label on something useless. The deterministic fallback, which offers
+ * things they CAN ask, is strictly better.
+ *
+ * Narrow on purpose. It looks for the answer referring to itself or to a draft
+ * as an object, not for the mere words "question" or "answer", which appear in
+ * plenty of legitimate replies ("the answer is net 30").
+ */
+const META_COMMENTARY_RE =
+  /\b(?:the draft(?:\s+answer)?\s+(?:does|did|fails?|should|lacks)|the (?:answer|response)\s+should\s+(?:be|include|address|contain)|the question asks (?:for|about)[^.]{0,80}\bbut\b|this (?:answer|response) (?:does not|doesn't) (?:address|answer))/i;
+
+export function gateMetaCommentary(answer: string): QualityFlag | null {
+  if (!answer || !META_COMMENTARY_RE.test(answer)) return null;
+  return {
+    filter: "meta_commentary",
+    /* Names what it is in the words somebody would use to reproduce it, so a
+       reader of the analytics row can find the prompt that caused it. */
+    reason: "answer describes what an answer should say instead of saying it",
+    severity: "block",
+  };
+}
+
+/* ------------------------------------------------------------------ */
 /* A3 — citation requirement                                           */
 /* ------------------------------------------------------------------ */
 
@@ -681,6 +734,14 @@ export function runAnswerQualityChecks(
     input.answer,
   );
   if (fUngrounded) flags.push(fUngrounded);
+
+  /* Checked BEFORE the warn-level filters, and unconditionally: it needs no
+     roster, no retrieved ids and no source dates, so an answer that is pure
+     meta-commentary is caught even on the paths where the others cannot run.
+     That matters because those are exactly the thin-context paths where a
+     model is most likely to narrate instead of answer. */
+  const fMeta = gateMetaCommentary(input.answer);
+  if (fMeta) flags.push(fMeta);
 
   if (input.knownNames) {
     const fEntities = validateEntities(
