@@ -222,9 +222,40 @@ export function selectModel(
     );
   }
 
-  // Step 3: downgrade - cheapest available of ANY tier that still fits context.
+  /* Step 3: downgrade to the MOST CAPABLE available, not the cheapest.
+   *
+   * THE BUG THIS FIXES. This took the cheapest model of ANY tier, so a request
+   * that could not be served at its tier fell all the way to the floor. Asking
+   * for "reasoning" with no reasoning model available returned gpt-4o-mini,
+   * the smallest model on the board: the maximum possible distance from what
+   * was asked, chosen deliberately.
+   *
+   * Measured in production over sixty days: 5 premium requests and 82 standard
+   * requests were served by gpt-4o-mini. The premium ones cost $0.135 across 5
+   * calls, the highest per-call cost recorded, for the least capable answer
+   * available. Somebody asked for the best model, waited longer, paid more,
+   * and got the smallest.
+   *
+   * A downgrade should step DOWN one rung at a time. If reasoning is
+   * unavailable but large is, large is the honest answer: it is the closest
+   * thing to what was requested. Cost still breaks ties WITHIN the best
+   * available tier, so this does not spend more than it must.
+   *
+   * Reported as a downgrade either way, so the caller can see it did not get
+   * what it asked for. */
   const anyTier = available.filter((m) => m.contextWindow >= minContext);
-  const downgraded = cheapest(anyTier, opts) ?? cheapest(available, opts);
+  const pool = anyTier.length > 0 ? anyTier : available;
+  const bestTierAvailable = pool.reduce<number>(
+    (top, m) => Math.max(top, TIER_ORDER[m.capabilityTier]),
+    -1,
+  );
+  const downgraded =
+    bestTierAvailable >= 0
+      ? cheapest(
+          pool.filter((m) => TIER_ORDER[m.capabilityTier] === bestTierAvailable),
+          opts,
+        )
+      : undefined;
   if (downgraded) {
     return withEstimate(
       {

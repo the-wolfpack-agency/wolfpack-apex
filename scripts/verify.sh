@@ -112,6 +112,7 @@ if [ "${VERIFY_DRY_RUN:-0}" = "1" ]; then
   fi
   if [ "${VERIFY_SKIP_E2E:-0}" != "1" ]; then
     stage_enabled e2e && echo "    - smoke-self-check"
+    stage_enabled e2e && echo "    - deployed-url (VERIFY_DEPLOYED=1)"
   fi
   if [ "${VERIFY_SKIP_E2E:-0}" != "1" ] && [ "${VERIFY_SKIP_SMOKE:-0}" != "1" ] && [ "${CI:-}" = "true" ]; then
     stage_enabled e2e && echo "    - e2e-smoke"
@@ -170,6 +171,23 @@ if stage_enabled e2e; then
     skip_stage "smoke-self-check" "VERIFY_SKIP_E2E=1"
   else
     run_stage "smoke-self-check" npm run test:e2e:smoke-self-check
+
+    # THE DEPLOYED URL, IN A REAL BROWSER.
+    #
+    # Everything else in this gate proves the code is right. This proves the
+    # thing a person actually loads is right, which is a different question and
+    # the one the repo's definition of done actually asks. Two days of work in
+    # August 2026 were verified entirely through the pipeline and the database,
+    # and scored zero against that standard.
+    #
+    # Opt-in via VERIFY_DEPLOYED=1 rather than always-on: it reaches the public
+    # internet, so a plain local `npm run verify` should not depend on the
+    # network or on a deploy being current. CI sets it.
+    if [ "${VERIFY_DEPLOYED:-0}" = "1" ]; then
+      run_stage "deployed-url" npm run test:e2e:deployed
+    else
+      skip_stage "deployed-url" "set VERIFY_DEPLOYED=1 to check the live site"
+    fi
   fi
 
   # The e2e-smoke probes the DEPLOYED prod URL (PROD_URL). That is a post-merge

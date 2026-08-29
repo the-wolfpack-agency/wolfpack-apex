@@ -118,6 +118,13 @@ jobs:
           npx playwright test
           tests/e2e/sites-preview-reality-check.spec.ts
           tests/e2e/dashboard-quick-actions.spec.ts
+          # A HARD GATE BECAUSE IT NEEDS NO CREDENTIALS AND GUARDS THE
+          # FAILURES THIS PRODUCT HAS ACTUALLY SHIPPED: an authenticated page
+          # rendering empty instead of redirecting (2026-04-16, every API call
+          # 401'd and the dashboard drew zeros), a login submit clickable
+          # before hydration, a CSP violation, a stale deploy alias. It runs in
+          # 8 seconds and cannot flake on a session it never establishes.
+          tests/e2e/deployed-url-smoke.spec.ts
           tests/e2e/ai-router-behaviour.spec.ts
           tests/e2e/playbook-readable.spec.ts
           --config=playwright.config.ts --workers=2 --reporter=github
