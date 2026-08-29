@@ -17,6 +17,7 @@ import { keywordSearchWithAudience, logQuery, markQueryCited } from "./repo";
 import { readableDocumentIds } from "./audience";
 import { describeDocuments } from "./repo";
 import { searchBrain } from "./qdrant";
+import { reciprocalRankFusion } from "./fusion";
 import { trackEvent } from "@/lib/analytics";
 import type { BrainKind, BrainQueryHit, BrainQueryResult } from "./types";
 
@@ -191,9 +192,6 @@ export async function queryBrain(opts: QueryOpts): Promise<QueryExecution> {
     const existing = byId.get(s.chunk_id);
     if (existing) {
       existing.source = "keyword+semantic";
-      // Stronger combined signal. Clamp to [0, 1.2] so combined hits
-      // still out-rank singletons without breaking downstream UI.
-      existing.score = Math.min(1.2, existing.score + 0.3 + s.score * 0.2);
     } else {
       byId.set(s.chunk_id, {
         chunk_id: s.chunk_id,
@@ -212,9 +210,50 @@ export async function queryBrain(opts: QueryOpts): Promise<QueryExecution> {
     }
   }
 
-  const hits = [...byId.values()]
-    .sort((a, b) => b.score - a.score)
-    .slice(0, limit);
+  /* FUSED BY RANK, NOT BY SCORE.
+   *
+   * This added the two scores with a both-lists bonus, a semantic weight and a
+   * clamp: `Math.min(1.2, score + 0.3 + s.score * 0.2)`. Three constants, plus
+   * FILENAME_MATCH_WEIGHT upstream, all reconciling numbers that share no unit:
+   * lexical density over a string against cosine distance in embedding space.
+   *
+   * Each was added for a real failure and each was chosen by arithmetic rather
+   * than evidence. Reciprocal rank fusion reads only the ORDER, so the scales
+   * never have to be made comparable, and a document ranked well by both
+   * retrievers still outranks one ranked well by either.
+   *
+   * Kept switchable while it is new: BRAIN_FUSION=score restores the previous
+   * behaviour. A ranking change that cannot be reverted in one environment
+   * variable is one nobody will risk deploying. */
+  /* DEFAULT REVERTED TO SCORE FUSION, BY MEASUREMENT.
+   *
+   * RRF was adopted on a six-pair eval set: MRR 0.557 -> 0.700, and "what are
+   * the payment terms in our work order?" moving from rank 7 to rank 1. On a
+   * cleaned twelve-pair set the result reverses:
+   *
+   *   score addition     50% ranked first, MRR 0.544
+   *   reciprocal rank    42% ranked first, MRR 0.503
+   *
+   * Six pairs was too few to decide anything — one question is 17% of that
+   * score — which I said before adopting it and then did anyway. The larger
+   * set is still small and the gap is close to noise, so this is not a
+   * verdict that RRF is wrong. It is that it has not earned the change, and
+   * the rule was written for exactly this: ties go to the incumbent, because
+   * churn in ranking is how a corpus gets quietly worse one defensible step
+   * at a time.
+   *
+   * BRAIN_FUSION=rrf re-enables it, so the next person with a bigger set can
+   * settle it rather than re-implement it. */
+  const useRrf = process.env.BRAIN_FUSION === "rrf";
+  const hits = useRrf
+    ? reciprocalRankFusion(
+        keyword.map((h) => ({ ...h, id: h.chunk_id })),
+        semantic.map((h) => ({ ...h, id: h.chunk_id })),
+      )
+        .map((f) => byId.get(f.item.id))
+        .filter((h): h is NonNullable<typeof h> => h !== undefined)
+        .slice(0, limit)
+    : [...byId.values()].sort((a, b) => b.score - a.score).slice(0, limit);
 
   const latency_ms = Date.now() - t0;
 

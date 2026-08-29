@@ -464,9 +464,20 @@ export function buildKeywordSearchSql(
    * Matched as a query rather than baked into bc.tsv, which would need a
    * migration and a backfill of 5,006 rows to fix something a JOIN already has
    * in hand. */
+  /* THE EXTENSION HAS TO COME OFF FIRST.
+   *
+   * to_tsvector('english', 'Meeting Notes with McDonalds.md') yields
+   * 'mcdonalds.md' as a single token, so searching for "McDonalds" never
+   * matches it. Underscored names escaped this because the replace already
+   * split them; anything with a space before the extension did not, which is
+   * most .pdf, .md and .png files a person names by hand.
+   *
+   * Found on 2026-08-29 by an eval pair that should have been trivial: a
+   * document called exactly what was typed, returning nothing. */
+  const filenameTsv = `to_tsvector('english', replace(regexp_replace(bd.filename, '\\.[a-z0-9]+$', '', 'i'), '_', ' '))`;
   const where: string[] = [
     `(bc.tsv @@ websearch_to_tsquery('english', $1)
-      OR to_tsvector('english', replace(bd.filename, '_', ' ')) @@ websearch_to_tsquery('english', $1))`,
+      OR ${filenameTsv} @@ websearch_to_tsquery('english', $1))`,
   ];
   const args: unknown[] = [];
   if (opts.uploadedBy) {
@@ -530,10 +541,8 @@ export function buildKeywordSearchSql(
                ts_rank_cd(bc.tsv, websearch_to_tsquery('english', $1)),
                LEAST(
                  1.0,
-                 ts_rank_cd(
-                   to_tsvector('english', replace(bd.filename, '_', ' ')),
-                   websearch_to_tsquery('english', $1)
-                 ) * ${FILENAME_MATCH_WEIGHT}
+                 ts_rank_cd(${filenameTsv}, websearch_to_tsquery('english', $1))
+                   * ${FILENAME_MATCH_WEIGHT}
                )
              ) AS score,
              ts_headline('english', bc.content, websearch_to_tsquery('english', $1),
