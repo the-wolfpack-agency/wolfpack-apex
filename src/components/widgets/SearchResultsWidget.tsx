@@ -106,11 +106,14 @@ function formatRelative(iso: string): string {
 export interface SearchResultsWidgetProps {
   spec: SearchResultsWidgetSpec;
   workflowId?: string;
+  /** Puts a narrowed query in the composer. Absent on read-only surfaces. */
+  onPickPrompt?: (prompt: string) => void;
 }
 
 export function SearchResultsWidget({
   spec,
   workflowId,
+  onPickPrompt,
 }: SearchResultsWidgetProps) {
   /* Sources with > 0 hits are the only ones that get a checkbox.
    *  Sources with zero hits stay collapsed — matches the /search page's
@@ -186,11 +189,22 @@ export function SearchResultsWidget({
   }
 
   function handleSearchAgain() {
-    /* No re-prompt path lives in the chat surface yet. Fire a
-     *  stub analytics event so the learning loop sees demand for a
-     *  narrowed re-search and we can wire the actual re-prompt
-     *  message once the surface supports it. The follow-up wiring is
-     *  documented in `.ai/conventions.md` under "Widget interfaces". */
+    /* IT NOW DOES SOMETHING. This fired an analytics event and nothing else:
+     * a button that looks like a control, is clicked, and produces no visible
+     * change. That is precisely the defect /admin/insights tracks under
+     * "controls shown to roles that cannot use them", except this one was
+     * shown to everybody. Somebody clicks it, nothing happens, and they
+     * conclude the product is broken.
+     *
+     * It was written that way honestly: the comment said no re-prompt path
+     * existed in the chat surface, and none did. One does now, so the stub
+     * becomes the real thing. The event still fires, because demand for a
+     * narrowed re-search is worth measuring either way.
+     *
+     * It FILLS THE COMPOSER rather than sending, matching every other
+     * prompt affordance in this chat. Somebody narrowing a search usually
+     * wants to adjust the words too, and sending on their behalf takes that
+     * away. */
     const narrowed = Array.from(activeSources);
     fetchWithRefresh("/api/analytics", {
       method: "POST",
@@ -206,6 +220,11 @@ export function SearchResultsWidget({
       }),
     }).catch(() => undefined);
     trackInteraction("search_again", narrowed.join(","));
+
+    /* Phrased the way the search tool already matches, so the narrowed query
+       reaches the same place the original did. */
+    const where = narrowed.length > 0 ? narrowed.map((t) => TYPE_LABELS[t] ?? t).join(", ") : null;
+    onPickPrompt?.(where ? `search ${spec.query} in ${where}` : `search ${spec.query}`);
   }
 
   /* Client-side filter — preserves the original ordering runSearch
