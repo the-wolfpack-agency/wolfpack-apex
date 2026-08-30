@@ -846,6 +846,12 @@ export type InstinctEventType =
   // platform.scan_findings_auto_resolved { platform, count, scan_id }
   // platform.system_profiled { platform, entities, integrations, routes, criticals }
   | "platform.system_profiled"
+  // platform.system_walked { platform, surfaces, entities, forms, frontier_remaining,
+  //   stop_reason, sampled_shapes }. A walk of a live system the client runs but we
+  //   cannot read the source of. frontier_remaining and stop_reason travel WITH the
+  //   counts on purpose: a map that stopped early and a map that finished look
+  //   identical once the numbers are separated from how they were obtained.
+  | "platform.system_walked"
   // platform.target_onboarded { platform, has_static, has_api } / target_offboarded { platform }
   | "platform.target_onboarded"
   | "platform.target_offboarded"

@@ -31,6 +31,10 @@ import { withSecret, scrubSecret } from "@/lib/cli/scrub-secret";
 import { createSurfaceReader } from "@/lib/platform-scan/mapping/reader";
 import { walkSystem } from "@/lib/platform-scan/mapping/walk";
 import { inventoryForms } from "@/lib/platform-scan/mapping/form-inventory";
+import { inferEntities } from "@/lib/platform-scan/mapping/entities";
+import { buildSystemMap } from "@/lib/platform-scan/mapping/explore";
+import { saveWalkedMap } from "@/lib/platform-scan/mapping/store";
+import { trackEvent } from "@/lib/analytics";
 import type { ScanPage } from "@/lib/platform-scan/browser/capture";
 
 const arg = (name: string): string | null => {
@@ -209,10 +213,33 @@ if (!baseUrl || !authorisedBy) {
       }
     }
 
-    const tables = surfaces.flatMap((s) => s.tables);
-    console.log(`\nWhat the system manages: ${tables.length} tables`);
-    for (const t of tables.slice(0, 6)) {
-      console.log(`  ${(t.caption ?? "untitled").slice(0, 30).padEnd(30)} ${t.columns.slice(0, 5).join(", ").slice(0, 60)}`);
+    /* WHAT THE SYSTEM MANAGES, AND NOT FROM THE TABLES.
+     *
+     * This used to print the tables directly, which on the real tenant meant
+     * nine rows reading "untitled  1, 2, 3, 4": the application lays its
+     * screens out with tables, so every one of them was furniture. Business
+     * objects come from the URL structure and the form fields now, both of
+     * which are names somebody chose. */
+    const entities = inferEntities(surfaces, coverage.patterns);
+    console.log(`\nWhat the system manages: ${entities.length} business objects`);
+    for (const e of entities.slice(0, 14)) {
+      const attrs = e.attributes.length > 0 ? e.attributes.slice(0, 4).join(", ") : "no fields observed";
+      console.log(
+        `  ${e.name.slice(0, 38).padEnd(38)} ${String(e.evidence.length).padStart(2)} screens  ${attrs.slice(0, 52)}`,
+      );
+    }
+
+    /* SAMPLED IS NOT THE SAME AS FOUND. Where a shape repeats, the walk opens
+       a couple and counts the rest, so the two numbers are printed together:
+       a reader can tell a small system from a sample of a large one. */
+    const sampled = coverage.patterns.filter((p) => p.visited < p.instances.length);
+    if (sampled.length > 0) {
+      console.log("\nRepeated screens, sampled rather than walked:");
+      for (const p of sampled.slice(0, 8)) {
+        console.log(
+          `  ${p.shape.slice(0, 44).padEnd(44)} ${String(p.instances.length).padStart(3)} exist, ${p.visited} opened`,
+        );
+      }
     }
 
     const byReason = new Map<string, number>();
@@ -230,6 +257,60 @@ if (!baseUrl || !authorisedBy) {
     if (slow.length > 0) {
       console.log(`\nSlow screens, which are a finding in their own right:`);
       for (const s of slow.slice(0, 5)) console.log(`  ${String(s.loadMs).padStart(6)}ms  ${s.signature}`);
+    }
+    /* THE MAP OUTLIVES THE TERMINAL IT WAS PRINTED IN.
+     *
+     * Until now the walk wrote nothing: a scan of a client's system existed
+     * for as long as somebody kept the window open. The report's System Map
+     * section read from a store nothing had ever written to, so it said "no
+     * system profile has been generated" no matter how many systems had
+     * actually been walked.
+     *
+     * Persisted per (workspace, entry point), so re-walking a system replaces
+     * its snapshot rather than accumulating stale ones a report might average
+     * over. */
+    const platform = (() => {
+      try {
+        return new URL(baseUrl).hostname.replace(/^www\./, "");
+      } catch {
+        return "unknown";
+      }
+    })();
+
+    const map = buildSystemMap({
+      platform,
+      entryUrl: baseUrl,
+      surfaces,
+      entities,
+      integrations: [],
+      coverage,
+      now: new Date().toISOString(),
+    });
+
+    const workspaceId = arg("workspace") ?? "default";
+    if (!process.env.DATABASE_URL) {
+      /* Said out loud rather than skipped quietly. A run that printed a map
+         and stored nothing, without saying so, is how somebody concludes the
+         report is broken a week later. */
+      console.log("\nNot stored: DATABASE_URL is not set, so this map exists only above.");
+    } else {
+      try {
+        await saveWalkedMap(workspaceId, map, authorisedBy);
+        trackEvent("platform.system_walked", "system", "system", {
+          platform,
+          surfaces: surfaces.length,
+          entities: entities.length,
+          forms: inv.content.length,
+          /* Travels WITH the counts: a map that stopped early and a map that
+             finished look identical once these are separated. */
+          frontier_remaining: coverage.frontierRemaining,
+          stop_reason: coverage.stopReason,
+          sampled_shapes: sampled.length,
+        });
+        console.log(`\nStored for workspace ${workspaceId}. It will appear in the System Map section of the report.`);
+      } catch (err) {
+        console.log(`\nNot stored: ${(err as Error).message.slice(0, 120)}`);
+      }
     }
   } finally {
     await handle.close();
