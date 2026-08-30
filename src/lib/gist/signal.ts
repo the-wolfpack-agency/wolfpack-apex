@@ -78,8 +78,14 @@ export function endedBadly(g: TurnGist): boolean {
   return g.outcome === "dead_end" || g.outcome === "re_asked" || g.outcome === "degraded";
 }
 
-/** Which gist fields are worth testing as predictors. */
-const FEATURES: Array<{ name: string; of: (g: TurnGist) => string }> = [
+/** One thing worth testing as a predictor, named as a reader would name it. */
+export interface Feature<T> {
+  name: string;
+  of: (item: T) => string;
+}
+
+/** Which turn-gist fields are worth testing. The default for an assistant run. */
+const TURN_FEATURES: Array<Feature<TurnGist>> = [
   { name: "shape", of: (g) => g.shape },
   { name: "origin", of: (g) => g.origin },
   { name: "answerLength", of: (g) => g.answerLength },
@@ -103,22 +109,43 @@ const FEATURES: Array<{ name: string; of: (g: TurnGist) => string }> = [
  */
 export const EXCLUDED_AS_CIRCULAR = ["admittedMiss"] as const;
 
-export function measureSignal(gists: TurnGist[]): SignalReport {
-  const turns = gists.length;
+/**
+ * GENERIC OVER WHAT IS BEING MEASURED, because the arithmetic never cared.
+ *
+ * It was hardcoded to turn gists, so measuring a client's change requests
+ * meant dressing a decision up as a turn. The numbers came out right and the
+ * LABELS came out lying: an export reported "questionLength=reversed" and
+ * "answerLength=longer", which is the sort of output nobody trusts twice and
+ * nobody should.
+ *
+ * The lift calculation is about feature values against an outcome and does not
+ * care what a feature means, so the features and the outcome test are now
+ * passed in. One implementation of "does this predict anything", and each
+ * caller names its own fields.
+ */
+export function measureSignal<T = TurnGist>(
+  items: T[],
+  opts?: { features?: Array<Feature<T>>; isBad?: (item: T) => boolean },
+): SignalReport {
+  const features =
+    opts?.features ?? (TURN_FEATURES as unknown as Array<Feature<T>>);
+  const isBad = opts?.isBad ?? ((item: T) => endedBadly(item as unknown as TurnGist));
+
+  const turns = items.length;
   if (turns === 0) {
     return { turns: 0, baseBadRate: 0, signals: [], usable: [] };
   }
 
-  const baseBad = gists.filter(endedBadly).length / turns;
+  const baseBad = items.filter(isBad).length / turns;
 
   const signals: FeatureSignal[] = [];
-  for (const feature of FEATURES) {
+  for (const feature of features) {
     const buckets = new Map<string, { n: number; bad: number }>();
-    for (const g of gists) {
-      const value = feature.of(g);
+    for (const item of items) {
+      const value = feature.of(item);
       const b = buckets.get(value) ?? { n: 0, bad: 0 };
       b.n += 1;
-      if (endedBadly(g)) b.bad += 1;
+      if (isBad(item)) b.bad += 1;
       buckets.set(value, b);
     }
     for (const [value, b] of buckets) {
