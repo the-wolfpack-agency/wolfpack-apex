@@ -81,6 +81,41 @@ import { SEMANTIC_SCORE_FLOOR } from "@/lib/brain/qdrant";
 // Types
 // ---------------------------------------------------------------------------
 
+/**
+ * WHAT KIND OF ANSWER THIS WAS, decided where it is produced.
+ *
+ * WHY THIS EXISTS. The gist worked out the kind by matching the answer's
+ * PROSE: "No results found for", "I could not find a clear answer", "I could
+ * not reach the search index". That is fragile in the way only prose is, and
+ * it cost real accuracy. Measured 2026-08-30:
+ *
+ *   - 14 outage answers were read as neutral, so somebody who suffered an
+ *     outage was scored as satisfied
+ *   - 187 model-written refusals matched no pattern at all, because the model
+ *     phrases "I do not know" differently every time
+ *
+ * The product knew all of it at the moment it answered and threw it away.
+ * Declaring it here means the gist reads a fact rather than re-deriving a
+ * guess, and a NEW kind of answer is a compile-time decision rather than
+ * something noticed months later in a spreadsheet.
+ *
+ * The prose patterns stay, as the reader for messages written before this
+ * existed. They are the legacy path now, not the primary one.
+ */
+export type AnswerOutcomeKind =
+  /** Answered from the corpus or a system. The ordinary case. */
+  | "answered"
+  /** Searched and genuinely held nothing. */
+  | "nothing_found"
+  /** Several documents fit and the product declined to guess between them. */
+  | "asked_which"
+  /** Something underneath was unreachable and the reader was told. */
+  | "degraded"
+  /** An answer was produced and the quality gate refused to show it. */
+  | "low_confidence"
+  /** A connected system is needed and is not connected. */
+  | "not_connected";
+
 export type AssistantSource =
   | "page_facts"
   | "knowledge_cache"
@@ -1673,7 +1708,9 @@ async function chatInner(
         choice_count: ask.choices.length,
         workflow_id: workflowId,
       });
-      const msgId = await dbSaveMessage(convId, "assistant", ask.answer, "tool", 0);
+      const msgId = await dbSaveMessage(convId, "assistant", ask.answer, "tool", 0, {
+        outcome_kind: "asked_which" satisfies AnswerOutcomeKind,
+      });
       await dbUpdateConversationStats(convId, 0);
       return {
         response: ask.answer,
@@ -1926,7 +1963,19 @@ async function chatInner(
       safeContent,
       "ai",
       aiResult.tokensUsed,
-      { grounded: groundedOn },
+      {
+        grounded: groundedOn,
+        /* DECLARED WHERE IT IS DECIDED. The quality verdict and the turn's
+           degradation are both known right here, and both used to be
+           recoverable only by matching the answer's prose afterwards. A
+           model-written refusal phrases itself differently every time, which
+           is why 187 of them were being read as ordinary answers. */
+        outcome_kind: (turnDegradation.any
+          ? "degraded"
+          : quality.verdict === "reject"
+            ? "low_confidence"
+            : "answered") satisfies AnswerOutcomeKind,
+      },
     );
     await dbUpdateConversationStats(convId, aiResult.tokensUsed);
 
@@ -2035,7 +2084,12 @@ async function chatInner(
       "- Features and capabilities\n\n" +
       "The more the team adds to the knowledge base, the more I can answer without AI. Try one of these instead:";
 
-  const msgId = await dbSaveMessage(convId, "assistant", fallbackMsg, "fallback", 0);
+  const msgId = await dbSaveMessage(convId, "assistant", fallbackMsg, "fallback", 0, {
+    /* The fallback says one of two different things and they are not the same
+       failure: an outage is broken plumbing, a genuine blank is a thin corpus,
+       and only the second is fixed by connecting more sources. */
+    outcome_kind: (degraded ? "degraded" : "nothing_found") satisfies AnswerOutcomeKind,
+  });
   await dbUpdateConversationStats(convId, 0);
 
   /* Bare-fallback path (no AI provider configured / AI call returned

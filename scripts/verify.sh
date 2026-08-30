@@ -50,6 +50,38 @@ stage_enabled() {
 declare -a STAGES
 declare -a STATUSES
 
+# COMPETING WORK MAKES THIS SUITE LIE, so it is measured before anything runs.
+#
+# On 2026-08-30 three separate verify runs reported between 29 and 32 failures
+# across MFA, polling, cron, search and the Tools API. Every one passed on a
+# clean re-run. The cause each time was a dev server or a Playwright browser
+# still up: this suite uses timers, several assertions have 5-second budgets,
+# and a loaded machine blows through them.
+#
+# The cost is not the wasted run. It is the minutes spent reading a failure
+# list that describes the machine rather than the code, which is exactly the
+# confusion this repo keeps building controls against.
+#
+# It WARNS rather than refuses. Sometimes you genuinely mean to have something
+# running, and a verifier that will not start is worse than one that explains
+# itself. The count is remembered so the summary can connect a failure to it,
+# which is the moment the information is actually wanted.
+BUSY_PROCS=0
+detect_competing_work() {
+  # Heavy, long-lived node work: a dev server, a Playwright run, another jest.
+  # Deliberately does NOT match this script or its own children.
+  BUSY_PROCS=$(pgrep -fl 'next dev|next-server|playwright|jest' 2>/dev/null \
+    | grep -v "verify.sh" \
+    | grep -cv '^$' || true)
+  if [ "${BUSY_PROCS:-0}" -gt 0 ]; then
+    echo "  [WARN] ${BUSY_PROCS} other node process(es) are running (dev server, Playwright, jest)."
+    echo "         This suite is timing-sensitive; a loaded machine produces failures that"
+    echo "         vanish on a clean run. Stop them first if anything below looks unrelated."
+    echo ""
+  fi
+}
+detect_competing_work
+
 run_stage() {
   local name="$1"; shift
   STAGES+=("$name")
@@ -214,6 +246,15 @@ for i in "${!STAGES[@]}"; do
   echo "  [${status}] ${STAGES[$i]}"
   [ "$status" = "FAIL" ] && failed=$((failed + 1))
 done
+
+# The hint at the moment it is wanted: a failure list plus a loaded machine is
+# the exact shape that wasted three runs on 2026-08-30.
+if [ "$failed" -gt 0 ] && [ "${BUSY_PROCS:-0}" -gt 0 ]; then
+  echo ""
+  echo "  NOTE: ${BUSY_PROCS} other node process(es) were running when this started."
+  echo "        Timing-sensitive suites fail under load. Stop them and re-run before"
+  echo "        investigating anything above."
+fi
 
 if [ "$failed" -eq 0 ]; then
   echo "=== verify: all ${#STAGES[@]} stages ok ==="
