@@ -1781,7 +1781,17 @@ export default function InstinctChat({
                         : undefined);
                     if (!widgetSpec) return null;
                     return (
-                      <ChatWidget spec={widgetSpec} workflowId={msg.workflowId} />
+                      <ChatWidget
+                        spec={widgetSpec}
+                        workflowId={msg.workflowId}
+                        /* Fills the composer rather than sending, the same
+                           way the fallback chips below do. Somebody almost
+                           always wants to change a word first. */
+                        onPickPrompt={(prompt) => {
+                          setInput(prompt);
+                          setTimeout(() => inputRef.current?.focus(), 0);
+                        }}
+                      />
                     );
                   })()}
 

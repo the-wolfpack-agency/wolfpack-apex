@@ -1150,3 +1150,114 @@ a:hover { color: var(--wp-gold-hover); }
   max-width: 68ch;
 }
 .wp-cost-compounds strong { color: var(--wp-text, #e8eaed); font-weight: 600; }
+
+/* WHAT THIS PRODUCT CAN DO, in the chat.
+   Replaces sixty bullets of markdown. The starters lead because they are the
+   only part most people need; the catalogue is reference and collapses. */
+.wp-cap { display: flex; flex-direction: column; gap: 1.25rem; margin-top: 0.5rem; }
+.wp-cap-head {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--wp-text-muted, #929cad);
+  margin: 0 0 0.625rem;
+}
+.wp-cap-starters { display: grid; gap: 0.5rem; }
+/* Two up where there is room, so three starters read as a set of choices
+   rather than a list to work through. */
+@media (min-width: 34rem) {
+  .wp-cap-starters { grid-template-columns: 1fr 1fr; }
+}
+.wp-cap-starter {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1875rem;
+  text-align: left;
+  padding: 0.75rem 0.875rem;
+  border-radius: 0.625rem;
+  border: 1px solid var(--wp-dark-border, rgba(255, 255, 255, 0.12));
+  background: var(--wp-dark-surface-2, rgba(255, 255, 255, 0.03));
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease, transform 120ms ease;
+}
+.wp-cap-starter:hover {
+  border-color: var(--wp-accent, #6c8cff);
+  background: var(--wp-dark-surface-3, rgba(255, 255, 255, 0.06));
+}
+.wp-cap-starter:active { transform: translateY(1px); }
+.wp-cap-starter:focus-visible { outline: 2px solid var(--wp-accent, #6c8cff); outline-offset: 2px; }
+.wp-cap-starter-prompt { font-size: 0.875rem; font-weight: 600; color: var(--wp-text, #e8eaed); }
+.wp-cap-starter-why { font-size: 0.75rem; line-height: 1.45; color: var(--wp-text-muted, #929cad); }
+
+.wp-cap-routines { display: flex; flex-direction: column; gap: 0.375rem; }
+.wp-cap-routine {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+  text-align: left;
+  padding: 0.5rem 0.625rem;
+  border-radius: 0.5rem;
+  border: 1px solid transparent;
+  background: transparent;
+  cursor: pointer;
+}
+.wp-cap-routine:hover {
+  border-color: var(--wp-dark-border, rgba(255, 255, 255, 0.12));
+  background: var(--wp-dark-surface-2, rgba(255, 255, 255, 0.03));
+}
+.wp-cap-routine:focus-visible { outline: 2px solid var(--wp-accent, #6c8cff); outline-offset: 2px; }
+.wp-cap-cmd {
+  font-family: var(--wp-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.8125rem;
+  color: var(--wp-accent, #6c8cff);
+  white-space: nowrap;
+}
+.wp-cap-routine-desc { font-size: 0.8125rem; color: var(--wp-text-muted, #929cad); }
+.wp-cap-note { font-size: 0.75rem; line-height: 1.5; color: var(--wp-text-muted, #929cad); margin: 0.625rem 0 0; }
+
+.wp-cap-groups { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.25rem; }
+.wp-cap-group-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  gap: 0.75rem;
+  padding: 0.5rem 0.625rem;
+  border-radius: 0.5rem;
+  border: 1px solid transparent;
+  background: transparent;
+  font-size: 0.8125rem;
+  color: var(--wp-text, #e8eaed);
+  cursor: pointer;
+}
+.wp-cap-group-toggle:hover {
+  border-color: var(--wp-dark-border, rgba(255, 255, 255, 0.12));
+  background: var(--wp-dark-surface-2, rgba(255, 255, 255, 0.03));
+}
+.wp-cap-group-toggle:focus-visible { outline: 2px solid var(--wp-accent, #6c8cff); outline-offset: 2px; }
+.wp-cap-count {
+  font-size: 0.6875rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--wp-text-muted, #929cad);
+  border: 1px solid var(--wp-dark-border, rgba(255, 255, 255, 0.12));
+  border-radius: 999px;
+  padding: 0.0625rem 0.4375rem;
+}
+.wp-cap-items {
+  margin: 0.25rem 0 0.5rem;
+  padding-left: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3125rem;
+}
+.wp-cap-items li { font-size: 0.8125rem; line-height: 1.5; color: var(--wp-text-muted, #929cad); }
+.wp-cap-invite {
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  color: var(--wp-text-muted, #929cad);
+  margin: 0;
+  padding-top: 0.875rem;
+  border-top: 1px solid var(--wp-dark-border, rgba(255, 255, 255, 0.12));
+}

@@ -30,6 +30,7 @@ import { FxWidget } from "@/components/widgets/FxWidget";
 import { UploadToBrainWidget } from "@/components/widgets/UploadToBrainWidget";
 import { MeetingPrepWidget } from "@/components/widgets/MeetingPrepWidget";
 import { FeedbackWidget } from "@/components/widgets/FeedbackWidget";
+import CapabilitiesWidget from "@/components/widgets/CapabilitiesWidget";
 import { TimeLogWidget } from "@/components/widgets/TimeLogWidget";
 import { ScanReceiptWidget } from "@/components/widgets/ScanReceiptWidget";
 import { ScanInvoiceWidget } from "@/components/widgets/ScanInvoiceWidget";
@@ -40,13 +41,22 @@ import { PilotStatusWidget } from "@/components/widgets/PilotStatusWidget";
 
 export interface ChatWidgetProps {
   spec: WidgetSpec;
+  /**
+   * Puts a sentence in the composer, for widgets that offer one.
+   *
+   * The conventions note that there is no programmatic re-prompt API, and this
+   * is deliberately not one: it fills the box rather than sending, matching
+   * the fallback chips already in the chat. Somebody almost always wants to
+   * change a word first, and sending on their behalf takes that away.
+   */
+  onPickPrompt?: (prompt: string) => void;
   /** Per-turn correlation id. Forwarded to every renderer so its
    *  client-side interaction analytics events join the same funnel
    *  as the originating chat() turn. */
   workflowId?: string;
 }
 
-export function ChatWidget({ spec, workflowId }: ChatWidgetProps) {
+export function ChatWidget({ spec, workflowId, onPickPrompt }: ChatWidgetProps) {
   if (!spec || typeof spec !== "object") return null;
   switch (spec.kind) {
     case "calendar":
@@ -81,6 +91,10 @@ export function ChatWidget({ spec, workflowId }: ChatWidgetProps) {
       return <MeetingPrepWidget spec={spec} workflowId={workflowId} />;
     case "feedback":
       return <FeedbackWidget spec={spec} workflowId={workflowId} />;
+    case "capabilities":
+      return (
+        <CapabilitiesWidget spec={spec} workflowId={workflowId} onPickPrompt={onPickPrompt} />
+      );
     case "time_log":
       /* Was missing from the switch since TimeLogWidget shipped on
          2026-05-20 — the log_time tool emitted the spec but the
