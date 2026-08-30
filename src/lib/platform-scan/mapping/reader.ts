@@ -194,6 +194,22 @@ export function judgeForm(form: HarvestedForm): MappedForm {
 export interface SurfaceReaderOptions {
   /** Injected so a test can drive time without waiting. */
   now?: () => number;
+  /**
+   * LET THE PAGE FINISH RENDERING BEFORE READING IT.
+   *
+   * goto resolves on load, and a client-side app draws its navigation after
+   * hydration. Reading immediately harvests the empty shell: measured on this
+   * product, the entry page reported ZERO links where it has 39, so the walk
+   * ended after one surface and called itself complete.
+   *
+   * That is the worst shape of failure for a map, because it looks like a
+   * finished run of a system with nothing in it.
+   *
+   * createSpecDiffBrowser already exposes a settle hook for exactly this, so
+   * the caller passes it in rather than this file inventing a second answer to
+   * a question the product has already answered.
+   */
+  settle?: (page: ScanPage) => Promise<void>;
 }
 
 /**
@@ -208,6 +224,26 @@ export async function createSurfaceReader(
 ): Promise<SurfaceReader> {
   const now = opts.now ?? (() => Date.now());
 
+  /* A BUNDLER HELPER THAT DOES NOT EXIST IN A BROWSER.
+   *
+   * esbuild, which tsx uses, wraps named functions in a __name() call to keep
+   * their names for stack traces. When such a function is handed to
+   * page.evaluate the call goes with it and the page throws
+   * "ReferenceError: __name is not defined", so every read returns nothing.
+   *
+   * It cost two runs today before being recognised, and it is invisible in a
+   * unit test because jsdom calls harvestSurface directly with no bundler in
+   * between. Defended here rather than in each caller, since any bundler with
+   * a name-preserving transform reintroduces it.
+   *
+   * The shim is a no-op identity function, and it is defined only if absent so
+   * a page that has its own is left alone. Written with no named functions
+   * inside, or it would need the very helper it is installing. */
+  await page.addInitScript(() => {
+    const g = globalThis as unknown as { __name?: (fn: unknown) => unknown };
+    if (!g.__name) g.__name = (fn: unknown) => fn;
+  });
+
   /* BEFORE THE FIRST NAVIGATION, not per page. A floor installed after a
      goto would leave the first surface unprotected, which is the one most
      likely to be somebody's dashboard. */
@@ -217,6 +253,7 @@ export async function createSurfaceReader(
     async read(url: string): Promise<ReadSurface> {
       const started = now();
       const response = await page.goto(url);
+      if (opts.settle) await opts.settle(page);
       const harvested = await page.evaluate(harvestSurface);
       return {
         url,
