@@ -39,13 +39,32 @@ export type QuestionShape =
   /** Anything else somebody types. */
   | "other";
 
-/** Where the answer came from. Mirrors the stored source, which is a closed set. */
+/**
+ * Where the answer came from.
+ *
+ * MIRRORS AssistantSource IN src/lib/assistant.ts, AND A TEST ENFORCES THAT.
+ * The first version listed six of the product's ten sources, so user_qa_cache,
+ * analytics, meeting_transcripts and broadcast all collapsed into "other":
+ * 55 turns in the 90-day run, invisible as themselves.
+ *
+ * That is the gist quietly losing resolution, which is the failure mode that
+ * matters most for something meant to compound. A signal it cannot name is a
+ * signal it can never learn from, and nothing would have said so.
+ *
+ * "other" survives as a deliberate catch-all for a source added to the product
+ * and not yet reflected here, so a new source degrades rather than throwing.
+ * The guardrail is what stops it staying degraded.
+ */
 export type AnswerOrigin =
   | "brain"
   | "tool"
   | "ai"
   | "knowledge_cache"
+  | "user_qa_cache"
   | "page_facts"
+  | "analytics"
+  | "meeting_transcripts"
+  | "broadcast"
   | "fallback"
   | "other";
 
@@ -54,6 +73,21 @@ export type LengthBand = "none" | "short" | "medium" | "long";
 
 /** What happened next, which is the thing being predicted. */
 export type TurnOutcome =
+  /**
+   * THE PRODUCT SAID IT DID NOT KNOW WHICH DOCUMENT WAS MEANT, AND ASKED.
+   *
+   * Added 2026-08-30 because without it the gist could not tell an honest
+   * question from a silent guess. "How much do we owe upfront?" used to quote
+   * a chauffeur invoice with a dollar figure; it now names the candidates and
+   * asks. To the previous vocabulary those two are identical, since neither is
+   * a dead end and neither is a re-ask, so the improvement was invisible to
+   * the thing that is supposed to notice improvements.
+   *
+   * That is the same failure class the answer path keeps hitting, one level
+   * up: two different situations spelled the same way. A gist that cannot see
+   * the difference cannot learn to prefer the honest one.
+   */
+  | "asked_which"
   /** The answer admitted having nothing and the person never returned. */
   | "dead_end"
   /** The answer had nothing but the person pushed on. */
@@ -80,9 +114,21 @@ export interface TurnGist {
 /** The declared vocabularies, exported so a test can hold the gist to them. */
 export const VOCABULARY = {
   shape: ["content", "existence", "action", "other"] as QuestionShape[],
-  origin: ["brain", "tool", "ai", "knowledge_cache", "page_facts", "fallback", "other"] as AnswerOrigin[],
+  origin: [
+    "brain",
+    "tool",
+    "ai",
+    "knowledge_cache",
+    "user_qa_cache",
+    "page_facts",
+    "analytics",
+    "meeting_transcripts",
+    "broadcast",
+    "fallback",
+    "other",
+  ] as AnswerOrigin[],
   band: ["none", "short", "medium", "long"] as LengthBand[],
-  outcome: ["dead_end", "pushed_past", "re_asked", "continued", "single_turn"] as TurnOutcome[],
+  outcome: ["asked_which", "dead_end", "pushed_past", "re_asked", "continued", "single_turn"] as TurnOutcome[],
 } as const;
 
 export function lengthBand(text: string): LengthBand {

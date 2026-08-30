@@ -8,7 +8,13 @@
  */
 
 import { query } from "@/lib/db";
-import { isMiss, similarity, REASK_WINDOW_SECONDS, REASK_SIMILARITY } from "@/lib/insights/answer-outcomes";
+import {
+  isMiss,
+  isAskedWhich,
+  similarity,
+  REASK_WINDOW_SECONDS,
+  REASK_SIMILARITY,
+} from "@/lib/insights/answer-outcomes";
 import { matchDocumentQuestion } from "@/lib/assistant/tools/search";
 import { isQuestionShaped } from "@/lib/brain/question-terms";
 import {
@@ -90,7 +96,13 @@ export function gistsFrom(rows: Row[]): TurnGist[] {
       }
 
       let outcome: TurnOutcome;
-      if (reAsked) outcome = "re_asked";
+      /* ASKED FIRST, and before re_asked deliberately. Somebody who is asked
+         "which of these did you mean" and then names one has been served
+         correctly, and their next message is a REPLY rather than a retry. It
+         will often look like a rephrase, so classifying the ask first stops a
+         working disambiguation being recorded as a failure. */
+      if (isAskedWhich(answer.content)) outcome = "asked_which";
+      else if (reAsked) outcome = "re_asked";
       else if (admittedMiss && !laterUser) outcome = "dead_end";
       else if (admittedMiss && laterUser) outcome = "pushed_past";
       else if (laterUser) outcome = "continued";

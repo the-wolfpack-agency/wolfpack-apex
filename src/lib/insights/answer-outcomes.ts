@@ -61,10 +61,33 @@ export const OUTAGE_PATTERNS: RegExp[] = [
   /I could not reach the model that writes answers/i,
 ];
 
+/**
+ * The product asking WHICH document was meant.
+ *
+ * Not a miss. A miss is "I have nothing"; this is "I have several and I will
+ * not guess between them", which is the correct answer to a question with no
+ * subject. Classified apart so an honest question is never counted as a
+ * failure: doing so would teach every downstream measure to prefer the
+ * confident wrong answer it replaced.
+ */
+export const ASKED_WHICH_PATTERNS: RegExp[] = [
+  /the closest things I hold are/i,
+  /the closest thing I hold is/i,
+];
+
+export function isAskedWhich(text: string): boolean {
+  const t = (text ?? "").trim();
+  return t.length > 0 && ASKED_WHICH_PATTERNS.some((r) => r.test(t));
+}
+
 export function isMiss(text: string): boolean {
   const t = (text ?? "").trim();
   if (!t) return false;
   if (OUTAGE_PATTERNS.some((r) => r.test(t))) return false;
+  /* Asking which is not admitting nothing, and the two overlap in wording:
+     the ask opens "I could not find a clear answer", which reads like a miss
+     and is the opposite of one. */
+  if (isAskedWhich(t)) return false;
   return MISS_PATTERNS.some((r) => r.test(t));
 }
 
