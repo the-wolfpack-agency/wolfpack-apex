@@ -67,3 +67,53 @@ describe("what the playbook promises, the product does", () => {
     expect(PLAYBOOK_UPDATED >= "2026-08-30").toBe(true);
   });
 });
+
+/**
+ * WHAT WE ASK A CLIENT FOR IS A PROMISE ABOUT WHAT WE WILL SEE.
+ *
+ * The playbook now asks for a Copilot usage export. Microsoft offers two
+ * Copilot surfaces and they sit on opposite sides of the line this product
+ * sells on:
+ *
+ *   getMicrosoft365CopilotUsageUserDetail   counts and dates, no content
+ *   getAllEnterpriseInteractions            full prompts and replies
+ *
+ * The second is exactly what the gist argument says to refuse, and refusing it
+ * is the pitch rather than a limitation. If somebody later "improves" the
+ * playbook by asking for richer data, this fails: a document that quietly
+ * starts asking for prompt text has changed what we are, not what we collect.
+ */
+describe("the Copilot ask stays on the safe side of the line", () => {
+  it("asks for the usage export", () => {
+    expect(CLIENT_DEPLOYMENT_PLAYBOOK).toMatch(/Copilot usage/i);
+    expect(CLIENT_DEPLOYMENT_PLAYBOOK).toMatch(/CSV export/i);
+  });
+
+  /* THE ONE THAT MATTERS. Says out loud that no prompt or response text is
+     involved, because a client will ask and the answer must be in writing. */
+  it("states that it carries no prompt or response text", () => {
+    expect(CLIENT_DEPLOYMENT_PLAYBOOK).toMatch(/No prompt text and no\s+response text/i);
+  });
+
+  it("says we deliberately do not ask for the interaction API", () => {
+    expect(CLIENT_DEPLOYMENT_PLAYBOOK).toMatch(/deliberately do not ask for it/i);
+  });
+
+  /* An export needs no consent grant; the API needs tenant-wide admin consent.
+     Bundling the second into the Phase 1 grant is the mistake this guards. */
+  it("asks for the export rather than the scope, and explains why", () => {
+    expect(CLIENT_DEPLOYMENT_PLAYBOOK).toMatch(/Reports\.Read\.All/);
+    expect(CLIENT_DEPLOYMENT_PLAYBOOK).toMatch(/tenant-wide admin\s+consent/i);
+  });
+
+  /* The limitation that would otherwise disappoint somebody later. */
+  it("separates adoption data from decision data", () => {
+    expect(CLIENT_DEPLOYMENT_PLAYBOOK).toMatch(/adoption data, not decision data/i);
+  });
+
+  /* And never promises the thing it cannot deliver. */
+  it("does not claim the export shows what Copilot changed", () => {
+    expect(CLIENT_DEPLOYMENT_PLAYBOOK).not.toMatch(/getAllEnterpriseInteractions/);
+    expect(CLIENT_DEPLOYMENT_PLAYBOOK).not.toMatch(/AiEnterpriseInteraction/);
+  });
+});
