@@ -172,6 +172,7 @@ describe("coverage is stated before anything is claimed", () => {
     surfacesReached: 60,
     frontierRemaining: 340,
     skipped: [],
+    patterns: [],
     maxDepthReached: 4,
     stopReason: "page-budget",
     durationMs: 1000,
