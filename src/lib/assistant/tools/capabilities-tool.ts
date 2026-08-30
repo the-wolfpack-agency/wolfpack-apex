@@ -21,6 +21,7 @@
  * things they would otherwise do in five windows. A list that opens with 40
  * individual tools buries them, and the person goes back to doing it by hand.
  */
+import type { WidgetSpec } from "@/lib/assistant/widgets/types";
 import { z } from "zod";
 import { trackEvent } from "@/lib/analytics";
 import { registerTool } from "./registry";
@@ -487,10 +488,38 @@ export const capabilitiesTool: ToolDef<Params, CapabilitiesData> = {
       ...(ctx.workflowId ? { workflow_id: ctx.workflowId } : {}),
     });
 
+    /* THE SAME CONTENT, SHAPED SO SOMEBODY CAN ACT ON IT.
+     *
+     * The prose above stays and is still what a person reads if the widget
+     * cannot render: this product runs in a chat that has to degrade to text,
+     * and an answer that is only a widget is an answer that can vanish.
+     *
+     * But read end to end the prose is sixty bullets, and for the first screen
+     * somebody ever sees that is the whole job failed. They do not want the
+     * catalogue, they want one thing to try. So the widget leads with the
+     * openers, keeps whole jobs next, and collapses the catalogue behind the
+     * group it belongs to. Built from the SAME arrays the prose is built from,
+     * so the two cannot drift into describing different products. */
+    const widget: WidgetSpec = {
+      kind: "capabilities",
+      routines: routines.map((r) => ({ command: r.command, description: r.description })),
+      groups: (hasPersona(ctx.userRole) ? areaOrder.map((title) => ({ title })) : AREAS)
+        .map(({ title }) => ({
+          title,
+          items: (byArea.get(title) ?? []).map((i) => i.replace(/^- /, "")),
+        }))
+        .filter((g) => g.items.length > 0),
+      starters: openers.map((g) => ({ prompt: g.say[0], because: g.gives })),
+      fallbackInvitation:
+        "If none of that matches your job, describe your day instead: tell me what you do " +
+        "on a Monday, in order, and I will map it onto what I can and cannot do.",
+    };
+
     return {
       ok: true,
       data: { routineCount: routines.length, toolCount: usable.length, withheldCount },
       answer: lines.join("\n"),
+      widget,
     };
   },
 };
