@@ -110,3 +110,25 @@ describe("finding signal", () => {
     expect(EXCLUDED_AS_CIRCULAR).toContain("admittedMiss");
   });
 });
+
+/**
+ * HONESTY IS NOT AUTOMATICALLY A SUCCESS.
+ *
+ * asked_which and degraded are both the product telling the truth, and that is
+ * where the resemblance stops. Asking which document is the RIGHT answer to a
+ * vague question. An outage is the product failing somebody who asked a
+ * perfectly good one.
+ *
+ * The distinction matters because the gist is meant to teach: scoring them the
+ * same way would tell it either that outages are fine or that asking is a
+ * failure, and both would push the product in the wrong direction.
+ */
+describe("the two honest outcomes are scored differently", () => {
+  it("does not count asking which document as a bad ending", () => {
+    expect(endedBadly(gist({ outcome: "asked_which" }))).toBe(false);
+  });
+
+  it("counts an outage as a bad ending", () => {
+    expect(endedBadly(gist({ outcome: "degraded" }))).toBe(true);
+  });
+});

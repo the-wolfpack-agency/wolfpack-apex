@@ -48,6 +48,24 @@ export const MISS_PATTERNS: RegExp[] = [
   /I don't have a confident answer/i,
   /I do not have anything on that yet/i,
   /is not connected yet/i,
+  /* THE MODEL WRITES ITS OWN WAYS OF SAYING "I DO NOT KNOW", and the first
+   * version of this list only knew the deterministic ones. Found by walking
+   * every distinct answer in a 90-day window and reading the ones that sound
+   * like a failure but matched nothing:
+   *
+   *   "I cannot determine who runs engineering based on the information
+   *    provided."
+   *
+   * Those landed in single_turn and read as neutral, which means the measured
+   * bad rate for origin=ai (39.3%) was UNDERSTATED: the worst-performing
+   * origin was the one whose failures were hardest to see, because it is the
+   * only one that phrases them differently every time.
+   *
+   * Deliberately anchored on the refusal itself rather than on any topic, so
+   * a document that happens to contain "cannot determine" is not swept up. */
+  /\bI (?:cannot|can't|could not|couldn't) (?:determine|find|locate|tell)\b/i,
+  /\bbased on the (?:information|data) provided[,.]? I (?:cannot|can't|do not|don't)\b/i,
+  /\bthere (?:are|is) no (?:records?|results?|matching)\b/i,
 ];
 
 /**

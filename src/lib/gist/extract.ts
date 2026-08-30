@@ -11,6 +11,7 @@ import { query } from "@/lib/db";
 import {
   isMiss,
   isAskedWhich,
+  isOutage,
   similarity,
   REASK_WINDOW_SECONDS,
   REASK_SIMILARITY,
@@ -101,7 +102,11 @@ export function gistsFrom(rows: Row[]): TurnGist[] {
          correctly, and their next message is a REPLY rather than a retry. It
          will often look like a rephrase, so classifying the ask first stops a
          working disambiguation being recorded as a failure. */
-      if (isAskedWhich(answer.content)) outcome = "asked_which";
+      /* An outage is checked FIRST. It is the only outcome that describes the
+         product breaking rather than the corpus being thin, and its wording
+         overlaps with both of the others. */
+      if (isOutage(answer.content)) outcome = "degraded";
+      else if (isAskedWhich(answer.content)) outcome = "asked_which";
       else if (reAsked) outcome = "re_asked";
       else if (admittedMiss && !laterUser) outcome = "dead_end";
       else if (admittedMiss && laterUser) outcome = "pushed_past";
