@@ -31,6 +31,7 @@ import { withSecret, scrubSecret } from "@/lib/cli/scrub-secret";
 import { createSurfaceReader } from "@/lib/platform-scan/mapping/reader";
 import { walkSystem } from "@/lib/platform-scan/mapping/walk";
 import { inventoryForms } from "@/lib/platform-scan/mapping/form-inventory";
+import { inferEntities } from "@/lib/platform-scan/mapping/entities";
 import type { ScanPage } from "@/lib/platform-scan/browser/capture";
 
 const arg = (name: string): string | null => {
@@ -209,10 +210,33 @@ if (!baseUrl || !authorisedBy) {
       }
     }
 
-    const tables = surfaces.flatMap((s) => s.tables);
-    console.log(`\nWhat the system manages: ${tables.length} tables`);
-    for (const t of tables.slice(0, 6)) {
-      console.log(`  ${(t.caption ?? "untitled").slice(0, 30).padEnd(30)} ${t.columns.slice(0, 5).join(", ").slice(0, 60)}`);
+    /* WHAT THE SYSTEM MANAGES, AND NOT FROM THE TABLES.
+     *
+     * This used to print the tables directly, which on the real tenant meant
+     * nine rows reading "untitled  1, 2, 3, 4": the application lays its
+     * screens out with tables, so every one of them was furniture. Business
+     * objects come from the URL structure and the form fields now, both of
+     * which are names somebody chose. */
+    const entities = inferEntities(surfaces, coverage.patterns);
+    console.log(`\nWhat the system manages: ${entities.length} business objects`);
+    for (const e of entities.slice(0, 14)) {
+      const attrs = e.attributes.length > 0 ? e.attributes.slice(0, 4).join(", ") : "no fields observed";
+      console.log(
+        `  ${e.name.slice(0, 38).padEnd(38)} ${String(e.evidence.length).padStart(2)} screens  ${attrs.slice(0, 52)}`,
+      );
+    }
+
+    /* SAMPLED IS NOT THE SAME AS FOUND. Where a shape repeats, the walk opens
+       a couple and counts the rest, so the two numbers are printed together:
+       a reader can tell a small system from a sample of a large one. */
+    const sampled = coverage.patterns.filter((p) => p.visited < p.instances.length);
+    if (sampled.length > 0) {
+      console.log("\nRepeated screens, sampled rather than walked:");
+      for (const p of sampled.slice(0, 8)) {
+        console.log(
+          `  ${p.shape.slice(0, 44).padEnd(44)} ${String(p.instances.length).padStart(3)} exist, ${p.visited} opened`,
+        );
+      }
     }
 
     const byReason = new Map<string, number>();
