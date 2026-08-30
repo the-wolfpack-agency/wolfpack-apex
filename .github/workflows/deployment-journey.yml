@@ -81,6 +81,16 @@ jobs:
           SCENARIO_DOCUMENT: ${{ github.event.inputs.document }}
           SCENARIO_CONTAINS: ${{ github.event.inputs.contains }}
         run: npx playwright test tests/e2e/scenarios.spec.ts --workers=1 --reporter=line
+      - name: The welcome modal must not sit on top of the first answer
+        # A first visit autofocuses the composer, so somebody can type past the
+        # modal and get an answer underneath a backdrop that is still there.
+        # Every control on that answer then silently does nothing. Only a real
+        # browser can see it: hit-testing is the bug, and jsdom has no layout.
+        env:
+          PROD_URL: ${{ env.PROD_URL }}
+          JOURNEY_EMAIL: ${{ secrets.ADMIN_E2E_EMAIL }}
+          JOURNEY_PASSWORD: ${{ secrets.ADMIN_E2E_PASSWORD }}
+        run: npx playwright test tests/e2e/welcome-modal-does-not-block-the-answer.spec.ts --workers=1 --reporter=line
 
       - name: Keep the evidence
         if: always()
