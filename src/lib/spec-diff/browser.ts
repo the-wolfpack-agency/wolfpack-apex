@@ -70,7 +70,13 @@ export async function createSpecDiffBrowser(): Promise<SpecDiffBrowserHandle> {
     browser =
       source === "remote-cdp" && endpoint
         ? await chromium.connectOverCDP(endpoint, { timeout: 20_000 })
-        : await chromium.launch({ args: ["--no-sandbox", "--disable-dev-shm-usage"] });
+        : await chromium.launch({
+            /* Headed when a person has to interact with the page, which is how
+               a sign-in that cannot be scripted gets done. Off by default:
+               every other caller wants this invisible. */
+            headless: process.env.BROWSER_HEADED !== "1",
+            args: ["--no-sandbox", "--disable-dev-shm-usage"],
+          });
   } catch (err) {
     throw new BrowserUnavailableError(source, err);
   }
