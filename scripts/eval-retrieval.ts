@@ -32,6 +32,12 @@
  */
 import { readFileSync } from "node:fs";
 import { queryBrain } from "@/lib/brain/query";
+import { getAIClient } from "@/lib/ai/router";
+import {
+  EXPANSION_SYSTEM,
+  EXPANSION_MAX_TOKENS,
+  parseExpansion,
+} from "@/lib/brain/expand-query";
 import { isEmbeddingConfigured } from "@/lib/brain/embedder";
 import { query } from "@/lib/db";
 import { mapWithConcurrency } from "@/lib/search/providers/util";
@@ -86,12 +92,27 @@ async function main(): Promise<void> {
      serving from, and reusing the search helper rather than growing a second
      concurrency primitive. */
   const EVAL_CONCURRENCY = 6;
+  /* EXPAND=1 measures the rewrite path. Off by default so the baseline is the
+     product as it ships, and a comparison is two runs of the same command. */
+  const expanding = process.env.EXPAND === "1";
+  const expand = async (question: string): Promise<string> => {
+    const res = await getAIClient().complete({
+      messages: [{ role: "user", content: question }],
+      system: EXPANSION_SYSTEM,
+      max_tokens: EXPANSION_MAX_TOKENS,
+      model_tier: "cheap",
+      metadata: { feature: "brain.query_expansion" },
+    });
+    return parseExpansion(res.content, question);
+  };
+
   const results = await mapWithConcurrency(pairs, EVAL_CONCURRENCY, async (p) => {
     const r = await queryBrain({
       userId: me.id,
       userRole: me.role,
       query: p.question,
       limit: 8,
+      ...(expanding ? { expand } : {}),
     });
     return {
       question: p.question,
