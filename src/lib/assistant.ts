@@ -20,7 +20,8 @@ import {
 } from "@/lib/assistant/routines";
 import { matchSavedRoutine } from "@/lib/assistant/routines/saved";
 import { searchKnowledge, saveAnswer } from "@/lib/knowledge";
-import { queryBrain, markCited as markBrainCited } from "@/lib/brain/query";
+import { markCited as markBrainCited } from "@/lib/brain/query";
+import { retrieve } from "@/lib/brain/retrieve";
 import { judgeRelevance, RELEVANCE_MATERIAL_PER_HIT } from "@/lib/brain/relevance";
 import { redactText, NEVER_QUOTE_KINDS } from "@/lib/ai/redaction";
 import { looksTabular } from "@/lib/brain/query";
@@ -2652,7 +2653,20 @@ async function tryBrain(
 }> {
   const emptyContext: BrainContext = { hits: [], topScore: 0, topScoreIsSemantic: false };
   try {
-    const result = await queryBrain({
+    /* THE SAME ENTRY POINT THE EVAL GRADES.
+     *
+     * retrieve() owns the order of operations — retrieve, optionally judge,
+     * optionally ask again in other words — and the eval calls it too. While
+     * the assistant called queryBrain directly and the eval called something
+     * else, the eval graded a path the product does not take, which is how
+     * query expansion shipped unproven: its trigger is a judge rejection and
+     * the harness never judged.
+     *
+     * No judge and no expander passed here, so behaviour is byte-for-byte what
+     * it was: retrieve() with neither is plain retrieval. The judge still runs
+     * below, where it always has. This is the wiring, not the behaviour
+     * change, and the two are worth keeping separate. */
+    const { execution: result } = await retrieve({
       userId,
       userRole,
       query: message,
