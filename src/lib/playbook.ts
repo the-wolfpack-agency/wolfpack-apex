@@ -19,7 +19,7 @@
  */
 
 /** Shown on the page so a reader knows how current this is. */
-export const PLAYBOOK_UPDATED = "2026-08-26";
+export const PLAYBOOK_UPDATED = "2026-08-30";
 
 /* A plain template literal, not String.raw: raw strings do not process escape
    sequences, so the escaped backticks this content needs would have rendered
@@ -74,6 +74,20 @@ answered from their own material, with the document named.
 3. Sync. Interrupted runs resume rather than restart; throttling is waited out.
 4. Confirm with \`npx tsx scripts/prompt-transcript.ts --file <their questions>\`,
    run once per persona.
+
+**What they can ask, as of 2026-08-30.** Three shapes, and the difference
+between them is the difference between a search box and an assistant:
+
+| They say | They get |
+| --- | --- |
+| "what does the SOW say about payment" | The clause, quoted, with the document named |
+| "summarise the onboarding document" | Prose across the whole document |
+| "what documents do we have about training" | A browsable list |
+
+The middle row is new. Until this week, asking for a summary returned a list of
+filenames: somebody who asked for a summary received a filing cabinet. Asking a
+document a question and asking the library what it holds are different
+questions, and they now get differently shaped answers.
 
 **Done when.** A person in each persona asks five questions from their own work
 and gets answers from their own documents, and a question they should not be
@@ -419,6 +433,28 @@ answer below is a thing that exists in the product today rather than something
 we would build if asked. Where the honest answer is a boundary, it is stated as
 a boundary.
 
+### When it goes wrong
+
+**What happens if your system is down when we ask something?**
+The answer names what could not be reached, says plainly that nothing has been
+lost and nothing needs re-uploading, and puts the fault on our side rather than
+on the question. Before that, a brief failure is simply retried: most throttles
+and connection blips clear in under a second and never reach a person.
+
+**How would we know the difference between "you have nothing on that" and "your
+search is broken"?**
+Because we say which. That distinction is the single failure this product has
+had to fix most often, in four separate places, and it is now the thing every
+number on the client dashboard is written to preserve. Where a check cannot be
+evidenced as running, the page says so instead of showing a clean-looking zero.
+
+**Somebody will paste a card number or an ID into the chat. Then what?**
+It is removed before the prompt leaves our system, so no model or outside
+service receives it, and the person is told that it was. If the message was
+otherwise a real question, the question is still answered. Tested with a card
+number, a national ID, bank details and an API key, including pasted alongside
+a genuine question.
+
 ### Their data
 
 **Where does our data live, and is it mixed in with your other clients?**
@@ -568,9 +604,17 @@ another.
 | \`npm run models:drift\` | Has anything moved since last time |
 | \`scripts/prompt-transcript.ts\` | What does a person actually see |
 | \`npm run scan:tenant-isolation\` | Can one client's data reach another |
+| \`scripts/probe-outage.sh\` | What a person is told when a dependency is down |
 
 The transcript is the one people skip and the one that finds the problems. Every
 answer-quality bug this month was found by reading an answer, not by a test.
+
+The outage probe is new, and it exists because the same was true of failures.
+Nothing had ever checked what a person sees when a dependency is down, and the
+answer turned out to be that the product told them their documents were
+missing. It points a dependency at a closed port so the failure is real on the
+real code path, and it fails if any degraded case invites somebody to
+re-upload.
 
 ## How the model spend is governed
 
@@ -590,7 +634,18 @@ answer-quality bug this month was found by reading an answer, not by a test.
 - Answers that cannot be grounded are refused rather than guessed.
 - Every model call is redacted, budgeted and audited at one place in the code.
 - Nothing is written to their systems without a person confirming it.
-- If a system is unavailable, the answer says so. It does not invent one.
+- If a system is unavailable, the answer says so, names what could not be read,
+  and states that nothing has been lost and nothing needs re-uploading. Worth
+  saying plainly that this line was aspirational until 2026-08-30: with the
+  model provider unreachable the product used to reply "I don't have
+  information on that yet, you can help me learn by adding it to the Knowledge
+  Base" about a document it was holding. It is now true, tested by
+  \`scripts/probe-outage.sh\`, and that check runs before a phase ships.
+- A brief failure is retried before anybody sees it. Throttling and connection
+  blips clear in under a second and no longer end somebody's question.
+- Something pasted by mistake never reaches a model. A card number, national ID
+  or API key typed into a question is removed before the prompt leaves the
+  system, and the question is still answered from their documents.
 
 ## When to stop and re-plan
 
