@@ -34,6 +34,7 @@ import { inventoryForms } from "@/lib/platform-scan/mapping/form-inventory";
 import { inferEntities } from "@/lib/platform-scan/mapping/entities";
 import { buildSystemMap } from "@/lib/platform-scan/mapping/explore";
 import { describeIntegrations } from "@/lib/platform-scan/mapping/integrations";
+import { assessWalkedTraffic } from "@/lib/platform-scan/mapping/assess";
 import { saveWalkedMap } from "@/lib/platform-scan/mapping/store";
 import { trackEvent } from "@/lib/analytics";
 import type { ScanPage } from "@/lib/platform-scan/browser/capture";
@@ -256,6 +257,26 @@ if (!baseUrl || !authorisedBy) {
     if (trafficTruncated) {
       console.log("  (recording hit its cap, so this list is a floor rather than a total)");
     }
+
+    /* WHAT NOTHING ACCOUNTS FOR. The same detector the compliance scan uses,
+       given a whole system instead of one page. A host contacted only by the
+       settings screen has been invisible to it for the life of the product. */
+    const assessment = assessWalkedTraffic({
+      entryUrl: baseUrl,
+      observations: reader.observations?.() ?? [],
+      entryHeaders: reader.entryHeaders?.() ?? null,
+      trafficObserved,
+      trafficTruncated,
+      nowIso: new Date().toISOString(),
+    });
+    const notable = assessment.report.findings.filter((f) => f.severity !== "low");
+    if (notable.length > 0) {
+      console.log(`\nContacted, and nothing accounts for it: ${notable.length}`);
+      for (const f of notable.slice(0, 8)) {
+        console.log(`  ${f.severity.padEnd(8)} ${f.host.slice(0, 38).padEnd(38)} ${f.summary.slice(0, 70)}`);
+      }
+    }
+    for (const c of assessment.report.caveats) console.log(`  note: ${c.slice(0, 150)}`);
 
     const byReason = new Map<string, number>();
     for (const s of coverage.skipped) byReason.set(s.reason, (byReason.get(s.reason) ?? 0) + 1);
