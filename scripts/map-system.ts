@@ -26,6 +26,7 @@ export {};
 
 import { createSpecDiffBrowser } from "@/lib/spec-diff/browser";
 import { promptSecret } from "@/lib/cli/prompt-secret";
+import { waitForEnter } from "@/lib/cli/wait-for-enter";
 import { withSecret, scrubSecret } from "@/lib/cli/scrub-secret";
 import { createSurfaceReader } from "@/lib/platform-scan/mapping/reader";
 import { walkSystem } from "@/lib/platform-scan/mapping/walk";
@@ -42,7 +43,8 @@ const authorisedBy = arg("authorised-by");
 if (!baseUrl || !authorisedBy) {
   console.error(
     'usage: npx tsx scripts/map-system.ts <baseUrl> --authorised-by "<name>"\n' +
-      "        [--email <user> --login-path /login]\n\n" +
+      "        [--sign-in]  open a browser, log in yourself, press Enter\n" +
+      "        [--email <user> --login-path /login]  scripted, simple logins only\n\n" +
       "The password is typed at a prompt, or read from MAP_PASSWORD. It is\n" +
       "deliberately not a flag: argv is visible to every process on the machine.\n\n" +
       "--authorised-by is required. This sends traffic to a real system and the\n" +
@@ -56,14 +58,37 @@ if (!baseUrl || !authorisedBy) {
   console.log(`Authorised by: ${authorisedBy}`);
   console.log("Read-only: no form is submitted, and every non-GET request is blocked.\n");
 
+  /* A person cannot sign in to a browser they cannot see. */
+  if (process.argv.includes("--sign-in")) process.env.BROWSER_HEADED = "1";
+
   const handle = await createSpecDiffBrowser();
   try {
     const page = (await handle.browser.newPage()) as unknown as ScanPage;
 
     const email = arg("email");
+    const signInByHand = process.argv.includes("--sign-in");
     let authenticated = false;
 
-    if (email) {
+    if (signInByHand) {
+      /* THE FLOW THAT WORKS EVERYWHERE, because it automates none of it.
+       *
+       * Cognito's login has no form element: four buttons of type="button"
+       * offering Google, Facebook, Microsoft or email, and only after
+       * choosing does an email field appear. Three attempts at selectors
+       * produced three different failures, none of them about mapping.
+       *
+       * It also means the password never enters this process, so there is
+       * nothing to prompt for and nothing to scrub out of an error. */
+      const p = page as unknown as { goto(u: string): Promise<unknown> };
+      await p.goto(baseUrl);
+      console.log(
+        "A browser window is open. Sign in there however you normally would,\n" +
+          "including any second factor, and navigate to the page you want mapped.\n",
+      );
+      await waitForEnter("Press Enter when you are signed in and ready: ");
+      authenticated = true;
+      console.log("");
+    } else if (email) {
       /* Asked for here, not taken from the command line. Typed input persists
          nowhere: not in history, not in argv, not in this repository. */
       const password = await promptSecret(`Password for ${email}: `, {
