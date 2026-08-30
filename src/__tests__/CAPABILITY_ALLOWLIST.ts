@@ -54,6 +54,7 @@ export const CAPABILITY_ALLOWLIST: readonly string[] = [
   "src/app/api/admin/brain/health/route.ts",
   "src/app/api/admin/insights/routing-coverage/route.ts",
   "src/app/api/admin/insights/degradation/route.ts",
+  "src/app/api/admin/gist/route.ts",
   "src/app/api/admin/templates/route.ts",
 
   // Provision health bot: authenticates inline via getUserFromRequest +
