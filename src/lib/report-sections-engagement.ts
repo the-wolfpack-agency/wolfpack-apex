@@ -21,6 +21,7 @@ import {
 import { queryAuditLog } from "@/lib/audit-log";
 import { listSystemProfiles } from "@/lib/platform-scan/profile/store";
 import { listWalkedMaps } from "@/lib/platform-scan/mapping/store";
+import { capabilityNote } from "@/lib/platform-scan/network/observations";
 import { listRecommendations } from "@/lib/platform-scan/recommend/store";
 import { pentestFindings } from "@/lib/platform-scan/pentest/findings";
 
@@ -192,6 +193,22 @@ async function walkedSection(ctx: ReportContext): Promise<string[]> {
         );
       }
       out.push(``);
+
+      /* WORTH ASKING, KEPT OUT OF THE SEVERITY. Some of these vendors also
+         sell session recording, which would capture what is on screen rather
+         than only which screens were used. A scan cannot see whether that is
+         switched on, so it asks instead of scoring. On a product the client
+         administers but does not control, these vendors are the SaaS
+         company's choice and the client usually does not know they are
+         there. */
+      const questions = m.integrations
+        .map((i) => ({ host: i.host, note: capabilityNote(i.host) }))
+        .filter((q): q is { host: string; note: string } => q.note !== null);
+      if (questions.length > 0) {
+        out.push(`**Worth asking whoever operates this system**`, ``);
+        for (const q of questions) out.push(`- ${q.note}`);
+        out.push(``);
+      }
     }
 
     if (m.entities.length > 0) {
