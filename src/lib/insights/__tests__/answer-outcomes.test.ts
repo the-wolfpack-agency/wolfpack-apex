@@ -1,0 +1,164 @@
+/**
+ * What happened to a person after the answer, derived rather than instrumented.
+ *
+ * THE GAP. The product emits 133 assistant events and every one describes what
+ * the SYSTEM did. Not one describes what the PERSON did in response, and the
+ * response is where frustration lives. That is why the customer-success view
+ * could only say "joined and has done nothing since": it was the only
+ * behavioural signal that existed.
+ *
+ * Measured on 90 days of production, 2026-08-30, through this module:
+ *
+ *     12,202 conversations   24,397 messages
+ *     misses 400   dead ends 387   followed up 13
+ *     re-asks 40   single-turn conversations 12,123   rated answers 3
+ *
+ * DERIVED IS THE POINT. Every figure comes from rows stored since day one. An
+ * event would start the count at zero today and know nothing about the last
+ * three months.
+ */
+
+import {
+  isMiss,
+  isOutage,
+  similarity,
+  summariseOutcomes,
+  MISS_PATTERNS,
+} from "@/lib/insights/answer-outcomes";
+
+function msg(
+  conversation_id: string,
+  role: string,
+  content: string,
+  minute: number,
+  rating: number | null = null,
+) {
+  return {
+    conversation_id,
+    role,
+    content,
+    rating,
+    created_at: new Date(Date.UTC(2026, 7, 30, 12, minute)).toISOString(),
+  };
+}
+
+/**
+ * THE FRAGILE PART, PINNED. This classifies by prose, so it breaks silently
+ * when somebody rewords an answer. These are the exact sentences the product
+ * produces today; if one changes, this fails and the pattern gets updated in
+ * the same commit rather than the metric quietly going to zero.
+ */
+describe("the sentences that mean we have nothing", () => {
+  it.each([
+    'No results found for "onboarding".',
+    "I don't have information on that yet. You can help me learn by adding it to the Knowledge Base",
+    "I don't have a confident answer for that. Could you rephrase",
+    "Salesforce is not connected yet, so I cannot check it.",
+  ])("counts %s as a miss", (text) => {
+    expect(isMiss(text)).toBe(true);
+  });
+
+  it.each([
+    "The payment terms are net 30 from invoice date.",
+    "Here's what the brain has on this: **SOW.pdf**",
+    "Found 3 results for \"training\".",
+    "",
+  ])("does not count %s as a miss", (text) => {
+    expect(isMiss(text)).toBe(false);
+  });
+
+  /* AN OUTAGE IS NOT A MISS, and counting them together would send somebody to
+     load more documents when the search index is down. */
+  it.each([
+    "I could not reach the search index just now, so I only looked at part of what you have.",
+    "I could not reach the model that writes answers just now",
+  ])("treats %s as an outage, not a gap in the corpus", (text) => {
+    expect(isOutage(text)).toBe(true);
+    expect(isMiss(text)).toBe(false);
+  });
+
+  it("has patterns, so a future edit cannot empty the list unnoticed", () => {
+    expect(MISS_PATTERNS.length).toBeGreaterThanOrEqual(4);
+  });
+});
+
+describe("recognising a question asked again", () => {
+  it("sees a rephrase even when the words move", () => {
+    expect(similarity("where is the wolfpack NDA doc", "provide me with the NDA doc")).toBeGreaterThan(
+      0.4,
+    );
+  });
+
+  it("does not call two different questions a rephrase", () => {
+    expect(similarity("what are the payment terms", "who runs engineering")).toBeLessThan(0.3);
+  });
+
+  it("handles empty input without dividing by zero", () => {
+    expect(similarity("", "anything")).toBe(0);
+    expect(similarity("anything", "")).toBe(0);
+  });
+});
+
+describe("what happened after the answer", () => {
+  /* THE NUMBER THAT MATTERS MOST. A miss nobody pushed past is a request
+     nobody filed, and it is invisible to every other signal. */
+  it("separates a miss somebody pushed past from one they walked away from", () => {
+    const rows = [
+      msg("a", "user", "what does the SOW say", 0),
+      msg("a", "assistant", 'No results found for "SOW".', 1),
+      msg("a", "user", "try the work order instead", 2),
+      msg("a", "assistant", "The payment terms are net 30.", 3),
+      msg("b", "user", "what is our leave policy", 0),
+      msg("b", "assistant", 'No results found for "leave policy".', 1),
+    ];
+    const o = summariseOutcomes(rows, 90);
+    expect(o.misses).toBe(2);
+    expect(o.deadEnds).toBe(1);
+    expect(o.missesFollowedUp).toBe(1);
+  });
+
+  it("counts a rephrase inside the window as a re-ask", () => {
+    const rows = [
+      msg("a", "user", "collect out RubyCar marketing emails", 0),
+      msg("a", "assistant", "Found 0 results.", 1),
+      msg("a", "user", "collect our RubyCar marketing emails", 2),
+    ];
+    const o = summariseOutcomes(rows, 90);
+    expect(o.reAsks).toBe(1);
+    expect(o.reAskConversations).toBe(1);
+  });
+
+  /* Somebody returning an hour later has thought of something new; that is not
+     a retry and counting it as one would inflate the signal. */
+  it("does not call a question an hour later a re-ask", () => {
+    const rows = [
+      msg("a", "user", "what are the payment terms", 0),
+      msg("a", "user", "what are the payment terms", 90),
+    ];
+    expect(summariseOutcomes(rows, 90).reAsks).toBe(0);
+  });
+
+  it("counts a conversation with one question as single-turn", () => {
+    const rows = [
+      msg("a", "user", "what are the payment terms", 0),
+      msg("a", "assistant", "Net 30.", 1),
+      msg("b", "user", "one", 0),
+      msg("b", "user", "two", 1),
+    ];
+    expect(summariseOutcomes(rows, 90).singleTurnConversations).toBe(1);
+  });
+
+  it("counts ratings, because a control nobody uses is worth knowing about", () => {
+    const rows = [
+      msg("a", "user", "q", 0),
+      msg("a", "assistant", "an answer", 1, 1),
+      msg("a", "assistant", "another", 2, null),
+    ];
+    expect(summariseOutcomes(rows, 90).ratedAnswers).toBe(1);
+  });
+
+  it("reports nothing rather than crashing on an empty window", () => {
+    const o = summariseOutcomes([], 90);
+    expect(o).toMatchObject({ readable: true, conversations: 0, misses: 0, deadEnds: 0 });
+  });
+});
