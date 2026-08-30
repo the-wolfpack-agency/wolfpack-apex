@@ -42,6 +42,24 @@ export interface LabelledPair {
    * and an eval set that breaks on a re-upload gets deleted rather than fixed.
    */
   expectFilename: string;
+  /**
+   * OTHER DOCUMENTS THAT WOULD ALSO BE A CORRECT ANSWER.
+   *
+   * Some questions genuinely have several right answers and scoring them
+   * against one is not strictness, it is a broken ruler. Found on 2026-08-30:
+   * "which hotels were surveyed in August" was labelled with a single file and
+   * counted as NEVER FOUND, while the corpus holds five August surveys:
+   *
+   *   Conrad Aug 10-14, Conrad Aug 17-21, Intercontinental Aug 10-14,
+   *   Ritz Carlton Las Colinas Aug 17-21, WO 8.10-8.17_All
+   *
+   * Retrieval was returning a correct document and being marked wrong for it,
+   * which is worse than having no eval: it sends somebody optimising a system
+   * that already works. A chunking change was nearly built to fix it.
+   *
+   * Optional, so every existing pair keeps its meaning untouched.
+   */
+  alsoAccept?: string[];
 }
 
 /** What retrieval returned, in order. */
@@ -84,7 +102,11 @@ export function gradeRetrieval(
 ): EvalReport {
   const outcomes: PairOutcome[] = pairs.map((pair) => {
     const results = run(pair.question);
-    const idx = results.findIndex((r) => matches(r.filename, pair.expectFilename));
+    /* Any acceptable document counts, and the FIRST one found decides the
+       rank: somebody asking a question with several right answers is served
+       by whichever arrives first, so that is what the rank should measure. */
+    const acceptable = [pair.expectFilename, ...(pair.alsoAccept ?? [])];
+    const idx = results.findIndex((r) => acceptable.some((a) => matches(r.filename, a)));
     return { pair, rank: idx === -1 ? null : idx + 1, found: idx !== -1 };
   });
 

@@ -179,3 +179,62 @@ describe("refusing to decide on too little evidence", () => {
     expect(judgeChange(small, big)).toBe("not_enough_evidence");
   });
 });
+
+/**
+ * A QUESTION WITH SEVERAL RIGHT ANSWERS NEEDS A RULER THAT KNOWS IT.
+ *
+ * Found on 2026-08-30. "Which hotels were surveyed in August" was labelled
+ * with one filename and scored as NEVER FOUND, while the corpus holds five
+ * August surveys: Conrad Aug 10-14, Conrad Aug 17-21, Intercontinental Aug
+ * 10-14, Ritz Carlton Las Colinas Aug 17-21, and WO 8.10-8.17_All.
+ *
+ * Retrieval was returning a correct document and being marked wrong for it.
+ * That is worse than having no eval, because it sends somebody optimising a
+ * system that already works: a tabular-chunking change was nearly built to
+ * fix a measurement error.
+ */
+describe("a question with several correct answers", () => {
+  const pair = {
+    question: "which hotels were surveyed in August",
+    expectFilename: "WO 8.10-8.17",
+    alsoAccept: ["Conrad Aug 10-14", "Conrad Aug 17-21", "Intercontinental Aug 10-14", "Ritz Carlton Las Colinas Aug 17-21"],
+  };
+
+  it("counts an alternative as found", () => {
+    const r = gradeRetrieval([pair], () => [
+      { filename: "Survey Data PCBA_101_Conrad Aug 17-21.xlsx" },
+    ]);
+    expect(r.outcomes[0].found).toBe(true);
+    expect(r.outcomes[0].rank).toBe(1);
+  });
+
+  /* Whichever acceptable document arrives FIRST decides the rank: somebody
+     asking is served by the first one, not by the one we happened to label. */
+  it("ranks by the first acceptable document, not the labelled one", () => {
+    const r = gradeRetrieval([pair], () => [
+      { filename: "Survey Data PCBA_101_Conrad Aug 10-14.xlsx" },
+      { filename: "Survey Data PCBA_WO 8.10-8.17_All.xlsx" },
+    ]);
+    expect(r.outcomes[0].rank).toBe(1);
+  });
+
+  it("still counts the originally labelled document", () => {
+    const r = gradeRetrieval([pair], () => [
+      { filename: "Survey Data PCBA_WO 8.10-8.17_All.xlsx" },
+    ]);
+    expect(r.outcomes[0].found).toBe(true);
+  });
+
+  /* And must not become a rubber stamp: a wrong document is still wrong. */
+  it("does not accept an unrelated document", () => {
+    const r = gradeRetrieval([pair], () => [{ filename: "viaPeople Work Order.pdf" }]);
+    expect(r.outcomes[0].found).toBe(false);
+  });
+
+  /* A pair with no alternatives behaves exactly as it always did. */
+  it("leaves a single-answer pair untouched", () => {
+    const strict = { question: "what are the payment terms", expectFilename: "viaPeople" };
+    expect(gradeRetrieval([strict], () => [{ filename: "Invoice.pdf" }]).outcomes[0].found).toBe(false);
+    expect(gradeRetrieval([strict], () => [{ filename: "viaPeople Work Order.pdf" }]).outcomes[0].found).toBe(true);
+  });
+});
