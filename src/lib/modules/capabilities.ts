@@ -119,32 +119,43 @@ const DOCUMENTS: ModuleCapability = {
       id: "documents.summarise",
       verb: "summarise",
       example: "summarize the onboarding document",
-      /* DECLARED AS IT BEHAVES, NOT AS IT READS. Measured returning a list:
-         "summarize the onboarding document" -> "Found 3 results" plus result
-         rows. Recording it as supported would make this file the second place
-         the truth is not. */
-      returns: "list",
-      /* STILL A GAP, AND THE FIRST ATTEMPT AT IT MADE THINGS WORSE.
+      /* PROMOTED 2026-08-30, AND THE THIRD ATTEMPT IS THE ONE THAT WORKED.
        *
-       * Stopping search from claiming the phrase, so it would reach retrieval,
-       * shipped and was validated against the deployed URL on 2026-08-29:
+       * Attempt one made search decline the phrase and expected retrieval to
+       * pick it up. It reached a model with no document context and asked the
+       * reader to paste a document the product already held. Reverted the same
+       * day, and this declaration correctly never moved.
        *
-       *   before  -> Found 3 results, plus three document rows in the widget
-       *   after   -> "I do not have anything on that yet, so I would rather
-       *              ask than guess."
+       * The cause was never the routing. Search's matcher did two jobs and
+       * only one was visible: it decided the route AND reduced the sentence to
+       * its topic. Removing the route silently removed the reduction, and
+       * keyword search ANDs its terms, so the leftover question verb had to
+       * appear literally in a chunk. "What does the viaPeople work order say"
+       * found nothing while "what is in the viaPeople work order" scored 0.900
+       * on that same document.
        *
-       * It fell through to a model with no document context rather than to
-       * retrieval, so it was reverted. A list is a worse answer than a summary
-       * and a far better one than nothing.
+       * The reduction now lives in brain/question-terms.ts, where retrieval
+       * uses it, and all three phrasings return the same document at 0.900.
        *
-       * This declaration never moved to `supported`, which is the contract
-       * doing its job: had it been promoted on the strength of the code change,
-       * the registry would have claimed a working summarise for the hours the
-       * regression was live. Promotion requires a measurement, and the
-       * measurement is what said no. */
-      status: "routes_elsewhere",
-      behavesLike: "documents.find",
-      because: "People ask for this constantly. Returns the matching documents instead.",
+       * MEASURED THROUGH THE REAL chat() PATH against the production database:
+       *
+       *   "summarize the viaPeople work order"
+       *     before  -> "Found 3 results", plus three rows in a widget
+       *     after   -> source=ai, prose naming the four services in the order
+       *
+       * A summary also declines the free quote-the-chunk path, because three
+       * excerpts are not a summary: that path answered with a filename, the
+       * words "chunk 2", and 500 characters from the middle of a subscription
+       * clause. Fact questions still take it, since a quote answers those
+       * exactly, for free, with the source visible.
+       *
+       * WHAT WOULD FALSIFY THIS. The content-questions-answer scenario runs
+       * against the deployed URL and asserts a summary is not a list. If it
+       * fails there, this entry comes back down rather than the scenario being
+       * loosened. */
+      returns: "synthesised",
+      status: "supported",
+      because: "People ask for this constantly, and it now answers from the document.",
     },
   ],
 };

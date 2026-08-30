@@ -108,44 +108,43 @@ const INTENT_RE =
  */
 const DOCUMENT_QUESTION_RE = new RegExp(
   [
-    /* "what does the SOW say about payment" */
-    String.raw`^\s*(?:what|whats|what's)\s+(?:do(?:es)?|did)\s+(?:the\s+|our\s+|my\s+|this\s+)?(?<saySubject>.+?)\s+say(?:\s+about\s+(?<sayAbout>.+?))?\s*[?.!]*\s*$`,
+    /* THESE TWO SURVIVE ONLY TO CATCH THE CONTAINER FORM.
+     *
+     * "what's in SharePoint about training" names the filing cabinet, and a
+     * list is exactly the right answer. "what's in the contract" names a
+     * document, and a list is exactly the wrong one. Both parse here; the
+     * extractor below releases the second to retrieval and keeps the first. */
+    String.raw`^ ?(?:what|whats|what's) (?:do(?:es)?|did) (?:the |our |my |this )?(?<saySubject>.+?) say(?: about (?<sayAbout>.+?))? ?[?.!]* ?$`,
+    String.raw`^ ?(?:what|whats|what's) (?:is )?in (?:the |our |my |this )?(?<inSubject>.+?)(?: about (?<inAbout>.+?))? ?[?.!]* ?$`,
     /* "what is in the SharePoint about training". The article is optional so
        "what is in SharePoint about training" lands here too, and the topic is
        captured rather than swallowed into the subject. */
-    String.raw`^\s*(?:what|whats|what's)\s+(?:is\s+)?in\s+(?:the\s+|our\s+|my\s+|this\s+)?(?<inSubject>.+?)(?:\s+about\s+(?<inAbout>.+?))?\s*[?.!]*\s*$`,
-    /* SUMMARISE STAYS HERE, AND THE ATTEMPT TO MOVE IT IS WORTH RECORDING.
+
+    /* SUMMARISE AND "WHAT DOES X SAY" ARE CONTENT QUESTIONS, NOT SEARCHES.
      *
-     * "summarize the onboarding document" returns a browsable LIST, so
-     * somebody who asked for a summary receives a filing cabinet. The obvious
-     * fix was to stop claiming it here and let it reach retrieval, which
-     * synthesises: the same corpus asked directly answers with figures and a
-     * citation.
+     * Both used to be captured here and handed to universal search, which
+     * returns a browsable LIST. Somebody who asks for a summary receives a
+     * filing cabinet.
      *
-     * That shipped, and validation against the deployed URL on 2026-08-29
-     * showed it made things WORSE, not better:
+     * THIS WAS TRIED ONCE AND REVERTED, AND THE REASON IT FAILED IS GONE.
+     * On 2026-08-29 declining sent these to a model with no document context,
+     * which then asked the reader to paste a document we already held. The
+     * cause was retrieval, not routing: at the time the Brain could not find a
+     * document by name at all.
      *
-     *   before  "summarize the onboarding document" -> Found 3 results, plus
-     *           three document rows in the results widget
-     *   after   -> "I do not have anything on that yet, so I would rather ask
-     *           than guess."
-     *   after   "summarise the SOW" -> "Provide the statement of work (SOW)
-     *           document or specify which SOW you are referring to, and I'll
-     *           summarize it for you."
+     * Since then filenames became searchable and weighted against semantic
+     * scores. Measured on 2026-08-30, the same queries now retrieve:
      *
-     * Declining did not route to retrieval. It fell through to a model answer
-     * with no document context at all, which then asked the reader to paste
-     * the document we already hold. Three relevant documents beat that.
+     *   "summarize the viaPeople work order"     5 hits, top 0.616, right doc
+     *   "what does the onboarding document say"  5 hits, top 0.409
+     *   "summarize the onboarding document"      2 hits, top 0.434
      *
-     * So the premise was wrong: reaching the Brain is not simply what happens
-     * when nothing else claims a sentence, and "what are the payment terms in
-     * our SOW?" gets there by some other route that "summarize the SOW" does
-     * not take. A real fix has to send summarise to retrieval EXPLICITLY
-     * rather than by omission, and that is a different change.
+     * All clear the 0.36 semantic floor, so retrieval has something to
+     * synthesise from where before it had nothing.
      *
-     * Reverted rather than left, because a list is a worse answer than a
-     * summary and a much better one than nothing. */
-    String.raw`^\s*summari[sz]e\s+(?:the\s+|our\s+|my\s+|this\s+)?(?<sumSubject>.+?)\s*[?.!]*\s*$`,
+     * EXISTENCE QUESTIONS STAY BELOW. A list IS the right answer to "what
+     * documents do we have about X", and moving those would break the one
+     * thing search is genuinely best at. */
     /* DO WE HOLD ANYTHING ABOUT THIS. The question somebody asks before they
        trust the product with a real one, and it reached nothing.
 
@@ -160,10 +159,10 @@ const DOCUMENT_QUESTION_RE = new RegExp(
        Both are existence questions, and search is the only thing that can
        answer one honestly, because it is the only thing that can see
        everything. */
-    String.raw`^\s*(?:what|which)\s+(?:documents?|docs?|files?|records?|papers?)\s+(?:do|does)\s+(?:we|i|the\s+team)\s+have\s+(?:on|about|for|regarding)\s+(?<haveAbout>.+?)\s*[?.!]*\s*$`,
-    String.raw`^\s*do\s+(?:we|i)\s+have\s+(?:anything|any\s+(?:documents?|docs?|files?|records?|info(?:rmation)?))\s+(?:on|about|for|regarding)\s+(?<anythingAbout>.+?)\s*[?.!]*\s*$`,
+    String.raw`^ ?(?:what|which) (?:documents?|docs?|files?|records?|papers?) (?:do|does) (?:we|i|the team) have (?:on|about|for|regarding) (?<haveAbout>.+?) ?[?.!]* ?$`,
+    String.raw`^ ?do (?:we|i) have (?:anything|any (?:documents?|docs?|files?|records?|info(?:rmation)?)) (?:on|about|for|regarding) (?<anythingAbout>.+?) ?[?.!]* ?$`,
     /* "is there anything on X", the same question phrased impersonally. */
-    String.raw`^\s*is\s+there\s+(?:anything|any\s+(?:documents?|docs?|files?|info(?:rmation)?))\s+(?:on|about|for|regarding)\s+(?<thereAbout>.+?)\s*[?.!]*\s*$`,
+    String.raw`^ ?is there (?:anything|any (?:documents?|docs?|files?|info(?:rmation)?)) (?:on|about|for|regarding) (?<thereAbout>.+?) ?[?.!]* ?$`,
     /* THE POLICY QUESTION. "find the pto policy" reached search and "whats our
        policy on pto" reached nothing, which is the wrong way round: the second
        is how anybody actually asks. An internal OS holding HR documents is
@@ -173,8 +172,8 @@ const DOCUMENT_QUESTION_RE = new RegExp(
        Both orders, because people say "our policy on X" and "our X policy"
        interchangeably. The topic is the search term either way; "policy" is
        kept in the query because the document is usually called one. */
-    String.raw`^\s*(?:what(?:'?s| is| are)?|where(?:'?s| is)?)\s+(?:the\s+|our\s+|my\s+)?polic(?:y|ies)\s+(?:on|about|for|regarding)\s+(?<policyOn>.+?)\s*[?.!]*\s*$`,
-    String.raw`^\s*(?:what(?:'?s| is| are)?|where(?:'?s| is)?)\s+(?:the\s+|our\s+|my\s+)?(?<policyFor>.+?)\s+polic(?:y|ies)\s*[?.!]*\s*$`,
+    String.raw`^ ?(?:what(?:'?s| is| are)?|where(?:'?s| is)?) (?:the |our |my )?polic(?:y|ies) (?:on|about|for|regarding) (?<policyOn>.+?) ?[?.!]* ?$`,
+    String.raw`^ ?(?:what(?:'?s| is| are)?|where(?:'?s| is)?) (?:the |our |my )?(?<policyFor>.+?) polic(?:y|ies) ?[?.!]* ?$`,
   ].join("|"),
   "i",
 );
@@ -204,7 +203,31 @@ const CONTAINER_ONLY_RE =
  * returns the whole document and buries the clause somebody wanted.
  */
 export function matchDocumentQuestion(message: string): string | null {
-  const m = DOCUMENT_QUESTION_RE.exec(message.trim());
+  /* NORMALISED BEFORE MATCHING, WHICH IS A SECURITY PROPERTY.
+   *
+   * These patterns put `\s+` next to a lazy `.+?`, so both sides could match
+   * the same space and a message of many spaces made the engine try every
+   * split. Measured on 2026-08-30 against "what did " followed by N spaces:
+   *
+   *     n=200   10.4ms
+   *     n=400   19.7ms
+   *     n=800  112.0ms
+   *     n=1600 858.8ms
+   *
+   * Superlinear, on a string a person can paste into the chat box, on a path
+   * that runs before any authentication-independent rate limit. CodeQL flagged
+   * the identical shape in brain/question-terms.ts (js/polynomial-redos) and
+   * did NOT flag this file, which is the more useful half of the finding: the
+   * scanner's silence was not evidence of safety.
+   *
+   * Collapsing whitespace first lets every pattern use a literal space, so the
+   * ambiguity has nowhere to live. Same input, same matches, no backtracking. */
+  const normalised = message.replace(/\s+/g, " ").trim();
+  /* Bounded as defence in depth, so a future edit that reintroduces some other
+     ambiguity cannot be exploited by length alone. No document question is
+     this long. */
+  if (normalised.length > 600) return null;
+  const m = DOCUMENT_QUESTION_RE.exec(normalised);
   if (!m) return null;
   const g = (m.groups ?? {}) as Record<string, string | undefined>;
 
@@ -249,7 +272,12 @@ export function matchDocumentQuestion(message: string): string | null {
     return about;
   }
 
-  return about ? `${subject} ${about}` : subject;
+  /* THE SUBJECT NAMES A DOCUMENT, so this is a content question and search is
+     the wrong tool for it. Releasing it lets retrieval answer from the text.
+     Everything above this line is a question about the LIBRARY, which is what
+     search is genuinely best at; everything here is a question about a
+     DOCUMENT, which only reading it can answer. */
+  return null;
 }
 
 /* ---------------------------------------------------------------------

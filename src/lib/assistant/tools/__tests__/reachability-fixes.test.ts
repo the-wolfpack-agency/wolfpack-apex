@@ -90,7 +90,13 @@ describe("the reachability floor", () => {
      earns it. */
   const CORE = [
     ["how is the pilot going", "pilot_status"],
-    ["what does the SOW say", "search"],
+    /* WAS ["what does the SOW say", "search"] until 2026-08-30.
+       Search claimed it and answered with a LIST of filenames, which is not
+       what the sentence asks for. It is now released to retrieval, so the
+       right assertion is that no tool intercepts it: the entry below asserts
+       the same coverage against a different destination, rather than being
+       deleted for being inconvenient. */
+    ["find the contract", "search"],
     ["what are my tasks", "task_list_widget"],
     /* Owned by get_calendar_availability, not the widget. "What is on my
        calendar today" is a free/busy question; "show me my calendar" is a

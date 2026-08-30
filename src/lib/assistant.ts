@@ -22,6 +22,8 @@ import { matchSavedRoutine } from "@/lib/assistant/routines/saved";
 import { searchKnowledge, saveAnswer } from "@/lib/knowledge";
 import { markCited as markBrainCited } from "@/lib/brain/query";
 import { retrieve } from "@/lib/brain/retrieve";
+import { asksForSynthesis } from "@/lib/brain/question-terms";
+import { quoteWindow } from "@/lib/brain/quote-window";
 import { judgeRelevance, RELEVANCE_MATERIAL_PER_HIT } from "@/lib/brain/relevance";
 import { redactText, NEVER_QUOTE_KINDS } from "@/lib/ai/redaction";
 import { looksTabular } from "@/lib/brain/query";
@@ -2862,6 +2864,28 @@ async function tryBrain(
      * when the strong hits are mostly tabular, this declines to answer here
      * and lets the grounded model path do it. Costs a cheap-tier call and buys
      * an answer a client can read. */
+    /* A SUMMARY IS NOT THREE EXCERPTS.
+     *
+     * The quote path below is the right answer to "what does the SOW say about
+     * payment": the clause is in one chunk, quoting it costs nothing, shows its
+     * source and cannot invent anything. It is the wrong answer to "summarise
+     * the SOW", where what was asked for exists in no single chunk. Measured on
+     * 2026-08-30, that question returned a filename, the words "chunk 2", and
+     * 500 characters of the middle of a subscription clause. Summary-shaped,
+     * and not a summary.
+     *
+     * It declines the same way the tabular case does, for the same reason and
+     * through the same seam: context still flows, so the model answers FROM
+     * these documents rather than from memory. Declining to quote is not
+     * declining to answer. */
+    if (asksForSynthesis(message)) {
+      trackEvent("assistant.brain_quote_declined_for_synthesis", userId, userRole, {
+        strong_hits: strong.length,
+        module: "assistant",
+      });
+      return { strong: null, context };
+    }
+
     const tabularCount = strong.filter((h) => looksTabular(h.content)).length;
     if (tabularCount > strong.length / 2) {
       trackEvent("assistant.brain_quote_declined_tabular", userId, userRole, {
@@ -2881,7 +2905,11 @@ async function tryBrain(
     const allMatchedLabels = new Set<string>();
     const redactedKinds = new Set<string>();
     for (const h of strong.slice(0, 3)) {
-      const raw = h.content.slice(0, 500).replace(/\s+/g, " ").trim();
+      /* Trimmed to word and sentence boundaries rather than a bare character
+         count, which used to open quotes mid-word: "tation and Project
+         Management fees" is the tail of "Documentation". */
+      const windowed = quoteWindow(h.content, 500);
+      const raw = windowed.text;
       const { text: injectionSafe, matchedLabels } = neutralizeInjection(raw);
       for (const l of matchedLabels) allMatchedLabels.add(l);
       /* AND THE PEOPLE IN IT. neutralizeInjection defends the MODEL from a
@@ -2898,10 +2926,16 @@ async function tryBrain(
       if (outbound.redacted) {
         for (const hit of outbound.hits) redactedKinds.add(hit.kind);
       }
+      /* NO CHUNK INDEX. "(chunk 7)" is how this product stores a document,
+         not anything a reader can act on: there is no chunk 7 to go and look
+         at, and naming one in a client-facing answer reads as debug output
+         that escaped. The filename is the part somebody can actually open. */
+      lines.push(`**${h.document_filename}**`);
+      /* Ellipses on the sides that were actually trimmed, so an excerpt looks
+         like an excerpt and a complete passage does not pretend to be one. */
       lines.push(
-        `**${h.document_filename}** (chunk ${h.chunk_idx + 1})`,
+        `> ${windowed.trimmedStart ? "…" : ""}${safe}${windowed.trimmedEnd ? "…" : ""}`,
       );
-      lines.push(`> ${safe}${h.content.length > 500 ? "…" : ""}`);
       lines.push("");
     }
     const sourcesLine =

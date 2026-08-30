@@ -33,6 +33,7 @@ import "@/lib/assistant/tools";
 
 import { getTools } from "@/lib/assistant/tools/registry";
 import { matchRoutine } from "@/lib/assistant/routines/catalogue";
+import { isQuestionShaped, searchTermsFor } from "@/lib/brain/question-terms";
 import { welcomePromptsForRole } from "@/lib/assistant/welcome-prompts";
 import { buildStarterCategoriesForTest } from "@/components/AssistantStarterPrompts";
 
@@ -78,6 +79,27 @@ function claimingRoutine(prompt: string): string | null {
   return routine ? `routine:${routine.id}` : null;
 }
 
+/**
+ * RETRIEVAL COUNTS AS A CLAIM, for the same reason routines do.
+ *
+ * "what does our policy say about time off?" is answered by reading the policy
+ * and saying what it says. No tool should claim it: the tool that used to,
+ * universal search, replied with a LIST of documents, which is why content
+ * questions were released to retrieval on 2026-08-30.
+ *
+ * Without this the guard would push somebody to delete a chip that works, or
+ * to write a tool regex to re-capture a question that is better off without
+ * one. The chip is fine. The destination changed.
+ *
+ * It is deliberately NOT an allowlist entry. An allowlist says "we accept that
+ * nothing claims this"; this says "something specific claims it", and it keeps
+ * working if the chip's wording changes, which an allowlist keyed on the exact
+ * string would not.
+ */
+function claimingRetrieval(prompt: string): string | null {
+  return isQuestionShaped(prompt) ? `retrieval:${searchTermsFor(prompt)}` : null;
+}
+
 /** Try every tool's matchIntent. Returns the tool name on first hit. */
 function claimingTool(prompt: string): string | null {
   for (const t of getTools()) {
@@ -99,7 +121,7 @@ describe("welcome-prompts coverage — every chip routes to a tool", () => {
       expect(prompts.length).toBeGreaterThanOrEqual(3);
       expect(prompts.length).toBeLessThanOrEqual(6);
       for (const p of prompts) {
-        const claim = claimingRoutine(p.text) ?? claimingTool(p.text);
+        const claim = claimingRoutine(p.text) ?? claimingRetrieval(p.text) ?? claimingTool(p.text);
         const allow = FREE_TEXT_ALLOWLIST[p.text];
         if (!claim && !allow) {
           throw new Error(
@@ -122,7 +144,7 @@ describe("AssistantStarterPrompts coverage — every chip routes to a tool", () 
     const broken: Array<{ category: string; prompt: string }> = [];
     for (const cat of cats) {
       for (const p of cat.prompts) {
-        if (claimingRoutine(p.text) ?? claimingTool(p.text)) continue;
+        if (claimingRoutine(p.text) ?? claimingRetrieval(p.text) ?? claimingTool(p.text)) continue;
         if (FREE_TEXT_ALLOWLIST[p.text]) continue;
         broken.push({ category: cat.title, prompt: p.text });
       }
@@ -208,13 +230,13 @@ describe("required-tools coverage — every shipped tool is advertised somewhere
     const advertised = new Set<string>();
     for (const role of ROLES) {
       for (const p of welcomePromptsForRole(role as string | null)) {
-        const c = claimingRoutine(p.text) ?? claimingTool(p.text);
+        const c = claimingRoutine(p.text) ?? claimingRetrieval(p.text) ?? claimingTool(p.text);
         if (c) advertised.add(c);
       }
     }
     for (const cat of buildStarterCategoriesForTest()) {
       for (const p of cat.prompts) {
-        const c = claimingRoutine(p.text) ?? claimingTool(p.text);
+        const c = claimingRoutine(p.text) ?? claimingRetrieval(p.text) ?? claimingTool(p.text);
         if (c) advertised.add(c);
       }
     }

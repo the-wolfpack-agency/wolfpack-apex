@@ -10,6 +10,8 @@
  * COSTS NOTHING. Intent matching is pure functions over strings: no database,
  * no model, no network, which is why it is safe to compute inside a request.
  */
+import { isQuestionShaped } from "@/lib/brain/question-terms";
+
 /** Prompts a person types, grouped so a gap shows up as a cluster. */
 export const AUDIT_PROMPTS: Record<string, string[]> = {
   calendar: [
@@ -61,8 +63,25 @@ export async function auditRouting(): Promise<RoutingResult> {
     name: string;
     matchIntent?: (m: string) => unknown;
   }>;
-  const claimants = (m: string) =>
-    tools.filter((t) => typeof t.matchIntent === "function" && t.matchIntent(m) != null).map((t) => t.name);
+  /* RETRIEVAL COUNTS AS A DESTINATION.
+   *
+   * This audit asks whether a sentence reaches something that can answer it,
+   * and for most sentences that something is a tool. For a content question it
+   * is the Brain: "what does the SOW say" is answered by reading the SOW, and
+   * the tool that used to claim it replied with a list of filenames.
+   *
+   * Counted as a claimant rather than dropped from the total, because the
+   * ratchet in routing-coverage.test.ts measures reachability and a question
+   * that reaches retrieval IS reachable. Removing it from the denominator
+   * would let the number rise by deleting the hard cases, which is the exact
+   * failure this audit exists to catch. */
+  const claimants = (m: string) => {
+    const byTool = tools
+      .filter((t) => typeof t.matchIntent === "function" && t.matchIntent(m) != null)
+      .map((t) => t.name);
+    if (byTool.length > 0) return byTool;
+    return isQuestionShaped(m) ? ["retrieval"] : [];
+  };
 
   const out: RoutingResult = {
     total: 0,

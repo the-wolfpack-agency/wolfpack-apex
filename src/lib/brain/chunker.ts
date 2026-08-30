@@ -98,8 +98,23 @@ export function chunkText(raw: string, opts: ChunkOpts = {}): TextChunk[] {
       continue;
     }
     emit(current);
-    // Carry overlap from tail of previous chunk for continuity
-    const tail = current.slice(-overlapChars);
+    /* Carry overlap from tail of previous chunk for continuity.
+     *
+     * SNAPPED TO A WORD BOUNDARY, because a raw character slice lands wherever
+     * the arithmetic says and that is mid-word most of the time. Measured on
+     * the live corpus 2026-08-30: 509 chunk seams open on a word fragment,
+     * 70.8 per cent of every seam that starts on a lowercase token. That is how
+     * a quote reached a reader as "tation and Project Management fees" (the
+     * tail of "Documentation"), and how others begin "senger Name:" and "tor
+     * Springs Garage".
+     *
+     * It costs an embedding a little context and costs a reader their trust,
+     * because content that is exactly right looks damaged. Chunks already END
+     * on sentence boundaries; only the overlap start was unguarded. */
+    const rawTail = current.slice(-overlapChars);
+    const boundary = rawTail.search(/\s/);
+    const tail =
+      boundary >= 0 && boundary < overlapChars / 4 ? rawTail.slice(boundary + 1) : rawTail;
     current = tail + "\n\n" + block;
     // If even the overlap-carrying buffer is already over target (because
     // block itself is large), emit immediately

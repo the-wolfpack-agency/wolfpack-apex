@@ -34,6 +34,7 @@ import { getTools } from "@/lib/assistant/tools/registry";
 import { canInvokeTool, TOOL_ROLE_LEVEL } from "@/lib/assistant/tools/gate";
 import { welcomePromptsForRole } from "@/lib/assistant/welcome-prompts";
 import { PROMPT_GUIDE } from "@/lib/assistant/prompt-corpus";
+import { isQuestionShaped } from "@/lib/brain/question-terms";
 
 interface Claimant {
   name: string;
@@ -67,11 +68,38 @@ describe("every role's starter prompts resolve for that role", () => {
     expect(welcomePromptsForRole(role).length).toBeGreaterThan(0);
   });
 
+  /* RETRIEVAL IS A DESTINATION, NOT A DEAD END.
+   *
+   * The risk this guards is a chip falling through to a model that answers
+   * from whatever it had nearest, which is how "who runs engineering" was once
+   * answered from brand-ambassador training slides. A content question does
+   * not do that. It reaches the Brain, which answers from the document and
+   * cites it, and it reaches no tool ON PURPOSE: the tool that used to claim
+   * "what does our policy say about time off?" was universal search, and it
+   * replied with a list of filenames.
+   *
+   * So the exemption is narrow and specific. It covers only sentences the
+   * question-frame parser recognises, which is the same parser retrieval uses
+   * to build its search terms. If that parser stops recognising a chip, the
+   * chip stops being exempt here and this test fails, which is the behaviour
+   * worth having. */
   it.each(ROLES)("every prompt offered to %s reaches a tool", (role) => {
     const dead = welcomePromptsForRole(role)
-      .filter((p) => claimants(p.text).length === 0)
+      .filter((p) => claimants(p.text).length === 0 && !isQuestionShaped(p.text))
       .map((p) => `${role}: ${JSON.stringify(p.text)} reaches no tool and will be answered by a model`);
     expect(dead).toEqual([]);
+  });
+
+  /* And the exemption must never become a blanket. A chip that is neither
+     claimed nor question-shaped is still a failure above; this asserts the
+     escape hatch is actually narrow. */
+  it("the retrieval exemption covers content questions and not much else", () => {
+    const exempt = ROLES.flatMap((role) =>
+      welcomePromptsForRole(role)
+        .filter((p) => claimants(p.text).length === 0 && isQuestionShaped(p.text))
+        .map((p) => p.text),
+    );
+    expect(new Set(exempt).size).toBeLessThanOrEqual(4);
   });
 
   /* THE ONE THAT ENDS IN A PERMISSION ERROR. Offered, clicked, refused. */
@@ -97,7 +125,7 @@ describe("the written guide matches what the product does", () => {
     const dead: string[] = [];
     for (const g of PROMPT_GUIDE) {
       for (const say of g.say) {
-        if (claimants(say).length === 0) {
+        if (claimants(say).length === 0 && !isQuestionShaped(say)) {
           dead.push(`${JSON.stringify(say)} is documented as reaching ${g.tool} and reaches nothing`);
         }
       }
