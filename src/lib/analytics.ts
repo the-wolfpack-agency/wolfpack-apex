@@ -1235,6 +1235,7 @@ export type InstinctEventType =
   | "system.brain_backfill_batch_failed"
   | "system.brain_semantic_degraded"
   | "system.assistant_model_unreachable"
+  | "system.knowledge_lookup_failed"
   | "system.assistant_answered_degraded"
   | "system.triple_write_degraded"
   //   assistant.follow_through_resolved { resolved } - a bare "ok, do that" was
