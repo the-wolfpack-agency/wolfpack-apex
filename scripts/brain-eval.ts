@@ -31,8 +31,10 @@
  *   npx tsx scripts/brain-eval.ts --save baseline.json
  *   npx tsx scripts/brain-eval.ts --against baseline.json
  */
-import { config } from "dotenv";
-config({ path: ".env.local" });
+/* First, and the order matters: imports are hoisted, so a config() call here
+   would run after every module below had already read an empty process.env.
+   See scripts/load-env.ts. */
+import "./load-env";
 import { readFileSync, writeFileSync } from "node:fs";
 
 interface Row {

@@ -6,8 +6,10 @@
  *   npx tsx scripts/brain-backfill.ts --limit 200
  *   npx tsx scripts/brain-backfill.ts
  */
-import { config } from "dotenv";
-config({ path: ".env.local" });
+/* First, and the order matters: imports are hoisted, so a config() call here
+   would run after every module below had already read an empty process.env.
+   See scripts/load-env.ts. */
+import "./load-env";
 
 async function main() {
   const argv = process.argv.slice(2);
