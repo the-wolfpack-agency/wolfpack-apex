@@ -527,6 +527,7 @@ export type InstinctEventType =
      one served the answer instead. Recorded rather than absorbed: a silent
      degrade hides a stale deployment name forever. */
   | "ai.tier_degraded_missing_deployment"
+  | "ai.provider_retry_succeeded"
   | "assistant.broadcast_sent"
   /* A draft answer read by a second model before it was sent. Records whether
      it was reviewed at all and whether the reviewer changed anything, because
