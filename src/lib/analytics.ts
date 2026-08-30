@@ -84,6 +84,10 @@ export type InstinctEventType =
      queryBrain logged. Added because those two disagreed in production and no
      record existed of the first one. */
   | "assistant.brain_lookup_returned"
+  /* A thin retrieval was retried with the question rewritten into document
+     vocabulary. Carries both wordings and whether it helped, because the pair
+     is the only evidence for whether the extra call earns its cost. */
+  | "brain.query_expanded"
   /* The corpus held something close and the question did not say which one, so
      we asked instead of refusing. Rising means people are asking good questions
      the product cannot yet disambiguate: a guidance problem, not retrieval. */

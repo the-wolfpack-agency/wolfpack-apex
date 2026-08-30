@@ -16,14 +16,24 @@ import { embedBatch, isEmbeddingConfigured } from "./embedder";
 import { keywordSearchWithAudience, logQuery, markQueryCited } from "./repo";
 import { readableDocumentIds } from "./audience";
 import { describeDocuments } from "./repo";
-import { searchBrain } from "./qdrant";
+import { searchBrain, SEMANTIC_SCORE_FLOOR } from "./qdrant";
 import { reciprocalRankFusion } from "./fusion";
+import { shouldExpand } from "./expand-query";
 import { trackEvent } from "@/lib/analytics";
 import type { BrainKind, BrainQueryHit, BrainQueryResult } from "./types";
 
 const DEFAULT_LIMIT = 8;
 
 export interface QueryOpts {
+  /**
+   * Rewrite the question into the words documents use, and try again.
+   *
+   * Injected rather than imported so retrieval never learns how to spend money:
+   * the caller owns the model call, and a caller that does not pass this gets
+   * the previous behaviour exactly. Only invoked when the first pass came back
+   * thin, so most questions never reach it.
+   */
+  expand?: (question: string) => Promise<string>;
   userId: string;
   userRole: string;
   query: string;
@@ -63,7 +73,63 @@ export type SemanticStatus =
   /** Configured, and threw. This is the one that hid for a month. */
   | "failed";
 
+/**
+ * Retrieve, and if the result is thin, ask again in the words documents use.
+ *
+ * THE FAILURE THIS TARGETS. Four of twelve labelled questions never surface
+ * their document, and all four are the same shape: the person and the paper
+ * describe one fact differently. "How much do we owe upfront?" against "50%
+ * ($6,000.00) is due within 30 days of the execution". No ranking fixes that;
+ * neither retriever can match words that are not there.
+ *
+ * ONE EXTRA CALL, ONLY WHEN THE FIRST PASS WAS THIN. Two thirds of questions
+ * already find their document at rank one, and paying a model on every question
+ * to help the third that struggles is the fixed-cascade mistake in a different
+ * costume. The cheap path stays cheap.
+ *
+ * THE EXPANSION IS USED FOR RETRIEVAL ONLY. Nothing downstream is told the
+ * person asked something they did not: the answer still comes from a document,
+ * still gets cited, and still faces the relevance judge. An expansion reaching
+ * the answer path would be the model inventing context and calling it
+ * retrieval.
+ *
+ * The ORIGINAL query is what gets logged, so the query log keeps recording what
+ * people actually type. An eval set harvested from rewritten questions would
+ * grade the product on its own paraphrases.
+ */
 export async function queryBrain(opts: QueryOpts): Promise<QueryExecution> {
+  const first = await queryBrainOnce(opts);
+
+  if (!opts.expand) return first;
+  if (!shouldExpand({ hitCount: first.hits.length, topScore: first.hits[0]?.score ?? 0 }, SEMANTIC_SCORE_FLOOR)) {
+    return first;
+  }
+
+  const rewritten = await opts.expand(opts.query).catch(() => opts.query);
+  /* An expansion that changed nothing is not worth a second retrieval. */
+  if (rewritten === opts.query) return first;
+
+  const second = await queryBrainOnce({ ...opts, query: rewritten });
+  const better = second.hits.length > first.hits.length ||
+    (second.hits[0]?.score ?? 0) > (first.hits[0]?.score ?? 0);
+
+  trackEvent("brain.query_expanded", opts.userId, opts.userRole, {
+    /* Both, because the pair is the evidence for whether this is worth its
+       cost. One without the other says nothing. */
+    original: opts.query.slice(0, 120),
+    rewritten: rewritten.slice(0, 120),
+    first_hits: first.hits.length,
+    second_hits: second.hits.length,
+    helped: better,
+  });
+
+  /* KEEPS THE BETTER OF THE TWO. A rewrite is a guess about vocabulary, and a
+     guess that retrieved worse must not replace a result that was merely
+     thin. */
+  return better ? { ...second, query: opts.query } : first;
+}
+
+async function queryBrainOnce(opts: QueryOpts): Promise<QueryExecution> {
   const limit = Math.min(Math.max(opts.limit ?? DEFAULT_LIMIT, 1), 20);
   const t0 = Date.now();
 
