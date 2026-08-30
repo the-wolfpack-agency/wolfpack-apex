@@ -66,6 +66,11 @@ export interface SignalReport {
  * ambiguity. It is excluded from the label and kept in the population.
  */
 export function endedBadly(g: TurnGist): boolean {
+  /* asked_which is NOT bad, and saying so is the point of having it.
+     The product declining to guess between several documents is the correct
+     answer to a question with no subject, and it replaced a confident wrong
+     one. Counting it as a failure would teach every downstream measure to
+     prefer the behaviour that was just fixed. */
   return g.outcome === "dead_end" || g.outcome === "re_asked";
 }
 

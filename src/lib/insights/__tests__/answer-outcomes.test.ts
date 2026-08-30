@@ -20,6 +20,7 @@
 
 import {
   isMiss,
+  isAskedWhich,
   isOutage,
   similarity,
   summariseOutcomes,
@@ -160,5 +161,42 @@ describe("what happened after the answer", () => {
   it("reports nothing rather than crashing on an empty window", () => {
     const o = summariseOutcomes([], 90);
     expect(o).toMatchObject({ readable: true, conversations: 0, misses: 0, deadEnds: 0 });
+  });
+});
+
+/**
+ * ASKING WHICH DOCUMENT IS NOT ADMITTING NOTHING.
+ *
+ * Added 2026-08-30 alongside the fix that made "how much do we owe upfront?"
+ * stop quoting a chauffeur invoice and start naming its candidates. The two
+ * wordings overlap: the ask OPENS with "I could not find a clear answer",
+ * which reads like a miss and is the opposite of one.
+ *
+ * Counting it as a miss would have taught every downstream measure to prefer
+ * the confident wrong answer that was just removed, which is the most
+ * expensive way a metric can be wrong.
+ */
+describe("the product asking which document was meant", () => {
+  it.each([
+    "I could not find a clear answer to that. The closest things I hold are: - **A** - **B**",
+    "I could not find a clear answer. The closest thing I hold is **Invoice 941**.",
+  ])("recognises %s", (text) => {
+    expect(isAskedWhich(text)).toBe(true);
+  });
+
+  /* THE ONE THAT MATTERS. It opens like a miss and must not be counted as one. */
+  it("is never counted as a miss", () => {
+    const ask =
+      "I could not find a clear answer to that. The closest things I hold are: - **A**";
+    expect(isAskedWhich(ask)).toBe(true);
+    expect(isMiss(ask)).toBe(false);
+  });
+
+  it.each([
+    'No results found for "onboarding".',
+    "The payment terms are net 30.",
+    "",
+  ])("does not mistake %s for an ask", (text) => {
+    expect(isAskedWhich(text)).toBe(false);
   });
 });
