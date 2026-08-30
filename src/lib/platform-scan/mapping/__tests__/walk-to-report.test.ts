@@ -78,10 +78,25 @@ function cognitoLike(): Record<string, Partial<ReadSurface>> {
   return pages;
 }
 
+/* Traffic the fake system emits per screen: an analytics beacon everywhere,
+   and one host only the export screen talks to, which is the shape that makes
+   per-screen attribution worth having. */
+const TRAFFIC: Record<string, string[]> = {
+  "*": ["https://www.google-analytics.com/collect"],
+  [`${BASE}/acme/porschecrm/entries`]: ["https://telemetry.unknown.example/ingest"],
+};
+
 const readerFor = (pages: Record<string, Partial<ReadSurface>>) => ({
+  observed: [] as { url: string; pageUrl: string; resourceType: string; atMs: number; status: number | null }[],
+  observations() {
+    return this.observed;
+  },
   async read(url: string): Promise<ReadSurface> {
     const p = pages[url];
     if (!p) throw new Error(`no such page: ${url}`);
+    for (const t of [...TRAFFIC["*"], ...(TRAFFIC[url] ?? [])]) {
+      this.observed.push({ url: t, pageUrl: url, resourceType: "fetch", atMs: 1, status: 200 });
+    }
     return {
       url, status: 200, title: null, headings: [], links: [],
       forms: [], tables: [], controls: [], loadMs: 120, ...p,
@@ -90,21 +105,23 @@ const readerFor = (pages: Record<string, Partial<ReadSurface>>) => ({
 });
 
 async function walkAndStore() {
-  const { surfaces, coverage } = await walkSystem(`${BASE}/acme/home`, readerFor(cognitoLike()), {
-    budget: { maxSurfaces: 40, maxDepth: 6, maxDurationMs: 60_000 },
-  });
+  const { surfaces, coverage, integrations, trafficObserved } = await walkSystem(
+    `${BASE}/acme/home`,
+    readerFor(cognitoLike()),
+    { budget: { maxSurfaces: 40, maxDepth: 6, maxDurationMs: 60_000 } },
+  );
   const entities = inferEntities(surfaces, coverage.patterns);
   const map = buildSystemMap({
     platform: "forms.example",
     entryUrl: `${BASE}/acme/home`,
     surfaces,
     entities,
-    integrations: [],
+    integrations,
     coverage,
     now: "2026-08-30T00:00:00.000Z",
   });
   await saveWalkedMap("ws-1", map, "CTO, Acme");
-  return { surfaces, coverage, entities, map };
+  return { surfaces, coverage, entities, map, integrations, trafficObserved };
 }
 
 beforeEach(() => {
@@ -200,5 +217,57 @@ describe("from the walk to the client-facing section", () => {
     });
     const md = await genSystemMap({ clientName: "Acme", workspaceId: "ws-1" });
     expect(md).toMatch(/sampled, not walked/i);
+  });
+});
+
+/**
+ * Where the data goes, carried from the browser to the client's document.
+ *
+ * The observation classifier and the anomaly detectors were written, tested
+ * and fed by exactly one single-page collector. The walker, which sees dozens
+ * of screens, threw every request away.
+ */
+describe("watching where the data goes", () => {
+  it("reports that it was watching, which is not the same as seeing nothing", async () => {
+    const { trafficObserved } = await walkAndStore();
+    expect(trafficObserved).toBe(true);
+  });
+
+  it("names the vendor it recognises", async () => {
+    const { integrations } = await walkAndStore();
+    expect(integrations.find((i) => i.vendor === "Google Analytics")).toBeTruthy();
+  });
+
+  /* PER SCREEN, which is the reason to walk rather than load one page. A host
+     contacted only by the entries screen is invisible from the home page. */
+  it("finds a host only one screen talks to, and says which", async () => {
+    const { integrations } = await walkAndStore();
+    const only = integrations.find((i) => i.host === "telemetry.unknown.example")!;
+    expect(only.vendor).toBeNull();
+    expect(only.seenOn).toEqual([`${BASE}/acme/porschecrm/entries`]);
+  });
+
+  it("does not count the system's own screens as outside services", async () => {
+    const { integrations } = await walkAndStore();
+    expect(integrations.map((i) => i.host)).not.toContain("forms.example");
+  });
+
+  it("carries the services into the report a client reads", async () => {
+    await walkAndStore();
+    const p = mockWrite.mock.calls[0][1] as unknown[];
+    mockSafe.mockResolvedValue({
+      rows: [
+        {
+          platform: p[1], entry_url: p[2], map: p[3],
+          surface_count: p[4], entity_count: p[5], form_count: p[6],
+          frontier_remaining: p[7], stop_reason: p[8], authorised_by: p[9],
+          generated_at: new Date("2026-08-30T00:00:00.000Z"),
+        },
+      ],
+    });
+    const md = await genSystemMap({ clientName: "Acme", workspaceId: "ws-1" });
+    expect(md).toContain("Outside services contacted");
+    expect(md).toContain("Google Analytics");
+    expect(md).toContain("telemetry.unknown.example");
   });
 });
