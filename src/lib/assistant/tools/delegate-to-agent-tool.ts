@@ -119,7 +119,7 @@ interface DelegateRunStep {
 export const delegateToAgentTool: ToolDef<Params, DelegateResult> = {
   name: "delegate_to_agent",
   description:
-    "Direct an onboarded agent to do real work, e.g. 'Agent1 add a task titled Doctors Appointment' or 'tell Scout to log my hours'. The named agent runs the instruction as a governed, per-step OGIAM-authorized plan under its own principal. Only the agent's owner or a manager-or-above may direct it.",
+    "Direct an onboarded agent to do real work, for example adding a task or drafting an update, with an objective and success criteria you set.",
   paramSchema: ParamSchema,
   // Any authenticated user may ATTEMPT; the handler enforces who may direct
   // which agent. The agent's own per-step OGIAM gate is the execution control,

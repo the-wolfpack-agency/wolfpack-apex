@@ -680,6 +680,33 @@ export interface ExecuteAgentWidgetSpec {
 
 /** Discriminated union of every widget kind. Add new entries as the
  *  framework expands. */
+/**
+ * "What can you do", as something a person can read and act on.
+ *
+ * WHY A WIDGET RATHER THAN PROSE. The answer was a wall of markdown: three
+ * headings, sixty-odd bullets and a closing paragraph. Every line was accurate
+ * and nobody could find anything in it, which for the first screen somebody
+ * sees is the whole job failed. Read end to end it is a list of what the
+ * product can do; what a person actually wants is one thing to try.
+ *
+ * So the shape carries STARTERS separately from the catalogue. A starter is a
+ * sentence somebody can send as-is, and clicking one puts it in the composer
+ * rather than sending it, so they can change a word first. The catalogue stays,
+ * grouped and collapsible, because "can it do X" is a real question and the
+ * list is the only honest answer to it.
+ */
+export interface CapabilitiesWidgetSpec {
+  kind: "capabilities";
+  /** Whole jobs, run by one command. Empty when the role has none. */
+  routines: Array<{ command: string; description: string }>;
+  /** Single things, grouped the way a reader thinks rather than by tool name. */
+  groups: Array<{ title: string; items: string[] }>;
+  /** Sentences to send as-is. The point of the widget. */
+  starters: Array<{ prompt: string; because: string }>;
+  /** Shown when nothing here matches the job somebody actually does. */
+  fallbackInvitation: string;
+}
+
 export type WidgetSpec =
   | CalendarWidgetSpec
   | EmailThreadWidgetSpec
@@ -697,6 +724,7 @@ export type WidgetSpec =
   | UploadToBrainWidgetSpec
   | MeetingPrepWidgetSpec
   | FeedbackWidgetSpec
+  | CapabilitiesWidgetSpec
   | TimeLogWidgetSpec
   | ScanReceiptWidgetSpec
   | ScanInvoiceWidgetSpec
