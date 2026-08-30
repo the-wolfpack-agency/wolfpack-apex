@@ -78,6 +78,44 @@ const KNOWN_HOSTS: readonly { suffix: string; kind: TrackerKind; name: string }[
   { suffix: "unpkg.com", kind: "cdn", name: "unpkg" },
   { suffix: "gstatic.com", kind: "cdn", name: "Google static" },
   { suffix: "googleapis.com", kind: "cdn", name: "Google APIs" },
+
+  /* ADDED FROM A REAL SCAN, 2026-08-30. Walking a client's forms platform
+     found seven third-party hosts and could name two of them. The five it
+     could not were reported as "unknown", which scores medium, so a product
+     that records user sessions on a system holding client data read exactly
+     like an unremarkable CDN.
+     Named here because being unable to name a host is a prompt to look, and
+     these have now been looked at. */
+  { suffix: "pendo.io", kind: "session-replay", name: "Pendo" },
+  /* Pendo and VWO are deliberately NOT the same kind, and the difference is
+     not cosmetic: session-replay is in SEVERE_KINDS and analytics is not.
+     Pendo's product includes session replay outright, so it earns the
+     heavier classification. VWO is an experimentation platform that also
+     offers recordings, and calling its base script session-replay would
+     overstate what its presence proves. Overstating is how a report becomes
+     one nobody reads. */
+  { suffix: "visualwebsiteoptimizer.com", kind: "analytics", name: "Visual Website Optimizer" },
+  /* The product's own object storage, not a third party in any meaningful
+     sense, but it IS a different origin and pretending otherwise would be its
+     own kind of dishonesty. Named so a reader can dismiss it quickly. */
+  { suffix: "blob.core.windows.net", kind: "cdn", name: "Azure Blob Storage" },
+];
+
+/**
+ * Hosts that need the PATH to identify, not just the name.
+ *
+ * google.com was contacted on all 38 screens of that scan and reported as an
+ * unexplained third party. It is reCAPTCHA: a security control the site is
+ * using to protect itself, which is close to the opposite of an unexplained
+ * tracker. Matching on the host alone cannot tell the two apart, because
+ * google.com serves both.
+ *
+ * Kept to signatures that cannot mean anything else, in the same spirit as the
+ * detectors: a rule that guesses is worse than no rule.
+ */
+const KNOWN_PATHS: readonly { suffix: string; path: RegExp; kind: TrackerKind; name: string }[] = [
+  { suffix: "google.com", path: /^\/recaptcha\//, kind: "cdn", name: "Google reCAPTCHA" },
+  { suffix: "gstatic.com", path: /^\/recaptcha\//, kind: "cdn", name: "Google reCAPTCHA" },
 ];
 
 export function hostOf(url: string): string | null {
@@ -110,6 +148,22 @@ export function partyOf(url: string, pageUrl: string): Party {
 export function identify(url: string): { kind: TrackerKind; name: string | null } {
   const h = hostOf(url);
   if (!h) return { kind: "unknown", name: null };
+
+  /* Path rules first: they are strictly more specific, so a host that has one
+     and matches it must not be caught by a broader entry for the same host. */
+  const path = (() => {
+    try {
+      return new URL(url).pathname;
+    } catch {
+      return "";
+    }
+  })();
+  for (const k of KNOWN_PATHS) {
+    if ((h === k.suffix || h.endsWith(`.${k.suffix}`)) && k.path.test(path)) {
+      return { kind: k.kind, name: k.name };
+    }
+  }
+
   for (const k of KNOWN_HOSTS) {
     // Dot-boundary match: "evil-hotjar.com" is not a subdomain of hotjar.com.
     if (h === k.suffix || h.endsWith(`.${k.suffix}`)) return { kind: k.kind, name: k.name };

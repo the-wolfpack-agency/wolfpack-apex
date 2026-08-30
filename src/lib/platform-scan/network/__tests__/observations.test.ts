@@ -193,3 +193,61 @@ describe("one observation set, three questions", () => {
     expect(unexplained(observations, ["google-analytics.com"]).map((c) => c.host)).toEqual(["mystery-tracker.test"]);
   });
 });
+
+/**
+ * Hosts a real scan met and could not name.
+ *
+ * Every URL here was contacted during a walk of a client's forms platform on
+ * 2026-08-30. Five of the seven third parties came back "unknown", which
+ * scores medium, so a product that records user sessions read exactly like an
+ * unremarkable CDN.
+ */
+describe("what the first live scan could not name", () => {
+  it("names Pendo, and as a session-replay product", () => {
+    for (const url of ["https://data.pendo.io/data/ptm.gif", "https://cdn.pendo.io/agent/x.js"]) {
+      expect(identify(url)).toEqual({ kind: "session-replay", name: "Pendo" });
+    }
+  });
+
+  /* NOT the same kind as Pendo, and the difference is not cosmetic:
+     session-replay is in SEVERE_KINDS and analytics is not. Calling an
+     experimentation platform's base script session-replay would overstate
+     what its presence proves, and overstating is how a report goes unread. */
+  it("names Visual Website Optimizer without overstating what it is", () => {
+    expect(identify("https://dev.visualwebsiteoptimizer.com/j.php")).toEqual({
+      kind: "analytics",
+      name: "Visual Website Optimizer",
+    });
+  });
+
+  it("names the product's own object storage so a reader can dismiss it", () => {
+    expect(identify("https://cognitoprod.blob.core.windows.net/x.png").name).toBe(
+      "Azure Blob Storage",
+    );
+  });
+
+  /* reCAPTCHA is a security control the site uses to protect itself, which is
+     close to the opposite of an unexplained tracker. The host alone cannot
+     tell them apart, because google.com serves both. */
+  it("tells reCAPTCHA apart from google.com generally", () => {
+    expect(identify("https://www.google.com/recaptcha/api2/aframe")).toEqual({
+      kind: "cdn",
+      name: "Google reCAPTCHA",
+    });
+    expect(identify("https://www.google.com/search?q=x")).toEqual({ kind: "unknown", name: null });
+  });
+
+  it("still refuses to name a host it has no signature for", () => {
+    expect(identify("https://telemetry.unknown.example/ingest")).toEqual({
+      kind: "unknown",
+      name: null,
+    });
+  });
+
+  /* Dot-boundary, as elsewhere: a lookalike domain must not inherit a real
+     vendor's name or its severity. */
+  it("does not let a lookalike domain borrow a vendor name", () => {
+    expect(identify("https://evil-pendo.io/x.js").name).toBeNull();
+    expect(identify("https://notpendo.io/x.js").name).toBeNull();
+  });
+});

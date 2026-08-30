@@ -42,6 +42,8 @@ import { inferEntities } from "@/lib/platform-scan/mapping/entities";
 import { buildSystemMap } from "@/lib/platform-scan/mapping/explore";
 import { describeIntegrations } from "@/lib/platform-scan/mapping/integrations";
 import { assessWalkedTraffic } from "@/lib/platform-scan/mapping/assess";
+import { integrationHostsFor } from "@/lib/platform-scan/mapping/known-integrations";
+import { systemMapToMarkdown } from "@/lib/platform-scan/mapping/to-brain";
 import { saveWalkedMap } from "@/lib/platform-scan/mapping/store";
 import { trackEvent } from "@/lib/analytics";
 import type { ScanPage } from "@/lib/platform-scan/browser/capture";
@@ -58,7 +60,8 @@ if (!baseUrl || !authorisedBy) {
   console.error(
     'usage: npx tsx scripts/map-system.ts <baseUrl> --authorised-by "<name>"\n' +
       "        [--sign-in]  open a browser, log in yourself, press Enter\n" +
-      "        [--email <user> --login-path /login]  scripted, simple logins only\n\n" +
+      "        [--email <user> --login-path /login]  scripted, simple logins only\n" +
+      "        [--to-brain]  also store it as a document the assistant can answer from\n\n" +
       "The password is typed at a prompt, or read from MAP_PASSWORD. It is\n" +
       "deliberately not a flag: argv is visible to every process on the machine.\n\n" +
       "--authorised-by is required. This sends traffic to a real system and the\n" +
@@ -268,8 +271,17 @@ if (!baseUrl || !authorisedBy) {
     /* WHAT NOTHING ACCOUNTS FOR. The same detector the compliance scan uses,
        given a whole system instead of one page. A host contacted only by the
        settings screen has been invisible to it for the life of the product. */
+    /* THE SECOND SOURCE OF TRUTH. The target's own policy is frequently
+       permissive enough to explain nothing; this product separately knows
+       which integrations this workspace runs and probes healthy. Explains
+       traffic from our systems, and correctly explains nothing on somebody
+       else's product. */
+    const workspaceId = arg("workspace") ?? "default";
+    const integrationHosts = await integrationHostsFor(workspaceId).catch(() => []);
+
     const assessment = assessWalkedTraffic({
       entryUrl: baseUrl,
+      integrationHosts,
       observations: reader.observations?.() ?? [],
       entryHeaders: reader.entryHeaders?.() ?? null,
       trafficObserved,
@@ -330,7 +342,6 @@ if (!baseUrl || !authorisedBy) {
       now: new Date().toISOString(),
     });
 
-    const workspaceId = arg("workspace") ?? "default";
     if (!process.env.DATABASE_URL) {
       /* Said out loud rather than skipped quietly. A run that printed a map
          and stored nothing, without saying so, is how somebody concludes the
@@ -351,6 +362,44 @@ if (!baseUrl || !authorisedBy) {
           sampled_shapes: sampled.length,
         });
         console.log(`\nStored for workspace ${workspaceId}. It will appear in the System Map section of the report.`);
+
+        /* INTO THE BRAIN, SO SOMEBODY CAN ASK. The assistant answers from
+           documents and nobody writes down which system holds the client list
+           or which outside companies receive data from it. Those are facts
+           about the systems themselves, and the walk is what learns them.
+           Opt-in, because ingesting is a write into a shared knowledge base
+           and a scan of somebody else's product is not automatically something
+           the whole workspace should be answered from. */
+        if (process.argv.includes("--to-brain")) {
+          const doc = systemMapToMarkdown({
+            platform, entryUrl: baseUrl, map,
+            surfaceCount: surfaces.length, entityCount: entities.length,
+            formCount: inv.content.length,
+            frontierRemaining: coverage.frontierRemaining,
+            stopReason: coverage.stopReason,
+            authorisedBy, generatedAt: new Date().toISOString(),
+          });
+          if (doc.redactedCount > 0) {
+            /* Said out loud. A map is meant to hold shape and nothing else, so
+               anything the redactor caught is a surprise worth knowing about
+               rather than a quiet success. */
+            console.log(
+              `  ${doc.redactedCount} sensitive value(s) were removed from the map before storing it. That is worth looking at: a system map should contain no such thing.`,
+            );
+          }
+          const { ingest } = await import("@/lib/brain/ingest");
+          await ingest({
+            filename: doc.filename,
+            contentType: "text/markdown",
+            buffer: Buffer.from(doc.markdown, "utf-8"),
+            uploadedBy: "system-mapper",
+            uploaderRole: "system",
+            tags: ["system-map", platform],
+          });
+          console.log(`  Ingested into the Brain as ${doc.filename}; the assistant can answer from it.`);
+        } else {
+          console.log("  Pass --to-brain to also make this answerable by the assistant.");
+        }
       } catch (err) {
         console.log(`\nNot stored: ${(err as Error).message.slice(0, 120)}`);
       }

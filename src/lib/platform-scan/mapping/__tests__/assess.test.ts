@@ -129,3 +129,40 @@ describe("a truncated recording", () => {
     expect(report.caveats.join(" ")).toMatch(/floor rather than a complete set/i);
   });
 });
+
+/**
+ * The second source of truth.
+ *
+ * On the real scan the detector printed its own reason for a long list: the
+ * site's Content-Security-Policy permits any host, so it explains nothing.
+ * This product separately knows which integrations a workspace runs, and
+ * buildDeclarations has always accepted them without anything supplying them.
+ */
+describe("integrations this workspace runs, as an explanation", () => {
+  it("accounts for a host belonging to a connected integration", () => {
+    const { report } = assessWalkedTraffic({
+      ...base,
+      /* A permissive policy, which is the realistic case and the reason a
+         second source is needed at all. */
+      entryHeaders: { "content-security-policy": "default-src https://*" },
+      observations: [obs("https://graph.microsoft.com/v1.0/me")],
+      integrationHosts: [{ host: "graph.microsoft.com", name: "the Microsoft 365 integration" }],
+    });
+    const finding = report.findings.find((f) => f.host === "graph.microsoft.com");
+    /* Explained and not new, so not raised as an anomaly at all. */
+    expect(finding).toBeUndefined();
+  });
+
+  /* A third-party product's own vendors are its own. Our Salesforce does not
+     account for the analytics a forms platform loads, and pretending otherwise
+     would explain away exactly the traffic worth asking about. */
+  it("does not let our integrations excuse someone else's vendors", () => {
+    const { report } = assessWalkedTraffic({
+      ...base,
+      entryHeaders: { "content-security-policy": "default-src https://*" },
+      observations: [obs("https://data.pendo.io/data/ptm.gif")],
+      integrationHosts: [{ host: "salesforce.com", name: "the Salesforce integration" }],
+    });
+    expect(report.findings.some((f) => f.host === "data.pendo.io")).toBe(true);
+  });
+});

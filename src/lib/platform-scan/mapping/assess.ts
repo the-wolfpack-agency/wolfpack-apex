@@ -40,6 +40,16 @@ export interface AssessWalkInput {
   baseline?: readonly HostBaseline[];
   /** Hosts an operator has already vouched for. */
   operatorAllowed?: readonly string[];
+  /**
+   * Hosts implied by integrations this workspace actually runs.
+   *
+   * The second source of truth. The target's own Content-Security-Policy is
+   * often permissive enough to explain nothing, and this product separately
+   * knows which integrations a workspace has connected and probes healthy.
+   * Explains traffic from OUR systems; a third-party product's own vendors are
+   * its own and will correctly remain unexplained.
+   */
+  integrationHosts?: readonly { host: string; name: string }[];
   /** False when the reader was not watching traffic at all. */
   trafficObserved: boolean;
   /** True when the observation set hit its cap. */
@@ -60,6 +70,7 @@ export function assessWalkedTraffic(input: AssessWalkInput): WalkAssessment {
     pageUrl: input.entryUrl,
     headers: input.entryHeaders,
     operatorAllowed: input.operatorAllowed,
+    integrationHosts: input.integrationHosts,
   });
 
   const report = detectAnomalies({
