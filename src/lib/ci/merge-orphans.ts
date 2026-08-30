@@ -1,0 +1,124 @@
+/**
+ * Merged, and not in main. The failure that keeps costing a session an hour.
+ *
+ * WHAT HAPPENS. Work is stacked: PR B is opened with PR A's branch as its
+ * base, because B genuinely depends on A. B gets merged into A's branch. Then
+ * A is SQUASH-merged into main, and a squash takes A's diff as it stood when
+ * the merge started. B's commits are not in that diff. GitHub reports both as
+ * merged, both show a green merged badge, and B's code is nowhere in main.
+ *
+ * Nothing catches it. Not CI, which only ever saw the branch. Not the PR list,
+ * where both are merged. Not the person who merged them, who did nothing
+ * wrong. It surfaces days later when somebody notices a file missing, and by
+ * then the branch may be deleted.
+ *
+ * This has now happened at least three times in this repository, and each time
+ * the response was to remember harder. This is the deterministic version of
+ * remembering.
+ *
+ * HOW IT DECIDES. A merged PR that added files, whose base was not the default
+ * branch, and NONE of whose added files exist in the default branch, is
+ * orphaned. All three conditions matter:
+ *
+ *   - Added files only. A PR that edits existing files cannot be checked this
+ *     way, because the file exists in main either way. Those are reported as
+ *     unverifiable rather than passed, because silently passing them would
+ *     make this check look more complete than it is.
+ *   - Base not the default branch. A PR merged straight to main is in main.
+ *   - NONE rather than SOME. A partially-present PR is a different situation
+ *     (a later PR moved a file, a rename) and calling it orphaned would train
+ *     everybody to ignore the check.
+ */
+
+export interface MergedPr {
+  number: number;
+  title: string;
+  baseRefName: string;
+  /** Paths the PR ADDED. Modified paths cannot be checked this way. */
+  addedFiles: string[];
+}
+
+export type Verdict =
+  | { pr: MergedPr; state: "in-main" }
+  | { pr: MergedPr; state: "orphaned"; missing: string[] }
+  /** Merged into the default branch directly, so there is nothing to check. */
+  | { pr: MergedPr; state: "direct" }
+  /** Added no files, so presence in main cannot be decided from paths alone. */
+  | { pr: MergedPr; state: "unverifiable"; because: string };
+
+/**
+ * Classify merged PRs against what is actually in the default branch.
+ *
+ * existsInDefault is injected rather than shelling out here, so the whole
+ * judgement is testable without a repository and the CLI stays a thin wrapper.
+ */
+export function classifyMerges(
+  prs: MergedPr[],
+  defaultBranch: string,
+  existsInDefault: (path: string) => boolean,
+): Verdict[] {
+  return prs.map((pr): Verdict => {
+    if (pr.baseRefName === defaultBranch) return { pr, state: "direct" };
+
+    if (pr.addedFiles.length === 0) {
+      /* REPORTED, NOT PASSED. A stacked PR that only edited existing files can
+         be just as orphaned and this method cannot see it. Saying so is the
+         difference between a check and a false reassurance. */
+      return {
+        pr,
+        state: "unverifiable",
+        because: "added no new files, so presence cannot be decided from paths",
+      };
+    }
+
+    const missing = pr.addedFiles.filter((f) => !existsInDefault(f));
+    /* NONE present, not SOME. A partially-present PR is a rename or a later
+       move, and flagging those would train everybody to ignore this. */
+    if (missing.length === pr.addedFiles.length) return { pr, state: "orphaned", missing };
+    return { pr, state: "in-main" };
+  });
+}
+
+export function orphansOf(verdicts: Verdict[]): Extract<Verdict, { state: "orphaned" }>[] {
+  return verdicts.filter((v): v is Extract<Verdict, { state: "orphaned" }> => v.state === "orphaned");
+}
+
+/**
+ * What to tell somebody, including how to fix it.
+ *
+ * A check that reports a problem without the recovery is a check people learn
+ * to scroll past. The recovery is a cherry-pick, and it is short.
+ */
+export function describe(verdicts: Verdict[], defaultBranch: string): string {
+  const orphans = orphansOf(verdicts);
+  const unverifiable = verdicts.filter((v) => v.state === "unverifiable");
+  const lines: string[] = [];
+
+  if (orphans.length === 0) {
+    lines.push(`No orphaned merges: every stacked PR checked is present in ${defaultBranch}.`);
+  } else {
+    lines.push(
+      `${orphans.length} merged PR(s) are NOT in ${defaultBranch}.`,
+      `A squash of the parent branch took its diff as it stood, leaving these behind.`,
+      ``,
+    );
+    for (const o of orphans) {
+      lines.push(
+        `  #${o.pr.number} ${o.pr.title.slice(0, 66)}`,
+        `     merged into ${o.pr.baseRefName}, ${o.missing.length} file(s) missing from ${defaultBranch}`,
+        `     e.g. ${o.missing.slice(0, 3).join(", ")}`,
+        `     recover: git cherry-pick <the PR's commit>  (the branch may need restoring first)`,
+        ``,
+      );
+    }
+  }
+
+  /* Said out loud every run, not only when something is wrong. A reader
+     needs to know how much of the list this actually looked at. */
+  if (unverifiable.length > 0) {
+    lines.push(
+      `${unverifiable.length} stacked PR(s) could not be checked this way (they added no new files).`,
+    );
+  }
+  return lines.join("\n");
+}
