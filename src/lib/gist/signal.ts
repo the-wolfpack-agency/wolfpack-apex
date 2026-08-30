@@ -71,7 +71,11 @@ export function endedBadly(g: TurnGist): boolean {
      answer to a question with no subject, and it replaced a confident wrong
      one. Counting it as a failure would teach every downstream measure to
      prefer the behaviour that was just fixed. */
-  return g.outcome === "dead_end" || g.outcome === "re_asked";
+  /* degraded IS bad. Both it and asked_which are honest, and that is where
+     the resemblance stops: asking which document is the right answer to a
+     vague question; an outage is the product failing somebody who asked a
+     perfectly good one. */
+  return g.outcome === "dead_end" || g.outcome === "re_asked" || g.outcome === "degraded";
 }
 
 /** Which gist fields are worth testing as predictors. */

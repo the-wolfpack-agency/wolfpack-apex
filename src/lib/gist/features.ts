@@ -88,6 +88,20 @@ export type TurnOutcome =
    * the difference cannot learn to prefer the honest one.
    */
   | "asked_which"
+  /**
+   * SOMETHING UNDERNEATH WAS BROKEN AND THE PERSON WAS TOLD SO.
+   *
+   * Added 2026-08-30. The outage messages shipped earlier the same day ("I
+   * could not reach the search index just now") were landing in single_turn,
+   * so a person who suffered an outage was counted as neutral, or as satisfied
+   * if they happened to ask something else afterwards.
+   *
+   * Counted as a BAD ending, unlike asked_which. Both are honest, and that is
+   * where the resemblance stops: asking which document is the right answer to
+   * a vague question, whereas an outage is the product failing somebody who
+   * asked a perfectly good one. Honesty about a failure is not a success.
+   */
+  | "degraded"
   /** The answer admitted having nothing and the person never returned. */
   | "dead_end"
   /** The answer had nothing but the person pushed on. */
@@ -128,7 +142,7 @@ export const VOCABULARY = {
     "other",
   ] as AnswerOrigin[],
   band: ["none", "short", "medium", "long"] as LengthBand[],
-  outcome: ["asked_which", "dead_end", "pushed_past", "re_asked", "continued", "single_turn"] as TurnOutcome[],
+  outcome: ["asked_which", "degraded", "dead_end", "pushed_past", "re_asked", "continued", "single_turn"] as TurnOutcome[],
 } as const;
 
 export function lengthBand(text: string): LengthBand {

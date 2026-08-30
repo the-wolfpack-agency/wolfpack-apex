@@ -200,3 +200,50 @@ describe("the product asking which document was meant", () => {
     expect(isAskedWhich(text)).toBe(false);
   });
 });
+
+/**
+ * THE MODEL WRITES ITS OWN WAYS OF SAYING "I DO NOT KNOW".
+ *
+ * The first version of MISS_PATTERNS knew only the deterministic strings, so a
+ * model-written refusal landed in single_turn and read as neutral. Found by
+ * walking every distinct answer in a 90-day window and reading the ones that
+ * sound like a failure and matched nothing:
+ *
+ *   "I cannot determine who runs engineering based on the information provided."
+ *
+ * The effect was that the WORST performing origin was the one whose failures
+ * were hardest to see, because it is the only one that phrases them
+ * differently every time. Widening the patterns moved 187 turns from neutral
+ * to dead_end and took the measured base rate from 3.5% to 5.2%.
+ */
+describe("a refusal the model wrote itself", () => {
+  it.each([
+    "I cannot determine who runs engineering based on the information provided.",
+    "I could not find any details about that in the documents.",
+    "I can't locate a record matching that description.",
+    "Based on the data provided, I cannot answer that.",
+    "There are no records matching this month.",
+  ])("counts %s as a miss", (text) => {
+    expect(isMiss(text)).toBe(true);
+  });
+
+  /* ANCHORED ON THE REFUSAL, NOT ON A TOPIC. A document that happens to
+     contain these words is not the assistant refusing, and sweeping it up
+     would inflate the failure rate with real answers. */
+  it.each([
+    "The contract states that the vendor cannot determine pricing unilaterally.",
+    "The payment terms are net 30 from invoice date.",
+    "Here's what the brain has on this: **SOW.pdf**",
+  ])("does not count %s as a miss", (text) => {
+    expect(isMiss(text)).toBe(false);
+  });
+
+  /* An outage is still not a miss, even though it is now also worded as a
+     failure. The fix is different: one is a thin corpus, the other is broken
+     plumbing. */
+  it("keeps an outage separate from a refusal", () => {
+    const outage = "I could not reach the search index just now, so I only looked at part of what you have.";
+    expect(isOutage(outage)).toBe(true);
+    expect(isMiss(outage)).toBe(false);
+  });
+});
