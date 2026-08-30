@@ -24,6 +24,13 @@
 
 export {};
 
+/* Loaded before anything reads process.env, matching brain-backfill.ts and
+   brain-eval.ts. Without it the walk completes, prints a whole map and stores
+   nothing, saying only that DATABASE_URL is unset: a run that looks like a
+   success and leaves no record. */
+import { config } from "dotenv";
+config({ path: ".env.local" });
+
 import { createSpecDiffBrowser } from "@/lib/spec-diff/browser";
 import { promptSecret } from "@/lib/cli/prompt-secret";
 import { waitForEnter } from "@/lib/cli/wait-for-enter";
