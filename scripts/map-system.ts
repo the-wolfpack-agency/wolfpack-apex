@@ -24,12 +24,12 @@
 
 export {};
 
-/* Loaded before anything reads process.env, matching brain-backfill.ts and
-   brain-eval.ts. Without it the walk completes, prints a whole map and stores
-   nothing, saying only that DATABASE_URL is unset: a run that looks like a
-   success and leaves no record. */
-import { config } from "dotenv";
-config({ path: ".env.local" });
+/* FIRST, AND THE ORDER IS LOAD-BEARING. Imports are hoisted, so calling
+   dotenv's config() in this file's body would run AFTER every module below has
+   already been evaluated and read an empty process.env. That shipped: the
+   mapper walked a client system for 216 seconds, printed a complete map, and
+   stored nothing. See scripts/load-env.ts. */
+import "./load-env";
 
 import { createSpecDiffBrowser } from "@/lib/spec-diff/browser";
 import { promptSecret } from "@/lib/cli/prompt-secret";
