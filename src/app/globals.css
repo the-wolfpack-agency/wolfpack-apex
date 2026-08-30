@@ -1013,7 +1013,27 @@ a:hover { color: var(--wp-gold-hover); }
   padding-left: 0.875rem;
   border-left: 2px solid var(--wp-dark-border, rgba(255, 255, 255, 0.12));
 }
-.wp-pilot-list li strong { color: var(--wp-text, #e8eaed); font-weight: 600; }
+/* WHEN SOMETHING BREAKS, on /pilot. Set apart from the figures above it
+   because it answers a different question: not how much the product does, but
+   what it does on its worst day. */
+.wp-pilot-resilience {
+  margin-top: 1.75rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--wp-dark-border, rgba(255, 255, 255, 0.12));
+}
+
+/* THE LEAD-IN GETS ITS OWN LINE.
+   Each of these items is a titled point, and running the title straight into
+   the body on one line reads as a run-on sentence: "The ones who never
+   started.They get reached..." is how it lands even when the space is there,
+   because nothing separates the two clauses but weight. A block lead-in makes
+   the four points scannable, which is the whole job of this list. */
+.wp-pilot-list li strong {
+  display: block;
+  color: var(--wp-text, #e8eaed);
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
 
 /* THE COST COMPARISON ON /pilot.
    The clearest commercial argument the product makes, so it is given the

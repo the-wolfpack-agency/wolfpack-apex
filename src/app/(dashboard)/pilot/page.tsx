@@ -259,6 +259,19 @@ export default function PilotPage() {
                   note="Every action an agent took passed a gate before it ran"
                   testId="pilot-cap-gate"
                 />
+                {/* THE CONTROL A CLIENT ACTUALLY ASKS ABOUT, SHOWN FIRST.
+                    People paste a card number or an ID into a chat box by
+                    mistake, and this is what happens when they do. It leads
+                    because it is the one that fires: verified end to end on
+                    2026-08-30 with a pasted card, a national ID inside a real
+                    question, bank details and an API key. None reached the
+                    answer. */}
+                <Figure
+                  value={reading(snap.capability.safety.sensitiveInputsRedacted)}
+                  label="Cards, IDs and keys removed from questions"
+                  note="Taken out before any model or outside service saw them. The question is still answered."
+                  testId="pilot-cap-inputs-redacted"
+                />
                 <Figure
                   value={reading(snap.capability.safety.responsesFlagged)}
                   /* FLAGGED, NOT WITHHELD, AND THE DISTINCTION IS ENFORCED.
@@ -277,10 +290,57 @@ export default function PilotPage() {
                      bluntness is deliberate: a check that tried to understand
                      negation could be talked around, and this copy is read by
                      clients. So the claim is made positively instead. */
-                  note="Recorded for review, and the answer still reaches the reader. The audit row is the control."
+                  /* SAYS WHAT A ZERO MEANS, because it has always been zero
+                     and always honestly so. This counts what a MODEL sent
+                     back, and for a product answering questions about
+                     documents that shape is genuinely rare. Left unexplained,
+                     a client reads "0" beside a safety promise as the safety
+                     check having found nothing, when the check above has been
+                     catching real things all along. */
+                  note="Watches what the model sends back, which is rare in document work. The tile above is the one that catches pasted data."
                   testId="pilot-cap-flagged"
                 />
               </div>
+              {/* WHAT HAPPENS WHEN SOMETHING BREAKS.
+                  Added 2026-08-30 because it became true that day, and
+                  because it is the question a client asks after the demo
+                  rather than during it. Every claim here is a shipped control
+                  with a test behind it, not a roadmap item. */}
+              <div className="wp-pilot-resilience" data-testid="pilot-resilience">
+                <h3 className="wp-pilot-subhead">When something breaks</h3>
+                <ul className="wp-pilot-list">
+                  <li>
+                    <strong>A brief failure is retried, not shown to you.</strong>
+                    When a model is throttled or a connection drops, the request is
+                    made again before anybody sees anything. Most of these clear in
+                    under a second, and until this shipped every one of them ended
+                    somebody&rsquo;s question.
+                  </li>
+                  <li>
+                    <strong>An outage says so, and never blames your documents.</strong>
+                    If part of the system cannot be reached, the answer names what
+                    could not be read and states plainly that nothing has been lost
+                    and nothing needs re-uploading. It used to say &ldquo;I don&rsquo;t
+                    have information on that yet&rdquo; about a document it was
+                    holding, which reads as your library having gone missing.
+                  </li>
+                  <li>
+                    <strong>Pasted data never reaches a model.</strong>
+                    A card number, national ID or key typed into a question is
+                    removed before the prompt leaves this system, and the question
+                    is still answered from your documents. Tested with all four,
+                    including data pasted alongside a real question.
+                  </li>
+                  <li>
+                    <strong>A quiet number is treated as a question.</strong>
+                    Every figure on this page states what a zero means, because a
+                    control that never ran and a control that found nothing look
+                    identical otherwise. Where we cannot evidence a check firing,
+                    we say that instead of showing you a clean-looking count.
+                  </li>
+                </ul>
+              </div>
+
               <p className="wp-pilot-aside">
                 {/* A ZERO HERE IS ONLY GOOD NEWS IF THE CHECK RUNS. Reporting
                     "nothing needed redacting" from an inspector that never
