@@ -96,7 +96,10 @@ describe("walked systems in the System Map", () => {
       entities: [
         { name: "porschecrm", evidence: [], attributes: ["centerNumber", "emailAddress"] },
       ],
-      integrations: [],
+      integrations: [
+        { host: "google-analytics.com", vendor: "Google Analytics", seenOn: ["/a", "/b"], requestCount: 9 },
+        { host: "telemetry.unknown.example", vendor: null, seenOn: ["/a"], requestCount: 2 },
+      ],
       paths: [],
       coverage: {
         surfacesReached: 19,
@@ -186,5 +189,67 @@ describe("walked systems in the System Map", () => {
     mockListWalkedMaps.mockRejectedValue(new Error("store down"));
     const md = await genSystemMap(ctx);
     expect(md).toContain("acme-crm");
+  });
+});
+
+/**
+ * Where data leaves the organisation, in the document a client reads.
+ */
+describe("outside services in the System Map", () => {
+  const walkedRow = (over: Record<string, unknown> = {}) => ({
+    platform: "cognito-forms",
+    entryUrl: "https://forms.example/acme",
+    surfaceCount: 19,
+    entityCount: 1,
+    formCount: 1,
+    frontierRemaining: 0,
+    stopReason: "frontier-exhausted",
+    authorisedBy: "CTO, Acme",
+    generatedAt: "2026-08-30T00:00:00.000Z",
+    map: {
+      platform: "cognito-forms",
+      entryUrl: "https://forms.example/acme",
+      surfaces: [],
+      entities: [],
+      integrations: [
+        { host: "google-analytics.com", vendor: "Google Analytics", seenOn: ["/a", "/b"], requestCount: 9 },
+        { host: "telemetry.unknown.example", vendor: null, seenOn: ["/a"], requestCount: 2 },
+      ],
+      paths: [],
+      coverage: {
+        surfacesReached: 19, frontierRemaining: 0, skipped: [], patterns: [],
+        maxDepthReached: 2, stopReason: "frontier-exhausted", durationMs: 1000,
+      },
+      generatedAt: "2026-08-30T00:00:00.000Z",
+      headline: "",
+    },
+    ...over,
+  });
+
+  it("lists the services, with how much and from how many screens", async () => {
+    mockListSystemProfiles.mockResolvedValue([]);
+    mockListWalkedMaps.mockResolvedValue([walkedRow()]);
+    const md = await genSystemMap(ctx);
+    expect(md).toContain("Google Analytics");
+    expect(md).toContain("google-analytics.com");
+    expect(md).toContain("| 9 | 2 |");
+  });
+
+  /* A host nobody could name is a prompt to ask, and a blank cell reads as
+     nothing to see. */
+  it("shows an unrecognised host as unrecognised rather than blank", async () => {
+    mockListSystemProfiles.mockResolvedValue([]);
+    mockListWalkedMaps.mockResolvedValue([walkedRow()]);
+    const md = await genSystemMap(ctx);
+    expect(md).toContain("telemetry.unknown.example");
+    expect(md).toMatch(/_unrecognised_/);
+  });
+
+  it("omits the table entirely when nothing was contacted", async () => {
+    mockListSystemProfiles.mockResolvedValue([]);
+    const row = walkedRow();
+    row.map.integrations = [];
+    mockListWalkedMaps.mockResolvedValue([row]);
+    expect(await genSystemMap(ctx)).not.toContain("Outside services contacted");
   });
 });

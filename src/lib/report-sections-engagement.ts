@@ -174,6 +174,26 @@ async function walkedSection(ctx: ReportContext): Promise<string[]> {
       );
     }
 
+    /* WHERE DATA LEAVES THE ORGANISATION. Deliberately above the object list:
+       a reader scanning the section should meet this before the inventory,
+       because it is the finding that changes what somebody does next. */
+    if (m.integrations.length > 0) {
+      out.push(
+        `**Outside services contacted**`,
+        ``,
+        `| Service | Host | Requests | Screens |`,
+        `|---------|------|----------|---------|`,
+      );
+      for (const i of m.integrations.slice(0, 15)) {
+        /* "unrecognised" rather than blank: a host nobody could name is a
+           prompt to ask, and an empty cell reads as nothing to see. */
+        out.push(
+          `| ${i.vendor ?? "_unrecognised_"} | ${i.host} | ${i.requestCount} | ${i.seenOn.length} |`,
+        );
+      }
+      out.push(``);
+    }
+
     if (m.entities.length > 0) {
       out.push(`| Business object | Fields observed |`, `|-----------------|-----------------|`);
       for (const e of m.entities.slice(0, 20)) {

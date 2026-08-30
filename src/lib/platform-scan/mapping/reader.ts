@@ -25,6 +25,8 @@
  */
 
 import { installReadOnlyFloor, type ScanPage } from "../browser/capture";
+import { createTrafficRecorder } from "../network/record";
+import type { NetworkObservation } from "../network/observations";
 import { mayClick } from "./click-policy";
 import type { MappedForm } from "./types";
 import type { SurfaceReader, ReadSurface } from "./walk";
@@ -253,9 +255,18 @@ export async function createSurfaceReader(
      likely to be somebody's dashboard. */
   await installReadOnlyFloor(page);
 
+  /* WATCHING WHERE THE DATA GOES, which is the question a client assessment
+     exists to answer and which the walk previously threw away. The recorder
+     uses the "response" event rather than a route hook, so it cannot conflict
+     with the floor above, which owns the only interceptor. */
+  const traffic = createTrafficRecorder(page, { now });
+
   return {
     async read(url: string): Promise<ReadSurface> {
       const started = now();
+      /* Before the navigation, so the document request itself is attributed to
+         the screen it fetches rather than to the previous one. */
+      traffic.attributeTo(url);
       const response = await page.goto(url);
       if (opts.settle) await opts.settle(page);
       const harvested = await page.evaluate(harvestSurface);
@@ -267,5 +278,7 @@ export async function createSurfaceReader(
         forms: harvested.forms.map(judgeForm),
       };
     },
+    observations: () => traffic.observations(),
+    trafficTruncated: () => traffic.truncated(),
   };
 }

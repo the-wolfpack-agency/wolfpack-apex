@@ -26,6 +26,7 @@
  * produce no report at all rather than a truthful one.
  */
 import type { ScanPage } from "../browser/capture";
+import { createTrafficRecorder } from "../network/record";
 import { installReadOnlyFloor } from "../browser/capture";
 import type { PageFacts } from "./findings";
 import type { NetworkObservation } from "../network/observations";
@@ -115,28 +116,16 @@ export function normalizeHeaders(raw: Record<string, string> | undefined | null)
 export async function collectForCompliance(pageUrl: string, deps: CollectDeps): Promise<CollectResult> {
   const { page } = deps;
   const now = deps.now ?? Date.now;
-  const startedAt = now();
-  const raw: RawRequest[] = [];
 
   // Safety first: no mutating request may leave the browser. A compliance scan
   // runs against a client's live site.
   await installReadOnlyFloor(page);
 
-  page.on("response", (res: unknown) => {
-    const r = res as { url?: () => string; status?: () => number; request?: () => { resourceType?: () => string } };
-    try {
-      const url = r.url?.() ?? "";
-      if (!url) return;
-      raw.push({
-        url,
-        resourceType: r.request?.()?.resourceType?.() ?? "other",
-        atMs: Math.max(0, now() - startedAt),
-        status: r.status?.() ?? null,
-      });
-    } catch {
-      /* One unreadable response must not lose the rest of the capture. */
-    }
-  });
+  // Shared with the system walker, which needs the same capture across dozens
+  // of screens. This collector had the only copy, so the walker threw every
+  // request away and the anomaly detectors could only ever see one page.
+  const traffic = createTrafficRecorder(page, { now });
+  traffic.attributeTo(pageUrl);
 
   let headers: Record<string, string> = {};
   try {
@@ -173,12 +162,6 @@ export async function collectForCompliance(pageUrl: string, deps: CollectDeps): 
 
   return {
     facts: { ...pageFacts, headers, pageLoaded: true },
-    observations: raw.map((r) => ({
-      url: r.url,
-      pageUrl,
-      resourceType: r.resourceType,
-      atMs: r.atMs,
-      status: r.status,
-    })),
+    observations: traffic.observations(),
   };
 }

@@ -33,6 +33,7 @@ import { walkSystem } from "@/lib/platform-scan/mapping/walk";
 import { inventoryForms } from "@/lib/platform-scan/mapping/form-inventory";
 import { inferEntities } from "@/lib/platform-scan/mapping/entities";
 import { buildSystemMap } from "@/lib/platform-scan/mapping/explore";
+import { describeIntegrations } from "@/lib/platform-scan/mapping/integrations";
 import { saveWalkedMap } from "@/lib/platform-scan/mapping/store";
 import { trackEvent } from "@/lib/analytics";
 import type { ScanPage } from "@/lib/platform-scan/browser/capture";
@@ -160,7 +161,7 @@ if (!baseUrl || !authorisedBy) {
     });
 
     const started = Date.now();
-    const { surfaces, coverage } = await walkSystem(baseUrl, reader, {
+    const { surfaces, coverage, integrations, trafficObserved, trafficTruncated } = await walkSystem(baseUrl, reader, {
       /* --whole-origin for a single-tenant system, where a deep entry URL
          would otherwise confine the map to one folder. */
       confineTo: process.argv.includes("--whole-origin") ? null : (arg("confine-to") ?? undefined),
@@ -242,6 +243,20 @@ if (!baseUrl || !authorisedBy) {
       }
     }
 
+    /* WHERE THE DATA GOES, which is the question a client assessment exists to
+       answer. Printed even when nothing was found, because an empty list and
+       a scan that was not watching are opposite findings. */
+    console.log(`\nWhere data goes: ${describeIntegrations(integrations, trafficObserved)}`);
+    for (const i of integrations.slice(0, 10)) {
+      const where = i.seenOn.length === 1 ? "1 screen" : `${i.seenOn.length} screens`;
+      console.log(
+        `  ${(i.vendor ?? "unrecognised").slice(0, 22).padEnd(22)} ${i.host.slice(0, 34).padEnd(34)} ${String(i.requestCount).padStart(4)} requests, ${where}`,
+      );
+    }
+    if (trafficTruncated) {
+      console.log("  (recording hit its cap, so this list is a floor rather than a total)");
+    }
+
     const byReason = new Map<string, number>();
     for (const s of coverage.skipped) byReason.set(s.reason, (byReason.get(s.reason) ?? 0) + 1);
     console.log("\nDeliberately not looked at:");
@@ -282,7 +297,7 @@ if (!baseUrl || !authorisedBy) {
       entryUrl: baseUrl,
       surfaces,
       entities,
-      integrations: [],
+      integrations,
       coverage,
       now: new Date().toISOString(),
     });

@@ -29,7 +29,9 @@ import {
 } from "./explore";
 import { partitionByPolicy, type ClickCandidate } from "./click-policy";
 import { ShapeSampler } from "./shapes";
-import type { MappedSurface, MapCoverage, MappedForm } from "./types";
+import type { MappedSurface, MapCoverage, MappedForm, ObservedIntegration } from "./types";
+import type { NetworkObservation } from "../network/observations";
+import { observedIntegrations } from "./integrations";
 
 /** What the driver needs a page to tell it. One visit, one answer. */
 export interface ReadSurface {
@@ -57,11 +59,34 @@ export interface SurfaceReader {
    * failure: the surface was already counted.
    */
   clickTo?(control: ClickCandidate): Promise<string | null>;
+  /**
+   * Outbound traffic seen while reading, when the reader was watching.
+   *
+   * Optional, and its ABSENCE is carried through to the map rather than
+   * flattened into an empty list. A walk that did not watch and a walk that
+   * saw nothing leave are opposite findings, and a reader who cannot tell them
+   * apart will read a gap in the scan as a clean system.
+   */
+  observations?(): NetworkObservation[];
+  /**
+   * True when the observation set hit its cap.
+   *
+   * Reported rather than assumed complete: a capped set that looked whole
+   * would understate what a system contacts, which is the one direction this
+   * finding must never be wrong in.
+   */
+  trafficTruncated?(): boolean;
 }
 
 export interface WalkResult {
   surfaces: MappedSurface[];
   coverage: MapCoverage;
+  /** Third-party hosts contacted, per screen. Empty when none were seen. */
+  integrations: ObservedIntegration[];
+  /** False when the reader was not watching, which is not the same as none. */
+  trafficObserved: boolean;
+  /** True when traffic recording hit its cap, so the list is a floor. */
+  trafficTruncated: boolean;
 }
 
 export interface WalkOptions {
@@ -119,6 +144,9 @@ export async function walkSystem(
   if (!origin) {
     return {
       surfaces: [],
+      integrations: [],
+      trafficObserved: false,
+      trafficTruncated: false,
       coverage: {
         surfacesReached: 0,
         frontierRemaining: 0,
@@ -306,8 +334,14 @@ export async function walkSystem(
     opts.onSurface?.(surface);
   }
 
+  const observed = typeof reader.observations === "function";
+  const integrations = observed ? observedIntegrations(reader.observations!()) : [];
+
   return {
     surfaces,
+    integrations,
+    trafficObserved: observed,
+    trafficTruncated: reader.trafficTruncated?.() ?? false,
     coverage: {
       surfacesReached: surfaces.length,
       /* NON-ZERO MEANS THE MAP IS INCOMPLETE, and every claim drawn from it
