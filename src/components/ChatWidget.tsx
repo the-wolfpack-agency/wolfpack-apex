@@ -78,7 +78,12 @@ export function ChatWidget({ spec, workflowId, onPickPrompt }: ChatWidgetProps) 
     case "integrations_list":
       return <IntegrationsListWidget spec={spec} workflowId={workflowId} />;
     case "search_results":
-      return <SearchResultsWidget spec={spec} workflowId={workflowId} />;
+      /* onPickPrompt makes 'Search again in selected sources' do something.
+         It fired an analytics event and nothing else, which is a button that
+         looks like a control and produces no visible change. */
+      return (
+        <SearchResultsWidget spec={spec} workflowId={workflowId} onPickPrompt={onPickPrompt} />
+      );
     case "weather":
       return <WeatherWidget spec={spec} workflowId={workflowId} />;
     case "headlines":

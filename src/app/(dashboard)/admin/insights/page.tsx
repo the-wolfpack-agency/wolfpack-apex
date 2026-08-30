@@ -62,6 +62,17 @@ interface CapabilitySnapshot {
 }
 
 /** The routing score, and whether it could be read at all. */
+/** What the answer path could not reach, and what it recovered from. */
+interface Degradation {
+  readable: boolean;
+  days: number;
+  degradedAnswers?: number;
+  causes?: Array<{ kind: string; count: number }>;
+  retriesRecovered?: number;
+  semanticDegraded?: number;
+  knowledgeLookupFailures?: number;
+}
+
 interface RoutingCoverage {
   readable: boolean;
   total?: number;
@@ -138,19 +149,26 @@ export default function InsightsAdminPage() {
   /* Unreadable is not the same fact as none, and rendering an empty table for
      both would claim no control in the product lies to anybody. */
   const [mismatchesReadable, setMismatchesReadable] = useState(true);
+  /* What broke while somebody was waiting. Null until the first load, so an
+     unread store and a quiet month are never rendered the same way. */
+  const [degradation, setDegradation] = useState<Degradation | null>(null);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
     const failures: string[] = [];
     try {
-      const [intentRes, templateRes, healthRes, mismatchRes, routingRes, capabilityRes] = await Promise.all([
+      const [intentRes, templateRes, healthRes, mismatchRes, routingRes, capabilityRes, degradationRes] = await Promise.all([
         fetchWithRefresh("/api/admin/insights/unmet-intents", { headers: authHeaders() }),
         fetchWithRefresh("/api/admin/templates", { headers: authHeaders() }),
         fetchWithRefresh("/api/health/integrations", { headers: authHeaders() }),
         fetchWithRefresh("/api/admin/insights/role-mismatches", { headers: authHeaders() }),
         fetchWithRefresh("/api/admin/insights/routing-coverage", { headers: authHeaders() }),
         fetchWithRefresh("/api/admin/insights/capability", { headers: authHeaders() }),
+        fetchWithRefresh("/api/admin/insights/degradation", { headers: authHeaders() }),
       ]);
+      if (degradationRes.ok) {
+        setDegradation(await degradationRes.json());
+      } else failures.push(`degradation: HTTP ${degradationRes.status}`);
       if (intentRes.ok) {
         const body = await intentRes.json();
         setIntents(body.intents ?? []);
@@ -228,6 +246,90 @@ export default function InsightsAdminPage() {
           Some feeds failed to load: {errors.join("; ")}
         </div>
       )}
+
+      {/* WHAT BROKE WHILE SOMEBODY WAS WAITING.
+          Placed above the role-mismatch panel because that one names a control
+          somebody could not use, and this one names an answer somebody could
+          not get. Both are already broken for a person who did not tell us;
+          this is the more expensive of the two.
+          It did not exist until 2026-08-30, and neither did most of its
+          signals. queryBrain has reported semantic_status since 2026-08-24 and
+          only analytics read it; callAI returned a bare null for every failure
+          so an unreachable model and an empty corpus were indistinguishable.
+          Both now reach the answer, which is why they can now reach a page. */}
+      <section data-testid="insights-degradation" className="mb-8">
+        <h2 className="text-lg font-semibold mb-2" style={{ color: "var(--wp-text)" }}>
+          Answers given while something was broken (last {degradation?.days ?? 30} days)
+        </h2>
+        {degradation && !degradation.readable ? (
+          <p className="text-xs" style={{ color: "var(--wp-text-dim)" }}>
+            The event store could not be read, so this is not being reported. That is a different
+            thing from a quiet month and is not shown as one.
+          </p>
+        ) : degradation ? (
+          <>
+            <p className="text-xs mb-3" style={{ color: "var(--wp-text-dim)" }}>
+              A degraded answer names what could not be read and tells the reader nothing was lost.
+              A recovered retry is one nobody saw. Rising recoveries are a dependency getting worse
+              before it fails for good, which is the earliest warning available here.
+            </p>
+            <div className="flex flex-wrap gap-6 mb-2">
+              <div data-testid="insights-degraded-answers">
+                <div className="text-2xl font-semibold" style={{ color: "var(--wp-text)" }}>
+                  {degradation.degradedAnswers ?? 0}
+                </div>
+                <div className="text-xs" style={{ color: "var(--wp-text-dim)" }}>
+                  people told something was wrong
+                </div>
+              </div>
+              <div data-testid="insights-retries-recovered">
+                <div className="text-2xl font-semibold" style={{ color: "var(--wp-text)" }}>
+                  {degradation.retriesRecovered ?? 0}
+                </div>
+                <div className="text-xs" style={{ color: "var(--wp-text-dim)" }}>
+                  failures recovered before anybody saw
+                </div>
+              </div>
+              <div data-testid="insights-semantic-degraded">
+                <div className="text-2xl font-semibold" style={{ color: "var(--wp-text)" }}>
+                  {degradation.semanticDegraded ?? 0}
+                </div>
+                <div className="text-xs" style={{ color: "var(--wp-text-dim)" }}>
+                  searches that ran on keywords alone
+                </div>
+              </div>
+              <div data-testid="insights-knowledge-failures">
+                <div className="text-2xl font-semibold" style={{ color: "var(--wp-text)" }}>
+                  {degradation.knowledgeLookupFailures ?? 0}
+                </div>
+                <div className="text-xs" style={{ color: "var(--wp-text-dim)" }}>
+                  knowledge lookups that failed
+                </div>
+              </div>
+            </div>
+            {/* WHICH DEPENDENCY, because the count says there is a problem and
+                only this says where to go. */}
+            {degradation.causes && degradation.causes.length > 0 ? (
+              <ul className="text-xs" style={{ color: "var(--wp-text-dim)" }} data-testid="insights-degradation-causes">
+                {degradation.causes.map((c) => (
+                  <li key={c.kind}>
+                    {c.kind.replace(/_/g, " ")}: {c.count}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-xs" style={{ color: "var(--wp-text-dim)" }}>
+                Nothing has degraded an answer in this window. The checks run on every turn, so this
+                is a result rather than the absence of one.
+              </p>
+            )}
+          </>
+        ) : (
+          <p className="text-xs" style={{ color: "var(--wp-text-dim)" }}>
+            Loading.
+          </p>
+        )}
+      </section>
 
       {/* FIRST ON THE PAGE, deliberately. The other panels describe what to
           build next; this one names something already broken for somebody who

@@ -117,7 +117,12 @@ const DOCUMENTS: ModuleCapability = {
     },
     {
       id: "documents.summarise",
-      verb: "summarise",
+      /* US SPELLING, BECAUSE A CLIENT READS IT. The id keeps the British form
+         it was registered under: it is referenced by tests, by the journey and
+         by the client guide, and renaming an identifier to fix a display
+         string is how a rename becomes an outage. The verb is the part
+         somebody sees. */
+      verb: "summarize",
       example: "summarize the onboarding document",
       /* PROMOTED 2026-08-30, AND THE THIRD ATTEMPT IS THE ONE THAT WORKED.
        *

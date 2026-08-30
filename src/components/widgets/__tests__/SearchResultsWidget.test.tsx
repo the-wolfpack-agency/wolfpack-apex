@@ -227,3 +227,46 @@ describe("SearchResultsWidget — empty results", () => {
     expect(body.metadata.source_count).toBe(0);
   });
 });
+
+/**
+ * "Search again in selected sources" must do something.
+ *
+ * IT FIRED AN ANALYTICS EVENT AND NOTHING ELSE. A button that looks like a
+ * control, is clicked, and produces no visible change. That is exactly the
+ * defect /admin/insights tracks under "controls shown to roles that cannot
+ * use them", except this one was shown to everybody: somebody clicks it,
+ * nothing happens, and they conclude the product is broken.
+ *
+ * It was written that way honestly. The comment said no re-prompt path existed
+ * in the chat surface, and none did. One does now.
+ */
+describe("searching again actually searches again", () => {
+  it("puts a narrowed query in the composer", () => {
+    const onPickPrompt = jest.fn();
+    render(
+      <SearchResultsWidget
+        spec={populatedSpec}
+        onPickPrompt={onPickPrompt}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("search-results-refresh"));
+    expect(onPickPrompt).toHaveBeenCalledTimes(1);
+    expect(String(onPickPrompt.mock.calls[0][0])).toContain("porsche");
+  });
+
+  /* The demand signal is still worth having, so the event must survive the
+     button becoming real. */
+  it("still records that a narrowed re-search was wanted", () => {
+    render(<SearchResultsWidget spec={populatedSpec} onPickPrompt={jest.fn()} />);
+    fireEvent.click(screen.getByTestId("search-results-refresh"));
+    const call = mockFetch.mock.calls.find((c) =>
+      String(c[1]?.body ?? "").includes("search_refilter_requested"),
+    );
+    expect(call).toBeTruthy();
+  });
+
+  it("does not throw on a surface with no composer wired", () => {
+    render(<SearchResultsWidget spec={populatedSpec} />);
+    expect(() => fireEvent.click(screen.getByTestId("search-results-refresh"))).not.toThrow();
+  });
+});
