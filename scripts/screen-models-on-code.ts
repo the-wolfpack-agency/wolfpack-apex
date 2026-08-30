@@ -40,9 +40,9 @@
  *   npx tsx scripts/screen-models-on-code.ts --tiers small,large
  */
 import { execFileSync, execSync } from "node:child_process";
-import { mkdtempSync, rmSync, readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync, writeFileSync, mkdirSync, existsSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, dirname } from "node:path";
+import { join, dirname, resolve, sep } from "node:path";
 import {
   scoreScreen,
   detectOracleGaming,
@@ -241,8 +241,22 @@ async function attemptTask(
   let gaming;
 
   try {
-    mkdirSync(dirname(join(worktree, task.targetFile)), { recursive: true });
-    writeFileSync(join(worktree, task.targetFile), body, "utf8");
+    /* THE MODEL'S OUTPUT LANDS INSIDE THE WORKTREE OR NOWHERE.
+     *
+     * `body` is text a model wrote and `targetFile` decides where it goes, so
+     * a path that climbs out of the worktree would let a screening run write
+     * into the real repository. Nothing today supplies "../", and this runner
+     * is a step away from letting a model choose its own target, which is
+     * precisely when a check nobody added becomes expensive.
+     * resolve() collapses any traversal before it is compared, so "a/../../x"
+     * is judged by where it lands rather than how it is spelled. */
+    const target = resolve(worktree, task.targetFile);
+    const root = resolve(worktree);
+    if (target !== root && !target.startsWith(root + sep)) {
+      throw new Error(`refusing to write outside the worktree: ${task.targetFile}`);
+    }
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(target, body, "utf8");
 
     /* git writes the diff, not the model, and it covers the WHOLE tree rather
        than just the target. This runner only lets a model write one file, so
@@ -262,7 +276,15 @@ async function attemptTask(
     } else {
       /* node_modules is not in the worktree; link the real one rather than
          reinstalling per attempt. */
-      execSync(`ln -s "${REPO}/node_modules" "${worktree}/node_modules"`, { stdio: "ignore" });
+      /* NO SHELL. This built a command string with ${REPO} interpolated into
+         it and handed it to a shell, which CodeQL flagged as
+         js/shell-command-injection-from-environment. REPO comes from the
+         environment, so a path containing a quote or a semicolon executed
+         whatever followed it.
+         symlinkSync does the same job with no shell to inject into, which is
+         the fix rather than a better-quoted string: escaping is a thing you
+         can get wrong, and not invoking a shell is not. */
+      symlinkSync(join(REPO, "node_modules"), join(worktree, "node_modules"));
       const gate = runScopedGate(worktree, task);
       outcome = gate.ok ? "passed" : "failed";
       gateError = gate.error;
