@@ -30,6 +30,7 @@ import { waitForEnter } from "@/lib/cli/wait-for-enter";
 import { withSecret, scrubSecret } from "@/lib/cli/scrub-secret";
 import { createSurfaceReader } from "@/lib/platform-scan/mapping/reader";
 import { walkSystem } from "@/lib/platform-scan/mapping/walk";
+import { inventoryForms } from "@/lib/platform-scan/mapping/form-inventory";
 import type { ScanPage } from "@/lib/platform-scan/browser/capture";
 
 const arg = (name: string): string | null => {
@@ -181,11 +182,31 @@ if (!baseUrl || !authorisedBy) {
       );
     }
 
-    const forms = surfaces.flatMap((s) => s.forms);
-    const mutating = forms.filter((f) => f.mutating);
-    console.log(`\nWhere data enters: ${forms.length} forms (${mutating.length} that would change something)`);
-    for (const f of forms.slice(0, 8)) {
-      console.log(`  ${f.mutating ? "writes" : "reads "}  ${f.name.slice(0, 44).padEnd(44)} ${f.fields.length} fields`);
+    /* DISTINCT FORMS, AND FURNITURE SEPARATED. Counting instances reported 94
+       forms across 40 surfaces on a real tenant, most of them the same support
+       widget on every screen. A number that large about a system that small is
+       worse than no number, because somebody will quote it. */
+    const inv = inventoryForms(surfaces);
+    const mutating = inv.content.filter((f) => f.form.mutating);
+    console.log(
+      `\nWhere data enters: ${inv.content.length} distinct forms ` +
+        `(${mutating.length} that would change something)`,
+    );
+    for (const s of inv.content.slice(0, 12)) {
+      const seen = s.surfaces.length > 1 ? `  on ${s.surfaces.length} screens` : "";
+      console.log(
+        `  ${s.form.mutating ? "writes" : "reads "}  ${s.form.name.slice(0, 42).padEnd(42)} ${s.form.fields.length} fields${seen}`,
+      );
+    }
+    if (inv.chrome.length > 0) {
+      /* Reported, not deleted: a support widget that uploads files IS a place
+         information leaves an organisation. It just is not the client's. */
+      console.log(
+        `\nPart of the application frame, on most screens: ${inv.chrome.length}`,
+      );
+      for (const s of inv.chrome.slice(0, 6)) {
+        console.log(`  ${s.form.name.slice(0, 42).padEnd(42)} ${s.form.fields.length} fields`);
+      }
     }
 
     const tables = surfaces.flatMap((s) => s.tables);
