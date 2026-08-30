@@ -9,7 +9,7 @@
  *
  *   npx tsx scripts/map-system.ts <baseUrl> --authorised-by "<name>"
  *   npx tsx scripts/map-system.ts <baseUrl> --authorised-by "<name>" \
- *     --email <user> --password <pass> --login-path /login
+ *     --email <user> --login-path /login
  *
  * AUTHORISATION IS NAMED, NOT ASSUMED. Every run prints who authorised it and
  * refuses without it. This sends traffic to a real system, and "somebody said
@@ -25,6 +25,7 @@
 export {};
 
 import { createSpecDiffBrowser } from "@/lib/spec-diff/browser";
+import { promptSecret } from "@/lib/cli/prompt-secret";
 import { createSurfaceReader } from "@/lib/platform-scan/mapping/reader";
 import { walkSystem } from "@/lib/platform-scan/mapping/walk";
 import type { ScanPage } from "@/lib/platform-scan/browser/capture";
@@ -40,7 +41,9 @@ const authorisedBy = arg("authorised-by");
 if (!baseUrl || !authorisedBy) {
   console.error(
     'usage: npx tsx scripts/map-system.ts <baseUrl> --authorised-by "<name>"\n' +
-      "        [--email <user> --password <pass> --login-path /login]\n\n" +
+      "        [--email <user> --login-path /login]\n\n" +
+      "The password is typed at a prompt, or read from MAP_PASSWORD. It is\n" +
+      "deliberately not a flag: argv is visible to every process on the machine.\n\n" +
       "--authorised-by is required. This sends traffic to a real system and the\n" +
       "run should say who agreed to it.",
   );
@@ -57,10 +60,18 @@ if (!baseUrl || !authorisedBy) {
     const page = (await handle.browser.newPage()) as unknown as ScanPage;
 
     const email = arg("email");
-    const password = arg("password");
     let authenticated = false;
 
-    if (email && password) {
+    if (email) {
+      /* Asked for here, not taken from the command line. Typed input persists
+         nowhere: not in history, not in argv, not in this repository. */
+      const password = await promptSecret(`Password for ${email}: `, {
+        envVar: "MAP_PASSWORD",
+      });
+      if (!password) {
+        console.error("No password given, so there is nothing to sign in with.");
+        process.exit(2);
+      }
       /* BEFORE THE FLOOR. A sign-in is a POST and the floor blocks those, so
          this is the one navigation that happens without it. */
       const loginPath = arg("login-path") ?? "/login";
