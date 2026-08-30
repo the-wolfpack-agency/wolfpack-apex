@@ -224,3 +224,56 @@ describe("long names that are not ids", () => {
     expect(named("aabbccddeeff1122")).not.toContain("aabbccddeeff1122");
   });
 });
+
+/**
+ * What the first live run against a real tenant got wrong.
+ *
+ * Every string here is copied from that output on 2026-08-30. It walked 39
+ * screens of a real Cognito Forms account and reported 19 business objects,
+ * of which one was a pagination segment and most were named after a screen.
+ */
+describe("the first live run's mistakes", () => {
+  const withTitle = (slug: string, title: string) =>
+    inferEntities([
+      surface({ url: `https://x.test/porscheacademyus/${slug}/all-entries`, title }),
+      surface({ url: `https://x.test/porscheacademyus/${slug}/build`, title }),
+      surface({ url: `https://x.test/porscheacademyus/other/build`, title: "Other" }),
+    ]).map((e) => e.name);
+
+  /* Reported as "Change Management Plan - All Entries": the object named after
+     whichever screen happened to be opened first. */
+  it("names the object, not the screen it was seen on", () => {
+    expect(withTitle("changemanagementplan", "Change Management Plan - All Entries")).toContain(
+      "Change Management Plan",
+    );
+  });
+
+  it("strips the suffix however the title punctuates it", () => {
+    expect(withTitle("porschecrm", "Porsche CRM | Entries")).toContain("Porsche CRM");
+    expect(withTitle("pcnausers", "PCNA Users – Build")).toContain("PCNA Users");
+  });
+
+  /* GUESSING WOULD BE WORSE THAN THE PROBLEM. A product genuinely called
+     "Acme - Field Service" keeps its name; an object silently renamed reads as
+     authoritative and no reader can spot it. */
+  it("leaves a real name that merely contains a dash alone", () => {
+    expect(withTitle("acmefieldservice", "Acme - Field Service")).toContain("Acme - Field Service");
+  });
+
+  /* Reported as a business object called "1-all-entries", which is page two of
+     a list. */
+  it("does not report pagination as something the system manages", () => {
+    const names = inferEntities([
+      surface({ url: "https://x.test/porscheacademyus/changemanagementplan/1-all-entries" }),
+      surface({ url: "https://x.test/porscheacademyus/porschecrm/1-all-entries" }),
+    ]).map((e) => e.name);
+    expect(names).not.toContain("1-all-entries");
+    expect(names).toEqual(expect.arrayContaining(["changemanagementplan", "porschecrm"]));
+  });
+
+  /* The two screens of one form are one object, not two. */
+  it("counts a form once however many of its screens were opened", () => {
+    const names = withTitle("changemanagementplan", "Change Management Plan - All Entries");
+    expect(names.filter((n) => n.startsWith("Change Management Plan"))).toHaveLength(1);
+  });
+});
