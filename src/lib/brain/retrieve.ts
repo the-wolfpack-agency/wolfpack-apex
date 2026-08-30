@@ -21,6 +21,7 @@
  */
 import { queryBrain, type QueryExecution, type QueryOpts } from "./query";
 import { shouldExpand } from "./expand-query";
+import { searchTermsFor } from "./question-terms";
 import { SEMANTIC_SCORE_FLOOR } from "./qdrant";
 
 export interface RetrieveOpts extends Omit<QueryOpts, "expand"> {
@@ -55,7 +56,19 @@ function isBetter(a: QueryExecution, b: QueryExecution): boolean {
 
 export async function retrieve(opts: RetrieveOpts): Promise<RetrieveResult> {
   const { judge, expand, ...queryOpts } = opts;
-  const first = await queryBrain(queryOpts);
+
+  /* SEARCH THE TOPIC, JUDGE THE QUESTION.
+   *
+   * Keyword search ANDs its terms, so one scaffolding word the corpus does not
+   * contain zeroes out an otherwise perfect match: "what does the viaPeople
+   * work order say" found nothing while "what is in the viaPeople work order"
+   * scored 0.900 on the same document.
+   *
+   * The judge still sees the ORIGINAL sentence, because it is deciding whether
+   * these results answer what a person actually asked, and handing it the
+   * reduced terms would ask it a different and easier question. */
+  const terms = searchTermsFor(opts.query);
+  const first = await queryBrain({ ...queryOpts, query: terms });
 
   const verdict =
     judge && first.hits.length > 0 ? await judge(opts.query, first.hits).catch(() => "unjudged" as const) : "unjudged";
@@ -80,7 +93,7 @@ export async function retrieve(opts: RetrieveOpts): Promise<RetrieveResult> {
     return { execution: first, firstWasRejected, expanded: false, expansionHelped: false };
   }
 
-  const second = await queryBrain({ ...queryOpts, query: rewritten });
+  const second = await queryBrain({ ...queryOpts, query: searchTermsFor(rewritten) });
   const helped = isBetter(second, first);
 
   return {
@@ -88,7 +101,7 @@ export async function retrieve(opts: RetrieveOpts): Promise<RetrieveResult> {
        result: a rewrite is a guess about vocabulary, and the query log should
        record what the person actually typed. An eval harvested from rewritten
        questions would grade the product on its own paraphrases. */
-    execution: helped ? { ...second, query: opts.query } : first,
+    execution: helped ? { ...second, query: opts.query } : { ...first, query: opts.query },
     firstWasRejected,
     expanded: true,
     rewritten,

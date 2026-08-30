@@ -150,6 +150,39 @@ export interface CorpusScenarioConfig {
  * PATTERN — vague question, then name the document, then ask about it — with
  * their material rather than ours.
  */
+/**
+ * Content questions must answer, not list.
+ *
+ * Only built when the deployment names a document, because "summarise X" needs
+ * an X that exists in their corpus. Portable in shape, specific in content,
+ * which is the same split every other corpus check uses.
+ */
+export function contentQuestionScenario(config: CorpusScenarioConfig): Scenario | null {
+  const name = config.documentName?.trim();
+  if (!name) return null;
+  return {
+    id: "content-questions-answer",
+    goal: "Ask what a document says and get an answer, not a filing cabinet.",
+    turns: [
+      {
+        say: `summarize ${name}`,
+        /* A LIST IS THE FAILURE HERE, and it is why this scenario exists: the
+           classifier reads "Found 3 results" as `list`, which is a correct
+           answer to "find" and the wrong one to "summarise". */
+        expect: ["substantive"],
+        budgetMs: 15_000,
+        because: "Asking for a summary must not return a list of documents.",
+      },
+      {
+        say: `what does ${name} say about payment?`,
+        expect: ["substantive", "empty"],
+        budgetMs: 15_000,
+        because: "Asking what a document contains must not return a list either.",
+      },
+    ],
+  };
+}
+
 export function corpusScenario(config: CorpusScenarioConfig): Scenario | null {
   const name = config.documentName?.trim();
   if (!name) return null;
@@ -178,6 +211,8 @@ export function corpusScenario(config: CorpusScenarioConfig): Scenario | null {
 }
 
 export function buildScenarios(config: CorpusScenarioConfig = {}): Scenario[] {
-  const corpus = corpusScenario(config);
-  return corpus ? [...UNIVERSAL_SCENARIOS, corpus] : UNIVERSAL_SCENARIOS;
+  const corpus = [corpusScenario(config), contentQuestionScenario(config)].filter(
+    (s): s is Scenario => s !== null,
+  );
+  return [...UNIVERSAL_SCENARIOS, ...corpus];
 }

@@ -1,61 +1,60 @@
 /**
- * "What does the SOW say" is the question a document library exists to answer.
+ * Asking what a document says must produce an answer, not a filing cabinet.
  *
- * It reached NO tool until 2026-08-26, and "summarize the SOW" reached
- * op_create_document, which would have tried to CREATE a document by that name
- * rather than read the one already in the library. "find the contract" worked,
- * because that is how an engineer phrases it; everybody else asks a question.
+ * THE HISTORY, BECAUSE IT TOOK THREE ATTEMPTS. "What does the SOW say" reached
+ * NO tool until 2026-08-26, so it was pointed at universal search, which made
+ * it reachable. But search returns a browsable LIST, and somebody who asks for
+ * a summary receives a list of filenames.
  *
- * For a SharePoint engagement this is the whole interaction: connect a library,
- * ask about a document in it. The negatives matter as much as the positives,
- * because a matcher this shape is one careless widening away from claiming
- * every sentence containing the word "say".
+ * The first fix simply stopped search claiming those sentences, expecting them
+ * to fall through to retrieval. It shipped on 2026-08-29 and was reverted the
+ * same day: they reached a model with no document context, which asked the
+ * reader to paste a document the product already held. Strictly worse.
+ *
+ * The cause was never the routing. Search's matcher was doing two jobs at once
+ * and only one of them was visible. It decided the route AND it reduced the
+ * sentence to its topic, handing on "SOW payment" rather than "what does the
+ * SOW say about payment". Removing the route silently removed the reduction,
+ * and keyword search ANDs its terms, so the surviving question verb ("say")
+ * had to appear literally in a chunk or nothing matched at all.
+ *
+ * The reduction now lives in `@/lib/brain/question-terms`, where retrieval can
+ * use it, and it is tested there. This file asserts the routing half: content
+ * questions are released, existence questions are not.
  */
 
 import { matchDocumentQuestion } from "@/lib/assistant/tools/search";
 
-describe("questions about a document", () => {
+/**
+ * A CONTENT question asks what is inside a document. Only retrieval can answer
+ * it, because only retrieval reads the text.
+ */
+describe("content questions are released to retrieval", () => {
   it.each([
-    ["what does the SOW say", "SOW"],
-    ["what's in the SOW", "SOW"],
-    ["what is in the contract", "contract"],
-    ["what does our contract say", "contract"],
-    ["what did the proposal say", "proposal"],
-  ])("%s searches for %s", (prompt, expected) => {
-    expect(matchDocumentQuestion(prompt)).toBe(expected);
-  });
-
-  it("carries what was asked ABOUT into the query", () => {
-    /* Searching the subject alone returns the whole document and buries the
-       clause somebody actually wanted. */
-    expect(matchDocumentQuestion("what does the SOW say about payment terms")).toBe(
-      "SOW payment terms",
-    );
-    expect(matchDocumentQuestion("what does the contract say about termination")).toBe(
-      "contract termination",
-    );
-  });
-
-  it("tolerates punctuation and casing the way people type", () => {
-    expect(matchDocumentQuestion("What does the SOW say?")).toBe("SOW");
-    expect(matchDocumentQuestion("  whats in the contract  ")).toBe("contract");
+    "what does the SOW say",
+    "what does the SOW say about payment terms",
+    "what does our contract say",
+    "what did the proposal say",
+    "what's in the SOW",
+    "what is in the contract",
+    "summarize the onboarding document",
+    "summarise the contract",
+  ])("%s is not claimed by search", (prompt) => {
+    expect(matchDocumentQuestion(prompt)).toBeNull();
   });
 });
 
-describe("sentences that are not questions about a document", () => {
+/**
+ * An EXISTENCE question asks what the library HOLDS. A list is the correct
+ * answer, and moving these would break the one thing search is best at.
+ */
+describe("existence questions stay with search", () => {
   it.each([
-    /* A pronoun carries no search terms, so this would return the library. */
-    "what does it say",
-    "what does this say",
-    /* Not a document question at all. */
-    "what does Jorge do",
-    "what should I work on",
-    "what are my tasks",
-    "how is the pilot going",
-    "what's on my calendar today",
-    "what's the weather",
-  ])("%s does not become a document search", (prompt) => {
-    expect(matchDocumentQuestion(prompt)).toBeNull();
+    ["what documents do we have about onboarding", "onboarding"],
+    ["do we have anything on invoices", "invoices"],
+    ["is there anything on training", "training"],
+  ])("%s still searches for %s", (prompt, expected) => {
+    expect(matchDocumentQuestion(prompt)).toBe(expected);
   });
 });
 
@@ -63,85 +62,39 @@ describe("routing end to end", () => {
   async function claimants(prompt: string): Promise<string[]> {
     await import("@/lib/assistant/tools");
     const { getTools } = await import("@/lib/assistant/tools/registry");
-    return (getTools() as unknown as Array<{ name: string; agentOnly?: boolean; matchIntent?: (m: string) => unknown }>)
-      /* agentOnly tools never fire on a human turn, so they are not competing
-         claimants for a person's sentence. */
-      .filter((t) => !t.agentOnly && typeof t.matchIntent === "function" && t.matchIntent(prompt) != null)
-      .map((t) => t.name);
-  }
-
-  it.each([
-    "what does the SOW say",
-    "what's in the SOW",
-    "what does the contract say about payment",
-  ])("%s reaches search and nothing else", async (prompt) => {
-    expect(await claimants(prompt)).toEqual(["search"]);
-  });
-
-  it("leaves the imperative form working", async () => {
-    expect(await claimants("find the contract")).toContain("search");
-  });
-});
-
-/**
- * Summarise stays with search, and the attempt to move it is worth recording.
- *
- * "summarize the onboarding document" returns a browsable LIST, so somebody
- * who asked for a summary receives a filing cabinet. The obvious fix was to
- * stop claiming it as a search and let it reach retrieval, which synthesises.
- *
- * That shipped, and validation against the deployed URL on 2026-08-29 showed
- * it made things worse:
- *
- *   before  "summarize the onboarding document" -> Found 3 results, plus three
- *           document rows in the results widget
- *   after   -> "I do not have anything on that yet, so I would rather ask than
- *           guess."
- *   after   "summarise the SOW" -> "Provide the statement of work (SOW)
- *           document or specify which SOW you are referring to, and I'll
- *           summarize it for you."
- *
- * Declining did not route to retrieval. It fell through to a model answer with
- * no document context, which then asked the reader to paste a document we
- * already hold.
- *
- * The premise was wrong: reaching the Brain is not what happens when nothing
- * claims a sentence. A real fix must route summarise to retrieval explicitly.
- */
-describe("summarise is claimed by search, and that is currently the better answer", () => {
-  it.each(["summarize the SOW", "summarise the contract", "summarize the onboarding deck"])(
-    "%s is claimed, so the reader gets matching documents rather than nothing",
-    (prompt) => {
-      expect(matchDocumentQuestion(prompt)).not.toBeNull();
-    },
-  );
-
-  /* THE MEASUREMENT THAT FORCED THE REVERT. Pinned so the next person to try
-     this reads the result before repeating it: declining is not enough,
-     because nothing downstream picks it up. */
-  it("is claimed by search specifically, not left to fall through", async () => {
-    await import("@/lib/assistant/tools");
-    const { getTools } = await import("@/lib/assistant/tools/registry");
-    const humanClaimants = (
+    return (
       getTools() as unknown as Array<{
         name: string;
         agentOnly?: boolean;
         matchIntent?: (m: string) => unknown;
       }>
     )
-      .filter((t) => !t.agentOnly && typeof t.matchIntent === "function")
-      .filter((t) => t.matchIntent!("summarize the onboarding document") != null)
+      /* agentOnly tools never fire on a human turn, so they are not competing
+         claimants for a person's sentence. */
+      .filter(
+        (t) => !t.agentOnly && typeof t.matchIntent === "function" && t.matchIntent(prompt) != null,
+      )
       .map((t) => t.name);
-    expect(humanClaimants).toEqual(["search"]);
+  }
+
+  /* THE REGRESSION THAT WOULD HURT MOST. If some other tool claims these now
+     that search has let go, they reach something that cannot read a document
+     and the release has made things worse rather than better. In particular
+     op_create_document once claimed "summarize the SOW" and would have tried
+     to CREATE a document by that name. */
+  it.each([
+    "what does the SOW say",
+    "summarize the onboarding document",
+    "what is in the contract",
+  ])("%s reaches no tool, so retrieval gets it", async (prompt) => {
+    expect(await claimants(prompt)).toEqual([]);
   });
 
-  /* Existence questions are unaffected either way: a list IS the right answer
-     to "what documents do we have about X". */
-  it.each([
-    "what documents do we have about onboarding",
-    "do we have anything on invoices",
-    "is there anything on training",
-  ])("still routes %s to search", (prompt) => {
-    expect(matchDocumentQuestion(prompt)).not.toBeNull();
+  it("leaves the imperative form working, because find really is a search", async () => {
+    expect(await claimants("find the contract")).toContain("search");
+  });
+
+  it("leaves existence questions with search", async () => {
+    expect(await claimants("what documents do we have about onboarding")).toEqual(["search"]);
   });
 });

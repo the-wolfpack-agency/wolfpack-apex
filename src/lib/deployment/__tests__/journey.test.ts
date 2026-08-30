@@ -277,10 +277,22 @@ describe("module capabilities become journey steps", () => {
     expect(ids).toContain("module-documents.find");
   });
 
-  /* A gap already written down must not fail the journey, or the report
-     becomes noise and people stop reading it. */
-  it("does not test an action declared as routing elsewhere", () => {
-    expect(moduleSteps().map((s) => s.id)).not.toContain("module-documents.summarise");
+  /* SUMMARISE JOINED THE JOURNEY ON 2026-08-30, which is the registry driving
+     the journey rather than the two being maintained side by side. It sat out
+     for as long as it was declared `routes_elsewhere`, because a gap already
+     written down must not fail the journey or the report becomes noise and
+     people stop reading it. Promoting the declaration added the step, and no
+     part of this file had to be told. */
+  it("verifies summarise now that it is supported", () => {
+    expect(moduleSteps().map((s) => s.id)).toContain("module-documents.summarise");
+  });
+
+  /* And the step must demand a real answer. A summarise step that accepted a
+     list would reinstate the original defect while looking like coverage. */
+  it("holds summarise to a synthesised answer", () => {
+    const step = moduleSteps().find((s) => s.id === "module-documents.summarise")!;
+    expect(step.expect).toContain("substantive");
+    expect(step.expect).not.toContain("list");
   });
 
   /* The expectation comes from the DECLARED shape, so a module claiming a

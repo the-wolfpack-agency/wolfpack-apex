@@ -457,19 +457,18 @@ describe("questions that name where the documents live", () => {
     expect(matchDocumentQuestion("what is in the drive")).toBeNull();
   });
 
-  /* The container rule must not swallow real document names. */
+  /* THE OTHER HALF OF THE RULE. A container gets a list; a DOCUMENT name gets
+     released to retrieval, which reads the text and answers from it. Both of
+     these used to return a search term, so somebody asking what a contract
+     said received a list of filenames. These two describe blocks are the whole
+     split: a question about the LIBRARY, and a question about a DOCUMENT. */
   it.each([
-    ["what is in the contract", "contract"],
-    ["what does the SOW say about payment", "SOW payment"],
-    /* Was "summarize the onboarding deck". Summarise is deliberately no longer
-       claimed as a search: it returned a browsable list to somebody who asked
-       for a summary, and now falls through to retrieval, which synthesises.
-       The claim THIS test makes is about the container rule not swallowing a
-       real document name, so the example is swapped rather than dropped. */
-    ["what is in the onboarding deck", "onboarding deck"],
-    ["what does our security policy say", "security policy"],
-  ])("leaves %s alone", (question, expected) => {
-    expect(matchDocumentQuestion(question)).toBe(expected);
+    "what is in the contract",
+    "what does the SOW say about payment",
+    "what is in the onboarding deck",
+    "what does our security policy say",
+  ])("releases %s to retrieval", (question) => {
+    expect(matchDocumentQuestion(question)).toBeNull();
   });
 });
 

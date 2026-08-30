@@ -108,44 +108,43 @@ const INTENT_RE =
  */
 const DOCUMENT_QUESTION_RE = new RegExp(
   [
-    /* "what does the SOW say about payment" */
+    /* THESE TWO SURVIVE ONLY TO CATCH THE CONTAINER FORM.
+     *
+     * "what's in SharePoint about training" names the filing cabinet, and a
+     * list is exactly the right answer. "what's in the contract" names a
+     * document, and a list is exactly the wrong one. Both parse here; the
+     * extractor below releases the second to retrieval and keeps the first. */
     String.raw`^\s*(?:what|whats|what's)\s+(?:do(?:es)?|did)\s+(?:the\s+|our\s+|my\s+|this\s+)?(?<saySubject>.+?)\s+say(?:\s+about\s+(?<sayAbout>.+?))?\s*[?.!]*\s*$`,
+    String.raw`^\s*(?:what|whats|what's)\s+(?:is\s+)?in\s+(?:the\s+|our\s+|my\s+|this\s+)?(?<inSubject>.+?)(?:\s+about\s+(?<inAbout>.+?))?\s*[?.!]*\s*$`,
     /* "what is in the SharePoint about training". The article is optional so
        "what is in SharePoint about training" lands here too, and the topic is
        captured rather than swallowed into the subject. */
-    String.raw`^\s*(?:what|whats|what's)\s+(?:is\s+)?in\s+(?:the\s+|our\s+|my\s+|this\s+)?(?<inSubject>.+?)(?:\s+about\s+(?<inAbout>.+?))?\s*[?.!]*\s*$`,
-    /* SUMMARISE STAYS HERE, AND THE ATTEMPT TO MOVE IT IS WORTH RECORDING.
+
+    /* SUMMARISE AND "WHAT DOES X SAY" ARE CONTENT QUESTIONS, NOT SEARCHES.
      *
-     * "summarize the onboarding document" returns a browsable LIST, so
-     * somebody who asked for a summary receives a filing cabinet. The obvious
-     * fix was to stop claiming it here and let it reach retrieval, which
-     * synthesises: the same corpus asked directly answers with figures and a
-     * citation.
+     * Both used to be captured here and handed to universal search, which
+     * returns a browsable LIST. Somebody who asks for a summary receives a
+     * filing cabinet.
      *
-     * That shipped, and validation against the deployed URL on 2026-08-29
-     * showed it made things WORSE, not better:
+     * THIS WAS TRIED ONCE AND REVERTED, AND THE REASON IT FAILED IS GONE.
+     * On 2026-08-29 declining sent these to a model with no document context,
+     * which then asked the reader to paste a document we already held. The
+     * cause was retrieval, not routing: at the time the Brain could not find a
+     * document by name at all.
      *
-     *   before  "summarize the onboarding document" -> Found 3 results, plus
-     *           three document rows in the results widget
-     *   after   -> "I do not have anything on that yet, so I would rather ask
-     *           than guess."
-     *   after   "summarise the SOW" -> "Provide the statement of work (SOW)
-     *           document or specify which SOW you are referring to, and I'll
-     *           summarize it for you."
+     * Since then filenames became searchable and weighted against semantic
+     * scores. Measured on 2026-08-30, the same queries now retrieve:
      *
-     * Declining did not route to retrieval. It fell through to a model answer
-     * with no document context at all, which then asked the reader to paste
-     * the document we already hold. Three relevant documents beat that.
+     *   "summarize the viaPeople work order"     5 hits, top 0.616, right doc
+     *   "what does the onboarding document say"  5 hits, top 0.409
+     *   "summarize the onboarding document"      2 hits, top 0.434
      *
-     * So the premise was wrong: reaching the Brain is not simply what happens
-     * when nothing else claims a sentence, and "what are the payment terms in
-     * our SOW?" gets there by some other route that "summarize the SOW" does
-     * not take. A real fix has to send summarise to retrieval EXPLICITLY
-     * rather than by omission, and that is a different change.
+     * All clear the 0.36 semantic floor, so retrieval has something to
+     * synthesise from where before it had nothing.
      *
-     * Reverted rather than left, because a list is a worse answer than a
-     * summary and a much better one than nothing. */
-    String.raw`^\s*summari[sz]e\s+(?:the\s+|our\s+|my\s+|this\s+)?(?<sumSubject>.+?)\s*[?.!]*\s*$`,
+     * EXISTENCE QUESTIONS STAY BELOW. A list IS the right answer to "what
+     * documents do we have about X", and moving those would break the one
+     * thing search is genuinely best at. */
     /* DO WE HOLD ANYTHING ABOUT THIS. The question somebody asks before they
        trust the product with a real one, and it reached nothing.
 
@@ -249,7 +248,12 @@ export function matchDocumentQuestion(message: string): string | null {
     return about;
   }
 
-  return about ? `${subject} ${about}` : subject;
+  /* THE SUBJECT NAMES A DOCUMENT, so this is a content question and search is
+     the wrong tool for it. Releasing it lets retrieval answer from the text.
+     Everything above this line is a question about the LIBRARY, which is what
+     search is genuinely best at; everything here is a question about a
+     DOCUMENT, which only reading it can answer. */
+  return null;
 }
 
 /* ---------------------------------------------------------------------

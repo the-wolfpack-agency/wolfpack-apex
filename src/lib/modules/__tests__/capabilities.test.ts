@@ -20,6 +20,7 @@ import {
   declaredSources,
 } from "@/lib/modules/capabilities";
 import { PROMPT_REQUIREMENTS } from "@/lib/assistant/welcome-prompts";
+import { matchDocumentQuestion } from "@/lib/assistant/tools/search";
 
 describe("the declaration must be honest", () => {
   /* THE ASSERTION THE WHOLE FILE IS FOR. An action claiming to be supported
@@ -53,12 +54,20 @@ describe("the declaration must be honest", () => {
   /* Records the measured state of documents. If summarise is ever fixed, this
      test fails and forces the registry to be updated in the same change, which
      is the point: the contract cannot lag the engine. */
-  it("records that summarise currently behaves like find", () => {
+  /* SUMMARISE WAS THE GAP THIS FILE WAS BUILT AROUND, and it closed on
+     2026-08-30. It spent two attempts as `routes_elsewhere`, which was the
+     contract working: the first fix shipped, made things worse, and this
+     declaration never claimed otherwise.
+     Retained as an assertion rather than deleted, because the failure mode it
+     guards is a summarise that quietly goes back to returning a list. */
+  it("records that summarise now answers from the document", () => {
     const summarise = MODULE_CAPABILITIES.flatMap((m) => m.actions).find(
       (a) => a.id === "documents.summarise",
     )!;
-    expect(summarise.status).toBe("routes_elsewhere");
-    expect(summarise.behavesLike).toBe("documents.find");
+    expect(summarise.status).toBe("supported");
+    expect(summarise.returns).toBe("synthesised");
+    /* behavesLike described the DETOUR. There is no longer one to describe. */
+    expect(summarise.behavesLike).toBeUndefined();
   });
 });
 
@@ -72,14 +81,18 @@ describe("what the interface may offer", () => {
     }
   });
 
-  it("does not offer summarise while it behaves like find", () => {
-    expect(offerableActions("documents").map((a) => a.id)).not.toContain("documents.summarise");
+  it("offers summarise, now that it summarises", () => {
+    expect(offerableActions("documents").map((a) => a.id)).toContain("documents.summarise");
   });
 
-  it("still offers the two that work", () => {
+  /* THE WALKTHROUGH IS NOW THREE MOVES WIDE, not two. That is the whole point
+     of the change: a client who asks a document a question, asks for a list,
+     and asks for a summary gets three appropriately shaped answers. */
+  it("offers the three that work", () => {
     expect(offerableActions("documents").map((a) => a.id).sort()).toEqual([
       "documents.ask",
       "documents.find",
+      "documents.summarise",
     ]);
   });
 
@@ -105,12 +118,25 @@ describe("every action is usable as an interface entry", () => {
     }
   });
 
-  /* A synthesised answer comes from asking a question. The measured rule is
-     that document COMMANDS route to search and return a list, so an example
-     phrased as a command could not produce the shape it claims. */
-  it("phrases every synthesised action's example as a question", () => {
+  /* EVERY SYNTHESISED EXAMPLE MUST ACTUALLY REACH THE PATH THAT SYNTHESISES.
+   *
+   * This asserted that the example ended in a question mark, on the measured
+   * rule that document COMMANDS routed to search and returned a list, so a
+   * command could not produce the shape it claimed. That premise expired on
+   * 2026-08-30: "summarize the onboarding document" is a command, is no longer
+   * claimed by search, and now synthesises.
+   *
+   * Replaced rather than relaxed, and with something stricter. Punctuation was
+   * only ever a proxy for the real property, which is that the example reaches
+   * retrieval instead of being intercepted by a tool that returns a list. That
+   * is checkable directly, and unlike the proxy it stays true when somebody
+   * rewords an example. */
+  it("routes every synthesised action's example to retrieval, not to a list", () => {
     for (const a of all.filter((x) => x.returns === "synthesised")) {
-      expect(`${a.id}: ${a.example.trim().endsWith("?")}`).toBe(`${a.id}: true`);
+      const claimed = matchDocumentQuestion(a.example);
+      expect(`${a.id} claimed by search: ${claimed !== null}`).toBe(
+        `${a.id} claimed by search: false`,
+      );
     }
   });
 
