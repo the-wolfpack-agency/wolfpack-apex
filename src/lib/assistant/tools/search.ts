@@ -316,22 +316,41 @@ export function matchDocumentQuestion(message: string): string | null {
 const TYPED_CRM_RE =
   /\b(?:look\s+up|find|search\s+for|fetch|pull|show\s+(?:me\s+)?(?:the\s+)?)(?:\s+the)?\s+(?:contacts?|people|person|deals?|opportunit(?:y|ies)|accounts?|compan(?:y|ies))(?:\s+(?:for|called|named|with\s+name))?\s+.{2,160}$/i;
 
+/**
+ * Does this tool claim the message, without letting a broken matcher decide
+ * routing by accident?
+ *
+ * A throwing matcher must not take universal search down, which is why these
+ * were wrapped. But swallowing it silently means a tool stops claiming its own
+ * questions and nobody finds out: the message routes somewhere else and
+ * answers plausibly from the wrong source, which is worse than an error
+ * because it looks like a working product.
+ *
+ * Same protection, one line of evidence.
+ */
+function claims(name: string, match: (m: string) => unknown, message: string): boolean {
+  try {
+    return match(message) !== null;
+  } catch (err) {
+    console.warn(
+      `[search] ${name}.matchIntent threw; it will not claim this message: ${(err as Error).message}`,
+    );
+    return false;
+  }
+}
+
 function crmToolClaims(message: string): boolean {
   /* Typed-object CRM ("find the contact for Acme"). Same regex shape
    *  as PATTERNS[0] in search-external-records-tool. */
   if (TYPED_CRM_RE.test(message)) return true;
   /* Possessive related — "Acme's opportunities", "Jorge's open deals". */
-  try {
-    if (getRelatedRecordsTool.matchIntent(message) !== null) return true;
-  } catch { /* swallow */ }
+  if (claims("getRelatedRecords", (m) => getRelatedRecordsTool.matchIntent(m), message)) return true;
   /* Filter — "deals over $50k closing this month". */
-  try {
-    if (filterExternalRecordsTool.matchIntent(message) !== null) return true;
-  } catch { /* swallow */ }
+  if (claims("filterExternalRecords", (m) => filterExternalRecordsTool.matchIntent(m), message)) {
+    return true;
+  }
   /* ID-shape — "look up contact id 003abc". */
-  try {
-    if (getExternalRecordTool.matchIntent(message) !== null) return true;
-  } catch { /* swallow */ }
+  if (claims("getExternalRecord", (m) => getExternalRecordTool.matchIntent(m), message)) return true;
   return false;
 }
 
