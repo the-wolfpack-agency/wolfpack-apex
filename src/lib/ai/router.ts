@@ -188,6 +188,42 @@ function pickPrimary(
   return registry.anthropic;
 }
 
+/**
+ * A configured provider that is not the one which just failed.
+ *
+ * The compatible providers are the ones added by configuration rather than
+ * code, which on this deployment is where the non-OpenAI models live.
+ */
+function firstCompatible(
+  registry: ProviderRegistry,
+  primary: AIProvider,
+  req: AICompleteRequest,
+): AIProvider | null {
+  return registry.compatible.find((p) => p !== primary && p.supportsTier(req.model_tier)) ?? null;
+}
+
+/**
+ * Who takes over when the primary fails.
+ *
+ * THIS RETURNED NULL IN PRODUCTION, ALWAYS, and nothing said so. The rule was
+ * "Azure is primary, Anthropic is the fallback if its key is set", and
+ * ANTHROPIC_API_KEY has never been set on this deployment: the nightly probe
+ * has been reporting it unreachable, correctly, the whole time. So every
+ * retryable Azure failure had no second provider to try, and the analytics
+ * agree without ambiguity: 0 fallbacks across 1,406 calls in the product's
+ * life.
+ *
+ * The registry was not short of providers. It carries `compatible`, the
+ * OpenAI-shaped providers added by configuration, and those have served real
+ * calls as PRIMARY. They were simply never considered as a fallback, so a
+ * reachable second vendor sat unused behind an outage that would have taken
+ * every AI call down.
+ *
+ * Additive on purpose: every branch that previously returned a provider still
+ * returns the same one, and only the paths that returned null are filled in.
+ * The failing provider is never chosen, since retrying the thing that just
+ * broke is not a fallback.
+ */
 function pickFallback(
   primary: AIProvider,
   registry: ProviderRegistry,
@@ -197,10 +233,21 @@ function pickFallback(
     if (isAzureConfigured() && registry.azure.supportsTier(req.model_tier)) {
       return registry.azure;
     }
-    return null;
+    return firstCompatible(registry, primary, req);
   }
+
   // Azure is primary; Anthropic is the fallback only if its key is set.
   if (isAnthropicConfigured()) return registry.anthropic;
+
+  // Nothing from the named vendors. Anything else that is configured beats
+  // failing the call outright.
+  const compatible = firstCompatible(registry, primary, req);
+  if (compatible) return compatible;
+
+  // A compatible provider was primary, so Azure itself is the way out.
+  if (primary !== registry.azure && isAzureConfigured() && registry.azure.supportsTier(req.model_tier)) {
+    return registry.azure;
+  }
   return null;
 }
 

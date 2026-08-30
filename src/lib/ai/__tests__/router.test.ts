@@ -72,6 +72,10 @@ afterAll(() => {
   delete process.env.ANTHROPIC_API_KEY;
   delete process.env.AZURE_OPENAI_ENDPOINT;
   delete process.env.AZURE_OPENAI_API_KEY;
+  /* Compatible providers are read from env at registry build time, so a
+     leftover here would silently give every later test a fallback it was
+     written without. */
+  for (const k of Object.keys(process.env)) if (k.startsWith("AI_COMPAT_")) delete process.env[k];
   delete process.env.AI_PROVIDER_PRIMARY;
   global.fetch = originalFetch;
 });
@@ -325,6 +329,73 @@ describe("router — failover", () => {
     const payload = mockTrackEvent.mock.calls.find((c) => c[0] === "ai.completion")![3] as Record<string, unknown>;
     expect(payload.fallback_used).toBe(true);
   });
+
+  /**
+   * THE PRODUCTION CASE, WHICH HAD NO TEST AND NO FALLBACK.
+   *
+   * The rule was "Azure is primary, Anthropic is the fallback if its key is
+   * set". ANTHROPIC_API_KEY has never been set on this deployment, so
+   * pickFallback returned null for every retryable Azure failure, and the
+   * analytics agree: 0 fallbacks across 1,406 calls in the product's life.
+   * Meanwhile a configured OpenAI-shaped provider sat in the registry, serving
+   * calls as primary, never considered as a way out of an outage.
+   */
+  it("Azure 5xx falls back to a configured provider when Anthropic has no key", async () => {
+    delete process.env.ANTHROPIC_API_KEY;
+    process.env.AZURE_OPENAI_ENDPOINT = "https://test-resource.openai.azure.com";
+    process.env.AZURE_OPENAI_API_KEY = "akey";
+    process.env.AZURE_OPENAI_DEPLOYMENT_CHEAP = "gpt-4o-mini-dep";
+    process.env.AZURE_OPENAI_DEPLOYMENT_STANDARD = "gpt-4o-dep";
+    process.env.AI_COMPAT_PROVIDERS = "deepseek";
+    process.env.AI_COMPAT_DEEPSEEK_BASE_URL = "https://api.deepseek.com/v1";
+    process.env.AI_COMPAT_DEEPSEEK_API_KEY = "dkey";
+    process.env.AI_COMPAT_DEEPSEEK_MODEL_STANDARD = "deepseek-chat";
+    process.env.AI_COMPAT_DEEPSEEK_INPUT_PER_1K_STANDARD = "0.0001";
+    process.env.AI_COMPAT_DEEPSEEK_OUTPUT_PER_1K_STANDARD = "0.0002";
+    _resetAIClientForTests(null);
+
+    /* Azure is asked first and fails; the compatible provider answers. Both
+       go through fetch, so the order of the mocks is the order of the calls. */
+    mockFetch.mockResolvedValueOnce(azureFail(503, "azure down"));
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [{ message: { content: "from-deepseek" }, finish_reason: "stop" }],
+        usage: { prompt_tokens: 5, completion_tokens: 3 },
+        model: "deepseek-chat",
+      }),
+      text: async () => "",
+    } as unknown as Response);
+
+    const out = await getAIClient().complete({
+      messages: [{ role: "user", content: "x" }],
+      max_tokens: 10,
+      model_tier: "standard",
+      sensitivity: "public",
+      metadata: { feature: "failover.azure.to.compatible" },
+    });
+
+    expect(out.provider_used).toBe("deepseek");
+    const payload = mockTrackEvent.mock.calls.find((c) => c[0] === "ai.completion")![3] as Record<string, unknown>;
+    expect(payload.fallback_used).toBe(true);
+  });
+
+  /* NOT TESTED HERE, AND SAID RATHER THAN IMPLIED: that pickFallback never
+   * returns the provider which just failed.
+   *
+   * A test for it was written and deleted. Constructing "a compatible provider
+   * is primary and fails" turns out to be impossible through this seam,
+   * because with neither Azure nor Anthropic configured the router selects
+   * ANTHROPIC as primary and throws on the missing key without ever
+   * considering the compatible provider that is configured. That is a real
+   * defect and a separate one; it is not the production path, where Azure is
+   * configured and is primary.
+   *
+   * The deleted test passed, both with the guard and without it, for that
+   * reason. A test that cannot fail is worse than no test: it reports coverage
+   * of a rule it never reaches.
+   */
 
   it("both providers fail: throws and emits no analytics event", async () => {
     process.env.AZURE_OPENAI_ENDPOINT = "https://test-resource.openai.azure.com";
