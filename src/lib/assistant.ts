@@ -1490,7 +1490,18 @@ async function chatInner(
       module: "assistant",
     });
   }
-  const knowledgeResult = bypassCache || hasAttachment ? null : await tryKnowledgeBase(message);
+  /* WHAT BROKE DURING THIS TURN, collected so the answer can say so.
+   *
+   * Declared HERE rather than beside the model call, because the knowledge
+   * lookup below runs first and can fail first. A collector created after the
+   * failure it is meant to record is worse than none: it reads as healthy.
+   *
+   * Per-turn rather than module state: two people asking at the same moment
+   * must not inherit each other's outages. */
+  const turnDegradation = new TurnDegradation();
+
+  const knowledgeResult =
+    bypassCache || hasAttachment ? null : await tryKnowledgeBase(message, turnDegradation);
   if (knowledgeResult) {
     trackEvent("knowledge.answer_found", userId, userRole, {
       source: "knowledge_cache",
@@ -1729,11 +1740,6 @@ async function chatInner(
     workflow_id: workflowId,
   });
 
-  /* WHAT BROKE DURING THIS TURN, collected so the answer can say so.
-   *
-   * Per-turn rather than module state: two people asking questions at the same
-   * moment must not inherit each other's outages. */
-  const turnDegradation = new TurnDegradation();
   if (brainContext?.semanticStatus === "failed") {
     turnDegradation.record("semantic_search", brainContext.semanticError ?? undefined);
   }
@@ -2360,7 +2366,11 @@ interface KnowledgeMatch {
    below (typically 0.2–0.35). */
 const KB_MIN_SIMILARITY = 0.45;
 
-async function tryKnowledgeBase(message: string): Promise<KnowledgeMatch | null> {
+async function tryKnowledgeBase(
+  message: string,
+  /* So a failed lookup is not mistaken for an empty knowledge base. */
+  degradation?: TurnDegradation,
+): Promise<KnowledgeMatch | null> {
   try {
     const results = await searchKnowledge(message, 5);
     // Unrated entries (rating === null) are KEPT — they represent fresh
@@ -2386,7 +2396,20 @@ async function tryKnowledgeBase(message: string): Promise<KnowledgeMatch | null>
       type: "knowledge",
     }));
     return { answer: top.answer, sources };
-  } catch {
+  } catch (err) {
+    /* A FAILED LOOKUP IS NOT AN EMPTY KNOWLEDGE BASE.
+     *
+     * This returned null on any error, and null here means "nothing matched".
+     * So a Postgres blip made the knowledge base look empty, the turn fell
+     * through, and the reader was told "I don't have information on that yet"
+     * about something we hold. That is the same defect the answer path was
+     * fixed for on 2026-08-30, one layer down, and it would have quietly
+     * recreated it. */
+    degradation?.record("integration", (err as Error)?.message);
+    trackEvent("system.knowledge_lookup_failed", "system", "system", {
+      module: "assistant",
+      error: String((err as Error)?.message ?? "unknown").slice(0, 160),
+    });
     return null;
   }
 }
