@@ -155,12 +155,15 @@ describe("clicking, which is what sees inside an app", () => {
 
 describe("stopping honestly", () => {
   it("stops at the surface budget and says the map is incomplete", async () => {
+    /* Nested under one segment, because the walk confines itself to the entry
+       URL's first path segment: a flat /p0 -> /p1 chain would now be refused
+       as another tenant, which is the confinement working and not the budget. */
     const pages: Record<string, Partial<ReadSurface>> = {};
     for (let i = 0; i < 20; i += 1) {
-      pages[`${BASE}/p${i}`] = { links: [`${BASE}/p${i + 1}`] };
+      pages[`${BASE}/app/p${i}`] = { links: [`${BASE}/app/p${i + 1}`] };
     }
-    pages[`${BASE}/p20`] = {};
-    const r = await walkSystem(`${BASE}/p0`, readerFor(pages), {
+    pages[`${BASE}/app/p20`] = {};
+    const r = await walkSystem(`${BASE}/app/p0`, readerFor(pages), {
       budget: { maxSurfaces: 5, maxDepth: 10, maxDurationMs: 60_000 },
     });
     expect(r.coverage.stopReason).toBe("page-budget");
@@ -210,5 +213,101 @@ describe("stopping honestly", () => {
       }),
     );
     expect(r.coverage.skipped.filter((s) => s.reason === "off-origin")).toHaveLength(1);
+  });
+});
+
+
+/**
+ * A MULTI-TENANT HOST IS THE VENDOR'S DOMAIN, NOT THE CUSTOMER'S.
+ *
+ * Mapping a real tenant on 2026-08-30, the walk left the customer's org and
+ * spent 17 of 40 surfaces inside the vendor's own documentation, because
+ * cognitoforms.com serves /porscheacademyus and /support from one host.
+ *
+ * The cost was not only wasted surfaces. The frontier finished at 301 because
+ * a docs site is effectively unbounded, the form count filled with the
+ * vendor's newsletter and support-chat widgets, and the refusal list filled
+ * with their controls rather than the client's. A map of somebody else's
+ * marketing site is worse than a small map.
+ */
+describe("staying inside the tenant", () => {
+  const TENANT = `${BASE}/acme`;
+
+  it("does not follow the vendor's own pages on the same host", async () => {
+    const r = await walkSystem(
+      `${TENANT}/home`,
+      readerFor({
+        [`${TENANT}/home`]: { links: [`${TENANT}/forms`, `${BASE}/support/how-to-guides`] },
+        [`${TENANT}/forms`]: { title: "Forms" },
+        [`${BASE}/support/how-to-guides`]: { title: "Vendor docs" },
+      }),
+    );
+    expect(r.surfaces.map((s) => s.title)).not.toContain("Vendor docs");
+    expect(r.coverage.skipped.some((s) => s.reason === "outside-tenant")).toBe(true);
+  });
+
+  /* THE DANGEROUS DIRECTION. A bare startsWith would walk ANOTHER customer's
+     org whose name happens to begin with this one's. */
+  it("does not wander into a tenant whose name shares a prefix", async () => {
+    const r = await walkSystem(
+      `${TENANT}/home`,
+      readerFor({
+        [`${TENANT}/home`]: { links: [`${BASE}/acmecorp/home`] },
+        [`${BASE}/acmecorp/home`]: { title: "Someone else" },
+      }),
+    );
+    expect(r.surfaces.map((s) => s.title)).not.toContain("Someone else");
+  });
+
+  /* A single-tenant system has no org segment, and the origin already is the
+     boundary. Confining to the first path segment there would map one folder. */
+  it("does not confine when the entry url has no path", async () => {
+    const r = await walkSystem(
+      `${BASE}/`,
+      readerFor({
+        [`${BASE}/`]: { links: [`${BASE}/anything`] },
+        [`${BASE}/anything`]: { title: "Reached" },
+      }),
+    );
+    expect(r.surfaces.map((s) => s.title)).toContain("Reached");
+  });
+});
+
+/**
+ * A record id needs a DIGIT.
+ *
+ * Matching any 15-18 character alphanumeric run also matches ordinary words:
+ * "porscheacademyus" is 16 characters, so every surface in a real map read
+ * /:id/home and the org disappeared from its own map.
+ */
+describe("collapsing records without collapsing names", () => {
+  it("keeps a word-like path segment readable", async () => {
+    const r = await walkSystem(
+      `${BASE}/porscheacademyus/home`,
+      readerFor({ [`${BASE}/porscheacademyus/home`]: {} }),
+    );
+    expect(r.surfaces[0].signature).toBe("/porscheacademyus/home");
+  });
+
+  it("still collapses a real record id", async () => {
+    const r = await walkSystem(
+      `${BASE}/acct/001x00000ABCDEfg/view`,
+      readerFor({ [`${BASE}/acct/001x00000ABCDEfg/view`]: {} }),
+    );
+    expect(r.surfaces[0].signature).toBe("/acct/:id/view");
+  });
+
+  /* A deep link into a single-tenant system would otherwise map one folder.
+     Passing null walks the whole origin. */
+  it("walks the whole origin when confinement is switched off", async () => {
+    const r = await walkSystem(
+      `${BASE}/dashboard`,
+      readerFor({
+        [`${BASE}/dashboard`]: { links: [`${BASE}/reports`] },
+        [`${BASE}/reports`]: { title: "Reports" },
+      }),
+      { confineTo: null },
+    );
+    expect(r.surfaces.map((s) => s.title)).toContain("Reports");
   });
 });

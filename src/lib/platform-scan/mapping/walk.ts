@@ -65,6 +65,16 @@ export interface WalkResult {
 
 export interface WalkOptions {
   budget?: ExploreBudget;
+  /**
+   * Path every surface must sit under. Derived from the entry URL's first
+   * segment when omitted, which is right for a multi-tenant host and wrong
+   * for a deep link into a single-tenant one.
+   *
+   * Pass null to walk the whole origin. The map reports every
+   * "outside-tenant" refusal, so an over-confined run is visible in its own
+   * coverage rather than looking like a small system.
+   */
+  confineTo?: string | null;
   now?: () => number;
   /** Surfaced so a caller can report progress without this file knowing how. */
   onSurface?: (surface: MappedSurface) => void;
@@ -107,6 +117,29 @@ export async function walkSystem(
       },
     };
   }
+
+  /* CONFINE TO THE TENANT THE ENTRY URL NAMES.
+   *
+   * On a shared-domain SaaS the origin is the vendor, not the customer. The
+   * first path segment is the org, and everything worth mapping sits under it.
+   * Without this the walk left a customer's org for the vendor's documentation
+   * and spent 17 of 40 surfaces there, with a frontier of 301 because a docs
+   * site is effectively unbounded.
+   *
+   * Absent when the entry URL has no path, which is an ordinary single-tenant
+   * system where the origin already is the boundary. */
+  const firstSegment =
+    opts.confineTo === null
+      ? undefined
+      : (opts.confineTo ??
+        (() => {
+          try {
+            const seg = new URL(entryUrl).pathname.split("/").filter(Boolean)[0];
+            return seg ? `/${seg}` : undefined;
+          } catch {
+            return undefined;
+          }
+        })());
 
   frontier.add(entryUrl, 0);
 
@@ -168,6 +201,7 @@ export async function walkSystem(
         seen,
         depth: item.depth,
         maxDepth: budget.maxDepth,
+        confineTo: firstSegment,
       });
       if (verdict.follow) {
         onward.add(signatureOf(link));
@@ -201,6 +235,7 @@ export async function walkSystem(
           seen,
           depth: item.depth,
           maxDepth: budget.maxDepth,
+          confineTo: firstSegment,
         });
         if (verdict.follow) {
           onward.add(signatureOf(landed));

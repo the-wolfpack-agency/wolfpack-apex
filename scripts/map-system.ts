@@ -156,6 +156,9 @@ if (!baseUrl || !authorisedBy) {
 
     const started = Date.now();
     const { surfaces, coverage } = await walkSystem(baseUrl, reader, {
+      /* --whole-origin for a single-tenant system, where a deep entry URL
+         would otherwise confine the map to one folder. */
+      confineTo: process.argv.includes("--whole-origin") ? null : (arg("confine-to") ?? undefined),
       budget: {
         maxSurfaces: Number(arg("max-surfaces") ?? 40),
         maxDepth: Number(arg("max-depth") ?? 3),
