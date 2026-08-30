@@ -120,3 +120,31 @@ describe("shape only, enforced rather than intended", () => {
     expect(systemMapToMarkdown(row()).filename).toBe("system-map-cognito-forms.md");
   });
 });
+
+/**
+ * The question that must not be answered by a severity.
+ *
+ * A client administering a SaaS product does not choose its embedded vendors
+ * and usually does not know they are there. Asked plainly, and asked without
+ * accusing anybody, because a scan cannot see whether a recording feature is
+ * switched on.
+ */
+describe("what to ask about a vendor nobody chose", () => {
+  it("carries the question next to the vendor", () => {
+    const r = row();
+    r.map.integrations = [
+      { host: "data.pendo.io", vendor: "Pendo", seenOn: ["/a"], requestCount: 124 },
+    ];
+    const { markdown } = systemMapToMarkdown(r);
+    expect(markdown).toMatch(/session replay/i);
+    expect(markdown).toMatch(/worth asking/i);
+  });
+
+  it("says nothing extra about an ordinary vendor", () => {
+    const r = row();
+    r.map.integrations = [
+      { host: "fonts.googleapis.com", vendor: "Google APIs", seenOn: ["/a"], requestCount: 38 },
+    ];
+    expect(systemMapToMarkdown(r).markdown).not.toMatch(/worth asking/i);
+  });
+});

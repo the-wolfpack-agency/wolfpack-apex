@@ -27,6 +27,7 @@
  */
 
 import { redactText } from "@/lib/ai/redaction";
+import { capabilityNote } from "../network/observations";
 import type { WalkedMapRow } from "./store";
 
 export interface BrainDocument {
@@ -93,8 +94,14 @@ export function systemMapToMarkdown(row: WalkedMapRow): BrainDocument {
       ``,
     );
     for (const i of named) {
+      /* The question a severity must not answer for you. A vendor that sells
+         session recording is worth asking about, and whether the feature is
+         switched on is invisible from outside, so it travels as a sentence
+         rather than as a score. */
+      const note = capabilityNote(i.host);
       out.push(
-        `- **${i.vendor}** (${i.host}) was contacted ${i.requestCount} time(s) across ${i.seenOn.length} screen(s).`,
+        `- **${i.vendor}** (${i.host}) was contacted ${i.requestCount} time(s) across ${i.seenOn.length} screen(s).` +
+          (note ? ` ${note}` : ""),
       );
     }
     for (const i of unnamed) {

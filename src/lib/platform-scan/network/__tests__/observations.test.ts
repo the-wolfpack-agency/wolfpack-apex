@@ -7,6 +7,7 @@
  * report compliance nobody established.
  */
 import {
+  capabilityNote,
   classify,
   partyOf,
   identify,
@@ -203,21 +204,27 @@ describe("one observation set, three questions", () => {
  * unremarkable CDN.
  */
 describe("what the first live scan could not name", () => {
-  it("names Pendo, and as a session-replay product", () => {
+  it("names Pendo", () => {
     for (const url of ["https://data.pendo.io/data/ptm.gif", "https://cdn.pendo.io/agent/x.js"]) {
-      expect(identify(url)).toEqual({ kind: "session-replay", name: "Pendo" });
+      expect(identify(url).name).toBe("Pendo");
     }
   });
 
-  /* NOT the same kind as Pendo, and the difference is not cosmetic:
-     session-replay is in SEVERE_KINDS and analytics is not. Calling an
-     experimentation platform's base script session-replay would overstate
-     what its presence proves, and overstating is how a report goes unread. */
+  /* CLASSIFIED ON WHAT WAS OBSERVED, NOT ON WHAT THE VENDOR SELLS.
+     Pendo was first put in session-replay because Pendo sells session replay.
+     That is a fact about a price list: replay is a feature an operator
+     switches on, and a scan from outside cannot see whether it is enabled.
+     Scoring a host into SEVERE_KINDS on something nobody measured is the
+     crying wolf these detectors exist to avoid. */
+  it("does not score a vendor by its price list", () => {
+    expect(identify("https://data.pendo.io/data/ptm.gif").kind).toBe("analytics");
+    expect(identify("https://dev.visualwebsiteoptimizer.com/j.php").kind).toBe("analytics");
+  });
+
   it("names Visual Website Optimizer without overstating what it is", () => {
-    expect(identify("https://dev.visualwebsiteoptimizer.com/j.php")).toEqual({
-      kind: "analytics",
-      name: "Visual Website Optimizer",
-    });
+    expect(identify("https://dev.visualwebsiteoptimizer.com/j.php").name).toBe(
+      "Visual Website Optimizer",
+    );
   });
 
   it("names the product's own object storage so a reader can dismiss it", () => {
@@ -249,5 +256,31 @@ describe("what the first live scan could not name", () => {
   it("does not let a lookalike domain borrow a vendor name", () => {
     expect(identify("https://evil-pendo.io/x.js").name).toBeNull();
     expect(identify("https://notpendo.io/x.js").name).toBeNull();
+  });
+});
+
+/**
+ * The question a severity must not answer for you.
+ *
+ * A vendor that sells session recording is worth asking about. Whether that
+ * feature is switched on is invisible from outside, so it belongs in a
+ * question rather than in a score.
+ */
+describe("what a scan cannot prove but should ask", () => {
+  it("asks about a vendor that could be recording", () => {
+    const note = capabilityNote("data.pendo.io");
+    expect(note).toMatch(/session replay/i);
+    /* Phrased so it can be asked without accusing anybody. */
+    expect(note).toMatch(/worth asking/i);
+    expect(note).toMatch(/not visible from outside/i);
+  });
+
+  it("matches on the dot boundary like everything else here", () => {
+    expect(capabilityNote("cdn.pendo.io")).not.toBeNull();
+    expect(capabilityNote("evil-pendo.io")).toBeNull();
+  });
+
+  it("has nothing to ask about an ordinary host", () => {
+    expect(capabilityNote("fonts.googleapis.com")).toBeNull();
   });
 });
