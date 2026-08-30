@@ -57,6 +57,46 @@ build does, and starting it late is the single most common way a pilot slips.
 Ask for these in the first meeting, in writing. They are not a formality: the
 tenant grant alone has taken weeks elsewhere.
 
+### Also ask for: their Copilot usage export
+
+If they run Microsoft 365 they very likely have Copilot, and its usage report
+is the cheapest read we will ever get on how AI is actually landing in their
+organisation. Ask their admin for a CSV export of **Copilot usage** from the
+Microsoft 365 admin centre, thirty days, and the version 2 report if the
+console offers it.
+
+**What it contains.** Per person: which Copilot surfaces they touched (Teams,
+Word, Excel, PowerPoint, Outlook, OneNote, Loop, Chat), when they last touched
+each, and in the version 2 report how many prompts they submitted and on how
+many days. Identities are hashed when the tenant has "conceal user
+information" set, which many do.
+
+**What it does NOT contain, and this is the point.** No prompt text and no
+response text. It is shape without content, which is the same thing we ask of
+our own decision data. There IS an API that returns full prompts and replies,
+and we deliberately do not ask for it: a vendor who takes that has a much
+harder conversation with a legal team than one who does not, and we do not
+need it to be useful.
+
+**Ask for the export, not the API.** \`Reports.Read.All\` is tenant-wide admin
+consent, which is a materially bigger request than the delegated scopes Phase 1
+already needs, and it should not be bundled into the first grant. A CSV a
+person exports by hand answers the same question this month and costs them
+nothing. If it turns out to be worth reading every week, THEN ask for the
+scope, with the export as the argument for it.
+
+**What it can and cannot tell you.** It is adoption data, not decision data:
+who uses Copilot and how often, never what it changed or whether the change
+was good. It answers "is the investment being used", which is a real question
+a lot of buyers cannot currently answer, and it does not answer "is it making
+better decisions". Say which one you are answering.
+
+**If they run something else.** ChatGPT Enterprise, Claude and Glean each have
+their own admin export and no Microsoft surface. And if nobody is sure what is
+in use, Entra sign-in logs and Defender for Cloud Apps show which AI services
+staff are actually signing into, which is a different and often more
+uncomfortable report.
+
 ## Phase 1: documents, read only
 
 **What it is.** Their SharePoint library, read into the Brain, answerable
