@@ -32,6 +32,9 @@ interface Row extends Record<string, unknown> {
   content: string;
   source: string | null;
   created_at: string;
+  /** Declared by the product at write time. Absent on older messages, and
+   *  optional so a caller building rows by hand is not forced to say null. */
+  outcome_kind?: string | null;
 }
 
 /* The product's OWN routing decides the shape, rather than a second set of
@@ -44,7 +47,8 @@ const shapeDeps = {
 
 export async function extractGists(days = 90): Promise<TurnGist[]> {
   const result = await query<Row>(
-    `SELECT conversation_id, role, content, source, created_at
+    `SELECT conversation_id, role, content, source, created_at,
+            metadata->>'outcome_kind' AS outcome_kind
        FROM instinct_messages
       WHERE created_at > NOW() - INTERVAL '1 day' * $1
       ORDER BY conversation_id, created_at
@@ -82,7 +86,23 @@ export function gistsFrom(rows: Row[]): TurnGist[] {
       }
       if (!question) continue;
 
-      const admittedMiss = isMiss(answer.content);
+      /* PREFER WHAT THE PRODUCT DECLARED, FALL BACK TO READING THE PROSE.
+       *
+       * The declared kind is a fact recorded where the decision was made. The
+       * patterns are a guess made afterwards, and a guess is what cost 187
+       * model-written refusals: the model phrases "I do not know" differently
+       * every time, so no list of patterns will ever be complete.
+       *
+       * The fallback stays because 90 days of history predates the field, and
+       * it must stay for as long as that history is worth reading. It is the
+       * legacy reader now, not the primary one. */
+      const declared = answer.outcome_kind ?? null;
+      const admittedMiss =
+        declared !== null ? declared === "nothing_found" : isMiss(answer.content);
+      const wasDegraded =
+        declared !== null ? declared === "degraded" : isOutage(answer.content);
+      const wasAskedWhich =
+        declared !== null ? declared === "asked_which" : isAskedWhich(answer.content);
       const laterUser = messages.slice(i + 1).find((m) => m.role === "user");
 
       /* Was the NEXT thing they typed the same question again? That is the
@@ -105,8 +125,8 @@ export function gistsFrom(rows: Row[]): TurnGist[] {
       /* An outage is checked FIRST. It is the only outcome that describes the
          product breaking rather than the corpus being thin, and its wording
          overlaps with both of the others. */
-      if (isOutage(answer.content)) outcome = "degraded";
-      else if (isAskedWhich(answer.content)) outcome = "asked_which";
+      if (wasDegraded) outcome = "degraded";
+      else if (wasAskedWhich) outcome = "asked_which";
       else if (reAsked) outcome = "re_asked";
       else if (admittedMiss && !laterUser) outcome = "dead_end";
       else if (admittedMiss && laterUser) outcome = "pushed_past";
