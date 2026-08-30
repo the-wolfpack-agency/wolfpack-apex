@@ -40,6 +40,14 @@ export interface ClickCandidate {
   href?: string;
   /** aria-expanded, present on disclosure controls. */
   ariaExpanded?: boolean;
+  /**
+   * True when the control sits inside a dialog or modal.
+   *
+   * The discriminator that lets a modal be dismissed without loosening
+   * "close" everywhere. Closing a RECORD changes something; closing a DIALOG
+   * changes nothing and is the only way to reach what is behind it.
+   */
+  insideDialog?: boolean;
   disabled?: boolean;
 }
 
@@ -98,6 +106,15 @@ const NAVIGATIONAL = new RegExp(
   "i",
 );
 
+/**
+ * Words that close a dialog and nothing else.
+ *
+ * Anchored to the whole label rather than matched loosely, so "Close" and
+ * "Close dialog" pass while "Close ticket" and "Close and delete" do not: the
+ * second pair name a thing being acted on, and that thing is not the modal.
+ */
+const DISMISSES_DIALOG = /^(close|dismiss|cancel|not now|no thanks|got it|skip|maybe later|×|✕|x)(\s+(dialog|modal|window|this|welcome|popup|banner|message|tour))?$/i;
+
 /** ARIA roles whose whole purpose is moving between views. */
 const NAVIGATIONAL_ROLES = new Set(["tab", "tablist", "menuitem", "treeitem", "link", "navigation"]);
 
@@ -129,6 +146,24 @@ export function mayClick(candidate: ClickCandidate): ClickVerdict {
 
   if (ENDS_SESSION.test(said)) {
     return { allowed: false, because: "would end the session and invalidate the rest of the map" };
+  }
+
+  /* DISMISSING A DIALOG IS NAVIGATION, AND IT HAS TO BE.
+   *
+   * Measured while mapping this product: "Close welcome" was refused, because
+   * "close" is also how a ticket is closed and refusals run before
+   * permissions. A modal that cannot be dismissed blocks everything behind it,
+   * so one unclosable dialog costs the whole map below it.
+   *
+   * Loosening "close" globally would be the wrong fix: closing a record is
+   * genuinely mutating. The dialog role is the discriminator, because it says
+   * what the control is closing rather than what it is called.
+   *
+   * Deliberately narrow. Only plain dismissal words, and only inside a dialog:
+   * a "Delete" button inside a confirmation modal is still a delete, and this
+   * must never become a way to press it. */
+  if (c.insideDialog && DISMISSES_DIALOG.test(said)) {
+    return { allowed: true, because: "dismisses a dialog, which reveals what is behind it" };
   }
 
   if (MUTATING.test(said)) {
