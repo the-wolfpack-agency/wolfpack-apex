@@ -26,6 +26,7 @@ export {};
 
 import { createSpecDiffBrowser } from "@/lib/spec-diff/browser";
 import { promptSecret } from "@/lib/cli/prompt-secret";
+import { withSecret, scrubSecret } from "@/lib/cli/scrub-secret";
 import { createSurfaceReader } from "@/lib/platform-scan/mapping/reader";
 import { walkSystem } from "@/lib/platform-scan/mapping/walk";
 import type { ScanPage } from "@/lib/platform-scan/browser/capture";
@@ -79,15 +80,42 @@ if (!baseUrl || !authorisedBy) {
         goto(u: string): Promise<unknown>;
         fill(sel: string, v: string): Promise<void>;
         click(sel: string): Promise<void>;
+        waitForSelector(sel: string, o?: unknown): Promise<unknown>;
         waitForURL(fn: (u: URL) => boolean, o?: unknown): Promise<void>;
       };
-      await p.goto(`${baseUrl.replace(/\/$/, "")}${loginPath}`);
-      await p.fill('input[type="email"], input[name="email"], input[name="username"]', email);
-      await p.fill('input[type="password"], input[name="password"]', password);
-      await p.click('button[type="submit"], input[type="submit"]');
-      await p
-        .waitForURL((u: URL) => !u.pathname.includes(loginPath), { timeout: 45_000 })
-        .catch(() => undefined);
+      /* EVERY step that touches the password runs inside withSecret, because
+         a library reports a failed fill by quoting what it was filling. */
+      await withSecret(password, async () => {
+        await p.goto(`${baseUrl.replace(/\/$/, "")}${loginPath}`);
+
+        const EMAIL = 'input[type="email"], input[name="email"], input[name="username"]';
+        const PASSWORD = 'input[type="password"], input[name="password"]';
+        const SUBMIT = 'button[type="submit"], input[type="submit"]';
+
+        await p.fill(EMAIL, email);
+
+        /* A MULTI-STEP SIGN-IN IS THE COMMON CASE, NOT THE EXCEPTION.
+           Cognito, Microsoft and Google all ask for the address, then the
+           password on a second screen. The field exists in the DOM the whole
+           time and is hidden, so filling it immediately times out against
+           something that is present and unusable. Wait for it to be usable;
+           if it is not, press continue and wait again. */
+        const passwordUsable = await p
+          .waitForSelector(PASSWORD, { state: "visible", timeout: 4_000 })
+          .then(() => true)
+          .catch(() => false);
+
+        if (!passwordUsable) {
+          await p.click(SUBMIT);
+          await p.waitForSelector(PASSWORD, { state: "visible", timeout: 20_000 });
+        }
+
+        await p.fill(PASSWORD, password);
+        await p.click(SUBMIT);
+        await p
+          .waitForURL((u: URL) => !u.pathname.includes(loginPath), { timeout: 45_000 })
+          .catch(() => undefined);
+      });
       authenticated = true;
       console.log("signed in\n");
     } else {
@@ -159,6 +187,12 @@ if (!baseUrl || !authorisedBy) {
   }
   process.exit(0);
 })().catch((err) => {
-  console.error(`\nmapping failed: ${(err as Error).message.slice(0, 300)}`);
+  /* THE LAST EXIT, SCRUBBED TOO. withSecret covers the sign-in, and this
+     covers everything after it: a redirect URL, a cookie header or a stack
+     from deeper in a library can all carry the value, and this is the one
+     line that reaches a terminal. */
+  const secret = process.env.MAP_PASSWORD ?? "";
+  const message = (err as Error).message ?? String(err);
+  console.error(`\nmapping failed: ${scrubSecret(message, secret).slice(0, 400)}`);
   process.exit(1);
 });
