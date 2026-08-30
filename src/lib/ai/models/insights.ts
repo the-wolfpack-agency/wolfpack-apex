@@ -116,6 +116,21 @@ export interface RouterInsights {
   usage: ModelUsage[];
   reasons: ReasonCount[];
   fallbacks: number;
+  /**
+   * TRANSIENT FAILURES THAT NEVER REACHED A PERSON.
+   *
+   * Distinct from a fallback, and more common in this deployment. A fallback
+   * swaps providers, which needs a second provider to swap to: pickFallback
+   * returns null unless Anthropic is keyed, and it is not keyed here. So until
+   * 2026-08-30 an Azure-only deployment had no recovery at all and every blip
+   * ended somebody's question.
+   *
+   * A retry is the recovery that actually applies here. Counting it separately
+   * from fallbacks matters because they answer different questions: a fallback
+   * says one provider was down, a retry says the request was fine and the
+   * service was momentarily busy.
+   */
+  retriesRecovered: number;
   models: ModelAvailability[];
   /** Share of decisions served by the cheapest tier. The efficiency headline. */
   smallTierShare: number | null;
@@ -570,6 +585,8 @@ export async function getRouterInsights(days = 30): Promise<RouterInsights> {
   const models = modelAvailability();
   let rows: DecisionRow[] = [];
   let actualRows: ActualRow[] = [];
+  /* Recoveries in the window. Zero until a retryable failure happens. */
+  let retriesRecovered = 0;
   let redactionRows: RedactionRow[] = [];
   let answerRedactionRows: RedactionRow[] = [];
   let refusalRows: RefusalRow[] = [];
@@ -623,6 +640,24 @@ export async function getRouterInsights(days = 30): Promise<RouterInsights> {
       actualRows = result.rows;
     } catch {
       /* Same posture: no actuals is a smaller answer, not a broken page. */
+    }
+
+    /* RECOVERIES, WHICH ARE THE THING A READER MOST WANTS TO SEE AND NEVER
+       COULD. A retry that works is invisible by design: the person got their
+       answer and nothing anywhere said the first attempt failed. Counting it
+       is what turns a silent success into evidence the recovery is real, and
+       into warning that a dependency is degrading before it fails for good. */
+    try {
+      const result = await query<{ n: string }>(
+        `SELECT count(*)::text AS n
+           FROM instinct_events
+          WHERE event_type = 'ai.provider_retry_succeeded'
+            AND timestamp > NOW() - INTERVAL '1 day' * $1`,
+        [days],
+      );
+      retriesRecovered = Number(result.rows[0]?.n ?? 0) || 0;
+    } catch {
+      /* Same posture again. */
     }
 
     try {
@@ -717,6 +752,7 @@ export async function getRouterInsights(days = 30): Promise<RouterInsights> {
   return {
     days,
     models,
+    retriesRecovered,
     ...withActuals,
     protection,
     /* Always present, including when it is all zeroes: "the gate ran and

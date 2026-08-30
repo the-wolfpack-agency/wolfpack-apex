@@ -603,3 +603,41 @@ describe("the quality trend", () => {
     expect(screen.queryByTestId("router-quality-panel")).not.toBeInTheDocument();
   });
 });
+
+/**
+ * RECOVERIES, WHICH ARE THE ONLY ONE THAT APPLIES TO THIS DEPLOYMENT.
+ *
+ * "Fell back" will read zero here however much goes wrong: a fallback swaps
+ * providers, pickFallback returns null unless Anthropic is keyed, and it is
+ * not keyed. Until 2026-08-30 that zero was accurate for the worst possible
+ * reason, because there was no recovery at all and every transient failure
+ * ended somebody's question.
+ *
+ * A retry is what actually saves a turn here, and a working one is invisible:
+ * the person got their answer and nothing said the first attempt failed.
+ */
+describe("recoveries", () => {
+  it("reports retries separately from fallbacks", async () => {
+    respond(insights({ fallbacks: 0, retriesRecovered: 3 }));
+    render(<Page />);
+    expect(await screen.findByTestId("router-metric-retries")).toHaveTextContent("3");
+    expect(await screen.findByTestId("router-metric-fallbacks")).toHaveTextContent("0");
+  });
+
+  /* A payload from a deploy that predates the retry has no field at all, which
+     is different from "no retries happened". It must render as zero rather
+     than blanking the page or showing undefined. */
+  it("renders zero for a payload that predates the field", async () => {
+    const body = insights();
+    delete (body as Record<string, unknown>).retriesRecovered;
+    respond(body);
+    render(<Page />);
+    expect(await screen.findByTestId("router-metric-retries")).toHaveTextContent("0");
+  });
+
+  it("says what the number means, so a zero is not read as nothing working", async () => {
+    respond(insights({ retriesRecovered: 0 }));
+    render(<Page />);
+    expect(await screen.findByTestId("router-metric-retries")).toHaveTextContent(/blip nobody saw/i);
+  });
+});

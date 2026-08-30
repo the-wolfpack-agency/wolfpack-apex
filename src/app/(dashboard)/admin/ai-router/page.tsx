@@ -59,6 +59,10 @@ function normalize(raw: unknown): RouterInsights | null {
     /* Absent means no. An older deploy, or a payload that lost the field,
        must not silently offer a control the server will refuse. */
     canProbe: b.canProbe === true,
+    /* Absent on a payload from a deploy that predates the retry, which is a
+       different thing from "no retries happened" and must not be reported as
+       a confident zero. Normalised to 0 here and the tile says which. */
+    retriesRecovered: typeof b.retriesRecovered === "number" ? b.retriesRecovered : 0,
     days: typeof b.days === "number" ? b.days : 30,
     totalDecisions: b.totalDecisions ?? 0,
     estimatedCostUsd: b.estimatedCostUsd ?? 0,
@@ -432,6 +436,24 @@ export default function AiRouterPage() {
                 testId="router-metric-cheap"
               />
               <MetricTile value={data.fallbacks} label="Fell back" kicker="Preferred model unavailable" testId="router-metric-fallbacks" />
+              {/* THE RECOVERY THAT APPLIES TO THIS DEPLOYMENT.
+                  A fallback needs a second provider to swap to, and
+                  pickFallback returns null unless Anthropic is keyed, which it
+                  is not here. So "Fell back" will read zero however much goes
+                  wrong, and until 2026-08-30 that zero was accurate for the
+                  worst possible reason: there was no recovery at all and every
+                  transient failure ended somebody's question.
+                  A retry is what actually saves a turn here, and it is
+                  invisible by design: the person got their answer and nothing
+                  said the first attempt failed. Counting it is what turns a
+                  silent success into evidence, and into early warning that a
+                  dependency is degrading before it fails for good. */}
+              <MetricTile
+                value={data.retriesRecovered}
+                label="Recovered by retry"
+                kicker="A blip nobody saw"
+                testId="router-metric-retries"
+              />
             </ConsoleGrid>
             {/* The caveat now only appears when there is genuinely nothing
                 measured, which means completions are not being recorded: a
