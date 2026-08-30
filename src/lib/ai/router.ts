@@ -493,7 +493,14 @@ class RouterClient implements AIClient {
     if (wsId) {
       try {
         wsPolicy = await this.budgetDeps.loadPolicy(wsId);
-      } catch {
+      } catch (err) {
+        /* SAID OUT LOUD. Failing open is the right call, and doing it in
+           silence is not: a workspace whose cost cap quietly stopped applying
+           looks exactly like a workspace that never had one, and the first
+           anybody would learn of it is the bill. */
+        console.warn(
+          `[router] workspace policy for ${wsId} could not be loaded, so its caps are NOT being applied: ${(err as Error).message}`,
+        );
         wsPolicy = null;
       }
     }
