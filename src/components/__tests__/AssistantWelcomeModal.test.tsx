@@ -445,4 +445,79 @@ describe("only promising what is connected", () => {
       expect(screen.getByText(/ask a question about your documents/i)).toBeInTheDocument();
     });
   });
+
+  /**
+   * TYPING YOUR OWN QUESTION CLOSES IT.
+   *
+   * Found in real Chromium on 2026-08-30, on a flow every unit test passed.
+   * The composer AUTOFOCUSES, so somebody arriving for the first time can type
+   * their question without ever touching this modal, send it, and get a real
+   * answer streamed underneath a backdrop that is still there. Every control
+   * on that answer then resolved to the backdrop and silently did nothing:
+   *
+   *     copy button covered by: fixed inset-0 z-[60] ... bg-black/60
+   *
+   * Nothing looks broken, which is the worst version. The answer is right
+   * there, slightly greyed, and the buttons ignore you.
+   *
+   * Escape and click-outside were both added earlier by measuring, and neither
+   * helps: somebody typing their own question presses neither. The end-to-end
+   * proof lives in tests/e2e, because hit-testing is the actual bug and jsdom
+   * has no layout. This asserts the listener, which is the part jsdom CAN see.
+   */
+  it("closes when somebody types their own question", async () => {
+    statusReturns({ microsoft: { connected: true }, quickbooks: { connected: false } });
+    render(<AssistantWelcomeModal userName="Nick" userRole="ops" onPickPrompt={() => {}} />);
+    await waitFor(() => expect(screen.getByTestId("assistant-welcome-modal")).toBeInTheDocument());
+
+    /* A composer outside the modal, which is where the real one lives. */
+    const composer = document.createElement("textarea");
+    composer.setAttribute("data-testid", "assistant-composer-input");
+    document.body.appendChild(composer);
+
+    await act(async () => {
+      composer.value = "what are the payment terms";
+      composer.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+
+    await waitFor(() =>
+      expect(screen.queryByTestId("assistant-welcome-modal")).not.toBeInTheDocument(),
+    );
+    composer.remove();
+  });
+
+  /* The modal must not close on its own controls. A search box added in here
+     later would otherwise dismiss the thing it is inside. */
+  it("does not close on input inside itself", async () => {
+    statusReturns({ microsoft: { connected: true }, quickbooks: { connected: false } });
+    render(<AssistantWelcomeModal userName="Nick" userRole="ops" onPickPrompt={() => {}} />);
+    const modal = await screen.findByTestId("assistant-welcome-modal");
+
+    const inner = document.createElement("input");
+    inner.type = "text";
+    modal.appendChild(inner);
+    await act(async () => {
+      inner.value = "x";
+      inner.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+
+    expect(screen.getByTestId("assistant-welcome-modal")).toBeInTheDocument();
+  });
+
+  /* A checkbox is not somebody writing a question. */
+  it("does not close on a checkbox toggle elsewhere on the page", async () => {
+    statusReturns({ microsoft: { connected: true }, quickbooks: { connected: false } });
+    render(<AssistantWelcomeModal userName="Nick" userRole="ops" onPickPrompt={() => {}} />);
+    await screen.findByTestId("assistant-welcome-modal");
+
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    document.body.appendChild(box);
+    await act(async () => {
+      box.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+
+    expect(screen.getByTestId("assistant-welcome-modal")).toBeInTheDocument();
+    box.remove();
+  });
 });
