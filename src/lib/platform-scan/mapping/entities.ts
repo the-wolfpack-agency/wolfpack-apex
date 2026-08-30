@@ -54,17 +54,36 @@ const SCREEN_WORDS = new Set([
 /**
  * A segment that identifies one record rather than a kind of record.
  *
- * A long opaque id containing a digit. Deliberately narrow: real object names
- * are words, and a pattern loose enough to catch every id would also catch
- * names like "changemanagementplan".
+ * LENGTH AND A DIGIT ARE NOT ENOUGH, which an end-to-end test caught before
+ * this ever ran again. The first version called anything long with a digit in
+ * it an id, and the real tenant has a form named
+ * "thewolfpackagencyinvoiceandw9collectionform": twenty-two characters and a
+ * 9, so a genuine business object silently disappeared from the map. The
+ * comment above it claimed the pattern was deliberately narrow. It was not.
+ *
+ * What actually separates them is that names are made of WORDS and ids are
+ * not. "invoiceandw9collection" has letter runs ten long and one digit in
+ * twenty-two characters; "a1b2c3d4e5f6g7h8" has no letter run longer than one
+ * and is half digits. Hex ids have long letter runs but a high digit share, so
+ * both signals are needed and either one is enough.
  */
-const RECORD_ID = /^(?=[a-zA-Z0-9_-]{15,}$)(?=.*\d)[a-zA-Z0-9_-]+$/;
+const ID_DIGIT_SHARE = 0.25;
+const ID_MAX_LETTER_RUN = 4;
+
+function looksLikeRecordId(s: string): boolean {
+  if (s.length < 15) return false;
+  const digits = (s.match(/\d/g) ?? []).length;
+  if (digits === 0) return false;
+  if (digits / s.length >= ID_DIGIT_SHARE) return true;
+  const longestLetterRun = Math.max(0, ...(s.match(/[a-z]+/gi) ?? []).map((r) => r.length));
+  return longestLetterRun <= ID_MAX_LETTER_RUN;
+}
 
 function isEntityName(segment: string): boolean {
   const s = segment.toLowerCase();
   if (!s || s.length < 3) return false;
   if (SCREEN_WORDS.has(s)) return false;
-  if (RECORD_ID.test(s)) return false;
+  if (looksLikeRecordId(s)) return false;
   /* Purely numeric, a version marker, a file extension. */
   if (/^\d+$/.test(s) || /^v\d/.test(s) || s.includes(".")) return false;
   return true;

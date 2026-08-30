@@ -184,3 +184,43 @@ describe("the tenant container", () => {
     expect(inferEntities(surfaces).map((e) => e.name)).toContain("invoices");
   });
 });
+
+/**
+ * Telling an opaque id from a long name, which the first version got wrong.
+ *
+ * It called anything fifteen characters or longer with a digit in it an id.
+ * The real tenant has a form named "thewolfpackagencyinvoiceandw9collectionform",
+ * so a genuine business object silently disappeared from the map. Names are
+ * made of words; ids are not.
+ */
+describe("long names that are not ids", () => {
+  const named = (slug: string) =>
+    inferEntities([
+      surface({ url: `https://x.test/org/${slug}/build` }),
+      surface({ url: `https://x.test/org/other/build` }),
+    ]).map((e) => e.name);
+
+  it("keeps a real form name that happens to contain a digit", () => {
+    expect(named("thewolfpackagencyinvoiceandw9collectionform")).toContain(
+      "thewolfpackagencyinvoiceandw9collectionform",
+    );
+  });
+
+  it("keeps long names with no digits at all", () => {
+    expect(named("brandambassadorchangemanagementplan")).toContain(
+      "brandambassadorchangemanagementplan",
+    );
+  });
+
+  it("still rejects an alternating id", () => {
+    expect(named("a1b2c3d4e5f6g7h8")).not.toContain("a1b2c3d4e5f6g7h8");
+  });
+
+  it("still rejects a digit-heavy id", () => {
+    expect(named("0015g00000XyZaBAAV")).not.toContain("0015g00000XyZaBAAV");
+  });
+
+  it("still rejects a hex id, which has long letter runs but many digits", () => {
+    expect(named("aabbccddeeff1122")).not.toContain("aabbccddeeff1122");
+  });
+});
