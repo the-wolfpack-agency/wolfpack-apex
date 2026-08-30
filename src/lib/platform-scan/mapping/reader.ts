@@ -261,6 +261,21 @@ export async function createSurfaceReader(
      with the floor above, which owns the only interceptor. */
   const traffic = createTrafficRecorder(page, { now });
 
+  /* THE ENTRY PAGE'S HEADERS, KEPT ONCE.
+   *
+   * A Content-Security-Policy is what outbound traffic gets checked against:
+   * without one, every third party is unexplained because there is nothing to
+   * compare it to. Not capturing it and passing nothing would make a report
+   * say the system publishes no CSP, when the truth is that nobody looked. So
+   * the first response's headers are kept, and null means not captured rather
+   * than not present.
+   *
+   * The first response only. A CSP is served per response and an application
+   * that varied it per screen would be unusual enough to be its own finding,
+   * but keeping every screen's headers would bloat a stored map for a header
+   * that is the same on all of them. */
+  let entryHeaders: Record<string, string> | null = null;
+
   return {
     async read(url: string): Promise<ReadSurface> {
       const started = now();
@@ -268,6 +283,15 @@ export async function createSurfaceReader(
          the screen it fetches rather than to the previous one. */
       traffic.attributeTo(url);
       const response = await page.goto(url);
+      if (entryHeaders === null && response?.headers) {
+        try {
+          entryHeaders = response.headers();
+        } catch {
+          /* silent-ok: headers are an optional method on the abstraction, and
+             a fake or a browser that does not expose them leaves this null,
+             which downstream reads as "not captured" rather than "absent". */
+        }
+      }
       if (opts.settle) await opts.settle(page);
       const harvested = await page.evaluate(harvestSurface);
       return {
@@ -279,6 +303,7 @@ export async function createSurfaceReader(
       };
     },
     observations: () => traffic.observations(),
+    entryHeaders: () => entryHeaders,
     trafficTruncated: () => traffic.truncated(),
   };
 }

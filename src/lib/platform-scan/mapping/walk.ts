@@ -76,6 +76,14 @@ export interface SurfaceReader {
    * finding must never be wrong in.
    */
   trafficTruncated?(): boolean;
+  /**
+   * Entry-page response headers, when the reader captured them.
+   *
+   * Null means NOT CAPTURED. A caller must not read it as "the system serves
+   * no Content-Security-Policy", which is a finding, where this is the absence
+   * of one.
+   */
+  entryHeaders?(): Record<string, string> | null;
 }
 
 export interface WalkResult {
