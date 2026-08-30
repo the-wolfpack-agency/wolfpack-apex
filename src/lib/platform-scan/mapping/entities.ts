@@ -79,10 +79,18 @@ function looksLikeRecordId(s: string): boolean {
   return longestLetterRun <= ID_MAX_LETTER_RUN;
 }
 
+/** Screen words with punctuation removed, for comparing against display text. */
+const SCREEN_WORDS_SQUASHED = new Set([...SCREEN_WORDS].map((w) => w.replace(/[^a-z0-9]/g, "")));
+
 function isEntityName(segment: string): boolean {
   const s = segment.toLowerCase();
   if (!s || s.length < 3) return false;
   if (SCREEN_WORDS.has(s)) return false;
+  /* PAGINATION IS NOT A BUSINESS OBJECT. The real tenant serves page two of a
+     list at "/form/1-all-entries", and that segment sits in the same position
+     an object name sits in, so the first live run reported "1-all-entries" as
+     something the system manages. */
+  if (SCREEN_WORDS.has(s.replace(/^\d+[-_]/, ""))) return false;
   if (looksLikeRecordId(s)) return false;
   /* Purely numeric, a version marker, a file extension. */
   if (/^\d+$/.test(s) || /^v\d/.test(s) || s.includes(".")) return false;
@@ -150,10 +158,33 @@ function displayName(slug: string, surfaces: EntitySurface[]): string {
     for (const candidate of [s.title, ...s.headings]) {
       const text = (candidate ?? "").trim();
       if (!text || text.length > 60) continue;
-      if (text.replace(/[^a-z0-9]/gi, "").toLowerCase().includes(squashed)) return text;
+      if (text.replace(/[^a-z0-9]/gi, "").toLowerCase().includes(squashed)) {
+        return stripScreenSuffix(text);
+      }
     }
   }
   return slug;
+}
+
+/**
+ * "Change Management Plan - All Entries" is a screen. The object is "Change
+ * Management Plan".
+ *
+ * Applications title a page after the thing AND the view of it, so taking the
+ * title verbatim names every business object after whichever screen happened
+ * to be opened first. The first live run produced exactly that: a client
+ * system whose objects were all called "... - All Entries".
+ *
+ * Only strips a trailing segment that is a KNOWN screen word. A product
+ * genuinely called "Acme - Field Service" keeps its name, because guessing
+ * would be worse than the problem: an object silently renamed reads as
+ * authoritative and there is no way for a reader to spot it.
+ */
+function stripScreenSuffix(title: string): string {
+  const m = /^(.*\S)\s*[-|\u2013\u2014]\s*([^-|\u2013\u2014]+)$/.exec(title);
+  if (!m) return title;
+  const tail = m[2].replace(/[^a-z0-9]/gi, "").toLowerCase();
+  return SCREEN_WORDS_SQUASHED.has(tail) ? m[1].trim() : title;
 }
 
 /**
