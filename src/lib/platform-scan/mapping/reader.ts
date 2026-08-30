@@ -153,6 +153,10 @@ export function harvestSurface(): HarvestedPage {
           type: e.getAttribute("type") ?? undefined,
           role: e.getAttribute("role") ?? undefined,
           insideForm: !!e.closest("form"),
+          /* WHAT IT IS CLOSING, not what it is called. A dismissal inside a
+             dialog reveals what is behind it; the same word outside one is
+             usually closing a record. */
+          insideDialog: !!e.closest('[role="dialog"],[role="alertdialog"],dialog,[aria-modal="true"]'),
           href: e.getAttribute("href") ?? undefined,
           ariaExpanded: e.hasAttribute("aria-expanded")
             ? e.getAttribute("aria-expanded") === "true"

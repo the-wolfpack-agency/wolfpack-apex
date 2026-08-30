@@ -160,3 +160,44 @@ describe("reporting what was declined", () => {
     expect(declined.every((d) => d.because.length > 10)).toBe(true);
   });
 });
+
+/**
+ * A MODAL THAT CANNOT BE DISMISSED BLOCKS EVERYTHING BEHIND IT.
+ *
+ * Measured while mapping this product: "Close welcome" was refused, because
+ * "close" is also how a ticket is closed and refusals run before permissions.
+ * One unclosable dialog costs the whole map below it.
+ *
+ * Loosening "close" globally would be the wrong fix, since closing a record is
+ * genuinely mutating. The dialog role is the discriminator, because it says
+ * what the control is closing rather than what it is called.
+ */
+describe("dismissing a dialog", () => {
+  const inDialog = (text: string) => mayClick(el({ text, insideDialog: true }));
+
+  it.each(["Close", "Close welcome", "Dismiss", "Got it", "Not now", "No thanks", "Skip", "×"])(
+    "allows %s inside a dialog",
+    (text) => {
+      expect(inDialog(text).allowed).toBe(true);
+    },
+  );
+
+  /* THE LINE THAT MATTERS. A confirmation modal is still full of real
+     buttons, and this must never become a way to press one. */
+  it.each(["Close ticket", "Delete", "Close and delete", "Save", "Approve", "Send"])(
+    "still refuses %s inside a dialog",
+    (text) => {
+      expect(inDialog(text).allowed).toBe(false);
+    },
+  );
+
+  /* Outside a dialog the old behaviour is unchanged: "Close" there is
+     overwhelmingly closing a record. */
+  it("does not allow a bare Close outside a dialog", () => {
+    expect(mayClick(el({ text: "Close welcome" })).allowed).toBe(false);
+  });
+
+  it("still refuses a logout inside a dialog", () => {
+    expect(inDialog("Sign out").allowed).toBe(false);
+  });
+});
