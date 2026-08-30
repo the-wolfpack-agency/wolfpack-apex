@@ -28,6 +28,7 @@ import {
   type ExploreBudget,
 } from "./explore";
 import { partitionByPolicy, type ClickCandidate } from "./click-policy";
+import { ShapeSampler } from "./shapes";
 import type { MappedSurface, MapCoverage, MappedForm } from "./types";
 
 /** What the driver needs a page to tell it. One visit, one answer. */
@@ -75,6 +76,13 @@ export interface WalkOptions {
    * coverage rather than looking like a small system.
    */
   confineTo?: string | null;
+  /**
+   * How many instances of one repeated screen shape to actually open.
+   * Defaults to the sampler's own figure. Pass Infinity to open every one,
+   * which is what the first version of this did and why it ran out of budget
+   * on the thirteenth build screen.
+   */
+  samplesPerShape?: number;
   now?: () => number;
   /** Surfaced so a caller can report progress without this file knowing how. */
   onSurface?: (surface: MappedSurface) => void;
@@ -93,6 +101,12 @@ export async function walkSystem(
   const frontier = new Frontier(seen);
   const surfaces: MappedSurface[] = [];
   const skipped: MapCoverage["skipped"] = [];
+  /* VISIT FEW, RECORD ALL. Thirteen forms each having a build, a publish and
+     an entries screen is four screens, not fifty-two, and opening all
+     fifty-two is how the real run spent its budget without learning anything
+     after the third form. Every instance is still counted; only the opening
+     stops. */
+  const shapes = new ShapeSampler(opts.samplesPerShape);
   let maxDepthReached = 0;
 
   const origin = (() => {
@@ -109,6 +123,7 @@ export async function walkSystem(
         surfacesReached: 0,
         frontierRemaining: 0,
         skipped: [{ signature: entryUrl, reason: "not-http" }],
+        patterns: [],
         maxDepthReached: 0,
         /* The entry URL itself was unusable, which is not an exhausted
            frontier: nothing was ever walkable. */
@@ -151,6 +166,21 @@ export async function walkSystem(
     skipped.push({ signature: sig, reason });
   };
 
+  /* Shapes are read off the path, so a query string cannot make two views of
+     the same screen look like two screens. */
+  const pathOf = (u: string): string | null => {
+    try {
+      return new URL(u).pathname;
+    } catch {
+      return null;
+    }
+  };
+  const notePath = (u: string) => {
+    const path = pathOf(u);
+    if (path) shapes.note(path);
+  };
+  notePath(entryUrl);
+
   /* The honest default: if the loop ends without a budget stopping it, there
      was nothing left to visit. */
   let stopReason: MapCoverage["stopReason"] = "frontier-exhausted";
@@ -171,6 +201,19 @@ export async function walkSystem(
     const sig = signatureOf(item.url);
     if (seen.has(sig)) continue;
     seen.add(sig);
+
+    /* ALREADY SEEN THIS SHAPE ENOUGH TIMES.
+     *
+     * Recorded as a skip with the count, not dropped, because "sampled two of
+     * thirteen" and "found two" are the two different situations this product
+     * keeps having to tell apart. A reader can see which one they are looking
+     * at. */
+    const path = pathOf(item.url);
+    if (path && item.depth > 0 && shapes.isSaturated(path)) {
+      noteSkip(item.url, "shape-already-sampled");
+      continue;
+    }
+    if (path) shapes.markVisited(path);
 
     let read: ReadSurface;
     try {
@@ -205,6 +248,7 @@ export async function walkSystem(
       });
       if (verdict.follow) {
         onward.add(signatureOf(link));
+        notePath(link);
         frontier.add(link, item.depth + 1);
       } else if (verdict.reason !== "already-seen") {
         /* already-seen is not a decision worth reporting: it means the map
@@ -270,6 +314,7 @@ export async function walkSystem(
          inherits that. Reported rather than rounded away. */
       frontierRemaining: frontier.size,
       skipped,
+      patterns: shapes.patterns(),
       maxDepthReached,
       stopReason,
       durationMs: now() - startedAt,

@@ -158,12 +158,20 @@ describe("stopping honestly", () => {
     /* Nested under one segment, because the walk confines itself to the entry
        URL's first path segment: a flat /p0 -> /p1 chain would now be refused
        as another tenant, which is the confinement working and not the budget. */
+    /* NESTED RATHER THAN SIBLINGS, and that is not incidental. A flat
+       /app/p0 ... /app/p19 is twenty instances of one shape, which the sampler
+       now correctly stops opening after two, so the frontier would empty and
+       the budget would never be what stopped it. Nesting gives every page a
+       shape of its own, which is what this test is actually about. */
     const pages: Record<string, Partial<ReadSurface>> = {};
-    for (let i = 0; i < 20; i += 1) {
-      pages[`${BASE}/app/p${i}`] = { links: [`${BASE}/app/p${i + 1}`] };
+    let path = "/app";
+    for (let i = 0; i < 8; i += 1) {
+      const next = `${path}/p${i}`;
+      pages[`${BASE}${path}`] = { links: [`${BASE}${next}`] };
+      path = next;
     }
-    pages[`${BASE}/app/p20`] = {};
-    const r = await walkSystem(`${BASE}/app/p0`, readerFor(pages), {
+    pages[`${BASE}${path}`] = {};
+    const r = await walkSystem(`${BASE}/app`, readerFor(pages), {
       budget: { maxSurfaces: 5, maxDepth: 10, maxDurationMs: 60_000 },
     });
     expect(r.coverage.stopReason).toBe("page-budget");
@@ -309,5 +317,89 @@ describe("collapsing records without collapsing names", () => {
       { confineTo: null },
     );
     expect(r.surfaces.map((s) => s.title)).toContain("Reports");
+  });
+});
+
+/**
+ * The repetition problem, end to end.
+ *
+ * Mapping a real tenant, the walk spent its whole budget on thirteen forms
+ * that each had the same three sub-screens, and stopped with thirty-four
+ * places still queued having learned nothing after the third form.
+ */
+describe("a system that repeats itself", () => {
+  const FORMS = ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf"];
+
+  const repetitiveSystem = (): Record<string, Partial<ReadSurface>> => {
+    const pages: Record<string, Partial<ReadSurface>> = {
+      [`${BASE}/org/home`]: { links: FORMS.map((f) => `${BASE}/org/${f}/all-entries`) },
+    };
+    for (const f of FORMS) {
+      pages[`${BASE}/org/${f}/all-entries`] = {
+        links: ["build", "publish", "entries"].map((s) => `${BASE}/org/${f}/${s}`),
+      };
+      for (const s of ["build", "publish", "entries"]) pages[`${BASE}/org/${f}/${s}`] = {};
+    }
+    return pages;
+  };
+
+  it("opens far fewer surfaces than it finds", async () => {
+    const r = await walkSystem(`${BASE}/org/home`, readerFor(repetitiveSystem()), {
+      budget: { maxSurfaces: 200, maxDepth: 10, maxDurationMs: 60_000 },
+    });
+    /* 1 home + 7 landings + 21 sub-screens = 29 if it opened everything. */
+    expect(r.surfaces.length).toBeLessThan(20);
+    expect(r.coverage.stopReason).toBe("frontier-exhausted");
+  });
+
+  /* THE COST THAT WOULD MAKE IT A BAD TRADE. Cheaper is only better if the
+     map still covers both dimensions: every business object, and every kind
+     of screen the system has. */
+  it("still opens every form, which is the inventory", async () => {
+    const r = await walkSystem(`${BASE}/org/home`, readerFor(repetitiveSystem()), {
+      budget: { maxSurfaces: 200, maxDepth: 10, maxDurationMs: 60_000 },
+    });
+    const opened = new Set(r.surfaces.map((s) => new URL(s.url).pathname.split("/")[2]));
+    for (const f of FORMS) expect(opened.has(f)).toBe(true);
+  });
+
+  it("still sees every kind of screen", async () => {
+    const r = await walkSystem(`${BASE}/org/home`, readerFor(repetitiveSystem()), {
+      budget: { maxSurfaces: 200, maxDepth: 10, maxDurationMs: 60_000 },
+    });
+    const kinds = new Set(r.surfaces.map((s) => new URL(s.url).pathname.split("/")[3]));
+    for (const k of ["build", "publish", "entries"]) expect(kinds.has(k)).toBe(true);
+  });
+
+  /* SAMPLED IS NOT THE SAME AS FOUND, and a map that blurred them would be
+     the confident kind of wrong this product keeps having to design against. */
+  it("reports every instance it declined to open", async () => {
+    const r = await walkSystem(`${BASE}/org/home`, readerFor(repetitiveSystem()), {
+      budget: { maxSurfaces: 200, maxDepth: 10, maxDurationMs: 60_000 },
+    });
+    /* What the walk actually settles into: the first two forms are explored in
+       full, the rest get their landing screen and one more, and all seven are
+       known. So the publish screens are the ones sampled rather than the build
+       screens, which is why this asserts the property and not a chosen shape. */
+    const publish = r.coverage.patterns.find((p) => p.shape === "/org/*/publish");
+    expect(publish?.instances).toHaveLength(FORMS.length);
+    expect(publish!.visited).toBeLessThan(FORMS.length);
+
+    /* The inventory is complete even where the visiting is not: every form is
+       named in some pattern, whether or not every screen was opened. */
+    const named = new Set(
+      r.coverage.patterns.flatMap((p) => p.instances.map((i) => i.split("/")[2])),
+    );
+    for (const f of FORMS) expect(named.has(f)).toBe(true);
+
+    expect(r.coverage.skipped.some((s) => s.reason === "shape-already-sampled")).toBe(true);
+  });
+
+  it("opens everything when told to sample without limit", async () => {
+    const r = await walkSystem(`${BASE}/org/home`, readerFor(repetitiveSystem()), {
+      budget: { maxSurfaces: 200, maxDepth: 10, maxDurationMs: 60_000 },
+      samplesPerShape: Infinity,
+    });
+    expect(r.surfaces).toHaveLength(1 + FORMS.length * 4);
   });
 });

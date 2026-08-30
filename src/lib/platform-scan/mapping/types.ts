@@ -110,6 +110,10 @@ export interface MapCoverage {
   /** Links deliberately not followed, with the reason. Off-origin, logout,
    *  and anything that looked mutating. */
   skipped: { signature: string; reason: string }[];
+  /** Repeated screen shapes: how many instances exist, and how many were
+   *  actually opened. The gap between those two numbers is the difference
+   *  between a small system and a sample of a large one. */
+  patterns: { shape: string; instances: string[]; visited: number }[];
   maxDepthReached: number;
   stopReason: StopReason;
   durationMs: number;
