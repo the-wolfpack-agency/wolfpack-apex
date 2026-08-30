@@ -1301,6 +1301,7 @@ export type InstinctEventType =
      documents instead. { strong_hits, tabular_hits }. A quote is fast and
      free; a CSV row printed verbatim names the people in it. */
   | "assistant.brain_quote_declined_tabular"
+  | "assistant.brain_answer_contested"
   | "assistant.brain_quote_declined_for_synthesis"
   /* Personal data removed from an answer at the ANSWER boundary rather than
      the model boundary. ai.response_redacted only ever covered the model path,

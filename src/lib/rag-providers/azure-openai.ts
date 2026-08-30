@@ -17,6 +17,7 @@
  *   - Response vectors are re-sorted by `index` to defend against out-of-order responses.
  */
 
+import { isRetryableError, retryDelayMs } from "@/lib/ai/router";
 import type { EmbeddingProvider } from "@/lib/rag-providers/types";
 import { emitRagEvent } from "@/lib/rag-providers/analytics-shim";
 
@@ -51,6 +52,22 @@ export function createAzureOpenAIEmbedder(cfg: AzureOpenAIConfig): EmbeddingProv
         return [];
       }
 
+      /* ONE RETRY, AS A LOOP RATHER THAN A HELPER.
+       *
+       * A THROTTLE IS NOT A FAILURE, AND THIS TREATED IT AS ONE. Returning []
+       * makes the caller report "embedder returned no vector", the Brain drops
+       * to keyword-only, and nobody is told. Measured over 90 days: 178 of
+       * these were HTTP 429 on text-embedding-3-small. The request was fine,
+       * the service was busy, and every one of them silently halved the
+       * search.
+       *
+       * It is also why a question phrased differently from the document fails.
+       * Keyword cannot bridge "how much do we owe upfront" to "50% is due
+       * within 30 days"; semantic can, and semantic was not running.
+       *
+       * A loop keeps the retry in one function with one exit, rather than a
+       * recursive helper that has to be kept in step with it. */
+      for (let attempt = 0; ; attempt += 1) {
       const start = performance.now();
 
       try {
@@ -64,6 +81,30 @@ export function createAzureOpenAIEmbedder(cfg: AzureOpenAIConfig): EmbeddingProv
         });
 
         if (!res.ok) {
+          /* Retried once, using the ROUTER's classification rather than a
+             second opinion, so the two paths cannot drift into disagreeing
+             about what a 429 means. */
+          if (attempt === 0 && isRetryableError({ status: res.status })) {
+            await new Promise((r) =>
+              setTimeout(
+                r,
+                retryDelayMs(
+                  {
+                    status: res.status,
+                    /* Guarded: a real fetch Response always carries headers,
+                       but this must not be the thing that throws if it is ever
+                       handed a Response-like object that does not. Losing the
+                       hint costs a default backoff; throwing would cost the
+                       retry entirely, which is the bug being fixed. */
+                    headers: { "retry-after": res.headers?.get?.("retry-after") ?? null },
+                  },
+                  1,
+                ),
+              ),
+            );
+            continue;
+          }
+
           const detail = await safeReadText(res);
           const duration_ms = performance.now() - start;
           await emitRagEvent("rag.embedding_failed", SYSTEM_USER, SYSTEM_ROLE, {
@@ -72,6 +113,9 @@ export function createAzureOpenAIEmbedder(cfg: AzureOpenAIConfig): EmbeddingProv
             input_count: texts.length,
             error: `HTTP ${res.status}: ${detail}`,
             duration_ms,
+            /* So a throttle that survived a retry is distinguishable from a
+               first-try failure when somebody reads these later. */
+            retried: attempt > 0,
           });
           return [];
         }
@@ -109,6 +153,12 @@ export function createAzureOpenAIEmbedder(cfg: AzureOpenAIConfig): EmbeddingProv
 
         return embeddings;
       } catch (err) {
+        /* A THROWN network error is retryable too, and this is the shape the
+           most recent failures take: 13 "fetch failed" on 2026-08-30. */
+        if (attempt === 0 && isRetryableError(err)) {
+          await new Promise((r) => setTimeout(r, retryDelayMs(err, 1)));
+          continue;
+        }
         const duration_ms = performance.now() - start;
         await emitRagEvent("rag.embedding_failed", SYSTEM_USER, SYSTEM_ROLE, {
           provider: PROVIDER_NAME,
@@ -116,8 +166,10 @@ export function createAzureOpenAIEmbedder(cfg: AzureOpenAIConfig): EmbeddingProv
           input_count: texts.length,
           error: err instanceof Error ? err.message : String(err),
           duration_ms,
+          retried: attempt > 0,
         });
         return [];
+      }
       }
     },
 

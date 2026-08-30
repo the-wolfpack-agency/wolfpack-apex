@@ -23,6 +23,7 @@ import { searchKnowledge, saveAnswer } from "@/lib/knowledge";
 import { markCited as markBrainCited, type SemanticStatus } from "@/lib/brain/query";
 import { retrieve } from "@/lib/brain/retrieve";
 import { asksForSynthesis } from "@/lib/brain/question-terms";
+import { detectAmbiguity } from "@/lib/brain/ambiguous-question";
 import { quoteWindow } from "@/lib/brain/quote-window";
 import { TurnDegradation, type DegradationKind } from "@/lib/assistant/degraded-answer";
 import { judgeRelevance, RELEVANCE_MATERIAL_PER_HIT } from "@/lib/brain/relevance";
@@ -2987,6 +2988,32 @@ async function tryBrain(
      * when the strong hits are mostly tabular, this declines to answer here
      * and lets the grounded model path do it. Costs a cheap-tier call and buys
      * an answer a client can read. */
+    /* WEAK AND CONTESTED EVIDENCE IS NOT AN ANSWER.
+     *
+     * Measured 2026-08-30: "how much do we owe upfront?" quoted a chauffeur
+     * invoice, confidently, with a dollar figure. "when do we have to pay?"
+     * correctly replied "the closest things I hold are... name it". Same shape
+     * of question, opposite behaviour, and the first is a wrong answer given
+     * with the product's full confidence.
+     *
+     * The existing guard only fires when the relevance judge REJECTS the hits.
+     * Here the judge accepted, and was right to: an invoice genuinely is
+     * relevant to owing money. Relevance was never the problem. Agreement was.
+     * Neither question names a subject, so several documents answer equally
+     * and picking one is a guess wearing a citation.
+     *
+     * Falls through to the same near-miss path the judge-rejection case uses,
+     * so there is one way of saying "which did you mean" rather than two. */
+    const ambiguity = detectAmbiguity(strong);
+    if (ambiguity) {
+      trackEvent("assistant.brain_answer_contested", userId, userRole, {
+        candidates: ambiguity.candidates.length,
+        top_score: Number((strong[0]?.score ?? 0).toFixed(4)),
+        module: "assistant",
+      });
+      return { strong: null, context: emptyContext, nearMisses: ambiguity.candidates };
+    }
+
     /* A SUMMARY IS NOT THREE EXCERPTS.
      *
      * The quote path below is the right answer to "what does the SOW say about
