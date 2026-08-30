@@ -1,0 +1,94 @@
+name: Merge orphan watch
+
+# Work that GitHub says is merged and that is not in main.
+#
+# A stacked pull request is merged into its parent's branch, then the parent is
+# SQUASH-merged into main taking the parent's diff as it stood when the merge
+# began. The child's commits are not in that diff. Both show a green merged
+# badge and the child's code is nowhere.
+#
+# Nothing catches it. Not Verify, which only ever saw the branch. Not the pull
+# request list, where both are merged. Not the person who merged them, who did
+# nothing wrong. It has happened at least three times here, most recently to
+# #576, and each previous time the response was to remember harder.
+#
+# Runs AFTER a push to main, because that push is the event that orphans the
+# work: before the squash there is nothing wrong to find. Files into the same
+# maint-queue label the maintenance loop already drains, updating one thread
+# rather than opening an issue per push.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: write
+
+concurrency:
+  group: merge-orphan-watch
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          # The check compares merged pull requests against what is actually in
+          # main, so it needs main's history rather than a single commit.
+          fetch-depth: 0
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v4.0.4
+        with:
+          node-version: 20
+      - run: npm ci --ignore-scripts
+      - name: Look for merged work that never reached main
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set +e
+          npx tsx scripts/check-merge-orphans.ts | tee orphans.txt
+          echo "found=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+      - name: Say so, in the queue that gets drained
+        if: steps.check.outputs.found != '0'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v7.0.1
+        with:
+          script: |
+            const fs = require("fs");
+            const body = fs.readFileSync("orphans.txt", "utf-8");
+            // A stable marker so the search finds the same thread every time,
+            // however a human edits the title.
+            const MARKER = "<!-- merge-orphan-watch -->";
+            const title = "Merged work is missing from main";
+
+            const found = await github.rest.search.issuesAndPullRequests({
+              q: `repo:${context.repo.owner}/${context.repo.repo} is:issue is:open in:body "${MARKER}"`,
+            });
+
+            const text = [
+              MARKER,
+              "",
+              "A squash-merge of a parent branch left stacked work behind.",
+              "",
+              "```",
+              body.trim(),
+              "```",
+              "",
+              `Detected after ${context.sha.slice(0, 7)} landed on main.`,
+              "Recover with the cherry-pick above; restore the branch first if it was deleted.",
+            ].join("\n");
+
+            const existing = found.data.items[0];
+            if (existing) {
+              await github.rest.issues.createComment({
+                ...context.repo, issue_number: existing.number, body: text,
+              });
+            } else {
+              await github.rest.issues.create({
+                ...context.repo, title, body: text, labels: ["maint-queue"],
+              });
+            }
