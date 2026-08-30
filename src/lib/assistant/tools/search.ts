@@ -114,8 +114,8 @@ const DOCUMENT_QUESTION_RE = new RegExp(
      * list is exactly the right answer. "what's in the contract" names a
      * document, and a list is exactly the wrong one. Both parse here; the
      * extractor below releases the second to retrieval and keeps the first. */
-    String.raw`^\s*(?:what|whats|what's)\s+(?:do(?:es)?|did)\s+(?:the\s+|our\s+|my\s+|this\s+)?(?<saySubject>.+?)\s+say(?:\s+about\s+(?<sayAbout>.+?))?\s*[?.!]*\s*$`,
-    String.raw`^\s*(?:what|whats|what's)\s+(?:is\s+)?in\s+(?:the\s+|our\s+|my\s+|this\s+)?(?<inSubject>.+?)(?:\s+about\s+(?<inAbout>.+?))?\s*[?.!]*\s*$`,
+    String.raw`^ ?(?:what|whats|what's) (?:do(?:es)?|did) (?:the |our |my |this )?(?<saySubject>.+?) say(?: about (?<sayAbout>.+?))? ?[?.!]* ?$`,
+    String.raw`^ ?(?:what|whats|what's) (?:is )?in (?:the |our |my |this )?(?<inSubject>.+?)(?: about (?<inAbout>.+?))? ?[?.!]* ?$`,
     /* "what is in the SharePoint about training". The article is optional so
        "what is in SharePoint about training" lands here too, and the topic is
        captured rather than swallowed into the subject. */
@@ -159,10 +159,10 @@ const DOCUMENT_QUESTION_RE = new RegExp(
        Both are existence questions, and search is the only thing that can
        answer one honestly, because it is the only thing that can see
        everything. */
-    String.raw`^\s*(?:what|which)\s+(?:documents?|docs?|files?|records?|papers?)\s+(?:do|does)\s+(?:we|i|the\s+team)\s+have\s+(?:on|about|for|regarding)\s+(?<haveAbout>.+?)\s*[?.!]*\s*$`,
-    String.raw`^\s*do\s+(?:we|i)\s+have\s+(?:anything|any\s+(?:documents?|docs?|files?|records?|info(?:rmation)?))\s+(?:on|about|for|regarding)\s+(?<anythingAbout>.+?)\s*[?.!]*\s*$`,
+    String.raw`^ ?(?:what|which) (?:documents?|docs?|files?|records?|papers?) (?:do|does) (?:we|i|the team) have (?:on|about|for|regarding) (?<haveAbout>.+?) ?[?.!]* ?$`,
+    String.raw`^ ?do (?:we|i) have (?:anything|any (?:documents?|docs?|files?|records?|info(?:rmation)?)) (?:on|about|for|regarding) (?<anythingAbout>.+?) ?[?.!]* ?$`,
     /* "is there anything on X", the same question phrased impersonally. */
-    String.raw`^\s*is\s+there\s+(?:anything|any\s+(?:documents?|docs?|files?|info(?:rmation)?))\s+(?:on|about|for|regarding)\s+(?<thereAbout>.+?)\s*[?.!]*\s*$`,
+    String.raw`^ ?is there (?:anything|any (?:documents?|docs?|files?|info(?:rmation)?)) (?:on|about|for|regarding) (?<thereAbout>.+?) ?[?.!]* ?$`,
     /* THE POLICY QUESTION. "find the pto policy" reached search and "whats our
        policy on pto" reached nothing, which is the wrong way round: the second
        is how anybody actually asks. An internal OS holding HR documents is
@@ -172,8 +172,8 @@ const DOCUMENT_QUESTION_RE = new RegExp(
        Both orders, because people say "our policy on X" and "our X policy"
        interchangeably. The topic is the search term either way; "policy" is
        kept in the query because the document is usually called one. */
-    String.raw`^\s*(?:what(?:'?s| is| are)?|where(?:'?s| is)?)\s+(?:the\s+|our\s+|my\s+)?polic(?:y|ies)\s+(?:on|about|for|regarding)\s+(?<policyOn>.+?)\s*[?.!]*\s*$`,
-    String.raw`^\s*(?:what(?:'?s| is| are)?|where(?:'?s| is)?)\s+(?:the\s+|our\s+|my\s+)?(?<policyFor>.+?)\s+polic(?:y|ies)\s*[?.!]*\s*$`,
+    String.raw`^ ?(?:what(?:'?s| is| are)?|where(?:'?s| is)?) (?:the |our |my )?polic(?:y|ies) (?:on|about|for|regarding) (?<policyOn>.+?) ?[?.!]* ?$`,
+    String.raw`^ ?(?:what(?:'?s| is| are)?|where(?:'?s| is)?) (?:the |our |my )?(?<policyFor>.+?) polic(?:y|ies) ?[?.!]* ?$`,
   ].join("|"),
   "i",
 );
@@ -203,7 +203,31 @@ const CONTAINER_ONLY_RE =
  * returns the whole document and buries the clause somebody wanted.
  */
 export function matchDocumentQuestion(message: string): string | null {
-  const m = DOCUMENT_QUESTION_RE.exec(message.trim());
+  /* NORMALISED BEFORE MATCHING, WHICH IS A SECURITY PROPERTY.
+   *
+   * These patterns put `\s+` next to a lazy `.+?`, so both sides could match
+   * the same space and a message of many spaces made the engine try every
+   * split. Measured on 2026-08-30 against "what did " followed by N spaces:
+   *
+   *     n=200   10.4ms
+   *     n=400   19.7ms
+   *     n=800  112.0ms
+   *     n=1600 858.8ms
+   *
+   * Superlinear, on a string a person can paste into the chat box, on a path
+   * that runs before any authentication-independent rate limit. CodeQL flagged
+   * the identical shape in brain/question-terms.ts (js/polynomial-redos) and
+   * did NOT flag this file, which is the more useful half of the finding: the
+   * scanner's silence was not evidence of safety.
+   *
+   * Collapsing whitespace first lets every pattern use a literal space, so the
+   * ambiguity has nowhere to live. Same input, same matches, no backtracking. */
+  const normalised = message.replace(/\s+/g, " ").trim();
+  /* Bounded as defence in depth, so a future edit that reintroduces some other
+     ambiguity cannot be exploited by length alone. No document question is
+     this long. */
+  if (normalised.length > 600) return null;
+  const m = DOCUMENT_QUESTION_RE.exec(normalised);
   if (!m) return null;
   const g = (m.groups ?? {}) as Record<string, string | undefined>;
 

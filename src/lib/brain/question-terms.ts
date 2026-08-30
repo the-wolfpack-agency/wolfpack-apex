@@ -32,22 +32,55 @@
  * Ordered longest-frame-first so "what does X say about Y" is tried before
  * "what does X say", which would otherwise swallow "about Y" into the topic.
  */
+/**
+ * Question frames, each capturing the topic and any narrowing clause.
+ *
+ * WRITTEN AGAINST NORMALISED TEXT, WHICH IS A SECURITY PROPERTY AND NOT A
+ * STYLE CHOICE. The first version used `\s+` and `\s*` next to a lazy `.+?`,
+ * and CodeQL correctly flagged it as polynomial ReDoS (js/polynomial-redos):
+ * both sides can match the same space, so a message of many spaces makes the
+ * engine try every split. These patterns run on whatever somebody types into
+ * the chat box, which is exactly the input an attacker controls.
+ *
+ * `normalise()` collapses every whitespace run to a single space before any of
+ * these are tried, so the patterns can use a literal space and the ambiguity
+ * has nowhere to live. Keep it that way: reintroducing `\s+` here reintroduces
+ * the vulnerability.
+ *
+ * Ordered longest-frame-first so "what does X say about Y" is tried before
+ * "what does X say", which would otherwise swallow "about Y" into the topic.
+ */
 const FRAMES: RegExp[] = [
   /* "what does the SOW say about payment" -> "SOW payment" */
-  /^\s*(?:what|whats|what's)\s+(?:do(?:es)?|did)\s+(?:the\s+|our\s+|my\s+|this\s+)?(.+?)\s+say\s+about\s+(.+?)\s*[?.!]*\s*$/i,
+  /^(?:what|whats|what's) (?:do(?:es)?|did) (?:the |our |my |this )?(.+?) say about (.+?)[?.!]*$/i,
   /* "what does the SOW say" -> "SOW" */
-  /^\s*(?:what|whats|what's)\s+(?:do(?:es)?|did)\s+(?:the\s+|our\s+|my\s+|this\s+)?(.+?)\s+say\s*[?.!]*\s*$/i,
+  /^(?:what|whats|what's) (?:do(?:es)?|did) (?:the |our |my |this )?(.+?) say[?.!]*$/i,
   /* "what is in the contract about termination" -> "contract termination" */
-  /^\s*(?:what|whats|what's)\s+(?:is\s+)?in\s+(?:the\s+|our\s+|my\s+|this\s+)?(.+?)\s+about\s+(.+?)\s*[?.!]*\s*$/i,
+  /^(?:what|whats|what's) (?:is )?in (?:the |our |my |this )?(.+?) about (.+?)[?.!]*$/i,
   /* "what is in the contract" -> "contract" */
-  /^\s*(?:what|whats|what's)\s+(?:is\s+)?in\s+(?:the\s+|our\s+|my\s+|this\s+)?(.+?)\s*[?.!]*\s*$/i,
+  /^(?:what|whats|what's) (?:is )?in (?:the |our |my |this )?(.+?)[?.!]*$/i,
   /* "summarise the onboarding doc" -> "onboarding doc" */
-  /^\s*(?:can\s+you\s+|please\s+)?summari[sz]e\s+(?:the\s+|our\s+|my\s+|this\s+)?(.+?)\s*[?.!]*\s*$/i,
+  /^(?:can you |please )?summari[sz]e (?:the |our |my |this )?(.+?)[?.!]*$/i,
   /* "give me a summary of the SOW" -> "SOW" */
-  /^\s*(?:give\s+me\s+|can\s+i\s+get\s+)?an?\s+(?:brief\s+|short\s+|quick\s+)?summary\s+of\s+(?:the\s+|our\s+|my\s+|this\s+)?(.+?)\s*[?.!]*\s*$/i,
+  /^(?:give me |can i get )?an? (?:brief |short |quick )?summary of (?:the |our |my |this )?(.+?)[?.!]*$/i,
   /* "tell me about the SOW" -> "SOW" */
-  /^\s*tell\s+me\s+about\s+(?:the\s+|our\s+|my\s+|this\s+)?(.+?)\s*[?.!]*\s*$/i,
+  /^tell me about (?:the |our |my |this )?(.+?)[?.!]*$/i,
 ];
+
+/**
+ * A ceiling on what is worth parsing, as defence in depth.
+ *
+ * Normalising removes the ambiguity these patterns backtracked on, and this
+ * bounds the damage if a future edit reintroduces some other one. Nobody asks
+ * what a document says in six hundred characters; a request that long is not a
+ * document question, so declining to parse it costs a real user nothing.
+ */
+const MAX_QUESTION_CHARS = 600;
+
+/** Collapse whitespace so the frames above can rely on single literal spaces. */
+function normalise(question: string): string {
+  return (question ?? "").replace(/\s+/g, " ").trim();
+}
 
 /**
  * A topic made only of pronouns is not a topic.
@@ -64,8 +97,11 @@ const PRONOUN_ONLY = /^(?:it|this|that|they|them|these|those|there)$/i;
  * the common case and the safe one.
  */
 export function searchTermsFor(question: string): string {
-  const text = (question ?? "").trim();
+  const text = normalise(question);
   if (!text) return text;
+  /* Too long to be a document question, and the one input shape worth
+     refusing outright rather than parsing. */
+  if (text.length > MAX_QUESTION_CHARS) return text;
 
   for (const frame of FRAMES) {
     const m = frame.exec(text);
@@ -85,7 +121,7 @@ export function searchTermsFor(question: string): string {
 
 /** Whether this question had scaffolding worth stripping. Useful for logging. */
 export function isQuestionShaped(question: string): boolean {
-  return searchTermsFor(question) !== (question ?? "").trim();
+  return searchTermsFor(question) !== normalise(question);
 }
 
 /**
@@ -98,12 +134,12 @@ export function isQuestionShaped(question: string): boolean {
  * wall of excerpts that looks like an answer and is not one.
  */
 const WHOLE_DOCUMENT: RegExp[] = [
-  /^\s*(?:can\s+you\s+|please\s+)?summari[sz]e\s+/i,
-  /^\s*(?:give\s+me\s+|can\s+i\s+get\s+)?an?\s+(?:brief\s+|short\s+|quick\s+)?summary\s+of\s+/i,
-  /^\s*tell\s+me\s+about\s+/i,
-  /^\s*what(?:'?s| is| are)?\s+(?:the\s+)?(?:main\s+|key\s+)?(?:points?|takeaways?|gist)\s+of\s+/i,
-  /^\s*(?:what|whats|what's)\s+(?:do(?:es)?|did)\s+.+\s+say\s*[?.!]*\s*$/i,
-  /^\s*(?:what|whats|what's)\s+(?:is\s+)?in\s+(?!.*\babout\b).+[?.!]*\s*$/i,
+  /^(?:can you |please )?summari[sz]e /i,
+  /^(?:give me |can i get )?an? (?:brief |short |quick )?summary of /i,
+  /^tell me about /i,
+  /^what(?:'?s| is| are)? (?:the )?(?:main |key )?(?:points?|takeaways?|gist) of /i,
+  /^(?:what|whats|what's) (?:do(?:es)?|did) .+ say[?.!]*$/i,
+  /^(?:what|whats|what's) (?:is )?in (?!.*\babout\b).+[?.!]*$/i,
 ];
 
 /**
@@ -116,8 +152,8 @@ const WHOLE_DOCUMENT: RegExp[] = [
  * an unnecessary model call costs money on every question in the product.
  */
 export function asksForSynthesis(question: string): boolean {
-  const text = (question ?? "").trim();
-  if (!text) return false;
+  const text = normalise(question);
+  if (!text || text.length > MAX_QUESTION_CHARS) return false;
   /* NO GLOBAL "about" VETO, though the first version had one and it was wrong.
      Narrowing is handled inside the frames that can be narrowed: the "say"
      frame anchors at the end so "say about payment" never matches it, and the
