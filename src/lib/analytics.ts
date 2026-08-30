@@ -1234,6 +1234,8 @@ export type InstinctEventType =
   //   next run, so this is the only record that it happened.
   | "system.brain_backfill_batch_failed"
   | "system.brain_semantic_degraded"
+  | "system.assistant_model_unreachable"
+  | "system.assistant_answered_degraded"
   | "system.triple_write_degraded"
   //   assistant.follow_through_resolved { resolved } - a bare "ok, do that" was
   //     resolved against the previous turn ("ran_offer") or answered with a

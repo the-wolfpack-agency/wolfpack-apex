@@ -20,10 +20,11 @@ import {
 } from "@/lib/assistant/routines";
 import { matchSavedRoutine } from "@/lib/assistant/routines/saved";
 import { searchKnowledge, saveAnswer } from "@/lib/knowledge";
-import { markCited as markBrainCited } from "@/lib/brain/query";
+import { markCited as markBrainCited, type SemanticStatus } from "@/lib/brain/query";
 import { retrieve } from "@/lib/brain/retrieve";
 import { asksForSynthesis } from "@/lib/brain/question-terms";
 import { quoteWindow } from "@/lib/brain/quote-window";
+import { TurnDegradation, type DegradationKind } from "@/lib/assistant/degraded-answer";
 import { judgeRelevance, RELEVANCE_MATERIAL_PER_HIT } from "@/lib/brain/relevance";
 import { redactText, NEVER_QUOTE_KINDS } from "@/lib/ai/redaction";
 import { looksTabular } from "@/lib/brain/query";
@@ -135,6 +136,10 @@ export interface AssistantResponse {
   /** Personal data kinds removed at the answer boundary, so the UI can say
    *  what was taken out instead of leaving an unexplained gap. */
   redactedKinds?: string[];
+  /** Which parts of the answer path did not run. Present only on a degraded
+   *  turn, so the UI can style an outage differently from an empty answer and
+   *  a support conversation starts from a fact rather than a guess. */
+  degradedKinds?: DegradationKind[];
   /** Source attributions surfaced to the UI. Empty array when the answer
    *  is generic (fallback / pure AI / etc.). */
   sources?: AssistantSourceRef[];
@@ -1724,6 +1729,15 @@ async function chatInner(
     workflow_id: workflowId,
   });
 
+  /* WHAT BROKE DURING THIS TURN, collected so the answer can say so.
+   *
+   * Per-turn rather than module state: two people asking questions at the same
+   * moment must not inherit each other's outages. */
+  const turnDegradation = new TurnDegradation();
+  if (brainContext?.semanticStatus === "failed") {
+    turnDegradation.record("semantic_search", brainContext.semanticError ?? undefined);
+  }
+
   const aiResult = await callAI(
     message,
     history,
@@ -1734,6 +1748,7 @@ async function chatInner(
     brainContext,
     attachmentBlock,
     tierOverride,
+    turnDegradation,
   );
   if (aiResult) {
     trackEvent("system.ai_call_made", userId, userRole, {
@@ -1846,7 +1861,29 @@ async function chatInner(
          this, the chips appear orphaned underneath the prose. Keep the
          base lowConfidenceMessage() untouched (it's reused by tests +
          other call-sites). */
-      safeContent = `${lowConfidenceMessage()} Try one of these instead:`;
+      /* AN OUTAGE IS NOT LOW CONFIDENCE.
+       *
+       * Measured 2026-08-30 with the semantic store unreachable and the model
+       * still up: the answer came back weak, the quality gate rejected it, and
+       * the reader was told "I don't have a confident answer for that. Could
+       * you rephrase..." That asks somebody to reword a perfectly good
+       * question to work around our outage, and it happens at the exit the
+       * fallback path's honesty fix never reached.
+       *
+       * Half the index was missing. Saying so is both truer and more useful
+       * than implying the question was the problem. */
+      const outage = turnDegradation.answer();
+      safeContent = outage
+        ? `${outage.text}\n\nIn the meantime, these do not need it:`
+        : `${lowConfidenceMessage()} Try one of these instead:`;
+      if (outage) {
+        trackEvent("system.assistant_answered_degraded", userId, userRole, {
+          kinds: outage.kinds.join(","),
+          exit: "quality_reject",
+          module: "assistant",
+          workflow_id: workflowId,
+        });
+      }
     } else if (quality.verdict === "low_confidence") {
       const flagReasons = quality.flags.map((f) => f.reason).join("; ");
       safeContent =
@@ -1932,6 +1969,13 @@ async function chatInner(
         model: aiResult.model,
         provider: aiResult.provider,
         tierRequested: aiResult.tierRequested,
+        /* The reject exit is the second place a degraded turn surfaces, and it
+           was the one the first pass at this missed: the prose was made honest
+           while the machine-readable signal stayed absent, so the UI could not
+           tell an outage from a genuinely weak answer. */
+        ...(turnDegradation.any
+          ? { degradedKinds: turnDegradation.all.map((d) => d.kind) }
+          : {}),
       };
     }
 
@@ -1945,18 +1989,44 @@ async function chatInner(
       conversationId: convId,
       messageId: msgId,
       workflowId,
+      ...(turnDegradation.any ? { degradedKinds: turnDegradation.all.map((d) => d.kind) } : {}),
     };
   }
 
   // --- Fallback ---
-  const fallbackMsg =
-    "I don't have information on that yet. You can help me learn by adding it to the Knowledge Base, or try asking about:\n\n" +
-    "- Our platforms (Instinct, Auto, Learn)\n" +
-    "- Team members and roles\n" +
-    "- Tech stack and infrastructure\n" +
-    "- Costs and pricing\n" +
-    "- Features and capabilities\n\n" +
-    "The more the team adds to the knowledge base, the more I can answer without AI. Try one of these instead:";
+  /* WHAT WENT WRONG DECIDES WHICH SENTENCE IS TRUE.
+   *
+   * Measured 2026-08-30 with the model provider unreachable and a question
+   * whose answer sits in the corpus: the reader was told "I don't have
+   * information on that yet. You can help me learn by adding it to the
+   * Knowledge Base." Every clause false, and the last one invites a client to
+   * upload a second copy of a document the product already holds.
+   *
+   * The plain message survives unchanged for the healthy case, because "I have
+   * nothing on that" is a good answer when it is TRUE. Dressing every empty
+   * result up as an outage would be the same defect pointed backwards.
+   *
+   * BOTH BRANCHES KEEP THE CHIPS. An outage is exactly when somebody most
+   * needs something else to try, so this chooses the prose and lets the chip
+   * kit, the analytics event and the persistence below run either way. */
+  const degraded = turnDegradation.answer();
+  if (degraded) {
+    trackEvent("system.assistant_answered_degraded", userId, userRole, {
+      kinds: degraded.kinds.join(","),
+      module: "assistant",
+      workflow_id: workflowId,
+    });
+  }
+
+  const fallbackMsg = degraded
+    ? `${degraded.text}\n\nIn the meantime, these do not need it:`
+    : "I don't have information on that yet. You can help me learn by adding it to the Knowledge Base, or try asking about:\n\n" +
+      "- Our platforms (Instinct, Auto, Learn)\n" +
+      "- Team members and roles\n" +
+      "- Tech stack and infrastructure\n" +
+      "- Costs and pricing\n" +
+      "- Features and capabilities\n\n" +
+      "The more the team adds to the knowledge base, the more I can answer without AI. Try one of these instead:";
 
   const msgId = await dbSaveMessage(convId, "assistant", fallbackMsg, "fallback", 0);
   await dbUpdateConversationStats(convId, 0);
@@ -1969,6 +2039,9 @@ async function chatInner(
     role: userRole,
     chip_count: fallbackChips.length,
     source: "fallback",
+    /* Joined, because an analytics value is a scalar. The array shape belongs
+       on the response, where the UI reads it. */
+    ...(degraded ? { degraded_kinds: degraded.kinds.join(",") } : {}),
     module: "assistant",
     workflow_id: workflowId,
   });
@@ -1981,6 +2054,9 @@ async function chatInner(
     messageId: msgId,
     workflowId,
     fallbackChips,
+    /* Present only on a degraded turn, so the UI can style an outage
+       differently from an empty answer. */
+    ...(degraded ? { degradedKinds: degraded.kinds } : {}),
   };
 }
 
@@ -2469,6 +2545,17 @@ interface BrainContext {
   /** Which index produced topScore. Keyword and semantic scores are different
    *  measurements, and a threshold is meaningless without knowing which. */
   topScoreIsSemantic?: boolean;
+  /**
+   * WHETHER THE SEARCH ACTUALLY RAN, carried up to the answer.
+   *
+   * queryBrain has reported this since 2026-08-24 and only analytics read it.
+   * That is why an unreachable vector store and an empty corpus produced the
+   * same sentence for a person: the difference was measured, recorded, and
+   * then dropped one layer below the only place it mattered.
+   */
+  semanticStatus?: SemanticStatus;
+  /** Short reason, for the event. Never shown verbatim to a reader. */
+  semanticError?: string;
 }
 
 /**
@@ -2701,7 +2788,15 @@ async function tryBrain(
          which is how the two records stayed ambiguous for so long. */
       query_log_id: result.query_log_id,
     });
-    if (result.hits.length === 0) return { strong: null, context: emptyContext };
+    if (result.hits.length === 0) {
+      /* THE CASE THAT MATTERED MOST WAS THE ONE THROWING THE SIGNAL AWAY. An
+         unreachable index is exactly what produces zero hits, and this
+         returned a context that said nothing about why. */
+      return {
+        strong: null,
+        context: { ...emptyContext, semanticStatus: result.semantic_status },
+      };
+    }
 
     /* Compute context regardless of strong-hit verdict — even weak hits
        give the LLM real grounding + give the quality runner real
@@ -2726,7 +2821,12 @@ async function tryBrain(
         score: h.score,
       });
     }
-    const context: BrainContext = { hits: ctxHits, topScore, topScoreIsSemantic };
+    const context: BrainContext = {
+      hits: ctxHits,
+      topScore,
+      topScoreIsSemantic,
+      semanticStatus: result.semantic_status,
+    };
 
     // Gate: require either a semantic-blended hit OR a keyword hit with
     // reasonable tsrank score. ts_rank_cd returns values typically in
@@ -3094,6 +3194,8 @@ async function callAI(
      directive is removed from the message at the top of the turn, so by the
      time it reaches this function there is nothing left to find. */
   tierOverride?: TierDirective | null,
+  /* What broke during this turn, so the answer can say so. */
+  degradation?: TurnDegradation,
 ): Promise<{
   content: string;
   tokensUsed: number;
@@ -3358,12 +3460,32 @@ async function callAI(
        back to null preserves the historical "I don't have information"
        UX rather than 500'ing the chat. Other errors (network, rate
        limit) also fall back. */
+    const isProviderMissing = err instanceof NoProviderAvailableError;
     if (process.env.NODE_ENV !== "production") {
-      const isProviderMissing = err instanceof NoProviderAvailableError;
       console.warn(
         `[assistant.callAI] returning null — ${isProviderMissing ? "no AI provider configured" : "AI call failed"}: ${(err as Error).message}`,
       );
     }
+    /* SAY WHY, BUT ONLY WHEN IT IS ACTUALLY A FAILURE.
+     *
+     * Returning a bare null made "the model could not be reached" identical to
+     * "we have nothing on that", and the caller told the reader the second
+     * one. Recording the reason fixes that.
+     *
+     * NO PROVIDER CONFIGURED IS NOT AN OUTAGE. This product has a designed
+     * no-AI mode: the plain fallback's own wording ("the more the team adds to
+     * the knowledge base, the more I can answer without AI") describes exactly
+     * that state, and it is what tests and local development run in. Calling
+     * it degraded would tell somebody to try again in a minute for a condition
+     * that will still be true next month. A missing provider is a deployment
+     * decision; an unreachable one is an outage. */
+    if (!isProviderMissing) {
+      degradation?.record("model", (err as Error).message);
+    }
+    trackEvent("system.assistant_model_unreachable", userId, userRole, {
+      reason: isProviderMissing ? "no_provider_configured" : "call_failed",
+      module: "assistant",
+    });
     return null;
   }
 }
