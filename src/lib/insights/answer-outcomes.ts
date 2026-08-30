@@ -25,6 +25,24 @@
  * months; deriving them reads the whole history. Only genuinely browser-side
  * facts, a copy or a source click, need a new event, and those live elsewhere.
  *
+ * RATINGS ARE NOT THE ANSWER, AND THAT IS SETTLED. Every time outcome labels
+ * come up as the scarce input, the obvious proposal is to get more people to
+ * rate answers. Measured 2026-08-30, so nobody has to re-litigate it:
+ *
+ *     knowledge.answer_rated events        27      last 2026-08-04
+ *     messages carrying a rating           14
+ *     assistant messages in the corpus 16,332
+ *     conversations with no owner           0      so nothing is blocked
+ *
+ * The control WORKS. Twenty-seven rate actions across fourteen messages in the
+ * product's life, none in the last twenty-six days. People do not rate
+ * answers, they act on them or they leave, and a product that needs them to
+ * rate in order to learn will not learn.
+ *
+ * Which is why the labels here are DERIVED and why the two browser-only
+ * signals are a copy and a source click. Both are things somebody does for
+ * their own reasons, and neither requires anybody to be asked.
+ *
  * WHAT THIS DELIBERATELY WILL NOT CONCLUDE. "One question then gone" is not a
  * frustration metric. It means either somebody got what they needed in one
  * question or they gave up, and those are opposite readings of one number.

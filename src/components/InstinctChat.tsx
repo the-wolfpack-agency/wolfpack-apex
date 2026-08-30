@@ -1143,22 +1143,37 @@ export default function InstinctChat({
   async function handleRate(msgId: string | undefined, rating: number) {
     if (!msgId) return;
 
-    setMessages((prev) =>
-      prev.map((m) => (m.id === msgId ? { ...m, rating } : m)),
-    );
+    /* Optimistic, so the thumb responds instantly. Remembered so it can be put
+       back: a rating that did not save must not keep looking saved. */
+    const previous = messages.find((m) => m.id === msgId)?.rating;
+    setMessages((prev) => prev.map((m) => (m.id === msgId ? { ...m, rating } : m)));
 
+    /* A FAILED RATING USED TO LOOK EXACTLY LIKE A SAVED ONE.
+     *
+     * rateMessage returns false when the message is not in a conversation the
+     * rater owns, and the route answers 200 with { success: false }. A 200
+     * does not throw, so the catch below never ran, and the optimistic thumb
+     * stayed filled in over nothing.
+     *
+     * Nothing fails that check today: measured 2026-08-30, zero of 16,332
+     * assistant messages sit in an unowned conversation. The shape is still
+     * wrong, and it is the shape this codebase has spent the week removing:
+     * a failure spelled exactly like a success. Somebody who rates an answer
+     * and is silently ignored stops rating, and never says why. */
     try {
-      await fetchWithRefresh("/api/assistant", {
+      const res = await fetchWithRefresh("/api/assistant", {
         method: "POST",
         headers: authHeaders(),
-        body: JSON.stringify({
-          action: "rate",
-          messageId: msgId,
-          rating,
-        }),
+        body: JSON.stringify({ action: "rate", messageId: msgId, rating }),
       });
+      const saved = res.ok && ((await res.json().catch(() => ({}))) as { success?: boolean }).success;
+      if (!saved) {
+        setMessages((prev) => prev.map((m) => (m.id === msgId ? { ...m, rating: previous } : m)));
+      }
     } catch {
-      // Rating failure is non-fatal
+      /* Offline or refused. Put it back rather than leave a rating that was
+         never recorded looking like one that was. */
+      setMessages((prev) => prev.map((m) => (m.id === msgId ? { ...m, rating: previous } : m)));
     }
   }
 
