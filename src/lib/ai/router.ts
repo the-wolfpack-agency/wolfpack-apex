@@ -240,19 +240,91 @@ function nextTierDown(tier: AIModelTier): AIModelTier | null {
   return i >= 0 && i < TIER_LADDER.length - 1 ? TIER_LADDER[i + 1]! : null;
 }
 
-function isRetryableError(err: unknown): boolean {
+/**
+ * Node's own network failures, which never reach us wrapped in an SDK class.
+ *
+ * The SDK names below only appear when the SDK made the call. A fetch that
+ * cannot open a socket throws a plain Error carrying one of these codes, and
+ * the previous version of this function called that unretryable, so a
+ * momentary DNS or connection blip became a visible failure.
+ */
+const RETRYABLE_SYSCALL = new Set([
+  "ECONNREFUSED",
+  "ECONNRESET",
+  "ETIMEDOUT",
+  "ENOTFOUND",
+  "EAI_AGAIN",
+  "EPIPE",
+  "ENETUNREACH",
+]);
+
+/**
+ * Is this worth trying again, on this provider or another one?
+ *
+ * 429 WAS MISSING, AND IT IS THE COMMON CASE. Throttling is the most frequent
+ * real failure a hosted model produces, and it is the most retryable thing
+ * there is: the request was fine, the service was busy. Excluding it meant the
+ * single most likely outage produced no retry and no failover, and a person
+ * saw a dead end for a condition that usually clears in under a second.
+ *
+ * 4xx OTHERWISE STAYS UNRETRYABLE, which the original was right about: a
+ * malformed request fails identically on the second attempt, and retrying it
+ * just spends money twice to reach the same place.
+ */
+export function isRetryableError(err: unknown): boolean {
   if (!err || typeof err !== "object") return false;
+
   const status = (err as { status?: unknown }).status;
-  if (typeof status === "number" && status >= 500 && status < 600) return true;
+  if (typeof status === "number") {
+    if (status >= 500 && status < 600) return true;
+    /* Busy, not wrong. 408 is the same shape: the service ran out of time
+       rather than objecting to what was asked. */
+    if (status === 429 || status === 408) return true;
+  }
+
   const name = (err as { name?: unknown }).name;
   if (
     name === "APIConnectionError" ||
     name === "APIConnectionTimeoutError" ||
-    name === "InternalServerError"
+    name === "InternalServerError" ||
+    name === "RateLimitError" ||
+    /* An aborted call is one we gave up on, not one the service refused. */
+    name === "AbortError" ||
+    name === "TimeoutError"
   ) {
     return true;
   }
+
+  const code = (err as { code?: unknown }).code;
+  if (typeof code === "string" && RETRYABLE_SYSCALL.has(code)) return true;
+  /* fetch wraps the syscall error, so the code sits one level down. */
+  const cause = (err as { cause?: { code?: unknown } }).cause;
+  if (cause && typeof cause.code === "string" && RETRYABLE_SYSCALL.has(cause.code)) return true;
+
   return false;
+}
+
+/**
+ * How long to wait before trying the same provider again.
+ *
+ * HONOURS Retry-After WHEN THE SERVICE SENDS ONE, because a service that says
+ * how long it needs is more reliable than any guess we make. Capped, because a
+ * person is waiting: a provider asking for thirty seconds is telling us to use
+ * a different one, not to leave somebody staring at a spinner.
+ */
+const MAX_RETRY_WAIT_MS = 1_500;
+
+export function retryDelayMs(err: unknown, attempt: number): number {
+  const headers = (err as { headers?: Record<string, unknown> } | null)?.headers;
+  const raw =
+    headers?.["retry-after"] ?? headers?.["Retry-After"] ?? (err as { retryAfter?: unknown })?.retryAfter;
+  const seconds = Number(raw);
+  if (Number.isFinite(seconds) && seconds > 0) {
+    return Math.min(seconds * 1000, MAX_RETRY_WAIT_MS);
+  }
+  /* Otherwise a short backoff: 250ms then 500ms. Long enough for a throttle
+     window to clear, short enough that two attempts still feel like one. */
+  return Math.min(250 * 2 ** Math.max(0, attempt - 1), MAX_RETRY_WAIT_MS);
 }
 
 /**
@@ -621,7 +693,11 @@ class RouterClient implements AIClient {
       };
     }
     const obs = getObsClient();
-    let response: AICompleteResponse;
+    /* Undefined until something answers. The recovery paths below assign it or
+       throw, and the explicit check after them is what makes that provable
+       rather than asserted: a future edit that adds a path forgetting to
+       assign fails loudly here instead of reading a stale value. */
+    let response: AICompleteResponse | undefined;
     let fallbackUsed = false;
 
     /* Wrap each provider call in its own span so we capture latency
@@ -716,6 +792,65 @@ class RouterClient implements AIClient {
           throw fbErr;
         }
         fallbackUsed = true;
+      } else if (isRetryableError(err)) {
+        /* NO OTHER PROVIDER, SO TRY THIS ONE AGAIN.
+         *
+         * There was no retry here at all: one transient failure and the turn
+         * was lost, even though most of them clear in well under a second.
+         * That is the worst trade in this file, because a throttle or a
+         * connection blip is exactly the failure a person should never see.
+         *
+         * DELIBERATELY AFTER THE FALLBACK, NOT BEFORE. When another provider
+         * is available it is both faster and likelier to work than the one
+         * that just failed, so retrying first would add latency to the good
+         * path to help the bad one. This branch is the deployment that has no
+         * second provider, which is this product's own: Azure alone, with
+         * Anthropic unkeyed. Until now that meant no recovery of any kind.
+         *
+         * ONE extra attempt, not a loop. A model call costs real money and
+         * real latency, and a provider that fails twice running is having an
+         * outage rather than a blip: at that point the honest message is the
+         * right answer, and the caller now has one.
+         *
+         * Recorded, never silent. A retry that quietly fixes things is the
+         * kind of success that hides a worsening dependency until it fails for
+         * good, so the event matters as much as the recovery does. */
+        const waitMs = retryDelayMs(err, 1);
+        const retrySpan = obs.startSpan(`ai.completion.${primary.name}`, {
+          ...baseAttrs,
+          role: "retry",
+        });
+        try {
+          await new Promise((r) => setTimeout(r, waitMs));
+          response = await primary.complete(cReq);
+          retrySpan.setAttribute("model_used", response.model_used);
+          retrySpan.setAttribute("latency_ms", response.latency_ms);
+          retrySpan.setAttribute("fallback_used", false);
+          retrySpan.end("ok");
+          trackEvent(
+            "ai.provider_retry_succeeded",
+            cReq.metadata?.user_id ?? "system",
+            cReq.metadata?.user_role ?? "system",
+            {
+              provider: primary.name,
+              waited_ms: waitMs,
+              first_error: (err as Error).message.slice(0, 120),
+              feature: cReq.metadata?.feature ?? "unknown",
+            },
+          );
+        } catch (retryErr) {
+          retrySpan.setAttribute("error_message", (retryErr as Error).message);
+          retrySpan.end("error");
+          console.warn(
+            `[ai/router] ${primary.name} failed twice, no fallback available: ${(retryErr as Error).message}`,
+          );
+          obs.recordError(retryErr as Error, {
+            ...baseAttrs,
+            provider: primary.name,
+            role: "retry",
+          });
+          throw retryErr;
+        }
       } else {
         console.warn(
           `[ai/router] ${primary.name} failed with no usable fallback: ${(err as Error).message}`,
@@ -727,6 +862,13 @@ class RouterClient implements AIClient {
         });
         throw err;
       }
+    }
+
+    /* EVERY PATH ABOVE EITHER ANSWERED OR THREW. This is unreachable in
+       practice and cheap to keep: it converts a future missing assignment from
+       a confusing downstream failure into one sentence naming the cause. */
+    if (!response) {
+      throw new Error("ai/router: no provider produced a response and none reported an error");
     }
 
     /* Record the routing decision.

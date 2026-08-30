@@ -229,11 +229,40 @@ describe("router — anthropic-only routing today", () => {
 });
 
 describe("router — failover", () => {
-  it("anthropic 5xx with no fallback available propagates the error", async () => {
+  /* ONE TRANSIENT FAILURE IS RECOVERED, and this test used to assert the
+     opposite. It rejected ONCE and expected the error to reach the caller,
+     which was the behaviour: there was no retry anywhere in the router, so a
+     single blip lost the turn even with no second provider to blame.
+     A deployment with one provider is this product's own (Azure alone,
+     Anthropic unkeyed), so "no fallback available" was the common case rather
+     than the corner. It now tries once more before giving up. */
+  it("a single 5xx with no fallback is retried rather than surfaced", async () => {
     const err = Object.assign(new Error("boom"), {
       status: 500,
       name: "InternalServerError",
     });
+    mockMessagesCreate.mockRejectedValueOnce(err);
+    mockMessagesCreate.mockResolvedValueOnce(fakeOk("recovered"));
+
+    const out = await getAIClient().complete({
+      messages: [{ role: "user", content: "x" }],
+      max_tokens: 10,
+      model_tier: "standard",
+      metadata: { feature: "failover.no.fallback" },
+    });
+
+    expect(out.content).toContain("recovered");
+    /* The recovery is recorded. A retry that quietly works is the kind of
+       success that hides a worsening dependency until it fails for good. */
+    expect(mockTrackEvent.mock.calls.map((c) => c[0])).toContain("ai.provider_retry_succeeded");
+  });
+
+  it("a provider failing twice with no fallback propagates the error", async () => {
+    const err = Object.assign(new Error("boom"), {
+      status: 500,
+      name: "InternalServerError",
+    });
+    mockMessagesCreate.mockRejectedValueOnce(err);
     mockMessagesCreate.mockRejectedValueOnce(err);
     await expect(
       getAIClient().complete({
@@ -243,7 +272,25 @@ describe("router — failover", () => {
         metadata: { feature: "failover.no.fallback" },
       }),
     ).rejects.toMatchObject({ message: "boom" });
-    expect(mockTrackEvent).not.toHaveBeenCalled();
+    /* No ai.completion event, because nothing completed. The retry event is
+       absent too: it only fires on a recovery. */
+    expect(mockTrackEvent.mock.calls.map((c) => c[0])).not.toContain("ai.completion");
+  });
+
+  /* A 4xx must NOT be retried: it fails identically the second time and
+     retrying spends money twice to reach the same place. */
+  it("does not retry a bad request", async () => {
+    const err = Object.assign(new Error("bad request"), { status: 400 });
+    mockMessagesCreate.mockRejectedValueOnce(err);
+    await expect(
+      getAIClient().complete({
+        messages: [{ role: "user", content: "x" }],
+        max_tokens: 10,
+        model_tier: "standard",
+        metadata: { feature: "failover.no.retry.4xx" },
+      }),
+    ).rejects.toMatchObject({ message: "bad request" });
+    expect(mockMessagesCreate).toHaveBeenCalledTimes(1);
   });
 
   it("Azure 5xx falls back to Anthropic and reports fallback_used=true", async () => {
