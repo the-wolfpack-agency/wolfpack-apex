@@ -33,7 +33,7 @@
  * Baseline: demo/model-drift-baseline.json, committed on purpose so a change
  * in model behaviour shows up in a diff somebody reviews.
  */
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { getAIClient } from "@/lib/ai";
 import { verifyAnswer } from "@/lib/ai/verification";
@@ -153,14 +153,48 @@ async function main(): Promise<void> {
     );
   }
 
-  if (!existsSync(BASELINE) || update) {
+  /* READ IT, DO NOT ASK WHETHER IT EXISTS FIRST.
+   *
+   * This called existsSync and then readFileSync further down, which CodeQL
+   * flagged as js/file-system-race: between the question and the answer the
+   * file can go away, and the read then throws with a stack trace instead of
+   * the sentence a person needs.
+   *
+   * Reading once removes the window entirely. It also lets the two states be
+   * told apart, which the existence check could not: "no baseline yet" is a
+   * first run and is fine, "baseline unreadable" is corruption and is not.
+   * Reporting the second as the first would silently overwrite a baseline
+   * somebody was relying on, which is the whole point of having one. */
+  let before: Sample[] | null = null;
+  if (!update) {
+    let raw: string | null = null;
+    try {
+      raw = readFileSync(BASELINE, "utf8");
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException)?.code !== "ENOENT") {
+        console.error(`\nBaseline at ${BASELINE} could not be read: ${(err as Error).message}`);
+        console.error("Refusing to overwrite it. Fix or remove it, then run again.");
+        process.exit(1);
+      }
+      /* ENOENT is a first run, and the only case that may write. */
+    }
+    if (raw !== null) {
+      try {
+        before = JSON.parse(raw) as Sample[];
+      } catch (err) {
+        console.error(`\nBaseline at ${BASELINE} is not valid JSON: ${(err as Error).message}`);
+        console.error("Refusing to overwrite it. Fix or remove it, then run again.");
+        process.exit(1);
+      }
+    }
+  }
+
+  if (before === null) {
     mkdirSync(dirname(BASELINE), { recursive: true });
     writeFileSync(BASELINE, `${JSON.stringify(now, null, 2)}\n`);
     console.log(`\nBaseline written to ${BASELINE}. Nothing asserted on a first run.`);
     return;
   }
-
-  const before: Sample[] = JSON.parse(readFileSync(BASELINE, "utf8"));
   const drift = compare(now, before);
   if (drift.length === 0) {
     console.log("\nNo drift. Same models, same verdicts, costs and latencies within tolerance.");

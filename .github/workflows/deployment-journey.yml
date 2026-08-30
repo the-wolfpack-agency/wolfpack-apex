@@ -17,6 +17,16 @@
 
 name: Deployment journey
 
+# LEAST PRIVILEGE BY DEFAULT, flagged by CodeQL (TokenPermissionsID, high).
+# Without a top-level block every job inherits the repository default, which
+# can be write. A workflow that only reads code should not hold a token that
+# can push to it: the blast radius of a compromised action is whatever the
+# token could do, not whatever the workflow meant to do.
+# A job needing more elevates explicitly, so the grant is visible where it is
+# used rather than assumed everywhere.
+permissions:
+  contents: read
+
 on:
   workflow_dispatch:
     inputs:
