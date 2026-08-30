@@ -31,13 +31,15 @@
  * can tell them their deployment works.
  */
 import { readFileSync } from "node:fs";
-import { queryBrain } from "@/lib/brain/query";
+import { retrieve } from "@/lib/brain/retrieve";
+import { judgeRelevance } from "@/lib/brain/relevance";
 import { getAIClient } from "@/lib/ai/router";
 import {
   EXPANSION_SYSTEM,
   EXPANSION_MAX_TOKENS,
   parseExpansion,
 } from "@/lib/brain/expand-query";
+import { RELEVANCE_MATERIAL_PER_HIT } from "@/lib/brain/relevance";
 import { isEmbeddingConfigured } from "@/lib/brain/embedder";
 import { query } from "@/lib/db";
 import { mapWithConcurrency } from "@/lib/search/providers/util";
@@ -106,19 +108,52 @@ async function main(): Promise<void> {
     return parseExpansion(res.content, question);
   };
 
+  /* THE SAME LOOP THE ASSISTANT RUNS. Previously this called queryBrain
+     directly, so it graded a path the product does not take: query expansion
+     triggers on a JUDGE rejection, and the only harness that could have tested
+     it never called the judge. A measurement that grades a different path than
+     the one that runs is worse than none, because it reports numbers with the
+     authority of a test. */
+  const judge = async (question: string, hits: Array<{ content: string }>) => {
+    const material = hits
+      .slice(0, 3)
+      .map((h) => h.content.slice(0, RELEVANCE_MATERIAL_PER_HIT))
+      .join("\n\n");
+    const r = await judgeRelevance(question, material, async (input) => {
+      const res = await getAIClient().complete({
+        messages: [
+          { role: "system", content: input.system },
+          { role: "user", content: input.prompt },
+        ],
+        max_tokens: input.maxTokens,
+        model_tier: "cheap",
+        metadata: { feature: "brain.retrieval_relevance" },
+      });
+      return res.content;
+    });
+    return r.verdict;
+  };
+
+  let expandedCount = 0;
+  let helpedCount = 0;
   const results = await mapWithConcurrency(pairs, EVAL_CONCURRENCY, async (p) => {
-    const r = await queryBrain({
+    const r = await retrieve({
       userId: me.id,
       userRole: me.role,
       query: p.question,
       limit: 8,
-      ...(expanding ? { expand } : {}),
+      ...(expanding ? { judge, expand } : {}),
     });
+    if (r.expanded) expandedCount++;
+    if (r.expansionHelped) helpedCount++;
     return {
       question: p.question,
-      hits: r.hits.map((h) => ({ filename: String(h.document_filename ?? "") })),
+      hits: r.execution.hits.map((h) => ({ filename: String(h.document_filename ?? "") })),
     };
   });
+  if (expanding) {
+    console.log(`  expansion fired on ${expandedCount} of ${pairs.length}, helped ${helpedCount}\n`);
+  }
   const cache = new Map<string, RankedResult[]>(results.map((r) => [r.question, r.hits]));
 
   const report = gradeRetrieval(pairs, (q) => cache.get(q) ?? []);
