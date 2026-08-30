@@ -32,6 +32,9 @@ import { createSurfaceReader } from "@/lib/platform-scan/mapping/reader";
 import { walkSystem } from "@/lib/platform-scan/mapping/walk";
 import { inventoryForms } from "@/lib/platform-scan/mapping/form-inventory";
 import { inferEntities } from "@/lib/platform-scan/mapping/entities";
+import { buildSystemMap } from "@/lib/platform-scan/mapping/explore";
+import { saveWalkedMap } from "@/lib/platform-scan/mapping/store";
+import { trackEvent } from "@/lib/analytics";
 import type { ScanPage } from "@/lib/platform-scan/browser/capture";
 
 const arg = (name: string): string | null => {
@@ -254,6 +257,60 @@ if (!baseUrl || !authorisedBy) {
     if (slow.length > 0) {
       console.log(`\nSlow screens, which are a finding in their own right:`);
       for (const s of slow.slice(0, 5)) console.log(`  ${String(s.loadMs).padStart(6)}ms  ${s.signature}`);
+    }
+    /* THE MAP OUTLIVES THE TERMINAL IT WAS PRINTED IN.
+     *
+     * Until now the walk wrote nothing: a scan of a client's system existed
+     * for as long as somebody kept the window open. The report's System Map
+     * section read from a store nothing had ever written to, so it said "no
+     * system profile has been generated" no matter how many systems had
+     * actually been walked.
+     *
+     * Persisted per (workspace, entry point), so re-walking a system replaces
+     * its snapshot rather than accumulating stale ones a report might average
+     * over. */
+    const platform = (() => {
+      try {
+        return new URL(baseUrl).hostname.replace(/^www\./, "");
+      } catch {
+        return "unknown";
+      }
+    })();
+
+    const map = buildSystemMap({
+      platform,
+      entryUrl: baseUrl,
+      surfaces,
+      entities,
+      integrations: [],
+      coverage,
+      now: new Date().toISOString(),
+    });
+
+    const workspaceId = arg("workspace") ?? "default";
+    if (!process.env.DATABASE_URL) {
+      /* Said out loud rather than skipped quietly. A run that printed a map
+         and stored nothing, without saying so, is how somebody concludes the
+         report is broken a week later. */
+      console.log("\nNot stored: DATABASE_URL is not set, so this map exists only above.");
+    } else {
+      try {
+        await saveWalkedMap(workspaceId, map, authorisedBy);
+        trackEvent("platform.system_walked", "system", "system", {
+          platform,
+          surfaces: surfaces.length,
+          entities: entities.length,
+          forms: inv.content.length,
+          /* Travels WITH the counts: a map that stopped early and a map that
+             finished look identical once these are separated. */
+          frontier_remaining: coverage.frontierRemaining,
+          stop_reason: coverage.stopReason,
+          sampled_shapes: sampled.length,
+        });
+        console.log(`\nStored for workspace ${workspaceId}. It will appear in the System Map section of the report.`);
+      } catch (err) {
+        console.log(`\nNot stored: ${(err as Error).message.slice(0, 120)}`);
+      }
     }
   } finally {
     await handle.close();
