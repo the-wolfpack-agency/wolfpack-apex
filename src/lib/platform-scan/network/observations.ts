@@ -86,20 +86,62 @@ const KNOWN_HOSTS: readonly { suffix: string; kind: TrackerKind; name: string }[
      like an unremarkable CDN.
      Named here because being unable to name a host is a prompt to look, and
      these have now been looked at. */
-  { suffix: "pendo.io", kind: "session-replay", name: "Pendo" },
-  /* Pendo and VWO are deliberately NOT the same kind, and the difference is
-     not cosmetic: session-replay is in SEVERE_KINDS and analytics is not.
-     Pendo's product includes session replay outright, so it earns the
-     heavier classification. VWO is an experimentation platform that also
-     offers recordings, and calling its base script session-replay would
-     overstate what its presence proves. Overstating is how a report becomes
-     one nobody reads. */
+  /* BOTH ANALYTICS, AND THE REASON IS THE WHOLE PHILOSOPHY OF THIS FILE.
+     Pendo was first classified session-replay because Pendo SELLS session
+     replay. That is a fact about a price list, not about the scan: replay is
+     a feature an operator switches on, and a scan from outside sees a host
+     being contacted and cannot see whether it is enabled.
+     Classifying on capability rather than observation puts a host into
+     SEVERE_KINDS on the strength of something nobody measured, which is
+     exactly the crying wolf these detectors exist to avoid. What was observed
+     is analytics traffic. That both vendors ALSO offer recording is a question
+     to ask, and it is asked in CAPABILITY_NOTE rather than smuggled into a
+     severity where nobody can see the reasoning. */
+  { suffix: "pendo.io", kind: "analytics", name: "Pendo" },
   { suffix: "visualwebsiteoptimizer.com", kind: "analytics", name: "Visual Website Optimizer" },
   /* The product's own object storage, not a third party in any meaningful
      sense, but it IS a different origin and pretending otherwise would be its
      own kind of dishonesty. Named so a reader can dismiss it quickly. */
   { suffix: "blob.core.windows.net", kind: "cdn", name: "Azure Blob Storage" },
 ];
+
+/**
+ * Vendors that can do more than a scan can prove they did.
+ *
+ * A host being contacted shows a vendor is present. It does not show which of
+ * that vendor's features are switched on, and where a product offers session
+ * recording that difference is the whole question: analytics tells somebody
+ * which screens were used, recording can capture what was on them.
+ *
+ * Kept OUT of the severity, deliberately. A scan that scored a host high
+ * because its vendor sells a feature would be reporting a price list. This is
+ * a question for whoever operates the system, phrased so it can be asked
+ * without accusing anybody of anything.
+ *
+ * It matters most for a vendor nobody chose. On a SaaS product a customer
+ * administers but does not control, the embedded vendors belong to the SaaS
+ * company, and the customer usually has no idea they are there.
+ */
+export const CAPABILITY_NOTE: Readonly<Record<string, string>> = {
+  "pendo.io":
+    "Pendo also sells session replay, which can record what is on screen. Whether it is switched on here is set by whoever operates this system, is not visible from outside, and is worth asking them.",
+  "visualwebsiteoptimizer.com":
+    "Visual Website Optimizer also sells session recording. Whether it is switched on here is set by whoever operates this system, is not visible from outside, and is worth asking them.",
+  "hotjar.com":
+    "Hotjar records sessions as its main product. Whether those recordings are masked on this system is worth asking whoever operates it.",
+  "clarity.ms":
+    "Microsoft Clarity records sessions as its main product. Whether those recordings are masked on this system is worth asking whoever operates it.",
+  "fullstory.com":
+    "FullStory records sessions as its main product. Whether those recordings are masked on this system is worth asking whoever operates it.",
+};
+
+/** The question worth asking about a host, when there is one. */
+export function capabilityNote(host: string): string | null {
+  for (const [suffix, note] of Object.entries(CAPABILITY_NOTE)) {
+    if (host === suffix || host.endsWith(`.${suffix}`)) return note;
+  }
+  return null;
+}
 
 /**
  * Hosts that need the PATH to identify, not just the name.
