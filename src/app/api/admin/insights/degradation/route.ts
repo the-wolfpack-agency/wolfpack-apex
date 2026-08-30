@@ -25,6 +25,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getUserFromRequest } from "@/lib/auth";
 import { query } from "@/lib/db";
+import { readAnswerOutcomes, type AnswerOutcomes } from "@/lib/insights/answer-outcomes";
 
 export const dynamic = "force-dynamic";
 
@@ -52,6 +53,17 @@ export interface DegradationInsights {
   semanticDegraded: number;
   /** A knowledge lookup that failed and would once have read as an empty base. */
   knowledgeLookupFailures: number;
+  /**
+   * WHAT HAPPENED TO THE PERSON AFTER THE ANSWER.
+   *
+   * Derived from stored messages rather than emitted, so it reaches back to
+   * the product's first day instead of starting at zero today. Served from
+   * this route because an operator asking "what is going wrong" wants the
+   * outage and the dead end on one screen: a dependency being down and a
+   * person walking away are both the product failing somebody, and only one
+   * of them announces itself.
+   */
+  outcomes?: AnswerOutcomes;
 }
 
 async function count(sql: string, params: unknown[]): Promise<number | null> {
@@ -116,6 +128,10 @@ export async function GET(req: NextRequest) {
     /* The headline still stands without the breakdown. */
   }
 
+  /* Never fatal to the panel above it: a slow message table must not take the
+     outage counts down with it. */
+  const outcomes = await readAnswerOutcomes(90).catch(() => undefined);
+
   const body: DegradationInsights = {
     readable: true,
     days,
@@ -124,6 +140,7 @@ export async function GET(req: NextRequest) {
     retriesRecovered: retries ?? 0,
     semanticDegraded: semantic ?? 0,
     knowledgeLookupFailures: knowledge ?? 0,
+    ...(outcomes?.readable ? { outcomes } : {}),
   };
   return NextResponse.json(body);
 }

@@ -232,6 +232,9 @@ export default function InstinctChat({
   const [fileError, setFileError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const [expandedSources, setExpandedSources] = useState<Record<string, boolean>>({});
+  /* Which answer was just copied, so the button can say so. Index rather than
+     a boolean: two answers must not both read "Copied". */
+  const [copiedAnswer, setCopiedAnswer] = useState<number | null>(null);
   const [isOnline, setIsOnline] = useState<boolean>(
     typeof navigator !== "undefined" ? navigator.onLine : true,
   );
@@ -1837,6 +1840,43 @@ export default function InstinctChat({
                       </div>
                     )}
 
+                  {/* COPY, WHICH IS THE CLEAREST "THIS WAS USEFUL" THERE IS.
+                      No copy affordance existed at all, and the only other
+                      post-answer signal, source_viewed, has fired ONCE in the
+                      product's life (2026-04-23). So 99.4% of conversations
+                      end after one question and nothing can say whether that
+                      is somebody satisfied or somebody giving up.
+                      Records THAT an answer was copied, never what it said:
+                      message position, the answer's source, and the workflow
+                      id. No content, no selection, no keystrokes. */}
+                  {msg.role === "assistant" && msg.content?.trim() ? (
+                    <button
+                      type="button"
+                      className="mt-2 text-xs underline"
+                      style={{ color: "var(--wp-text-muted, #6b7280)" }}
+                      data-testid={`copy-answer-${idx}`}
+                      onClick={() => {
+                        void navigator.clipboard?.writeText(msg.content).catch(() => {});
+                        setCopiedAnswer(idx);
+                        void fetchWithRefresh("/api/analytics", {
+                          method: "POST",
+                          headers: canonicalJsonHeaders(),
+                          body: JSON.stringify({
+                            event: "assistant.answer_copied",
+                            metadata: {
+                              answer_source: msg.source ?? "unknown",
+                              answer_length: msg.content.length,
+                              has_sources: Boolean(msg.sources?.length),
+                              ...(msg.workflowId ? { workflow_id: msg.workflowId } : {}),
+                            },
+                          }),
+                        }).catch(() => {});
+                      }}
+                    >
+                      {copiedAnswer === idx ? "Copied" : "Copy"}
+                    </button>
+                  ) : null}
+
                   {msg.role === "assistant" &&
                     msg.sources &&
                     msg.sources.length > 0 && (
@@ -1855,6 +1895,16 @@ export default function InstinctChat({
                                   event: "assistant.source_viewed",
                                   metadata: {
                                     source_type: msg.sources[0]?.type ?? "unknown",
+                                    /* JOIN KEYS. This event carried only a
+                                       source_type, so it could say somebody
+                                       looked at a knowledge source and never
+                                       WHICH answer they were reading. That is
+                                       the whole question: did the person who
+                                       got this answer go and check it. */
+                                    action: "expanded",
+                                    source_count: msg.sources.length,
+                                    answer_source: msg.source ?? "unknown",
+                                    ...(msg.workflowId ? { workflow_id: msg.workflowId } : {}),
                                   },
                                 }),
                               }).catch(() => {});
@@ -1883,7 +1933,14 @@ export default function InstinctChat({
                                       headers: canonicalJsonHeaders(),
                                       body: JSON.stringify({
                                         event: "assistant.source_viewed",
-                                        metadata: { source_type: s.type },
+                                        metadata: {
+                                          source_type: s.type,
+                                          action: "opened",
+                                          answer_source: msg.source ?? "unknown",
+                                          ...(msg.workflowId
+                                            ? { workflow_id: msg.workflowId }
+                                            : {}),
+                                        },
                                       }),
                                     }).catch(() => {});
                                   }}

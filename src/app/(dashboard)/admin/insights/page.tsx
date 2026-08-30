@@ -71,6 +71,17 @@ interface Degradation {
   retriesRecovered?: number;
   semanticDegraded?: number;
   knowledgeLookupFailures?: number;
+  outcomes?: {
+    days: number;
+    conversations: number;
+    misses: number;
+    deadEnds: number;
+    missesFollowedUp: number;
+    reAsks: number;
+    singleTurnConversations: number;
+    ratedAnswers: number;
+    messages: number;
+  };
 }
 
 interface RoutingCoverage {
@@ -330,6 +341,70 @@ export default function InsightsAdminPage() {
           </p>
         )}
       </section>
+
+      {/* WHAT HAPPENED TO THE PERSON AFTER THE ANSWER.
+          The product emits 133 assistant events and every one describes what
+          the SYSTEM did. Not one described what the PERSON did in response,
+          and the response is where frustration lives. That is why the
+          customer-success view could only say "joined and has done nothing
+          since": it was the only behavioural signal that existed.
+          Derived from stored messages rather than emitted, so it reaches back
+          to the first day instead of starting at zero today. */}
+      {degradation?.outcomes ? (
+        <section data-testid="insights-outcomes" className="mb-8">
+          <h2 className="text-lg font-semibold mb-2" style={{ color: "var(--wp-text)" }}>
+            What happened after the answer (last {degradation.outcomes.days} days)
+          </h2>
+          <p className="text-xs mb-3" style={{ color: "var(--wp-text-dim)" }}>
+            A dead end is an answer that admitted having nothing, after which the person never
+            asked anything again. Each one is a request nobody filed, and it is the shortest list
+            of real work this page produces.
+          </p>
+          <div className="flex flex-wrap gap-6 mb-2">
+            <div data-testid="insights-dead-ends">
+              <div className="text-2xl font-semibold" style={{ color: "var(--wp-text)" }}>
+                {degradation.outcomes.deadEnds}
+              </div>
+              <div className="text-xs" style={{ color: "var(--wp-text-dim)" }}>
+                dead ends, of {degradation.outcomes.misses} answers that had nothing
+              </div>
+            </div>
+            <div data-testid="insights-misses-followed">
+              <div className="text-2xl font-semibold" style={{ color: "var(--wp-text)" }}>
+                {degradation.outcomes.missesFollowedUp}
+              </div>
+              <div className="text-xs" style={{ color: "var(--wp-text-dim)" }}>
+                pushed past it and asked again
+              </div>
+            </div>
+            <div data-testid="insights-reasks">
+              <div className="text-2xl font-semibold" style={{ color: "var(--wp-text)" }}>
+                {degradation.outcomes.reAsks}
+              </div>
+              <div className="text-xs" style={{ color: "var(--wp-text-dim)" }}>
+                questions asked again in different words
+              </div>
+            </div>
+            <div data-testid="insights-rated">
+              <div className="text-2xl font-semibold" style={{ color: "var(--wp-text)" }}>
+                {degradation.outcomes.ratedAnswers}
+              </div>
+              <div className="text-xs" style={{ color: "var(--wp-text-dim)" }}>
+                answers anybody rated
+              </div>
+            </div>
+          </div>
+          {/* THE NUMBER THAT MEANS TWO OPPOSITE THINGS, said out loud rather
+              than reported as if it were a result. */}
+          <p className="text-xs" style={{ color: "var(--wp-text-dim)" }} data-testid="insights-single-turn">
+            {degradation.outcomes.singleTurnConversations} of {degradation.outcomes.conversations}{" "}
+            conversations were one question and no more. That means either somebody got what they
+            needed or they gave up, and nothing here can tell which. The copy and source-open
+            signals are what will separate them, and they start from today rather than reaching
+            back.
+          </p>
+        </section>
+      ) : null}
 
       {/* FIRST ON THE PAGE, deliberately. The other panels describe what to
           build next; this one names something already broken for somebody who

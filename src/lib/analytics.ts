@@ -1558,6 +1558,19 @@ export type InstinctEventType =
   | "assistant.welcome_dismissed"
   | "assistant.welcome_prompt_clicked"
   | "assistant.fallback_chip_clicked"
+  /* WHAT THE PERSON DID WITH THE ANSWER.
+   *
+   * The only two facts on this page that a database cannot derive: a copy and
+   * a source click both happen entirely in the browser and leave no row.
+   * Everything else about an answer's outcome is read from instinct_messages
+   * instead, which reaches back to day one rather than starting at zero today.
+   *
+   * SCOPED TO WHICH ANSWER, NEVER WHAT IT SAID. The metadata carries the
+   * message and workflow id and the answer's source. No content, no selection,
+   * no keystrokes, no scroll depth. These name individuals, so the rule is
+   * that they record that somebody acted rather than what they read. */
+  | "assistant.answer_copied"
+  | "assistant.answer_source_opened"
   // Form-field-level analytics: which fields users skip + which
   // fields trip server validation. Tells us which optional fields
   // earn their space and which required fields are confusing.
