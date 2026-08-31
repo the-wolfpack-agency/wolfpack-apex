@@ -263,7 +263,7 @@ describe("router wiring", () => {
     expect(urls.some((u) => u.includes("api.groq.com"))).toBe(false);
   });
 
-  it("an unrecognised pin falls back to normal behaviour, not to an outage", () => {
+  it("an unrecognized pin falls back to normal behavior, not to an outage", () => {
     process.env.AI_PROVIDER_PRIMARY = "a-typo";
     expect(() => buildCompatibleProviders(process.env)).not.toThrow();
     expect(buildCompatibleProviders(process.env)).toEqual([]);

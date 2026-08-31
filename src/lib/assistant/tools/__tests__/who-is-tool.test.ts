@@ -276,7 +276,7 @@ describe("roster questions", () => {
     "who works here",
     "show me the team",
     "list our team",
-  ])("recognises %s as a roster question", (q) => {
+  ])("recognizes %s as a roster question", (q) => {
     expect(matchRosterQuestion(q)).not.toBeNull();
   });
 

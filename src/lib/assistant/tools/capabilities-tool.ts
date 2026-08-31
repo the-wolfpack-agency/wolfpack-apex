@@ -9,7 +9,7 @@
  * which is the only question they were asking: a sales lead reading about the
  * financials tools learns something they cannot use.
  *
- * So this reads the live registry and the routine catalogue, filters by the
+ * So this reads the live registry and the routine catalog, filters by the
  * caller's role through the same gate the dispatcher enforces, and describes
  * what is left. Add a tool and it appears here. Remove one and it disappears.
  * The description can never drift from the capability, because it IS the
@@ -29,7 +29,7 @@ import { getTools } from "./registry";
 import { canInvokeNamedTool, canInvokeTool } from "./gate";
 import { scopeToConnected, connectedSystems, describeAwaiting } from "./capability-scope";
 import { hasPersona, personaCopyFor } from "./persona";
-import { BUILT_IN_ROUTINES } from "@/lib/assistant/routines/catalogue";
+import { BUILT_IN_ROUTINES } from "@/lib/assistant/routines/catalog";
 import { PROMPT_GUIDE } from "@/lib/assistant/prompt-corpus";
 import type { ToolDef, ToolResult } from "./types";
 
@@ -231,8 +231,8 @@ export function matchCapabilitiesIntent(message: string): Params | null {
  *
  * By SUBJECT, not by the module they live in. Somebody asking what the product
  * does is thinking about their mail and their calendar, not about which file a
- * tool was written in, and a list organised by our architecture reads as a list
- * organised by nothing.
+ * tool was written in, and a list organized by our architecture reads as a list
+ * organized by nothing.
  */
 const AREAS: Array<{ title: string; match: RegExp }> = [
   { title: "Mail and people", match: /mail|email|who_is|contact|people|message/ },
@@ -522,8 +522,8 @@ export const capabilitiesTool: ToolDef<Params, CapabilitiesData> = {
      *
      * But read end to end the prose is sixty bullets, and for the first screen
      * somebody ever sees that is the whole job failed. They do not want the
-     * catalogue, they want one thing to try. So the widget leads with the
-     * openers, keeps whole jobs next, and collapses the catalogue behind the
+     * catalog, they want one thing to try. So the widget leads with the
+     * openers, keeps whole jobs next, and collapses the catalog behind the
      * group it belongs to. Built from the SAME arrays the prose is built from,
      * so the two cannot drift into describing different products. */
     const widget: WidgetSpec = {

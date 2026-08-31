@@ -2,7 +2,7 @@
  * Support prompts, registered.
  *
  * Migrated from string constants inside src/lib/support/*.ts. The text is
- * unchanged — this is a move, not a rewrite, so a behaviour change here would
+ * unchanged — this is a move, not a rewrite, so a behavior change here would
  * be a bug rather than a feature. What is new is everything around it: an id an
  * eval can score, a version a regression can be bisected against, and a scope
  * the registry appends so nobody has to remember to write one.
@@ -63,7 +63,7 @@ export const SUPPORT_AUTO_ACKNOWLEDGE = definePrompt({
   },
   inputs: [],
   // Moved verbatim, joined exactly as the call site joined it. The first line
-  // alone would have been a behaviour change dressed as a migration: the six
+  // alone would have been a behavior change dressed as a migration: the six
   // hard rules below it are what keep an unsupervised reply safe to send.
   render: () =>
     [

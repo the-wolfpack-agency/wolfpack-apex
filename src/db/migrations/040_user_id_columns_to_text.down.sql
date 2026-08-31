@@ -2,7 +2,7 @@
 -- WARNING: this REJECTS rows whose values aren't valid UUID literals
 -- (e.g. the "demo-cto" strings that caused the original bug). If real
 -- non-UUID data has been written, this migration will fail — which is
--- the correct behaviour for rolling back a widening change.
+-- the correct behavior for rolling back a widening change.
 
 BEGIN;
 

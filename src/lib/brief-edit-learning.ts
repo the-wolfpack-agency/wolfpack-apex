@@ -190,7 +190,7 @@ function toNumber(v: number | string | null | undefined): number {
 
 function toIso(d: Date | string): string {
   if (d instanceof Date) return d.toISOString();
-  // Postgres already returns ISO-ish; normalise via Date for safety.
+  // Postgres already returns ISO-ish; normalize via Date for safety.
   const parsed = new Date(d);
   return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : String(d);
 }

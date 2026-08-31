@@ -90,7 +90,7 @@ export interface TaskListItem {
   importance: "low" | "normal" | "high";
   /** ISO timestamp; null when the task has no due date. */
   dueAt: string | null;
-  /** Local list UUID (used by the optimistic-complete handler to scope
+  /** Local list UUID (used by the optimiztic-complete handler to scope
    *  the PATCH call). */
   listId: string;
   /** Friendly list name shown next to the title ("Inbox", "Work"). */
@@ -689,9 +689,9 @@ export interface ExecuteAgentWidgetSpec {
  * sees is the whole job failed. Read end to end it is a list of what the
  * product can do; what a person actually wants is one thing to try.
  *
- * So the shape carries STARTERS separately from the catalogue. A starter is a
+ * So the shape carries STARTERS separately from the catalog. A starter is a
  * sentence somebody can send as-is, and clicking one puts it in the composer
- * rather than sending it, so they can change a word first. The catalogue stays,
+ * rather than sending it, so they can change a word first. The catalog stays,
  * grouped and collapsible, because "can it do X" is a real question and the
  * list is the only honest answer to it.
  */

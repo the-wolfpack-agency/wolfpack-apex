@@ -1262,7 +1262,7 @@ a:hover { color: var(--wp-gold-hover); }
 
 /* WHAT THIS PRODUCT CAN DO, in the chat.
    Replaces sixty bullets of markdown. The starters lead because they are the
-   only part most people need; the catalogue is reference and collapses. */
+   only part most people need; the catalog is reference and collapses. */
 .wp-cap { display: flex; flex-direction: column; gap: 1.25rem; margin-top: 0.5rem; }
 .wp-cap-head {
   font-size: 0.75rem;

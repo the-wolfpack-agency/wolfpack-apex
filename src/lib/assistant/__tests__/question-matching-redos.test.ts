@@ -20,7 +20,7 @@
  * finding one instance is not evidence the class is contained, and the fix was
  * applied to both only because the second was measured rather than assumed.
  *
- * Both now normalise whitespace before matching, so the patterns use literal
+ * Both now normalize whitespace before matching, so the patterns use literal
  * spaces and the ambiguity has nowhere to live.
  */
 
@@ -36,7 +36,7 @@ const ADVERSARIAL = [
   (n: number) => "what did a" + " ".repeat(n) + "!",
   (n: number) => "what did a say about " + " ".repeat(n) + "!",
   (n: number) => "what in " + " ".repeat(n) + "!",
-  (n: number) => "summarise " + " ".repeat(n) + "!",
+  (n: number) => "summarize " + " ".repeat(n) + "!",
   (n: number) => "tell me about " + " ".repeat(n) + "!",
   (n: number) => "a summary of " + " ".repeat(n) + "!",
 ];
@@ -74,10 +74,10 @@ describe.each([
 });
 
 /**
- * The fix must not have changed what the matchers actually do. Normalising
+ * The fix must not have changed what the matchers actually do. Normalizing
  * whitespace is supposed to be invisible to a person typing normally.
  */
-describe("normalising whitespace did not change any answer", () => {
+describe("normalizing whitespace did not change any answer", () => {
   it.each([
     ["what does the SOW say about payment", null],
     ["what documents do we have about onboarding", "onboarding"],

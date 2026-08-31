@@ -1,5 +1,5 @@
 /**
- * What this organisation asked that nothing connected could answer.
+ * What this organization asked that nothing connected could answer.
  *
  * Needs both halves and almost nobody has both: the questions people actually
  * asked, and the estate that failed them. A content audit says what a client

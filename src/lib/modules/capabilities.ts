@@ -7,7 +7,7 @@
  *
  *   ASK      "what are the payment terms in our SOW?"    -> answer + citation
  *   FIND     "what documents do we have about onboarding" -> a browsable list
- *   SUMMARISE "summarize the onboarding document"         -> a browsable list
+ *   SUMMARIZE "summarize the onboarding document"         -> a browsable list
  *
  * Two of those are right. The third is a verb the interface invites and the
  * engine does not honour, so somebody asks for a summary and receives a
@@ -28,8 +28,8 @@
  *      offer what the engine honours.
  *   3. A verb the engine does not honour is declared as routing somewhere,
  *      rather than quietly behaving like something else.
- *   4. A test asserts the declaration is honest, so "we support summarise"
- *      cannot be written down while summarise returns a list.
+ *   4. A test asserts the declaration is honest, so "we support summarize"
+ *      cannot be written down while summarize returns a list.
  *
  * The fourth point is the one that matters. A contract nobody verifies becomes
  * marketing inside a week, and this file would then be a second place where
@@ -44,7 +44,7 @@ import { PROMPT_REQUIREMENTS, type PromptRequirement } from "@/lib/assistant/wel
 export type AnswerShape =
   /** Prose answering the question, with its source. What the product sells. */
   | "synthesised"
-  /** A browsable set of results. Right for "find", wrong for "summarise". */
+  /** A browsable set of results. Right for "find", wrong for "summarize". */
   | "list"
   /** One record, rendered. A vehicle, a contact, an invoice. */
   | "record"
@@ -72,8 +72,8 @@ export interface ModuleAction {
   /**
    * For `routes_elsewhere`: the action id it actually behaves like.
    *
-   * This is the honest record of a gap. "Summarise behaves like find" is a
-   * sentence somebody can act on; a summarise button that returns a list is
+   * This is the honest record of a gap. "Summarize behaves like find" is a
+   * sentence somebody can act on; a summarize button that returns a list is
    * a bug report waiting to be written by a client.
    */
   behavesLike?: string;
@@ -116,7 +116,7 @@ const DOCUMENTS: ModuleCapability = {
       because: "See everything on a topic before picking one.",
     },
     {
-      id: "documents.summarise",
+      id: "documents.summarize",
       /* US SPELLING, BECAUSE A CLIENT READS IT. The id keeps the British form
          it was registered under: it is referenced by tests, by the journey and
          by the client guide, and renaming an identifier to fix a display

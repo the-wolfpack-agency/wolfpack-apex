@@ -1,6 +1,6 @@
 /**
  * Access-control unit tests for the Invoice Tracker registry. This is the least-
- * privilege gate for finance/budget data, so the allowlist behaviour (exact,
+ * privilege gate for finance/budget data, so the allowlist behavior (exact,
  * case-insensitive, deny-empty) is the security-critical part and is covered
  * exhaustively.
  */

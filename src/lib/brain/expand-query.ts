@@ -3,7 +3,7 @@
  *
  * THE FAILURE THIS TARGETS
  *
- * Measured against the labelled set, four of twelve questions never surface the
+ * Measured against the labeled set, four of twelve questions never surface the
  * document that answers them, and all four are the same shape: the person and
  * the paper describe one fact differently.
  *
@@ -56,7 +56,7 @@ export interface FirstPass {
    *
    * THE SIGNAL THAT MATTERS, and the one I got wrong first time. Gating on a
    * thin result seemed obvious and fired on nothing: measured against the
-   * labelled set, "how much do we owe upfront?" retrieves four hits scoring
+   * labeled set, "how much do we owe upfront?" retrieves four hits scoring
    * 0.42 to 0.45, comfortably above the floor. They are simply the wrong
    * documents, and no score can say so.
    *

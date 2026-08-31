@@ -2,8 +2,8 @@
  * @jest-environment jsdom
  *
  * MetricTile + useCountUp. Asserts: renders value + label, zero state, the
- * count-up reaches its final value, accent + delta direction/colour, the
- * inverted-delta colour mapping, a pre-formatted display string, a sparkline
+ * count-up reaches its final value, accent + delta direction/color, the
+ * inverted-delta color mapping, a pre-formatted display string, a sparkline
  * slot, and that the reduced-motion path (default in jsdom, no matchMedia)
  * shows the final value instantly without throwing.
  */
@@ -75,7 +75,7 @@ describe("MetricTile — render", () => {
     expect(screen.getByTestId("metric-value")).toHaveTextContent("3.14");
   });
 
-  test("accent colour is applied to the value", () => {
+  test("accent color is applied to the value", () => {
     render(<MetricTile value={5} label="x" accent="var(--wp-gold)" />);
     expect(screen.getByTestId("metric-value").style.color).toBe(
       "var(--wp-gold)",
@@ -96,7 +96,7 @@ describe("MetricTile — render", () => {
 });
 
 describe("MetricTile — delta", () => {
-  test("positive delta → up arrow, success colour by default", () => {
+  test("positive delta → up arrow, success color by default", () => {
     render(<MetricTile value={10} label="x" delta={{ value: 4 }} />);
     const d = screen.getByTestId("metric-delta");
     expect(d.getAttribute("data-direction")).toBe("up");
@@ -104,7 +104,7 @@ describe("MetricTile — delta", () => {
     expect(d.style.color).toBe("var(--wp-success, #22c55e)");
   });
 
-  test("negative delta → down arrow, error colour by default", () => {
+  test("negative delta → down arrow, error color by default", () => {
     render(<MetricTile value={10} label="x" delta={{ value: -2 }} />);
     const d = screen.getByTestId("metric-delta");
     expect(d.getAttribute("data-direction")).toBe("down");

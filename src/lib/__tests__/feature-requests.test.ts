@@ -4,7 +4,7 @@
 
 // Mock db before imports. writeQuery is the strict path — it throws
 // on any failure (missing DATABASE_URL, pg error, unexpected row count)
-// so the test-side mock mirrors that behaviour explicitly. safeQuery
+// so the test-side mock mirrors that behavior explicitly. safeQuery
 // is the lenient path used for reads.
 const mockQuery = jest.fn();
 const mockSafeQuery = jest.fn();

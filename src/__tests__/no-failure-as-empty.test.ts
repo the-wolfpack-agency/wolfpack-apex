@@ -105,7 +105,7 @@ describe("a failure is not spelled like an empty result", () => {
   });
 
   /* The one that caused the incident must stay fixed. It is asserted by
-     behaviour rather than by line number, which moves. */
+     behavior rather than by line number, which moves. */
   it("the knowledge-base lookup records its failure rather than looking empty", () => {
     const src = readFileSync("src/lib/assistant.ts", "utf8");
     const fn = src.slice(src.indexOf("async function tryKnowledgeBase"));

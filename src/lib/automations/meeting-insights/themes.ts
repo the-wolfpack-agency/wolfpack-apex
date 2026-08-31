@@ -15,7 +15,7 @@
  *
  * All queries are pure reads against the analyses + messages tables.
  * No LLM calls happen here — themes are derived from previously
- * analysed messages.
+ * analyzed messages.
  */
 
 import { query } from "@/lib/db";

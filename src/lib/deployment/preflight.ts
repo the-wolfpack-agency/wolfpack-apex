@@ -1,7 +1,7 @@
 /**
  * Is this deployment ready to hand to a client?
  *
- * WHY A CHECKLIST AND NOT A JUDGEMENT
+ * WHY A CHECKLIST AND NOT A JUDGMENT
  *
  * Everything verified today was verified against OUR instance, with our
  * documents, our connectors and an account that has existed for months. A fresh

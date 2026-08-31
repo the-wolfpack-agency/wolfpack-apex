@@ -227,7 +227,7 @@ describe("<RecognizeView />", () => {
     expect(await screen.findByTestId("recognize-drop-zone")).toBeInTheDocument();
   });
 
-  it("reclassify PATCHes the API and optimistically updates the displayed type", async () => {
+  it("reclassify PATCHes the API and optimiztically updates the displayed type", async () => {
     const initial = mkRecognized({
       classification: mkClassification({ type: "receipt", confidence: 0.6 }),
     });
@@ -264,7 +264,7 @@ describe("<RecognizeView />", () => {
       fireEvent.change(select, { target: { value: "invoice" } });
     });
 
-    /* Optimistic — the type label flips immediately to "Invoice". */
+    /* Optimiztic — the type label flips immediately to "Invoice". */
     await waitFor(() =>
       expect(screen.getByTestId("classification-type-label")).toHaveTextContent(
         "Invoice",
@@ -342,7 +342,7 @@ describe("<RecognizeView />", () => {
   it("does not render the main UI and consults getInstinctToken when no token (redirect path)", async () => {
     /* jsdom won't let us reliably reassign window.location and the
        direct .href assignment triggers a real jsdom navigation that
-       can't be cleanly intercepted. We assert the BEHAVIOURAL
+       can't be cleanly intercepted. We assert the BEHAVIORAL
        contract instead — same approach the /qr page test uses: with
        no token, the auth gate stays unchecked, nothing renders, and
        crucially no authed API call ever fires. The href assignment

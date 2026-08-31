@@ -55,7 +55,7 @@ function healthy(over: Record<string, unknown> = {}) {
 
 beforeEach(() => jest.clearAllMocks());
 
-describe("recognising the question", () => {
+describe("recognizing the question", () => {
   it.each([
     "what did the scan find",
     "open security findings",

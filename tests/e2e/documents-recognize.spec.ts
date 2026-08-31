@@ -15,7 +15,7 @@
  *   5. Spinner clears, ClassificationCard renders with a type label,
  *      ExtractedFieldsTable renders rows (or the explicit empty
  *      state).
- *   6. Reclassify via the dropdown — assert optimistic update of the
+ *   6. Reclassify via the dropdown — assert optimiztic update of the
  *      visible type label.
  *   7. "Scan another" returns the user to the drop zone.
  *   8. Throughout, a console + network failure listener guarantees
@@ -197,7 +197,7 @@ test.describe("/documents/recognize — full journey", () => {
       }
 
       /* Reclassify — pick a different document type, then assert the
-         optimistic update flipped the visible label. */
+         optimiztic update flipped the visible label. */
       await page
         .getByTestId("classification-reclassify-select")
         .selectOption("invoice");

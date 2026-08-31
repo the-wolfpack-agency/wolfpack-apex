@@ -146,8 +146,8 @@ beforeEach(() => {
   }
   mockIsAnalyzerAvailable.mockReturnValue(true);
   // Clear the in-memory rate-limit cache between tests.
-  if (regenerateTestExports?.recentReanalyses) {
-    regenerateTestExports.recentReanalyses.clear();
+  if (regenerateTestExports?.recenteranalyses) {
+    regenerateTestExports.recenteranalyses.clear();
   }
 });
 

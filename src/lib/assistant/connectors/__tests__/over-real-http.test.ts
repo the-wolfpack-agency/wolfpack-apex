@@ -142,7 +142,7 @@ describe("a connector declares what its vendor actually holds", () => {
 describe("a system that never answers", () => {
   it("gives up rather than hanging, and says which kind of failure it was", async () => {
     /* A server that accepts the connection and goes quiet is the normal
-       behaviour of a legacy system behind a flaky VPN. There was no
+       behavior of a legacy system behind a flaky VPN. There was no
        timeout: the call hung indefinitely, which on a serverless
        function burns the whole execution budget and shows the user a
        blank response rather than "that system did not answer". */
@@ -156,7 +156,7 @@ describe("a system that never answers", () => {
       authHeader: "Bearer t",
       vendorPreset: null,
       /* The real timeout is 15s; a test must not wait that long, so the
-         behaviour under an aborted request is what is proved here. */
+         behavior under an aborted request is what is proved here. */
       fetchImpl: ((url: string, init: RequestInit) =>
         fetch(url, { ...init, signal: AbortSignal.timeout(150) })) as typeof fetch,
     });

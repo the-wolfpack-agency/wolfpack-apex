@@ -44,7 +44,7 @@ export interface ThemeColors {
   muted: string;
 }
 
-/* ------------------------- Hex + colour helpers ----------------------- */
+/* ------------------------- Hex + color helpers ----------------------- */
 
 function clamp255(n: number): number {
   return Math.max(0, Math.min(255, Math.round(n)));
@@ -70,7 +70,7 @@ export function luminance(r: number, g: number, b: number): number {
 
 /* ----------------------------- PNG decoder ---------------------------- */
 
-// RFC 2083 minimal subset: 8-bit-depth, colour types 2 (RGB) and 6
+// RFC 2083 minimal subset: 8-bit-depth, color types 2 (RGB) and 6
 // (RGBA), filter method 0, no interlace. Covers Figma/Canva/Excalidraw
 // exports, which are the wireframe sources we care about.
 
@@ -150,7 +150,7 @@ export function decodePngToPixels(buf: Uint8Array): PixelBuffer | null {
   if (!width || !height) return null;
   if (bitDepth !== 8) return null;
   if (interlace !== 0) return null;
-  // Support truecolour (2) and truecolour+alpha (6) only. Greyscale / paletted
+  // Support truecolor (2) and truecolor+alpha (6) only. Greyscale / paletted
   // images are rare in design wireframes we actually want to palette.
   const channels = colorType === 2 ? 3 : colorType === 6 ? 4 : 0;
   if (channels === 0) return null;
@@ -352,7 +352,7 @@ export function kmeansRgb(
 /* ----------------------------- Public API ----------------------------- */
 
 /**
- * Extract up to `count` dominant colours from a raw image buffer.
+ * Extract up to `count` dominant colors from a raw image buffer.
  *
  * Returns `{ swatches: [], weights: [] }` when the buffer cannot be
  * decoded (e.g. JPEG, WEBP, or a malformed PNG). Callers should treat

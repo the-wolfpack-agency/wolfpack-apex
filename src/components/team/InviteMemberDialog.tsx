@@ -112,7 +112,7 @@ export default function InviteMemberDialog({ open, onClose, onInvited }: Props) 
     <div
       data-testid="invite-member-dialog"
       role="dialog"
-      aria-labelledby={`${formId}-title`}
+      aria-labeledby={`${formId}-title`}
       aria-modal="true"
       className="fixed inset-0 z-50 flex items-center justify-center px-4"
       style={{ background: "rgba(0,0,0,0.6)" }}

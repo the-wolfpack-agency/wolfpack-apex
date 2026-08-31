@@ -16,7 +16,7 @@ const t = (name: string) => ({ name });
 const none = new Set<BackingSystem>();
 
 describe("which system a tool needs", () => {
-  it("recognises the CRM tools by name", () => {
+  it("recognizes the CRM tools by name", () => {
     for (const n of [
       "search_external_records",
       "get_related_records",
@@ -27,7 +27,7 @@ describe("which system a tool needs", () => {
     }
   });
 
-  it("recognises the dealer inventory tool", () => {
+  it("recognizes the dealer inventory tool", () => {
     expect(backingSystemFor("dms_inventory_widget")).toBe("dms");
   });
 

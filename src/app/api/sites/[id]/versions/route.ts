@@ -38,7 +38,7 @@ export async function GET(
     // In this codebase sites are not per-user-scoped at the DB layer —
     // visibility is gated by site existence. Returning 403 (rather than
     // 404) matches the task spec + hides whether the id exists at all
-    // from an unauthorised caller.
+    // from an unauthorized caller.
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 

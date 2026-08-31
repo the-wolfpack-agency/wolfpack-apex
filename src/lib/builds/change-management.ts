@@ -159,7 +159,7 @@ export const IMPROVEMENTS: Improvement[] = [
     title: "The plan is a record, not a submission",
     now: "One row per submission. An update is a second row that does not know about the first.",
     proposed:
-      "One plan per participant per programme, with revisions. Earlier wording stays readable, and who changed what is in the audit chain.",
+      "One plan per participant per program, with revisions. Earlier wording stays readable, and who changed what is in the audit chain.",
     unlocks: "Whether a plan was ever revisited, which is the first thing that predicts whether it worked.",
   },
   {
@@ -173,28 +173,28 @@ export const IMPROVEMENTS: Improvement[] = [
     title: "Check-ins are scheduled by the plan",
     now: "Somebody remembers. Four weeks of silence is how every post-training commitment ends.",
     proposed:
-      "Cadence set per programme and counted from the class date. The plan asks the participant, then the manager, then stops asking and marks itself overdue.",
-    unlocks: "Overdue as a number rather than an impression, per class and per centre.",
+      "Cadence set per program and counted from the class date. The plan asks the participant, then the manager, then stops asking and marks itself overdue.",
+    unlocks: "Overdue as a number rather than an impression, per class and per center.",
   },
   {
     title: "A commitment carries a before and an after",
     now: "The plan says what someone intends. Nothing records what changed.",
     proposed:
       "Each commitment takes an observation at the start and one at close, in the participant's own terms. Not a KPI, and deliberately not scored.",
-    unlocks: "Whether the behaviour moved, from the two people who can actually see it.",
+    unlocks: "Whether the behavior moved, from the two people who can actually see it.",
   },
   {
-    title: "The plan knows its class, centre and coach",
-    now: "Participant, class, centre and coach live in four separate forms with no join.",
+    title: "The plan knows its class, center and coach",
+    now: "Participant, class, center and coach live in four separate forms with no join.",
     proposed:
       "One reference, already tracked. The plan inherits them rather than asking the participant to retype them.",
-    unlocks: "Completion by centre, by class, by instructor. Today this needs a person with a spreadsheet.",
+    unlocks: "Completion by center, by class, by instructor. Today this needs a person with a spreadsheet.",
   },
   {
     title: "The cohort is readable without reading anyone's plan",
     now: "The only way to see the cohort is to open the entries list, which means reading individual plans.",
     proposed:
-      "Rollups by class and centre are a separate surface from the plans themselves, and the default view for anyone above the manager carries counts and recurring themes, not text.",
+      "Rollups by class and center are a separate surface from the plans themselves, and the default view for anyone above the manager carries counts and recurring themes, not text.",
     unlocks:
       "Which commitments recur across a cohort, which is a signal about the course and not about the person.",
   },
@@ -227,15 +227,15 @@ export interface ConfigItem {
 }
 
 /**
- * What a programme owner sets up once per programme.
+ * What a program owner sets up once per program.
  *
  * BA101 and BA102 are different courses with different cohort sizes, so the
- * cadence and the prompts belong to the programme rather than to the product.
+ * cadence and the prompts belong to the program rather than to the product.
  * Everything here exists because hard-coding it would mean a second form the
  * next time a course changes, which is the failure being replaced.
  */
 export const CONFIGURATION: ConfigItem[] = [
-  { setting: "Programme and class reference", why: "The plan inherits participant, class, centre and coach instead of asking for them." },
+  { setting: "Program and class reference", why: "The plan inherits participant, class, center and coach instead of asking for them." },
   { setting: "How many commitments a plan holds", why: "Three is a plan, ten is a wish list. The number is a teaching decision, not ours." },
   { setting: "The prompts for each commitment", why: "What will change, why, how you will know, by when. Wording belongs to the course." },
   { setting: "Check-in cadence from the class date", why: "Week two catches a plan that never started. Week twelve catches one that stopped." },
@@ -251,7 +251,7 @@ export interface Reuse {
 /** Already built and already tested. Nothing here is new work. */
 export const REUSED: Reuse[] = [
   { have: "Hash-chained audit log", serves: "A plan's history is provable rather than asserted, including who read one." },
-  { have: "Role scoping with per-user overrides", serves: "Participant, manager, coach and programme owner see different things by default." },
+  { have: "Role scoping with per-user overrides", serves: "Participant, manager, coach and program owner see different things by default." },
   { have: "Documents indexed with citations", serves: "The coach asks what somebody committed to and gets the plan, quoted." },
   { have: "The redaction boundary", serves: "Nothing sensitive in a plan reaches a model. Already proven against a real corpus." },
   { have: "Analytics and the learning loop", serves: "Which prompts get thin answers, which is how the instrument improves." },
@@ -261,15 +261,15 @@ export const REUSED: Reuse[] = [
  * The near-miss worth naming, because somebody will find it and ask.
  *
  * wolfpack-auto has an admin surface called change management. It is a
- * different thing that shares a name: organisational change, with categories
+ * different thing that shares a name: organizational change, with categories
  * of process, pricing, staffing, system and policy, and a
  * proposed-approved-active-rolled-back lifecycle. That is a dealership
- * changing a process. This is one person changing their own behaviour after a
+ * changing a process. This is one person changing their own behavior after a
  * course. Forcing one onto the other would give both the wrong shape.
  */
 export const SIBLING_MODULE =
-  "wolfpack-auto's change management is organisational: a dealership changes a process and measures " +
-  "the result. This is personal: one person changes their own behaviour after a course. The lifecycle " +
+  "wolfpack-auto's change management is organizational: a dealership changes a process and measures " +
+  "the result. This is personal: one person changes their own behavior after a course. The lifecycle " +
   "and the before-and-after pair are worth borrowing. The rest is not.";
 
 export interface OpenQuestion {

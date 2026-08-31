@@ -1,5 +1,5 @@
 /**
- * Behaviour evals: containment and honesty.
+ * Behavior evals: containment and honesty.
  *
  * The existing model eval scores whether an agent SUCCEEDS (see model-eval.ts).
  * Both of the 2026 incidents this was written after were failures of a

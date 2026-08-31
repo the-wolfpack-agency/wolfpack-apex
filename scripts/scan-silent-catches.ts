@@ -4,7 +4,7 @@
  * A catch that returns an empty array turns "the query threw" into "there were
  * no results", and every layer above it then reports the absence honestly.
  * Chasing exactly that cost an afternoon and five discarded hypotheses. The
- * judgement lives in src/lib/ci/silent-catch.ts and is tested there; this
+ * judgment lives in src/lib/ci/silent-catch.ts and is tested there; this
  * walks the files and holds the ratchet.
  *
  *   npm run scan:silent-catches

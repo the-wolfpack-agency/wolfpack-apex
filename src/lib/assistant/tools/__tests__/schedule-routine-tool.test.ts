@@ -35,7 +35,7 @@ beforeEach(() => {
 });
 
 describe("reading the instruction", () => {
-  it("recognises a standing appointment", () => {
+  it("recognizes a standing appointment", () => {
     /* The command is captured WHOLE, verb included, because the chain is
        called "run my morning" and stripping the verb leaves something that
        matches nothing. */
@@ -51,11 +51,11 @@ describe("reading the instruction", () => {
     expect(matchScheduleIntent("run my morning every weekday")).toBeNull();
   });
 
-  it("recognises stopping one", () => {
+  it("recognizes stopping one", () => {
     expect(matchScheduleIntent("stop running my morning")).toMatchObject({ action: "cancel" });
   });
 
-  it("recognises the question about what is scheduled", () => {
+  it("recognizes the question about what is scheduled", () => {
     expect(matchScheduleIntent("what's scheduled")).toEqual({ action: "list" });
     expect(matchScheduleIntent("what runs automatically")).toEqual({ action: "list" });
   });

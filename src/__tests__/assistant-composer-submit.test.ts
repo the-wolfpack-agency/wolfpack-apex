@@ -4,7 +4,7 @@
  * WHAT HAPPENED. Seven e2e specs filled the assistant composer and pressed
  * Enter, and not one of them ever submitted a message. The composer is a
  * textarea whose `handleKeyDown` submits on Cmd/Ctrl+Enter only, which is
- * correct behaviour for a multi-line prompt box: a plain Enter inserts a
+ * correct behavior for a multi-line prompt box: a plain Enter inserts a
  * newline. So every one of those specs typed a sentence, sent nothing, and
  * then waited for a response that was never requested.
  *

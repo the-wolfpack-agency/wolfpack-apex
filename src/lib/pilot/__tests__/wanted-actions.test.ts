@@ -6,17 +6,17 @@
  * them, which is the whole reason this bucket stopped rendering free text.
  */
 
-import { actionOf, summariseWanted } from "@/lib/pilot/wanted-actions";
+import { actionOf, summarizeWanted } from "@/lib/pilot/wanted-actions";
 
 describe("what people wanted done", () => {
   it("names the action and never the person", () => {
-    const { actions } = summariseWanted([{ query: "book me 30 minutes with dana tomorrow", asked: 1 }], 3);
+    const { actions } = summarizeWanted([{ query: "book me 30 minutes with dana tomorrow", asked: 1 }], 3);
     expect(actions).toEqual([{ action: "schedule a meeting", asked: 1 }]);
     expect(JSON.stringify(actions)).not.toMatch(/dana/i);
   });
 
   it("names the action and never the client", () => {
-    const { actions } = summariseWanted(
+    const { actions } = summarizeWanted(
       [{ query: "collect out rubycar marketing emails into one folder", asked: 1 }],
       3,
     );
@@ -25,7 +25,7 @@ describe("what people wanted done", () => {
   });
 
   it("adds up different phrasings of the same want", () => {
-    const { actions } = summariseWanted(
+    const { actions } = summarizeWanted(
       [
         { query: "book me 30 minutes with a colleague", asked: 2 },
         { query: "schedule a review for friday", asked: 3 },
@@ -43,8 +43,8 @@ describe("what people wanted done", () => {
     expect(actionOf("turn off notifications")).toBe("change a setting");
   });
 
-  it("counts an unrecognised instruction rather than dropping it", () => {
-    const s = summariseWanted([{ query: "escalate this to legal", asked: 4 }], 3);
+  it("counts an unrecognized instruction rather than dropping it", () => {
+    const s = summarizeWanted([{ query: "escalate this to legal", asked: 4 }], 3);
     expect(s.actions).toEqual([]);
     /* Silence here would read as nobody having wanted anything, and this
        bucket exists because people do not file requests for what they assume
@@ -63,6 +63,6 @@ describe("what people wanted done", () => {
   });
 
   it("returns nothing for an empty log", () => {
-    expect(summariseWanted([], 3)).toEqual({ actions: [], other: 0 });
+    expect(summarizeWanted([], 3)).toEqual({ actions: [], other: 0 });
   });
 });

@@ -51,7 +51,7 @@ export interface ComplianceFinding {
   title: string;
   verdict: Verdict;
   severity: Severity;
-  /** What we saw. One or two sentences a non-specialist can act on. */
+  /** What we saw. One or two sentences a non-specializt can act on. */
   detail: string;
   /** Present only when we can point at something concrete. */
   evidence?: Record<string, unknown>;
@@ -169,7 +169,7 @@ function trackingFinding(input: ComplianceInput): ComplianceFinding {
   if (!facts.pageLoaded || observations.length === 0) {
     return {
       id: "tracking-before-consent",
-      title: "Tracking behaviour could not be checked",
+      title: "Tracking behavior could not be checked",
       verdict: "unverifiable",
       severity: "medium",
       detail:

@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS assistant_routine_schedules (
   user_id       TEXT        NOT NULL,
   -- What to run, by the command the person types. Not a routine id: a saved
   -- routine and a built-in one are both reachable this way, and the command is
-  -- the thing they will recognise in a list of their own schedules.
+  -- the thing they will recognize in a list of their own schedules.
   command       TEXT        NOT NULL,
   cadence       TEXT        NOT NULL,
   -- 0 to 23 in the person's own zone.

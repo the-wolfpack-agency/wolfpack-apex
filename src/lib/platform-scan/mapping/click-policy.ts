@@ -12,9 +12,9 @@
  * buys safety by buying blindness, and the honest rule is narrower: moving
  * around somebody's system is fine, changing it is not.
  *
- * DENY BY DEFAULT, WHICH IS THE ENTIRE DESIGN. An unrecognised control is
+ * DENY BY DEFAULT, WHICH IS THE ENTIRE DESIGN. An unrecognized control is
  * refused. The cost of refusing a harmless tab is a smaller map; the cost of
- * clicking one unrecognised "Publish" is a client's live form going out. Those
+ * clicking one unrecognized "Publish" is a client's live form going out. Those
  * are not symmetrical, so the default is not symmetrical either.
  *
  * IT DECIDES, IT DOES NOT ACT. Pure, like every other rule in this directory,
@@ -126,7 +126,7 @@ function words(c: ClickCandidate): string {
  * May the explorer click this?
  *
  * Order matters and is deliberate: the refusals run first, so a control
- * labelled "Save filter" is refused despite containing a navigational word.
+ * labeled "Save filter" is refused despite containing a navigational word.
  */
 export function mayClick(candidate: ClickCandidate): ClickVerdict {
   const c = candidate;
@@ -136,7 +136,7 @@ export function mayClick(candidate: ClickCandidate): ClickVerdict {
     return { allowed: false, because: "disabled, so clicking proves nothing" };
   }
 
-  /* AN UNLABELLED CONTROL IS AN UNKNOWN CONTROL. An icon button with no
+  /* AN UNLABELED CONTROL IS AN UNKNOWN CONTROL. An icon button with no
      accessible name could be a refresh or a delete, and there is no way to
      tell from here. That it cannot be identified is itself a finding worth
      reporting, not a reason to try it. */
@@ -206,10 +206,10 @@ export function mayClick(candidate: ClickCandidate): ClickVerdict {
     return { allowed: true, because: `"${said}" reads as moving around rather than changing` };
   }
 
-  /* THE DEFAULT, AND THE POINT OF THE FILE. Everything unrecognised is
+  /* THE DEFAULT, AND THE POINT OF THE FILE. Everything unrecognized is
      refused. A smaller map is a cost we can absorb; a client's form going out
      because a button was ambiguous is not. */
-  return { allowed: false, because: "unrecognised control, and the default is to leave it alone" };
+  return { allowed: false, because: "unrecognized control, and the default is to leave it alone" };
 }
 
 /** Split a set of candidates, so a caller can report what it declined and why. */

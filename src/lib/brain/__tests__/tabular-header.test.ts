@@ -25,7 +25,7 @@ import {
 
 const SURVEY_HEADER = "Assessment Name,User ID,Class,Location,Prompt,Response";
 
-describe("recognising a table", () => {
+describe("recognizing a table", () => {
   it("reads the sheet and header a spreadsheet export opens with", () => {
     const ctx = readTableContext(`Sheet: Evaluation Responses\n${SURVEY_HEADER}\nrow,data,here,Conrad,q,a`)!;
     expect(ctx.sheet).toBe("Evaluation Responses");

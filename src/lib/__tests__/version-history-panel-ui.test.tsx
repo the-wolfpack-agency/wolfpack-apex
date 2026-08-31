@@ -28,7 +28,7 @@ import type { SiteBrief } from "@/lib/sites-schema";
 // Mock fetchWithRefresh directly — replacing global.fetch doesn't
 // always reach module-captured references across jest module reloads,
 // which was the cause of the panel's entries failing to render in
-// these tests despite identical production behaviour.
+// these tests despite identical production behavior.
 const fetchWithRefreshMock = jest.fn();
 jest.mock("@/lib/client-auth", () => ({
   fetchWithRefresh: (...args: unknown[]) => fetchWithRefreshMock(...args),

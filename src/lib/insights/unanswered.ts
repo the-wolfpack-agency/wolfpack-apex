@@ -1,5 +1,5 @@
 /**
- * The questions an organisation asks that none of its connected systems can
+ * The questions an organization asks that none of its connected systems can
  * answer.
  *
  * WHY THIS IS THE ONE WORTH BUILDING. It needs both halves and almost nobody
@@ -108,7 +108,7 @@ export function isSyntheticQuery(query: string): boolean {
  *
  * Pattern-matched on the question rather than routed through the assistant,
  * because a gap report runs over months of history and cannot re-run the
- * router for every row. Deliberately conservative: anything unrecognised is
+ * router for every row. Deliberately conservative: anything unrecognized is
  * attributed to documents, which is where an unclassifiable question would in
  * fact have been looked for.
  */

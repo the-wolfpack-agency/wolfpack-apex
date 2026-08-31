@@ -6,7 +6,7 @@
  * is the switch that decides whether somebody can sign in. The assertions that
  * matter are the refusals.
  *
- * Locked behaviours:
+ * Locked behaviors:
  *   - 403 without settings.manage_team (HR can see the roster, not change it)
  *   - 400 on a body that is not { active: boolean }
  *   - 400 refusing to remove your own access

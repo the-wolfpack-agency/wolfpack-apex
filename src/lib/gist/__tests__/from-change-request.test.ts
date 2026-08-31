@@ -8,7 +8,7 @@
  * labels are the scarce input for everything the gist wants to do.
  *
  * WE DO NOT KNOW THEIR SCHEMA. Every forms system is configured per
- * organisation, so this detects candidate columns and shows what it detected,
+ * organization, so this detects candidate columns and shows what it detected,
  * rather than guessing silently and producing a confident number from the
  * wrong column.
  */
@@ -40,7 +40,7 @@ describe("finding the columns without being told", () => {
   /* Says NOT FOUND rather than picking something plausible: a status read from
      the wrong column produces a confident and entirely wrong answer. */
   it("reports nothing rather than guessing when no column fits", () => {
-    expect(detectColumns(["Colour", "Height", "Weight"]).status).toBeNull();
+    expect(detectColumns(["Color", "Height", "Weight"]).status).toBeNull();
   });
 });
 
@@ -56,7 +56,7 @@ describe("mapping a status to an ending", () => {
     ["Pending", "pending"],
     ["In Review", "pending"],
   ])("reads %s as %s", (status, ending) => {
-    expect(endingFromStatus(status)).toEqual({ ending, recognised: true });
+    expect(endingFromStatus(status)).toEqual({ ending, recognized: true });
   });
 
   /* MATCHED WHOLE, NOT PARTIAL. "Approval Pending" contains "approv" and is
@@ -65,13 +65,13 @@ describe("mapping a status to an ending", () => {
     expect(endingFromStatus("Approval Pending").ending).not.toBe("accepted");
   });
 
-  /* AN UNRECOGNISED STATUS IS ANNOUNCED, never quietly bucketed. Four of the
+  /* AN UNRECOGNIZED STATUS IS ANNOUNCED, never quietly bucketed. Four of the
      product's own answer sources spent weeks collapsing into "other" and
      nothing said so. */
   it("flags a status it does not know", () => {
     expect(endingFromStatus("Escalated to Legal")).toEqual({
       ending: "unknown",
-      recognised: false,
+      recognized: false,
     });
   });
 });

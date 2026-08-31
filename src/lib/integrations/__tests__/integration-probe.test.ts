@@ -7,7 +7,7 @@
  * getValidToken returned null for everybody; the failures were that one
  * missing credential, the successes were reads from the Postgres cache, and
  * one "crash" was the probe's own summarizer calling .slice on an error shape
- * it did not recognise.
+ * it did not recognize.
  *
  * Nobody would have known. The table looked exactly like a real result, and
  * acting on it would have meant debugging healthy integrations and telling a

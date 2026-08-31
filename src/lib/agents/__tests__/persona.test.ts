@@ -27,9 +27,9 @@ describe("the avatar identifies, it does not endorse", () => {
     expect(hueFor("agent-1")).not.toBe(hueFor("agent-2"));
   });
 
-  it("never lands in the red band, which is reserved for misbehaviour", () => {
+  it("never lands in the red band, which is reserved for misbehavior", () => {
     // A red agent must be red because it did something, not because its id
-    // hashed that way. Otherwise the colour stops carrying meaning at exactly
+    // hashed that way. Otherwise the color stops carrying meaning at exactly
     // the moment it matters.
     for (let i = 0; i < 500; i++) {
       const hue = hueFor(`agent-${i}`);
@@ -117,7 +117,7 @@ describe("the trust line never over-reads an absence of evidence", () => {
     expect(t.headline).toMatch(/Stayed inside its limits across 12 tasks/);
   });
 
-  it("leads with misbehaviour over everything else", () => {
+  it("leads with misbehavior over everything else", () => {
     // Including over a proven boundary: the boundary held and it still probed.
     const t = trustLine({ state: "active", runs: 40, standing: "attention", boundaryProven: true });
     expect(t.tone).toBe("attention");

@@ -23,12 +23,12 @@ interface Step {
 }
 
 /* The chain being argued against. Deliberately concrete: "weeks later" and
-   "nobody tells the client" are the two parts everyone recognises. */
+   "nobody tells the client" are the two parts everyone recognizes. */
 const TRADITIONAL: Step[] = [
   { who: "Client", what: "Hits something confusing", cost: "Describes it from memory, later" },
   { who: "CS manager", what: "Takes the call, writes it up", cost: "Context becomes prose" },
   { who: "Ticket queue", what: "Waits to be triaged", cost: "Days" },
-  { who: "Product", what: "Prioritises against everything else", cost: "Detail drops out" },
+  { who: "Product", what: "Prioritizes against everything else", cost: "Detail drops out" },
   { who: "Engineering", what: "Fixes it, weeks later", cost: "Nobody tells the client" },
 ];
 
@@ -145,7 +145,7 @@ export default function CustomerSuccessLoop() {
       <section
         className="csl-panel"
         role="img"
-        aria-label="The traditional path: a client hits something confusing and describes it later from memory; a customer success manager writes it up, turning context into prose; it waits in a ticket queue for days; product prioritises it against everything else and detail drops out; engineering fixes it weeks later and nobody tells the client."
+        aria-label="The traditional path: a client hits something confusing and describes it later from memory; a customer success manager writes it up, turning context into prose; it waits in a ticket queue for days; product prioritizes it against everything else and detail drops out; engineering fixes it weeks later and nobody tells the client."
       >
         <p className="csl-title">The traditional path</p>
         <p className="csl-sub">
@@ -169,7 +169,7 @@ export default function CustomerSuccessLoop() {
       <section
         className="csl-panel"
         role="img"
-        aria-label="The closed loop: the client reports inside the product with their identity, organisation and screen already attached; it lands in one queue the builder reads as sent, with no re-typing; the builder can open the client's workspace to see exactly what they see, bounded and recorded; the change ships and the client sees it, which makes reporting worth doing again."
+        aria-label="The closed loop: the client reports inside the product with their identity, organization and screen already attached; it lands in one queue the builder reads as sent, with no re-typing; the builder can open the client's workspace to see exactly what they see, bounded and recorded; the change ships and the client sees it, which makes reporting worth doing again."
       >
         <p className="csl-title">The closed loop</p>
         <p className="csl-sub">The report and the fix live in the same system, so there is nothing to hand off.</p>

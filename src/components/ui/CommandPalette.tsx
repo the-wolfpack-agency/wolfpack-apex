@@ -143,7 +143,7 @@ export default function CommandPalette({ role, email }: Props) {
     <div
       role="dialog"
       aria-modal="true"
-      aria-labelledby={`${id}-label`}
+      aria-labeledby={`${id}-label`}
       data-testid="command-palette"
       className="fixed inset-0 z-50 flex items-start justify-center px-4 pt-[12vh]"
       style={{ background: "rgba(0,0,0,0.55)" }}

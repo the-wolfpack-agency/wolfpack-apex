@@ -15,7 +15,7 @@
  * client reads.
  *
  * Follows the profile store exactly in everything that is genuinely shared:
- * upsert per target, scalars denormalised for listing, and safeQuery so a
+ * upsert per target, scalars denormalized for listing, and safeQuery so a
  * transient store problem never fails the walk that produced the map.
  */
 
@@ -32,7 +32,7 @@ export interface WalkedMapRow {
   /** Non-zero means the map is INCOMPLETE and every claim inherits that. */
   frontierRemaining: number;
   stopReason: string | null;
-  authorisedBy: string;
+  authorizedBy: string;
   generatedAt: string;
 }
 
@@ -45,7 +45,7 @@ interface DbRow {
   form_count: number;
   frontier_remaining: number;
   stop_reason: string | null;
-  authorised_by: string;
+  authorized_by: string;
   generated_at: string | Date;
 }
 
@@ -59,7 +59,7 @@ function toRow(r: DbRow): WalkedMapRow {
     formCount: Number(r.form_count) || 0,
     frontierRemaining: Number(r.frontier_remaining) || 0,
     stopReason: r.stop_reason ?? null,
-    authorisedBy: String(r.authorised_by),
+    authorizedBy: String(r.authorized_by),
     generatedAt:
       r.generated_at instanceof Date ? r.generated_at.toISOString() : String(r.generated_at),
   };
@@ -68,17 +68,17 @@ function toRow(r: DbRow): WalkedMapRow {
 /**
  * Store a walk.
  *
- * authorisedBy is required and not defaulted. It is the record that walking
+ * authorizedBy is required and not defaulted. It is the record that walking
  * somebody else's system was permitted, which outlives the map itself, and a
- * default value would quietly make every scan look authorised.
+ * default value would quietly make every scan look authorized.
  */
 export async function saveWalkedMap(
   workspaceId: string,
   map: SystemMap,
-  authorisedBy: string,
+  authorizedBy: string,
 ): Promise<void> {
-  if (!authorisedBy.trim()) {
-    throw new Error("saveWalkedMap needs who authorised the walk");
+  if (!authorizedBy.trim()) {
+    throw new Error("saveWalkedMap needs who authorized the walk");
   }
   /* Counted here rather than trusted from a caller, so the listing figures and
      the document can never disagree. */
@@ -87,7 +87,7 @@ export async function saveWalkedMap(
   await writeQuery(
     `INSERT INTO instinct_walked_system_maps
        (workspace_id, platform, entry_url, map, surface_count, entity_count, form_count,
-        frontier_remaining, stop_reason, authorised_by, generated_at)
+        frontier_remaining, stop_reason, authorized_by, generated_at)
      VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9, $10, NOW())
      ON CONFLICT (workspace_id, entry_url) DO UPDATE SET
        platform = EXCLUDED.platform,
@@ -97,7 +97,7 @@ export async function saveWalkedMap(
        form_count = EXCLUDED.form_count,
        frontier_remaining = EXCLUDED.frontier_remaining,
        stop_reason = EXCLUDED.stop_reason,
-       authorised_by = EXCLUDED.authorised_by,
+       authorized_by = EXCLUDED.authorized_by,
        generated_at = NOW()`,
     [
       workspaceId,
@@ -109,7 +109,7 @@ export async function saveWalkedMap(
       formCount,
       map.coverage.frontierRemaining,
       map.coverage.stopReason,
-      authorisedBy.trim(),
+      authorizedBy.trim(),
     ],
   );
 }
@@ -132,7 +132,7 @@ export async function saveWalkedMap(
 export async function listWalkedMaps(workspaceId: string): Promise<WalkedMapRow[]> {
   const { rows } = await safeQuery<DbRow>(
     `SELECT platform, entry_url, map, surface_count, entity_count, form_count,
-            frontier_remaining, stop_reason, authorised_by, generated_at
+            frontier_remaining, stop_reason, authorized_by, generated_at
        FROM instinct_walked_system_maps
       WHERE workspace_id = $1
       ORDER BY generated_at DESC`,
@@ -147,7 +147,7 @@ export async function getWalkedMap(
 ): Promise<WalkedMapRow | null> {
   const { rows } = await safeQuery<DbRow>(
     `SELECT platform, entry_url, map, surface_count, entity_count, form_count,
-            frontier_remaining, stop_reason, authorised_by, generated_at
+            frontier_remaining, stop_reason, authorized_by, generated_at
        FROM instinct_walked_system_maps
       WHERE workspace_id = $1 AND entry_url = $2
       LIMIT 1`,

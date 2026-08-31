@@ -14,15 +14,15 @@ import {
   parseSummaryReply,
   summaryChunkText,
   buildSummaryPrompt,
-  summariseDocument,
+  summarizeDocument,
 } from "../enrich";
 
 describe("reading the model's reply", () => {
   it("takes the summary and the topics", () => {
     const out = parseSummaryReply(
-      "SUMMARY: Brand Ambassador training, day three of a five day programme for Porsche Center staff.\nTOPICS: brand ambassador, training, porsche center, day three",
+      "SUMMARY: Brand Ambassador training, day three of a five day program for Porsche Center staff.\nTOPICS: brand ambassador, training, porsche center, day three",
     );
-    expect(out.summary).toContain("day three of a five day programme");
+    expect(out.summary).toContain("day three of a five day program");
     expect(out.topics).toEqual([
       "brand ambassador",
       "training",
@@ -91,7 +91,7 @@ describe("a document that tries to give instructions", () => {
 
 describe("when the model cannot be reached", () => {
   it("returns nothing rather than failing the ingest", async () => {
-    const out = await summariseDocument("x.pdf", "some text", async () => {
+    const out = await summarizeDocument("x.pdf", "some text", async () => {
       throw new Error("provider down");
     });
     expect(out).toEqual({ summary: "", topics: [] });
@@ -99,7 +99,7 @@ describe("when the model cannot be reached", () => {
 
   it("does not spend a call on an empty document", async () => {
     const complete = jest.fn();
-    const out = await summariseDocument("x.pdf", "   ", complete);
+    const out = await summarizeDocument("x.pdf", "   ", complete);
     expect(complete).not.toHaveBeenCalled();
     expect(out.summary).toBe("");
   });

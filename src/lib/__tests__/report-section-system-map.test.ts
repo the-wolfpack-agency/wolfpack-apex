@@ -76,7 +76,7 @@ it("degrades to the empty-state line on a store error (never throws)", async () 
 
 /**
  * Systems learned by WALKING them, which is a different kind of knowledge from
- * reading a repository and is labelled as such in a document a client reads.
+ * reading a repository and is labeled as such in a document a client reads.
  */
 describe("walked systems in the System Map", () => {
   const walkedRow = (over: Record<string, unknown> = {}) => ({
@@ -87,7 +87,7 @@ describe("walked systems in the System Map", () => {
     formCount: 13,
     frontierRemaining: 0,
     stopReason: "frontier-exhausted",
-    authorisedBy: "CTO, Acme",
+    authorizedBy: "CTO, Acme",
     generatedAt: "2026-08-30T00:00:00.000Z",
     map: {
       platform: "cognito-forms",
@@ -169,7 +169,7 @@ describe("walked systems in the System Map", () => {
 
   /* Walking somebody else's system is a permitted act, and the record that it
      was permitted belongs in the deliverable. */
-  it("names who authorised the walk", async () => {
+  it("names who authorized the walk", async () => {
     mockListSystemProfiles.mockResolvedValue([]);
     mockListWalkedMaps.mockResolvedValue([walkedRow()]);
     expect(await genSystemMap(ctx)).toContain("CTO, Acme");
@@ -193,7 +193,7 @@ describe("walked systems in the System Map", () => {
 });
 
 /**
- * Where data leaves the organisation, in the document a client reads.
+ * Where data leaves the organization, in the document a client reads.
  */
 describe("outside services in the System Map", () => {
   const walkedRow = (over: Record<string, unknown> = {}) => ({
@@ -204,7 +204,7 @@ describe("outside services in the System Map", () => {
     formCount: 1,
     frontierRemaining: 0,
     stopReason: "frontier-exhausted",
-    authorisedBy: "CTO, Acme",
+    authorizedBy: "CTO, Acme",
     generatedAt: "2026-08-30T00:00:00.000Z",
     map: {
       platform: "cognito-forms",
@@ -237,12 +237,12 @@ describe("outside services in the System Map", () => {
 
   /* A host nobody could name is a prompt to ask, and a blank cell reads as
      nothing to see. */
-  it("shows an unrecognised host as unrecognised rather than blank", async () => {
+  it("shows an unrecognized host as unrecognized rather than blank", async () => {
     mockListSystemProfiles.mockResolvedValue([]);
     mockListWalkedMaps.mockResolvedValue([walkedRow()]);
     const md = await genSystemMap(ctx);
     expect(md).toContain("telemetry.unknown.example");
-    expect(md).toMatch(/_unrecognised_/);
+    expect(md).toMatch(/_unrecognized_/);
   });
 
   it("omits the table entirely when nothing was contacted", async () => {

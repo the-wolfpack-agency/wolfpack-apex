@@ -382,7 +382,7 @@ describe("what the same work costs elsewhere", () => {
   /* THE ASSUMPTION HAS TO BE ON THE PAGE, not just in the code comment. Holding
      the token count fixed and changing only the price is the only comparison
      our own data supports, and presenting it as a forecast of another
-     product's bill would be a guess about their behaviour. */
+     product's bill would be a guess about their behavior. */
   it("states its own assumption and dates its prices", async () => {
     respond({ ...base, tokenUsage });
     render(<PilotPage />);

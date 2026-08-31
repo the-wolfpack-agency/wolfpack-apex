@@ -9,12 +9,12 @@
  * probe that asked for real content failed on a page that rendered fine a
  * second later.
  *
- * Fixing probePath is not enough on its own. The fix is a timing behaviour,
- * and timing behaviour is exactly what quietly regresses: somebody swaps the
+ * Fixing probePath is not enough on its own. The fix is a timing behavior,
+ * and timing behavior is exactly what quietly regresses: somebody swaps the
  * poll back for a single read, every probe still passes against a fast local
  * server, and nobody learns otherwise until production is slow.
  *
- * So these two cases pin the behaviour against a server whose timing we
+ * So these two cases pin the behavior against a server whose timing we
  * control. Neither needs credentials, a deployment, or a network.
  */
 import { test, expect } from "@playwright/test";

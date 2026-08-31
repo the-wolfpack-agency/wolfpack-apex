@@ -1,5 +1,5 @@
 /**
- * meeting-prep-sources — fan-out behaviour, degraded-source handling,
+ * meeting-prep-sources — fan-out behavior, degraded-source handling,
  * deterministic hash. Every retriever is mocked so the test never
  * crosses a network boundary.
  */

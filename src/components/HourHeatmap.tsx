@@ -17,7 +17,7 @@ export function HourHeatmap({
   /** Singular noun for the cell tooltip ("scan", "view"). */
   unitLabel?: string;
 }) {
-  /* Normalise to 24 buckets so missing hours show empty cells. */
+  /* Normalize to 24 buckets so missing hours show empty cells. */
   const buckets: number[] = Array.from({ length: 24 }, () => 0);
   for (const d of data) {
     if (Number.isFinite(d.hour) && d.hour >= 0 && d.hour < 24) {

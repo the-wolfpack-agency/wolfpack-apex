@@ -549,7 +549,7 @@ export async function listObservationsForSubject(
      historical id (e.g. survivor of a dedup migration that's not the
      same as the JWT-minted canonical id). When opts.email is omitted
      the function falls back to the single-id query — preserving
-     today's behaviour for callers that don't pass email. */
+     today's behavior for callers that don't pass email. */
   const ids: string[] = [subjectUserId];
   if (opts.email) {
     try {

@@ -139,8 +139,8 @@ describe("the adjustable surface itself", () => {
     }
   });
 
-  it("covers only layout and type, never colour or content", () => {
-    // Colour is brand and content is voice. Both are proposal-and-accept, not
+  it("covers only layout and type, never color or content", () => {
+    // Color is brand and content is voice. Both are proposal-and-accept, not
     // things a prompted edit applies on its own.
     const names = Object.keys(ADJUSTABLE);
     expect(names.some((n) => /colou?r|background|content|text/i.test(n))).toBe(false);

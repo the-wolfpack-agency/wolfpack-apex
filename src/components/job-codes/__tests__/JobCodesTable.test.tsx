@@ -216,7 +216,7 @@ describe("<JobCodesTable />", () => {
     );
     expect(patchCall).toBeDefined();
     const body = JSON.parse((patchCall![1] as { body: string }).body);
-    /* The body now also carries `expected_value` for the optimistic-
+    /* The body now also carries `expected_value` for the optimiztic-
        concurrency gate added in 2026-05-21 (the cell's mounted value
        was "OLD"). */
     expect(body).toEqual({ column: "D", value: "Phase 2", expected_value: "OLD" });

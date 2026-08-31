@@ -27,7 +27,7 @@ import {
   type ExecutableTask,
 } from "@/lib/agents/tasks/executor";
 
-/* Containment gate: these suites exercise the executor's own behaviour, not the
+/* Containment gate: these suites exercise the executor's own behavior, not the
    stop or the budget, so they declare an enabled workspace with a fresh ledger.
    Saying it out loud beats a gate that silently does not apply — the executor
    fails closed by design, and a suite that did not opt in would be testing the
@@ -951,7 +951,7 @@ describe("familiarityScore", () => {
   });
 });
 
-describe("the behaviour eval actually fires", () => {
+describe("the behavior eval actually fires", () => {
   // metaFor() returns the FIRST matching call, so without this each test reads
   // the previous test's event and quietly asserts against the wrong run. The
   // two blocks above already do this for the same reason.

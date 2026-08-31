@@ -21,7 +21,7 @@
  * So this emits candidates with `reviewed: false`. A pair earns its place by
  * somebody reading it, which is cheap per pair and is the only step that turns
  * usage into ground truth. The eval runner is free to weight or skip unreviewed
- * pairs; what it must not do is pretend they are labelled.
+ * pairs; what it must not do is pretend they are labeled.
  *
  * Usage:
  *   npx tsx scripts/harvest-eval-pairs.ts > candidates.json

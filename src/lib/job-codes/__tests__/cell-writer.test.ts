@@ -283,7 +283,7 @@ describe("patchJobCodeCell — Graph error mapping", () => {
   });
 });
 
-describe("patchJobCodeCell — optimistic concurrency + idempotency", () => {
+describe("patchJobCodeCell — optimiztic concurrency + idempotency", () => {
   /* The shared usedRange body: WOLFPACK-AUTO at row 3 with
      Program="HOXSIE-VALUE" (someone else's write between snapshot
      and submit). */

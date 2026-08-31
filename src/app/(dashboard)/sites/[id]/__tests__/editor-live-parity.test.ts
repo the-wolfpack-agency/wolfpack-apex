@@ -3,7 +3,7 @@
  *
  * Editor-vs-live parity — end-to-end decision contract.
  *
- * Asserts the composite behaviour across the editor URL selector and the
+ * Asserts the composite behavior across the editor URL selector and the
  * preview page's `selectPreviewSource`: for a non-dirty draft with a
  * deployed preview_url, both surfaces settle on the same "deployed"
  * render path, which means the iframe in /sites/[id]/edit shows exactly

@@ -5,7 +5,7 @@
  * answers "has it changed". A provider can update a model under a stable name,
  * a prompt edit can move every answer at once, a price can change, and a
  * latency can double, and each of those is invisible to a suite that asserts
- * behaviour rather than remembering it.
+ * behavior rather than remembering it.
  *
  * That is the gap against the tools that sell continuous evaluation: not that
  * they test better, but that they test AGAIN and tell you what moved. A
@@ -31,7 +31,7 @@
  *   npx tsx scripts/model-drift.ts --pin deepseek   # a configured provider
  *
  * Baseline: demo/model-drift-baseline.json, committed on purpose so a change
- * in model behaviour shows up in a diff somebody reviews.
+ * in model behavior shows up in a diff somebody reviews.
  */
 /* FIRST. Imports hoist, so anything below already read process.env. */
 import "./load-env";
@@ -48,8 +48,8 @@ const BASELINE = join(process.cwd(), "demo", "model-drift-baseline.json");
 const PROMPTS = [
   "Reply with exactly the word: ready",
   "What is 17 multiplied by 23? Reply with only the number.",
-  "List three primary colours, comma separated, nothing else.",
-  "Summarise in one sentence: a dealer reported that two demo vehicles were double-booked for the same weekend.",
+  "List three primary colors, comma separated, nothing else.",
+  "Summarize in one sentence: a dealer reported that two demo vehicles were double-booked for the same weekend.",
   "A customer asks whether their warranty covers a cracked windscreen. Answer in one sentence without promising anything.",
 ];
 

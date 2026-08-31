@@ -7,7 +7,7 @@
 jest.mock("@/lib/analytics", () => ({ trackEvent: jest.fn() }));
 jest.mock("@/lib/platform-scan/ssrf-guard", () => ({ assertScannableUrl: jest.fn(async () => undefined) }));
 // The mock mirrors the module's real exports. An incomplete module mock is the
-// same failure as an incomplete fetch fake: the double stops modelling the
+// same failure as an incomplete fetch fake: the double stops modeling the
 // thing it doubles, and the code is then tested against a fiction.
 jest.mock("@/lib/spec-diff/browser", () => ({
   createSpecDiffBrowser: jest.fn(),

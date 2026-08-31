@@ -62,7 +62,7 @@ export interface Evidence {
   ageDays: number | null;
 }
 
-/** ACTIVE, STALE and UNPROVEN, and the boundary is a judgement worth naming. */
+/** ACTIVE, STALE and UNPROVEN, and the boundary is a judgment worth naming. */
 export function verdict(e: Evidence): "active" | "stale" | "unproven" {
   if (e.events === 0 || e.ageDays === null) return "unproven";
   /* A fortnight. Long enough to survive a quiet week, short enough that

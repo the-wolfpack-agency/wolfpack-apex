@@ -125,7 +125,7 @@ export type AssistantSource =
   | "brain"
   | "tool"
   | "ai"
-  /* A message the organisation sent to everybody, not an answer the assistant
+  /* A message the organization sent to everybody, not an answer the assistant
      produced. Kept as its own source precisely so it can never be treated as
      one: see broadcast.ts for why that distinction is load-bearing. */
   | "broadcast"
@@ -447,7 +447,7 @@ async function findOrgQACacheHit(
           AND u.created_at > NOW() - ($2::bigint || ' milliseconds')::interval
           AND a.source IS DISTINCT FROM 'fallback'
           /* A BROADCAST IS NOT AN ANSWER. An announcement written into every
-             person's assistant is a message the organisation sent, not
+             person's assistant is a message the organization sent, not
              something the product worked out, and replaying it to whoever asks
              a vaguely similar question weeks later is how "submit expenses by
              Friday" becomes this company's standing answer about expenses.
@@ -471,7 +471,7 @@ async function findOrgQACacheHit(
              ABSENT METADATA COUNTS AS UNGROUNDED. Entries written before this
              column existed cannot be shown to have stood on anything, and the
              honest reading of "we cannot tell" for an answer served to the
-             whole organisation is not to serve it. That empties the existing
+             whole organization is not to serve it. That empties the existing
              cache, which is the point: it is currently full of answers nobody
              checked. */
           AND COALESCE((a.metadata->>'grounded')::int, 0) > 0
@@ -550,7 +550,7 @@ async function findOrgQACacheHit(
           AND u.created_at > NOW() - ($1::bigint || ' milliseconds')::interval
           AND a.source IS DISTINCT FROM 'fallback'
           /* A BROADCAST IS NOT AN ANSWER. An announcement written into every
-             person's assistant is a message the organisation sent, not
+             person's assistant is a message the organization sent, not
              something the product worked out, and replaying it to whoever asks
              a vaguely similar question weeks later is how "submit expenses by
              Friday" becomes this company's standing answer about expenses.
@@ -1099,13 +1099,13 @@ async function chatInner(
    * command would be swallowed by whichever tool matched first, and the person
    * would get a calendar instead of their morning.
    *
-   * The match is exact (see catalogue.matchRoutine): a five-step chain that
+   * The match is exact (see catalog.matchRoutine): a five-step chain that
    * fires at somebody who was asking a question is much worse than one that
-   * failed to recognise its own name.
+   * failed to recognize its own name.
    *
    * A routine costs no model tokens unless one of its own steps is a model
    * step -- the point of the feature is that it operates the tools you already
-   * have from one place, and asks a model only where judgement is required. */
+   * have from one place, and asks a model only where judgment is required. */
   /* ONE CONTEXT, BOTH PATHS. A routine dispatches the same tools a message
      does, and building the context twice is how the two quietly come to
      disagree about which workspace the caller is in. */
@@ -1368,7 +1368,7 @@ async function chatInner(
    * an unfinished setup step, and contradicts the answer the task tool gives
    * for the same underlying cause in the same minute.
    *
-   * Degrades to the old behaviour on any error: an unreachable token store
+   * Degrades to the old behavior on any error: an unreachable token store
    * must not cost somebody their answer, so it falls through to the model
    * exactly as before. */
   try {
@@ -1410,7 +1410,7 @@ async function chatInner(
      right when the question stands alone, and all of them are wrong when the
      user has just attached a file and asked about it.
      
-     This is what produced the reported behaviour. "look at the screen shot"
+     This is what produced the reported behavior. "look at the screen shot"
      with a screenshot attached was answered from three OLDER screenshots the
      brain had indexed, and a message about adding a show-password toggle came
      back as a list of 22 CRM contacts. The turn never reached the model with
@@ -2860,9 +2860,9 @@ async function tryBrain(
      * query expansion shipped unproven: its trigger is a judge rejection and
      * the harness never judged.
      *
-     * No judge and no expander passed here, so behaviour is byte-for-byte what
+     * No judge and no expander passed here, so behavior is byte-for-byte what
      * it was: retrieve() with neither is plain retrieval. The judge still runs
-     * below, where it always has. This is the wiring, not the behaviour
+     * below, where it always has. This is the wiring, not the behavior
      * change, and the two are worth keeping separate. */
     const { execution: result } = await retrieve({
       userId,
@@ -3078,7 +3078,7 @@ async function tryBrain(
      * Measured 2026-08-30: "how much do we owe upfront?" quoted a chauffeur
      * invoice, confidently, with a dollar figure. "when do we have to pay?"
      * correctly replied "the closest things I hold are... name it". Same shape
-     * of question, opposite behaviour, and the first is a wrong answer given
+     * of question, opposite behavior, and the first is a wrong answer given
      * with the product's full confidence.
      *
      * The existing guard only fires when the relevance judge REJECTS the hits.
@@ -3103,7 +3103,7 @@ async function tryBrain(
      *
      * The quote path below is the right answer to "what does the SOW say about
      * payment": the clause is in one chunk, quoting it costs nothing, shows its
-     * source and cannot invent anything. It is the wrong answer to "summarise
+     * source and cannot invent anything. It is the wrong answer to "summarize
      * the SOW", where what was asked for exists in no single chunk. Measured on
      * 2026-08-30, that question returned a filename, the words "chunk 2", and
      * 500 characters of the middle of a subscription clause. Summary-shaped,
@@ -3538,7 +3538,7 @@ async function callAI(
          reads every answer.
          The failure worth catching here is the other kind, an answer that is
          well formed and confident and wrong, or that answered half the
-         question. That is the judgement verification.ts says a rule cannot
+         question. That is the judgment verification.ts says a rule cannot
          make. Reviewing every answered question is what makes the claim true,
          and at this volume the cost is a rounding error against a bill that
          ran to 43 cents in sixty days. */

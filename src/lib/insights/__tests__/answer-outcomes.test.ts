@@ -5,7 +5,7 @@
  * the SYSTEM did. Not one describes what the PERSON did in response, and the
  * response is where frustration lives. That is why the customer-success view
  * could only say "joined and has done nothing since": it was the only
- * behavioural signal that existed.
+ * behavioral signal that existed.
  *
  * Measured on 90 days of production, 2026-08-30, through this module:
  *
@@ -23,7 +23,7 @@ import {
   isAskedWhich,
   isOutage,
   similarity,
-  summariseOutcomes,
+  summarizeOutcomes,
   MISS_PATTERNS,
 } from "@/lib/insights/answer-outcomes";
 
@@ -83,7 +83,7 @@ describe("the sentences that mean we have nothing", () => {
   });
 });
 
-describe("recognising a question asked again", () => {
+describe("recognizing a question asked again", () => {
   it("sees a rephrase even when the words move", () => {
     expect(similarity("where is the wolfpack NDA doc", "provide me with the NDA doc")).toBeGreaterThan(
       0.4,
@@ -112,7 +112,7 @@ describe("what happened after the answer", () => {
       msg("b", "user", "what is our leave policy", 0),
       msg("b", "assistant", 'No results found for "leave policy".', 1),
     ];
-    const o = summariseOutcomes(rows, 90);
+    const o = summarizeOutcomes(rows, 90);
     expect(o.misses).toBe(2);
     expect(o.deadEnds).toBe(1);
     expect(o.missesFollowedUp).toBe(1);
@@ -124,7 +124,7 @@ describe("what happened after the answer", () => {
       msg("a", "assistant", "Found 0 results.", 1),
       msg("a", "user", "collect our RubyCar marketing emails", 2),
     ];
-    const o = summariseOutcomes(rows, 90);
+    const o = summarizeOutcomes(rows, 90);
     expect(o.reAsks).toBe(1);
     expect(o.reAskConversations).toBe(1);
   });
@@ -136,7 +136,7 @@ describe("what happened after the answer", () => {
       msg("a", "user", "what are the payment terms", 0),
       msg("a", "user", "what are the payment terms", 90),
     ];
-    expect(summariseOutcomes(rows, 90).reAsks).toBe(0);
+    expect(summarizeOutcomes(rows, 90).reAsks).toBe(0);
   });
 
   it("counts a conversation with one question as single-turn", () => {
@@ -146,7 +146,7 @@ describe("what happened after the answer", () => {
       msg("b", "user", "one", 0),
       msg("b", "user", "two", 1),
     ];
-    expect(summariseOutcomes(rows, 90).singleTurnConversations).toBe(1);
+    expect(summarizeOutcomes(rows, 90).singleTurnConversations).toBe(1);
   });
 
   it("counts ratings, because a control nobody uses is worth knowing about", () => {
@@ -155,11 +155,11 @@ describe("what happened after the answer", () => {
       msg("a", "assistant", "an answer", 1, 1),
       msg("a", "assistant", "another", 2, null),
     ];
-    expect(summariseOutcomes(rows, 90).ratedAnswers).toBe(1);
+    expect(summarizeOutcomes(rows, 90).ratedAnswers).toBe(1);
   });
 
   it("reports nothing rather than crashing on an empty window", () => {
-    const o = summariseOutcomes([], 90);
+    const o = summarizeOutcomes([], 90);
     expect(o).toMatchObject({ readable: true, conversations: 0, misses: 0, deadEnds: 0 });
   });
 });
@@ -180,7 +180,7 @@ describe("the product asking which document was meant", () => {
   it.each([
     "I could not find a clear answer to that. The closest things I hold are: - **A** - **B**",
     "I could not find a clear answer. The closest thing I hold is **Invoice 941**.",
-  ])("recognises %s", (text) => {
+  ])("recognizes %s", (text) => {
     expect(isAskedWhich(text)).toBe(true);
   });
 

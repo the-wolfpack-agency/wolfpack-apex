@@ -30,7 +30,7 @@ interface Ctx {
  * cap is enough at our scale + protects against double-click bursts.
  */
 const RATE_LIMIT_WINDOW_MS = 30_000;
-const recentReanalyses = new Map<string, number>();
+const recenteranalyses = new Map<string, number>();
 
 function rateLimitKey(userId: string, messageId: string): string {
   return `${userId}:${messageId}`;
@@ -39,13 +39,13 @@ function rateLimitKey(userId: string, messageId: string): string {
 function checkRateLimit(userId: string, messageId: string): boolean {
   const key = rateLimitKey(userId, messageId);
   const now = Date.now();
-  const last = recentReanalyses.get(key);
+  const last = recenteranalyses.get(key);
   if (last && now - last < RATE_LIMIT_WINDOW_MS) return false;
-  recentReanalyses.set(key, now);
+  recenteranalyses.set(key, now);
   // Drop oldest entries if the map grows past 1000 keys.
-  if (recentReanalyses.size > 1000) {
-    const firstKey = recentReanalyses.keys().next().value;
-    if (firstKey) recentReanalyses.delete(firstKey);
+  if (recenteranalyses.size > 1000) {
+    const firstKey = recenteranalyses.keys().next().value;
+    if (firstKey) recenteranalyses.delete(firstKey);
   }
   return true;
 }
@@ -130,6 +130,6 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 /* Test exports                                                        */
 /* ------------------------------------------------------------------ */
 export const __test__ = {
-  recentReanalyses,
+  recenteranalyses,
   RATE_LIMIT_WINDOW_MS,
 };

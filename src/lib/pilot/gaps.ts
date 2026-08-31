@@ -19,7 +19,7 @@
 import { query } from "@/lib/db";
 import { getKnownNames } from "@/lib/pilot/known-names";
 import { forDisplay, type Withheld } from "@/lib/pilot/question-display";
-import { summariseWanted, type WantedSummary } from "@/lib/pilot/wanted-actions";
+import { summarizeWanted, type WantedSummary } from "@/lib/pilot/wanted-actions";
 import {
   buildGapReport,
   type AskedQuestion,
@@ -173,8 +173,8 @@ export async function getGapsSnapshot(
       wouldConnect: shapeAll(buckets[0], known),
       missing: shapeAll(buckets[1], known),
       closed: shapeAll(buckets[2], known),
-      wanted: summariseWanted(buckets[3], TOP),
-      /* The instruction bucket is excluded: its entries are summarised rather
+      wanted: summarizeWanted(buckets[3], TOP),
+      /* The instruction bucket is excluded: its entries are summarized rather
          than left out, and counting them as omissions would overstate what is
          missing from the page. */
       statements: buckets.slice(0, 3).reduce((n, b) => n + notQuestions(b, known), 0),

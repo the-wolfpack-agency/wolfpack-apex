@@ -7,7 +7,7 @@
  * trust goes. The scope list in microsoft-graph.ts is the only truth, and a
  * test fails if anything here disagrees with it.
  *
- * ORGANISED AS DECISIONS THE CLIENT MAKES, not as a list of permissions we
+ * ORGANIZED AS DECISIONS THE CLIENT MAKES, not as a list of permissions we
  * want. "Sites.Read.All" means nothing to the person who has to approve it.
  * "Do you want the assistant to search all of SharePoint, or only what each
  * person can already open" is a question they can actually answer, and the

@@ -2,7 +2,7 @@
  * Unit tests for the spec-diff orchestration, driven by a fake page so no
  * browser, network or database is involved.
  *
- * The behaviours pinned here are the ones that make the tool trustworthy: both
+ * The behaviors pinned here are the ones that make the tool trustworthy: both
  * sides are measured at the SAME viewport, the read-only floor is installed on
  * every page (a comparison must never mutate a target), and one failing viewport
  * degrades instead of destroying the run.

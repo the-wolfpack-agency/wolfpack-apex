@@ -48,7 +48,7 @@ import { mapWithConcurrency } from "@/lib/search/providers/util";
 import {
   gradeRetrieval,
   describeEval,
-  type LabelledPair,
+  type LabeledPair,
   type RankedResult,
 } from "@/lib/brain/retrieval-eval";
 
@@ -72,9 +72,9 @@ async function main(): Promise<void> {
     process.exit(2);
   }
 
-  const pairs = JSON.parse(readFileSync(path, "utf8")) as LabelledPair[];
+  const pairs = JSON.parse(readFileSync(path, "utf8")) as LabeledPair[];
   if (!Array.isArray(pairs) || pairs.length === 0) {
-    console.error("No labelled pairs. An empty eval set scores zero, not perfect.");
+    console.error("No labeled pairs. An empty eval set scores zero, not perfect.");
     process.exit(2);
   }
 

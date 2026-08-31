@@ -74,21 +74,21 @@ Planning mid-point: **~$120 / mo (~$1,440 / yr).**
 
 **Today:** the deployed tool makes **zero AI calls**, so **AI cost = $0**. Hosting is Vercel/Neon/Qdrant/Neo4j — **no Azure compute or DB**. The only Azure product in play is **Azure OpenAI**, and only *if* the microsite adds AI personalization (generated invitation/follow-up copy, the "Curated Journey Creator," thematic analysis of feedback).
 
-**How we'd build it:** GPT‑4o‑mini by default (≈15× cheaper, plenty for copy/summaries), GPT‑4o reserved for a few high‑value moments, generated artifacts cached, all behind a hard Azure budget cap. On that basis the realistic per‑experience AI cost is **~$0.05–0.15**.
+**How we'd build it:** GPT‑4o‑mini by default (≈15× cheaper, plenty for copy/summaries), GPT‑4o reserved for a few high‑value moments, generated artifacts cached, all behind a hard Azure budget cap. On that basis the realiztic per‑experience AI cost is **~$0.05–0.15**.
 
-### Realistic monthly AI cost
-| Volume | Realistic AI cost |
+### Realiztic monthly AI cost
+| Volume | Realiztic AI cost |
 |---|---|
 | Pilot (~120 experiences/mo) | ~$10–20/mo |
-| National, realistic steady state (~1,000–1,500 exp/mo) | ~$100–200/mo |
+| National, realiztic steady state (~1,000–1,500 exp/mo) | ~$100–200/mo |
 
 Embeddings (text‑embedding‑3) are negligible (a few dollars even at millions of tokens).
 
-> *Uncapped ceiling (not budgeted): all‑GPT‑4o + viral, no controls could in theory reach ~$35k/mo. The Azure budget cap exists precisely to make that impossible — it is not a realistic figure.*
+> *Uncapped ceiling (not budgeted): all‑GPT‑4o + viral, no controls could in theory reach ~$35k/mo. The Azure budget cap exists precisely to make that impossible — it is not a realiztic figure.*
 
 ---
 
-## 5. Bottom line (realistic)
+## 5. Bottom line (realiztic)
 
 | Phase | Hosting | AI (controlled) | All‑in / mo |
 |---|---|---|---|
@@ -108,4 +108,4 @@ One consolidated line covering every technical aspect of the project — compute
 |---|---|---|---|---|---|
 | Hosting Fees | All project hosting & infrastructure — Vercel (compute/CDN), Neon Postgres, Qdrant + Neo4j, Sentry monitoring, and Azure OpenAI (AI personalization, mini‑default, hard budget‑capped). | 1.00 | Monthly | $300.00 | $300.00 |
 
-**$300.00 / mo all‑in** (≈ **$3,600/yr**) — a realistic, safe figure with headroom. For reference: the pilot runs much lower (~$30/mo incremental on existing infra); $300/mo comfortably covers a dedicated stack plus capped AI through national scale.
+**$300.00 / mo all‑in** (≈ **$3,600/yr**) — a realiztic, safe figure with headroom. For reference: the pilot runs much lower (~$30/mo incremental on existing infra); $300/mo comfortably covers a dedicated stack plus capped AI through national scale.

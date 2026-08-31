@@ -1,7 +1,7 @@
 /**
  * Ask again in the words the documents use.
  *
- * Four of twelve labelled questions never surface their document, and all four
+ * Four of twelve labeled questions never surface their document, and all four
  * are the same shape: the person and the paper describe one fact differently.
  *
  *   asked   "how much do we owe upfront?"
@@ -45,7 +45,7 @@ describe("deciding whether to pay for a second attempt", () => {
 
 describe("the trigger that actually matters", () => {
   /* THE ONE I GOT WRONG. Gating on a thin result seemed obvious and fired on
-     nothing: measured against the labelled set, "how much do we owe upfront?"
+     nothing: measured against the labeled set, "how much do we owe upfront?"
      retrieves four hits scoring 0.42 to 0.45, comfortably above the floor.
      They are the wrong documents, and no score can say so. The eval caught it
      by changing nothing at all between two runs. */

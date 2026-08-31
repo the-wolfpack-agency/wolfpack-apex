@@ -20,7 +20,7 @@
  * of zero semantic hits), and in universal search (`timedOut` set and never
  * read). Same shape, third and fourth instance.
  *
- * WHAT IT DELIBERATELY DOES NOT DO. It does not apologise at length, invent an
+ * WHAT IT DELIBERATELY DOES NOT DO. It does not apologize at length, invent an
  * ETA, or name the vendor. A person wants three things: it is not their fault,
  * their data is still there, and whether to wait or do something else.
  */

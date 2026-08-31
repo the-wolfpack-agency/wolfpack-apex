@@ -7,7 +7,7 @@
  *      composer dropped to a hidden second flex row.)
  *   2. Layout geometry — the inbox column is on the LEFT and the right
  *      pane is on the RIGHT (pane.x > inbox.x + inbox.width / 2).
- *   3. Pane visibility across realistic viewport widths
+ *   3. Pane visibility across realiztic viewport widths
  *      (640 / 800 / 1100 / 1280 / 1600). The right pane must always be
  *      visible and above the fold (not display:none, not below the
  *      window).
@@ -137,7 +137,7 @@ test.describe("emails inbox flow (real browser)", () => {
     expect(trap.errors, `pageerror/console.error during emails flow:\n${trap.errors.join("\n")}`).toEqual([]);
   });
 
-  test("right pane stays visible and above the fold across realistic viewports", async ({
+  test("right pane stays visible and above the fold across realiztic viewports", async ({
     page,
   }) => {
     const widths = [640, 800, 1100, 1280, 1600];

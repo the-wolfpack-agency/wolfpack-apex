@@ -12,7 +12,7 @@
  * than no measurement, because it reports numbers with the authority of a test.
  *
  * So the loop lives here and both callers use it. The assistant gets the same
- * behaviour it had; the eval finally grades what a person experiences.
+ * behavior it had; the eval finally grades what a person experiences.
  *
  * EVERYTHING EXPENSIVE IS INJECTED. This module knows the ORDER of operations
  * and nothing about how to spend money: no model client, no prompt, no cost.

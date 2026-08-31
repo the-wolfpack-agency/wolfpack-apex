@@ -9,7 +9,7 @@
  */
 import {
   compareMonths,
-  summarise,
+  summarize,
   toCents,
   formatUsd,
   monthKey,
@@ -107,7 +107,7 @@ describe("compareMonths", () => {
   });
 });
 
-describe("summarise", () => {
+describe("summarize", () => {
   const months = compareMonths(
     [
       invoiced("2026-01-01", 21.78),
@@ -121,7 +121,7 @@ describe("summarise", () => {
     /* Summing every baseline against a partial measured side would report the
        whole of January and February as saved, when the router simply was not
        running then. */
-    const s = summarise(months);
+    const s = summarize(months);
     expect(s.comparableMonths).toBe(1);
     expect(s.totalBaselineCents).toBe(toCents(108.88));
     expect(s.totalMeasuredCents).toBe(toCents(8.88));
@@ -129,7 +129,7 @@ describe("summarise", () => {
   });
 
   it("says when a total leans on an assumed rate", () => {
-    const s = summarise(
+    const s = summarize(
       compareMonths(
         [{ periodMonth: "2026-05-01", amountCents: 10888, kind: "recurring_estimate", note: null }],
         [{ periodMonth: "2026-05-01", cents: 500 }],
@@ -139,11 +139,11 @@ describe("summarise", () => {
   });
 
   it("does not claim an estimate when every comparable month is invoiced", () => {
-    expect(summarise(months).includesEstimate).toBe(false);
+    expect(summarize(months).includesEstimate).toBe(false);
   });
 
   it("totals zero, not NaN, when nothing is comparable", () => {
-    const s = summarise(compareMonths([invoiced("2026-01-01", 21.78)], []));
+    const s = summarize(compareMonths([invoiced("2026-01-01", 21.78)], []));
     expect(s.comparableMonths).toBe(0);
     expect(s.totalDifferenceCents).toBe(0);
   });

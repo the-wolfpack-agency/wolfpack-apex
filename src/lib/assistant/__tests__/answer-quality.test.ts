@@ -709,7 +709,7 @@ describe("questions about us cannot be answered from nothing", () => {
      is the regression this gate is careful not to repeat. The real remedy is
      grounding: with the library loaded, the answer comes from a document or
      says there is none. */
-  it("does not catch an invented term that names no organisation", () => {
+  it("does not catch an invented term that names no organization", () => {
     expect(gateUngroundedClaimAboutUs("what is the Zentrala protocol", 0)).toBeNull();
   });
 });

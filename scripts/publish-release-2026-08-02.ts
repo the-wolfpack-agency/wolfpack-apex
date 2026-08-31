@@ -12,7 +12,7 @@
  *
  * So the entries below are written by hand, and go through the SAME
  * createRelease() the generator uses. Reusing the write path matters more than
- * reusing the authoring step: the row shape, the upsert-on-version behaviour
+ * reusing the authoring step: the row shape, the upsert-on-version behavior
  * and the analytics all stay identical to a generated release.
  *
  * Kept in the repo rather than run as a throwaway, following the precedent of
@@ -91,7 +91,7 @@ const entries: ReleaseEntry[] = [
   {
     title: "A brief can be checked for what it left unsaid before the work starts",
     description:
-      "Most expensive back-and-forth on a task is not caused by a hard problem. It is caused by a fact the brief did not carry, and the same handful recur: where it has to work, how you would know it worked, what must not change, and what already exists that should be reused. Paste a brief on the Agent fleet page and it names which of those are missing, each with the one question that would supply it. There is no score, because a number invites optimising the number. It appends questions rather than filling in answers, because a confident wrong assumption written back in your own voice is worse than the gap. The brief itself is never stored.",
+      "Most expensive back-and-forth on a task is not caused by a hard problem. It is caused by a fact the brief did not carry, and the same handful recur: where it has to work, how you would know it worked, what must not change, and what already exists that should be reused. Paste a brief on the Agent fleet page and it names which of those are missing, each with the one question that would supply it. There is no score, because a number invites optimizing the number. It appends questions rather than filling in answers, because a confident wrong assumption written back in your own voice is worse than the gap. The brief itself is never stored.",
     how_to_use:
       "Open the Agent fleet page, paste the brief you were about to send into the box at the top, and press Review it. A brief that already names its target, its done condition and its boundary comes back with nothing to add.",
     area: AREA,

@@ -115,7 +115,7 @@ export const PROMPT_GUIDE: PromptGroup[] = [
   {
     goal: "Understand where your week is going",
     tool: "schedule_health",
-    say: ["analyse my calendar", "how much of my week is meetings", "which hours should I protect", "when am I most free"],
+    say: ["analyze my calendar", "how much of my week is meetings", "which hours should I protect", "when am I most free"],
     gives: "How much of your unbooked time is actually usable, where the back-to-back runs are, and which hours to defend.",
   },
   {

@@ -20,7 +20,7 @@
  * follow namespaces, or validate anything.
  */
 
-/** One entry from a feed, normalised across publishers. */
+/** One entry from a feed, normalized across publishers. */
 export interface FeedItem {
   title: string;
   link: string;

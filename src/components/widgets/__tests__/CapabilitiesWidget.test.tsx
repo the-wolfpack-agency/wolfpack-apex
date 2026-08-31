@@ -5,11 +5,11 @@
  *
  * WHAT THIS REPLACED. "What can you do" answered with a wall of markdown:
  * three headings, sixty-odd bullets, a closing paragraph. Every line accurate
- * and nothing findable. A person reading it does not want the catalogue, they
- * want one thing to try, and the catalogue was all they got.
+ * and nothing findable. A person reading it does not want the catalog, they
+ * want one thing to try, and the catalog was all they got.
  *
  * So the widget leads with sentences they can send, keeps whole jobs next, and
- * collapses the catalogue behind the group it belongs to. Clicking a starter
+ * collapses the catalog behind the group it belongs to. Clicking a starter
  * fills the composer rather than sending it, matching the fallback chips this
  * product already uses: somebody almost always wants to change a word, and
  * sending on their behalf takes that away.
@@ -55,9 +55,9 @@ describe("what a person sees first", () => {
     expect(starters[0].textContent).toContain("what came in overnight");
   });
 
-  /* THE CATALOGUE IS REFERENCE, NOT THE OPENING. It must be present, because
+  /* THE CATALOG IS REFERENCE, NOT THE OPENING. It must be present, because
      "can it do X" is a real question, and it must not be the first thing. */
-  it("keeps the catalogue collapsed until asked for", () => {
+  it("keeps the catalog collapsed until asked for", () => {
     render(<CapabilitiesWidget spec={spec} />);
     expect(screen.queryByTestId("capabilities-group-items")).not.toBeInTheDocument();
     expect(screen.getAllByTestId("capabilities-group-toggle")).toHaveLength(2);

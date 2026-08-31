@@ -43,7 +43,7 @@ describe("app shell top bars", () => {
 
   /* Centring is what makes an explicit height safe: without it a short child
      sits at the top of a tall bar and the fix looks worse than the bug. */
-  it.each(BARS)("$name centres its contents vertically", ({ name, marker }) => {
+  it.each(BARS)("$name centers its contents vertically", ({ name, marker }) => {
     expect(marker.exec(source)![0]).toContain("items-center");
   });
 

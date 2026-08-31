@@ -66,7 +66,7 @@ describe("AssistantSuggestionsOverlay", () => {
     expect(backdrop).toHaveAttribute("role", "dialog");
     expect(backdrop).toHaveAttribute("aria-modal", "true");
     expect(backdrop).toHaveAttribute(
-      "aria-labelledby",
+      "aria-labeledby",
       "assistant-suggestions-title",
     );
     expect(

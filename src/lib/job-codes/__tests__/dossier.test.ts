@@ -45,7 +45,7 @@ describe("buildCodeDossier", () => {
     mockQuery
       .mockResolvedValueOnce(rows([{
         code: "WOLFPACK-AUTO",
-        description: "Wolfpack Auto programme",
+        description: "Wolfpack Auto program",
         active: true,
         last_seen_at: "2026-05-21T00:00:00.000Z",
         source_web_url: "https://sp/x.xlsx",
@@ -64,7 +64,7 @@ describe("buildCodeDossier", () => {
     expect(d).not.toBeNull();
     expect(d!.header).toMatchObject({
       code: "WOLFPACK-AUTO",
-      description: "Wolfpack Auto programme",
+      description: "Wolfpack Auto program",
       active: true,
       category: "Wolfpack Auto",
       program: "Phase 2",

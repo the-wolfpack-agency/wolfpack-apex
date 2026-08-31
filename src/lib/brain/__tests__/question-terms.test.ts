@@ -19,7 +19,7 @@ describe("reducing a question to its topic", () => {
     ["what is in the contract", "contract"],
     ["what's in the SOW", "SOW"],
     ["summarize the onboarding document", "onboarding document"],
-    ["summarise our contract", "contract"],
+    ["summarize our contract", "contract"],
     ["give me a summary of the SOW", "SOW"],
     ["tell me about the viaPeople work order", "viaPeople work order"],
   ])("%s searches for %s", (question, expected) => {
@@ -44,7 +44,7 @@ describe("reducing a question to its topic", () => {
 /**
  * WHAT IT MUST NOT TOUCH. A reducer that quietly drops the subject is worse
  * than one that finds nothing: the first is wrong and looks right, the second
- * is honest. Anything unrecognised comes back exactly as it went in.
+ * is honest. Anything unrecognized comes back exactly as it went in.
  */
 describe("sentences it must leave alone", () => {
   it.each([

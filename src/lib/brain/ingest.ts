@@ -212,7 +212,7 @@ export async function ingest(req: IngestRequest): Promise<IngestResult> {
    *
    * ONE CHEAP CALL PER DOCUMENT, at ingest, never per question. Cost is
    * bounded by the size of the library rather than by how much anybody uses
-   * it, and every future question is answered better for it. Summarising at
+   * it, and every future question is answered better for it. Summarizing at
    * query time would pay again for every asking and help only that asking.
    *
    * Best-effort throughout: a model that is unavailable, over budget or
@@ -369,7 +369,7 @@ export class BrainIngestError extends Error {
  * Describe one document through the router.
  *
  * Through the router rather than a provider, so enrichment inherits redaction,
- * residency, the workspace budget ceiling and the constitution. A summariser
+ * residency, the workspace budget ceiling and the constitution. A summarizer
  * that could read a credential the assistant could not, or spend past a limit
  * the workspace has already hit, would be a hole in every one of those at
  * once.
@@ -381,8 +381,8 @@ async function describeDocument(
 ): Promise<DocumentSummary> {
   try {
     const { getAIClient } = await import("@/lib/ai");
-    const { summariseDocument } = await import("./enrich");
-    const out = await summariseDocument(req.filename, text, async (input) => {
+    const { summarizeDocument } = await import("./enrich");
+    const out = await summarizeDocument(req.filename, text, async (input) => {
       const res = await getAIClient().complete({
         messages: [
           { role: "system", content: input.system },
@@ -414,7 +414,7 @@ async function describeDocument(
      * model that saw it are what makes the record checkable. */
     await recordAudit({
       actor: { user_id: req.uploadedBy, role: req.uploaderRole },
-      action: "brain.document.summarised",
+      action: "brain.document.summarized",
       resourceType: "brain_document",
       resourceId: docId,
       afterState: {

@@ -119,7 +119,7 @@ function matchDmsIntent(message: string): Params | null {
    * part of that topic rather than a thing on the forecourt.
    *
    * Same shape and same reasoning as the broken-page guard above: the moment
-   * somebody asks what we hold about their programme is the moment a list of
+   * somebody asks what we hold about their program is the moment a list of
    * cars is most obviously wrong.
    *
    * The noun and the preposition are allowed up to 30 characters apart,

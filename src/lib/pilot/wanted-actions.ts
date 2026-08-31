@@ -36,8 +36,11 @@ const ACTION_PHRASE: Record<string, string> = {
   move: "file or move email",
   archive: "file or move email",
   sort: "file or move email",
-  organise: "file or move email",
   organize: "file or move email",
+  /* Kept because people type it: the verb the product reads is whatever
+     somebody actually wrote, and this list is about matching them, not about
+     how we spell. */
+  organise: "file or move email",
   assign: "assign work to someone",
   create: "create a record",
   make: "create a record",
@@ -84,7 +87,7 @@ export function actionOf(query: string): string | null {
 }
 
 /** How many people wanted each thing, most-wanted first. */
-export function summariseWanted(
+export function summarizeWanted(
   items: readonly { query: string; asked: number }[],
   top: number,
 ): WantedSummary {

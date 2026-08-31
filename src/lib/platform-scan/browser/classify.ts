@@ -33,7 +33,7 @@ export interface UiElement {
   tag: string;
   /** The computed/explicit ARIA role, e.g. "button", "link", "dialog". */
   role?: string;
-  /** The accessible name (aria-label, aria-labelledby text, or label assoc). */
+  /** The accessible name (aria-label, aria-labeledby text, or label assoc). */
   accessibleName?: string;
   /** True when the element is operable (clickable/focusable control). */
   interactive?: boolean;

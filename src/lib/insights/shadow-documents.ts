@@ -103,7 +103,7 @@ export interface ShadowReading {
 /**
  * Split circulated files by whether the knowledge base has seen them.
  *
- * `indexedNames` is passed in rather than read here so the judgement is
+ * `indexedNames` is passed in rather than read here so the judgment is
  * testable without a database, which is where the mistakes would be.
  */
 export function findShadowDocuments(

@@ -52,7 +52,7 @@ export async function requiresWriteApproval(
       [agentId, workspaceId],
     );
     /* No such agent in this workspace is not "no approval needed", it is a
-       question we could not answer about an actor we do not recognise. */
+       question we could not answer about an actor we do not recognize. */
     if (rows.length === 0) return true;
     return rows[0].requires_write_approval === true;
   } catch {

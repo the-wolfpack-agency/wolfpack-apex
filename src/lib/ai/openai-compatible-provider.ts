@@ -15,9 +15,9 @@
  * new provider is a base URL, a key, and a model name. No new code, no new
  * dependency, no release.
  *
- * WHY NOT JUST CALL A GATEWAY AND INHERIT THEIR CATALOGUE
+ * WHY NOT JUST CALL A GATEWAY AND INHERIT THEIR CATALOG
  *
- * Because the catalogue is the least valuable half of what we do. Routing
+ * Because the catalog is the least valuable half of what we do. Routing
  * through somebody else's gateway means our redaction, residency and audit
  * would sit behind THEIR hop: the prompt reaches them before it reaches the
  * model, and "nothing leaves unchecked" stops being true at the first hop

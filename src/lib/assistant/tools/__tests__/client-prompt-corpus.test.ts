@@ -9,7 +9,7 @@
  * asked for.
  *
  * A wrong tool with a confident voice is worse than no tool. "I cannot
- * answer that yet" is a sentence somebody can work with; an authorisation
+ * answer that yet" is a sentence somebody can work with; an authorization
  * error about financials, in answer to a question about warranty work,
  * teaches them the product does not understand their job.
  *
@@ -102,7 +102,7 @@ const MUST_NOT_MATCH: Array<[string, string]> = [
   ["what do you do about a rejected claim?", "capability phrasing, real object"],
   ["where do I start the claim from?", "capability phrasing, real object"],
   ["what should I ask the technician?", "capability phrasing, real object"],
-  /* Running a chain is not asking which chains exist. The catalogue must
+  /* Running a chain is not asking which chains exist. The catalog must
      not answer for the runner, or "run my morning" becomes a menu. */
   ["run my morning", "starts a chain, does not list them"],
   ["start my day", "starts a chain, does not list them"],
@@ -151,7 +151,7 @@ const MUST_MATCH: Array<[string, string[]]> = [
      exactly why nobody has noticed. Recorded as an alternative rather
      than asserted as correct. */
   ["what is on my calendar this week?", ["calendar_widget", "get_calendar_availability"]],
-  ["analyse my calendar", ["schedule_health"]],
+  ["analyze my calendar", ["schedule_health"]],
   ["what are my ideal times of day?", ["schedule_health"]],
   /* Questions about the SHAPE of a week, which is the line between this
      and the calendar tools. Also from the sweep. */
@@ -263,7 +263,7 @@ const MUST_MATCH: Array<[string, string[]]> = [
      deliberately broad, and taking that shape away from it to win one
      prompt would cost more than it gains. Registration order decides,
      routine_templates is registered at position 9 against search at 54,
-     so the catalogue answers. The point of naming it here is that the
+     so the catalog answers. The point of naming it here is that the
      tie is a decision somebody made rather than one a client discovers. */
   ["show me the routines", ["routine_templates", "search"]],
   ["list my automations", ["routine_templates"]],

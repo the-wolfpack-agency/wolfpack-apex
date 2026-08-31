@@ -1,5 +1,5 @@
 /**
- * Recognising that thirty screens are three screens, thirty times.
+ * Recognizing that thirty screens are three screens, thirty times.
  *
  * WHAT IT FIXES. Mapping a real tenant, the walk spent its whole budget on
  * repetition: every one of thirteen forms has /build, /publish and /entries,

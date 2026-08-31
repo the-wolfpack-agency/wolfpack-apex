@@ -11,9 +11,9 @@
  * blindness.
  *
  * THE ASYMMETRY IS THE WHOLE DESIGN. Refusing a harmless tab costs one
- * unexplored control. Clicking one unrecognised "Publish" puts a client's live
+ * unexplored control. Clicking one unrecognized "Publish" puts a client's live
  * form out into the world. Those are not the same size, so the default is not
- * symmetrical: anything unrecognised is refused.
+ * symmetrical: anything unrecognized is refused.
  */
 
 import { mayClick, partitionByPolicy, type ClickCandidate } from "@/lib/platform-scan/mapping/click-policy";
@@ -116,16 +116,16 @@ describe("things that only move you around are allowed", () => {
 });
 
 describe("the default, which is the point of the file", () => {
-  /* An unrecognised control is refused. A smaller map is a cost we absorb. */
-  it("refuses anything it does not recognise", () => {
+  /* An unrecognized control is refused. A smaller map is a cost we absorb. */
+  it("refuses anything it does not recognize", () => {
     const v = mayClick(el({ text: "Flurb" }));
     expect(v.allowed).toBe(false);
-    expect(v.because).toMatch(/unrecognised/i);
+    expect(v.because).toMatch(/unrecognized/i);
   });
 
-  /* AN UNLABELLED ICON COULD BE REFRESH OR DELETE and there is no way to tell.
+  /* AN UNLABELED ICON COULD BE REFRESH OR DELETE and there is no way to tell.
      That it cannot be identified is a finding, not a reason to try it. */
-  it("refuses an unlabelled control rather than guessing", () => {
+  it("refuses an unlabeled control rather than guessing", () => {
     const v = mayClick(el({ text: "", label: "" }));
     expect(v.allowed).toBe(false);
     expect(v.because).toMatch(/accessible name/i);
@@ -191,7 +191,7 @@ describe("dismissing a dialog", () => {
     },
   );
 
-  /* Outside a dialog the old behaviour is unchanged: "Close" there is
+  /* Outside a dialog the old behavior is unchanged: "Close" there is
      overwhelmingly closing a record. */
   it("does not allow a bare Close outside a dialog", () => {
     expect(mayClick(el({ text: "Close welcome" })).allowed).toBe(false);

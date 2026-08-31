@@ -27,7 +27,7 @@
  * that happened to be answered by two systems, and mapping them is where the
  * two designs meet rather than a rename.
  *
- * SAFETY: THIS CANNOT CHANGE TODAY'S BEHAVIOUR
+ * SAFETY: THIS CANNOT CHANGE TODAY'S BEHAVIOR
  *
  * Every AI call in the platform goes through the execution router. A bridge
  * that got this wrong would not degrade one feature, it would break all of
@@ -100,7 +100,7 @@ export interface BridgedChoice {
  * That is indistinguishable from a field somebody forgot to record, and the
  * three reasons are not the same fact. An override is a deliberate human
  * decision; no_model_available is an estate problem; a client model is
- * correct behaviour that must never route through our tenant.
+ * correct behavior that must never route through our tenant.
  */
 export type NoSelectionReason =
   | "primary_override"

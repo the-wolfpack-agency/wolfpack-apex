@@ -3,7 +3,7 @@
  */
 
 /**
- * Tasks UI tests — three status columns, optimistic complete, search,
+ * Tasks UI tests — three status columns, optimiztic complete, search,
  * sync button, empty state when MS not connected.
  */
 
@@ -110,7 +110,7 @@ describe("Tasks page", () => {
     expect(screen.getByText("Done item")).toBeInTheDocument();
   });
 
-  it("optimistically completes a task via checkbox + PATCHes status=completed", async () => {
+  it("optimiztically completes a task via checkbox + PATCHes status=completed", async () => {
     await act(async () => {
       render(<TasksPage />);
     });

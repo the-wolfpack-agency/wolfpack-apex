@@ -1,7 +1,7 @@
 /**
  * Running a routine from the chat surface.
  *
- * THE ONE PLACE THE PIECES MEET: the catalogue says what the steps are, the
+ * THE ONE PLACE THE PIECES MEET: the catalog says what the steps are, the
  * runner advances them, the store records where the time went, and this file
  * supplies the two things neither of those may have -- a way to reach a tool,
  * and a way to reach a model.
@@ -20,10 +20,10 @@ import type { ToolContext } from "@/lib/assistant/tools/types";
 import { advance, resume, startRun, type RunnerDeps } from "./runner";
 import { referencedSlots } from "./slots";
 import { saveRun, trackRun } from "./store";
-import { matchRoutine, routineById, BUILT_IN_ROUTINES as BUILT_IN } from "./catalogue";
+import { matchRoutine, routineById, BUILT_IN_ROUTINES as BUILT_IN } from "./catalog";
 import type { Routine, RoutineRun } from "./types";
 
-export { matchRoutine, routineById, BUILT_IN_ROUTINES } from "./catalogue";
+export { matchRoutine, routineById, BUILT_IN_ROUTINES } from "./catalog";
 
 /**
  * Words that mean "I have done my part, carry on".
@@ -98,7 +98,7 @@ export function liveDeps(ctx: ToolContext): RunnerDeps {
       const res = await getAIClient().complete({
         messages: [{ role: "user", content: boundPrompt(prompt) }],
         max_tokens: 700,
-        /* Cheap by default. A step summarising what four tools just returned is
+        /* Cheap by default. A step summarizing what four tools just returned is
            not a reasoning problem, and paying premium prices for every step of
            every routine is how a feature that saves people time becomes a line
            item somebody cancels. */

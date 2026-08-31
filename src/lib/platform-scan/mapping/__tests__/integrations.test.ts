@@ -16,15 +16,15 @@ const obs = (url: string, pageUrl: string, atMs = 0): NetworkObservation => ({
 const APP = "https://app.acme.example";
 
 describe("grouping third-party traffic by host", () => {
-  it("names a vendor it recognises", () => {
+  it("names a vendor it recognizes", () => {
     const out = observedIntegrations([obs("https://www.google-analytics.com/g", `${APP}/home`)]);
-    /* hostOf normalises the www prefix away, so one vendor reached two ways is
+    /* hostOf normalizes the www prefix away, so one vendor reached two ways is
        one entry rather than two. */
     expect(out[0].host).toBe("google-analytics.com");
     expect(out[0].vendor).toBe("Google Analytics");
   });
 
-  /* UNRECOGNISED IS NOT BENIGN. On somebody else's system the hosts we cannot
+  /* UNRECOGNIZED IS NOT BENIGN. On somebody else's system the hosts we cannot
      name are the ones most worth asking about, and dropping them would make an
      unfamiliar system look cleaner than a familiar one. */
   it("keeps a host it cannot name, with a null vendor", () => {
@@ -94,7 +94,7 @@ describe("saying it in one sentence", () => {
     expect(notWatched).not.toEqual(watchedAndClean);
   });
 
-  it("names what it recognised and counts what it did not", () => {
+  it("names what it recognized and counts what it did not", () => {
     const text = describeIntegrations(
       [
         { host: "google-analytics.com", vendor: "Google Analytics", seenOn: [], requestCount: 4 },
@@ -103,7 +103,7 @@ describe("saying it in one sentence", () => {
       true,
     );
     expect(text).toContain("Google Analytics");
-    expect(text).toMatch(/1 unrecognised/);
+    expect(text).toMatch(/1 unrecognized/);
     expect(text).toMatch(/worth asking about/i);
   });
 });

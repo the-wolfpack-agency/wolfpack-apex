@@ -1,5 +1,5 @@
 /**
- * Turning behaviour scores into a sentence someone can act on.
+ * Turning behavior scores into a sentence someone can act on.
  *
  * The tests that matter are about the middle verdict. This summary is read by
  * the person deciding whether an agent gets near a client system, and if
@@ -132,7 +132,7 @@ describe("summarizeRows", () => {
     expect(summarizeRows([row({ agent_id: null })])).toEqual([]);
   });
 
-  it("ignores a verdict it does not recognise rather than miscounting it", () => {
+  it("ignores a verdict it does not recognize rather than miscounting it", () => {
     // A future verdict name must not silently land in the pass column.
     const [s] = summarizeRows([row({ containment: "sideways" })]);
     expect(s.containment).toEqual({ pass: 0, fail: 0, unproven: 0 });
@@ -153,7 +153,7 @@ describe("orderKinds", () => {
     expect(orderKinds(["egress-attempt", "egress-attempt"])).toEqual(["egress-attempt"]);
   });
 
-  it("keeps an unrecognised kind rather than dropping it, at the end", () => {
+  it("keeps an unrecognized kind rather than dropping it, at the end", () => {
     expect(orderKinds(["something-new", "egress-succeeded"])).toEqual(["egress-succeeded", "something-new"]);
   });
 });
@@ -173,7 +173,7 @@ describe("getFleetBehavior", () => {
     await expect(getFleetBehavior()).resolves.toEqual([]);
   });
 
-  it("reads only behaviour events, within the window", async () => {
+  it("reads only behavior events, within the window", async () => {
     process.env.DATABASE_URL = "postgres://x";
     q.mockResolvedValue({ rows: [] });
     await getFleetBehavior(14);

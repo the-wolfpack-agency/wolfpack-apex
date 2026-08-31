@@ -35,8 +35,8 @@ interface Capability {
    * Other tools allowed to claim these phrasings.
    *
    * Not every co-claim is a defect. Two tools that genuinely overlap on a
-   * question are a JUDGEMENT about how the product is carved up, and a
-   * sweep that reports a judgement as a bug trains people to ignore it.
+   * question are a JUDGMENT about how the product is carved up, and a
+   * sweep that reports a judgment as a bug trains people to ignore it.
    * Naming them here turns each one into a decision somebody wrote down.
    */
   alsoFine?: string[];
@@ -91,14 +91,14 @@ const CAPABILITIES: Capability[] = [
     tool: "schedule_health",
     what: "the shape of somebody's week",
     phrasings: [
-      "analyse my calendar", "analyze my calendar", "review my schedule",
+      "analyze my calendar", "analyze my calendar", "review my schedule",
       "what are my ideal times of day", "when should I do focus work",
       "where is my week going", "schedule health",
       "how much focus time do I have", "how much of my week is meetings",
       /* "are my meetings out of control" is claimed by the availability
          tool. Defensible either way and recorded rather than fought: the
          shape of a week and whether somebody is free are close enough
-         that a tie here is a judgement, not a bug. */
+         that a tie here is a judgment, not a bug. */
       "when am I most free",
       "which hours should I protect",
     ],
@@ -160,7 +160,7 @@ const CAPABILITIES: Capability[] = [
   {
     tool: "who_is",
     what: "who somebody is",
-    /* Org facts answers questions about people in the organisation and
+    /* Org facts answers questions about people in the organization and
        who_is answers questions about a contact. "tell me about Ray
        Okonkwo" is legitimately either, and which one wins depends on
        whether Ray works here, which the phrasing does not say. */

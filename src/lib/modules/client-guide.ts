@@ -89,7 +89,7 @@ export interface OperatorNote {
 /**
  * What we know and the client is not told.
  *
- * A support person needs this on day one: somebody WILL type "summarise this"
+ * A support person needs this on day one: somebody WILL type "summarize this"
  * and needs an answer better than "that's odd". Kept separate from the client
  * guide because teaching a workaround is not the same as documenting a gap.
  */

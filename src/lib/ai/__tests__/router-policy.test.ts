@@ -102,7 +102,7 @@ const refusals = () => mockTrackEvent.mock.calls.filter((c) => c[0] === "ai.poli
 
 describe("router content policy — leaving ordinary answers alone", () => {
   it("returns a clean answer unchanged and records no refusal", async () => {
-    const text = "Your local Centre can walk you through the finance options available.";
+    const text = "Your local Center can walk you through the finance options available.";
     mockMessagesCreate.mockResolvedValue(reply(text));
 
     const res = await getAIClient().complete(request());
@@ -249,7 +249,7 @@ describe("router content policy — degrading, never failing", () => {
     /* A typo in configuration costs industry coverage. It must not cost the
        baseline gate, and it must never cost the answer. */
     process.env.AI_CONTENT_POLICY_PROFILE = "aotumotive";
-    const text = "Six colours are available on that model.";
+    const text = "Six colors are available on that model.";
     mockMessagesCreate.mockResolvedValue(reply(text));
 
     const res = await getAIClient().complete(request());
@@ -259,7 +259,7 @@ describe("router content policy — degrading, never failing", () => {
 
   it("does not fail the call when the workspace row cannot be read", async () => {
     const client = clientWithWorkspace(new Error("db down"));
-    const text = "Six colours are available on that model.";
+    const text = "Six colors are available on that model.";
     mockMessagesCreate.mockResolvedValue(reply(text));
 
     const res = await client.complete(

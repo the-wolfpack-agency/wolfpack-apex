@@ -186,7 +186,7 @@ async function main(): Promise<void> {
   }
 
   /* --all provisions the whole set. Without it the script keeps its original
-     single-account behaviour, so an existing CI job cannot change meaning
+     single-account behavior, so an existing CI job cannot change meaning
      because somebody added a flag. */
   if (process.argv.includes("--all")) {
     await provisionAll();

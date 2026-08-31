@@ -21,7 +21,7 @@
  * The fetchWithRefresh mock is a single shared router (`routeFetch`) installed in
  * beforeEach. It keys on (url, method), decodes POST bodies from the call args,
  * and defaults every route to an ok response so unrelated steps never break.
- * Tests tune behaviour by mutating the `targetsBody`/`scanBody`/`recsBody`
+ * Tests tune behavior by mutating the `targetsBody`/`scanBody`/`recsBody`
  * fixtures, not by re-implementing the router.
  */
 

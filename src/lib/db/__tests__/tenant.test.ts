@@ -24,7 +24,7 @@ const env = (over: Record<string, string> = {}) => over as unknown as NodeJS.Pro
 
 describe("it is inert until switched on", () => {
   it("defaults to single mode, so merging this changes nothing in production", () => {
-    // A change this significant must not alter behaviour the moment it lands.
+    // A change this significant must not alter behavior the moment it lands.
     expect(dbMode(env())).toBe("single");
     expect(dbMode(env({ INSTINCT_DB_MODE: "" }))).toBe("single");
     expect(dbMode(env({ INSTINCT_DB_MODE: "anything-else" }))).toBe("single");

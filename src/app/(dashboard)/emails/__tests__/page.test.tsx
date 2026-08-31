@@ -187,7 +187,7 @@ async function flushPromises() {
 
 /**
  * Open the composer pane. The new layout starts with the EmptyState
- * shown in the right pane; tests that exercise composer behaviour
+ * shown in the right pane; tests that exercise composer behavior
  * must open it first.
  */
 async function openComposer() {
@@ -209,7 +209,7 @@ function setBodyHtml(html: string) {
 }
 
 // ---------------------------------------------------------------------------
-// 3-column layout — new behaviour
+// 3-column layout — new behavior
 // ---------------------------------------------------------------------------
 
 describe("EmailsPage — 3-column layout (Gmail-style)", () => {
@@ -638,7 +638,7 @@ describe("EmailsPage — right_pane_state telemetry", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Inline composer behaviour (preserved from PR #29)
+// Inline composer behavior (preserved from PR #29)
 // ---------------------------------------------------------------------------
 
 describe("EmailsPage — inline composer", () => {

@@ -24,7 +24,7 @@ const ev = (subject: string | null, hours = 1, attendeeCount = 3) => ({
 describe("somebody being away", () => {
   /* The entry that made this necessary: "anyone whose meeting says OOO is
      just a vacation day". */
-  it("recognises the way people actually write it", () => {
+  it("recognizes the way people actually write it", () => {
     for (const s of ["Alicia OOO", "OOO", "Nick - PTO", "Vacation", "Annual leave", "Day off"]) {
       expect(classifyCalendarEvent(ev(s, 192))).toBe("time-off");
     }
@@ -34,15 +34,15 @@ describe("somebody being away", () => {
      policy too. */
   it("does not mistake a meeting about leave for leave", () => {
     expect(classifyCalendarEvent(ev("Review the holiday policy draft"))).toBe("meeting");
-    expect(classifyCalendarEvent(ev("Portfolio Optimisation Overview"))).toBe("meeting");
+    expect(classifyCalendarEvent(ev("Portfolio Optimization Overview"))).toBe("meeting");
   });
 
-  it("recognises time off however short it is", () => {
+  it("recognizes time off however short it is", () => {
     expect(classifyCalendarEvent(ev("Alicia OOO", 4))).toBe("time-off");
   });
 });
 
-describe("long entries nobody labelled", () => {
+describe("long entries nobody labeled", () => {
   /* "F1 Las Vegas" and "Avryl Trip" say nothing about what they are and are
      only distinguishable as non-meetings by lasting 192 hours. Name alone
      misses them; shape alone misses "Alicia OOO". */
@@ -62,7 +62,7 @@ describe("long entries nobody labelled", () => {
 });
 
 describe("holds somebody puts on their own time", () => {
-  it("recognises a focus block", () => {
+  it("recognizes a focus block", () => {
     expect(classifyCalendarEvent(ev("Focus time", 2, 0))).toBe("personal-hold");
     expect(classifyCalendarEvent(ev("Lunch", 1, 0))).toBe("personal-hold");
   });
@@ -133,7 +133,7 @@ describe("an appointment about a topic, not the topic itself", () => {
   });
 
   /* And does not let the rule swallow actual leave. */
-  it("still recognises leave with no meeting words in it", () => {
+  it("still recognizes leave with no meeting words in it", () => {
     for (const s of ["Alicia OOO", "PTO", "Vacation", "Nick - day off"]) {
       expect(classifyCalendarEvent(ev(s, 8))).toBe("time-off");
     }
@@ -163,7 +163,7 @@ describe("preparing for a convention nobody has told us about", () => {
   });
 
   /* The signature: a handful of entries holding most of the hours. This is
-     what an unlabelled convention looks like from outside. */
+     what an unlabeled convention looks like from outside. */
   it("notices when a few entries hold most of the time", () => {
     const events = [long("Floor duty", 200), long("Floor duty", 200), ...Array.from({ length: 40 }, () => long("Standup", 0.5))];
     const c = findConcentration(events);
@@ -193,7 +193,7 @@ describe("preparing for a convention nobody has told us about", () => {
   });
 });
 
-describe("this organisation's own vocabulary", () => {
+describe("this organization's own vocabulary", () => {
   const at = (h: number) => new Date(Date.UTC(2026, 7, 31, h)).toISOString();
   const e = (subject: string, hours = 4) => ({
     subject,

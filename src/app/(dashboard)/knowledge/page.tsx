@@ -253,7 +253,7 @@ export default function KnowledgePage() {
         }),
       });
     } catch {
-      // best-effort — leave the optimistic UI in place even on failure
+      // best-effort — leave the optimiztic UI in place even on failure
     }
   }
 
@@ -556,7 +556,7 @@ export default function KnowledgePage() {
         cancelEdit();
       } else {
         setEditMsg("Saved locally — will sync when online");
-        // Optimistic local update for the queued path so the UI reflects
+        // Optimiztic local update for the queued path so the UI reflects
         // the user's edit even before replay lands.
         setEntries((prev) =>
           prev.map((it) =>
@@ -590,7 +590,7 @@ export default function KnowledgePage() {
     if (!ok) return;
     try {
       await deleteKnowledgeEntryOffline(entry.id);
-      // Optimistic local removal in either branch — on the queued path
+      // Optimiztic local removal in either branch — on the queued path
       // the server write replays on reconnect.
       setEntries((prev) => prev.filter((it) => it.id !== entry.id));
       if (selected?.id === entry.id) setSelected(null);
@@ -601,7 +601,7 @@ export default function KnowledgePage() {
   }
 
   async function handleRate(entryId: string, rating: number) {
-    // Optimistic UI
+    // Optimiztic UI
     setEntries((prev) =>
       prev.map((e) => (e.id === entryId ? { ...e, rating } : e))
     );

@@ -104,8 +104,8 @@ function readPrimaryOverride(): PrimaryOverride {
     return raw;
   }
   /* A configured compatible provider may be pinned by its own id. Anything
-     unrecognised still falls through to "auto", so a typo degrades to the
-     normal behaviour rather than to an outage. */
+     unrecognized still falls through to "auto", so a typo degrades to the
+     normal behavior rather than to an outage. */
   if (raw && buildCompatibleProviders().some((p) => p.name === raw)) return raw;
   return "auto";
 }
@@ -1269,7 +1269,7 @@ class RouterClient implements AIClient {
             )
           : unjudged(
               judgeChoice.reason === "author_lineage_unknown"
-                ? "No independent check: the family of the answering model is not recognised."
+                ? "No independent check: the family of the answering model is not recognized."
                 : "No independent check: every configured model shares a family with the one that answered.",
             );
         trackEvent(
@@ -1464,7 +1464,7 @@ function emitCompletionEvent(
     // deliberate override from a field nobody recorded. brain.retrieval_eval
     // had none across ninety calls. The reasons are different facts: an
     // override is somebody's decision, no_model_available is an estate
-    // problem, and a client model is correct behaviour that must never route
+    // problem, and a client model is correct behavior that must never route
     // through our tenant. Every completion now says which.
     ...(selectedModelId
       ? { selected_model_id: selectedModelId, selection: "router" }
@@ -1508,7 +1508,7 @@ function emitCompletionEvent(
       /* Both sides priced off the SAME list, on the SAME tokens.
          Subtracting the provider's billed cost_usd from a registry-priced
          baseline would compare two different price lists and manufacture a
-         saving (or hide one) purely from which catalogue was consulted. */
+         saving (or hide one) purely from which catalog was consulted. */
       const baselineCost = price(baseline.model);
       const routedCost = price(actual.model);
       metadata.baseline_tier = req.metadata.baseline_tier;

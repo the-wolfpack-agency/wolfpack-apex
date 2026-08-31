@@ -23,7 +23,7 @@ describe("what may be shown on a client's dashboard", () => {
      the same sentence fourteen times, longer than every other section. */
   it("keeps the topic of a paste and drops the passage", () => {
     const paste =
-      "summarise the single most common failure in these claim notes in one sentence. " +
+      "summarize the single most common failure in these claim notes in one sentence. " +
       "the dealer submitted a warranty claim for a cayenne with an intermittent fault reported at 42,110 miles and the technician replaced the sensor harness. ".repeat(
         14,
       );
@@ -32,7 +32,7 @@ describe("what may be shown on a client's dashboard", () => {
     expect(d?.withheld).toBe("paste");
     expect(d!.text.length).toBeLessThanOrEqual(MAX_CHARS);
     /* The instruction survives, which is the only part that was ever a gap. */
-    expect(d!.text).toMatch(/summarise the single most common failure/);
+    expect(d!.text).toMatch(/summarize the single most common failure/);
     expect(d!.text).not.toMatch(/sensor harness/);
   });
 

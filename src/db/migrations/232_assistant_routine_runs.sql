@@ -58,7 +58,7 @@ CREATE TABLE IF NOT EXISTS assistant_routine_runs (
 
 CREATE TABLE IF NOT EXISTS assistant_routine_steps (
   run_id      TEXT    NOT NULL REFERENCES assistant_routine_runs(run_id) ON DELETE CASCADE,
-  -- Denormalised from the parent run ON PURPOSE. A child table reachable only
+  -- Denormalized from the parent run ON PURPOSE. A child table reachable only
   -- through a join is one whose safety depends on every future query
   -- remembering to join, and the query that forgets is the one that leaks
   -- another company's step labels. Carrying the column costs a few bytes and

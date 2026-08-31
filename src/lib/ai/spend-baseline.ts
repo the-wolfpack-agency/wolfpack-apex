@@ -133,7 +133,7 @@ export interface BaselineSummary {
   includesEstimate: boolean;
 }
 
-export function summarise(months: MonthComparison[]): BaselineSummary {
+export function summarize(months: MonthComparison[]): BaselineSummary {
   const comparable = months.filter((m) => m.differenceCents !== null);
   return {
     months,

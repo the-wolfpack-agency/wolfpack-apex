@@ -84,7 +84,7 @@ const SEVERITY_TONE: Record<Severity, SeverityTone> = {
 };
 
 // CSS var per severity for the distribution bar + sparkline accents (token-based;
-// the tone vocabulary backs each one so colours stay single-sourced).
+// the tone vocabulary backs each one so colors stay single-sourced).
 const SEVERITY_VAR: Record<Severity, string> = {
   critical: "var(--wp-error, #ef4444)",
   high: "var(--wp-warning, #f59e0b)",
@@ -288,7 +288,7 @@ function evidenceLine(evidence: Record<string, unknown>): string {
   return parts.join(" · ");
 }
 
-// Horizontal stacked severity-distribution bar built from divs + token colours.
+// Horizontal stacked severity-distribution bar built from divs + token colors.
 // No charting dependency. Zero total renders an explicit empty band.
 function SeverityDistributionBar({ summary }: { summary: FindingsSummary }) {
   const total = SEVERITY_ORDER.reduce((n, s) => n + summary.bySeverity[s], 0);

@@ -95,7 +95,7 @@ describe("when the reviewer cannot be reached", () => {
  * every answer.
  *
  * The failure a reviewer is for is the opposite kind, and verification.ts says
- * so itself: relevance is the judgement a rule cannot make, and therefore the
+ * so itself: relevance is the judgment a rule cannot make, and therefore the
  * one place a second model earns its cost. Gating the reviewer on the rules
  * failing aims it at the case it can least help with.
  */
@@ -106,7 +106,7 @@ describe("when the reviewer is asked", () => {
     return improve === "always" ? true : Boolean(improve) && !sufficient;
   }
 
-  it("does not run on a sound answer when improve is true, which is the old behaviour", () => {
+  it("does not run on a sound answer when improve is true, which is the old behavior", () => {
     expect(reviewWanted(true, true)).toBe(false);
   });
 

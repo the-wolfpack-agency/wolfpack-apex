@@ -29,7 +29,7 @@ interface PipelineSnapshot {
   byStage: Array<{ stage: string; count: number; amount: number }>;
 }
 
-interface RecentRecord {
+interface Recentercord {
   id: string;
   name: string;
   type: "contacts" | "opportunities" | "accounts";
@@ -39,7 +39,7 @@ interface RecentRecord {
 interface DashboardResponse {
   notConfigured: boolean;
   pipeline: PipelineSnapshot;
-  recent: RecentRecord[];
+  recent: Recentercord[];
   connector: string;
 }
 
@@ -110,7 +110,7 @@ export async function GET(req: NextRequest) {
   }
 
   /* Recent activity — sort the union by LastModifiedDate desc, take 10. */
-  const combined: RecentRecord[] = [];
+  const combined: Recentercord[] = [];
   for (const c of contacts) {
     if (typeof c.Id !== "string") continue;
     combined.push({

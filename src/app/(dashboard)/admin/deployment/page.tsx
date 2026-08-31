@@ -51,7 +51,7 @@ interface ReadinessResult {
 
 /**
  * Map a release-gate state to a command-center tone. This is the one place the
- * gate's vocabulary becomes colour, so an operator reads the same severity here
+ * gate's vocabulary becomes color, so an operator reads the same severity here
  * as everywhere else in the console.
  *   awaiting_approval               -> warning
  *   checks_failing / merge_conflict -> error

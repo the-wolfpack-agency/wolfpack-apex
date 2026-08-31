@@ -37,7 +37,7 @@ function mkRes(body: unknown, opts: { ok?: boolean; status?: number } = {}): any
 const sampleDossier = {
   header: {
     code: "WPA-1",
-    description: "Wolfpack Auto programme",
+    description: "Wolfpack Auto program",
     active: true,
     category: "Wolfpack Auto",
     program: "Phase 2",
@@ -110,7 +110,7 @@ describe("<CodeDossierView />", () => {
 
     await waitFor(() => expect(screen.getByTestId("code-dossier")).toBeInTheDocument());
     expect(screen.getByTestId("dossier-code").textContent).toBe("WPA-1");
-    expect(screen.getByTestId("dossier-description").textContent).toBe("Wolfpack Auto programme");
+    expect(screen.getByTestId("dossier-description").textContent).toBe("Wolfpack Auto program");
     expect(screen.getByTestId("dossier-category").textContent).toMatch(/Wolfpack Auto/);
     expect(screen.getByTestId("dossier-program").textContent).toBe("Phase 2");
     expect(screen.getByTestId("dossier-po-number").textContent).toBe("PO-42");

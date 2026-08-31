@@ -247,7 +247,7 @@ export function AssistantWelcomeModal({
       className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 px-4"
       role="dialog"
       aria-modal="true"
-      aria-labelledby="instinct-welcome-title"
+      aria-labeledby="instinct-welcome-title"
     >
       <div
         data-testid="assistant-welcome-modal"

@@ -79,7 +79,7 @@ describe("parseSitemap", () => {
   it("decodes each supported entity exactly once", () => {
     const specs = parseSitemap(sitemap([`${BASE}/p?q=a&amp;b&quot;c&apos;d`]), BASE);
     // &amp; decodes to a real "&" separator; the quote entities decode too, then
-    // URL normalisation percent-encodes them (%22 / %27) on the way out.
+    // URL normalization percent-encodes them (%22 / %27) on the way out.
     expect(specs[0].path).toBe("/p?q=a&b%22c%27d");
   });
 

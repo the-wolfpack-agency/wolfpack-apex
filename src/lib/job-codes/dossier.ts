@@ -186,7 +186,7 @@ export async function buildCodeDossier(
   const trimmed = code.trim();
   if (!trimmed) return null;
   // Tenant isolation: job codes (instinct_job_codes_cache) are an agency-global
-  // catalogue with NO workspace_id column, but the receipts (instinct_receipt_scans)
+  // catalog with NO workspace_id column, but the receipts (instinct_receipt_scans)
   // and edits (instinct_job_codes_edits) applied to a code are workspace-owned
   // (workspace_id NOT NULL). Two workspaces can share a global code, so every
   // tenant-owned source below MUST be filtered by workspace_id - otherwise

@@ -23,7 +23,7 @@ describe("hostMatches", () => {
     expect(hostMatches("github.com.evil.test", "github.com")).toBe(false);
   });
 
-  it("normalises case, a leading www and a trailing dot", () => {
+  it("normalizes case, a leading www and a trailing dot", () => {
     expect(normalizeHost("WWW.GitHub.com.")).toBe("github.com");
     expect(hostMatches("WWW.GitHub.com.", "github.com")).toBe(true);
   });
@@ -53,7 +53,7 @@ describe("decideEgress", () => {
   });
 
   it("refuses everything for a capability with an empty list", () => {
-    // target-scan is empty on purpose: targets are authorised per run by the
+    // target-scan is empty on purpose: targets are authorized per run by the
     // ownership gate, never by a static list.
     expect(decideEgress("https://anything.test/", "target-scan")).toMatchObject({ allowed: false });
   });

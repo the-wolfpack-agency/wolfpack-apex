@@ -5,7 +5,7 @@
 /**
  * Edit-page pair test for migration 081_adopt_wolfpack_aidan_mulready.
  *
- * Asserts the end-to-end behaviour a designer sees when they click into
+ * Asserts the end-to-end behavior a designer sees when they click into
  * /sites/{adopted_id}/edit:
  *
  *   1. The editor's URL selector (`selectEditorPreviewUrl`) produces a

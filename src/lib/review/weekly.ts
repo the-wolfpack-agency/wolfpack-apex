@@ -45,7 +45,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Return the UTC Monday-00:00 of the week containing `d`. Mon=1…Sun=7
- * under ISO; JS getUTCDay returns Sun=0…Sat=6, so we normalise to an
+ * under ISO; JS getUTCDay returns Sun=0…Sat=6, so we normalize to an
  * offset where Monday = 0.
  */
 export function mondayOf(d: Date): Date {

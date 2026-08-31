@@ -6,14 +6,14 @@
  * WHAT IT REPLACES. A wall of markdown: three headings, sixty-odd bullets and
  * a closing paragraph. Every line accurate, nothing findable. For the first
  * screen a person ever sees, that is the whole job failed. They do not want to
- * read a catalogue, they want one thing to try.
+ * read a catalog, they want one thing to try.
  *
  * SO STARTERS COME FIRST AND ARE CLICKABLE. Clicking puts the sentence in the
  * composer rather than sending it, matching the fallback chips this product
  * already uses: somebody almost always wants to change a word, and sending on
  * their behalf takes that away.
  *
- * THE CATALOGUE STAYS, COLLAPSED. "Can it do X" is a real question and the
+ * THE CATALOG STAYS, COLLAPSED. "Can it do X" is a real question and the
  * list is the only honest answer, but it is reference material and does not
  * belong ahead of the thing somebody can do in the next five seconds.
  */

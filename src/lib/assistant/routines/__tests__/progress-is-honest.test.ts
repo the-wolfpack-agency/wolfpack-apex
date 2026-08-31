@@ -16,7 +16,7 @@
 import { advance, resume, startRun, type RunnerDeps } from "../runner";
 import { describeRun, routineById } from "../index";
 import { ROUTINE_TEMPLATES } from "../templates";
-import { BUILT_IN_ROUTINES } from "../catalogue";
+import { BUILT_IN_ROUTINES } from "../catalog";
 import type { Routine } from "../types";
 
 const WHO = { runId: "run-1", userId: "u1", workspaceId: "w1" };

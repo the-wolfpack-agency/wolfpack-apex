@@ -63,7 +63,7 @@ function makePng(pixels: [number, number, number][][]): Uint8Array {
   ihdr.writeUInt32BE(width, 0);
   ihdr.writeUInt32BE(height, 4);
   ihdr[8] = 8; // bit depth
-  ihdr[9] = 2; // colour type (RGB)
+  ihdr[9] = 2; // color type (RGB)
   ihdr[10] = 0; // compression
   ihdr[11] = 0; // filter method
   ihdr[12] = 0; // interlace
@@ -78,7 +78,7 @@ function makePng(pixels: [number, number, number][][]): Uint8Array {
 /* --------------------------- Primitive helpers ------------------------ */
 
 describe("rgbToHex / hexToRgb", () => {
-  it("round-trips a known colour", () => {
+  it("round-trips a known color", () => {
     expect(rgbToHex(18, 52, 86)).toBe("#123456");
     expect(hexToRgb("#123456")).toEqual([18, 52, 86]);
   });
@@ -86,7 +86,7 @@ describe("rgbToHex / hexToRgb", () => {
     expect(rgbToHex(300, -10, 128)).toBe("#ff0080");
   });
   it("returns null on malformed hex", () => {
-    expect(hexToRgb("not-a-colour")).toBeNull();
+    expect(hexToRgb("not-a-color")).toBeNull();
     expect(hexToRgb("#abc")).toBeNull();
   });
 });
@@ -104,11 +104,11 @@ describe("luminance", () => {
 /* ----------------------------- k-means -------------------------------- */
 
 describe("kmeansRgb", () => {
-  it("collapses to 1 cluster when all pixels are the same colour", () => {
+  it("collapses to 1 cluster when all pixels are the same color", () => {
     const samples: number[][] = Array.from({ length: 50 }, () => [200, 100, 50]);
     const clusters = kmeansRgb(samples, 5);
     expect(clusters.length).toBeGreaterThan(0);
-    // Largest cluster centroid should match the input colour exactly.
+    // Largest cluster centroid should match the input color exactly.
     const top = clusters[0];
     expect(Math.round(top.centroid[0])).toBe(200);
     expect(Math.round(top.centroid[1])).toBe(100);
@@ -117,7 +117,7 @@ describe("kmeansRgb", () => {
     expect(top.size).toBe(50);
   });
 
-  it("produces deterministic ordering for a 3-colour sample set", () => {
+  it("produces deterministic ordering for a 3-color sample set", () => {
     const reds = Array.from({ length: 30 }, () => [220, 30, 30] as number[]);
     const greens = Array.from({ length: 20 }, () => [30, 200, 30] as number[]);
     const blues = Array.from({ length: 10 }, () => [30, 30, 220] as number[]);
@@ -195,7 +195,7 @@ describe("decodePngToPixels", () => {
     expect(decodePngToPixels(bogus)).toBeNull();
   });
 
-  it("decodes a 3x1 gradient PNG with distinct colours", () => {
+  it("decodes a 3x1 gradient PNG with distinct colors", () => {
     const png = makePng([
       [
         [10, 10, 10],
@@ -219,7 +219,7 @@ describe("extractPalette", () => {
     expect(p.weights).toEqual([]);
   });
 
-  it("pulls dominant colour from a PNG of mostly one colour", () => {
+  it("pulls dominant color from a PNG of mostly one color", () => {
     // 10x10 buffer: 90 red + 10 blue pixels.
     const red: [number, number, number] = [220, 30, 30];
     const blue: [number, number, number] = [30, 30, 220];

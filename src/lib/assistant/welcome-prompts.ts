@@ -124,7 +124,7 @@ export type AvailableSources = Partial<Record<PromptRequirement, boolean>>;
  * product cannot answer, which is the failure that matters most on day one.
  *
  * Deliberately NOT tied to a document only we hold: "our policy" is something
- * every organisation has, so the chip teaches the shape without depending on
+ * every organization has, so the chip teaches the shape without depending on
  * one corpus.
  */
 const ASK_DOCUMENTS: WelcomePrompt = {

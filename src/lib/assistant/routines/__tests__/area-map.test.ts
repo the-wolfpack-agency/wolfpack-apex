@@ -113,7 +113,7 @@ describe("what it says when the map is thin", () => {
   });
 
   it("says plainly when no area's work reaches another's", () => {
-    /* The honest answer for a young catalogue. A summary that described
+    /* The honest answer for a young catalog. A summary that described
        three unconnected chains as a company's flow would be the same
        overclaim as a coverage report calling a failed walk a mapped
        system. */

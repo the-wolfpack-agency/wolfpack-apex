@@ -71,7 +71,7 @@ export interface SearchResponseCounts {
 
 /** A provider that did not answer, and why. */
 export interface SearchDegradation {
-  /** The provider's display name, as a reader would recognise it. */
+  /** The provider's display name, as a reader would recognize it. */
   provider: string;
   reason: "timed_out" | "failed";
 }
@@ -189,7 +189,7 @@ function withBudget<T>(work: Promise<T>, ms: number): Promise<T | typeof TIMED_O
       (err) => {
         clearTimeout(timer);
         /* RE-THROWN, NOT SWALLOWED. Written first as resolve(TIMED_OUT), which
-           relabelled every genuine provider failure as a timeout and would
+           relabeled every genuine provider failure as a timeout and would
            have hidden a broken connector behind a latency story. The test for
            a rejecting provider caught it. A rejection belongs to the caller's
            catch, which records it as failed. */

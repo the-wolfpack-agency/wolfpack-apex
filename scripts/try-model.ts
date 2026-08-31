@@ -1,7 +1,7 @@
 /**
- * Prove a model from the Azure AI Foundry catalogue before adding it.
+ * Prove a model from the Azure AI Foundry catalog before adding it.
  *
- * WHY THIS EXISTS. The catalogue has hundreds of models and this product uses
+ * WHY THIS EXISTS. The catalog has hundreds of models and this product uses
  * two. That is not a limit of the architecture: a Foundry model is a registry
  * entry plus a deployment name, and the endpoint and key are already
  * configured in production. The limit was that nothing made trying one cheap,
@@ -18,17 +18,17 @@
  * WHAT IT MEASURES AND WHAT IT REFUSES TO. It sends real prompts of the shape
  * this product actually runs and reports latency, token counts and whether the
  * answer is usable. It does NOT decide whether a model is good enough: that is
- * a judgement about a client's questions, and a script that scored it would be
+ * a judgment about a client's questions, and a script that scored it would be
  * inventing a threshold nobody agreed.
  *
- * IT NEVER GUESSES A PRICE. Prices come from the catalogue at the time you add
+ * IT NEVER GUESSES A PRICE. Prices come from the catalog at the time you add
  * the model, and the registry entry it prints leaves them for you to fill in.
  * A wrong price does not fail loudly; it silently reorders every routing
  * decision the product makes.
  *
  * Usage:
  *   npx tsx scripts/try-model.ts phi-4-mini
- *   npx tsx scripts/try-model.ts ministral-3b --prompt "summarise this in one line: ..."
+ *   npx tsx scripts/try-model.ts ministral-3b --prompt "summarize this in one line: ..."
  *
  * Needs AZURE_AI_FOUNDRY_ENDPOINT and AZURE_AI_FOUNDRY_API_KEY, both of which
  * are already set in production.
@@ -62,7 +62,7 @@ const PROBES: Array<{ name: string; system: string; user: string }> = [
   {
     name: "short instruction following",
     system: "Reply with exactly one sentence and no preamble.",
-    user: "Summarise: the team shipped seventeen fixes, most found by measuring production rather than reading code.",
+    user: "Summarize: the team shipped seventeen fixes, most found by measuring production rather than reading code.",
   },
 ];
 
@@ -178,8 +178,8 @@ async function tryModel() {
       `    apiKeyEnvVar: "AZURE_AI_FOUNDRY_API_KEY",\n` +
       `    deploymentEnvVar: "AZURE_FOUNDRY_DEPLOYMENT_<NAME>",\n` +
       `    capabilityTier: "small",   // "small" only if it passed the grounded probes\n` +
-      `    contextWindow: 0,          // from the catalogue\n` +
-      `    inputPricePer1kUsd: 0,     // from the catalogue, do not guess\n` +
+      `    contextWindow: 0,          // from the catalog\n` +
+      `    inputPricePer1kUsd: 0,     // from the catalog, do not guess\n` +
       `    outputPricePer1kUsd: 0,    // a wrong price reorders every routing decision\n` +
       `  },\n`,
   );

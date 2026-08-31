@@ -8,7 +8,7 @@
  * meeting_prep_source_clicked: one click, on one widget.
  *
  * That is why the customer-success view could only say "joined and has done
- * nothing since". It is the crudest possible behavioural signal because it was
+ * nothing since". It is the crudest possible behavioral signal because it was
  * the only one.
  *
  * MEASURED ON 90 DAYS OF PRODUCTION, 2026-08-30:
@@ -222,11 +222,11 @@ export async function readAnswerOutcomes(days = 90): Promise<AnswerOutcomes> {
     return empty;
   }
 
-  return summariseOutcomes(rows, days);
+  return summarizeOutcomes(rows, days);
 }
 
 /** Split out so the arithmetic is testable without a database. */
-export function summariseOutcomes(rows: MessageRow[], days: number): AnswerOutcomes {
+export function summarizeOutcomes(rows: MessageRow[], days: number): AnswerOutcomes {
   const byConversation = new Map<string, MessageRow[]>();
   for (const m of rows) {
     const list = byConversation.get(m.conversation_id);

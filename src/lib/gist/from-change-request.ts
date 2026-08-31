@@ -9,7 +9,7 @@
  * any source carries.
  *
  * WE DO NOT KNOW THEIR SCHEMA, AND MUST NOT PRETEND TO. Every forms system is
- * configured per organisation: the status column might be "Status", "State",
+ * configured per organization: the status column might be "Status", "State",
  * "Decision" or "Workflow Stage", and its values will be whatever somebody
  * typed when they built the form. So this DETECTS candidate columns and then
  * shows what it detected, rather than guessing silently and producing a
@@ -18,7 +18,7 @@
  * UNMAPPED STATUSES ARE REPORTED, NEVER BUCKETED QUIETLY. That is the lesson
  * from our own gist: four of the product's ten answer sources spent weeks
  * collapsing into "other" and nothing said so. A status this does not
- * recognise becomes "unknown" AND appears in the report, because a status
+ * recognize becomes "unknown" AND appears in the report, because a status
  * nobody mapped is a decision nobody can learn from.
  *
  * NOTHING THE FORM SAID SURVIVES. Titles, descriptions, names and comments are
@@ -109,22 +109,22 @@ const ENDING_BY_STATUS: Array<{ ending: DecisionEnding; values: string[] }> = [
 
 export interface MappedStatus {
   ending: DecisionEnding;
-  /** False when the status was not recognised, so the report can say so. */
-  recognised: boolean;
+  /** False when the status was not recognized, so the report can say so. */
+  recognized: boolean;
 }
 
 export function endingFromStatus(status: string): MappedStatus {
   const v = (status ?? "").trim().toLowerCase();
-  if (!v) return { ending: "unknown", recognised: false };
+  if (!v) return { ending: "unknown", recognized: false };
   for (const group of ENDING_BY_STATUS) {
-    if (group.values.includes(v)) return { ending: group.ending, recognised: true };
+    if (group.values.includes(v)) return { ending: group.ending, recognized: true };
   }
-  return { ending: "unknown", recognised: false };
+  return { ending: "unknown", recognized: false };
 }
 
 export interface ChangeRequestReading {
   gists: DecisionGist[];
-  /** Statuses the mapping did not recognise, with how often each appeared. */
+  /** Statuses the mapping did not recognize, with how often each appeared. */
   unmapped: Array<{ status: string; count: number }>;
   /** Rows skipped because they carried no status at all. */
   skipped: number;
@@ -153,8 +153,8 @@ export function readChangeRequests(
       continue;
     }
 
-    const { ending, recognised } = endingFromStatus(statusValue);
-    if (!recognised) {
+    const { ending, recognized } = endingFromStatus(statusValue);
+    if (!recognized) {
       unmappedCounts.set(statusValue, (unmappedCounts.get(statusValue) ?? 0) + 1);
     }
 

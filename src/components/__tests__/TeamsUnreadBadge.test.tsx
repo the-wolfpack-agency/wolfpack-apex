@@ -10,7 +10,7 @@ import "@testing-library/jest-dom";
  *   2. count > 0 renders with a /messages link + accessible label.
  *   3. Clicking fires messages.unread_badge_clicked analytics, sets
  *      localStorage instinct.messages.last_seen to a fresh ISO stamp,
- *      navigates to /messages, and optimistically zeroes the badge.
+ *      navigates to /messages, and optimiztically zeroes the badge.
  *   4. scope_missing response hides silently (no badge, no error UI).
  *   5. connected:false response hides silently.
  *   6. Polling interval re-fires the fetch (jest fake timers).
@@ -126,7 +126,7 @@ describe("<TeamsUnreadBadge />", () => {
 
     expect(mockPush).toHaveBeenCalledWith("/messages");
 
-    // Badge is optimistically zeroed, so it unmounts after the click.
+    // Badge is optimiztically zeroed, so it unmounts after the click.
     await waitFor(() => {
       expect(screen.queryByTestId("teams-unread-badge")).toBeNull();
     });

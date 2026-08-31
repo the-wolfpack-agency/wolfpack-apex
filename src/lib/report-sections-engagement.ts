@@ -117,7 +117,7 @@ export async function genSystemMap(ctx: ReportContext): Promise<string> {
 }
 
 /**
- * Systems learned by walking them, rendered separately and labelled as such.
+ * Systems learned by walking them, rendered separately and labeled as such.
  *
  * NOT MERGED WITH THE PROFILED ONES, and the separation is the point. A
  * profile read the source; a walk saw the outside of a running product. They
@@ -143,7 +143,7 @@ async function walkedSection(ctx: ReportContext): Promise<string[]> {
         ` counts, tests and migrations are unknown rather than zero.`,
       ``,
       `**Entry point**: ${row.entryUrl}`,
-      `**Authorised by**: ${row.authorisedBy}`,
+      `**Authorized by**: ${row.authorizedBy}`,
       ``,
       `| Observed | Count |`,
       `|----------|-------|`,
@@ -175,7 +175,7 @@ async function walkedSection(ctx: ReportContext): Promise<string[]> {
       );
     }
 
-    /* WHERE DATA LEAVES THE ORGANISATION. Deliberately above the object list:
+    /* WHERE DATA LEAVES THE ORGANIZATION. Deliberately above the object list:
        a reader scanning the section should meet this before the inventory,
        because it is the finding that changes what somebody does next. */
     if (m.integrations.length > 0) {
@@ -186,10 +186,10 @@ async function walkedSection(ctx: ReportContext): Promise<string[]> {
         `|---------|------|----------|---------|`,
       );
       for (const i of m.integrations.slice(0, 15)) {
-        /* "unrecognised" rather than blank: a host nobody could name is a
+        /* "unrecognized" rather than blank: a host nobody could name is a
            prompt to ask, and an empty cell reads as nothing to see. */
         out.push(
-          `| ${i.vendor ?? "_unrecognised_"} | ${i.host} | ${i.requestCount} | ${i.seenOn.length} |`,
+          `| ${i.vendor ?? "_unrecognized_"} | ${i.host} | ${i.requestCount} | ${i.seenOn.length} |`,
         );
       }
       out.push(``);

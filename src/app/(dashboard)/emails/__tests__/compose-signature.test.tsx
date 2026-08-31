@@ -1,7 +1,7 @@
 /** @jest-environment jsdom */
  
 /**
- * Compose-pane signature behaviour:
+ * Compose-pane signature behavior:
  *   1) The "Signature" toolbar dropdown lists the user's saved signatures
  *      and inserts the chosen one into the body.
  *   2) When the user has a default signature AND opens a fresh composer

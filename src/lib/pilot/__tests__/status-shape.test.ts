@@ -126,7 +126,7 @@ describe("a source that was not read is never a zero", () => {
   });
 });
 
-describe("readiness refuses to be optimistic about what it did not read", () => {
+describe("readiness refuses to be optimiztic about what it did not read", () => {
   it("is unknown when only one source answered, however clean that source is", () => {
     /* The trap in one test. Tasks are empty and perfect, and answering
        "on track" from that alone would be a claim about a calendar and a

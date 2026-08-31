@@ -2,7 +2,7 @@
  * Every prompt in docs/assistant-prompts.md must actually work.
  *
  * A usage doc is the one kind of documentation that can be checked mechanically:
- * each example is an input, and the product either recognises it or does not.
+ * each example is an input, and the product either recognizes it or does not.
  * Left unchecked it rots in the worst way, by telling somebody to type a
  * sentence that does nothing, on their first day, when they have no way to tell
  * whether they misunderstood or we did.
@@ -14,7 +14,7 @@
 import { readFileSync } from "fs";
 import { join } from "path";
 import { getTools } from "@/lib/assistant/tools/registry";
-import { matchRoutine } from "@/lib/assistant/routines/catalogue";
+import { matchRoutine } from "@/lib/assistant/routines/catalog";
 import "@/lib/assistant/tools";
 
 const DOC = join(process.cwd(), "docs/assistant-prompts.md");
@@ -59,7 +59,7 @@ describe("the prompts we tell people to type", () => {
     expect(examples.length).toBeGreaterThan(20);
   });
 
-  it.each(examples.map((e) => [e]))("%s is recognised by something", (example) => {
+  it.each(examples.map((e) => [e]))("%s is recognized by something", (example) => {
     const match = matchedBy(example);
     expect({ example, match }).toEqual(expect.objectContaining({ match: expect.any(String) }));
   });

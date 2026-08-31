@@ -28,7 +28,7 @@
  *     of brand tokens is indefensible.
  *   - og:image, when present and PNG, gets run through the existing
  *     k-means palette extractor in `image-palette.ts` for a measured
- *     colour set to cross-check the CSS-variable set.
+ *     color set to cross-check the CSS-variable set.
  *
  * Learning-loop note: every phase fires analytics.
  *   - brand_import_requested  — always, with only the hostname (no PII).
@@ -120,7 +120,7 @@ export const BRAND_SCRAPE_USER_AGENT =
 /**
  * IPv4 literal hosts we refuse. Pattern match is load-bearing: a host
  * like `127.1` (valid shorthand for 127.0.0.1) is not caught by a naive
- * "starts with 127." check, so we also normalise single-octet forms.
+ * "starts with 127." check, so we also normalize single-octet forms.
  *
  * Blocked:
  *   - 10.0.0.0/8
@@ -141,7 +141,7 @@ function isForbiddenIPv4(hostname: string): boolean {
   if (parts.some((p) => !Number.isFinite(p) || p < 0 || p > 0xffffffff)) {
     return true; // malformed literal — refuse
   }
-  // Normalise to 4 octets. IPv4 accepts 1-part (32-bit), 2-part (8+24),
+  // Normalize to 4 octets. IPv4 accepts 1-part (32-bit), 2-part (8+24),
   // 3-part (8+8+16), 4-part (8+8+8+8). We stay strict: anything other
   // than a dotted-quad is rejected so we never have to understand which
   // shorthand maps where. A "host" like `127.1` for loopback — refuse.
@@ -174,7 +174,7 @@ function isForbiddenIPv6(hostname: string): boolean {
   if (h.startsWith("fe80:") || h.startsWith("fe80::")) return true; // link-local
   if (h.startsWith("fc") || h.startsWith("fd")) return true; // unique local
   if (h.startsWith("ff")) return true; // multicast
-  // IPv4-mapped v6 addresses. The URL parser may normalise these into
+  // IPv4-mapped v6 addresses. The URL parser may normalize these into
   // either the dotted form `::ffff:127.0.0.1` OR the fully-expanded hex
   // form `::ffff:7f00:1`. We cover both — reject unconditionally when
   // the ::ffff: prefix is present, since the whole point of the mapped
@@ -426,7 +426,7 @@ function readInlineStyles(html: string): string {
 /**
  * Extract CSS custom-property values that match the modern brand-token
  * convention: `--primary`, `--accent`, `--bg`, `--fg` OR the prefixed
- * `--color-primary`, `--color-accent`, etc. We normalise hex to lower
+ * `--color-primary`, `--color-accent`, etc. We normalize hex to lower
  * case and de-duplicate while preserving declaration order.
  */
 export function extractCssPalette(css: string): string[] {
@@ -456,7 +456,7 @@ export function extractCssPalette(css: string): string[] {
     let m: RegExpExecArray | null;
     while ((m = re.exec(css)) !== null) {
       const raw = m[1].trim();
-      // Match #rgb, #rrggbb, #rrggbbaa (we normalise to 6-digit hex)
+      // Match #rgb, #rrggbb, #rrggbbaa (we normalize to 6-digit hex)
       const hex = /#([0-9a-f]{3,8})/i.exec(raw);
       if (!hex) continue;
       const h = hex[1].toLowerCase();
@@ -535,7 +535,7 @@ export function extractFontFamilies(css: string): string[] {
 
 /**
  * Absolute URL resolution — every href/src we lift off the page is
- * normalised against the scraped page's own URL so the caller never
+ * normalized against the scraped page's own URL so the caller never
  * has to care whether the source page used relative, protocol-relative,
  * or absolute addressing.
  */

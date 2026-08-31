@@ -7,7 +7,7 @@
  * promotion gate, the cost table. All of them are reasoning about a NAME, and
  * the thing behind the name moves. "gpt-4o" has meant several different sets of
  * weights. A model quarantined for regressing is quarantined by name, and the
- * replacement weights that shipped last week inherit that judgement whether or
+ * replacement weights that shipped last week inherit that judgment whether or
  * not they deserve it.
  *
  * Providers already tell us. The completion response carries the model that
@@ -56,13 +56,13 @@ export interface DriftObservation {
 }
 
 /**
- * Normalise what a provider called itself.
+ * Normalize what a provider called itself.
  *
  * Trimmed and lowercased only. NOT stripped of date suffixes, which was the
  * tempting simplification: treating gpt-4o-2024-11-20 as "gpt-4o" would make
  * the whole module blind to the exact change it exists to catch.
  */
-export function normaliseVersion(raw: string | null | undefined): string {
+export function normalizeVersion(raw: string | null | undefined): string {
   return (raw ?? "").trim().toLowerCase();
 }
 
@@ -77,24 +77,24 @@ export function observeVersion(input: {
   servedVersion: string;
   known: readonly KnownVersion[];
 }): DriftObservation {
-  const served = normaliseVersion(input.servedVersion);
+  const served = normalizeVersion(input.servedVersion);
   const known = input.known;
   const current = known[0] ?? null;
 
   const base = {
     modelId: input.modelId,
     servedVersion: served,
-    previousVersion: current ? normaliseVersion(current.servedVersion) : null,
+    previousVersion: current ? normalizeVersion(current.servedVersion) : null,
     previousCallCount: current ? current.callCount : null,
   };
 
   if (!current) return { ...base, kind: "first_sighting", previousVersion: null, previousCallCount: null };
-  if (normaliseVersion(current.servedVersion) === served) return { ...base, kind: "unchanged" };
+  if (normalizeVersion(current.servedVersion) === served) return { ...base, kind: "unchanged" };
 
   /* Seen before, and something else has served since. A provider rolling back
      is materially different news from a provider shipping something new: it
      often means a regression somebody else already noticed has been undone. */
-  const seenBefore = known.some((k) => normaliseVersion(k.servedVersion) === served);
+  const seenBefore = known.some((k) => normalizeVersion(k.servedVersion) === served);
   return { ...base, kind: seenBefore ? "reverted" : "changed" };
 }
 
@@ -108,17 +108,17 @@ export function isMaterial(observation: DriftObservation): boolean {
  *
  * THE REASON THIS MODULE MATTERS TO THE GATE. A model quarantined for
  * regressing was quarantined for what its weights did. When the provider ships
- * different weights, that judgement is about something that is no longer
+ * different weights, that judgment is about something that is no longer
  * running, and continuing to refuse is punishing a name.
  *
  * It does not auto-clear the quarantine, because a state that lifts itself is
  * the failure the promotion gate was written to avoid. It reports that the
- * judgement is STALE, which is a prompt for a decision rather than a decision.
+ * judgment is STALE, which is a prompt for a decision rather than a decision.
  */
 export function quarantineIsStale(input: {
   quarantinedVersion: string | null;
   servingVersion: string;
 }): boolean {
   if (!input.quarantinedVersion) return false;
-  return normaliseVersion(input.quarantinedVersion) !== normaliseVersion(input.servingVersion);
+  return normalizeVersion(input.quarantinedVersion) !== normalizeVersion(input.servingVersion);
 }

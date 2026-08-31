@@ -12,7 +12,7 @@
  *
  * Most of what is asserted here is about refusing and about honesty, because
  * those are the two ways a client assessment does damage: scanning something
- * nobody authorised, or handing over a thin result that reads as thorough.
+ * nobody authorized, or handing over a thin result that reads as thorough.
  */
 const mockTrack = jest.fn();
 jest.mock("@/lib/analytics", () => ({ trackEvent: (...a: unknown[]) => mockTrack(...a) }));
@@ -62,7 +62,7 @@ describe("the ownership floor", () => {
   });
 
   /* An unreadable answer is not a yes. The cost of being wrong is scanning a
-     system nobody authorised us to touch. */
+     system nobody authorized us to touch. */
   it("treats an unreadable verification as unverified", async () => {
     const d = deps({
       isVerified: jest.fn(async () => {

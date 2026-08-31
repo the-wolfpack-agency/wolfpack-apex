@@ -68,7 +68,7 @@ export default function ConfirmDialog({
     <div
       role="dialog"
       aria-modal="true"
-      aria-labelledby="confirm-dialog-title"
+      aria-labeledby="confirm-dialog-title"
       data-testid="confirm-dialog"
       className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50"
       onClick={onCancel}

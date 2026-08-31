@@ -106,7 +106,7 @@ describe("knowing when to spend a model call", () => {
     ).toBeNull();
   });
 
-  it("refuses an essay, rather than paying to summarise one", () => {
+  it("refuses an essay, rather than paying to summarize one", () => {
     expect(matchPlanDayIntent(`Here's what I do: ${"x".repeat(5000)}`)).toBeNull();
   });
 });

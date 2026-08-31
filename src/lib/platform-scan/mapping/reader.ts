@@ -32,9 +32,9 @@ import type { MappedForm } from "./types";
 import type { SurfaceReader, ReadSurface } from "./walk";
 
 /**
- * A form as the DOM describes it, before judgement.
+ * A form as the DOM describes it, before judgment.
  *
- * Whether it MUTATES is decided outside the browser, because that judgement
+ * Whether it MUTATES is decided outside the browser, because that judgment
  * belongs to click-policy and the harvest cannot import anything: it is
  * serialised into the page. Raw facts here, policy applied by the reader.
  */
@@ -324,7 +324,7 @@ export async function createSurfaceReader(
    * page.evaluate the call goes with it and the page throws
    * "ReferenceError: __name is not defined", so every read returns nothing.
    *
-   * It cost two runs today before being recognised, and it is invisible in a
+   * It cost two runs today before being recognized, and it is invisible in a
    * unit test because jsdom calls harvestSurface directly with no bundler in
    * between. Defended here rather than in each caller, since any bundler with
    * a name-preserving transform reintroduces it.

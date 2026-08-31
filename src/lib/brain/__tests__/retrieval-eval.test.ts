@@ -19,11 +19,11 @@ import {
   judgeChange,
   MIN_PAIRS_FOR_A_VERDICT,
   describeEval,
-  type LabelledPair,
+  type LabeledPair,
   type RankedResult,
 } from "@/lib/brain/retrieval-eval";
 
-const PAIRS: LabelledPair[] = [
+const PAIRS: LabeledPair[] = [
   { question: "what are the payment terms?", expectFilename: "work order" },
   { question: "what is the refund window?", expectFilename: "services agreement" },
 ];
@@ -115,7 +115,7 @@ describe("an empty eval set", () => {
 describe("the summary line", () => {
   it("carries the three numbers a reviewer needs", () => {
     const line = describeEval(gradeRetrieval(PAIRS, () => results("nope.pdf")));
-    expect(line).toMatch(/labelled questions/);
+    expect(line).toMatch(/labeled questions/);
     expect(line).toMatch(/MRR/);
     expect(line).toMatch(/never found/);
   });
@@ -183,13 +183,13 @@ describe("refusing to decide on too little evidence", () => {
 /**
  * A QUESTION WITH SEVERAL RIGHT ANSWERS NEEDS A RULER THAT KNOWS IT.
  *
- * Found on 2026-08-30. "Which hotels were surveyed in August" was labelled
+ * Found on 2026-08-30. "Which hotels were surveyed in August" was labeled
  * with one filename and scored as NEVER FOUND, while the corpus holds five
  * August surveys: Conrad Aug 10-14, Conrad Aug 17-21, Intercontinental Aug
  * 10-14, Ritz Carlton Las Colinas Aug 17-21, and WO 8.10-8.17_All.
  *
  * Retrieval was returning a correct document and being marked wrong for it.
- * That is worse than having no eval, because it sends somebody optimising a
+ * That is worse than having no eval, because it sends somebody optimizing a
  * system that already works: a tabular-chunking change was nearly built to
  * fix a measurement error.
  */
@@ -210,7 +210,7 @@ describe("a question with several correct answers", () => {
 
   /* Whichever acceptable document arrives FIRST decides the rank: somebody
      asking is served by the first one, not by the one we happened to label. */
-  it("ranks by the first acceptable document, not the labelled one", () => {
+  it("ranks by the first acceptable document, not the labeled one", () => {
     const r = gradeRetrieval([pair], () => [
       { filename: "Survey Data PCBA_101_Conrad Aug 10-14.xlsx" },
       { filename: "Survey Data PCBA_WO 8.10-8.17_All.xlsx" },
@@ -218,7 +218,7 @@ describe("a question with several correct answers", () => {
     expect(r.outcomes[0].rank).toBe(1);
   });
 
-  it("still counts the originally labelled document", () => {
+  it("still counts the originally labeled document", () => {
     const r = gradeRetrieval([pair], () => [
       { filename: "Survey Data PCBA_WO 8.10-8.17_All.xlsx" },
     ]);

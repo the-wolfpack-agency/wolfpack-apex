@@ -251,7 +251,7 @@ describe("assessLayout — failed requests", () => {
 });
 
 // ---------------------------------------------------------------------------
-// assessLayout — multiple simultaneous issues + device labelling
+// assessLayout — multiple simultaneous issues + device labeling
 // ---------------------------------------------------------------------------
 
 describe("assessLayout — combined", () => {
@@ -289,7 +289,7 @@ describe("assessLayout — combined", () => {
 // ---------------------------------------------------------------------------
 
 describe("deviceFindingToScanFinding", () => {
-  it("folds a DeviceFinding into a ScanFinding, labelling the route with the device", () => {
+  it("folds a DeviceFinding into a ScanFinding, labeling the route with the device", () => {
     const [finding] = assessLayout(obs({ documentScrollWidth: 500 }));
     const scan = deviceFindingToScanFinding(finding, "https://app.example.com/dashboard");
     expect(scan.route).toBe("https://app.example.com/dashboard [phone]");

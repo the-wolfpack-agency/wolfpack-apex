@@ -62,7 +62,7 @@ describe("a degraded turn says what broke", () => {
   });
 
   /* Two failures of one kind are one problem to a reader, and the wording must
-     be identical every time the same thing breaks so somebody can recognise a
+     be identical every time the same thing breaks so somebody can recognize a
      repeat outage. */
   it("says a repeated failure once", () => {
     const twice = degradedAnswer([{ kind: "model" }, { kind: "model", detail: "429" }])!;

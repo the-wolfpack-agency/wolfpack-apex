@@ -22,17 +22,17 @@ CREATE TABLE IF NOT EXISTS instinct_walked_system_maps (
   platform       TEXT NOT NULL,
   entry_url      TEXT NOT NULL,
   map            JSONB NOT NULL,
-  -- Denormalised for listing without parsing the document.
+  -- Denormalized for listing without parsing the document.
   surface_count  INTEGER NOT NULL DEFAULT 0,
   entity_count   INTEGER NOT NULL DEFAULT 0,
   form_count     INTEGER NOT NULL DEFAULT 0,
   -- NON-ZERO MEANS THE MAP IS INCOMPLETE, and every claim drawn from it
-  -- inherits that. Denormalised so a reader cannot miss it.
+  -- inherits that. Denormalized so a reader cannot miss it.
   frontier_remaining INTEGER NOT NULL DEFAULT 0,
   stop_reason    TEXT,
-  -- Who authorised walking somebody else's system. Not optional: this is the
+  -- Who authorized walking somebody else's system. Not optional: this is the
   -- record that the scan was permitted, and it is worth more than the map.
-  authorised_by  TEXT NOT NULL,
+  authorized_by  TEXT NOT NULL,
   generated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 

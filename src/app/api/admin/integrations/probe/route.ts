@@ -41,7 +41,7 @@ export async function POST(req: NextRequest) {
    * without either of them choosing it.
    *
    * getValidToken resolves by connected_by OR user_email, so the caller's own
-   * email is the right key: they authorised the connection, and the probe
+   * email is the right key: they authorized the connection, and the probe
    * therefore reaches exactly what they can already reach.
    */
   const userId = auth.user.email;

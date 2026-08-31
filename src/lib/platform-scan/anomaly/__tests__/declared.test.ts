@@ -152,7 +152,7 @@ describe("buildDeclarations", () => {
     expect(explanationFor(set, "shared.example.net")?.source).toBe("integration");
   });
 
-  it("normalises www and case in operator entries", () => {
+  it("normalizes www and case in operator entries", () => {
     const set = buildDeclarations({ pageUrl: page, operatorAllowed: ["  WWW.Vendor.IO  "] });
     expect(explanationFor(set, "vendor.io")?.source).toBe("operator");
   });

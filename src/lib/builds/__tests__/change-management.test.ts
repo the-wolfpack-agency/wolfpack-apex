@@ -107,11 +107,11 @@ describe("the argument for replacing it", () => {
 
   it("names the module that shares the name and does not fit", () => {
     expect(SIBLING_MODULE).toMatch(/wolfpack-auto/);
-    expect(SIBLING_MODULE).toMatch(/organisational/i);
+    expect(SIBLING_MODULE).toMatch(/organizational/i);
     expect(SIBLING_MODULE).toMatch(/personal/i);
   });
 
-  it("configures per programme rather than per product", () => {
+  it("configures per program rather than per product", () => {
     expect(CONFIGURATION.length).toBeGreaterThanOrEqual(5);
     expect(CONFIGURATION.map((c) => c.setting).join(" ")).toMatch(/cadence/i);
   });

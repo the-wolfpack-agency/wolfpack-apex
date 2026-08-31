@@ -10,7 +10,7 @@
  * Accessibility contract:
  *   - Outer <nav role="tablist"> carries `aria-orientation="vertical"`.
  *   - Each tab button is `role="tab"` with `aria-selected` + `aria-controls`.
- *   - Tab panels are `role="tabpanel"` with matching `aria-labelledby`.
+ *   - Tab panels are `role="tabpanel"` with matching `aria-labeledby`.
  *   - ArrowUp / ArrowDown cycle focus; Home / End jump to first/last.
  *   - Controlled: parent owns `activeTab` so the studio can persist
  *     selection to the URL for deep-links.
@@ -213,7 +213,7 @@ export default function TabDock({
       <div
         role="tabpanel"
         id={`${testIdPrefix}-panel-${active?.id ?? ""}`}
-        aria-labelledby={`${testIdPrefix}-tab-${active?.id ?? ""}`}
+        aria-labeledby={`${testIdPrefix}-tab-${active?.id ?? ""}`}
         data-testid={`${testIdPrefix}-panel`}
         data-active-tab={active?.id ?? ""}
         tabIndex={0}

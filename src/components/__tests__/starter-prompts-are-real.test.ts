@@ -20,7 +20,7 @@
  * write a regex to satisfy a test.
  */
 import { buildStarterCategoriesForTest } from "@/components/AssistantStarterPrompts";
-import { BUILT_IN_ROUTINES, matchRoutine } from "@/lib/assistant/routines/catalogue";
+import { BUILT_IN_ROUTINES, matchRoutine } from "@/lib/assistant/routines/catalog";
 import { getTools } from "@/lib/assistant/tools/registry";
 import "@/lib/assistant/tools";
 

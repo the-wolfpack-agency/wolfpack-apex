@@ -84,7 +84,7 @@ describe("checking that a routine still does what it says", () => {
   it("ignores human and model steps, which cannot break this way", () => {
     const r = routine([
       { kind: "human", label: "Rehearse the opening", action: "do" },
-      { kind: "model", prompt: "summarise", label: "Summarise it" },
+      { kind: "model", prompt: "summarize", label: "Summarize it" },
     ]);
     expect(checkRoutine(r, TOOLS, "cto").ok).toBe(true);
   });
