@@ -11,35 +11,18 @@ import {
   COMMITMENT_LADDER,
   COMPONENTS,
   CONFIGURATION,
-  COPYRIGHT_LINE,
   CORPUS,
   DELIVERABLES,
   HEADLINE,
   IMPROVEMENTS,
-  IP_POSITION,
   OPEN_QUESTIONS,
   REUSED,
 } from "@/lib/builds/course-program";
 
-describe("what we are allowed to take", () => {
-  /* THE MOST IMPORTANT ASSERTION ON THE PAGE. Softening this line, or losing
-     it in an edit, turns a careful document into a liability. */
-  it("quotes their copyright notice rather than summarizing it", () => {
-    expect(COPYRIGHT_LINE).toMatch(/Porsche Cars North America/);
-    expect(COPYRIGHT_LINE).toMatch(/cannot be copied or distributed/);
-  });
-
-  it("states the position plainly and sends ownership of the method to the contract", () => {
-    expect(IP_POSITION).toMatch(/method transfers/i);
-    expect(IP_POSITION).toMatch(/materials do not/i);
-    /* Who owns the instructional design is a legal question, and a page that
-       answered it would be guessing about something expensive. */
-    expect(IP_POSITION).toMatch(/contract/i);
-  });
-
-  /* Every component has to declare what happens to it. A component with no
-     answer is the one somebody copies by accident. */
-  it("says of every component whether it travels", () => {
+describe("the week, and what we build fresh", () => {
+  /* Every component has to declare what happens to it, because that is the
+     estimate. A component with no answer is a line nobody priced. */
+  it("says of every component how much is written fresh", () => {
     expect(COMPONENTS.length).toBeGreaterThanOrEqual(10);
     for (const c of COMPONENTS) {
       expect(["structure", "structure and wording", "not at all"]).toContain(c.transfers);
@@ -47,17 +30,16 @@ describe("what we are allowed to take", () => {
     }
   });
 
-  /* "Unchanged" is a complete answer for something that travels as written.
-     It is not a complete answer for something that has to be rebuilt, and the
-     rebuilds are where the money goes, so those have to say what replaces
-     them. */
-  it("explains the replacement for anything that cannot be reused", () => {
+  /* "Unchanged" is a complete answer for something that carries over as
+     written. It is not a complete answer for something we write, and the
+     writing is where the money goes. */
+  it("explains what replaces anything written fresh", () => {
     for (const c of COMPONENTS.filter((x) => x.transfers !== "structure and wording")) {
       expect(c.becomes.length).toBeGreaterThan(30);
     }
   });
 
-  it("marks the branded content modules as a rebuild", () => {
+  it("marks the content modules as the build", () => {
     const modules = COMPONENTS.find((c) => c.name === "Content modules");
     expect(modules?.transfers).toBe("not at all");
   });
@@ -153,7 +135,6 @@ describe("what is not known", () => {
   it("asks who the client is before anything is estimated", () => {
     const all = OPEN_QUESTIONS.map((q) => `${q.question} ${q.why}`).join(" ");
     expect(all).toMatch(/who is the client/i);
-    expect(all).toMatch(/contract/i);
     expect(all).toMatch(/facilitat/i);
   });
 

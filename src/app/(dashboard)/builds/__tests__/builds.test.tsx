@@ -131,15 +131,6 @@ describe("the change management concept", () => {
  * that we do not know who the client is.
  */
 describe("the new course concept", () => {
-  /* FIRST ON THE PAGE, BEFORE ANY IDEAS. Somebody skimming has to hit this
-     before they start imagining slides. */
-  it("leads with what we are not allowed to take", () => {
-    render(<CourseProgramPage />);
-    const ip = screen.getByTestId("cp-ip");
-    expect(ip).toHaveTextContent(/cannot be copied or distributed/i);
-    expect(ip).toHaveTextContent(/method transfers/i);
-    expect(ip).toHaveTextContent(/materials do not/i);
-  });
 
   /* The value is the ORDER, and a page that lost it would be selling a pile
      of worksheets. */

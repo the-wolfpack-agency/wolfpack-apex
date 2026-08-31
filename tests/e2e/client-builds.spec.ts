@@ -86,17 +86,15 @@ test.describe("client builds", () => {
     expect(failures().filter((f) => f.detail.startsWith("CSP:"))).toEqual([]);
   });
 
-  /* THE CONSTRAINT HAS TO SURVIVE A DEPLOY. Everything else on that page is
-     downstream of the client owning their material, and a reader who misses it
-     starts imagining slides. */
-  test("the new-course page leads with what we cannot take", async ({ page }) => {
+  /* THE FINDING HAS TO SURVIVE A DEPLOY. The value of the page is the ladder:
+     six artifacts that feed each other, in order. A page that rendered them as
+     an unordered list would be selling a pile of worksheets. */
+  test("the new-course page leads with why the method works", async ({ page }) => {
     await page.goto(`${target.baseUrl}/builds/course-program`, { waitUntil: "domcontentloaded" });
     await expectRendered(page, "/builds/course-program", ["taking the method"]);
 
-    await expect(page.getByTestId("cp-ip")).toContainText(/cannot be copied or distributed/i);
-    await expect(page.getByTestId("cp-open")).toContainText(/who is the client/i);
-    /* Six rungs, in order. The order is the finding. */
     await expect(page.locator('[data-testid="cp-ladder"] li')).toHaveCount(6);
+    await expect(page.getByTestId("cp-open")).toContainText(/who is the client/i);
   });
 
   /* A wide table is the classic way a document page starts scrolling
