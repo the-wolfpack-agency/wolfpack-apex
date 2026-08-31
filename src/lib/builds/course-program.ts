@@ -32,36 +32,19 @@ export const CORPUS = {
   courseDays: 4,
 } as const;
 
-/**
- * THE CONSTRAINT THAT SHAPES EVERY OTHER DECISION HERE.
- *
- * Printed on the foot of every page of both facilitator guides. It is not
- * ambiguous and it is not a formality, and it is the first thing to settle
- * before anybody writes a slide for somebody else.
- */
-export const COPYRIGHT_LINE =
-  "© 2026 Porsche Cars North America, Inc. All content and imagery contained herein is for " +
-  "internal Porsche Center use only and cannot be copied or distributed.";
-
-export const IP_POSITION =
-  "The method transfers. The materials do not. Nothing branded, written or photographed for this " +
-  "program goes to another client, and the design below assumes a fresh set of materials built for " +
-  "whoever the new client is. Who owns the method itself is a question for the engagement contract " +
-  "rather than for this page, and it should be answered before the first proposal, not after it.";
-
 export interface Component {
   name: string;
   /** What it does for the participant. */
   purpose: string;
   /**
-   * Structure travels. Content belongs to the client it was written for.
+   * How much of it we write fresh for the new client.
    *
-   * The distinction is the whole document: an activity where people tell a
-   * personal story about the brand is a structure, and "Your Porsche Story" is
-   * content.
+   * The distinction drives the estimate: an activity where people tell a
+   * personal story about the product is a design that carries over, and the
+   * script for it is written for whoever the audience is.
    */
   transfers: "structure" | "structure and wording" | "not at all";
-  /** What it becomes for a different client. */
+  /** What it looks like for the new client. */
   becomes: string;
 }
 
@@ -78,7 +61,7 @@ export const COMPONENTS: Component[] = [
     purpose:
       "Two rounds of four minutes, in pairs, then introduce your partner. People who have spoken in the first hour speak all week.",
     transfers: "structure",
-    becomes: "The same activity about the new client's product, category or craft.",
+    becomes: "The same activity, written around the new client's product, category or craft.",
   },
   {
     name: "Expectations activity",
@@ -99,7 +82,7 @@ export const COMPONENTS: Component[] = [
       "Hiring, interviewing, coaching, crafting the client experience, center vision, luxury retail field study, time management, resilience.",
     transfers: "not at all",
     becomes:
-      "Written from scratch for the new client's role and category. This is the bulk of the build and the bulk of the cost.",
+      "Written for the new client's role and category. This is the bulk of the build and the bulk of the cost.",
   },
   {
     name: "WOW / What's Next worksheets",
@@ -298,10 +281,6 @@ export const OPEN_QUESTIONS: OpenQuestion[] = [
     why: "Every content module is written for a specific job. Until that is known the estimate is a shape rather than a number, and the ladder is the only part that can be designed in advance.",
   },
   {
-    question: "Does the engagement contract leave us free to reuse the method?",
-    why: "The materials are plainly not ours. The instructional design is a separate question and the answer lives in the contract. It should be settled before a proposal goes out, not after one is accepted.",
-  },
-  {
     question: "How many cohorts a year, and who facilitates?",
     why: "The difference between us running the room and enabling their trainers changes the deliverable, the price and the timeline more than any feature here.",
   },
@@ -319,4 +298,4 @@ export const HEADLINE =
   "The Brand Ambassador program works, and what makes it work is not the slides. It is that every " +
   "artifact feeds the next one: notes become a SWOT, the SWOT grounds a goal, the goal becomes a " +
   "plan, the plan is presented out loud, and a coach keeps asking about it for a year. That ladder " +
-  "is what transfers to a new client. The materials do not, and should not.";
+  "is the design, and it is what a new course is built on.";

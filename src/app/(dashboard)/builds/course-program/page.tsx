@@ -3,10 +3,9 @@
 /**
  * /builds/course-program - a new course for a new client.
  *
- * ORDERED SO THE CONSTRAINT ARRIVES BEFORE THE IDEAS. The copyright line on
- * their material is the first thing on the page, because every design decision
- * below is downstream of it and because somebody skimming needs to hit it
- * before they start imagining slides.
+ * ORDERED AS AN ARGUMENT. Why the program works, then the week it runs in,
+ * then where we make it better, then what it costs to build. A reader who
+ * stops after the first section still has the finding.
  *
  * Everything rendered comes from lib/builds/course-program.ts, where a test
  * pins it. A document claiming we understand their program should not be able
@@ -20,12 +19,10 @@ import {
   COMMITMENT_LADDER,
   COMPONENTS,
   CONFIGURATION,
-  COPYRIGHT_LINE,
   CORPUS,
   DELIVERABLES,
   HEADLINE,
   IMPROVEMENTS,
-  IP_POSITION,
   OPEN_QUESTIONS,
   REUSED,
 } from "@/lib/builds/course-program";
@@ -48,15 +45,6 @@ export default function CourseProgramPage() {
         <h1>Taking the method, not the material</h1>
         <p className="wp-pilot-sub">{HEADLINE}</p>
       </header>
-
-      {/* FIRST, BEFORE ANY IDEAS. */}
-      <section className="wp-pilot-section" data-testid="cp-ip">
-        <h2>What we can and cannot take</h2>
-        <blockquote className="wp-build-quote">{COPYRIGHT_LINE}</blockquote>
-        <p className="wp-pilot-aside">
-          That line sits at the foot of every page of both facilitator guides. {IP_POSITION}
-        </p>
-      </section>
 
       {/* THE ACTUAL FINDING. Not a list of features: an order. */}
       <section className="wp-pilot-section" data-testid="cp-ladder">
