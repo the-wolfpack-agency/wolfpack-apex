@@ -589,3 +589,76 @@ describe("the exposure scan is discoverable", () => {
     expect(el).toHaveClass("wp-pilot-button");
   });
 });
+
+/**
+ * What people asked and did not get.
+ *
+ * A build backlog written by the people using it rather than guessed at in a
+ * planning meeting, and the one panel here that says what to do next rather
+ * than what happened.
+ */
+describe("the gaps panel", () => {
+  const gaps = {
+    wouldConnect: [{ question: "how many cayennes are on the lot", asked: 9, system: "dealer-system" }],
+    missing: [{ question: "what is our refund policy", asked: 5, system: "documents" }],
+    closed: [{ question: "what are the payment terms in our sow?", asked: 18 }],
+    wanted: [{ question: "book me 30 minutes with dana tomorrow", asked: 3 }],
+    readable: true,
+  };
+
+  /* THE SPLIT THE PANEL EXISTS FOR. One is a decision somebody makes in an
+     afternoon, the other is somebody writing a document. A single list of
+     failures mixes a sales conversation with a content backlog. */
+  it("keeps connect-this apart from write-this", async () => {
+    respond({ ...base, gaps });
+    render(<PilotPage />);
+    const connect = await screen.findByTestId("pilot-gaps-connect");
+    expect(connect).toHaveTextContent("how many cayennes are on the lot");
+    expect(connect).toHaveTextContent("dealer-system");
+
+    const missing = screen.getByTestId("pilot-gaps-missing");
+    expect(missing).toHaveTextContent("what is our refund policy");
+    expect(missing).not.toHaveTextContent("cayennes");
+  });
+
+  /* Unmet demand for an ACTION is invisible everywhere else: nobody files a
+     request for something they assumed would work. */
+  it("shows what somebody expected the product to do", async () => {
+    respond({ ...base, gaps });
+    render(<PilotPage />);
+    expect(await screen.findByTestId("pilot-gaps-wanted")).toHaveTextContent(
+      "book me 30 minutes with dana tomorrow",
+    );
+  });
+
+  /* The best evidence there is that uploading changed something. */
+  it("shows gaps that have since closed", async () => {
+    respond({ ...base, gaps });
+    render(<PilotPage />);
+    expect(await screen.findByTestId("pilot-gaps-closed")).toHaveTextContent(
+      "what are the payment terms in our sow?",
+    );
+  });
+
+  /* AN UNREADABLE LOG AND A CLIENT WITH NO GAPS ARE THE SAME EMPTY LIST AND
+     OPPOSITE FACTS. */
+  it("says the figures could not be read rather than showing nothing", async () => {
+    respond({ ...base, gaps: { ...gaps, readable: false } });
+    render(<PilotPage />);
+    expect(await screen.findByTestId("pilot-gaps-unreadable")).toHaveTextContent(
+      /not the same as nothing having gone unanswered/i,
+    );
+    expect(screen.queryByTestId("pilot-gaps-connect")).toBeNull();
+  });
+
+  it("says so plainly when everything was answered", async () => {
+    respond({
+      ...base,
+      gaps: { wouldConnect: [], missing: [], closed: [], wanted: [], readable: true },
+    });
+    render(<PilotPage />);
+    expect(await screen.findByTestId("pilot-gaps-none")).toHaveTextContent(
+      /Every question asked in this window was answered/i,
+    );
+  });
+});
