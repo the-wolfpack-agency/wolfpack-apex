@@ -36,7 +36,7 @@
 export const TOOL_PERSONAS: Record<string, readonly string[]> = {
   /* A Porsche Center's own staff: their cars, their guests, their week, and
      the documents their Center is allowed to read. Nothing about anybody
-     else's Center, and nothing about the agency running the programme. */
+     else's Center, and nothing about the agency running the program. */
   dealer: [
     "what_can_you_do",
     "get_calendar_availability",
@@ -123,7 +123,7 @@ export const PERSONA_COPY: Record<string, PersonaCopy> = {
   },
   search: {
     area: "Your documents",
-    description: "Search the programme documents, your mail and your calendar in one go",
+    description: "Search the program documents, your mail and your calendar in one go",
   },
   feedback: {
     area: "Telling us something",

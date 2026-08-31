@@ -49,7 +49,7 @@ describe("a decision with no cost estimate", () => {
 
   it("with no completed calls, says spend cannot be measured", () => {
     /* This asserted the headline warned that the estimate "understates the real
-       figure". The warning was true and useless: it apologised for a number
+       figure". The warning was true and useless: it apologized for a number
        instead of reporting the one we had. ai.completion carries the
        provider's own cost for every call that ran, and the headline now reads
        that instead (see insights-actuals.test.ts).

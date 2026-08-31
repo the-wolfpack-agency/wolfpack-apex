@@ -10,7 +10,7 @@
  * Contract it consumes (server-only lib + route already exist):
  *   GET /api/admin/deployment/release-gate -> { ok, gate: ReleaseGateStatus }
  *
- * Behaviour:
+ * Behavior:
  *   - blocking.length > 0  -> "N change(s) built and waiting to deploy to
  *     production. [most-urgent PR title] needs [its reason] -> View"
  *   - blocking empty       -> renders nothing (no noise when prod is current)

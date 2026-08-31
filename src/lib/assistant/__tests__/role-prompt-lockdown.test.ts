@@ -79,9 +79,9 @@ describe("every role's starter prompts resolve for that role", () => {
    * replied with a list of filenames.
    *
    * So the exemption is narrow and specific. It covers only sentences the
-   * question-frame parser recognises, which is the same parser retrieval uses
-   * to build its search terms. If that parser stops recognising a chip, the
-   * chip stops being exempt here and this test fails, which is the behaviour
+   * question-frame parser recognizes, which is the same parser retrieval uses
+   * to build its search terms. If that parser stops recognizing a chip, the
+   * chip stops being exempt here and this test fails, which is the behavior
    * worth having. */
   it.each(ROLES)("every prompt offered to %s reaches a tool", (role) => {
     const dead = welcomePromptsForRole(role)

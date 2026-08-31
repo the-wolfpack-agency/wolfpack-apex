@@ -153,7 +153,7 @@ export const AGENT_OPERATIONS: AgentOperation[] = [
     id: "create_document",
     summary: "Create a document or written summary in the knowledge base",
     // "create/make/write/draft/... a document|summary|write-up|brief|report|memo|
-    //  doc ...", or a bare "summarize/summarise ...". Anchored on a document-like
+    //  doc ...", or a bare "summarize/summarize ...". Anchored on a document-like
     // surface noun so it does not swallow "create a task"/"create an event".
     intent:
       /\b(?:create|make|write|draft|compose|generate|produce|prepare|save|put\s+together)\b[^.!?]*\b(?:document|summary|write[\s-]?up|writeup|brief|report|memo|doc)\b|\bsummari[sz]e\b/i,

@@ -86,7 +86,7 @@ function requesterIp(headers: Headers): string {
   );
 }
 
-/** ISO country from Vercel's edge header, normalised. Null when absent. */
+/** ISO country from Vercel's edge header, normalized. Null when absent. */
 function edgeCountry(headers: Headers): string | null {
   const c = headers.get("x-vercel-ip-country");
   if (!c) return null;

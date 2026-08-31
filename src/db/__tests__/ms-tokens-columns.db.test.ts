@@ -15,7 +15,7 @@
  * same shape as the invite-accept bug in the suite next door: a query naming an
  * object that does not exist.
  *
- * SO THIS EXECUTES THE REAL QUERY TEXT rather than inspecting a catalogue. A
+ * SO THIS EXECUTES THE REAL QUERY TEXT rather than inspecting a catalog. A
  * test that reads information_schema only proves what the test itself just
  * created; running the statement proves the statement works. A clause naming a
  * column nobody added fails here and only here.
@@ -95,7 +95,7 @@ describeIfDb("the Microsoft token lookup", () => {
     expect(byEmail.rows).toHaveLength(1);
   });
 
-  /* THE BUG, REPRODUCED. Not an assertion about a catalogue: the statement
+  /* THE BUG, REPRODUCED. Not an assertion about a catalog: the statement
      that shipped, run for real, failing the way it failed in production. If
      the table ever genuinely becomes workspace-scoped this test says so out
      loud and the routes get updated deliberately rather than by assumption. */

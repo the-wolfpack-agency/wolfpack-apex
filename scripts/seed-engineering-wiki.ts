@@ -135,7 +135,7 @@ That ceiling is the point rather than a stage to grow out of. A routine anyone c
 Nothing new. A routine step dispatches through the same path a chat message takes, so the capability gate, the OGIAM decision, confirmation on every write, the ledger and the analytics all still run. A routine is a faster path through the existing gates, never a way around them.
 
 ## Keeping a chain working
-Every scheduled routine is checked before it runs, against the live registry and the owner's role. A broken one is **not** run, because half a chain produces a partial answer that looks like a whole one. Where a step can be repaired the fix is proposed to its owner and never applied silently, and a replacement that does something merely adjacent is refused in favour of removing the step.`,
+Every scheduled routine is checked before it runs, against the live registry and the owner's role. A broken one is **not** run, because half a chain produces a partial answer that looks like a whole one. Where a step can be repaired the fix is proposed to its owner and never applied silently, and a replacement that does something merely adjacent is refused in favor of removing the step.`,
   },
   {
     slug: "how-we-build",
@@ -300,7 +300,7 @@ Every AI call goes through one place, and it checks in both directions.
 Four outcomes: allow, trim the claim, withhold it, or hand it to a person. Rule sets are per tenant, with a baseline true of any business plus industry sets. Refusals record the **rule**, never the sentence: a log of blocked answers would be a permanent, queryable archive of exactly the text the gate exists to withhold.
 
 ## How much of a chain actually needed AI
-Every routine run records how many of its steps were tools and how many were models. The claim being made to a client is that their own tools are being operated from one place and a model is asked only where judgement is genuinely required, and that is a number per routine per week rather than a sentence in a deck. It is also the early warning if a chain drifts into asking a model something a tool already knows.`,
+Every routine run records how many of its steps were tools and how many were models. The claim being made to a client is that their own tools are being operated from one place and a model is asked only where judgment is genuinely required, and that is a number per routine per week rather than a sentence in a deck. It is also the early warning if a chain drifts into asking a model something a tool already knows.`,
   },
   {
     slug: "design-conformance",
@@ -409,7 +409,7 @@ Most expensive round trips on a task are not caused by a hard problem. They are 
 Paste a brief on the Agent fleet page and it reports which of those facts are missing, each with the one question that would supply it. It runs before the work, not as a retrospective afterwards, because that is where the saving is.
 
 ## What it deliberately is not
-- **Not a score.** There is no grade or percentage. A number invites people to optimise the number rather than write a better brief.
+- **Not a score.** There is no grade or percentage. A number invites people to optimize the number rather than write a better brief.
 - **Not a model call.** The rules are deterministic, so they can be read, argued with and unit-tested, and they cost nothing to run on every brief.
 - **Not a rewrite.** It appends questions rather than filling in answers, because a confident wrong assumption written back in your own voice is worse than the gap it replaced.
 - **Not stored.** The brief text is never saved. Only the shape of the result is recorded, so the team can eventually answer "which fact do we most often leave out" without keeping text that names clients.
@@ -548,7 +548,7 @@ In most software companies the person who feels a problem and the person who can
 That chain has four handoffs and loses information at each one. Our answer is not a better ticketing process. It is to remove the handoffs.
 
 ## What we build instead
-**The client reports inside the product they are using, and the builder reads it in the same system.** No inbox in between, no re-typing, no summary of a summary. The report already knows who sent it, which organisation they belong to, and what screen they were on, because the product knows.
+**The client reports inside the product they are using, and the builder reads it in the same system.** No inbox in between, no re-typing, no summary of a summary. The report already knows who sent it, which organization they belong to, and what screen they were on, because the product knows.
 
 **The builder can stand where the client stands.** A support context points our session at one client's workspace, so we see exactly what they see instead of asking them to describe it. It is bounded, recorded and shown on screen the whole time it is open.
 
@@ -558,7 +558,7 @@ That chain has four handoffs and loses information at each one. Our answer is no
 - **Fidelity.** The report arrives with its context attached rather than as somebody's recollection of a phone call.
 - **Latency.** The loop is client to builder to shipped, not client to CSM to ticket to sprint to release.
 - **Honesty.** When the feedback path is one click and the reply is a fix they can see, clients keep reporting. Silence stops being ambiguous.
-- **Scale.** It is the same layer for every client and every organisation, so the eleventh client costs no more customer-success process than the first.
+- **Scale.** It is the same layer for every client and every organization, so the eleventh client costs no more customer-success process than the first.
 
 ## A prime example: A Weekend with Porsche
 The dealer workspace is where this layer is being proved. Its Porsche Centers report from inside the product, their program leads see the whole rollout without asking anybody for a status update, and we can open any Center's workspace to help them, on the record.
@@ -585,14 +585,14 @@ Each item below is marked **live** where it is in production today in A Weekend 
 | Broken user paths | planned | Journeys that start and do not finish, surfaced automatically rather than discovered in a call. |
 | Areas of resistance | planned | Where people hesitate, retry or abandon. The signal that a screen is wrong before anybody complains about it. |
 | Email template tester | live | Sends the real client template to yourself, so what you check is what they receive. The link it carries is inert and cannot be redeemed. |
-| Multi-org switcher with header banner | live | Open one organisation's workspace to help them. Recorded on entry and exit, shown in a banner for as long as it is open, and it expires by itself. |
+| Multi-org switcher with header banner | live | Open one organization's workspace to help them. Recorded on entry and exit, shown in a banner for as long as it is open, and it expires by itself. |
 
 ## The client's side
 ### Admins and program leads
 | Tool | State | What it is for |
 |---|---|---|
 | Full-program analytics | live | Every group beneath them, rolled up, plus a per-group breakdown so a lead can name a specific example rather than quote an average. |
-| Direct support form | live | A form inside the product that reaches us by email and lands in one queue. It never asks who they are or which organisation: the session knows. |
+| Direct support form | live | A form inside the product that reaches us by email and lands in one queue. It never asks who they are or which organization: the session knows. |
 | Feedback page | live | For the smaller things that are not worth a support request but are worth saying. |
 
 ### Everyone below admin level

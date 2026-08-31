@@ -2,7 +2,7 @@
  * The gist layer's live state.
  *
  * Serves what the experiment measures, so the page shows the product's actual
- * behaviour rather than a screenshot of a good day. Read-only: it derives from
+ * behavior rather than a screenshot of a good day. Read-only: it derives from
  * stored messages and writes nothing.
  */
 

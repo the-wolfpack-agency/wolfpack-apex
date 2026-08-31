@@ -21,7 +21,7 @@
  *   MS_CLIENT_ID=... MS_CLIENT_SECRET=... MS_TENANT_ID=... \
  *     npx tsx scripts/graph-capability-probe.ts
  *
- * Prints nothing secret. Token claims are summarised, never dumped.
+ * Prints nothing secret. Token claims are summarized, never dumped.
  */
 
 /* Makes this file a module rather than a global script, so its type names do
@@ -49,7 +49,7 @@ interface Probe {
  */
 const PROBES: Probe[] = [
   {
-    name: "Copilot licences in the tenant",
+    name: "Copilot licenses in the tenant",
     url: "https://graph.microsoft.com/v1.0/subscribedSkus",
     needs: "Organization.Read.All (or Directory.Read.All)",
     worth: "whether Copilot is licensed at all, before asking anybody about usage",

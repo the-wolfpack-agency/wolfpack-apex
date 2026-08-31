@@ -74,7 +74,7 @@ test.describe("the first day on this deployment", () => {
    * dependent flow and wrong for a survey. The first run of this against
    * production failed on step 3 and skipped steps 4, 5 and 6, reporting "3 did
    * not run" for a deployment whose calendar, capability and confabulation
-   * behaviour were all still unknown.
+   * behavior were all still unknown.
    *
    * Somebody standing up a client instance needs the whole picture from one
    * run, including everything downstream of the first problem. Each step signs

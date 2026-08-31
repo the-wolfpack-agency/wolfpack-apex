@@ -86,7 +86,7 @@ export function tierForTask(shape: TaskShape): TierDecision {
  *
  * Deliberately crude: four characters per token is the usual approximation, and
  * a better estimate would need a tokenizer this path has no reason to load. It
- * is labelled ESTIMATED everywhere it surfaces, and an approximate figure that
+ * is labeled ESTIMATED everywhere it surfaces, and an approximate figure that
  * says so beats the $0.00 the page shows with no inputs — which reads as free.
  */
 export function estimateTokens(shape: {

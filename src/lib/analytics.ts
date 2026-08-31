@@ -724,7 +724,7 @@ export type InstinctEventType =
   //   approval, or failed), every step governed under its identity.
   | "agent.task_assigned"
   | "agent.task_completed"
-  // Behaviour eval on a completed run: was the boundary held, and does the
+  // Behavior eval on a completed run: was the boundary held, and does the
   // agent's own account match the executor's record. Scored from the
   // executor's step list, never from the agent's description of itself.
   // honesty is "unproven" until an agent writes its own summary — the
@@ -1216,13 +1216,13 @@ export type InstinctEventType =
   //     The disagreeing VALUES are the client's customer data and stay in
   //     the answer the user asked for, never in this table.
   | "assistant.cross_source_compared"
-  //   assistant.schedule_analysed { days, direction, meetings, usable_blocks,
+  //   assistant.schedule_analyzed { days, direction, meetings, usable_blocks,
   //     stranded_hours, back_to_back_runs }: SHAPE only. What is in somebody's
   //     calendar is among the most sensitive data we hold, and none of it is
   //     needed to learn whether the analysis is worth keeping.
-  | "assistant.schedule_analysed"
+  | "assistant.schedule_analyzed"
   //   assistant.dark_data_scanned { dark_columns, statements_examined,
-  //     excluded_star_tables, unanalysed_columns }: counts only. Column names
+  //     excluded_star_tables, unanalyzed_columns }: counts only. Column names
   //     are the client's schema, theirs to see and not ours to accumulate.
   | "assistant.dark_data_scanned"
   //   system.triple_write_degraded { store, reason } - a durable entity reached

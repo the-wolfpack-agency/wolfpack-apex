@@ -11,7 +11,7 @@
  * and asserts the canonical safety patterns are present.
  *
  * These are STRUCTURAL assertions — they don't execute SQL. Runtime
- * behaviour is covered by the hr-documents-e2e integration tests.
+ * behavior is covered by the hr-documents-e2e integration tests.
  */
 
 import { readFileSync, existsSync } from "node:fs";

@@ -395,7 +395,7 @@ export async function _findStalestEntry(
 /**
  * Starts the idle-refresh watcher. Returns a `stop()` fn for cleanup.
  *
- * Behaviour:
+ * Behavior:
  *   - Listens to mousemove/keydown/scroll/touchstart/click on document.
  *   - Any event resets the idle timer.
  *   - After `idleThresholdMs` of quiet (default 30s), emits

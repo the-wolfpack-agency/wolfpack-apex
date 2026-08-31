@@ -12,7 +12,7 @@
 -- tracker (Phase 3, src/lib/automations/meeting-insights/themes.ts).
 --
 -- Idempotency:
---   * UNIQUE (message_id, analyzer_version) — re-analysing the same message
+--   * UNIQUE (message_id, analyzer_version) — re-analyzing the same message
 --     with the same prompt version is a no-op (UPSERT on update).
 --   * Bumping analyzer_version creates a new row, preserving prior history.
 --
@@ -36,14 +36,14 @@ BEGIN;
 -- instinct_meeting_analyses
 -- ============================================================
 -- One analysis snapshot per (message, analyzer_version). The structured
--- fields are jsonb (so we can grow the schema) plus a denormalised
+-- fields are jsonb (so we can grow the schema) plus a denormalized
 -- topics text[] for fast GIN-indexed theme search.
 CREATE TABLE IF NOT EXISTS instinct_meeting_analyses (
   id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   message_id         UUID NOT NULL
     REFERENCES instinct_meeting_messages(id) ON DELETE CASCADE,
 
-  -- Bump when the prompt or schema changes. Lets us re-analyse without
+  -- Bump when the prompt or schema changes. Lets us re-analyze without
   -- losing history. Format: 'YYYY-MM-DD.N' or semver — opaque to DB.
   analyzer_version   TEXT NOT NULL,
   analyzed_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -62,7 +62,7 @@ CREATE TABLE IF NOT EXISTS instinct_meeting_analyses (
   blockers           JSONB NOT NULL DEFAULT '[]'::jsonb,
   next_steps         JSONB NOT NULL DEFAULT '[]'::jsonb,
 
-  -- Denormalised topic strings, lowercased + trimmed by the analyzer.
+  -- Denormalized topic strings, lowercased + trimmed by the analyzer.
   -- A separate text[] (rather than jsonb) so we can build a GIN index
   -- and run array containment / overlap queries from the theme tracker.
   topics             TEXT[] NOT NULL DEFAULT '{}',

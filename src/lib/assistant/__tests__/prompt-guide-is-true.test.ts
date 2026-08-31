@@ -44,7 +44,7 @@ describe("every phrasing the guide shows a user", () => {
 describe("the shape of the guide", () => {
   it("names the goal in the user's words, not the tool's", () => {
     /* Somebody looking for how to book a meeting is not looking for
-       create_calendar_event_form. A guide organised by our internals is a
+       create_calendar_event_form. A guide organized by our internals is a
        guide for us. */
     for (const g of PROMPT_GUIDE) {
       expect(g.goal.toLowerCase()).not.toContain("_");

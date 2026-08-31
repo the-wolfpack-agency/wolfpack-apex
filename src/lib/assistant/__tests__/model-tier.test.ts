@@ -104,7 +104,7 @@ describe("selectAssistantTier — upgrades", () => {
 });
 
 describe("selectAssistantTier — safety", () => {
-  test("an unrecognised turn keeps the old behaviour exactly", () => {
+  test("an unrecognized turn keeps the old behavior exactly", () => {
     const c = selectAssistantTier({
       message: "Pull the delivery records for the three Centers in the northeast region",
     });
@@ -180,8 +180,8 @@ describe("parseTierDirective", () => {
     const d = parseTierDirective("/cheap what are my meetings today");
     expect(d?.cleaned).toBe("what are my meetings today");
     // Wherever it sits, and without leaving a double space behind it.
-    expect(parseTierDirective("summarise this thread /premium")?.cleaned).toBe(
-      "summarise this thread",
+    expect(parseTierDirective("summarize this thread /premium")?.cleaned).toBe(
+      "summarize this thread",
     );
     expect(parseTierDirective("draft /standard an update")?.cleaned).toBe("draft an update");
   });
@@ -290,7 +290,7 @@ describe("a pinned tier survives having been removed from the message", () => {
     for (const [raw, tier] of [
       ["/cheap why did revenue drop?", "cheap"],
       ["/premium hello", "premium"],
-      ["/standard analyse the quarter", "standard"],
+      ["/standard analyze the quarter", "standard"],
     ] as const) {
       expect(parseTierDirective(raw)?.tier).toBe(tier);
     }

@@ -40,7 +40,7 @@ describe("lineageOf", () => {
     expect(lineageOf({ model: "", provider: "openai" })).toBe("openai");
   });
 
-  it("is unknown rather than guessed for a name it does not recognise", () => {
+  it("is unknown rather than guessed for a name it does not recognize", () => {
     expect(lineageOf({ model: "some-new-model-v1" })).toBe(LINEAGE_UNKNOWN);
     expect(lineageOf({})).toBe(LINEAGE_UNKNOWN);
   });
@@ -92,7 +92,7 @@ describe("chooseIndependentJudge", () => {
 
   it("skips candidates of unknown family rather than assuming they differ", () => {
     /* A candidate that MIGHT be a sibling is not evidence of independence.
-       Passing it would let an unrecognised model name launder a sibling check. */
+       Passing it would let an unrecognized model name launder a sibling check. */
     const c = chooseIndependentJudge(claude, [{ provider: "mystery", model: "x-1" }, gpt]);
     expect(c.candidate).toBe(gpt);
   });

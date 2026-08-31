@@ -7,11 +7,11 @@
  * something with it. On day one, nobody knows that. A person looking at an
  * empty assistant does not think "I should narrate my Monday"; they think
  * "what is this for". A library answers that in the only way that lands: by
- * showing work they recognise as their own.
+ * showing work they recognize as their own.
  *
  * IT MUST NEVER OFFER SOMETHING THAT WILL NOT RUN
  *
- * A catalogue that half-fails on contact is worse than a short one. Every
+ * A catalog that half-fails on contact is worse than a short one. Every
  * template here is checked against the LIVE registry and the reader's own role
  * before it is offered, using the same checkRoutine that guards a saved chain
  * (see heal.ts). The library says "6 of these will work for you today, and
@@ -53,7 +53,7 @@ const TEMPLATES: RoutineTemplate[] = [
      today.
 
      It arrived as three. Two of them, a week-ahead chain and a customer
-     catch-up, turned out to be the catalogue's own "look at the week
+     catch-up, turned out to be the catalog's own "look at the week
      ahead" and "catch me up on a client" written again in different
      words, which is what happens when you write before you read. Both
      were dropped rather than shipped as near-duplicates: a menu with two
@@ -449,7 +449,7 @@ const TEMPLATES: RoutineTemplate[] = [
           "be dropped without anybody minding? Be concrete and do not pad the list.",
         label: "Working out the week",
       },
-      { kind: "human", label: "Decide what the week is really for", action: "do", why: "This is the one judgement nothing here can make for you, and it is the one that decides how the week goes.", show: ["plan"] },
+      { kind: "human", label: "Decide what the week is really for", action: "do", why: "This is the one judgment nothing here can make for you, and it is the one that decides how the week goes.", show: ["plan"] },
     ],
   },
 ];

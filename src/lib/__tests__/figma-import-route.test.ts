@@ -246,7 +246,7 @@ describe("POST /api/figma/import", () => {
     expect(body.reason).toBe("empty_result");
   });
 
-  test("ceo role also authorised", async () => {
+  test("ceo role also authorized", async () => {
     mockGetUser.mockReturnValue({ ...USER, role: "ceo" });
     mockImport.mockResolvedValue({
       ok: true,

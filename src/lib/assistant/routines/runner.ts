@@ -5,7 +5,7 @@
  *
  * It advances a run: substitute slots, dispatch a step, store the result, move
  * the cursor, and stop when a person is needed or the work is done. It is NOT
- * an agent. It does not decide what to do next, retry a judgement call, or
+ * an agent. It does not decide what to do next, retry a judgment call, or
  * work around a failure. A chain that improvises is one nobody can predict,
  * and unpredictability is disqualifying for something that sends mail on
  * somebody's behalf.
@@ -13,7 +13,7 @@
  * PURE CORE, INJECTED EDGES
  *
  * Every side effect arrives through RunnerDeps: dispatching a tool, asking a
- * model, and reading the clock. That is what lets the interesting behaviour
+ * model, and reading the clock. That is what lets the interesting behavior
  * (a step fails mid-chain, a person takes eleven minutes, a slot is missing)
  * be tested exactly rather than approximately.
  *

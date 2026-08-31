@@ -235,7 +235,7 @@ describe("router — anthropic-only routing today", () => {
 describe("router — failover", () => {
   /* ONE TRANSIENT FAILURE IS RECOVERED, and this test used to assert the
      opposite. It rejected ONCE and expected the error to reach the caller,
-     which was the behaviour: there was no retry anywhere in the router, so a
+     which was the behavior: there was no retry anywhere in the router, so a
      single blip lost the turn even with no second provider to blame.
      A deployment with one provider is this product's own (Azure alone,
      Anthropic unkeyed), so "no fallback available" was the common case rather
@@ -298,10 +298,10 @@ describe("router — failover", () => {
   });
 
   it("Azure 5xx falls back to Anthropic and reports fallback_used=true", async () => {
-    // A realistically shaped Azure endpoint. "example.azure.com" is not one:
+    // A realiztically shaped Azure endpoint. "example.azure.com" is not one:
     // real resources live under <name>.openai.azure.com, and since the egress
     // allowlist was wired into the provider a fixture that does not look like a
-    // real endpoint is correctly refused. Making the fixture realistic is the
+    // real endpoint is correctly refused. Making the fixture realiztic is the
     // fix; adding a test hostname to a production allowlist would not be.
     process.env.AZURE_OPENAI_ENDPOINT = "https://test-resource.openai.azure.com";
     process.env.AZURE_OPENAI_API_KEY = "akey";
@@ -659,7 +659,7 @@ describe("router — savings are measured, not asserted", () => {
     });
   });
 
-  test("a baseline_tier records what the OLD behaviour would have cost", async () => {
+  test("a baseline_tier records what the OLD behavior would have cost", async () => {
     await getAIClient().complete({
       messages: [{ role: "user", content: "hi" }],
       max_tokens: 10,

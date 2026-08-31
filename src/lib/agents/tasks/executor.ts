@@ -124,7 +124,7 @@ async function defaultGetOwnerRole(
 export interface ExecutorDeps {
   /**
    * True only when the containment self-test actually ran and passed for this
-   * batch. Absent means NOT demonstrated, and the behaviour eval reports
+   * batch. Absent means NOT demonstrated, and the behavior eval reports
    * containment as unproven rather than as a pass. Both 2026 sandbox escapes
    * happened in environments everyone believed were contained and nobody had
    * shown to be.
@@ -1155,7 +1155,7 @@ export async function runAgentTask(
     /* telemetry is best effort; the task already ran */
   }
 
-  // BEHAVIOUR EVAL. The existing completion event scores whether the task
+  // BEHAVIOR EVAL. The existing completion event scores whether the task
   // SUCCEEDED. That is the wrong question for the two 2026 incident classes:
   // an agent that reaches outside its allowlist, or that misrepresents what it
   // did, can succeed at the task. Scored here from the executor's own step

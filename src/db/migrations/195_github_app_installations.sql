@@ -13,7 +13,7 @@
 -- installation belongs to which tenant so resolveGithubToken() can mint the
 -- right scoped token at call time. When no row exists (or the App env is not
 -- configured) the code falls back to the existing PAT, so our own repos keep
--- working with ZERO behaviour change.
+-- working with ZERO behavior change.
 --
 -- workspace_id, installation_id, account_login, linked_by are TEXT (NOT UUID /
 -- NOT BIGINT): workspace/user identifiers in this codebase are opaque string

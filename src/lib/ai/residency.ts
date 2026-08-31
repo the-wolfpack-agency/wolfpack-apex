@@ -84,8 +84,8 @@ export function regionOfModel(
   return REGION_UNKNOWN;
 }
 
-/** Regions this request's data may be processed in, normalised. */
-export function normaliseRequirement(required: readonly string[] | undefined): string[] {
+/** Regions this request's data may be processed in, normalized. */
+export function normalizeRequirement(required: readonly string[] | undefined): string[] {
   if (!required) return [];
   return [...new Set(required.map((r) => r.trim().toLowerCase()).filter(Boolean))];
 }
@@ -96,7 +96,7 @@ export interface ResidencyVerdict {
   reason: "no_requirement" | "region_allowed" | "region_not_allowed" | "region_undeclared";
   /** Where the candidate model runs, as far as we can tell. */
   servedIn: Region;
-  /** What the request asked for, normalised. Empty when it asked for nothing. */
+  /** What the request asked for, normalized. Empty when it asked for nothing. */
   required: string[];
 }
 
@@ -109,7 +109,7 @@ export function mayProcessHere(input: {
   required: readonly string[] | undefined;
   servedIn: Region;
 }): ResidencyVerdict {
-  const required = normaliseRequirement(input.required);
+  const required = normalizeRequirement(input.required);
   const servedIn = (input.servedIn || REGION_UNKNOWN).toLowerCase();
 
   if (required.length === 0) {

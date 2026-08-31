@@ -19,7 +19,7 @@
  *
  * IT SEPARATES, IT DOES NOT DELETE. Chrome is still reported, as chrome. A
  * support widget that uploads files IS a data entry point, and a reader
- * assessing where information leaves an organisation should see it. What they
+ * assessing where information leaves an organization should see it. What they
  * should not see is it counted eleven times alongside the invoice form.
  */
 
@@ -62,7 +62,7 @@ function identityOf(form: MappedForm): string {
 /**
  * Group forms across surfaces, and split the furniture from the content.
  *
- * Takes surfaces rather than a flat list, because the whole judgement is about
+ * Takes surfaces rather than a flat list, because the whole judgment is about
  * how widely a form is spread and that is lost the moment they are flattened.
  */
 export function inventoryForms(

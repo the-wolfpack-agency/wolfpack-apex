@@ -125,7 +125,7 @@ describe("createAzureOpenAIEmbedder.embed", () => {
   /* A 429 IS NOW RETRIED ONCE BEFORE IT COUNTS AS A FAILURE.
    *
    * This asserted that a single 429 returned [] and reported a failure, which
-   * was the behaviour and was the bug. Measured over 90 days of production:
+   * was the behavior and was the bug. Measured over 90 days of production:
    * 178 of these, each one silently dropping the Brain to keyword-only with
    * nobody told. The request was fine; the service was busy.
    *

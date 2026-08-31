@@ -5,7 +5,7 @@
  * whether any of it gets used: does a person who does not already know these
  * features exist come across them?
  *
- * The starter-prompt catalogue is real application code here, not a stub. A
+ * The starter-prompt catalog is real application code here, not a stub. A
  * chain missing from the panel, or a chip that does not populate the composer,
  * fails this spec. That is the difference between a feature that exists and one
  * anybody runs.

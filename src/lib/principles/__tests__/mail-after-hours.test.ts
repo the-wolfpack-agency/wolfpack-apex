@@ -1,7 +1,7 @@
  
 const mockGetValidToken = jest.fn();
 /* The evaluator now goes through getReadTokenForUser (which falls
-   back to delegated when app-only is off — today's behaviour). The
+   back to delegated when app-only is off — today's behavior). The
    mock returns a delegated-shaped ReadToken so existing tests stay
    valid. We re-export graphPathForReadToken from the real module since
    it's pure and doesn't hit the network. */

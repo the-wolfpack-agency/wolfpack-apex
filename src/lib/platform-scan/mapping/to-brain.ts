@@ -45,7 +45,7 @@ function heading(row: WalkedMapRow): string[] {
     ``,
     /* THE DATE AND THE GAP, FIRST. A retrieved chunk is quoted without its
        surroundings, so the caveat has to be inside the part worth quoting. */
-    `This describes ${m.platform} as it was on ${walkedOn}, learned by opening ${row.surfaceCount} of its screens as a signed-in user. It is a snapshot, not a live view, and a system can change after it is walked. Walking it was authorised by ${row.authorisedBy}.`,
+    `This describes ${m.platform} as it was on ${walkedOn}, learned by opening ${row.surfaceCount} of its screens as a signed-in user. It is a snapshot, not a live view, and a system can change after it is walked. Walking it was authorized by ${row.authorizedBy}.`,
     ``,
   ];
 
@@ -105,10 +105,10 @@ export function systemMapToMarkdown(row: WalkedMapRow): BrainDocument {
       );
     }
     for (const i of unnamed) {
-      /* Unrecognised is a prompt to ask, not a benign default, and the wording
+      /* Unrecognized is a prompt to ask, not a benign default, and the wording
          has to survive being quoted on its own. */
       out.push(
-        `- **${i.host}** was contacted ${i.requestCount} time(s) across ${i.seenOn.length} screen(s). This host was not recognised, which means it is worth asking about rather than that it is harmless.`,
+        `- **${i.host}** was contacted ${i.requestCount} time(s) across ${i.seenOn.length} screen(s). This host was not recognized, which means it is worth asking about rather than that it is harmless.`,
       );
     }
     out.push(``);

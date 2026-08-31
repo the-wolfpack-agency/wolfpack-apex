@@ -16,7 +16,7 @@
  * runs, done early. Most breakage is found here, before anybody is waiting.
  *
  * REPAIRING, which is where a model earns its place. "This tool is gone, what
- * should replace it" is a judgement about meaning, and rules cannot make it.
+ * should replace it" is a judgment about meaning, and rules cannot make it.
  * So a model proposes, and the registry decides: a replacement that does not
  * exist, or that this person cannot invoke, is discarded rather than written
  * into somebody's morning.

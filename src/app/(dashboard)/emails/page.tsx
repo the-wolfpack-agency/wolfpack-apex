@@ -1186,14 +1186,14 @@ export default function EmailsPage() {
      already hides the inbox during compose so the composer is
      full-screen. The earlier `&& !isComposing` fully unmounted the
      inbox on desktop too, which silently dropped the auto-collapse
-     width behaviour and made the unsaved-draft-on-thread-switch
+     width behavior and made the unsaved-draft-on-thread-switch
      dialog unreachable. */
   const showInbox = showInboxOnMobile;
 
   // The 3-column shell stays mounted at all times. The reader does
   // NOT replace the page — it's rendered inside the right pane,
   // alongside (visually) the inbox list and nav rail. This is the
-  // Gmail-style behaviour: switch threads without losing the inbox.
+  // Gmail-style behavior: switch threads without losing the inbox.
   return (
     <div style={responsivePageWrap} data-testid="emails-page">
       {/* Left nav rail */}
@@ -1968,7 +1968,7 @@ const paneFill: React.CSSProperties = {
   flexDirection: "column",
 };
 
-// Reader-specific wrapper. Same fill behaviour as paneFill, plus a
+// Reader-specific wrapper. Same fill behavior as paneFill, plus a
 // scroll boundary so long emails scroll inside the right pane
 // instead of the whole page. Mirrors the previous full-screen
 // reader wrapper but scoped to the right column.

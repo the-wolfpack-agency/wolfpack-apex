@@ -104,7 +104,7 @@ describe("the channels provider's bounds", () => {
 
   /* The arithmetic that has to hold: waves x round-trip must fit the 6s
      budget with room to spare. */
-  it("fits the fan-out budget at a realistic Graph round trip", () => {
+  it("fits the fan-out budget at a realiztic Graph round trip", () => {
     const cap = Number(/MAX_CHANNELS_SCANNED = (\d+)/.exec(src)![1]);
     const conc = Number(/MESSAGE_SCAN_CONCURRENCY = (\d+)/.exec(src)![1]);
     const ROUND_TRIP_MS = 130;

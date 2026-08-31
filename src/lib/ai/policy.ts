@@ -12,7 +12,7 @@
  * them is a problem leaving a customer's chatbot:
  *
  *   "You'll qualify for 2.9% APR on that."          a rate we do not set
- *   "We'll beat any price in the state."            a promise nobody authorised
+ *   "We'll beat any price in the state."            a promise nobody authorized
  *   "That's covered under your warranty."           a coverage decision
  *   "There are no open recalls, it's safe to drive."  a safety assurance
  *   "Yes, that's in stock, I'll hold one for you."   an inventory commitment
@@ -114,7 +114,7 @@ export const BASELINE_RULES: readonly PolicyRule[] = Object.freeze([
     id: "price_guarantee",
     title: "Promised a price",
     why:
-      "Pricing changes by location and by day. A guarantee made in chat is a commitment nobody in the business authorised.",
+      "Pricing changes by location and by day. A guarantee made in chat is a commitment nobody in the business authorized.",
     action: "block",
     direction: "response",
     pattern: /\b(?:guarantee\w*|we(?:'ll| will) beat|lowest price|best price(?: guarantee)?|price match)\b/i,
@@ -184,7 +184,7 @@ export const AUTOMOTIVE_RULES: readonly PolicyRule[] = Object.freeze([
     id: "warranty_coverage",
     title: "Decided a warranty question",
     why:
-      "Whether a repair is covered is a decision the brand makes on the facts of the car. Saying it is covered sets an expectation the service centre then has to break.",
+      "Whether a repair is covered is a decision the brand makes on the facts of the car. Saying it is covered sets an expectation the service center then has to break.",
     action: "escalate",
     direction: "response",
     pattern: /\b(?:covered under|under warranty|warranty (?:covers|will cover)|fully covered)\b/i,
@@ -273,7 +273,7 @@ export const POLICY_PROFILES: Readonly<Record<PolicyProfile, readonly PolicyRule
 /**
  * The set for a tenant, defaulting to the safest useful thing.
  *
- * An unrecognised profile falls back to the baseline rather than to nothing.
+ * An unrecognized profile falls back to the baseline rather than to nothing.
  * A misconfigured tenant should lose industry coverage, not lose the gate.
  */
 export function policyFor(profile: string | null | undefined): readonly PolicyRule[] {

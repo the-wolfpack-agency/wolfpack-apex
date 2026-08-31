@@ -23,7 +23,7 @@
  * the incoming URL, bot/blocked flags, the matched-client name (if
  * the heuristic in scans.ts.matchClient correlated geo/referrer to
  * an instinct_clients row), and the visitor_hash so repeat scans are
- * recognisable. Sortable columns + group-by-visitor toggle.
+ * recognizable. Sortable columns + group-by-visitor toggle.
  */
 
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";

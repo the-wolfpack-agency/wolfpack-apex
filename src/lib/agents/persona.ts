@@ -48,7 +48,7 @@ export function initialsFor(name: string): string {
  *
  * Derived from the id rather than the name: a rename should not change who you
  * are looking at. Deliberately NOT tied to health — a red agent must be red
- * because it misbehaved, not because its id hashed that way, or the colour
+ * because it misbehaved, not because its id hashed that way, or the color
  * stops carrying meaning at exactly the moment it matters.
  */
 export function hueFor(agentId: string): number {
@@ -116,7 +116,7 @@ export function describeCapabilities(connections: readonly string[] | undefined)
 }
 
 export interface TrustInput {
-  /** From the behaviour summary: has it stayed inside its limits. */
+  /** From the behavior summary: has it stayed inside its limits. */
   standing?: "good" | "attention" | "unknown";
   /** Has the containment self-test actually run for this agent's runs. */
   boundaryProven?: boolean;

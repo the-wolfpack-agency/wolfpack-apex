@@ -174,7 +174,7 @@ export interface ScheduleReport {
   /** Hours a person spent in meetings that recur, per week. */
   recurringHoursPerWeek: number;
   heaviestRecurring?: { subject: string; occurrences: number; hoursPerWeek: number };
-  /** Attendee-hours: the cost to the organisation, not to one diary. */
+  /** Attendee-hours: the cost to the organization, not to one diary. */
   attendeeHours: number;
   /** Hour-of-day slots most often free, best first. */
   bestFocusHours: number[];
@@ -241,7 +241,7 @@ function freeStretches(events: ZonedEvent[], hours: WorkingHours): number[] {
   return stretches.filter((m) => m > 0);
 }
 
-export function analyseSchedule(
+export function analyzeSchedule(
   events: ScheduleEvent[],
   opts: { days?: number; hours?: WorkingHours; timeZone?: string | null } = {},
 ): ScheduleReport {

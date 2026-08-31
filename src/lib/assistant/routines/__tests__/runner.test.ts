@@ -1,7 +1,7 @@
 /**
  * The runner.
  *
- * Three behaviours carry the design, and each is here:
+ * Three behaviors carry the design, and each is here:
  *
  *   1. It STOPS at a person, and everything already done survives the stop.
  *   2. It counts machine time and human time SEPARATELY. That split is the
@@ -87,7 +87,7 @@ describe("running to the end", () => {
     let prompt = "";
     const r = routine([
       { kind: "tool", tool: "read", params: {}, label: "Reading the thing", slot: "inbox" },
-      { kind: "model", prompt: "summarise {{inbox}}", label: "Summarising it", slot: "summary" },
+      { kind: "model", prompt: "summarize {{inbox}}", label: "Summarizing it", slot: "summary" },
     ]);
 
     const run = await advance(r, startRun(r, WHO), deps({
@@ -98,7 +98,7 @@ describe("running to the end", () => {
       },
     }));
 
-    expect(prompt).toBe("summarise two threads");
+    expect(prompt).toBe("summarize two threads");
     expect(run.slots.summary).toBe("here is the summary");
   });
 });
@@ -386,7 +386,7 @@ describe("a human step somebody did not do", () => {
     expect(done.outcomes[1].status).toBe("ok");
   });
 
-  it("marks an unlabelled human step as a review, not as missed work", async () => {
+  it("marks an unlabeled human step as a review, not as missed work", async () => {
     /* An ordinary checkpoint miscounted as a missed human action would put a
        false signal into the insight this distinction exists to produce. */
     const r = routine([{ kind: "human", label: "Check this before it goes" }]);

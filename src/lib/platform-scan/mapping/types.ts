@@ -12,7 +12,7 @@
  * So this models what an authenticated browser can OBSERVE, and the observed
  * map feeds the same profile and recommendation pipeline that already exists.
  *
- * THE HONESTY PROBLEM AT THE CENTRE OF MAPPING
+ * THE HONESTY PROBLEM AT THE CENTER OF MAPPING
  *
  * A map is always partial. You stop because you ran out of budget, not because
  * you reached the end, and a client system is large enough that you will always
@@ -33,7 +33,7 @@ export interface MappedSurface {
   /** Canonical URL as visited. */
   url: string;
   /** Path with volatile ids replaced, so /Account/001x and /Account/001y are
-   *  recognised as one surface rather than two thousand. */
+   *  recognized as one surface rather than two thousand. */
   signature: string;
   title: string | null;
   /** Depth from the entry point. */
@@ -94,7 +94,7 @@ export interface InferredEntity {
 /** An external system this platform talks to, observed on the wire. */
 export interface ObservedIntegration {
   host: string;
-  /** Vendor when recognised. Null means unrecognised, not absent. */
+  /** Vendor when recognized. Null means unrecognized, not absent. */
   vendor: string | null;
   /** Surfaces that triggered it, so "what uses Stripe" is answerable. */
   seenOn: string[];

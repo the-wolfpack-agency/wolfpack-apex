@@ -65,7 +65,7 @@ describe("insertBriefGeneration", () => {
     expect(params[10]).toBe(7);
   });
 
-  it("normalises missing optional fields to NULL", async () => {
+  it("normalizes missing optional fields to NULL", async () => {
     await insertBriefGeneration({
       id: "site_brief_gen_xyz",
       requestedBy: "u_2",

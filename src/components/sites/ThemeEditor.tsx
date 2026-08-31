@@ -514,7 +514,7 @@ export function ThemeEditor({ value, onChange, projectId }: ThemeEditorProps) {
 // Collapsed by default so existing users aren't overwhelmed by the new
 // token UI on first load. Uses a native <details>/<summary> so the a11y
 // contract is free: keyboard-openable, screen-reader announces expand
-// state, no JS required for the core behaviour. The summary carries a
+// state, no JS required for the core behavior. The summary carries a
 // stable `data-testid` so RTL + Playwright can toggle it deterministically.
 // ---------------------------------------------------------------------------
 function TokenSection({

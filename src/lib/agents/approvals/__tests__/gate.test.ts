@@ -106,9 +106,9 @@ describe("what it does when it cannot tell", () => {
     expect(await holdWriteForApproval(args)).not.toBeNull();
   });
 
-  it("holds the write for an agent it does not recognise", async () => {
+  it("holds the write for an agent it does not recognize", async () => {
     /* No row is not "no approval needed". It is a question we could not answer
-       about an actor we do not recognise. */
+       about an actor we do not recognize. */
     mockQuery.mockResolvedValue({ rows: [] });
     expect(await requiresWriteApproval("ghost", "ws1")).toBe(true);
   });

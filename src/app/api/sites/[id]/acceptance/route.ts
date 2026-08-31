@@ -1,6 +1,6 @@
 /**
  * /api/sites/[id]/acceptance — the contract a generated site is judged against,
- * and the record of every judgement.
+ * and the record of every judgment.
  *
  *   GET → 200 { criteria, completeness, runs } | 401 | 404
  *   PUT → 200 { criteria, completeness }       | 400 | 401 | 404

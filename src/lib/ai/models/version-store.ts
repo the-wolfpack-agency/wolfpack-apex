@@ -8,7 +8,7 @@
  */
 import { query } from "@/lib/db";
 import { trackEvent } from "@/lib/analytics";
-import { observeVersion, isMaterial, normaliseVersion, type KnownVersion, type DriftObservation } from "./version-drift";
+import { observeVersion, isMaterial, normalizeVersion, type KnownVersion, type DriftObservation } from "./version-drift";
 
 /** Versions recorded for a model, most recently seen first. */
 export async function knownVersions(modelId: string): Promise<KnownVersion[]> {
@@ -46,7 +46,7 @@ export async function recordServedVersion(input: {
   workspaceId?: string;
   feature?: string;
 }): Promise<DriftObservation | null> {
-  const served = normaliseVersion(input.servedVersion);
+  const served = normalizeVersion(input.servedVersion);
   if (!served || !input.modelId) return null;
 
   const known = await knownVersions(input.modelId);

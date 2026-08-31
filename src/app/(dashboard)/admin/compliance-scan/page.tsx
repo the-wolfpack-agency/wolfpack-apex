@@ -12,7 +12,7 @@
  * page will tell a client they are fine.
  *
  * So unverifiable is not styled as a mild pass. It is its own column, its own
- * neutral colour, and its own words: "could not be established". The headline
+ * neutral color, and its own words: "could not be established". The headline
  * refuses to say "all clear" whenever anything was unverifiable, and the tier
  * banner says in plain language what this scan was not able to look at.
  *

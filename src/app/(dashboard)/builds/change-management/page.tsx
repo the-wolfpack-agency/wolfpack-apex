@@ -139,7 +139,7 @@ export default function ChangeManagementPage() {
       </section>
 
       <section className="wp-pilot-section" data-testid="cm-configuration">
-        <h2>What a programme owner sets up</h2>
+        <h2>What a program owner sets up</h2>
         <p className="wp-pilot-aside">
           BA101 and BA102 are different courses. Anything hard-coded here becomes a second
           form the next time one changes, which is the failure being replaced.

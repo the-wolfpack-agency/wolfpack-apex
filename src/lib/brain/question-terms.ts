@@ -19,8 +19,8 @@
  * "what does the SOW say about payment". The second job was the one keeping
  * retrieval alive, and it was invisible because it lived inside the first.
  *
- * NARROW ON PURPOSE. It strips only scaffolding it recognises, and anything it
- * does not recognise is returned untouched. A general-purpose "remove the
+ * NARROW ON PURPOSE. It strips only scaffolding it recognizes, and anything it
+ * does not recognize is returned untouched. A general-purpose "remove the
  * question words" pass would eventually eat a word that was the whole point of
  * the question, and a search that quietly drops your subject is worse than one
  * that finds nothing: the first is wrong, the second is honest.
@@ -35,14 +35,14 @@
 /**
  * Question frames, each capturing the topic and any narrowing clause.
  *
- * WRITTEN AGAINST NORMALISED TEXT, WHICH IS A SECURITY PROPERTY AND NOT A
+ * WRITTEN AGAINST NORMALIZED TEXT, WHICH IS A SECURITY PROPERTY AND NOT A
  * STYLE CHOICE. The first version used `\s+` and `\s*` next to a lazy `.+?`,
  * and CodeQL correctly flagged it as polynomial ReDoS (js/polynomial-redos):
  * both sides can match the same space, so a message of many spaces makes the
  * engine try every split. These patterns run on whatever somebody types into
  * the chat box, which is exactly the input an attacker controls.
  *
- * `normalise()` collapses every whitespace run to a single space before any of
+ * `normalize()` collapses every whitespace run to a single space before any of
  * these are tried, so the patterns can use a literal space and the ambiguity
  * has nowhere to live. Keep it that way: reintroducing `\s+` here reintroduces
  * the vulnerability.
@@ -59,7 +59,7 @@ const FRAMES: RegExp[] = [
   /^(?:what|whats|what's) (?:is )?in (?:the |our |my |this )?(.+?) about (.+?)[?.!]*$/i,
   /* "what is in the contract" -> "contract" */
   /^(?:what|whats|what's) (?:is )?in (?:the |our |my |this )?(.+?)[?.!]*$/i,
-  /* "summarise the onboarding doc" -> "onboarding doc" */
+  /* "summarize the onboarding doc" -> "onboarding doc" */
   /^(?:can you |please )?summari[sz]e (?:the |our |my |this )?(.+?)[?.!]*$/i,
   /* "give me a summary of the SOW" -> "SOW" */
   /^(?:give me |can i get )?an? (?:brief |short |quick )?summary of (?:the |our |my |this )?(.+?)[?.!]*$/i,
@@ -68,9 +68,9 @@ const FRAMES: RegExp[] = [
 ];
 
 /**
- * A ceiling on what is worth parsing, as defence in depth.
+ * A ceiling on what is worth parsing, as defense in depth.
  *
- * Normalising removes the ambiguity these patterns backtracked on, and this
+ * Normalizing removes the ambiguity these patterns backtracked on, and this
  * bounds the damage if a future edit reintroduces some other one. Nobody asks
  * what a document says in six hundred characters; a request that long is not a
  * document question, so declining to parse it costs a real user nothing.
@@ -78,7 +78,7 @@ const FRAMES: RegExp[] = [
 const MAX_QUESTION_CHARS = 600;
 
 /** Collapse whitespace so the frames above can rely on single literal spaces. */
-function normalise(question: string): string {
+function normalize(question: string): string {
   return (question ?? "").replace(/\s+/g, " ").trim();
 }
 
@@ -93,11 +93,11 @@ const PRONOUN_ONLY = /^(?:it|this|that|they|them|these|those|there)$/i;
 /**
  * Reduce a question to the terms worth searching for.
  *
- * Returns the input unchanged when it is not a shape this recognises, which is
+ * Returns the input unchanged when it is not a shape this recognizes, which is
  * the common case and the safe one.
  */
 export function searchTermsFor(question: string): string {
-  const text = normalise(question);
+  const text = normalize(question);
   if (!text) return text;
   /* Too long to be a document question, and the one input shape worth
      refusing outright rather than parsing. */
@@ -121,7 +121,7 @@ export function searchTermsFor(question: string): string {
 
 /** Whether this question had scaffolding worth stripping. Useful for logging. */
 export function isQuestionShaped(question: string): boolean {
-  return searchTermsFor(question) !== normalise(question);
+  return searchTermsFor(question) !== normalize(question);
 }
 
 /**
@@ -129,7 +129,7 @@ export function isQuestionShaped(question: string): boolean {
  *
  * The distinction that matters is narrowing, not wording. "What does the SOW
  * say about payment" wants one clause, and quoting the matching chunk answers
- * it exactly, for free, with the source visible. "Summarise the SOW" wants
+ * it exactly, for free, with the source visible. "Summarize the SOW" wants
  * something no single chunk contains, and quoting three of them produces a
  * wall of excerpts that looks like an answer and is not one.
  */
@@ -152,7 +152,7 @@ const WHOLE_DOCUMENT: RegExp[] = [
  * an unnecessary model call costs money on every question in the product.
  */
 export function asksForSynthesis(question: string): boolean {
-  const text = normalise(question);
+  const text = normalize(question);
   if (!text || text.length > MAX_QUESTION_CHARS) return false;
   /* NO GLOBAL "about" VETO, though the first version had one and it was wrong.
      Narrowing is handled inside the frames that can be narrowed: the "say"

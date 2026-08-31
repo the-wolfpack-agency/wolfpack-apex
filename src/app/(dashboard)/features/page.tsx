@@ -201,7 +201,7 @@ export default function FeaturesPage() {
     if (!window.confirm("Delete this feature request? This cannot be undone.")) {
       return;
     }
-    // Optimistic removal so the UI feels instant.
+    // Optimiztic removal so the UI feels instant.
     setFeatures((prev) => prev.filter((f) => f.id !== featureId));
     try {
       const res = await fetchWithRefresh(`/api/features/${featureId}`, {

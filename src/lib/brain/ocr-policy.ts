@@ -52,7 +52,7 @@ export interface OcrDecision {
   /** One line an operator can read on a cost page to tell a deliberate
    *  escalation from a bug. */
   reason: string;
-  /** Rough cents per page, so a run can be costed BEFORE it is authorised.
+  /** Rough cents per page, so a run can be costed BEFORE it is authorized.
    *  Null when nothing will run. Deliberately an estimate: the point is the
    *  order of magnitude between the two routes, not two decimal places. */
   estimatedCentsPerPage: number | null;
@@ -174,7 +174,7 @@ export interface OcrBudgetVerdict {
 /**
  * Would this run fit the ceiling.
  *
- * COSTED BEFORE IT IS AUTHORISED, not after. An ingestion job that discovers
+ * COSTED BEFORE IT IS AUTHORIZED, not after. An ingestion job that discovers
  * its own bill by running is the shape that makes a per-document cost
  * frightening, and it is why this returns a refusal rather than a warning.
  */

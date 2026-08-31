@@ -544,7 +544,7 @@ export function fingerprintPath(path: string): string {
   return createHash("sha256").update(path).digest("hex").slice(0, 16);
 }
 
-/** What a request was, in terms the client would recognise. */
+/** What a request was, in terms the client would recognize. */
 export interface RequestShape {
   /** getRecord | searchRecords | createRecord | updateRecord */
   operation: string;

@@ -63,12 +63,12 @@ describe("repo-wide tenant isolation guardrail", () => {
     expect(classifyFilter("src/lib/finance/leak.ts", leak, "instinct_invoices")).toBe("unclassified");
 
     // And the correct form is NOT flagged by the classifier's benign rules:
-    // a pk-pinned update is a recognised, sound exception, not unclassified.
+    // a pk-pinned update is a recognized, sound exception, not unclassified.
     const pkPinned = `UPDATE instinct_invoices SET status = $2 WHERE id = $1`;
     expect(classifyFilter("src/lib/finance/ok.ts", pkPinned, "instinct_invoices")).toBe("pk-pinned-upstream");
   });
 
-  it("recognises a cross-workspace queue claim, and still catches one that hides the workspace", () => {
+  it("recognizes a cross-workspace queue claim, and still catches one that hides the workspace", () => {
     // A worker claims the oldest queued row across every tenant and hands back
     // the workspace so each downstream write is scoped: the same shape as the
     // cross-workspace SELECTs already understood, written as an UPDATE so two

@@ -1,5 +1,5 @@
 /**
- * The questions an organisation asks that nothing connected can answer.
+ * The questions an organization asks that nothing connected can answer.
  *
  * Every fixture is a real row from brain_query_log on 2026-08-31, including
  * the ones that made the exclusion necessary.
@@ -68,7 +68,7 @@ describe("which system would hold the answer", () => {
 
   /* These become answerable as systems connect, without a line of this
      changing. */
-  it("recognises questions a CRM or a dealer system would answer", () => {
+  it("recognizes questions a CRM or a dealer system would answer", () => {
     expect(systemFor("what is the status of the johnson deal")).toBe("crm");
     expect(systemFor("how many cayennes are on the lot")).toBe("dealer-system");
     expect(systemFor("how do i submit a warranty claim?")).toBe("dealer-system");
@@ -177,7 +177,7 @@ describe("the first dogfood run's mistakes", () => {
   });
 
   /* And still routes a real finance question. */
-  it("still recognises a question about money with no document in it", () => {
+  it("still recognizes a question about money with no document in it", () => {
     expect(systemFor("what was our revenue last quarter")).toBe("finance");
   });
 

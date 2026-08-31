@@ -18,7 +18,7 @@ interface Claim {
   plain: string;
   /**
    * The panel on THIS page that proves the claim, written as an instruction to
-   * the reader. Originally labelled "Where to point", which readers took as
+   * the reader. Originally labeled "Where to point", which readers took as
    * a direction to point at something physical rather than "here is your
    * evidence" (reported 2026-08-20).
    */

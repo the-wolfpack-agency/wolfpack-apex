@@ -10,7 +10,7 @@
  * quote, so it does not reach us as a bug, it reaches us as somebody quietly
  * using the product less. A lighter version shipped on the Porsche build and
  * immediately caught a real user attempting three times to submit a user to an
- * organisation he was not part of. Three attempts, no complaint.
+ * organization he was not part of. Three attempts, no complaint.
  *
  * ONE INSTRUMENTATION POINT, BY CONSTRUCTION. Every authenticated client fetch
  * in this product goes through fetchWithRefresh, and a guardrail test

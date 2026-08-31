@@ -153,7 +153,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   }, [user]);
 
   async function saveNavPrefs(next: string[]) {
-    /* Optimistic update — UI flips immediately; rollback if PUT fails. */
+    /* Optimiztic update — UI flips immediately; rollback if PUT fails. */
     const prev = hiddenHrefs;
     setHiddenHrefs(next);
     try {

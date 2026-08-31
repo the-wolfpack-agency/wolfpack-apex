@@ -594,10 +594,10 @@ export default function InstinctChat({
          * Replacing the local array with that snapshot drops the
          * pending assistant message + its widget. Instead, APPEND the
          * server-side rows we don't have locally and PRESERVE any
-         * local-only (no id) optimistic messages. */
+         * local-only (no id) optimiztic messages. */
         /* Race-safe merge (see mergeRefreshedMessages): preserves any local
          * row the snapshot does not yet represent, by id OR role+content, so
-         * an optimistic assistant reply carrying a server messageId is not
+         * an optimiztic assistant reply carrying a server messageId is not
          * dropped when a refresh races the server's assistant-message save. */
         setMessages((prev) => mergeRefreshedMessages(prev, remote));
         void fetchWithRefresh("/api/analytics", {
@@ -1143,7 +1143,7 @@ export default function InstinctChat({
   async function handleRate(msgId: string | undefined, rating: number) {
     if (!msgId) return;
 
-    /* Optimistic, so the thumb responds instantly. Remembered so it can be put
+    /* Optimiztic, so the thumb responds instantly. Remembered so it can be put
        back: a rating that did not save must not keep looking saved. */
     const previous = messages.find((m) => m.id === msgId)?.rating;
     setMessages((prev) => prev.map((m) => (m.id === msgId ? { ...m, rating } : m)));
@@ -1152,7 +1152,7 @@ export default function InstinctChat({
      *
      * rateMessage returns false when the message is not in a conversation the
      * rater owns, and the route answers 200 with { success: false }. A 200
-     * does not throw, so the catch below never ran, and the optimistic thumb
+     * does not throw, so the catch below never ran, and the optimiztic thumb
      * stayed filled in over nothing.
      *
      * Nothing fails that check today: measured 2026-08-30, zero of 16,332

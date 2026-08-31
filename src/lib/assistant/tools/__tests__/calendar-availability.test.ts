@@ -56,7 +56,7 @@ describe("runCalendarAvailability", () => {
     expect(out?.answer).toContain("this afternoon");
   });
 
-  test("reports busy + summarises up to 3 overlapping meetings", async () => {
+  test("reports busy + summarizes up to 3 overlapping meetings", async () => {
     mockSafeQuery.mockResolvedValue({
       rows: [{ user_id: "u1", display_name: "Hoxsie", mail: "hoxsie@wolfpack.dev" }],
     });

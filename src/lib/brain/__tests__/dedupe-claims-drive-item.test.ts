@@ -18,7 +18,7 @@
  * hit its cap, reporting progress the whole way.
  *
  * Every individual piece behaved as written. Dedupe deduped, resume resumed,
- * the counters counted. The defect only exists where two correct behaviours
+ * the counters counted. The defect only exists where two correct behaviors
  * meet, which is why the convergence test below matters more than any
  * assertion about either half on its own.
  */

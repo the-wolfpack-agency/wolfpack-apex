@@ -40,7 +40,7 @@ const result = (answer: string, latencyMs: number | null = 1_000): StepResult =>
 describe("classifying what came back", () => {
   /* VERBATIM from production 2026-08-29, the answer to "what are the payment
      terms in our SOW?" This is the thing we sell. */
-  it("recognises a real answer from a real document", () => {
+  it("recognizes a real answer from a real document", () => {
     expect(
       classifyAnswer({
         answer:
@@ -98,7 +98,7 @@ describe("classifying what came back", () => {
     ).toBe("broken");
   });
 
-  it("recognises an honest empty result", () => {
+  it("recognizes an honest empty result", () => {
     expect(classifyAnswer({ answer: 'No results found for "xyz".', latencyMs: 700 })).toBe("empty");
   });
 
@@ -194,7 +194,7 @@ describe("the journey must not depend on our data", () => {
 
   it("runs on a deployment with no configuration at all", () => {
     const steps = buildJourney();
-    /* Universal behaviour plus every module's declared capability. Both are
+    /* Universal behavior plus every module's declared capability. Both are
        portable by construction; only the corpus probes are deployment-specific,
        and there are none here. */
     expect(steps.length).toBe(UNIVERSAL_STEPS.length + moduleSteps().length);
@@ -267,7 +267,7 @@ describe("the journey must not depend on our data", () => {
  * CRM capabilities adds their verification automatically, so a module cannot
  * ship claiming an action nobody ever drove against a real deployment. Written
  * by hand, each module's coverage depends on somebody remembering, and
- * documents is the evidence for how that goes: it shipped a "summarise" the
+ * documents is the evidence for how that goes: it shipped a "summarize" the
  * engine never honoured and nothing noticed for as long as nobody typed it.
  */
 describe("module capabilities become journey steps", () => {
@@ -277,20 +277,20 @@ describe("module capabilities become journey steps", () => {
     expect(ids).toContain("module-documents.find");
   });
 
-  /* SUMMARISE JOINED THE JOURNEY ON 2026-08-30, which is the registry driving
+  /* SUMMARIZE JOINED THE JOURNEY ON 2026-08-30, which is the registry driving
      the journey rather than the two being maintained side by side. It sat out
      for as long as it was declared `routes_elsewhere`, because a gap already
      written down must not fail the journey or the report becomes noise and
      people stop reading it. Promoting the declaration added the step, and no
      part of this file had to be told. */
-  it("verifies summarise now that it is supported", () => {
-    expect(moduleSteps().map((s) => s.id)).toContain("module-documents.summarise");
+  it("verifies summarize now that it is supported", () => {
+    expect(moduleSteps().map((s) => s.id)).toContain("module-documents.summarize");
   });
 
-  /* And the step must demand a real answer. A summarise step that accepted a
+  /* And the step must demand a real answer. A summarize step that accepted a
      list would reinstate the original defect while looking like coverage. */
-  it("holds summarise to a synthesised answer", () => {
-    const step = moduleSteps().find((s) => s.id === "module-documents.summarise")!;
+  it("holds summarize to a synthesised answer", () => {
+    const step = moduleSteps().find((s) => s.id === "module-documents.summarize")!;
     expect(step.expect).toContain("substantive");
     expect(step.expect).not.toContain("list");
   });

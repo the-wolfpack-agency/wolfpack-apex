@@ -597,7 +597,7 @@ export default function PilotPage() {
                      This tile read "Answers withheld as unsafe" on the admin
                      page once, which a client reasonably read as the product
                      blocking them. A guardrail asserts this wording against
-                     the router's actual behaviour. */
+                     the router's actual behavior. */
                   label="Answers flagged for review"
                   /* Phrased without the verb at all. "Recorded and delivered,
                      not blocked" was honest and still tripped the guardrail,

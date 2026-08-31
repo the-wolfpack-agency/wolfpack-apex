@@ -3,7 +3,7 @@
  *
  * CSP is enforced (not report-only). All inline scripts in this codebase
  * are server-rendered JSON-LD structured data, which is acceptable under
- * 'unsafe-inline' in script-src until nonce support is standardised in
+ * 'unsafe-inline' in script-src until nonce support is standardized in
  * Next.js App Router (tracked: https://nextjs.org/docs/app/building-your-application/configuring/content-security-policy).
  *
  * HSTS: enabled in production only. Once the domain has been live for >1 week

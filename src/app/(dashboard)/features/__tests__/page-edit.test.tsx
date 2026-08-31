@@ -146,7 +146,7 @@ test("Delete confirm-cancel does NOT call the network", async () => {
   }
 });
 
-test("Delete confirm-accept sends DELETE and removes the row optimistically", async () => {
+test("Delete confirm-accept sends DELETE and removes the row optimiztically", async () => {
   await renderPage();
 
   const confirmSpy = jest.spyOn(window, "confirm").mockReturnValue(true);

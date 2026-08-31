@@ -146,7 +146,7 @@ describe("extractReferences", () => {
 });
 
 describe("detectConsentPlatform", () => {
-  it("recognises a named consent platform", () => {
+  it("recognizes a named consent platform", () => {
     expect(detectConsentPlatform('<script src="https://cdn.cookielaw.org/otSDKStub.js"></script>')).toBe(true);
   });
 

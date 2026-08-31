@@ -3,7 +3,7 @@
  *
  * Each row supports:
  *   - Inline check-off (PATCH /api/ms-tasks/[listId]/[taskId] status=completed)
- *     with an optimistic UI update + analytics on success.
+ *     with an optimiztic UI update + analytics on success.
  *   - Click on the title → open the task in the /tasks page.
  *
  * The widget keeps a local "completed" set so toggling a row immediately

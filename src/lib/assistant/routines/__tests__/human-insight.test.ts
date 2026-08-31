@@ -93,9 +93,9 @@ describe("work a tool could help with", () => {
     expect(f.suggestion).not.toMatch(/recorder|buy|purchase|subscribe/i);
   });
 
-  it("leaves the judgement with the person", () => {
+  it("leaves the judgment with the person", () => {
     const [f] = readHumanSteps([row({ avgMsWhenDone: 15 * 60 * 1000 })]);
-    expect(f.suggestion).toMatch(/judgement stays with you/i);
+    expect(f.suggestion).toMatch(/judgment stays with you/i);
   });
 
   it("does not flag a quick habit as expensive", () => {

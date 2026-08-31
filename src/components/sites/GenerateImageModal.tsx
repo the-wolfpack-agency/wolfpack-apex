@@ -26,7 +26,7 @@ import { fetchWithRefresh, jsonHeaders } from "@/lib/client-auth";
 
 // Mirrors MAX_PROMPT_LEN in src/lib/image-gen.ts. We keep a client-safe
 // copy here so the modal doesn't transitively pull node:crypto / pg
-// into the browser bundle (same defence-in-depth pattern as sites.ts
+// into the browser bundle (same defense-in-depth pattern as sites.ts
 // re-exporting from sites-schema.ts for client usage).
 export const MAX_PROMPT_LEN = 500;
 
@@ -215,7 +215,7 @@ export function GenerateImageModal({
     <div
       role="dialog"
       aria-modal="true"
-      aria-labelledby={`${promptId}-title`}
+      aria-labeledby={`${promptId}-title`}
       data-generate-image-modal
       onClick={dismiss}
       style={{

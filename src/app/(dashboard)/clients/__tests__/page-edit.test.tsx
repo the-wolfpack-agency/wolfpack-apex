@@ -127,7 +127,7 @@ test("Delete confirm-cancel does NOT fire DELETE", async () => {
   }
 });
 
-test("Delete confirm-accept sends DELETE and removes row optimistically", async () => {
+test("Delete confirm-accept sends DELETE and removes row optimiztically", async () => {
   await renderPage();
 
   const confirmSpy = jest.spyOn(window, "confirm").mockReturnValue(true);

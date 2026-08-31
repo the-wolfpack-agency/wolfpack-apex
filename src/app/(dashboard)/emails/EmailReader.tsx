@@ -13,7 +13,7 @@
  *   - Renders subject, from, received time, body (HTML sanitized
  *     to a safe subset; plain text wrapped in <pre> for line breaks).
  *   - Inline reply textarea + Send button → POST /api/mail/reply
- *     with { originalMessageId, bodyText }. Optimistic disable +
+ *     with { originalMessageId, bodyText }. Optimiztic disable +
  *     transient success/error banner.
  *   - Error states surface inline:
  *       not_connected   → "Connect Microsoft" CTA → /settings

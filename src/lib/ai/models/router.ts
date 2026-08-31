@@ -143,7 +143,7 @@ function withEstimate(
 function resolvePins(
   opts: SelectOptions,
   env: NodeJS.ProcessEnv,
-  catalogue: readonly ModelSpec[],
+  catalog: readonly ModelSpec[],
 ): { model?: ModelSpec; reason?: string; fallbackFrom?: string } {
   const pins: { id: string | undefined; reason: string }[] = [
     { id: opts.agentPin, reason: "agent_pin" },
@@ -154,10 +154,10 @@ function resolvePins(
   let firstUnusable: string | undefined;
   for (const pin of pins) {
     if (!pin.id) continue;
-    // Look in the CATALOGUE, not just the Wolfpack registry: a client that has
+    // Look in the CATALOG, not just the Wolfpack registry: a client that has
     // plugged in their own model must be able to pin it, or "bring your own
     // model" means "bring your own model and never have it chosen".
-    const model = catalogue.find((m) => m.id === pin.id) ?? getModel(pin.id);
+    const model = catalog.find((m) => m.id === pin.id) ?? getModel(pin.id);
     if (model && (isClientModel(model) || isModelAvailable(model, env))) {
       return { model, reason: pin.reason };
     }
@@ -180,21 +180,21 @@ function resolvePins(
  *
  * Defaults to the Wolfpack registry, so every existing caller is unchanged. A
  * caller serving a client that has plugged in their own models passes the
- * merged catalogue instead — and everything downstream (the gate, the
- * containment budget, the behaviour eval, the audit trail) applies identically,
+ * merged catalog instead — and everything downstream (the gate, the
+ * containment budget, the behavior eval, the audit trail) applies identically,
  * because none of it knows or cares where a model came from. That is the point:
  * a control that only works on our own models is not a control.
  */
 export function selectModel(
   opts: SelectOptions = {},
   env: NodeJS.ProcessEnv = process.env,
-  catalogue: readonly ModelSpec[] = MODEL_REGISTRY,
+  catalog: readonly ModelSpec[] = MODEL_REGISTRY,
 ): ModelSelection {
   const requiredTier: CapabilityTier = opts.requiredTier ?? "small";
   const minContext = opts.minContextTokens ?? 0;
 
   // Step 1: pins.
-  const pin = resolvePins(opts, env, catalogue);
+  const pin = resolvePins(opts, env, catalog);
   if (pin.model && pin.reason) {
     return withEstimate({ model: pin.model, reason: pin.reason }, opts);
   }
@@ -202,7 +202,7 @@ export function selectModel(
 
   // A client model is available when its config is present; there is no env var
   // to check because it was not deployed by us.
-  const available = catalogue.filter((m) => isClientModel(m) || isModelAvailable(m, env));
+  const available = catalog.filter((m) => isClientModel(m) || isModelAvailable(m, env));
 
   // Step 2: cost-based among capable + context-fitting + available.
   const capable = available.filter(
@@ -269,7 +269,7 @@ export function selectModel(
 
   // Step 4: nothing available anywhere - return the cheapest registry model
   // regardless of availability. Never throw; the caller decides.
-  const last = cheapest(catalogue, opts) ?? cheapest(MODEL_REGISTRY, opts)!;
+  const last = cheapest(catalog, opts) ?? cheapest(MODEL_REGISTRY, opts)!;
   return withEstimate(
     {
       model: last,

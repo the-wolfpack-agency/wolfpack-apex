@@ -87,7 +87,7 @@ describe("what it refuses to claim", () => {
     expect(PRICES_RECORDED_ON).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 
-  it("compares against models a client would recognise, not a list of fifteen", () => {
+  it("compares against models a client would recognize, not a list of fifteen", () => {
     expect(COMPARISON_PRICES.length).toBeGreaterThanOrEqual(3);
     expect(COMPARISON_PRICES.length).toBeLessThanOrEqual(8);
     for (const p of COMPARISON_PRICES) {

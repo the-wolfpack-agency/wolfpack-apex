@@ -20,7 +20,7 @@ describe("isLoopbackUrl", () => {
     "http://[::1]:7421",
     "http://0.0.0.0:8080",
     "https://LOCALHOST:443",
-  ])("recognises %s as this machine", (url) => {
+  ])("recognizes %s as this machine", (url) => {
     expect(isLoopbackUrl(url)).toBe(true);
   });
 

@@ -4,7 +4,7 @@
  * Three admin pages (platform-scans, agents list, agent detail) all speak
  * the SAME status language so a "critical" looks identical everywhere and a
  * "resolved" reads the same on every surface. Map a free-form status/severity
- * string to one of the existing --wp-* tokens; never invent a colour.
+ * string to one of the existing --wp-* tokens; never invent a color.
  *
  * Tone buckets → token:
  *   critical / high / error / failed / blocked   → --wp-error
@@ -38,7 +38,7 @@ export const TONE_VAR: Record<SeverityTone, string> = {
   neutral: "var(--wp-text-dim, #b4bcc8)",
 };
 
-/** Word → tone lookup. Lower-cased keys; the resolver normalises input. */
+/** Word → tone lookup. Lower-cased keys; the resolver normalizes input. */
 const WORD_TONE: Record<string, SeverityTone> = {
   // error family
   critical: "error",
@@ -103,7 +103,7 @@ export function toneForStatus(status: string | null | undefined): SeverityTone {
   return WORD_TONE[compact] ?? "neutral";
 }
 
-/** Convenience: the CSS colour value for a status string in one call. */
+/** Convenience: the CSS color value for a status string in one call. */
 export function colorForStatus(status: string | null | undefined): string {
   return TONE_VAR[toneForStatus(status)];
 }

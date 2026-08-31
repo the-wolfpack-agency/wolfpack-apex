@@ -101,7 +101,7 @@ test.describe("model router page reports the truth about cost", () => {
   test("reports measured spend, and says so when there is none to measure", async ({ page }) => {
     /* This page quotes money. Someone will reconcile it against an invoice.
        Until #279 the headline was an ESTIMATE computed from a token guess made
-       before the answer existed, labelled "not billed". It is now the
+       before the answer existed, labeled "not billed". It is now the
        provider's own billed figure, so the failure to guard against is the
        opposite one: an unmeasured page reading as a measured $0.00. */
     await openRouter(page, INSIGHTS);
@@ -130,8 +130,8 @@ test.describe("model router page reports the truth about cost", () => {
   });
 
   test("drops the caveat once spend is actually measured", async ({ page }) => {
-    /* The caveat apologises for an absence. With real completions recorded
-       there is nothing to apologise for, and leaving it up would undersell a
+    /* The caveat apologizes for an absence. With real completions recorded
+       there is nothing to apologize for, and leaving it up would undersell a
        number that is correct. */
     await openRouter(page, { ...INSIGHTS, actualCostUsd: 0.42, actualCalls: 7 });
     await expect(page.getByTestId("router-headline")).toBeVisible();
@@ -172,7 +172,7 @@ test.describe("model router page reports the truth about configuration", () => {
     await openRouter(page, INSIGHTS);
     await expect(page.getByTestId("router-usage")).toContainText("gpt-4o-mini");
     /* Measured first, and explicit when there is nothing measured. This used to
-       read "without an estimate", which apologised for a guess instead of
+       read "without an estimate", which apologized for a guess instead of
        reporting the billed figure the completion record carries. */
     await expect(page.getByTestId("router-usage")).toContainText("no completed call recorded");
     await expect(page.getByTestId("router-reasons")).toContainText("the cheapest model that met the requirement");
@@ -264,7 +264,7 @@ test.describe("the explanations are folded away from the numbers", () => {
 /**
  * Where each model runs, on the page.
  *
- * An undeclared region silently changes behaviour: a request that requires a
+ * An undeclared region silently changes behavior: a request that requires a
  * region is REFUSED by a model in that state. If the page does not say which
  * models are in it, the refusal arrives with no visible cause, and the person
  * debugging it has to read source to learn the environment variable exists.

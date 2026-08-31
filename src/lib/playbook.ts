@@ -50,7 +50,7 @@ build does, and starting it late is the single most common way a pilot slips.
 | --- | --- | --- |
 | Microsoft 365 tenant consent | Their IT | Every document and calendar surface |
 | A SharePoint library, named | Their operations lead | Nothing to read until one is chosen |
-| One named role per persona | Their programme owner | Scoping is per role, not per person |
+| One named role per persona | Their program owner | Scoping is per role, not per person |
 | A test account per persona | Their IT | Verifying what a dealer sees needs a dealer |
 | Named escalation contact | Both sides | Somebody has to answer when a scan finds something |
 
@@ -61,8 +61,8 @@ tenant grant alone has taken weeks elsewhere.
 
 If they run Microsoft 365 they very likely have Copilot, and its usage report
 is the cheapest read we will ever get on how AI is actually landing in their
-organisation. Ask their admin for a CSV export of **Copilot usage** from the
-Microsoft 365 admin centre, thirty days, and the version 2 report if the
+organization. Ask their admin for a CSV export of **Copilot usage** from the
+Microsoft 365 admin center, thirty days, and the version 2 report if the
 console offers it.
 
 **What it contains.** Per person: which Copilot surfaces they touched (Teams,
@@ -168,7 +168,7 @@ between them is the difference between a search box and an assistant:
 | They say | They get |
 | --- | --- |
 | "what does the SOW say about payment" | The clause, quoted, with the document named |
-| "summarise the onboarding document" | Prose across the whole document |
+| "summarize the onboarding document" | Prose across the whole document |
 | "what documents do we have about training" | A browsable list |
 
 The middle row is new. Until this week, asking for a summary returned a list of
@@ -342,7 +342,7 @@ the gate       (who is this, what may they reach, what may they be told)
 |               |               |                |
 tools           retrieval       the router        connectors
 (their          (their          (only where       (their systems,
- systems,        documents,      judgement         read first,
+ systems,        documents,      judgment         read first,
  answered        scoped by       is needed)        written later)
  directly)       audience)
 \`\`\`
@@ -356,7 +356,7 @@ chatbot works.
 ### Data flow, phase 1
 
 1. A document is read from their library by a connector holding a delegated
-   token. It is never read with more access than the person who authorised it.
+   token. It is never read with more access than the person who authorized it.
 2. Text is extracted, split into passages, and each passage is embedded.
 3. The document is described once, at ingest, so retrieval can match the
    document rather than only a slice of it.
@@ -430,7 +430,7 @@ The nouns the system knows about, and how they relate. This is what makes
 cross-system answers possible, and it is the part that grows with each phase.
 
 \`\`\`text
-Person  --works at-->  Organisation
+Person  --works at-->  Organization
   |                        |
   |--attends-->  Meeting --covers--> Document --lives in--> Library
   |                 |                    |                      |
@@ -453,7 +453,7 @@ Person  --works at-->  Organisation
 
 Each later phase adds nouns rather than replacing them: a DMS adds Vehicle and
 Booking, a CRM adds Account and Opportunity, and the relationships they already
-have to Person and Organisation are what make the second system worth more than
+have to Person and Organization are what make the second system worth more than
 the first.
 
 ### The agents, and the gate that makes them safe
@@ -465,7 +465,7 @@ that the agent is the least novel part; the gate around it is the product.
 identity, a role, and a set of operations it has scanned and been granted. It
 acts ON BEHALF OF a named person through a delegation token, so it can never
 reach anything that person could not, and the audit shows both: who acted, and
-who authorised.
+who authorized.
 
 **The gate.** A model proposes; the gate decides, executes and records. The
 model never touches a system directly. Everything an agent can do is a
@@ -487,14 +487,14 @@ client cares about:
 | Operation registry | The complete, declared list of what it can do |
 | Approvals | A human confirms before anything irreversible |
 | Grounding | Answers come from their documents, not from the model's memory |
-| Behaviour evals | The agent is scored against a fixed task set, per model version |
-| Drift detection | The same tasks re-run, and a change in behaviour is reported |
+| Behavior evals | The agent is scored against a fixed task set, per model version |
+| Drift detection | The same tasks re-run, and a change in behavior is reported |
 | Failover | A provider outage degrades rather than stops |
 | Audit | Hash-chained, so the record of what an agent did cannot be edited |
 
 **Why this matters more than the agent.** Every one of those is a question a
 corporation asks about automation and usually cannot get answered: what may it
-do, who authorised it, what did it actually do, how do we know it still
+do, who authorized it, what did it actually do, how do we know it still
 behaves the way it did last month. An agent without them is a demo. The gate
 is what makes it something an enterprise can sign off.
 
@@ -603,7 +603,7 @@ accountable hears it from us rather than from a bill.
 **Who is accountable when an agent acts?**
 A named person. An agent acts on behalf of its owner through a short-lived
 delegation token good for a single act, so it can never reach anything that
-person could not. The audit shows both: who acted, and who authorised.
+person could not. The audit shows both: who acted, and who authorized.
 
 **Can we stop it?**
 Pause or revoke, immediately. Revoke kills the credential. Both are
@@ -613,7 +613,7 @@ lifted a limit is the first question an incident review asks.
 
 **How do we know it still behaves the way it did last month?**
 It is scored against a fixed task set, attributed to the model version that
-produced the score, and the same tasks are re-run so a change in behaviour is
+produced the score, and the same tasks are re-run so a change in behavior is
 reported rather than discovered. A model vendor shipping a new version is a
 change we detect.
 
@@ -740,6 +740,6 @@ re-upload.
   by tuning; the library is wrong.
 - A persona's questions are mostly things we cannot do. Better to widen the
   persona or narrow the promise than to answer badly.
-- Access has not arrived by the end of month one. That is a programme problem,
+- Access has not arrived by the end of month one. That is a program problem,
   and continuing to build against it hides the fact.
 `;

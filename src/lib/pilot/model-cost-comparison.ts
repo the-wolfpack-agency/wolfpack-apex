@@ -11,7 +11,7 @@
  * same tokens: a more capable one often answers in fewer, a chattier one in
  * more. So this is not a prediction of another product's bill, it is the cost
  * of OUR traffic at THEIR published rates, which is the only comparison we can
- * make from our own data without guessing at someone else's behaviour.
+ * make from our own data without guessing at someone else's behavior.
  *
  * THE LARGER SAVING IS NOT ON THIS TABLE, AND IT IS NOT MERELY "WE USE FEWER
  * MODELS". Two mechanisms sit outside it, and the second is the engineering.

@@ -12,7 +12,7 @@
  * cannot.
  *
  * THE RE-IDENTIFICATION LINE. "Asked about a named incentive tier in a small
- * market" is a shape AND a fingerprint. The defence is structural: no field
+ * market" is a shape AND a fingerprint. The defense is structural: no field
  * here names a topic, a document, a person, a place or a time. What survives
  * is how the product behaved.
  */
@@ -102,7 +102,7 @@ describe("the reductions themselves", () => {
 
   /* A new source added elsewhere in the product must not silently widen the
      gist's vocabulary. */
-  it("maps an unrecognised source into the vocabulary", () => {
+  it("maps an unrecognized source into the vocabulary", () => {
     expect(answerOrigin("brain")).toBe("brain");
     expect(answerOrigin("some_new_source_nobody_declared")).toBe("other");
     expect(answerOrigin(null)).toBe("other");

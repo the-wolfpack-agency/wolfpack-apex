@@ -16,7 +16,7 @@
 -- THE STEPS ARE JSON ON PURPOSE
 --
 -- A step is a small closed shape defined in TypeScript (tool, model, human)
--- and validated before it runs. Normalising it into tables would spread one
+-- and validated before it runs. Normalizing it into tables would spread one
 -- definition across two places that then drift, and would make a routine
 -- unreadable without a join. The shape is validated on the way IN and again
 -- on the way OUT, because a row written by an older deploy is a real case.

@@ -121,7 +121,7 @@ export function topicTerms(topic: string): string[] {
  * EVERY term must appear, in the title or the summary. "Any term" would answer
  * "latest on Porsche Taycan" with an article about a Ford. When the reader gave
  * only one meaningful word, that word alone is the whole test, which is the
- * behaviour they expect from a search box.
+ * behavior they expect from a search box.
  */
 export function itemMatches(item: FeedItem, terms: string[]): boolean {
   if (terms.length === 0) return false;

@@ -1,7 +1,7 @@
 /**
  * What we can tell a client before they have used us for anything.
  *
- * The suite is organised around the two failure modes that would make
+ * The suite is organized around the two failure modes that would make
  * these generators worthless in a pitch: saying something that needed
  * history (so it is blank on day one), and saying something we cannot
  * back up with arithmetic (so it collapses the first time a sharp
@@ -49,7 +49,7 @@ function connector(name: string, objectTypes: string[], configured = true) {
 describe("cross-source overlap — the day-zero insight", () => {
   it("says nothing with only one system connected", async () => {
     /* One system cannot disagree with anything. Inventing a finding
-       here would be the exact demo-shaped behaviour we refuse. */
+       here would be the exact demo-shaped behavior we refuse. */
     mockList.mockReturnValue([connector("hubspot", ["contact", "deal"])]);
     const { generateCrossSourceOverlap } = await import("../source-topology");
     expect(await generateCrossSourceOverlap(CTX)).toEqual([]);

@@ -86,7 +86,7 @@ console.log(`\n${reading.gists.length} decisions read, ${reading.skipped} rows s
    from, and it must be visible rather than quietly counted as "unknown". */
 if (reading.unmapped.length > 0) {
   const total = reading.unmapped.reduce((n, u) => n + u.count, 0);
-  console.log(`\n${total} rows carry a status this does not recognise:`);
+  console.log(`\n${total} rows carry a status this does not recognize:`);
   for (const u of reading.unmapped.slice(0, 12)) {
     console.log(`  ${String(u.count).padStart(5)}  ${u.status}`);
   }
@@ -108,7 +108,7 @@ const report = measureSignal(reading.gists, {
   isBad: (d) => !d.wentWell,
 });
 console.log(`\nBase rate of a decision going badly: ${(report.baseBadRate * 100).toFixed(1)}%`);
-console.log(`(reversed, abandoned, pending or unrecognised; a REJECTION counts as going well,`);
+console.log(`(reversed, abandoned, pending or unrecognized; a REJECTION counts as going well,`);
 console.log(` because a change refused by a reviewer is the process working)\n`);
 
 console.log(`Which shapes predict trouble (floor ${MIN_OBSERVATIONS} observations):`);

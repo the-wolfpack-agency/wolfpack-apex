@@ -1,5 +1,5 @@
 /**
- * Provenance-based injection defence.
+ * Provenance-based injection defense.
  *
  * The industry answer is a pattern list over the whole prompt. Its structural
  * flaw is the first test below: the same characters are a question when a
@@ -26,7 +26,7 @@ describe("the distinction pattern matching cannot make", () => {
 
   test("the same characters inside a retrieved document are fenced and reported", () => {
     const parts: PromptPart[] = [
-      { provenance: "user", text: "summarise the attached invoice" },
+      { provenance: "user", text: "summarize the attached invoice" },
       { provenance: "attachment", label: "invoice.pdf", text: ATTACK },
     ];
     const out = fenceUntrusted(parts);

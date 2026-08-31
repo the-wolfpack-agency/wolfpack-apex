@@ -171,7 +171,7 @@ export async function resolveGithubToken(
     const installationToken = await mintInstallationToken(workspaceId, deps);
     return installationToken ?? pat;
   } catch (err) {
-    // Defence in depth - mintInstallationToken already never throws, but if it
+    // Defense in depth - mintInstallationToken already never throws, but if it
     // ever did, we must still degrade to the PAT.
     console.warn(
       "[github-app] resolveGithubToken fell back to PAT:",

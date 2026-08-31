@@ -6,7 +6,7 @@
  * `/api/microsoft?action=auth-url` which is the CONNECT flow for
  * already-signed-in users).
  *
- * The callback at /api/microsoft/callback recognises the `signin:`
+ * The callback at /api/microsoft/callback recognizes the `signin:`
  * prefix in the signed state, provisions the Instinct user from the
  * OAuth profile (domain-gated to @thewolfpack.agency), stores the
  * Graph tokens, mints an Instinct JWT, and redirects to /. One click

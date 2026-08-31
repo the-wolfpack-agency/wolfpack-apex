@@ -13,7 +13,7 @@ import { fetchWithRefresh } from "@/lib/client-auth";
  * had no idea WHY their day was empty (the April-class "blank, no reason"
  * UX failure this team hard-bans).
  *
- * Behaviour:
+ * Behavior:
  *   - On mount, reads GET /api/integrations/status (via fetchWithRefresh,
  *     never raw fetch - authenticated endpoint) and inspects
  *     `microsoft.connected`.

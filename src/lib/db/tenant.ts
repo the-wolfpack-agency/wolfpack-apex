@@ -29,7 +29,7 @@
  *    an unconstrained one is an injection into configuration lookup. The
  *    pattern is narrow and validated before use.
  *
- * 4. INERT UNTIL SWITCHED ON. With INSTINCT_DB_MODE unset the behaviour is
+ * 4. INERT UNTIL SWITCHED ON. With INSTINCT_DB_MODE unset the behavior is
  *    exactly today's: one DATABASE_URL, one pool, nothing routed. A migration
  *    this significant should not change production the moment it merges.
  *
@@ -110,7 +110,7 @@ export function configuredTenants(env: NodeJS.ProcessEnv = process.env): string[
  * The connection string to use, given the tenant the request resolved to.
  *
  * `single` mode ignores the tenant entirely and uses DATABASE_URL, which is
- * today's behaviour and stays the default. `routed` mode has no default at all.
+ * today's behavior and stays the default. `routed` mode has no default at all.
  */
 export function connectionStringFor(
   tenantId: string | undefined,

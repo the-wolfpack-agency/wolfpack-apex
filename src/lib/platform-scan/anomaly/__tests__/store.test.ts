@@ -5,7 +5,7 @@
  * NOT do: it never overwrites first_seen_at, and it never learns from a scan
  * that failed. Both are the kind of rule that is obviously right when written
  * and silently lost the next time someone edits the upsert, so they are pinned
- * against the query text as well as the behaviour.
+ * against the query text as well as the behavior.
  */
 jest.mock("@/lib/db", () => ({ query: jest.fn() }));
 jest.mock("@/lib/analytics", () => ({ trackEvent: jest.fn() }));

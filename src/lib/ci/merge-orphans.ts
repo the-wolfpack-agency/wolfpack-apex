@@ -50,7 +50,7 @@ export type Verdict =
  * Classify merged PRs against what is actually in the default branch.
  *
  * existsInDefault is injected rather than shelling out here, so the whole
- * judgement is testable without a repository and the CLI stays a thin wrapper.
+ * judgment is testable without a repository and the CLI stays a thin wrapper.
  */
 export function classifyMerges(
   prs: MergedPr[],

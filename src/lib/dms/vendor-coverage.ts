@@ -148,7 +148,7 @@ export function readCoverage(): CoverageReading[] {
 /**
  * One sentence for a dealer, when a vendor cannot answer part of the question.
  *
- * Names the system rather than apologising, because a dealer knows which one
+ * Names the system rather than apologizing, because a dealer knows which one
  * they run and "your DMS does not expose that through this connection" is
  * actionable where "unavailable" is not.
  */

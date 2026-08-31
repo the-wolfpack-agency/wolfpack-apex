@@ -14,7 +14,7 @@
  *
  * These are STRUCTURAL assertions — they don't execute SQL. An
  * end-to-end DB-level test would require spinning up Postgres, which
- * is out of scope for a unit suite. Runtime behaviour is already
+ * is out of scope for a unit suite. Runtime behavior is already
  * covered by the integration tests that exercise the People/HR libs
  * through the DB layer.
  */

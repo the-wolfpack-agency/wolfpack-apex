@@ -115,9 +115,9 @@ function mins(ms: number): string {
   return `${Math.round(ms / 60_000)}m`;
 }
 
-/* Tones from the shared severity scale, not new colours. "Not happening" is a
+/* Tones from the shared severity scale, not new colors. "Not happening" is a
    warning rather than an error on purpose: a step somebody skipped is
-   information about the routine, and colouring it red would make the page feel
+   information about the routine, and coloring it red would make the page feel
    like an assessment of the person reading it. */
 const FINDING_TONE: Record<Finding["kind"], { label: string; tone: SeverityTone }> = {
   not_happening: { label: "Not happening", tone: "warning" },

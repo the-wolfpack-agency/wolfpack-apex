@@ -49,7 +49,7 @@ export async function PATCH(
     column?: string;
     column_name?: string;
     value?: string;
-    /* Optimistic-concurrency snapshot from the client. Server uses
+    /* Optimiztic-concurrency snapshot from the client. Server uses
        this in cell-writer.ts to detect conflicts. Pass empty string
        for "I expected the cell to be blank"; omit (or null) to skip
        the check entirely (server-side recovery scripts only). */

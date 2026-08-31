@@ -24,7 +24,7 @@
  *
  * DETERMINISTIC FIRST, MODEL ONLY WHERE NECESSARY
  *
- * Every check here is a rule, not a judgement. That is deliberate and it is the
+ * Every check here is a rule, not a judgment. That is deliberate and it is the
  * same doctrine as the rest of the gate: credentials are already stripped both
  * directions by redaction.ts, and a model that USUALLY notices a card number is
  * strictly worse than a rule that always does. These rules catch the failures a
@@ -140,7 +140,7 @@ export function verifyAnswer(input: VerificationInput): VerificationVerdict {
    * from its question, and a false flag here pays a larger model to improve
    * something that was already right, on every request that trips it, forever.
    *
-   * So relevance is exactly the judgement a rule cannot make, and therefore the
+   * So relevance is exactly the judgment a rule cannot make, and therefore the
    * one place a second model earns its cost. The flag stays in the union as the
    * contract that stage will emit; nothing computes it from text. Deterministic
    * where possible, model only where necessary, and being honest about which

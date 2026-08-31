@@ -76,7 +76,7 @@ export interface SyncRecentOpts {
   top?: number;
 }
 
-export interface SyncRecentResult {
+export interface SyncRecentersult {
   pageCount: number;
   durationMs: number;
 }
@@ -407,7 +407,7 @@ export async function createPage(
 export async function syncRecentPages(
   userId: string,
   opts: SyncRecentOpts = {},
-): Promise<SyncRecentResult> {
+): Promise<SyncRecentersult> {
   const start = Date.now();
   const top = Math.min(Math.max(opts.top ?? 50, 1), 200);
 

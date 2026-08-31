@@ -342,7 +342,7 @@ export function describeInsights(s: {
   }
   /* LEAD WITH THE MEASURED NUMBER when there is one. The old sentence said
      "N carried no cost estimate, so the total below understates the true
-     figure", which was true and unhelpful: it apologised for a number instead
+     figure", which was true and unhelpful: it apologized for a number instead
      of reporting the one we actually had. */
   if (s.actualCalls && s.actualCalls > 0) {
     const spend = (s.actualCostUsd ?? 0).toFixed(2);
@@ -744,7 +744,7 @@ export async function getRouterInsights(days = 30): Promise<RouterInsights> {
      panel is worth having and is not worth taking the page down for. */
   let versions: ModelVersionSummary[] = [];
   try {
-    versions = summariseVersions(await allModelVersions());
+    versions = summarizeVersions(await allModelVersions());
   } catch {
     /* Same posture as every other panel here. */
   }
@@ -772,7 +772,7 @@ export async function getRouterInsights(days = 30): Promise<RouterInsights> {
  * without a database. The rows arrive most-recent-first per model, which is the
  * order allModelVersions() returns.
  */
-export function summariseVersions(
+export function summarizeVersions(
   rows: Array<{
     modelId: string;
     servedVersion: string;

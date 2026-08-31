@@ -35,7 +35,7 @@ describe("UnsavedDraftDialog", () => {
     const dialog = screen.getByTestId("unsaved-draft-dialog");
     expect(dialog.getAttribute("role")).toBe("dialog");
     expect(dialog.getAttribute("aria-modal")).toBe("true");
-    expect(dialog.getAttribute("aria-labelledby")).toBeTruthy();
+    expect(dialog.getAttribute("aria-labeledby")).toBeTruthy();
   });
 
   it("renders the optional draft preview when provided", () => {

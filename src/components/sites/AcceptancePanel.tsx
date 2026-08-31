@@ -13,7 +13,7 @@
  * layer:
  *
  *   - Show a degraded run as anything like a pass. "Could not check" gets its
- *     own status and its own colour, and it reads as not accepted.
+ *     own status and its own color, and it reads as not accepted.
  *   - Show an empty history as reassurance. No runs yet means nobody has
  *     checked, which is stated in those words.
  *

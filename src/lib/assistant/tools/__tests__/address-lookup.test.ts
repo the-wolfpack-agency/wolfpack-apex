@@ -52,9 +52,9 @@ describe("an address reaches search instead of a model", () => {
     "1600 Pennsylvania Ave NW, Washington, DC 20500",
     "10100 Dream Tree Boulevard, Lake Buena Vista, Florida 32836",
     /* The UK form was missing on the first pass and fell through to a model.
-       This engagement is US-centred, but an address is an address. */
+       This engagement is US-centerd, but an address is an address. */
     "221 Baker Street, London NW1 6XE",
-  ])("recognises %j", (address) => {
+  ])("recognizes %j", (address) => {
     expect(addressQuery(address)).toEqual({ query: expect.any(String) });
   });
 

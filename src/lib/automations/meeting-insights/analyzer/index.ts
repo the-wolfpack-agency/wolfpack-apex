@@ -92,7 +92,7 @@ Return ONLY the JSON object.`;
 /* ------------------------------------------------------------------ */
 
 /**
- * Analyse one meeting message. Returns a typed result; never throws.
+ * Analyze one meeting message. Returns a typed result; never throws.
  *
  * Statuses:
  *   - "success": JSON parsed, schema valid, fields populated.

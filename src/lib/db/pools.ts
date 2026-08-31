@@ -59,7 +59,7 @@ export interface PoolConfigOptions {
    * It exists for a case we met the first time this ran against a real
    * server rather than a fake pool. A client's twelve-year-old database
    * sits on a private network and frequently has no TLS at all, and the
-   * normaliser rewrites sslmode=disable to verify-full, so the
+   * normalizer rewrites sslmode=disable to verify-full, so the
    * connection cannot be made under any setting. The choice is an
    * explicit opt-in by an operator who knows the network, or refusing
    * to integrate with the systems this product exists to integrate

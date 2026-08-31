@@ -9,7 +9,7 @@
  *
  *   - Renders nothing when `open === false` (server-rendered initial
  *     paint stays inert).
- *   - Centres a modal overlay above the rest of the surface
+ *   - Centers a modal overlay above the rest of the surface
  *     (z-index 1000+), clicks on the backdrop count as "cancel".
  *   - Auto-focuses "Keep editing" so a stray Enter never destroys
  *     work.
@@ -79,7 +79,7 @@ export default function UnsavedDraftDialog({
       <div
         role="dialog"
         aria-modal="true"
-        aria-labelledby={titleId}
+        aria-labeledby={titleId}
         data-testid="unsaved-draft-dialog"
         style={card}
         onClick={(e) => {

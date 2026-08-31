@@ -15,7 +15,7 @@ import { z } from "zod";
 import { trackEvent } from "@/lib/analytics";
 import { registerTool, getTools } from "./registry";
 import { savePendingAction } from "./pending-actions";
-import { matchRoutine } from "@/lib/assistant/routines/catalogue";
+import { matchRoutine } from "@/lib/assistant/routines/catalog";
 import { matchSavedRoutine, isReservedCommand } from "@/lib/assistant/routines/saved";
 import { removeStep, moveStep, replaceTool, describeSteps } from "@/lib/assistant/routines/edit";
 import type { ToolDef, ToolResult } from "./types";

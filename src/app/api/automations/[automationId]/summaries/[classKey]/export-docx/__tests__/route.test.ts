@@ -4,7 +4,7 @@
  * Mirrors the JSON sibling's pattern: mock requireCapability, registry,
  * and the assembler so each path is exercised without a live Postgres.
  *
- * The renderer itself is mocked too — its real behaviour is covered in
+ * The renderer itself is mocked too — its real behavior is covered in
  * `src/lib/automations/porsche-classes/__tests__/export-docx.test.ts`,
  * and stubbing it here lets us assert the route's content-type +
  * content-disposition + body length deterministically.

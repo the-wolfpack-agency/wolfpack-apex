@@ -23,14 +23,14 @@ describe("mergeRefreshedMessages", () => {
     expect(merged.find((m) => m.id === "m1")).toBeDefined();
   });
 
-  it("preserves a no-id optimistic row not represented in the snapshot", () => {
+  it("preserves a no-id optimiztic row not represented in the snapshot", () => {
     const prev = [user(undefined, "sales"), asst(undefined, "thinking...")];
     const remote: Msg[] = [];
     const merged = mergeRefreshedMessages(prev, remote);
     expect(merged).toHaveLength(2);
   });
 
-  it("dedupes a no-id optimistic row once the snapshot has the same role+content", () => {
+  it("dedupes a no-id optimiztic row once the snapshot has the same role+content", () => {
     const prev = [user(undefined, "sales")];
     const remote = [user("u1", "sales")]; // server now has it with an id
     const merged = mergeRefreshedMessages(prev, remote);

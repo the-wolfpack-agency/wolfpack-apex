@@ -36,7 +36,7 @@ export class EgressBlockedError extends Error {
 }
 
 export interface GuardedFetchOptions {
-  /** Hosts authorised for this run only (e.g. a scan target cleared by the
+  /** Hosts authorized for this run only (e.g. a scan target cleared by the
    *  ownership gate). Never widens the list for anyone else. */
   extraHosts?: readonly string[];
   /** Injected for tests; defaults to global fetch. */

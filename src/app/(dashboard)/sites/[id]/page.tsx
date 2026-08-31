@@ -19,7 +19,7 @@
  * Poll-stability lock: `load({ fromPoll })` preserves the verbatim logic
  * from the legacy detail page — regression test
  * sites-detail-poll-stability.test.tsx pins the "no Loading flicker"
- * contract + "poll doesn't overwrite unsaved brief" behaviour.
+ * contract + "poll doesn't overwrite unsaved brief" behavior.
  *
  * Analytics: every studio.* event goes through `trackClient` (client
  * side) which in turn POSTs `/api/analytics`. Brief saves + deploys

@@ -8,7 +8,7 @@
  * platform_scan.assessment_started has fired zero times in the product's life.
  *
  * The driver asks the existing rules every question rather than deciding
- * anything itself, which is what keeps the judgement testable without a
+ * anything itself, which is what keeps the judgment testable without a
  * browser and this file testable without a client system.
  */
 

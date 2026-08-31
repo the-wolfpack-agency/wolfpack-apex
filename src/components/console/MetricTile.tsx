@@ -2,7 +2,7 @@
  * MetricTile — the hero "view results" element of the command center.
  *
  * A large value + label, with optional delta (up/down, success/error tinted),
- * an optional accent colour for the value, and an optional sparkline slot. The
+ * an optional accent color for the value, and an optional sparkline slot. The
  * numeric value counts up from 0 on mount (RAF; instant under
  * prefers-reduced-motion via useCountUp). Build it on the --wp-* tokens only.
  *
@@ -15,13 +15,13 @@ import type { CSSProperties, ReactNode } from "react";
 import { useCountUp } from "./useCountUp";
 
 export interface MetricDelta {
-  /** Signed magnitude of change. Sign drives the arrow + colour when
+  /** Signed magnitude of change. Sign drives the arrow + color when
    *  `direction` is omitted. */
   value: number;
   /** Force the direction; otherwise inferred from the sign of `value`. */
   direction?: "up" | "down" | "flat";
   /** When true, a downward move is GOOD (e.g. fewer vulnerabilities) so the
-   *  colour mapping inverts. Default false (up = good = success). */
+   *  color mapping inverts. Default false (up = good = success). */
   invertColor?: boolean;
   /** Override the rendered delta text (defaults to a +/- formatted value). */
   label?: ReactNode;
@@ -39,7 +39,7 @@ export interface MetricTileProps {
   kicker?: ReactNode;
   /** Decimal places for the animated numeric value. Default 0. */
   decimals?: number;
-  /** Accent colour for the value text (any --wp-* var expression). */
+  /** Accent color for the value text (any --wp-* var expression). */
   accent?: string;
   /** Optional delta indicator. */
   delta?: MetricDelta;
@@ -85,7 +85,7 @@ export function MetricTile({
         ? formatNumber(animated, decimals)
         : "—";
 
-  // Delta direction + colour
+  // Delta direction + color
   let deltaNode: ReactNode = null;
   if (delta) {
     const dir =

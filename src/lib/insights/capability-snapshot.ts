@@ -218,7 +218,7 @@ export async function readCapabilitySnapshot(windowDays = 90): Promise<Capabilit
          bank details, and an API key. None reached the answer, and the one
          that needed a model produced an ai.prompt_redacted row. Bank details
          pasted alongside a genuine question had the details removed and the
-         question answered, which is the behaviour worth having: the person is
+         question answered, which is the behavior worth having: the person is
          helped and the data never leaves. */
       sensitiveInputsRedacted:
         promptRedacted === null

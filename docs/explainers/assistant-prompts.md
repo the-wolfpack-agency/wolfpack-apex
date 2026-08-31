@@ -1,6 +1,6 @@
 # Wolfpack Assistant prompts, explained
 
-> A living catalogue of every prompt the Assistant knows how to handle deterministically (no AI tokens spent). Onboarding doc for new employees, snippet source for the chat UI's "Try asking…" suggestions, and the canonical reference for the demo team.
+> A living catalog of every prompt the Assistant knows how to handle deterministically (no AI tokens spent). Onboarding doc for new employees, snippet source for the chat UI's "Try asking…" suggestions, and the canonical reference for the demo team.
 
 ```yaml
 sources:
@@ -16,7 +16,7 @@ last_translated: 2026-05-16
 
 Every prompt below is **verified** — it has a matching test that asserts the Assistant dispatches the right tool with the right parameters. If a prompt is in this doc, it works in production. If a phrasing isn't here, the Assistant may still answer it via the AI fallback path, but it'll spend tokens and the answer won't be as fast or as deterministic.
 
-Two ways to use the catalogue:
+Two ways to use the catalog:
 
 1. **For employees / clients** — copy a prompt verbatim, swap the placeholders (`<repo>`, `<vendor>`, `<contact name>`), and try it. Every prompt has a sample answer you can compare against to know it worked.
 2. **For the UI** — these are the snippets we seed into the chat's "Try asking…" hints. When we add a new prompt pattern, it goes here first; the UI consumes the doc.

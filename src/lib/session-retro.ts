@@ -82,7 +82,7 @@ export const FRICTION_TAXONOMY: readonly FrictionTaxonomyEntry[] = [
   {
     cause: "directive-echo",
     meaning:
-      "the request restated standing rules that are already loaded automatically every session, which costs tokens without changing behaviour",
+      "the request restated standing rules that are already loaded automatically every session, which costs tokens without changing behavior",
     ask: "State only what is DIFFERENT about this task. The standing directives are already in context.",
     agentFault: false,
   },
@@ -136,7 +136,7 @@ export function analyzeRetro(input: RetroInput): RetroFinding {
   const avoidableRounds = entries.length - agentRounds - discoveryRounds;
 
   // Taxonomy order, not first-seen order, so repeated sessions produce a stable
-  // list an operator can recognise at a glance.
+  // list an operator can recognize at a glance.
   const suggestions = FRICTION_TAXONOMY.filter(
     (e) => !e.agentFault && e.cause !== "scope-discovered" && input.causes.includes(e.cause),
   ).map((e) => e.ask);

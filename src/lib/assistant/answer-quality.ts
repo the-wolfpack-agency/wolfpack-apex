@@ -302,7 +302,7 @@ export function gateConfidence(
 /* ------------------------------------------------------------------ */
 
 /**
- * Asking about THIS organisation, not about the world.
+ * Asking about THIS organization, not about the world.
  *
  * "our Q4 initiative", "we", "the company's process" and our own product names
  * are all claims only our own records can settle. A model has no way to know
@@ -362,7 +362,7 @@ export function gateUngroundedClaimAboutUs(
   if (!ASKS_ABOUT_US.test(tells)) return null;
   return {
     filter: "ungrounded_internal",
-    reason: "asked about this organisation with no retrieved source to answer from",
+    reason: "asked about this organization with no retrieved source to answer from",
     severity: "block",
   };
 }

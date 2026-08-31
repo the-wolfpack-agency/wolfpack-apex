@@ -14,7 +14,7 @@
  * that cannot tell those apart would forbid the fix.
  *
  * Two ways to satisfy it: put the page in the rail, or stop telling people it
- * is there. Both are one line, and picking is a judgement about whether the
+ * is there. Both are one line, and picking is a judgment about whether the
  * page deserves a slot rather than a thing to work around.
  */
 import { PAGE_FACTS } from "@/lib/assistant/page-facts";

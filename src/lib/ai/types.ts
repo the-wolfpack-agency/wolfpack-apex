@@ -34,7 +34,7 @@ export interface AICompleteRequestMetadata {
   routing_reason?: string;
   /** The tier this call site used to send unconditionally. Present only where
    *  per-turn routing replaced a hardcoded tier, and used to price what the
-   *  old behaviour WOULD have cost for the same tokens — so "savings" is
+   *  old behavior WOULD have cost for the same tokens — so "savings" is
    *  measured against a real counterfactual rather than asserted. */
   baseline_tier?: AIModelTier;
   /**
@@ -123,7 +123,7 @@ export interface AICompleteRequest {
    *
    * The failure a reviewer is actually for is the opposite kind: an answer
    * that is well formed, confident, and wrong or half-answered. verification.ts
-   * says so itself, that relevance is exactly the judgement a rule cannot make
+   * says so itself, that relevance is exactly the judgment a rule cannot make
    * and therefore the one place a second model earns its cost. Gating the
    * reviewer on the rules failing points it at the one case it can least help
    * with, and away from every case it was built for.

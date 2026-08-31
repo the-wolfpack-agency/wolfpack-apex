@@ -55,7 +55,7 @@ describe("audit log append-only enforcement — static checks", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Behavioural simulation — mock client refuses UPDATE/DELETE, recordAudit OK
+// Behavioral simulation — mock client refuses UPDATE/DELETE, recordAudit OK
 // ---------------------------------------------------------------------------
 const mockConnect = jest.fn();
 jest.mock("@/lib/db", () => ({

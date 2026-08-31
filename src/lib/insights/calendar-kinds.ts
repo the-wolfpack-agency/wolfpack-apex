@@ -50,7 +50,7 @@ export interface CalendarEventShape {
 /**
  * Words that say the entry is somebody being away.
  *
- * Bounded by word edges so "Portfolio Optimisation Overview" does not match
+ * Bounded by word edges so "Portfolio Optimization Overview" does not match
  * on the letters of a leave word, and deliberately short: a list long enough
  * to catch every phrasing would catch meetings about leave policy too.
  */
@@ -93,7 +93,7 @@ function hoursBetween(startAt: string | null, endAt: string | null): number | nu
  * What this entry actually is.
  *
  * Name first, because a person naming their entry is the most reliable signal
- * there is. Shape second, for the ones nobody labelled.
+ * there is. Shape second, for the ones nobody labeled.
  */
 export function classifyCalendarEvent(
   event: CalendarEventShape,
@@ -106,7 +106,7 @@ export function classifyCalendarEvent(
   /* An appointment about a topic is a meeting, whatever the topic is. */
   const aboutSomething = ABOUT_A_TOPIC.test(subject);
 
-  /* This organisation's own vocabulary first: it knows itself better than a
+  /* This organization's own vocabulary first: it knows itself better than a
      built-in list does. */
   if (matchesAny(conventions.timeOff) && !aboutSomething) return "time-off";
   if (matchesAny(conventions.notAMeeting)) return "multi-day-block";
@@ -115,7 +115,7 @@ export function classifyCalendarEvent(
 
   const hours = hoursBetween(event.startAt, event.endAt);
   if (hours !== null && hours >= NOT_A_MEETING_HOURS) {
-    /* Long AND unlabelled. A trip, a conference, a week at a race: not a
+    /* Long AND unlabeled. A trip, a conference, a week at a race: not a
        meeting, and not somebody's leave either, so it is neither counted as
        meeting time nor reported as time off. */
     return "multi-day-block";
@@ -124,7 +124,7 @@ export function classifyCalendarEvent(
   if (matchesAny(conventions.hold) || PERSONAL_HOLD.test(subject)) return "personal-hold";
 
   /* An entry with nobody else invited is a note to self rather than a
-     meeting, however it is named. Checked last so a labelled one-person
+     meeting, however it is named. Checked last so a labeled one-person
      holiday is still time off. */
   if (event.attendeeCount === 0 && hours !== null && hours >= 4) return "personal-hold";
 
@@ -132,7 +132,7 @@ export function classifyCalendarEvent(
 }
 
 /**
- * Patterns that mean something particular to ONE organisation.
+ * Patterns that mean something particular to ONE organization.
  *
  * Ours needed none: "OOO" is universal enough to be built in. A client's will
  * not be. A dealership marks floor duty and demo drives on the same calendar
@@ -145,7 +145,7 @@ export function classifyCalendarEvent(
  * test drive at a dealership and a sales meeting everywhere else.
  */
 export interface CalendarConventions {
-  /** Extra ways this organisation says somebody is away. */
+  /** Extra ways this organization says somebody is away. */
   timeOff?: RegExp[];
   /** Extra ways it marks a block on its own time. */
   hold?: RegExp[];
@@ -156,7 +156,7 @@ export interface CalendarConventions {
 /**
  * The signature of a convention nobody has told us about yet.
  *
- * A handful of entries holding most of the hours is what an unlabelled
+ * A handful of entries holding most of the hours is what an unlabeled
  * convention looks like from outside. On our own calendar, ninety-four of 801
  * entries held ninety per cent of the time and every one was a holiday or a
  * trip. The data was well formed and the arithmetic was correct, which is

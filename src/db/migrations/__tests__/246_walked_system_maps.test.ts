@@ -3,7 +3,7 @@
  *
  * The table exists because a walked map and a repo-read profile know
  * genuinely different things, and the columns encode that: what the walk did
- * NOT reach is denormalised alongside what it did, so a listing cannot show
+ * NOT reach is denormalized alongside what it did, so a listing cannot show
  * counts without showing how complete they are.
  */
 import fs from "node:fs";
@@ -30,7 +30,7 @@ describe("246_walked_system_maps.sql", () => {
   /* THE COUNTS AND THEIR CAVEAT TRAVEL TOGETHER. A listing that showed
      nineteen screens without showing thirty-four still queued would describe a
      sample as an estate. */
-  test("denormalises what the walk did not reach, next to what it did", () => {
+  test("denormalizes what the walk did not reach, next to what it did", () => {
     expect(sql).toMatch(/surface_count\s+INTEGER\s+NOT NULL/i);
     expect(sql).toMatch(/entity_count\s+INTEGER\s+NOT NULL/i);
     expect(sql).toMatch(/form_count\s+INTEGER\s+NOT NULL/i);
@@ -40,8 +40,8 @@ describe("246_walked_system_maps.sql", () => {
 
   /* Walking somebody else's system is a permitted act, and the record that it
      was permitted outlives the map. NOT NULL so it cannot be omitted. */
-  test("requires who authorised the walk", () => {
-    expect(sql).toMatch(/authorised_by\s+TEXT\s+NOT NULL/i);
+  test("requires who authorized the walk", () => {
+    expect(sql).toMatch(/authorized_by\s+TEXT\s+NOT NULL/i);
   });
 
   /* One row per target: re-walking replaces the snapshot rather than

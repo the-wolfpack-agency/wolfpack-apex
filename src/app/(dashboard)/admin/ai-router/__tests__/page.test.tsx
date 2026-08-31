@@ -115,7 +115,7 @@ describe("money", () => {
     );
   });
 
-  it("does not apologise about estimates when spend was measured", async () => {
+  it("does not apologize about estimates when spend was measured", async () => {
     respond(insights({ decisionsWithoutEstimate: 3 }));
     render(<Page />);
     await screen.findByTestId("router-headline");
@@ -354,7 +354,7 @@ describe("what the router would not let through", () => {
       {
         rule: "price_guarantee",
         title: "Promised a price",
-        why: "Pricing changes by location and by day. A guarantee made in chat is a commitment nobody in the business authorised.",
+        why: "Pricing changes by location and by day. A guarantee made in chat is a commitment nobody in the business authorized.",
         count: 2,
       },
       {
@@ -375,7 +375,7 @@ describe("what the router would not let through", () => {
     render(<Page />);
     const list = await screen.findByTestId("router-refusal-rules");
     expect(list).toHaveTextContent("Promised a price");
-    expect(list).toHaveTextContent(/commitment nobody in the business authorised/i);
+    expect(list).toHaveTextContent(/commitment nobody in the business authorized/i);
     expect(screen.getByTestId("router-metric-blocked")).toHaveTextContent("2");
     expect(screen.getByTestId("router-metric-escalated")).toHaveTextContent("1");
   });
@@ -586,9 +586,9 @@ describe("the quality trend", () => {
     expect(screen.queryByTestId("router-quality-unreadable")).not.toBeInTheDocument();
   });
 
-  /* The normaliser rebuilds the payload field by field, and a field it does
+  /* The normalizer rebuilds the payload field by field, and a field it does
      not name is dropped silently. That is how the measured spend was lost. */
-  it("survives the normaliser rather than being dropped by it", async () => {
+  it("survives the normalizer rather than being dropped by it", async () => {
     respond(insights({ quality: quality() }));
     render(<Page />);
     expect(await screen.findByTestId("router-quality-panel")).toBeInTheDocument();

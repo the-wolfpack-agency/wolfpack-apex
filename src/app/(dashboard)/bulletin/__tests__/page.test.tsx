@@ -160,7 +160,7 @@ describe("/bulletin index", () => {
       expect(body.description).toBe("A description");
     });
 
-    /* The handler optimistically prepends the new board to the in-memory
+    /* The handler optimiztically prepends the new board to the in-memory
        list and then triggers a navigation. We assert the prepend; the
        navigation itself isn't testable in jsdom (Location.href setter
        throws "Not implemented: navigation") and is left to E2E. */

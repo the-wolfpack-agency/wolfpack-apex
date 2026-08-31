@@ -14,7 +14,7 @@
  *
  * IT NEVER FAILS THE CALLER. A directory that cannot be read yields an empty
  * list, and the display layer still shortens, still drops statements and still
- * redacts. Masking is the last line of that defence rather than the only one,
+ * redacts. Masking is the last line of that defense rather than the only one,
  * which is what makes an empty list survivable.
  */
 

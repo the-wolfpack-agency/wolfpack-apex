@@ -481,14 +481,14 @@ describe("/admin/agents: onboard form", () => {
   });
 });
 
-describe("/admin/agents: the behaviour panel cannot take down the roster", () => {
+describe("/admin/agents: the behavior panel cannot take down the roster", () => {
   // The panel renders inside the fleet page, so anything it throws blanks the
   // whole surface. That is not hypothetical during a deploy, when an old client
   // can briefly meet a new server or the reverse, and a blank authenticated
   // page is a failure this codebase has already lived through once.
 
-  it("still renders the roster when the behaviour payload is the wrong shape", async () => {
-    // Every fetch returns the ROSTER shape, including the behaviour call, so
+  it("still renders the roster when the behavior payload is the wrong shape", async () => {
+    // Every fetch returns the ROSTER shape, including the behavior call, so
     // the panel receives rows with no findingKinds. Before the normalizer this
     // threw on `.length` and took the page with it.
     mockFetchWithRefresh.mockResolvedValue(mkRes({ agents: [makeAgent()] }));
@@ -497,7 +497,7 @@ describe("/admin/agents: the behaviour panel cannot take down the roster", () =>
     expect(screen.getByTestId("fleet-behavior-panel")).toBeInTheDocument();
   });
 
-  it("still renders the roster when the behaviour call fails outright", async () => {
+  it("still renders the roster when the behavior call fails outright", async () => {
     mockFetchWithRefresh.mockImplementation(async (url: string) => {
       if (String(url).includes("/behavior")) throw new Error("offline");
       return mkRes({ agents: [makeAgent()] });
@@ -506,7 +506,7 @@ describe("/admin/agents: the behaviour panel cannot take down the roster", () =>
     expect(await screen.findByText("Research Scout")).toBeInTheDocument();
   });
 
-  it("reports a failed behaviour load as an absence of evidence, never as all clear", async () => {
+  it("reports a failed behavior load as an absence of evidence, never as all clear", async () => {
     // The panel's worst possible failure is reassurance it has not earned.
     mockFetchWithRefresh.mockImplementation(async (url: string) => {
       if (String(url).includes("/behavior")) throw new Error("offline");

@@ -14,7 +14,7 @@
  * The reason was mundane and invisible: production carries ANTHROPIC_MODEL and
  * no ANTHROPIC_API_KEY, so the three Claude models in the registry could never
  * run. The router fell through to the provider that had credentials, which is
- * correct behaviour and indistinguishable from a product that only supports
+ * correct behavior and indistinguishable from a product that only supports
  * one vendor.
  */
 import { readProviderReadiness } from "@/lib/health/model-provider-check";

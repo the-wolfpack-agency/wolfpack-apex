@@ -126,9 +126,9 @@ describe("support.self_serve_answer", () => {
   });
 
   it("must not assert anything about the member's account", () => {
-    // It has no visibility into licences or tickets, so anything it says about
+    // It has no visibility into licenses or tickets, so anything it says about
     // them is a guess delivered with authority.
-    expect(SUPPORT_SELF_SERVE_ANSWER.scope.outOfScope.join(" ")).toMatch(/account, licences or tickets/i);
+    expect(SUPPORT_SELF_SERVE_ANSWER.scope.outOfScope.join(" ")).toMatch(/account, licenses or tickets/i);
   });
 
   it("is a different prompt from knowledge.answer, not a variant of it", () => {

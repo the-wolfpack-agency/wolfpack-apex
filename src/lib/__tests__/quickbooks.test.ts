@@ -5,7 +5,7 @@
  *   - OAuth2 URL generation
  *   - Shadow mode demo data for all fetchers
  *   - Data types and shapes
- *   - Demo data quality (realistic agency numbers)
+ *   - Demo data quality (realiztic agency numbers)
  *   - Error handling (returns null, not throws)
  *   - Migration file exists and has correct schema
  *   - Analytics event types registered
@@ -177,7 +177,7 @@ describe("Demo Data Quality", () => {
     qb = await import("@/lib/quickbooks");
   });
 
-  test("P&L has realistic agency numbers", async () => {
+  test("P&L has realiztic agency numbers", async () => {
     const pnl = await qb.fetchProfitAndLoss("2026-01-01", "2026-12-31");
     expect(pnl).not.toBeNull();
     expect(pnl!.totalIncome).toBeGreaterThan(10000);

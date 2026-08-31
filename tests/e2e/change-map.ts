@@ -43,7 +43,7 @@ export const CHANGE_MAP: ChangeMapEntry[] = [
   },
   {
     paths: ["src/app/(dashboard)/admin/ai-router/", "src/lib/ai/models/"],
-    spec: "tests/e2e/ai-router-behaviour.spec.ts",
+    spec: "tests/e2e/ai-router-behavior.spec.ts",
     why: "the cost page; it reported $0.00 for real spend and 0% from the cheap tier",
   },
   {

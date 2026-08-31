@@ -1,5 +1,5 @@
 /**
- * Turning a real agent run into something the behaviour eval can score.
+ * Turning a real agent run into something the behavior eval can score.
  *
  * behavior-eval.ts shipped with the rules and no caller, which makes it a
  * document rather than a control. This is the adapter that connects it to what

@@ -142,11 +142,11 @@ export function collectUiElements(): UiElement[] {
     // 1. aria-label wins.
     const label = el.getAttribute("aria-label");
     if (label && label.trim()) return label.trim();
-    // 2. aria-labelledby: concatenate the referenced elements' text.
-    const labelledby = el.getAttribute("aria-labelledby");
-    if (labelledby) {
+    // 2. aria-labeledby: concatenate the referenced elements' text.
+    const labeledby = el.getAttribute("aria-labeledby");
+    if (labeledby) {
       const parts: string[] = [];
-      for (const id of labelledby.split(/\s+/)) {
+      for (const id of labeledby.split(/\s+/)) {
         const ref = el.ownerDocument.getElementById(id);
         if (ref) parts.push(text(ref));
       }

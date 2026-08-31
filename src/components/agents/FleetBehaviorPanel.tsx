@@ -14,11 +14,11 @@
  * comes from behavior-summary.ts, so the wording lives next to the rule that
  * produces it and gets tested with it.
  *
- * THE COLOUR IS THE ARGUMENT
+ * THE COLOR IS THE ARGUMENT
  *
  * Three states, and the middle one is why this exists. An agent whose limits
  * have never been demonstrated is NOT green — it is neutral, and it says so.
- * Rendering "we have not checked" in the same colour as "we checked and it was
+ * Rendering "we have not checked" in the same color as "we checked and it was
  * fine" is the single most likely way this panel could mislead someone, so it
  * is the thing most carefully prevented.
  */

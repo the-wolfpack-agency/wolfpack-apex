@@ -30,7 +30,7 @@ export interface QueryOpts {
    *
    * Injected rather than imported so retrieval never learns how to spend money:
    * the caller owns the model call, and a caller that does not pass this gets
-   * the previous behaviour exactly. Only invoked when the first pass came back
+   * the previous behavior exactly. Only invoked when the first pass came back
    * thin, so most questions never reach it.
    */
   expand?: (question: string) => Promise<string>;
@@ -76,7 +76,7 @@ export type SemanticStatus =
 /**
  * Retrieve, and if the result is thin, ask again in the words documents use.
  *
- * THE FAILURE THIS TARGETS. Four of twelve labelled questions never surface
+ * THE FAILURE THIS TARGETS. Four of twelve labeled questions never surface
  * their document, and all four are the same shape: the person and the paper
  * describe one fact differently. "How much do we owe upfront?" against "50%
  * ($6,000.00) is due within 30 days of the execution". No ranking fixes that;
@@ -289,7 +289,7 @@ async function queryBrainOnce(opts: QueryOpts): Promise<QueryExecution> {
    * retrievers still outranks one ranked well by either.
    *
    * Kept switchable while it is new: BRAIN_FUSION=score restores the previous
-   * behaviour. A ranking change that cannot be reverted in one environment
+   * behavior. A ranking change that cannot be reverted in one environment
    * variable is one nobody will risk deploying. */
   /* DEFAULT REVERTED TO SCORE FUSION, BY MEASUREMENT.
    *
@@ -352,7 +352,7 @@ async function queryBrainOnce(opts: QueryOpts): Promise<QueryExecution> {
    *
    *   brain_query_log  "how much do we owe upfront?"  ->  4 hits
    *   quality gate     same question, same second     ->  hit_count 0,
-   *                    "asked about this organisation with no retrieved
+   *                    "asked about this organization with no retrieved
    *                     source to answer", verdict reject
    *   the person       -> "I don't have a confident answer for that."
    *

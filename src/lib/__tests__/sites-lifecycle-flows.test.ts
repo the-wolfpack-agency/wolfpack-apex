@@ -11,7 +11,7 @@
  *   - `@/lib/auth` is mocked with a stub `getUserFromRequest` + real-shaped
  *     `hasRole` helper (levels: ceo/cto 5, hr 4, dev 3, ops 2, sales 1).
  *   - `@/lib/sites` is mocked so we exercise route logic in isolation — we
- *     do NOT re-test the library's internal validation/DB behaviour here.
+ *     do NOT re-test the library's internal validation/DB behavior here.
  *   - `@/lib/audit-log` is mocked; assertions on `action` + `resourceType` +
  *     `afterState` ride on the same structure `sites-delete.test.ts` uses.
  *

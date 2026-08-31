@@ -38,14 +38,14 @@ it("icon-only button -> no accessibleName, interactive, has text undefined", () 
   expect(btn.textContent).toBeUndefined();
 });
 
-it("labelled button (aria-label) -> accessibleName set", () => {
+it("labeled button (aria-label) -> accessibleName set", () => {
   render(`<button aria-label="Close dialog"></button>`);
   const btn = find(collectUiElements(), (e) => e.tag === "button");
   expect(btn.accessibleName).toBe("Close dialog");
 });
 
-it("aria-labelledby resolves referenced text into accessibleName", () => {
-  render(`<span id="lbl">Save changes</span><button aria-labelledby="lbl"></button>`);
+it("aria-labeledby resolves referenced text into accessibleName", () => {
+  render(`<span id="lbl">Save changes</span><button aria-labeledby="lbl"></button>`);
   const btn = find(collectUiElements(), (e) => e.tag === "button");
   expect(btn.accessibleName).toBe("Save changes");
 });
@@ -148,7 +148,7 @@ it("E2E: an unnamed div dialog -> classifyPage fires dialogNoAccessibleName", ()
   ).toBe(true);
 });
 
-it("E2E: a healthy labelled, well-sized button yields NO ux_gap findings", () => {
+it("E2E: a healthy labeled, well-sized button yields NO ux_gap findings", () => {
   render(`<button aria-label="Save">Save</button>`);
   stubBox("button", 60, 48);
   const findings = classifyPage(obsWith(collectUiElements()));

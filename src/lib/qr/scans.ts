@@ -117,7 +117,7 @@ export function extractLanguage(headers: Headers): string | null {
   if (!raw) return null;
   const first = raw.split(",")[0]?.split(";")[0]?.trim();
   if (!first) return null;
-  /* Cap to 35 chars (BCP-47 max realistic length) and reject control chars. */
+  /* Cap to 35 chars (BCP-47 max realiztic length) and reject control chars. */
   if (first.length > 35) return null;
   if (!/^[A-Za-z0-9_-]+$/.test(first)) return null;
   return first;
@@ -482,7 +482,7 @@ export interface ScanRow {
 }
 
 /**
- * Last N scans for a code, fully denormalised including the matched
+ * Last N scans for a code, fully denormalized including the matched
  * client's name (LEFT JOIN so unmatched scans still come through).
  *
  * Capped to 500 rows. The route layer additionally requires auth.

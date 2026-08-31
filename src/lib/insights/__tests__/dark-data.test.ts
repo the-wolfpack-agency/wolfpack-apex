@@ -57,13 +57,13 @@ describe("it stays quiet unless it is sure", () => {
     expect(r.dark.map((c) => c.column)).toEqual(["referral_code"]);
   });
 
-  it("does not claim a column is dark when the table has never been analysed", () => {
+  it("does not claim a column is dark when the table has never been analyzed", () => {
     /* No planner sample means no evidence it holds anything, and the
        whole claim is "there is DATA in here nobody reads". */
     const s = scan([["customers", "loyalty_tier", null]], ["SELECT name FROM customers"]);
     const r = findDarkData(s);
     expect(r.dark).toEqual([]);
-    expect(r.unanalysed).toBe(1);
+    expect(r.unanalyzed).toBe(1);
   });
 
   it("ignores a column that is almost entirely null", () => {

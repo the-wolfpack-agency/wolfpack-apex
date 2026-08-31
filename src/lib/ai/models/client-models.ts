@@ -8,7 +8,7 @@
  * — but the more interesting half is what it does to our own agents.
  *
  * If a client-supplied model runs under the same gate, the same containment
- * budget, the same behaviour eval and the same audit trail as a Wolfpack model,
+ * budget, the same behavior eval and the same audit trail as a Wolfpack model,
  * then none of those controls can quietly be "the thing that makes OUR models
  * safe". They have to be model-agnostic to work at all. That is the OGIAM
  * claim, and letting a stranger's model through the same pipe is the strongest
@@ -26,7 +26,7 @@
  *
  * We publish our own models' prices from vendor price lists. A client's numbers
  * are whatever they typed. The router still needs them to choose between
- * models, but every figure derived from them has to be labelled, or the cost
+ * models, but every figure derived from them has to be labeled, or the cost
  * page quietly mixes a measured number with an asserted one and reports the
  * total as if we stood behind all of it.
  *
@@ -183,14 +183,14 @@ export function validateEndpoint(
 }
 
 /**
- * Merge client models into the catalogue the router chooses from.
+ * Merge client models into the catalog the router chooses from.
  *
  * Wolfpack models come FIRST and a duplicate id keeps the Wolfpack entry. Ids
  * are already namespaced so a collision should be impossible; this makes the
  * outcome defined anyway, because "impossible" and "unchecked" is how a
  * shadowing bug survives.
  */
-export function buildCatalogue(
+export function buildCatalog(
   wolfpackModels: readonly ModelSpec[],
   clientModels: readonly ClientModelSpec[],
 ): ModelSpec[] {
@@ -201,7 +201,7 @@ export function buildCatalogue(
 }
 
 /** True when this spec came from a client. Used wherever a claim about price or
- *  behaviour needs qualifying. */
+ *  behavior needs qualifying. */
 export function isClientModel(spec: ModelSpec): spec is ClientModelSpec {
   return (spec as ClientModelSpec).origin === "client";
 }

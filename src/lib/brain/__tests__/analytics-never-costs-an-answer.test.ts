@@ -14,7 +14,7 @@
  *
  *   brain_query_log  "how much do we owe upfront?"  ->  4 hits
  *   quality gate     same question, same second     ->  hit_count 0,
- *                    "asked about this organisation with no retrieved source
+ *                    "asked about this organization with no retrieved source
  *                     to answer", verdict reject
  *   the person       ->  "I don't have a confident answer for that."
  *

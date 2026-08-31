@@ -120,7 +120,7 @@ function messageFor(reason: FinancialsFailure): string {
         "Financials are connected, but there is nothing recorded for that period. Try a different " +
         "timeframe, or check the Financials page for what is there."
       );
-    case "not_authorised":
+    case "not_authorized":
       return "Financial figures are limited to admin roles, so I cannot answer that one.";
     case "unknown_metric":
       /* The only case where the user's wording is genuinely the problem, and

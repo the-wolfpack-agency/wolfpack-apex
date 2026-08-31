@@ -239,7 +239,7 @@ describe("sanitizeComposeHtml", () => {
     // The DOMPurify-backed sanitizer (see ms-graph-chats.ts:642 - it
     // replaced the old regex strip CodeQL flagged) DROPS the unsafe href
     // attribute rather than rewriting it to "#". Either is safe; assert on
-    // the actual, more-secure behaviour: no live href survives, link text
+    // the actual, more-secure behavior: no live href survives, link text
     // is preserved.
     expect(out).not.toMatch(/href\s*=/i);
     expect(out).toContain("x");

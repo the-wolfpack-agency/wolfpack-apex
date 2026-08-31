@@ -4,7 +4,7 @@
  * Five workers and a dispatcher were written, are correct on inspection, and
  * were invoked by nothing until 2026-08-31. Scheduling them means untested
  * code meeting a client's Graph tenant at seven in the morning, so the
- * behaviour a first run depends on is pinned here: that one broken worker
+ * behavior a first run depends on is pinned here: that one broken worker
  * cannot take the others down, that a missing scope is reported rather than
  * thrown, and that a selection is honoured.
  */
@@ -68,7 +68,7 @@ describe("running only what was selected", () => {
 });
 
 describe("one broken worker does not take the sweep down", () => {
-  /* THE BEHAVIOUR A FIRST RUN DEPENDS ON. A tenant with no Tasks licence, a
+  /* THE BEHAVIOR A FIRST RUN DEPENDS ON. A tenant with no Tasks license, a
      revoked scope, a rate limit: any of them on one entity must leave the
      others to finish, or a single unlucky surface costs the whole night. */
   it("keeps going after a worker reports an error", async () => {

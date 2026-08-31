@@ -120,7 +120,7 @@ const DOCUMENT_QUESTION_RE = new RegExp(
        "what is in SharePoint about training" lands here too, and the topic is
        captured rather than swallowed into the subject. */
 
-    /* SUMMARISE AND "WHAT DOES X SAY" ARE CONTENT QUESTIONS, NOT SEARCHES.
+    /* SUMMARIZE AND "WHAT DOES X SAY" ARE CONTENT QUESTIONS, NOT SEARCHES.
      *
      * Both used to be captured here and handed to universal search, which
      * returns a browsable LIST. Somebody who asks for a summary receives a
@@ -203,7 +203,7 @@ const CONTAINER_ONLY_RE =
  * returns the whole document and buries the clause somebody wanted.
  */
 export function matchDocumentQuestion(message: string): string | null {
-  /* NORMALISED BEFORE MATCHING, WHICH IS A SECURITY PROPERTY.
+  /* NORMALIZED BEFORE MATCHING, WHICH IS A SECURITY PROPERTY.
    *
    * These patterns put `\s+` next to a lazy `.+?`, so both sides could match
    * the same space and a message of many spaces made the engine try every
@@ -222,12 +222,12 @@ export function matchDocumentQuestion(message: string): string | null {
    *
    * Collapsing whitespace first lets every pattern use a literal space, so the
    * ambiguity has nowhere to live. Same input, same matches, no backtracking. */
-  const normalised = message.replace(/\s+/g, " ").trim();
-  /* Bounded as defence in depth, so a future edit that reintroduces some other
+  const normalized = message.replace(/\s+/g, " ").trim();
+  /* Bounded as defense in depth, so a future edit that reintroduces some other
      ambiguity cannot be exploited by length alone. No document question is
      this long. */
-  if (normalised.length > 600) return null;
-  const m = DOCUMENT_QUESTION_RE.exec(normalised);
+  if (normalized.length > 600) return null;
+  const m = DOCUMENT_QUESTION_RE.exec(normalized);
   if (!m) return null;
   const g = (m.groups ?? {}) as Record<string, string | undefined>;
 
@@ -449,7 +449,7 @@ const STREET_TYPE =
  * US ZIP and ZIP+4, the two-letter-state-plus-ZIP form, and a UK postcode.
  *
  * The UK form was missing on the first pass and "221 Baker Street, London NW1
- * 6XE" fell through to a model. This engagement is US-centred, but an address
+ * 6XE" fell through to a model. This engagement is US-centerd, but an address
  * is an address and the pattern costs one alternation.
  */
 const POSTAL_TAIL =
@@ -683,7 +683,7 @@ export function relaxQuery(query: string): string | null {
 }
 
 /**
- * Name the providers that never answered, in words a reader recognises.
+ * Name the providers that never answered, in words a reader recognizes.
  *
  * Returns null on a healthy search, which is the common case and reads exactly
  * as it did before.
@@ -703,7 +703,7 @@ function degradedNote(body: SearchResponse): string | null {
   return `${list} did not answer in time, so ${d.length === 1 ? "it was" : "they were"} not searched`;
 }
 
-/* Exported for tests only. The wording IS the behaviour here: the defect this
+/* Exported for tests only. The wording IS the behavior here: the defect this
    guards was a sentence that asserted something untrue, so it has to be
    assertable directly rather than through the whole tool. */
 export { summaryAnswer as summaryAnswerForTests };

@@ -7,11 +7,11 @@
  * floor, click-policy decides what may be pressed, and walkSystem walks. This
  * is the wiring, not the work.
  *
- *   npx tsx scripts/map-system.ts <baseUrl> --authorised-by "<name>"
- *   npx tsx scripts/map-system.ts <baseUrl> --authorised-by "<name>" \
+ *   npx tsx scripts/map-system.ts <baseUrl> --authorized-by "<name>"
+ *   npx tsx scripts/map-system.ts <baseUrl> --authorized-by "<name>" \
  *     --email <user> --login-path /login
  *
- * AUTHORISATION IS NAMED, NOT ASSUMED. Every run prints who authorised it and
+ * AUTHORIZATION IS NAMED, NOT ASSUMED. Every run prints who authorized it and
  * refuses without it. This sends traffic to a real system, and "somebody said
  * it was fine" is not something a log should have to reconstruct later.
  *
@@ -55,17 +55,17 @@ const arg = (name: string): string | null => {
 };
 
 const baseUrl = process.argv[2];
-const authorisedBy = arg("authorised-by");
+const authorizedBy = arg("authorized-by");
 
-if (!baseUrl || !authorisedBy) {
+if (!baseUrl || !authorizedBy) {
   console.error(
-    'usage: npx tsx scripts/map-system.ts <baseUrl> --authorised-by "<name>"\n' +
+    'usage: npx tsx scripts/map-system.ts <baseUrl> --authorized-by "<name>"\n' +
       "        [--sign-in]  open a browser, log in yourself, press Enter\n" +
       "        [--email <user> --login-path /login]  scripted, simple logins only\n" +
       "        [--to-brain]  also store it as a document the assistant can answer from\n\n" +
       "The password is typed at a prompt, or read from MAP_PASSWORD. It is\n" +
       "deliberately not a flag: argv is visible to every process on the machine.\n\n" +
-      "--authorised-by is required. This sends traffic to a real system and the\n" +
+      "--authorized-by is required. This sends traffic to a real system and the\n" +
       "run should say who agreed to it.",
   );
   process.exit(2);
@@ -73,7 +73,7 @@ if (!baseUrl || !authorisedBy) {
 
 (async () => {
   console.log(`\nMapping ${baseUrl}`);
-  console.log(`Authorised by: ${authorisedBy}`);
+  console.log(`Authorized by: ${authorizedBy}`);
   console.log("Read-only: no form is submitted, and every non-GET request is blocked.\n");
 
   /* A person cannot sign in to a browser they cannot see. */
@@ -217,7 +217,7 @@ if (!baseUrl || !authorisedBy) {
     }
     if (inv.chrome.length > 0) {
       /* Reported, not deleted: a support widget that uploads files IS a place
-         information leaves an organisation. It just is not the client's. */
+         information leaves an organization. It just is not the client's. */
       console.log(
         `\nPart of the application frame, on most screens: ${inv.chrome.length}`,
       );
@@ -262,7 +262,7 @@ if (!baseUrl || !authorisedBy) {
     for (const i of integrations.slice(0, 10)) {
       const where = i.seenOn.length === 1 ? "1 screen" : `${i.seenOn.length} screens`;
       console.log(
-        `  ${(i.vendor ?? "unrecognised").slice(0, 22).padEnd(22)} ${i.host.slice(0, 34).padEnd(34)} ${String(i.requestCount).padStart(4)} requests, ${where}`,
+        `  ${(i.vendor ?? "unrecognized").slice(0, 22).padEnd(22)} ${i.host.slice(0, 34).padEnd(34)} ${String(i.requestCount).padStart(4)} requests, ${where}`,
       );
     }
     if (trafficTruncated) {
@@ -378,7 +378,7 @@ if (!baseUrl || !authorisedBy) {
       console.log("\nNot stored: DATABASE_URL is not set, so this map exists only above.");
     } else {
       try {
-        await saveWalkedMap(workspaceId, map, authorisedBy);
+        await saveWalkedMap(workspaceId, map, authorizedBy);
         trackEvent("platform.system_walked", "system", "system", {
           platform,
           surfaces: surfaces.length,
@@ -406,7 +406,7 @@ if (!baseUrl || !authorisedBy) {
             formCount: inv.content.length,
             frontierRemaining: coverage.frontierRemaining,
             stopReason: coverage.stopReason,
-            authorisedBy, generatedAt: new Date().toISOString(),
+            authorizedBy, generatedAt: new Date().toISOString(),
           });
           if (doc.redactedCount > 0) {
             /* Said out loud. A map is meant to hold shape and nothing else, so

@@ -722,9 +722,9 @@ describe("/admin/agents/[id]: assigned work (tasks)", () => {
     // prepended row shows its real status, not a stuck "Queued".
     const created = makeTask({
       id: "task-new",
-      goal: "Summarise Q2 numbers",
+      goal: "Summarize Q2 numbers",
       status: "succeeded",
-      steps: [{ index: 0, instruction: "Summarise", tool: "search_mail", outcome: "ran", detail: null }],
+      steps: [{ index: 0, instruction: "Summarize", tool: "search_mail", outcome: "ran", detail: null }],
     });
     mockFetchWithRefresh.mockImplementation(
       routeByUrl({
@@ -742,7 +742,7 @@ describe("/admin/agents/[id]: assigned work (tasks)", () => {
 
     await act(async () => {
       fireEvent.change(screen.getByTestId("agent-task-goal"), {
-        target: { value: "Summarise Q2 numbers" },
+        target: { value: "Summarize Q2 numbers" },
       });
       fireEvent.change(screen.getByTestId("agent-task-success"), {
         target: { value: "Numbers reconcile" },
@@ -766,7 +766,7 @@ describe("/admin/agents/[id]: assigned work (tasks)", () => {
     const body = JSON.parse((post?.[1] as { body: string }).body);
     // The template shape: objective (the plan) + the required success criteria,
     // tagged with the surface it came from.
-    expect(body.objective).toBe("Summarise Q2 numbers");
+    expect(body.objective).toBe("Summarize Q2 numbers");
     expect(body.successCriteria).toBe("Numbers reconcile");
     expect(body.source).toBe("detail_page");
 

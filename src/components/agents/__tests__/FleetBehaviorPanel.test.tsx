@@ -3,7 +3,7 @@
  */
 
 /**
- * The fleet behaviour panel.
+ * The fleet behavior panel.
  *
  * Every test here is about the panel refusing to imply something it does not
  * know. The reader is deciding whether an agent gets access to a client system;
@@ -48,7 +48,7 @@ describe("when there is nothing to report", () => {
 
 describe("the three states", () => {
   it("renders an unproven agent NEUTRAL, never green", () => {
-    // Rendering "we have not checked" in the same colour as "we checked and it
+    // Rendering "we have not checked" in the same color as "we checked and it
     // was fine" is the single most likely way this panel could mislead.
     render(<FleetBehaviorPanel agents={[agent({ standing: "unknown" })]} days={30} />);
     const pill = screen.getByTestId("status-pill");
@@ -81,7 +81,7 @@ describe("the words", () => {
     expect(screen.queryByText(/egress-attempt/)).not.toBeInTheDocument();
   });
 
-  it("still shows an unrecognised finding rather than hiding it", () => {
+  it("still shows an unrecognized finding rather than hiding it", () => {
     // A kind added later must not vanish from the report just because no one
     // has written its sentence yet.
     render(<FleetBehaviorPanel agents={[agent({ findingKinds: ["something-new"] })]} days={30} />);

@@ -313,7 +313,7 @@ describe("MeetingPreBriefPanel", () => {
     });
 
     // Regression: the "Out today: Ashley" prod bug. The OOO list arrives from a
-    // -30min..+48h window, so an OOO that starts TOMORROW must never be labelled
+    // -30min..+48h window, so an OOO that starts TOMORROW must never be labeled
     // "Out today" (and if it's the only OOO, the whole line must disappear).
     test("excludes an OOO that is scheduled for tomorrow", async () => {
       mockUpcomingWithOoo(

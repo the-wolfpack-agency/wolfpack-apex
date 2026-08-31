@@ -7,7 +7,7 @@
  *
  * NOTHING NEW IS CLASSIFIED HERE. network/observations.ts already decides what
  * is first-party, what is a subdomain, what is a third party, and which hosts
- * are recognisable vendors, and it is pure and tested. This groups its output
+ * are recognizable vendors, and it is pure and tested. This groups its output
  * by host and attaches the screens, which is the only part the map needs and
  * the classifier does not do.
  *
@@ -16,7 +16,7 @@
  * to an analytics vendor" tells somebody which part of their business is
  * involved, and that is the difference between a finding and a fact.
  *
- * UNRECOGNISED IS NOT BENIGN. A host nobody recognises keeps a null vendor and
+ * UNRECOGNIZED IS NOT BENIGN. A host nobody recognizes keeps a null vendor and
  * is reported exactly like the rest. On somebody else's system the hosts we
  * cannot name are the ones most worth asking about, and dropping them would
  * make an unfamiliar system look cleaner than a familiar one.
@@ -45,7 +45,7 @@ export function observedIntegrations(observations: NetworkObservation[]): Observ
        seenOn answers "where" and requestCount answers "how much". Conflating
        them would make one chatty screen look like broad usage. */
     if (obs.pageUrl) entry.seenOn.add(obs.pageUrl);
-    /* First recognised name wins: identify() is deterministic, so this only
+    /* First recognized name wins: identify() is deterministic, so this only
        matters when an earlier observation had an unparseable URL. */
     entry.vendor ??= c.vendor;
     byHost.set(c.host, entry);
@@ -95,7 +95,7 @@ export function describeIntegrations(
   if (named.length > 0) parts.push(`including ${head}`);
   if (unnamed > 0) {
     parts.push(
-      `${unnamed} unrecognised, which are the ones worth asking about rather than the ones to ignore`,
+      `${unnamed} unrecognized, which are the ones worth asking about rather than the ones to ignore`,
     );
   }
   return `${parts.join("; ")}.`;

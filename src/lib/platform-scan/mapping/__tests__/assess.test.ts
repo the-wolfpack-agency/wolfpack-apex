@@ -26,7 +26,7 @@ const base = {
 };
 
 describe("consent, which a walk never asks about", () => {
-  /* THE REASON THIS MODULE EXISTS. The walk signs in as an authorised user of
+  /* THE REASON THIS MODULE EXISTS. The walk signs in as an authorized user of
      an internal system. Reporting every host as firing before consent would be
      a claim about a question nobody asked. */
   it("does not stamp 'before consent' on hosts it never asked about", () => {
@@ -142,7 +142,7 @@ describe("integrations this workspace runs, as an explanation", () => {
   it("accounts for a host belonging to a connected integration", () => {
     const { report } = assessWalkedTraffic({
       ...base,
-      /* A permissive policy, which is the realistic case and the reason a
+      /* A permissive policy, which is the realiztic case and the reason a
          second source is needed at all. */
       entryHeaders: { "content-security-policy": "default-src https://*" },
       observations: [obs("https://graph.microsoft.com/v1.0/me")],

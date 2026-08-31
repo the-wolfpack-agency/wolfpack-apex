@@ -102,7 +102,7 @@ test("`/docs?generate=1` is ignored (no URL-controlled auto-open) - secure-by-de
    * flagged as js/user-controlled-bypass. The Generate panel must NOT
    * auto-open from the URL; it is only reachable via the in-page button.
    * Re-adding the deep-link would re-open the security finding, so this
-   * test locks the secure behaviour instead. */
+   * test locks the secure behavior instead. */
   setLocation("http://localhost/docs?generate=1");
   await renderPage();
   await waitFor(() => {

@@ -1,7 +1,7 @@
 /** @jest-environment jsdom */
  
 /**
- * Resize handle behaviour:
+ * Resize handle behavior:
  *   - Default inbox width is INBOX_WIDTH_DEFAULT (340).
  *   - Drag (mousedown → mousemove → mouseup) updates the column width.
  *   - The chosen width is persisted to localStorage on mouseup.
