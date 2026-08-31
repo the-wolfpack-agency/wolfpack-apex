@@ -997,6 +997,16 @@ a:hover { color: var(--wp-gold-hover); }
   font-weight: 600;
 }
 
+/* WHY A LINE IS NOT WHAT SOMEBODY TYPED. A shortened question and a short one
+   look identical, so the note has to be visible enough to be read and quiet
+   enough not to compete with the question it qualifies. */
+.wp-pilot-note {
+  color: var(--wp-text-muted, #929cad);
+  font-size: 0.78rem;
+  font-style: italic;
+  white-space: nowrap;
+}
+
 .wp-pilot-aside {
   color: var(--wp-text-muted, #929cad);
   font-size: 0.88rem;

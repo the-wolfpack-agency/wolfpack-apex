@@ -17,6 +17,9 @@
  */
 
 import { query } from "@/lib/db";
+import { getKnownNames } from "@/lib/pilot/known-names";
+import { forDisplay, type Withheld } from "@/lib/pilot/question-display";
+import { summariseWanted, type WantedSummary } from "@/lib/pilot/wanted-actions";
 import {
   buildGapReport,
   type AskedQuestion,
@@ -31,15 +34,37 @@ import {
 const PERSON = `(user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
                  OR user_id LIKE '%@%')`;
 
+export interface GapItem {
+  /** Safe to render. Never the raw query. */
+  question: string;
+  asked: number;
+  system?: GapSystem;
+  /** Set when the wording was shortened or a name was taken out. */
+  withheld?: Withheld;
+}
+
 export interface GapsSnapshot {
   /** Questions that would be answered by connecting something. */
-  wouldConnect: { question: string; asked: number; system: GapSystem }[];
+  wouldConnect: GapItem[];
   /** Questions a connected system searched and could not answer. */
-  missing: { question: string; asked: number; system: GapSystem }[];
+  missing: GapItem[];
   /** Asked, then answered later. Not a gap, and the best evidence there is. */
-  closed: { question: string; asked: number }[];
-  /** Instructions rather than questions: things somebody wanted done. */
-  wanted: { question: string; asked: number }[];
+  closed: GapItem[];
+  /**
+   * Things somebody wanted done, as actions rather than as sentences.
+   *
+   * No text anybody typed renders here. An instruction names the person, the
+   * client or the file it is about, and those are the parts the directory mask
+   * is least able to reach. See wanted-actions.ts.
+   */
+  wanted: WantedSummary;
+  /**
+   * Entries left out because they were statements, not questions.
+   *
+   * Reported rather than dropped quietly. An exclusion nobody can see is
+   * indistinguishable from nobody having asked.
+   */
+  statements: number;
   /**
    * False when the log could not be read.
    *
@@ -53,16 +78,48 @@ const EMPTY: GapsSnapshot = {
   wouldConnect: [],
   missing: [],
   closed: [],
-  wanted: [],
+  wanted: { actions: [], other: 0 },
+  statements: 0,
   readable: false,
 };
 
-const TOP = 5;
-const shape = (g: Gap | AskedQuestion) => ({
-  question: g.query,
-  asked: g.asked,
-  ...("system" in g ? { system: g.system } : {}),
-});
+/* Three. The panel is a prompt for a conversation, not a backlog: a reader
+   who sees five per section reads none of them, and the sections below get
+   pushed off the screen by the first one. */
+const TOP = 3;
+
+/**
+ * Displayable entries, collapsed and ranked.
+ *
+ * Collapsing happens AFTER the display layer rather than before, because two
+ * different people searched for is one fact worth stating once. Counts are
+ * summed so the collapse never understates demand.
+ */
+function shapeAll(items: readonly (Gap | AskedQuestion)[], known: readonly string[]): GapItem[] {
+  const byText = new Map<string, GapItem>();
+  for (const g of items) {
+    const shown = forDisplay(g.query, known);
+    /* Not a question. Counted by the caller so the omission is visible rather
+       than looking like nobody asked. */
+    if (!shown) continue;
+    const existing = byText.get(shown.text);
+    if (existing) {
+      existing.asked += g.asked;
+      continue;
+    }
+    byText.set(shown.text, {
+      question: shown.text,
+      asked: g.asked,
+      ...(shown.withheld ? { withheld: shown.withheld } : {}),
+      ...("system" in g ? { system: g.system } : {}),
+    });
+  }
+  return [...byText.values()].sort((a, b) => b.asked - a.asked).slice(0, TOP);
+}
+
+/** How many entries in a bucket were statements rather than questions. */
+const notQuestions = (items: readonly (Gap | AskedQuestion)[], known: readonly string[]) =>
+  items.filter((g) => forDisplay(g.query, known) === null).length;
 
 export async function getGapsSnapshot(
   connected: ReadonlySet<GapSystem>,
@@ -101,11 +158,26 @@ export async function getGapsSnapshot(
     }));
 
     const report = buildGapReport(asked, connected);
+    /* Read once for the whole snapshot rather than per question: it is the same
+       directory for every bucket, and the display layer is called hundreds of
+       times below. */
+    const known = await getKnownNames();
+    const buckets = [
+      report.wouldBeAnsweredByConnecting,
+      report.genuinelyMissing,
+      report.closedSince,
+      report.askedUsToDoSomething,
+    ] as const;
+
     return {
-      wouldConnect: report.wouldBeAnsweredByConnecting.slice(0, TOP).map(shape) as GapsSnapshot["wouldConnect"],
-      missing: report.genuinelyMissing.slice(0, TOP).map(shape) as GapsSnapshot["missing"],
-      closed: report.closedSince.slice(0, TOP).map(shape),
-      wanted: report.askedUsToDoSomething.slice(0, TOP).map(shape),
+      wouldConnect: shapeAll(buckets[0], known),
+      missing: shapeAll(buckets[1], known),
+      closed: shapeAll(buckets[2], known),
+      wanted: summariseWanted(buckets[3], TOP),
+      /* The instruction bucket is excluded: its entries are summarised rather
+         than left out, and counting them as omissions would overstate what is
+         missing from the page. */
+      statements: buckets.slice(0, 3).reduce((n, b) => n + notQuestions(b, known), 0),
       readable: true,
     };
   } catch {
