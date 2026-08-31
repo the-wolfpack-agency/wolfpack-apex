@@ -439,6 +439,11 @@ export default function PilotPage() {
                     {exposure.documentsWithNeverSend.toLocaleString()} hold a value that is
                     never sent to any provider at all.
                   </p>
+                  {/* Scrolls in its own box rather than pushing the page
+                      down. A hundred documents rendered inline buried every
+                      section below the button under a wall somebody had to
+                      scroll past to get anywhere. */}
+                  <div className="wp-pilot-scroll" data-testid="pilot-exposure-scroll">
                   <ul className="wp-pilot-list">
                     {exposure.documents.map((d) => (
                       <li key={d.documentId}>
@@ -448,6 +453,11 @@ export default function PilotPage() {
                       </li>
                     ))}
                   </ul>
+                  </div>
+                  <p className="wp-pilot-aside">
+                    {exposure.documents.length.toLocaleString()} document(s) listed above,
+                    never-send first. Scroll the box to read the rest.
+                  </p>
                   {exposure.truncated ? (
                     <p className="wp-pilot-aside">
                       Showing the first {exposure.documents.length}. The count above is the
