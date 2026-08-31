@@ -589,3 +589,60 @@ describe("the exposure scan is discoverable", () => {
     expect(el).toHaveClass("wp-pilot-button");
   });
 });
+
+/**
+ * A hundred results must not push the page down.
+ *
+ * The scan returns up to a hundred documents and the first version rendered
+ * all of them inline, so pressing the button buried every section below it
+ * under a wall somebody had to scroll past to get anywhere.
+ */
+describe("the exposure list stays in its own box", () => {
+  const manyDocuments = Array.from({ length: 100 }, (_, i) => ({
+    documentId: `d${i}`,
+    filename: `Invoice ${i}.pdf`,
+    kinds: [{ kind: "credit_card", occurrences: 1, neverSend: true }],
+    holdsNeverSend: true,
+  }));
+
+  const exposure = {
+    chunksScanned: 5006,
+    chunksWithSomething: 623,
+    byKind: [{ kind: "credit_card", occurrences: 60, neverSend: true }],
+    documentsWithSomething: 214,
+    documentsWithNeverSend: 59,
+    documents: manyDocuments,
+    truncated: true,
+    durationMs: 1200,
+  };
+
+  async function runScan() {
+    respond({ ...base });
+    render(<PilotPage />);
+    const button = await screen.findByTestId("pilot-exposure-run");
+    mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => exposure });
+    button.click();
+    return screen.findByTestId("pilot-exposure-result");
+  }
+
+  it("puts the results in a scrolling region rather than inline", async () => {
+    await runScan();
+    expect(await screen.findByTestId("pilot-exposure-scroll")).toHaveClass("wp-pilot-scroll");
+  });
+
+  /* Scrolls rather than truncates: the point of the panel is finding the
+     document you care about, and a "show more" hiding ninety of them makes
+     that worse. */
+  it("still renders every document it was given", async () => {
+    const result = await runScan();
+    expect(result).toHaveTextContent("Invoice 0.pdf");
+    expect(result).toHaveTextContent("Invoice 99.pdf");
+  });
+
+  /* Somebody has to know there is more below the fold of a box. */
+  it("says how many are listed and that the box scrolls", async () => {
+    const result = await runScan();
+    expect(result).toHaveTextContent(/100 document\(s\) listed above/i);
+    expect(result).toHaveTextContent(/Scroll the box/i);
+  });
+});
