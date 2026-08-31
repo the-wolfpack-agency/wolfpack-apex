@@ -38,7 +38,10 @@ async function main() {
   for (const input of LEARNING_INPUTS) {
     const counts = [];
     for (const table of input.sources) counts.push({ table, rows: await rowsIn(table) });
-    readings.push(readInput(input, counts));
+    /* The canonical table the sync maintains, so a query pointed at a dead
+       table is told apart from a capability with no data at all. */
+    const syncedRows = input.syncedInstead ? await rowsIn(input.syncedInstead) : null;
+    readings.push(readInput(input, counts, syncedRows));
   }
 
   const readiness = assessLearningInputs(readings);
@@ -48,7 +51,15 @@ async function main() {
   console.log(`\nSource tables:`);
   for (const r of readings) {
     const mark =
-      r.state === "fed" ? "ok  " : r.state === "thin" ? "thin" : r.state === "starved" ? "none" : "GONE";
+      r.state === "fed"
+        ? "ok  "
+        : r.state === "thin"
+          ? "thin"
+          : r.state === "looking-elsewhere"
+            ? "WRONG"
+            : r.state === "starved"
+              ? "none"
+              : "GONE";
     const detail = r.counts
       .map((c) => `${c.table}=${c.rows === null ? "absent" : c.rows}`)
       .join("  ");
