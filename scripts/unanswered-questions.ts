@@ -19,6 +19,7 @@ import {
   type GapSystem,
 } from "@/lib/insights/unanswered";
 import { connectedSystems } from "@/lib/assistant/tools/capability-scope";
+import { isServiceIdentity, describeTraffic, splitTraffic } from "@/lib/insights/traffic";
 
 /**
  * Which systems could have answered anything at all.
@@ -52,6 +53,13 @@ async function connected(): Promise<Set<GapSystem>> {
   return systems;
 }
 
+/* The same rule as isServiceIdentity, expressed once for the database so the
+   grouping happens on people's rows rather than being filtered afterwards.
+   Kept beside its TypeScript twin because two copies that drift would report
+   different numbers from the same log. */
+const SERVICE_SQL = `user_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                     AND user_id NOT LIKE '%@%'`;
+
 async function main() {
   const i = process.argv.indexOf("--days");
   const days = i > -1 ? Number(process.argv[i + 1]) || 30 : 30;
@@ -59,6 +67,17 @@ async function main() {
   /* Misses AND hits for the same question, so a gap that has since closed can
      be told from one still open. Asking only for misses reports a question as
      missing forever, however many times it has been answered since. */
+  /* PEOPLE ONLY. Half this log is our own eval harness, transcript probe and
+     demo user, and a gap report ranked by our testing tells a client what WE
+     happened to try rather than what THEY needed. Split before grouping, so
+     the counts are of people asking. */
+  const raw = await query<{ user_id: string }>(
+    `SELECT user_id FROM brain_query_log
+      WHERE created_at > now() - ($1 || ' days')::interval`,
+    [String(days)],
+  );
+  const split = splitTraffic(raw.rows, (r) => r.user_id);
+
   const { rows } = await query<{ query: string; misses: string; hits: string; last: string }>(
     `SELECT lower(trim(query)) AS query,
             count(*) FILTER (WHERE hit_count = 0)::text AS misses,
@@ -67,6 +86,7 @@ async function main() {
        FROM brain_query_log
       WHERE created_at > now() - ($1 || ' days')::interval
         AND length(trim(query)) > 8
+        AND NOT (${SERVICE_SQL})
       GROUP BY lower(trim(query))
      HAVING count(*) FILTER (WHERE hit_count = 0) > 0
       ORDER BY count(*) FILTER (WHERE hit_count = 0) DESC
@@ -85,7 +105,10 @@ async function main() {
   const report = buildGapReport(asked, linked);
 
   console.log(`Unanswered questions, last ${days} days`);
-  console.log(`Connected: ${[...linked].sort().join(", ") || "nothing"}\n`);
+  console.log(`Connected: ${[...linked].sort().join(", ") || "nothing"}`);
+  const traffic = describeTraffic(split);
+  if (traffic) console.log(traffic);
+  console.log("");
   console.log(describeGapReport(report));
 
   if (report.wouldBeAnsweredByConnecting.length > 0) {
