@@ -58,6 +58,20 @@ export interface ToolStep {
   /** Parameters, with {{slot}} references substituted before validation. */
   params: Record<string, unknown>;
   /**
+   * This step only READS, so it may run at the same time as its neighbours.
+   *
+   * Opt-in, and default sequential, because the cost of being wrong is not a
+   * slow routine. A chain that gathers and then sends must never dispatch the
+   * send while the gather is still in flight: the send would go out even when
+   * the gather failed, which is how a chain reaches "send this to the client"
+   * holding half of what it needed.
+   *
+   * Nothing infers this. The tools carry no read-or-write marker, and guessing
+   * from a name would be exactly the kind of cleverness that sends an email
+   * nobody approved. Whoever writes the routine knows, and says so here.
+   */
+  concurrent?: boolean;
+  /**
    * Parameters this step has to ASK FOR, as key to question.
    *
    * The ceiling this removes: searching mail needs to know what to search for,
