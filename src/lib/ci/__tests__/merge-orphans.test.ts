@@ -95,3 +95,58 @@ describe("what it tells somebody", () => {
     expect(text).not.toMatch(/could not be checked/);
   });
 });
+
+/**
+ * The shape the first check missed, and the reason it exists.
+ *
+ * On 2026-08-30 a correction was pushed to #587's branch seconds after #587
+ * merged. GitHub showed the pull request merged, the branch carried a commit
+ * nobody would ever merge, and main never got it. check:merge-orphans
+ * reported CLEAN throughout: it knew one way of losing work, and this was the
+ * other. The orphan was found by grepping main by hand.
+ */
+import { classifyBranchTips, strandedOf, describeTips, type BranchTip } from "../merge-orphans";
+
+const tip = (over: Partial<BranchTip> = {}): BranchTip => ({
+  pr: 587,
+  title: "Let the two tools tell each other what they know",
+  branch: "feat/name-what-the-scan-found",
+  lateCommits: ["e0edfb6a1111"],
+  filesDifferingFromDefault: ["src/lib/platform-scan/network/observations.ts"],
+  ...over,
+});
+
+describe("work pushed to a branch after its pull request merged", () => {
+  it("catches the real incident", () => {
+    expect(classifyBranchTips([tip()])[0].state).toBe("stranded");
+  });
+
+  it("says nothing about a branch with no commits after the merge", () => {
+    expect(classifyBranchTips([tip({ lateCommits: [] })])[0].state).toBe("landed");
+  });
+
+  /* A late commit whose content already matches main is somebody re-pushing
+     the same change, or a merge back from main. Reporting it would train
+     everybody to ignore this check. */
+  it("does not flag a late commit whose content is already in main", () => {
+    expect(classifyBranchTips([tip({ filesDifferingFromDefault: [] })])[0].state).toBe("landed");
+  });
+
+  it("names the branch and the commit that recovers it", () => {
+    const text = describeTips(classifyBranchTips([tip()]), "main");
+    expect(text).toContain("#587");
+    expect(text).toContain("feat/name-what-the-scan-found");
+    expect(text).toMatch(/cherry-pick e0edfb6a/);
+  });
+
+  it("explains why nothing will merge it, since the badge says merged", () => {
+    const text = describeTips(classifyBranchTips([tip()]), "main");
+    expect(text).toMatch(/after the pull request merged/i);
+  });
+
+  it("is quiet when every branch is clean", () => {
+    const text = describeTips(classifyBranchTips([tip({ lateCommits: [] })]), "main");
+    expect(text).toMatch(/No stranded branches/);
+    expect(strandedOf(classifyBranchTips([tip({ lateCommits: [] })]))).toEqual([]);
+  });
+});

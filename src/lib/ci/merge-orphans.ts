@@ -122,3 +122,85 @@ export function describe(verdicts: Verdict[], defaultBranch: string): string {
   }
   return lines.join("\n");
 }
+
+/**
+ * The second shape of the same failure, found the hard way.
+ *
+ * classifyMerges above catches a STACKED pull request whose parent was
+ * squashed. It reported clean on 2026-08-30 while work was missing from main,
+ * because the loss had a different shape: a commit pushed to a branch seconds
+ * after that branch's own pull request merged. GitHub shows the pull request
+ * merged, the branch carries a commit nobody will ever merge, and main never
+ * gets it.
+ *
+ * Same family, and worth stating plainly: work that exists on a remote branch
+ * and not in main. The first check knew one way of getting there.
+ *
+ * WHY SHAs CANNOT ANSWER THIS. A squash merge rewrites history, so no commit
+ * on the branch is ever reachable from main and "is this commit in main" says
+ * "no" for every branch ever merged. The question has to be asked about
+ * CONTENT: does the branch's version of a file differ from main's.
+ *
+ * NARROWED TO THE FILES THE LATE COMMITS TOUCHED. Comparing whole trees would
+ * flag every branch that main has simply moved past, which is all of them, and
+ * a check that fires on everything protects nothing.
+ */
+
+export interface BranchTip {
+  pr: number;
+  title: string;
+  branch: string;
+  /** Commits pushed to the branch after its pull request merged. */
+  lateCommits: string[];
+  /** Of the files those commits touched, the ones whose content differs from
+   *  the default branch. Empty means the work is present, however it got there. */
+  filesDifferingFromDefault: string[];
+}
+
+export type TipVerdict =
+  | { tip: BranchTip; state: "landed" }
+  | { tip: BranchTip; state: "stranded" };
+
+/**
+ * A branch carrying work that never reached the default branch.
+ *
+ * Requires BOTH a late commit and a real content difference. A late commit
+ * whose content already matches main is somebody re-pushing the same change,
+ * or a merge back from main, and reporting it would train everybody to ignore
+ * this.
+ */
+export function classifyBranchTips(tips: BranchTip[]): TipVerdict[] {
+  return tips.map((tip): TipVerdict =>
+    tip.lateCommits.length > 0 && tip.filesDifferingFromDefault.length > 0
+      ? { tip, state: "stranded" }
+      : { tip, state: "landed" },
+  );
+}
+
+export function strandedOf(verdicts: TipVerdict[]): Extract<TipVerdict, { state: "stranded" }>[] {
+  return verdicts.filter(
+    (v): v is Extract<TipVerdict, { state: "stranded" }> => v.state === "stranded",
+  );
+}
+
+export function describeTips(verdicts: TipVerdict[], defaultBranch: string): string {
+  const stranded = strandedOf(verdicts);
+  if (stranded.length === 0) {
+    return `No stranded branches: nothing was pushed to a merged branch and left behind.`;
+  }
+  const lines = [
+    `${stranded.length} merged branch(es) carry work that is not in ${defaultBranch}.`,
+    `Something was pushed after the pull request merged, so nothing will ever merge it.`,
+    ``,
+  ];
+  for (const s of stranded) {
+    lines.push(
+      `  #${s.tip.pr} ${s.tip.title.slice(0, 62)}`,
+      `     branch ${s.tip.branch}, ${s.tip.lateCommits.length} commit(s) after the merge`,
+      `     differs from ${defaultBranch} in: ${s.tip.filesDifferingFromDefault.slice(0, 3).join(", ")}`,
+      `     recover: git cherry-pick ${s.tip.lateCommits[0]?.slice(0, 12) ?? "<commit>"}`,
+      ``,
+    );
+  }
+  return lines.join("\n");
+}
