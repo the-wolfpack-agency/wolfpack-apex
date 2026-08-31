@@ -1,0 +1,44 @@
+[
+  {
+    "question": "who owns the Porsche account",
+    "expectFilename": "BA102_Day 1_MLG_V8_4-20-26",
+    "timesCited": 2,
+    "reviewed": false,
+    "concern": "Looks genuine. Somebody asked a real question and cited that document. Needs a human to confirm the guide actually answers it rather than merely mentioning the account."
+  },
+  {
+    "question": "Meeting Notes with McDonalds",
+    "expectFilename": "Meeting Notes with McDonalds",
+    "timesCited": 52,
+    "reviewed": false,
+    "concern": "REJECT: the question is the filename. Retrieval cannot fail this, so it measures nothing and would inflate every score it appears in."
+  },
+  {
+    "question": "this is feedback",
+    "expectFilename": "BA202 Phase 2 Susie Sample 360 Report",
+    "timesCited": 27,
+    "reviewed": false,
+    "concern": "REJECT: not a question. Nothing was being asked, so there is no right document to find."
+  },
+  {
+    "question": "what is my busiest day this week",
+    "expectFilename": "Screenshot 2026-06-03 at 11.56.00 AM",
+    "timesCited": 2,
+    "reviewed": false,
+    "concern": "REJECT: a calendar question. The answer is in the calendar, not the library, and grading document retrieval on it would score the wrong system."
+  },
+  {
+    "question": "how many open tasks do I have",
+    "expectFilename": "Screenshot 2026-06-19 at 1.18.00 PM",
+    "timesCited": 2,
+    "reviewed": false,
+    "concern": "REJECT: a tasks question, same reason. The cited file is a screenshot somebody happened to open in the same session."
+  },
+  {
+    "question": "whats in sharepoint",
+    "expectFilename": "Ba Comms1_Registration & Sign Up.mp4.pla",
+    "timesCited": 2,
+    "reviewed": false,
+    "concern": "REJECT: no single document answers 'what is in SharePoint', and a video playlist is not the answer to it. A pair with no correct answer grades noise."
+  }
+]

@@ -1,0 +1,62 @@
+[
+  {
+    "question": "how much did the printer cost?",
+    "expectFilename": "Printer",
+    "reviewed": true
+  },
+  {
+    "question": "how much do we owe upfront?",
+    "expectFilename": "viaPeople",
+    "reviewed": true
+  },
+  {
+    "question": "the viaPeople work order",
+    "expectFilename": "viaPeople",
+    "reviewed": true
+  },
+  {
+    "question": "what are the payment terms in our SOW?",
+    "expectFilename": "viaPeople",
+    "reviewed": true
+  },
+  {
+    "question": "what did we spend on name badges?",
+    "expectFilename": "NameBadges",
+    "reviewed": true
+  },
+  {
+    "question": "what does the brand ambassador training cover",
+    "expectFilename": "BA101_Learning Journal",
+    "reviewed": true
+  },
+  {
+    "question": "what does the Mike Abrashoff contract say?",
+    "expectFilename": "Abrashoff",
+    "reviewed": true
+  },
+  {
+    "question": "what feedback did we get about food and beverage",
+    "expectFilename": "Survey Data PCBA_WO 8.10-8.17",
+    "reviewed": true
+  },
+  {
+    "question": "what training do brand ambassadors get",
+    "expectFilename": "BA101_Learning Journal",
+    "reviewed": true
+  },
+  {
+    "question": "what training materials do we have",
+    "expectFilename": "ACADEMY STRATEGY",
+    "reviewed": true
+  },
+  {
+    "question": "when do we have to pay?",
+    "expectFilename": "viaPeople",
+    "reviewed": true
+  },
+  {
+    "question": "which hotels were surveyed in August",
+    "expectFilename": "Survey Data PCBA_WO 8.10-8.17",
+    "reviewed": true
+  }
+]
