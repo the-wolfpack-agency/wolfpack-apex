@@ -70,10 +70,15 @@ export const LEARNING_INPUTS: LearningInput[] = [
     syncedInstead: "instinct_ms_messages",
   },
   {
+    /* NOT the same question as "how is a week spent", and it was tempting to
+       call it that. This reads a log of calendar writes INSTINCT made, which
+       is a real signal about what the product did. Repointing it at the
+       synced calendar would have silently changed its meaning. The week-spent
+       capability was missing rather than misrouted and now lives in
+       insights/calendar-load.ts over instinct_ms_events. */
     extractor: "calendar-signals",
-    couldAnswer: "how much of a week is meetings, and what the context switching costs",
+    couldAnswer: "how many calendar changes the product itself made, and when",
     sources: ["instinct_calendar_events_written"],
-    syncedInstead: "instinct_ms_events",
   },
   {
     extractor: "file-signals",

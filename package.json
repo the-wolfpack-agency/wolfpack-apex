@@ -28,6 +28,7 @@
     "insights:unanswered": "npx tsx scripts/unanswered-questions.ts",
     "insights:shadow-docs": "npx tsx scripts/shadow-documents.ts",
     "insights:learning-inputs": "npx tsx scripts/learning-inputs.ts",
+    "insights:calendar-load": "npx tsx scripts/calendar-load.ts",
     "self-scan": "npx tsx scripts/self-scan-ai-surfaces.ts",
     "start": "next start",
     "test:e2e:prod": "PROD_URL=${PROD_URL:-https://wolfpack-instinct.vercel.app} playwright test tests/e2e/ --config=playwright.config.ts",
