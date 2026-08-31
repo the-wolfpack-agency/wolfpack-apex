@@ -253,6 +253,10 @@ export default function PilotPage() {
                 because the same contamination on a day of heavy testing would
                 overstate instead. A number that shrank deserves its reason
                 beside it rather than a question later. */}
+          </section>
+
+          <section className="wp-pilot-section">
+            <h2>What never reaches a model</h2>
             {/* WHAT THE GATE STOPS, ASKED FOR RATHER THAN ASSUMED.
                 Every other figure on this page is a count of what happened.
                 This one is a scan somebody runs, because it reads the whole
@@ -263,6 +267,16 @@ export default function PilotPage() {
                 the values beside it would be a copy of the exposure in a page
                 that is easier to read than the original. */}
             <div className="wp-pilot-exposure" data-testid="pilot-exposure">
+              {/* A PERSON HAS TO KNOW WHAT PRESSING IT WILL DO. The scan is the
+                  only thing on this page somebody performs rather than reads,
+                  and an unexplained button on a page of figures gets left
+                  alone. */}
+              <p className="wp-pilot-aside">
+                Some of what a company keeps should never be sent to a model at all: card
+                numbers, keys, bank details. They are removed at the boundary whether or
+                not anybody has looked. Press this to read every indexed passage and see
+                which documents are carrying them.
+              </p>
               <button
                 type="button"
                 className="wp-pilot-button"
@@ -328,7 +342,10 @@ export default function PilotPage() {
                 </div>
               ) : null}
             </div>
+          </section>
 
+          <section className="wp-pilot-section">
+            <h2>What we set aside</h2>
             {typeof snap.excludedAsTesting === "number" && snap.excludedAsTesting > 0 ? (
               <p className="wp-pilot-aside" data-testid="pilot-excluded-testing">
                 A further {snap.excludedAsTesting.toLocaleString()} answers came from our own
