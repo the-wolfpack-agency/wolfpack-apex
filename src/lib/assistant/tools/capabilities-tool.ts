@@ -27,6 +27,7 @@ import { trackEvent } from "@/lib/analytics";
 import { registerTool } from "./registry";
 import { getTools } from "./registry";
 import { canInvokeNamedTool, canInvokeTool } from "./gate";
+import { scopeToConnected, connectedSystems, describeAwaiting } from "./capability-scope";
 import { hasPersona, personaCopyFor } from "./persona";
 import { BUILT_IN_ROUTINES } from "@/lib/assistant/routines/catalogue";
 import { PROMPT_GUIDE } from "@/lib/assistant/prompt-corpus";
@@ -271,10 +272,26 @@ export const capabilitiesTool: ToolDef<Params, CapabilitiesData> = {
     /* The SAME gate the dispatcher enforces. Listing something the caller
        cannot run would be a menu of disappointments, and a second copy of the
        permission logic here is how the menu and the runtime come to disagree. */
-    const usable = all.filter(
+    const permitted = all.filter(
       (t) => canInvokeNamedTool(ctx.userRole, t.name, t.capability) && t.name !== "what_can_you_do",
     );
-    const withheldCount = all.length - usable.length - 1;
+
+    /* ROLE IS THE RIGHT GATE AND NOT THE ONLY ONE.
+     *
+     * A tool the caller is permitted to run still cannot run if the system
+     * behind it was never linked. Measured on this deployment: no connectors,
+     * zero CRM events ever, zero dealer-system events ever, and this answer
+     * advertised six CRM capabilities and an inventory widget regardless.
+     *
+     * Somebody running dealerships reads the list and goes straight for
+     * "deals over $50k closing this month" and "how many are on the lot",
+     * which are the two most tempting lines and the two backed by nothing.
+     * This file already refuses to say yes about an unlinked mailbox when
+     * asked directly; the menu now holds to the same rule. */
+    const linked = await connectedSystems(ctx.workspaceId ?? "default");
+    const scoped = scopeToConnected(permitted, linked);
+    const usable = scoped.available;
+    const withheldCount = all.length - permitted.length - 1;
 
     /* THEY ASKED ABOUT ONE THING, so answer about that one thing.
      *
@@ -441,6 +458,15 @@ export const capabilitiesTool: ToolDef<Params, CapabilitiesData> = {
       lines.push(
         "If none of that quite matches your job, describe your day instead: tell me what you do on a Monday, in order, and I will map it onto what I can and cannot do, then offer to chain the rest into one command.",
       );
+    }
+
+    /* NOT CONNECTED IS NOT NOT BUILT, so this is an offer rather than a list
+       of holes. One sentence naming the systems, not six unavailable CRM
+       capabilities enumerated one by one. */
+    const offer = describeAwaiting(scoped.awaitingSystems);
+    if (offer) {
+      lines.push("");
+      lines.push(offer);
     }
 
     if (withheldCount > 0) {
