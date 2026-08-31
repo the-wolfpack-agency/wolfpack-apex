@@ -118,3 +118,53 @@ describe("the declared inventory", () => {
     }
   });
 });
+
+/**
+ * The table an extractor reads is not always the one the sync fills.
+ *
+ * Found by syncing 801 calendar events into instinct_ms_events and watching
+ * this report call calendar-signals working, when calendar-signals reads
+ * instinct_calendar_events_written and nothing fills that any more. Two
+ * generations of table naming, and the learning layer reads the older one.
+ */
+describe("an extractor pointed at a table nothing fills", () => {
+  const calendar: LearningInput = {
+    extractor: "calendar-signals",
+    couldAnswer: "how much of a week is meetings, and what the context switching costs",
+    sources: ["instinct_calendar_events_written"],
+    syncedInstead: "instinct_ms_events",
+  };
+
+  /* Not starved: the data exists, under another name. */
+  it("is not called starved when the sync holds the same data elsewhere", () => {
+    const r = readInput(calendar, [{ table: "instinct_calendar_events_written", rows: 0 }], 801);
+    expect(r.state).toBe("looking-elsewhere");
+  });
+
+  /* And IS starved when nothing anywhere has it, because then there is
+     genuinely nothing to read. */
+  it("is starved when the canonical table is empty too", () => {
+    const r = readInput(calendar, [{ table: "instinct_calendar_events_written", rows: 0 }], 0);
+    expect(r.state).toBe("starved");
+  });
+
+  it("is simply fed once its own table has rows", () => {
+    const r = readInput(calendar, [{ table: "instinct_calendar_events_written", rows: 900 }], 801);
+    expect(r.state).toBe("fed");
+  });
+
+  /* The two need different work: one is an afternoon repointing a query, the
+     other is a decision about what to keep. */
+  it("says which of the two it is, in words", () => {
+    const text = describeLearningReadiness(
+      assessLearningInputs([readInput(calendar, [{ table: "instinct_calendar_events_written", rows: 0 }], 801)]),
+    );
+    expect(text).toMatch(/pointed at the wrong place/i);
+    expect(text).toMatch(/instinct_ms_events/);
+    /* Named as the cheaper of the two. The phrase "decision about what to
+       keep" appears in the contrast itself, so the discriminator is that it
+       is not reported as STARVED. */
+    expect(text).toMatch(/afternoon of work/i);
+    expect(text).not.toMatch(/are starved/i);
+  });
+});

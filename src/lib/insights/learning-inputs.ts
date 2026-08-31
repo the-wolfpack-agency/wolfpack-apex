@@ -31,8 +31,28 @@ export interface LearningInput {
   extractor: string;
   /** What it could tell somebody, if it had data. */
   couldAnswer: string;
-  /** Tables it reads. Starved when all of them are empty. */
+  /**
+   * Tables it ACTUALLY reads, taken from its FROM clauses rather than from
+   * what seemed likely.
+   *
+   * The first version of this file listed the tables an extractor plausibly
+   * used, and was wrong for four of nine. calendar-signals was credited with
+   * instinct_ms_events, which the Microsoft sync fills; it reads
+   * instinct_calendar_events_written, which nothing fills. So the report said
+   * the capability was working within minutes of a sync that had not fed it.
+   */
   sources: string[];
+  /**
+   * The canonical table the Microsoft sync maintains for the same data, when
+   * the extractor reads a different one.
+   *
+   * Two generations of table naming exist. The sync writes instinct_ms_*
+   * with delta cursors; several extractors read older tables that nothing
+   * populates any more. That is not a starved capability and not a wiring
+   * one: the data is present, under another name, and the extractor is
+   * looking in the wrong place.
+   */
+  syncedInstead?: string;
 }
 
 /**
@@ -46,12 +66,14 @@ export const LEARNING_INPUTS: LearningInput[] = [
   {
     extractor: "mail-signals",
     couldAnswer: "who replies and who does not, and the hour a message is most likely to be answered",
-    sources: ["instinct_sent_mail", "instinct_ms_messages"],
+    sources: ["instinct_sent_mail"],
+    syncedInstead: "instinct_ms_messages",
   },
   {
     extractor: "calendar-signals",
     couldAnswer: "how much of a week is meetings, and what the context switching costs",
-    sources: ["instinct_calendar_events_written", "instinct_ms_events"],
+    sources: ["instinct_calendar_events_written"],
+    syncedInstead: "instinct_ms_events",
   },
   {
     extractor: "file-signals",
@@ -61,7 +83,8 @@ export const LEARNING_INPUTS: LearningInput[] = [
   {
     extractor: "contact-signals",
     couldAnswer: "who this organisation deals with outside it, and how often",
-    sources: ["instinct_ms_contacts"],
+    sources: ["instinct_audit_log", "instinct_calendar_events", "instinct_sent_mail"],
+    syncedInstead: "instinct_ms_contacts",
   },
   {
     extractor: "team-collaboration-signals",
@@ -76,7 +99,7 @@ export const LEARNING_INPUTS: LearningInput[] = [
   {
     extractor: "planner-signals",
     couldAnswer: "what work is planned against what is happening",
-    sources: ["instinct_planner_tasks", "instinct_planner_plans"],
+    sources: ["instinct_planner_tasks"],
   },
   {
     extractor: "task-correlations",
@@ -94,13 +117,10 @@ export const LEARNING_INPUTS: LearningInput[] = [
  * Rows below which a source cannot support a signal.
  *
  * Fifty. Every one of these extractors computes a RATE or a PATTERN: who
- * replies and how often, which hour lands, which channels carry the work. Four
- * sent emails cannot tell you a reply rate, and reporting that source as
+ * replies and how often, which hour lands, which channels carry the work.
+ * Four sent emails cannot tell you a reply rate, and reporting that source as
  * working overstates readiness in exactly the direction that gets discovered
  * by trusting an answer built on it.
- *
- * The first version of this check had no such threshold and duly reported
- * mail-signals as fed on four rows.
  */
 export const MIN_ROWS_FOR_A_SIGNAL = 50;
 
@@ -109,6 +129,12 @@ export type InputState =
   | "fed"
   /** Has rows, too few to support a rate or a pattern. */
   | "thin"
+  /**
+   * The extractor's table is empty while the sync fills a different one with
+   * the same data. Not starved and not unwired: the data exists under another
+   * name and the extractor is looking in the wrong place.
+   */
+  | "looking-elsewhere"
   /** Every source is empty. Not a wiring problem. */
   | "starved"
   /** A source table does not exist, so nothing could ever have written to it. */
@@ -132,11 +158,21 @@ export interface InputReading {
 export function readInput(
   input: LearningInput,
   counts: { table: string; rows: number | null }[],
+  /** Rows in the canonical table the sync maintains, when there is one. */
+  syncedRows: number | null = null,
 ): InputReading {
   const present = counts.filter((c) => c.rows !== null);
   if (present.length === 0) return { input, state: "no-table", counts };
   const most = Math.max(...present.map((c) => c.rows ?? 0));
-  if (most === 0) return { input, state: "starved", counts };
+  if (most === 0) {
+    /* Checked before starved, because the two send somebody to do completely
+       different things: one is a decision about what to keep, the other is a
+       query pointed at a table nothing writes any more. */
+    if (input.syncedInstead && (syncedRows ?? 0) > 0) {
+      return { input, state: "looking-elsewhere", counts };
+    }
+    return { input, state: "starved", counts };
+  }
   return { input, state: most >= MIN_ROWS_FOR_A_SIGNAL ? "fed" : "thin", counts };
 }
 
@@ -144,6 +180,7 @@ export interface LearningReadiness {
   readings: InputReading[];
   fed: InputReading[];
   thin: InputReading[];
+  lookingElsewhere: InputReading[];
   starved: InputReading[];
   missingTables: InputReading[];
 }
@@ -153,6 +190,7 @@ export function assessLearningInputs(readings: InputReading[]): LearningReadines
     readings,
     fed: readings.filter((r) => r.state === "fed"),
     thin: readings.filter((r) => r.state === "thin"),
+    lookingElsewhere: readings.filter((r) => r.state === "looking-elsewhere"),
     starved: readings.filter((r) => r.state === "starved"),
     missingTables: readings.filter((r) => r.state === "no-table"),
   };
@@ -174,6 +212,18 @@ export function describeLearningReadiness(r: LearningReadiness): string {
     for (const t of r.thin) {
       const most = Math.max(...t.counts.map((c) => c.rows ?? 0));
       lines.push(`  ${t.input.extractor} (${most} row(s))`);
+    }
+  }
+  if (r.lookingElsewhere.length > 0) {
+    lines.push(
+      ``,
+      `${r.lookingElsewhere.length} read a table nothing fills any more, while the sync keeps the same data`,
+      `under another name. The data is there. The query is pointed at the wrong place, which is`,
+      `an afternoon of work rather than a decision about what to keep.`,
+      ``,
+    );
+    for (const l of r.lookingElsewhere) {
+      lines.push(`  ${l.input.extractor}: reads ${l.input.sources.join(", ")}, synced into ${l.input.syncedInstead}`);
     }
   }
   if (r.starved.length > 0) {
