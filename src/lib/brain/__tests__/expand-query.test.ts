@@ -25,21 +25,25 @@ describe("deciding whether to pay for a second attempt", () => {
   });
 
   it("expands when it found something unconvincing", () => {
-    expect(shouldExpand({ hitCount: 5, topScore: 0.2 }, FLOOR)).toBe(true);
+    /* Semantic, because the floor is a threshold on cosine similarity and a
+       keyword rank is not one. */
+    expect(shouldExpand({ hitCount: 5, topScore: 0.2, topIsSemantic: true }, FLOOR)).toBe(true);
   });
 
   /* THE COST ARGUMENT. Two thirds of questions already find their document at
      rank one; paying for all of them to help the third that struggles is the
      fixed-cascade mistake in a different costume. */
   it("does not expand after a confident retrieval", () => {
-    expect(shouldExpand({ hitCount: 5, topScore: 0.55 }, FLOOR)).toBe(false);
+    expect(shouldExpand({ hitCount: 5, topScore: 0.55, topIsSemantic: true }, FLOOR)).toBe(false);
   });
 
   /* Expanding after a GOOD retrieval risks replacing a correct answer with a
      differently-worded one: a regression that looks like a feature. */
   it("treats the floor as the boundary, not a suggestion", () => {
-    expect(shouldExpand({ hitCount: 3, topScore: FLOOR }, FLOOR)).toBe(false);
-    expect(shouldExpand({ hitCount: 3, topScore: FLOOR - 0.01 }, FLOOR)).toBe(true);
+    expect(shouldExpand({ hitCount: 3, topScore: FLOOR, topIsSemantic: true }, FLOOR)).toBe(false);
+    expect(
+      shouldExpand({ hitCount: 3, topScore: FLOOR - 0.01, topIsSemantic: true }, FLOOR),
+    ).toBe(true);
   });
 });
 

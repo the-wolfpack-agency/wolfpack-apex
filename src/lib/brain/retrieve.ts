@@ -46,6 +46,16 @@ export interface RetrieveResult {
   rewritten?: string;
   /** True when the second attempt was kept. */
   expansionHelped: boolean;
+  /**
+   * The judge's verdict on the attempt that was actually KEPT.
+   *
+   * Exists so a caller never has to work it out from the other three fields,
+   * and never judges the same material twice. firstWasRejected is about the
+   * first attempt; after a rewrite is kept, that field is history rather than
+   * a description of what the caller is holding. "unjudged" means no verdict
+   * applies to this execution and the caller should form its own.
+   */
+  keptVerdict: "relevant" | "irrelevant" | "unjudged";
 }
 
 /**
@@ -103,19 +113,23 @@ export async function retrieve(opts: RetrieveOpts): Promise<RetrieveResult> {
     {
       hitCount: first.hits.length,
       topScore: first.hits[0]?.score ?? 0,
+      /* Which scale that score is on. Without it the floor is applied to a
+         keyword rank it was never about, and 87 per cent of queries that
+         already worked buy a rewrite they do not need. */
+      topIsSemantic: Boolean(first.hits[0]?.source?.includes("semantic")),
       judgedIrrelevant: firstWasRejected,
     },
     SEMANTIC_SCORE_FLOOR,
   );
 
   if (!expand || !worthRetrying) {
-    return { execution: first, firstWasRejected, expanded: false, expansionHelped: false };
+    return { execution: first, firstWasRejected, expanded: false, expansionHelped: false, keptVerdict: verdict };
   }
 
   const rewritten = await expand(opts.query).catch(() => opts.query);
   /* A rewrite that changed nothing is not worth a second retrieval. */
   if (rewritten === opts.query) {
-    return { execution: first, firstWasRejected, expanded: false, expansionHelped: false };
+    return { execution: first, firstWasRejected, expanded: false, expansionHelped: false, keptVerdict: verdict };
   }
 
   const second = await queryBrain({ ...queryOpts, query: searchTermsFor(rewritten) });
@@ -170,5 +184,6 @@ export async function retrieve(opts: RetrieveOpts): Promise<RetrieveResult> {
     expanded: true,
     rewritten,
     expansionHelped: helped,
+    keptVerdict: helped ? secondVerdict : verdict,
   };
 }

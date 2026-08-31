@@ -18,9 +18,18 @@ jest.mock("@/lib/brain/query", () => ({
 }));
 jest.mock("@/lib/brain/qdrant", () => ({ SEMANTIC_SCORE_FLOOR: 0.36 }));
 
-const execution = (hits: Array<{ score: number }>) => ({
+/* Hits are SEMANTIC by default because these tests exercise the score path,
+   and the score path only applies to the scale the floor is about. A keyword
+   hit under the floor is not a weak result, it is a different measurement. */
+const execution = (hits: Array<{ score: number; source?: string }>) => ({
   query: "q",
-  hits: hits.map((h, i) => ({ ...h, chunk_id: `c${i}`, content: "x", document_filename: "f" })),
+  hits: hits.map((h, i) => ({
+    source: "semantic",
+    ...h,
+    chunk_id: `c${i}`,
+    content: "x",
+    document_filename: "f",
+  })),
   keyword_hits: 0,
   semantic_hits: 0,
   latency_ms: 1,
@@ -279,5 +288,105 @@ describe("choosing between the first attempt and the rewrite", () => {
     });
     /* Falls back to comparing scores rather than failing the retrieval. */
     expect(r.expansionHelped).toBe(true);
+  });
+});
+
+/**
+ * The verdict a caller is actually holding.
+ *
+ * WHY IT IS REPORTED RATHER THAN INFERRED. firstWasRejected describes the
+ * FIRST attempt. Once a rewrite is kept, that field is history, not a
+ * description of the material the caller has. A caller left to work it out
+ * from expanded/helped/firstWasRejected will get it wrong in one of the four
+ * combinations, and the way it gets it wrong is by judging the same passages a
+ * second time: same cost twice, and two parts of one turn able to disagree.
+ */
+describe("the verdict on whatever was kept", () => {
+  const hits = (n: number, score: number) =>
+    execution(Array.from({ length: n }, () => ({ score })));
+
+  it("is unjudged when no judge was supplied", async () => {
+    mockQuery.mockResolvedValue(hits(2, 0.9));
+    const r = await retrieve({ userId: "u", userRole: "cto", query: "q" });
+    expect(r.keptVerdict).toBe("unjudged");
+  });
+
+  it("is the first pass's verdict when no rewrite was tried", async () => {
+    mockQuery.mockResolvedValue(hits(2, 0.9));
+    const r = await retrieve({
+      userId: "u",
+      userRole: "cto",
+      query: "q",
+      judge: async () => "relevant",
+    });
+    /* Scored well and was judged relevant, so shouldExpand never fires. */
+    expect(r.expanded).toBe(false);
+    expect(r.keptVerdict).toBe("relevant");
+  });
+
+  /* THE COMBINATION THAT BREAKS AN INFERRING CALLER. The first attempt was
+     rejected and the rewrite was accepted, so the material in hand is
+     relevant while firstWasRejected is still true. */
+  it("reports the rewrite's verdict once the rewrite is kept", async () => {
+    mockQuery.mockResolvedValueOnce(hits(3, 0.88)).mockResolvedValueOnce(hits(2, 0.52));
+    let call = 0;
+    const r = await retrieve({
+      userId: "u",
+      userRole: "cto",
+      query: "q",
+      judge: async () => (++call === 1 ? "irrelevant" : "relevant"),
+      expand: async () => "other words",
+    });
+    expect(r.firstWasRejected).toBe(true);
+    expect(r.expansionHelped).toBe(true);
+    expect(r.keptVerdict).toBe("relevant");
+  });
+
+  it("reports irrelevant when the first pass was kept after both were rejected", async () => {
+    mockQuery.mockResolvedValueOnce(hits(3, 0.88)).mockResolvedValueOnce(hits(8, 0.41));
+    const r = await retrieve({
+      userId: "u",
+      userRole: "cto",
+      query: "q",
+      judge: async () => "irrelevant",
+      expand: async () => "other words",
+    });
+    expect(r.expansionHelped).toBe(false);
+    expect(r.keptVerdict).toBe("irrelevant");
+  });
+
+  /* A rewrite kept on score alone carries no opinion, and saying "relevant"
+     would be inventing one. The caller forms its own, which is the only
+     branch where a second judge call is correct. */
+  it("is unjudged when a rewrite won on score without being judged", async () => {
+    mockQuery.mockResolvedValueOnce(hits(1, 0.20)).mockResolvedValueOnce(hits(1, 0.90));
+    const r = await retrieve({
+      userId: "u",
+      userRole: "cto",
+      query: "q",
+      /* Not rejected, merely thin, so the second attempt is never judged. */
+      judge: async () => "relevant",
+      expand: async () => "better words",
+    });
+    expect(r.expansionHelped).toBe(true);
+    expect(r.keptVerdict).toBe("unjudged");
+  });
+
+  /* THE COST GUARD. One question, one judgment of the first pass, whatever
+     else happens. A second call is only ever made about the SECOND attempt. */
+  it("judges the first pass exactly once", async () => {
+    mockQuery.mockResolvedValueOnce(hits(2, 0.2)).mockResolvedValueOnce(hits(2, 0.3));
+    let calls = 0;
+    await retrieve({
+      userId: "u",
+      userRole: "cto",
+      query: "q",
+      judge: async () => {
+        calls += 1;
+        return "relevant";
+      },
+      expand: async () => "other words",
+    });
+    expect(calls).toBe(1);
   });
 });
