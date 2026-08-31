@@ -52,6 +52,9 @@ export const BUILT_IN_ROUTINES: readonly Routine[] = Object.freeze([
         kind: "tool",
         slot: "agenda",
         tool: "good_morning_widget",
+        /* Reads only, and needs nothing from the other two, so the three run
+           together rather than as three round trips a person waits through. */
+        concurrent: true,
         params: {},
         label: "Reading today's calendar",
       },
@@ -59,6 +62,9 @@ export const BUILT_IN_ROUTINES: readonly Routine[] = Object.freeze([
         kind: "tool",
         slot: "tasks",
         tool: "task_list_widget",
+        /* Reads only, and needs nothing from the other two, so the three run
+           together rather than as three round trips a person waits through. */
+        concurrent: true,
         params: { limit: 20 },
         label: "Collecting what is open",
       },
@@ -66,6 +72,9 @@ export const BUILT_IN_ROUTINES: readonly Routine[] = Object.freeze([
         kind: "tool",
         slot: "brief",
         tool: "meeting_prep",
+        /* Reads only, and needs nothing from the other two, so the three run
+           together rather than as three round trips a person waits through. */
+        concurrent: true,
         params: {},
         label: "Preparing your next meeting",
       },
