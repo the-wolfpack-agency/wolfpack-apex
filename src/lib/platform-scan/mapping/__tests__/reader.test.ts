@@ -118,3 +118,100 @@ describe("deciding whether a form changes something", () => {
     expect(f.fields).toHaveLength(1);
   });
 });
+
+/**
+ * Fields that live outside a form element, which on a modern application is
+ * most of them.
+ *
+ * Mapping a real tenant reported "3 distinct forms" on a system with fifteen,
+ * and the three were furniture. The fifteen are built in a canvas editor that
+ * renders inputs inside plain divs, which is ordinary practice in every React
+ * application written in the last decade. That is the difference between a map
+ * somebody can act on and a list of names that leaves them opening fifteen
+ * screens by hand.
+ */
+describe("a screen that collects data without a form element", () => {
+  const render = (html: string) => {
+    document.body.innerHTML = html;
+    return harvestSurface();
+  };
+
+  it("finds the fields anyway", () => {
+    const out = render(`
+      <h1>Brand Ambassador Change Management Plan</h1>
+      <div class="builder">
+        <input name="centerNumber" type="text" required />
+        <input name="emailAddress" type="email" />
+        <select name="region"><option>East</option></select>
+        <textarea name="notes"></textarea>
+      </div>`);
+    const loose = out.forms.find((f) => f.method === "none")!;
+    expect(loose.fields.map((f) => f.name)).toEqual([
+      "centerNumber",
+      "emailAddress",
+      "region",
+      "notes",
+    ]);
+  });
+
+  it("names the record after the screen, since there is no legend to use", () => {
+    const out = render(`<h1>Porsche CRM</h1><div><input name="a" /></div>`);
+    expect(out.forms.find((f) => f.method === "none")!.name).toBe("Porsche CRM");
+  });
+
+  /* NOT GUESSED INTO FORMS. With no form element there is no reliable
+     boundary between one form and the next, and inventing one would file
+     fields under headings they do not belong to. */
+  it("reports one record per screen rather than inventing form boundaries", () => {
+    const out = render(`
+      <h1>Settings</h1>
+      <div><h2>Profile</h2><input name="a" /></div>
+      <div><h2>Billing</h2><input name="b" /></div>`);
+    const loose = out.forms.filter((f) => f.method === "none");
+    expect(loose).toHaveLength(1);
+    expect(loose[0].fields.map((f) => f.name)).toEqual(["a", "b"]);
+  });
+
+  /* A field already inside a form is that form's, and counting it twice would
+     inflate every count drawn from this. */
+  it("does not count a field that belongs to a real form", () => {
+    const out = render(`
+      <form><input name="inside" /></form>
+      <div><input name="outside" /></div>`);
+    const loose = out.forms.find((f) => f.method === "none")!;
+    expect(loose.fields.map((f) => f.name)).toEqual(["outside"]);
+  });
+
+  it("ignores buttons and hidden state, which are not data somebody enters", () => {
+    const out = render(`
+      <div>
+        <input name="real" />
+        <input type="hidden" name="csrf" />
+        <input type="submit" value="Save" />
+        <input type="button" value="Cancel" />
+      </div>`);
+    expect(out.forms.find((f) => f.method === "none")!.fields.map((f) => f.name)).toEqual(["real"]);
+  });
+
+  /* An unnamed field still says the screen collects something, which is the
+     question being asked. */
+  it("falls back to the accessible label when there is no name", () => {
+    const out = render(`<div><input aria-label="Center number" /><input placeholder="VIN" /></div>`);
+    expect(out.forms.find((f) => f.method === "none")!.fields.map((f) => f.name)).toEqual([
+      "Center number",
+      "VIN",
+    ]);
+  });
+
+  it("says nothing about a screen that collects nothing", () => {
+    const out = render(`<h1>Read only</h1><p>Just text.</p>`);
+    expect(out.forms.filter((f) => f.method === "none")).toEqual([]);
+  });
+
+  /* "none" is the discriminator: nothing was declared, so nothing may be
+     assumed about what pressing a button on this screen would do. */
+  it("marks the record so nobody reads a method into it", () => {
+    const out = render(`<div><input name="a" /></div>`);
+    expect(out.forms.find((f) => f.name.length > 0)!.method).toBe("none");
+  });
+});
