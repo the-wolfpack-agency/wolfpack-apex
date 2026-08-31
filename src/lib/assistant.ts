@@ -22,6 +22,7 @@ import { matchSavedRoutine } from "@/lib/assistant/routines/saved";
 import { searchKnowledge, saveAnswer } from "@/lib/knowledge";
 import { markCited as markBrainCited, type SemanticStatus } from "@/lib/brain/query";
 import { retrieve } from "@/lib/brain/retrieve";
+import { makeExpander } from "@/lib/brain/expand-runner";
 import { asksForSynthesis } from "@/lib/brain/question-terms";
 import { detectAmbiguity } from "@/lib/brain/ambiguous-question";
 import { quoteWindow } from "@/lib/brain/quote-window";
@@ -2870,6 +2871,18 @@ async function tryBrain(
       query: message,
       limit: 5,
       conversationId,
+      /* ASK AGAIN IN THE WORDS THE DOCUMENTS USE.
+       *
+       * retrieve() has accepted a rewriter since it was written and was never
+       * given one here, so the second attempt returned before it began and
+       * only the eval script ever exercised it. Measured cost of that: "do we
+       * pay half now and half later?" asked five times by people and answered
+       * none of them, while the work order that answers it says fifty per
+       * cent on execution and the remainder on delivery.
+       *
+       * It fires only when shouldExpand agrees the first pass was thin, so an
+       * ordinary question that found its answer pays nothing. */
+      expand: makeExpander({ userId, userRole }),
     });
     /* THE LAST HIDING PLACE.
      *
