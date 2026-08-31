@@ -30,6 +30,8 @@
  * Deployment-specific by design: a client's own eval set is the only one that
  * can tell them their deployment works.
  */
+/* FIRST. Imports hoist, so anything below already read process.env. */
+import "./load-env";
 import { readFileSync } from "node:fs";
 import { retrieve } from "@/lib/brain/retrieve";
 import { judgeRelevance } from "@/lib/brain/relevance";

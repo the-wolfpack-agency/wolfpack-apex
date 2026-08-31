@@ -27,6 +27,8 @@
  *   npx tsx scripts/harvest-eval-pairs.ts > candidates.json
  *   # read them, delete the wrong ones, set reviewed: true on the rest
  */
+/* FIRST. Imports hoist, so anything below already read process.env. */
+import "./load-env";
 import { query } from "@/lib/db";
 
 interface Candidate {

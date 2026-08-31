@@ -29,6 +29,8 @@
  * Rerunning without --rotate is safe and idempotent: an existing account keeps
  * its password, so a re-run cannot silently break a CI job that is using it.
  */
+/* FIRST. Imports hoist, so anything below already read process.env. */
+import "./load-env";
 import { randomBytes } from "crypto";
 import { hashPassword } from "@/lib/auth";
 import { query } from "@/lib/db";

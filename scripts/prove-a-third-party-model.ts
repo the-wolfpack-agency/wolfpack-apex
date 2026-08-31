@@ -27,6 +27,8 @@
  * Usage:  npx tsx scripts/prove-a-third-party-model.ts
  */
 
+/* FIRST. Imports hoist, so anything below already read process.env. */
+import "./load-env";
 import { createServer } from "node:http";
 import { probeTargetFor } from "@/lib/ai/models/probe";
 import { validateClientModel } from "@/lib/ai/models/client-models";
