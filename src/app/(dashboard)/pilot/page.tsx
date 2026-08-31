@@ -89,6 +89,30 @@ interface GapItem {
   question: string;
   asked: number;
   system?: string;
+  /** Set when the wording was shortened or a name was taken out. */
+  withheld?: "paste" | "name" | "remark";
+}
+
+/**
+ * A line, and a plain note when it is not what somebody typed.
+ *
+ * The note exists because a shortened question and a short question look
+ * identical on the page, and a reader who cannot tell them apart will read a
+ * truncation as the whole of what was asked.
+ */
+function GapLine({ item, verb }: { item: GapItem; verb: string }) {
+  const note =
+    item.withheld === "paste"
+      ? "shortened"
+      : item.withheld === "name"
+        ? "name withheld"
+        : null;
+  return (
+    <li>
+      <strong>{item.question}</strong> {verb} {item.asked}×{item.system ? `, ${item.system}` : null}
+      {note ? <span className="wp-pilot-note"> {note}</span> : null}
+    </li>
+  );
 }
 
 /**
@@ -103,7 +127,8 @@ interface GapsSnapshot {
   wouldConnect: GapItem[];
   missing: GapItem[];
   closed: GapItem[];
-  wanted: GapItem[];
+  wanted: { actions: { action: string; asked: number }[]; other: number };
+  statements: number;
   readable: boolean;
 }
 
@@ -314,10 +339,7 @@ export default function PilotPage() {
                   </p>
                   <ul className="wp-pilot-list" data-testid="pilot-gaps-connect">
                     {snap.gaps.wouldConnect.map((g) => (
-                      <li key={g.question}>
-                        <strong>{g.question}</strong> asked {g.asked}×
-                        {g.system ? ` — ${g.system}` : null}
-                      </li>
+                      <GapLine key={g.question} item={g} verb="asked" />
                     ))}
                   </ul>
                 </>
@@ -331,27 +353,32 @@ export default function PilotPage() {
                   </p>
                   <ul className="wp-pilot-list" data-testid="pilot-gaps-missing">
                     {snap.gaps.missing.map((g) => (
-                      <li key={g.question}>
-                        <strong>{g.question}</strong> asked {g.asked}×
-                      </li>
+                      <GapLine key={g.question} item={g} verb="asked" />
                     ))}
                   </ul>
                 </>
               ) : null}
 
-              {snap.gaps.wanted.length > 0 ? (
+              {snap.gaps.wanted.actions.length > 0 || snap.gaps.wanted.other > 0 ? (
                 <>
                   <p className="wp-pilot-aside">
                     Instructions rather than questions: things somebody expected the
                     product to do. No document closes these, and nobody files a request for
-                    something they assumed would work.
+                    something they assumed would work. Shown as the action asked for, not as
+                    what anybody typed.
                   </p>
                   <ul className="wp-pilot-list" data-testid="pilot-gaps-wanted">
-                    {snap.gaps.wanted.map((g) => (
-                      <li key={g.question}>
-                        <strong>{g.question}</strong> asked {g.asked}×
+                    {snap.gaps.wanted.actions.map((a) => (
+                      <li key={a.action}>
+                        <strong>{a.action}</strong> asked {a.asked}×
                       </li>
                     ))}
+                    {snap.gaps.wanted.other > 0 ? (
+                      <li data-testid="pilot-gaps-wanted-other">
+                        {snap.gaps.wanted.other} further {snap.gaps.wanted.other === 1 ? "request" : "requests"} of
+                        other kinds
+                      </li>
+                    ) : null}
                   </ul>
                 </>
               ) : null}
@@ -364,17 +391,23 @@ export default function PilotPage() {
                   </p>
                   <ul className="wp-pilot-list" data-testid="pilot-gaps-closed">
                     {snap.gaps.closed.map((g) => (
-                      <li key={g.question}>
-                        <strong>{g.question}</strong> failed {g.asked}× before
-                      </li>
+                      <GapLine key={g.question} item={g} verb="failed" />
                     ))}
                   </ul>
                 </>
               ) : null}
 
+              {snap.gaps.statements > 0 ? (
+                <p className="wp-pilot-aside" data-testid="pilot-gaps-statements">
+                  {snap.gaps.statements} further {snap.gaps.statements === 1 ? "entry was" : "entries were"}{" "}
+                  left out as remarks rather than questions. Nothing was missing to answer
+                  them, so they are not gaps.
+                </p>
+              ) : null}
+
               {snap.gaps.wouldConnect.length === 0 &&
               snap.gaps.missing.length === 0 &&
-              snap.gaps.wanted.length === 0 ? (
+              snap.gaps.wanted.actions.length === 0 ? (
                 <p className="wp-pilot-aside" data-testid="pilot-gaps-none">
                   Every question asked in this window was answered by a connected system.
                 </p>
@@ -446,6 +479,11 @@ export default function PilotPage() {
                     {exposure.documentsWithNeverSend.toLocaleString()} hold a value that is
                     never sent to any provider at all.
                   </p>
+                  {/* Scrolls in its own box rather than pushing the page
+                      down. A hundred documents rendered inline buried every
+                      section below the button under a wall somebody had to
+                      scroll past to get anywhere. */}
+                  <div className="wp-pilot-scroll" data-testid="pilot-exposure-scroll">
                   <ul className="wp-pilot-list">
                     {exposure.documents.map((d) => (
                       <li key={d.documentId}>
@@ -455,6 +493,11 @@ export default function PilotPage() {
                       </li>
                     ))}
                   </ul>
+                  </div>
+                  <p className="wp-pilot-aside">
+                    {exposure.documents.length.toLocaleString()} document(s) listed above,
+                    never-send first. Scroll the box to read the rest.
+                  </p>
                   {exposure.truncated ? (
                     <p className="wp-pilot-aside">
                       Showing the first {exposure.documents.length}. The count above is the

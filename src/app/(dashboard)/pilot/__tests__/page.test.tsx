@@ -591,6 +591,63 @@ describe("the exposure scan is discoverable", () => {
 });
 
 /**
+ * A hundred results must not push the page down.
+ *
+ * The scan returns up to a hundred documents and the first version rendered
+ * all of them inline, so pressing the button buried every section below it
+ * under a wall somebody had to scroll past to get anywhere.
+ */
+describe("the exposure list stays in its own box", () => {
+  const manyDocuments = Array.from({ length: 100 }, (_, i) => ({
+    documentId: `d${i}`,
+    filename: `Invoice ${i}.pdf`,
+    kinds: [{ kind: "credit_card", occurrences: 1, neverSend: true }],
+    holdsNeverSend: true,
+  }));
+
+  const exposure = {
+    chunksScanned: 5006,
+    chunksWithSomething: 623,
+    byKind: [{ kind: "credit_card", occurrences: 60, neverSend: true }],
+    documentsWithSomething: 214,
+    documentsWithNeverSend: 59,
+    documents: manyDocuments,
+    truncated: true,
+    durationMs: 1200,
+  };
+
+  async function runScan() {
+    respond({ ...base });
+    render(<PilotPage />);
+    const button = await screen.findByTestId("pilot-exposure-run");
+    mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => exposure });
+    button.click();
+    return screen.findByTestId("pilot-exposure-result");
+  }
+
+  it("puts the results in a scrolling region rather than inline", async () => {
+    await runScan();
+    expect(await screen.findByTestId("pilot-exposure-scroll")).toHaveClass("wp-pilot-scroll");
+  });
+
+  /* Scrolls rather than truncates: the point of the panel is finding the
+     document you care about, and a "show more" hiding ninety of them makes
+     that worse. */
+  it("still renders every document it was given", async () => {
+    const result = await runScan();
+    expect(result).toHaveTextContent("Invoice 0.pdf");
+    expect(result).toHaveTextContent("Invoice 99.pdf");
+  });
+
+  /* Somebody has to know there is more below the fold of a box. */
+  it("says how many are listed and that the box scrolls", async () => {
+    const result = await runScan();
+    expect(result).toHaveTextContent(/100 document\(s\) listed above/i);
+    expect(result).toHaveTextContent(/Scroll the box/i);
+  });
+});
+
+/**
  * What people asked and did not get.
  *
  * A build backlog written by the people using it rather than guessed at in a
@@ -602,7 +659,8 @@ describe("the gaps panel", () => {
     wouldConnect: [{ question: "how many cayennes are on the lot", asked: 9, system: "dealer-system" }],
     missing: [{ question: "what is our refund policy", asked: 5, system: "documents" }],
     closed: [{ question: "what are the payment terms in our sow?", asked: 18 }],
-    wanted: [{ question: "book me 30 minutes with dana tomorrow", asked: 3 }],
+    wanted: { actions: [{ action: "schedule a meeting", asked: 3 }], other: 2 },
+    statements: 4,
     readable: true,
   };
 
@@ -626,8 +684,49 @@ describe("the gaps panel", () => {
   it("shows what somebody expected the product to do", async () => {
     respond({ ...base, gaps });
     render(<PilotPage />);
-    expect(await screen.findByTestId("pilot-gaps-wanted")).toHaveTextContent(
-      "book me 30 minutes with dana tomorrow",
+    const wanted = await screen.findByTestId("pilot-gaps-wanted");
+    expect(wanted).toHaveTextContent("schedule a meeting");
+    /* Requests whose verb is not on the list are counted. Dropping them
+       silently would read as nobody having wanted anything. */
+    expect(screen.getByTestId("pilot-gaps-wanted-other")).toHaveTextContent(/2 further requests/i);
+  });
+
+  /* NO INSTRUCTION IS QUOTED, EVER. The measured reason: "book me 30 minutes
+     with dana tomorrow" was on the live page, and neither that colleague nor
+     the client named in the next entry appears in any table this workspace
+     holds, so no mask could have reached them. */
+  it("never renders the words of an instruction", async () => {
+    respond({ ...base, gaps });
+    render(<PilotPage />);
+    const wanted = await screen.findByTestId("pilot-gaps-wanted");
+    expect(wanted).not.toHaveTextContent(/dana|30 minutes|tomorrow/i);
+  });
+
+  /* A shortened question and a short one look identical, and a reader who
+     cannot tell them apart reads a truncation as the whole question. */
+  it("marks a line that is not what somebody typed", async () => {
+    respond({
+      ...base,
+      gaps: {
+        ...gaps,
+        wouldConnect: [
+          { question: "a person's name", asked: 15, system: "directory", withheld: "name" },
+        ],
+        closed: [{ question: "analyze the survey data in the workbook and…", asked: 1, withheld: "paste" }],
+      },
+    });
+    render(<PilotPage />);
+    expect(await screen.findByTestId("pilot-gaps-connect")).toHaveTextContent("name withheld");
+    expect(screen.getByTestId("pilot-gaps-closed")).toHaveTextContent("shortened");
+  });
+
+  /* An exclusion nobody can see is indistinguishable from nobody having
+     asked, which is the failure this whole page is built around. */
+  it("reports how many entries were left out as remarks", async () => {
+    respond({ ...base, gaps });
+    render(<PilotPage />);
+    expect(await screen.findByTestId("pilot-gaps-statements")).toHaveTextContent(
+      /4 further entries were left out as remarks/i,
     );
   });
 
@@ -654,7 +753,14 @@ describe("the gaps panel", () => {
   it("says so plainly when everything was answered", async () => {
     respond({
       ...base,
-      gaps: { wouldConnect: [], missing: [], closed: [], wanted: [], readable: true },
+      gaps: {
+        wouldConnect: [],
+        missing: [],
+        closed: [],
+        wanted: { actions: [], other: 0 },
+        statements: 0,
+        readable: true,
+      },
     });
     render(<PilotPage />);
     expect(await screen.findByTestId("pilot-gaps-none")).toHaveTextContent(

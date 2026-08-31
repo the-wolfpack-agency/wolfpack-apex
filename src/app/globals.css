@@ -992,9 +992,50 @@ a:hover { color: var(--wp-gold-hover); }
   font-size: 0.86rem;
   line-height: 1.7;
 }
+
+/* A HUNDRED RESULTS MUST NOT PUSH THE PAGE DOWN.
+ *
+ * The exposure scan returns up to a hundred documents and the first version
+ * rendered all of them inline, so pressing the button buried every section
+ * below it under a wall somebody had to scroll past to get anywhere. The list
+ * is meant to be sifted, not endured.
+ *
+ * Scrolls inside its own box rather than being truncated: the whole point of
+ * the panel is finding the document you care about, and a "show more" that
+ * hides ninety of them makes that worse. The page keeps its shape and the
+ * list keeps all of its rows.
+ *
+ * The height is a little over ten rows, which is enough to read as a list
+ * with more below rather than as a cut-off. */
+.wp-pilot-scroll {
+  max-height: 19rem;
+  overflow-y: auto;
+  /* Its own edge, so it reads as a region that scrolls rather than as the
+     page ending. */
+  border: 1px solid var(--wp-dark-border, rgba(255, 255, 255, 0.12));
+  border-radius: 8px;
+  padding: 0.5rem 0.75rem;
+  background: var(--wp-dark-surface, rgba(255, 255, 255, 0.03));
+  /* Contains the scroll chaining, so reaching the bottom of the list does not
+     carry on scrolling the page underneath it. */
+  overscroll-behavior: contain;
+}
+.wp-pilot-scroll .wp-pilot-list {
+  margin: 0;
+}
 .wp-pilot-list strong {
   color: var(--wp-text, #e9edf4);
   font-weight: 600;
+}
+
+/* WHY A LINE IS NOT WHAT SOMEBODY TYPED. A shortened question and a short one
+   look identical, so the note has to be visible enough to be read and quiet
+   enough not to compete with the question it qualifies. */
+.wp-pilot-note {
+  color: var(--wp-text-muted, #929cad);
+  font-size: 0.78rem;
+  font-style: italic;
+  white-space: nowrap;
 }
 
 .wp-pilot-aside {
