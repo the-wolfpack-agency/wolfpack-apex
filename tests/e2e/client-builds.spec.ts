@@ -49,7 +49,7 @@ test.describe("client builds", () => {
 
   /* THE MECHANISM, ASSERTED. Every build page carries the marker, including
      when the link is shared without the register around it. */
-  for (const path of ["/pilot", "/builds/change-management"]) {
+  for (const path of ["/pilot", "/builds/change-management", "/builds/course-program"]) {
     test(`${path} carries the client-build marker`, async ({ page }) => {
       await page.goto(`${target.baseUrl}${path}`, { waitUntil: "domcontentloaded" });
       const banner = page.getByTestId("build-banner");
@@ -86,14 +86,31 @@ test.describe("client builds", () => {
     expect(failures().filter((f) => f.detail.startsWith("CSP:"))).toEqual([]);
   });
 
+  /* THE CONSTRAINT HAS TO SURVIVE A DEPLOY. Everything else on that page is
+     downstream of the client owning their material, and a reader who misses it
+     starts imagining slides. */
+  test("the new-course page leads with what we cannot take", async ({ page }) => {
+    await page.goto(`${target.baseUrl}/builds/course-program`, { waitUntil: "domcontentloaded" });
+    await expectRendered(page, "/builds/course-program", ["taking the method"]);
+
+    await expect(page.getByTestId("cp-ip")).toContainText(/cannot be copied or distributed/i);
+    await expect(page.getByTestId("cp-open")).toContainText(/who is the client/i);
+    /* Six rungs, in order. The order is the finding. */
+    await expect(page.locator('[data-testid="cp-ladder"] li')).toHaveCount(6);
+  });
+
   /* A wide table is the classic way a document page starts scrolling
      sideways on a laptop, and nobody notices until a client opens it. */
   test("the page body never scrolls sideways", async ({ page }) => {
     await page.setViewportSize({ width: 900, height: 900 });
-    await page.goto(`${target.baseUrl}/builds/change-management`, {
-      waitUntil: "domcontentloaded",
-    });
-    await expectRendered(page, "/builds/change-management", ["change management plan"]);
+    for (const path of ["/builds/change-management", "/builds/course-program"]) {
+      await page.goto(`${target.baseUrl}${path}`, { waitUntil: "domcontentloaded" });
+      await expectRendered(page, path, ["change management plan", "taking the method"]);
+      const wide = await page.evaluate(
+        () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      );
+      expect(wide, `${path} scrolls horizontally`).toBeLessThanOrEqual(1);
+    }
 
     const overflow = await page.evaluate(
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth,

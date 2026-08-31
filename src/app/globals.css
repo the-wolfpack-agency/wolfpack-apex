@@ -1513,3 +1513,46 @@ a:hover { color: var(--wp-gold-hover); }
   .wp-build-flow li, .wp-build-states li { grid-template-columns: 1fr; gap: 0.3rem; }
   .wp-build-flow-tag { white-space: normal; }
 }
+
+/* THE COMMITMENT LADDER. Numbered because it genuinely is a sequence and the
+   sequence is the finding: each artifact feeds the next one, and a course that
+   ships them as separate worksheets has copied the parts and missed the
+   design. */
+.wp-build-ladder { list-style: none; padding: 0; margin: 1.25rem 0 0; display: grid; gap: 0.4rem; }
+.wp-build-ladder li {
+  display: grid;
+  grid-template-columns: 1.6rem 1fr;
+  gap: 0.75rem;
+  align-items: baseline;
+  padding: 0.6rem 0.75rem;
+  border-radius: 6px;
+  background: var(--wp-panel, #171a20);
+  font-size: 0.9rem;
+  line-height: 1.55;
+}
+/* Each rung sits slightly further in, so the build-up reads as a build-up. */
+.wp-build-ladder li:nth-child(2) { margin-left: 0.75rem; }
+.wp-build-ladder li:nth-child(3) { margin-left: 1.5rem; }
+.wp-build-ladder li:nth-child(4) { margin-left: 2.25rem; }
+.wp-build-ladder li:nth-child(5) { margin-left: 3rem; }
+.wp-build-ladder li:nth-child(6) { margin-left: 3.75rem; }
+
+/* Whether a component travels is the column a reader scans for, so it reads as
+   a state rather than as more prose. */
+.wp-build-travel {
+  display: inline-block;
+  white-space: nowrap;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  padding: 0.16rem 0.45rem;
+  border-radius: 3px;
+}
+.wp-build-travel--structure-and-wording { background: rgba(111, 158, 120, 0.18); color: #8fc39a; }
+.wp-build-travel--structure { background: rgba(201, 162, 39, 0.16); color: #d8bc63; }
+.wp-build-travel--not-at-all { background: rgba(201, 138, 60, 0.18); color: #dd9f5c; }
+
+@media (max-width: 720px) {
+  .wp-build-ladder li { grid-template-columns: 1fr; gap: 0.25rem; }
+  .wp-build-ladder li:nth-child(n) { margin-left: 0; }
+}
