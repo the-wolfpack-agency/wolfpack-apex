@@ -756,6 +756,24 @@ export async function sweepAllWorkspaces(): Promise<{ workspaces: number; probes
     const res = await sweepWorkspace(r.workspace_id, userId ? { userId } : {});
     probes += res.probes;
     drifted.push(...res.drifted);
+
+    /* THE SURFACES NOBODY USES, EXERCISED NIGHTLY.
+     *
+     * Eighteen Microsoft surfaces are built and twelve had ever run, because
+     * six sit behind features nobody on this team happens to use daily. No
+     * event was ever written, and a surface with no events is
+     * indistinguishable from a broken one.
+     *
+     * Reads only, through the real modules, so each writes the same analytics
+     * a genuine use would. Running here rather than from somebody's laptop is
+     * not incidental: refreshing a Microsoft token needs the client secret,
+     * which exists in this deployment and not on a developer machine, so this
+     * is the only place the claim can honestly be earned. */
+    if (userId) {
+      const { exerciseUnprovenSurfaces } = await import("@/lib/health/unproven-surfaces");
+      const exercised = await exerciseUnprovenSurfaces(r.workspace_id, userId).catch(() => []);
+      probes += exercised.length;
+    }
   }
   return { workspaces: rows.length, probes, drifted };
 }
