@@ -551,3 +551,41 @@ describe("the corpus exposure panel", () => {
     expect(result).toHaveTextContent(/not that anybody did anything wrong/i);
   });
 });
+
+/**
+ * The capability has to be findable and the button has to look pressable.
+ *
+ * It shipped inside another panel, styled with a class that did not exist, so
+ * it rendered as plain text between two paragraphs and read as a heading.
+ * A feature nobody can see is worse than no feature: the page appears to
+ * claim something it does not offer.
+ */
+describe("the exposure scan is discoverable", () => {
+  it("has a heading of its own rather than trailing another panel", async () => {
+    respond({ ...base });
+    render(<PilotPage />);
+    /* By role, because the button's own label contains the same words and a
+       text match finds both. */
+    expect(
+      await screen.findByRole("heading", { name: /What never reaches a model/i }),
+    ).toBeInTheDocument();
+  });
+
+  /* A person has to know what pressing it will do before they press it. */
+  it("says what the scan does before it is run", async () => {
+    respond({ ...base });
+    render(<PilotPage />);
+    await screen.findByTestId("pilot-exposure-run");
+    expect(screen.getByText(/read every indexed passage/i)).toBeInTheDocument();
+  });
+
+  /* An element that is not a button cannot be reached by keyboard, and a div
+     with an onClick is the usual way that happens. */
+  it("is a real button", async () => {
+    respond({ ...base });
+    render(<PilotPage />);
+    const el = await screen.findByTestId("pilot-exposure-run");
+    expect(el.tagName).toBe("BUTTON");
+    expect(el).toHaveClass("wp-pilot-button");
+  });
+});
