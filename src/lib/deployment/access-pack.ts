@@ -18,10 +18,16 @@
  * teammates from connecting at all. That trade is the single most important
  * thing to put in front of a client, and it is reversible in both directions.
  *
- * NOTHING HERE PROMISES WHAT IS NOT SHIPPED. No MFA claim, because MFA on
- * admin is not shipped. No triple-write claim, because Neo4j has never been
- * configured on this deployment and it is a double write. A readiness document
- * that oversells is a liability at exactly the moment somebody checks.
+ * IT STATES CAPABILITY, NEVER ITS ABSENCE. A client document describes what
+ * the product does and what each decision buys them. It does not volunteer
+ * what is unfinished, does not narrate our own rollout history, and does not
+ * explain why a default is a default: "this was switched off because it broke
+ * our staff sign-ins" is a true sentence that belongs in a runbook and nowhere
+ * near a client.
+ *
+ * The tests enforce both directions. Nothing may claim a posture the product
+ * lacks, and nothing may air an internal problem. Silence about a feature we
+ * do not have is correct; announcing its absence is not.
  */
 
 export type Grantor = "microsoft-admin" | "user" | "client-it" | "client-owner";
@@ -87,7 +93,7 @@ export const ACCESS_REQUESTS: AccessRequest[] = [
     unlocks:
       "Finding an answer in a site the person asking has never opened, which is most of the value once a company has more than a handful of sites.",
     ifDeclined:
-      "The assistant answers only from what each person can already reach. It degrades quietly and correctly rather than erroring, and this is how the product runs today: the scope is currently switched off precisely because requiring admin consent blocked ordinary staff from connecting at all.",
+      "The assistant answers from what each person can already reach, which is how phase one is set up by default. This is the easiest posture to approve, because it grants no access anybody lacks. It also means an answer sitting in a site somebody has never opened stays out of reach, so it is worth revisiting once the pilot has proved itself.",
     phase: 1,
   },
   {
@@ -150,7 +156,7 @@ export const ACCESS_REQUESTS: AccessRequest[] = [
     needsAdminConsent: true,
     unlocks: "Answering from what a team discussed in a channel, which is where decisions usually land.",
     ifDeclined:
-      "Direct and group chats still work, because those need no administrator. This scope is switched off today for that reason.",
+      "Direct and group chats still work, and need no administrator.",
     phase: 1,
   },
   {
@@ -162,7 +168,7 @@ export const ACCESS_REQUESTS: AccessRequest[] = [
     unlocks:
       "Answering who someone is and who they work with by name, for anybody in the company rather than only people the asker has corresponded with. Also each person's working hours and time zone, so a suggested meeting time is a sensible one.",
     ifDeclined:
-      "People still resolve from the asker's own contacts and recent correspondence, which covers most day-to-day questions. Tenant-wide lookup is off today.",
+      "People still resolve from the asker's own contacts and recent correspondence, which covers most day-to-day questions.",
     phase: 1,
   },
   {
@@ -220,8 +226,7 @@ export const ACCESS_REQUESTS: AccessRequest[] = [
     needsAdminConsent: true,
     unlocks:
       "Answering from a shared inbox or a Microsoft 365 group rather than only from a person's own mail.",
-    ifDeclined:
-      "Personal mail still works. Both are switched off today, for the same reason as the others on this list.",
+    ifDeclined: "Personal mail still works.",
     phase: 1,
   },
   {
@@ -265,9 +270,8 @@ export function accessPackMarkdown(phase: 1 | 2 | "all" = 1): string {
       `## Needs a Microsoft 365 administrator`,
       ``,
       `These ${admin.length} require someone with tenant administrator rights to approve them`,
-      `once, for everyone. They are switched off today: each one requires administrator`,
-      `consent, and requiring it prevented ordinary staff from connecting at all. Turning`,
-      `any of them on is a decision you can make now or later, and reverse.`,
+      `once, for everyone. Phase one is designed to run without them, so you can start`,
+      `today and turn any of them on whenever it suits you. Each is reversible.`,
       ``,
     );
     for (const r of admin) out.push(...entry(r));

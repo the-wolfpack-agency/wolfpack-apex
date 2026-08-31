@@ -126,3 +126,34 @@ describe("what the document says", () => {
     expect(accessPackMarkdown(1)).toMatch(/only what their existing Microsoft 365/i);
   });
 });
+
+/**
+ * A client document describes what the product does. It does not narrate our
+ * own history, and it does not volunteer what is unfinished.
+ *
+ * "This was switched off because it broke our staff sign-ins" is a true
+ * sentence that belongs in a runbook and nowhere near a client. Silence about
+ * something we lack is correct; announcing its absence is not.
+ */
+describe("nothing internal reaches the client", () => {
+  const md = accessPackMarkdown("all");
+
+  it("does not narrate our own rollout problems", () => {
+    expect(md).not.toMatch(/blocked ordinary staff|prevented ordinary staff|stopped .* connecting/i);
+    expect(md).not.toMatch(/switched off (today|precisely)/i);
+  });
+
+  it("does not explain why a default is a default", () => {
+    expect(md).not.toMatch(/for that reason|for the same reason/i);
+  });
+
+  it("carries no dates from our own changelog", () => {
+    expect(md).not.toMatch(/20\d\d-\d\d-\d\d/);
+  });
+
+  /* Still says the thing that matters: a decision, and what it costs. */
+  it("still tells them what each answer means", () => {
+    expect(md).toMatch(/\*\*If yes:\*\*/);
+    expect(md).toMatch(/\*\*If no:\*\*/);
+  });
+});
