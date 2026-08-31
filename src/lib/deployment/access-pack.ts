@@ -206,6 +206,19 @@ export const ACCESS_REQUESTS: AccessRequest[] = [
     phase: 1,
   },
   {
+    id: "calibration",
+    question:
+      "Who can spend an hour telling us what your calendar entries and record statuses actually mean?",
+    scopes: [],
+    grantor: "client-owner",
+    needsAdminConsent: false,
+    unlocks:
+      "Numbers you can quote. Well-formed data with a local convention in it produces figures that are arithmetically correct and badly wrong: on our own calendar, eleven per cent of entries held ninety per cent of the hours and none of them was a meeting, which made a meeting-time figure ten times too large until somebody said so. We run the same check on yours in the first week, bring you the entries that carry the weight, and ask what they are.",
+    ifDeclined:
+      "The system still works and every answer still cites its source. What we will not do is publish a figure about how time is spent or how much a system holds, because a number nobody has sanity-checked against your own conventions is one we may have to withdraw.",
+    phase: 1,
+  },
+  {
     id: "copilot",
     question:
       "Do you already pay for Microsoft Copilot, and should this work alongside it or replace part of it?",
