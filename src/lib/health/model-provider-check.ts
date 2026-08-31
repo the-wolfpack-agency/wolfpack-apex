@@ -16,16 +16,30 @@
  * 99.8 per cent went to one vendor, and the two alternatives served one call
  * each, on one day. That is a smoke test, not a proven capability.
  *
- * AND THE CHEAP MODELS ARE NOT THE PROBLEM, WHICH IS THE SURPRISE. Every Azure
- * Foundry variable is present in production: endpoint, key, and deployments for
- * both DeepSeek and Llama. Those models cost roughly a tenth of a premium one
- * and they are fully reachable. They have served ONE call between them.
+ * WHAT A CLOSER LOOK FOUND, 2026-08-31, AND IT CORRECTS THE PARAGRAPH THAT USED
+ * TO BE HERE. That paragraph said the savings were sitting at the cheap end,
+ * unclaimed. They are not, and the reason is worth keeping.
  *
- * So this is not a credentials gap at the cheap end. It is that nothing
- * measures whether the router ever chooses them, and a router that always
- * picks the same model is indistinguishable from one that cannot pick another.
+ * gpt-4o-mini is ALREADY the cheapest small-tier model in the registry:
+ * $0.000327 for a call the shape of ours, against $0.0023 for the nearest
+ * alternative. DeepSeek and Llama are registered at the LARGE tier, so they
+ * were never candidates for the small-tier work that is almost all of our
+ * traffic. A router that picked them for it would be making a mistake, not a
+ * saving.
+ *
+ * Measured over 90 days: 1,673 calls, 97.1 per cent gpt-4o-mini, 2.7 per cent
+ * gpt-4o, two calls to anything else, and ZERO fallbacks. The router is not
+ * stuck on one model. It is choosing correctly, and the work is mostly cheap.
+ *
+ * THE REAL GAP IS AT THE LARGE TIER AND IS SMALL TODAY. Llama 3.3 costs
+ * $0.001292 where gpt-4o costs $0.005450, 4.2x for the same tier, and
+ * production served 36 large-tier calls in 90 days outside the bakeoff. The
+ * whole prize is around fifteen cents. Worth knowing as traffic grows, not
+ * worth engineering now, and pinned by tier-pricing-order.test.ts so a price
+ * edit cannot quietly reverse it.
+ *
  * (Anthropic genuinely has no key, and that matters least: it is the most
- * expensive option, so its absence costs no efficiency at all.)
+ * expensive option at every tier, so its absence costs no efficiency at all.)
  *
  * A capability nobody exercises is a claim. This turns it into a nightly fact:
  * for each provider the registry names, can we reach it right now, and if not,
@@ -64,12 +78,17 @@ const PROVIDER_REQUIREMENTS: Array<{
     models: ["gpt-4o-mini", "gpt-4o"],
     env: ["AZURE_OPENAI_API_KEY", "AZURE_OPENAI_ENDPOINT"],
   },
-  /* THE CHEAP END, WHICH IS THE POINT. DeepSeek and Llama are the models that
-     make the efficiency argument: roughly a tenth of a premium model's price
-     for work that does not need one. Their variables are taken from the
-     registry entries rather than guessed, because a check looking for the
-     wrong name reports a configured provider as missing and sends somebody
-     hunting for a key that is already there. */
+  /* THE LARGE TIER, WHICH IS WHERE THE DIFFERENCE ACTUALLY IS. DeepSeek and
+     Llama are large-tier models that cost a fraction of gpt-4o for the same
+     tier, which is the efficiency argument. It is NOT that they are cheaper
+     than gpt-4o-mini; nothing in the registry is. Their variables are taken
+     from the registry entries rather than guessed, because a check looking for
+     the wrong name reports a configured provider as missing and sends somebody
+     hunting for a key that is already there.
+
+     Worth watching: production carries both AZURE_AI_FOUNDRY_API_KEY and
+     AZURE_AI_FOUNDRY_KEY, which suggests somebody was unsure which name is
+     read. Only the first is. */
   {
     provider: "azure-foundry",
     models: ["deepseek-v3", "llama-3.3-70b"],
