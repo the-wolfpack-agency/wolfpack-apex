@@ -26,6 +26,8 @@
  * filter, and that is what surfaced the missing gate.
  */
 import { useEffect, useState } from "react";
+import BuildBanner from "@/components/BuildBanner";
+import { buildFor } from "@/lib/builds/registry";
 import type { CapabilitySnapshot } from "@/lib/insights/capability-snapshot";
 import {
   compareCosts,
@@ -137,6 +139,10 @@ interface ExposureResponse {
   durationMs: number;
 }
 
+/* This page is engagement work, not a shipped feature, and until the register
+   existed nothing on it said so. */
+const pilotBuild = buildFor("/pilot");
+
 export default function PilotPage() {
   const [snap, setSnap] = useState<
     | (PhaseOneSnapshot & {
@@ -199,6 +205,7 @@ export default function PilotPage() {
 
   return (
     <main className="wp-pilot" data-testid="phase-one-dashboard">
+      {pilotBuild ? <BuildBanner build={pilotBuild} /> : null}
       <header className="wp-pilot-head">
         <p className="wp-pilot-eyebrow">Phase one · last 60 days</p>
         <h1>Their library, read and answerable</h1>

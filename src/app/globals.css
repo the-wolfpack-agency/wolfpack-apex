@@ -1329,3 +1329,146 @@ a:hover { color: var(--wp-gold-hover); }
   padding-top: 0.875rem;
   border-top: 1px solid var(--wp-dark-border, rgba(255, 255, 255, 0.12));
 }
+
+/* CLIENT BUILDS. Pages under /builds belong to an engagement rather than to
+   Instinct, and the banner is the only thing on the screen that says so. It
+   has to read as a different KIND of element from the page it sits on, or it
+   becomes part of the design and stops being a warning. Hence the rule down
+   the left edge and the flat ground rather than the glass panels used
+   everywhere else. */
+.wp-build-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0 0 1.75rem;
+  padding: 0.85rem 1.1rem;
+  border-left: 3px solid var(--wp-gold, #c9a227);
+  border-radius: 0 6px 6px 0;
+  background: color-mix(in srgb, var(--wp-gold, #c9a227) 8%, transparent);
+}
+/* A concept is the one that gets mistaken for a product, so it is the one
+   that does not share the accent with everything else. */
+.wp-build-banner--concept {
+  border-left-color: #7f8da3;
+  background: color-mix(in srgb, #7f8da3 10%, transparent);
+}
+.wp-build-banner-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.6rem;
+  margin: 0;
+  font-size: 0.82rem;
+}
+.wp-build-banner-stage {
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 0.16rem 0.5rem;
+  border-radius: 3px;
+  background: var(--wp-gold, #c9a227);
+  color: #14171c;
+}
+.wp-build-stage--concept,
+.wp-build-banner--concept .wp-build-banner-stage {
+  background: #7f8da3;
+  color: #12151a;
+}
+.wp-build-banner-client { color: var(--wp-text, #e6e9ef); font-weight: 600; }
+.wp-build-banner-link { margin-left: auto; color: var(--wp-text-muted, #929cad); }
+.wp-build-banner-link:hover { color: var(--wp-gold, #c9a227); }
+.wp-build-banner-data {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.6;
+  color: var(--wp-text-muted, #929cad);
+  max-width: 78ch;
+}
+
+.wp-build-list { list-style: none; padding: 0; margin: 2rem 0 0; display: grid; gap: 1rem; }
+.wp-build-card {
+  padding: 1.1rem 1.25rem;
+  border: 1px solid var(--wp-border, #262b34);
+  border-radius: 8px;
+  background: var(--wp-panel, #171a20);
+}
+.wp-build-card h2 { margin: 0.5rem 0 0.4rem; font-size: 1.12rem; }
+.wp-build-card-top { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: baseline; margin: 0; font-size: 0.82rem; }
+.wp-build-card-what { margin: 0 0 0.4rem; line-height: 1.6; max-width: 78ch; }
+.wp-build-card-data { margin: 0; font-size: 0.84rem; color: var(--wp-text-muted, #929cad); line-height: 1.55; max-width: 78ch; }
+
+.wp-build-quote {
+  margin: 1rem 0 0;
+  padding: 0.9rem 1.1rem;
+  border-left: 2px solid var(--wp-border, #262b34);
+  color: var(--wp-text, #e6e9ef);
+  font-size: 1.02rem;
+  line-height: 1.65;
+  max-width: 72ch;
+}
+
+/* The flow list is numbered because the order IS the finding: three of the
+   four moments fall outside what a form can hold. */
+.wp-build-flow { list-style: none; padding: 0; margin: 1.25rem 0 0; display: grid; gap: 0.5rem; }
+.wp-build-flow li {
+  display: grid;
+  grid-template-columns: 1.6rem minmax(11rem, 1fr) 2fr auto;
+  gap: 0.75rem;
+  align-items: baseline;
+  padding: 0.6rem 0.75rem;
+  border-radius: 6px;
+  background: var(--wp-panel, #171a20);
+  font-size: 0.88rem;
+  line-height: 1.55;
+}
+.wp-build-flow-n { color: var(--wp-text-muted, #929cad); font-variant-numeric: tabular-nums; }
+.wp-build-flow-step { font-weight: 600; }
+.wp-build-flow-today { color: var(--wp-text-muted, #929cad); }
+.wp-build-flow-tag { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.07em; white-space: nowrap; }
+.wp-build-flow--held .wp-build-flow-tag { color: #6f9e78; }
+.wp-build-flow--loose .wp-build-flow-tag { color: #c98a3c; }
+
+.wp-build-findings { list-style: none; padding: 0; margin: 1.25rem 0 0; display: grid; gap: 1.1rem; }
+.wp-build-findings h3 { margin: 0 0 0.3rem; font-size: 1rem; }
+.wp-build-findings p { margin: 0; line-height: 1.6; max-width: 78ch; }
+.wp-build-evidence {
+  margin-top: 0.35rem !important;
+  font-size: 0.8rem;
+  color: var(--wp-text-muted, #929cad);
+  font-variant-numeric: tabular-nums;
+}
+
+.wp-build-states { list-style: none; counter-reset: none; padding: 0; margin: 1.25rem 0 0; display: grid; gap: 0.5rem; }
+.wp-build-states li {
+  display: grid;
+  grid-template-columns: minmax(8rem, auto) 2fr 2fr;
+  gap: 0.85rem;
+  padding: 0.6rem 0.75rem;
+  border-radius: 6px;
+  background: var(--wp-panel, #171a20);
+  font-size: 0.88rem;
+  line-height: 1.55;
+}
+.wp-build-state-name { font-weight: 700; color: var(--wp-gold, #c9a227); }
+.wp-build-state-leaves { color: var(--wp-text-muted, #929cad); }
+
+/* A wide table must scroll inside its own box; the page body never scrolls
+   sideways. */
+.wp-build-table-wrap { overflow-x: auto; margin: 1.25rem 0 0; }
+.wp-build-table { border-collapse: collapse; width: 100%; min-width: 46rem; font-size: 0.87rem; }
+.wp-build-table th, .wp-build-table td {
+  text-align: left;
+  vertical-align: top;
+  padding: 0.7rem 0.85rem;
+  border-bottom: 1px solid var(--wp-border, #262b34);
+  line-height: 1.55;
+}
+.wp-build-table th { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--wp-text-muted, #929cad); }
+.wp-build-table td strong { display: block; margin-bottom: 0.25rem; }
+.wp-build-table td span { color: var(--wp-text-muted, #929cad); }
+
+@media (max-width: 720px) {
+  .wp-build-flow li, .wp-build-states li { grid-template-columns: 1fr; gap: 0.3rem; }
+  .wp-build-flow-tag { white-space: normal; }
+}

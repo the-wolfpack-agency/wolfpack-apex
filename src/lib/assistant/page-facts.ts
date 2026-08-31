@@ -121,6 +121,25 @@ export const PAGE_FACTS: Record<string, PageFact> = {
     ],
     related_pages: ["playbook", "brain", "analytics"],
   },
+  builds: {
+    domain: "builds",
+    route: "/builds",
+    title: "Client builds",
+    purpose:
+      "The register of pages built for a client engagement rather than shipped as part of Instinct. Each one says which client it is for and whether its numbers are measured or drawn, so a concept is never mistaken for a product.",
+    what_you_can_do: [
+      "See every page in the product that belongs to a client engagement rather than to Instinct.",
+      "Tell at a glance whether a build is a concept, in flight, or live for a client.",
+      "Read what each build's numbers actually are before opening it: measured against real data, or drawn.",
+      "Put a wireframe or a mock on a real URL, in the real shell, before standing up a repo for it.",
+    ],
+    how_to: [
+      "Open Client Builds from the left nav.",
+      "Read the line under each build before opening it: it says whether the figures are measured or illustrative.",
+      "Every build page carries the same marker at the top, so the page itself says what it is even when it is shared as a link.",
+    ],
+    related_pages: ["pilot", "playbook"],
+  },
   playbook: {
     domain: "playbook",
     route: "/playbook",
