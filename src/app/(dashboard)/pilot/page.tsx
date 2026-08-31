@@ -83,6 +83,28 @@ function Figure({
   );
 }
 
+interface GapItem {
+  question: string;
+  asked: number;
+  system?: string;
+}
+
+/**
+ * What people asked that nothing could answer.
+ *
+ * The two lists are separate because they need different people. "Connect
+ * your CRM" is a decision; "the answer is not in your documents" is somebody
+ * writing one. A single list of failures mixes a sales conversation with a
+ * content backlog and produces neither.
+ */
+interface GapsSnapshot {
+  wouldConnect: GapItem[];
+  missing: GapItem[];
+  closed: GapItem[];
+  wanted: GapItem[];
+  readable: boolean;
+}
+
 interface ExposureKind {
   kind: string;
   occurrences: number;
@@ -121,6 +143,7 @@ export default function PilotPage() {
         adoption?: AdoptionSnapshot;
         capability?: CapabilitySnapshot;
         tokenUsage?: TokenUsage | null;
+        gaps?: GapsSnapshot;
       })
     | null
   >(null);
@@ -145,6 +168,7 @@ export default function PilotPage() {
         const res = await fetchWithRefresh("/api/pilot/phase-one");
         if (!res.ok) throw new Error(String(res.status));
         const data = (await res.json()) as PhaseOneSnapshot & {
+          gaps?: GapsSnapshot;
           adoption?: AdoptionSnapshot;
           capability?: CapabilitySnapshot;
           tokenUsage?: TokenUsage | null;
@@ -254,6 +278,102 @@ export default function PilotPage() {
                 overstate instead. A number that shrank deserves its reason
                 beside it rather than a question later. */}
           </section>
+
+          {/* WHAT THEY ASKED AND DID NOT GET.
+              A build backlog written by the people using it rather than
+              guessed at in a planning meeting, and the one panel here that
+              says what to do next rather than what happened.
+
+              An unreadable log and a client with no unanswered questions are
+              the same empty list and opposite facts, so the read carries
+              whether it worked. */}
+          {snap.gaps && !snap.gaps.readable ? (
+            <section className="wp-pilot-section">
+              <h2>What we could not answer</h2>
+              <p className="wp-pilot-aside" data-testid="pilot-gaps-unreadable">
+                These figures could not be read. That is not the same as nothing having
+                gone unanswered, and nothing here should be taken as a result.
+              </p>
+            </section>
+          ) : snap.gaps ? (
+            <section className="wp-pilot-section" data-testid="pilot-gaps">
+              <h2>What we could not answer</h2>
+
+              {snap.gaps.wouldConnect.length > 0 ? (
+                <>
+                  <p className="wp-pilot-aside">
+                    Asked about systems nothing is connected to. Connecting one answers
+                    these without anybody writing a document.
+                  </p>
+                  <ul className="wp-pilot-list" data-testid="pilot-gaps-connect">
+                    {snap.gaps.wouldConnect.map((g) => (
+                      <li key={g.question}>
+                        <strong>{g.question}</strong> asked {g.asked}×
+                        {g.system ? ` — ${g.system}` : null}
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              ) : null}
+
+              {snap.gaps.missing.length > 0 ? (
+                <>
+                  <p className="wp-pilot-aside">
+                    Asked of a system that IS connected, searched, and not there. These are
+                    gaps in the content rather than in the connections.
+                  </p>
+                  <ul className="wp-pilot-list" data-testid="pilot-gaps-missing">
+                    {snap.gaps.missing.map((g) => (
+                      <li key={g.question}>
+                        <strong>{g.question}</strong> asked {g.asked}×
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              ) : null}
+
+              {snap.gaps.wanted.length > 0 ? (
+                <>
+                  <p className="wp-pilot-aside">
+                    Instructions rather than questions: things somebody expected the
+                    product to do. No document closes these, and nobody files a request for
+                    something they assumed would work.
+                  </p>
+                  <ul className="wp-pilot-list" data-testid="pilot-gaps-wanted">
+                    {snap.gaps.wanted.map((g) => (
+                      <li key={g.question}>
+                        <strong>{g.question}</strong> asked {g.asked}×
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              ) : null}
+
+              {snap.gaps.closed.length > 0 ? (
+                <>
+                  <p className="wp-pilot-aside">
+                    Went unanswered then, answered now. The clearest evidence there is that
+                    what arrived since changed something.
+                  </p>
+                  <ul className="wp-pilot-list" data-testid="pilot-gaps-closed">
+                    {snap.gaps.closed.map((g) => (
+                      <li key={g.question}>
+                        <strong>{g.question}</strong> failed {g.asked}× before
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              ) : null}
+
+              {snap.gaps.wouldConnect.length === 0 &&
+              snap.gaps.missing.length === 0 &&
+              snap.gaps.wanted.length === 0 ? (
+                <p className="wp-pilot-aside" data-testid="pilot-gaps-none">
+                  Every question asked in this window was answered by a connected system.
+                </p>
+              ) : null}
+            </section>
+          ) : null}
 
           <section className="wp-pilot-section">
             <h2>What never reaches a model</h2>
