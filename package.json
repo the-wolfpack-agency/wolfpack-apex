@@ -50,7 +50,8 @@
     "assistant:routing": "npx tsx scripts/routing-audit.ts",
     "test:db": "bash scripts/db-test.sh",
     "test:e2e:changed": "npx tsx scripts/e2e-for-changes.ts",
-    "gate:exercise": "tsx scripts/gate-exercise.ts"
+    "gate:exercise": "tsx scripts/gate-exercise.ts",
+    "eval:retrieval": "npx tsx scripts/eval-retrieval.ts src/lib/brain/eval/retrieval-pairs.json"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.92.0",

@@ -32,7 +32,10 @@
  */
 /* FIRST. Imports hoist, so anything below already read process.env. */
 import "./load-env";
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
+
+/** The reviewed set, in the repo, so a reviewer can read what was graded. */
+const DEFAULT_PAIRS = "src/lib/brain/eval/retrieval-pairs.json";
 import { retrieve } from "@/lib/brain/retrieve";
 import { judgeRelevance } from "@/lib/brain/relevance";
 import { getAIClient } from "@/lib/ai/router";
@@ -53,9 +56,15 @@ import {
 } from "@/lib/brain/retrieval-eval";
 
 async function main(): Promise<void> {
-  const path = process.argv[2];
-  if (!path) {
-    console.error('usage: npx tsx scripts/eval-retrieval.ts pairs.json');
+  /* Defaults to the reviewed set in the repo. The pairs used to live in a
+     scratch folder on one machine, which meant the measurement that gated a
+     production decision could not be read by anyone reviewing it. */
+  const path = process.argv[2] ?? DEFAULT_PAIRS;
+  if (!existsSync(path)) {
+    console.error(
+      `No pairs at ${path}.\n` +
+        `Reviewed pairs live in ${DEFAULT_PAIRS}; run "npm run eval:retrieval" to grade them.`,
+    );
     process.exit(2);
   }
 
