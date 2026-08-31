@@ -126,13 +126,18 @@ export async function connectedSystems(workspaceId: string): Promise<Set<Backing
      a workspace's own linkage is recorded. */
   try {
     const { safeQuery } = await import("@/lib/db");
-    const { rows } = await safeQuery<{ vendor: string }>(
-      `SELECT DISTINCT vendor FROM instinct_connector_credentials
+    /* connector_name, not vendor. The first version queried a column that does
+       not exist, so every lookup threw and the fail-closed path swallowed it:
+       the front door was correct by accident, never because anything was
+       read. Found by dogfooding an unrelated report, which is the only reason
+       it surfaced at all. */
+    const { rows } = await safeQuery<{ connector_name: string }>(
+      `SELECT DISTINCT connector_name FROM instinct_connector_credentials
         WHERE workspace_id = $1 AND is_active = true`,
       [workspaceId],
     );
     for (const r of rows) {
-      const vendor = String(r.vendor).toLowerCase();
+      const vendor = String(r.connector_name).toLowerCase();
       if (/salesforce|hubspot|pipedrive|dynamics|zoho|crm/.test(vendor)) connected.add("crm");
       if (/quickbooks|intuit/.test(vendor)) connected.add("quickbooks");
       if (/dms|dealer/.test(vendor)) connected.add("dms");
