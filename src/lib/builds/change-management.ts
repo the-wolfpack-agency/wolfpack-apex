@@ -85,6 +85,23 @@ export interface Finding {
   evidence: string;
 }
 
+/**
+ * A CORRECTION, KEPT VISIBLE.
+ *
+ * An earlier reading of this program concluded that nothing follows up and
+ * that four weeks of silence is the failure mode. That was wrong, and it was
+ * wrong because it read the form builder rather than the course. BA101 Mobile
+ * Coach Rules is 115 rows of SMS script that tells participants "I'll check in
+ * weekly this year". Follow-through exists. What it lacks is any knowledge of
+ * what the individual committed to, which is a far better problem and a far
+ * cheaper one. Put in front of the client, the original claim would have been
+ * contradicted by their own material.
+ */
+export const FOLLOW_UP_CORRECTION =
+  "A weekly SMS coach already runs for a year after class. The gap is not that nobody follows up, " +
+  "it is that the follow-up asks how valuable the program was rather than how the participant's own " +
+  "commitment is going.";
+
 export const FINDINGS: Finding[] = [
   {
     title: "A submission is not a living record",

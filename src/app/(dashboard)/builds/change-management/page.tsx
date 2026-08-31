@@ -18,6 +18,7 @@ import { CLIENT_BUILDS } from "@/lib/builds/registry";
 import BuildBanner from "@/components/BuildBanner";
 import {
   CANDOUR_CONSTRAINT,
+  FOLLOW_UP_CORRECTION,
   COMMITMENT_STATES,
   CONFIGURATION,
   EVIDENCE,
@@ -73,6 +74,12 @@ export default function ChangeManagementPage() {
 
       <section className="wp-pilot-section" data-testid="cm-findings">
         <h2>What the walk found</h2>
+        {/* A correction, kept on the page rather than quietly edited out. The
+            first version of this said nobody follows up, which their own
+            material contradicts. */}
+        <p className="wp-pilot-aside" data-testid="cm-correction">
+          <strong>Corrected since first written.</strong> {FOLLOW_UP_CORRECTION}
+        </p>
         <p className="wp-pilot-aside">
           A read-only walk of {EVIDENCE.surfacesWalked} screens on their tenant. Nothing was
           created, changed or submitted.

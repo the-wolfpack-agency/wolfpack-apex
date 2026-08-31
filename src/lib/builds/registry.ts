@@ -56,6 +56,14 @@ export const CLIENT_BUILDS: ClientBuild[] = [
     data: "Every figure is measured against our own Microsoft tenant and query log. Nothing on the page is illustrative.",
   },
   {
+    href: "/builds/course-program",
+    title: "New course, new client",
+    client: "Wolfpack, for a client not yet named",
+    stage: "concept",
+    what: "Taking the method behind the Brand Ambassador program to a new client: the commitment ladder transfers, the materials do not.",
+    data: "Read from their own facilitator guides, cohort surveys and coaching scripts in the indexed corpus. Nothing is wired, and the client has not been named.",
+  },
+  {
     href: "/builds/change-management",
     title: "Change Management Plan",
     client: "Porsche Academy US",
