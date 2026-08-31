@@ -130,7 +130,63 @@ export function harvestSurface(): HarvestedPage {
           })),
         submitLabel: submitLabel.slice(0, 60),
       };
-    }),
+    }).concat(
+      /* FIELDS THAT LIVE OUTSIDE A FORM ELEMENT, which on a modern
+         application is most of them.
+         Mapping a real tenant found "3 distinct forms" on a system with
+         fifteen, and the three were furniture. The fifteen are built in a
+         canvas editor that renders inputs inside plain divs with a click
+         handler, which is ordinary practice in every React application
+         written in the last decade. Selecting "form" found the two chrome
+         widgets that happen to use one and missed every business form on the
+         estate.
+         That is the difference between a map somebody can act on and a map
+         that hands them a list of names and leaves them to open fifteen
+         screens by hand.
+         GROUPED AS ONE RECORD PER SCREEN, NOT GUESSED INTO FORMS. With no
+         form element there is no reliable boundary between one form and the
+         next, and inventing one would put fields under headings they do not
+         belong to. Reporting "this screen collects these fields" is true;
+         "this screen has three forms" would not be. */
+      (() => {
+        const loose = Array.prototype.slice
+          .call(document.querySelectorAll("input,select,textarea"))
+          .filter((i: Element) => {
+            if (i.closest("form")) return false;
+            const t = (i.getAttribute("type") ?? "").toLowerCase();
+            /* Controls and hidden state are not data somebody enters. */
+            return t !== "submit" && t !== "reset" && t !== "button" && t !== "image" && t !== "hidden";
+          })
+          .map((i: Element) => ({
+            /* A name attribute is best, then the accessible label, then the
+               placeholder. An unnamed field is still worth counting: it says
+               the screen collects something, which is the question. */
+            name:
+              i.getAttribute("name") ??
+              i.getAttribute("aria-label") ??
+              i.getAttribute("placeholder") ??
+              i.getAttribute("id") ??
+              "",
+            type: i.getAttribute("type") ?? i.tagName.toLowerCase(),
+            required: i.hasAttribute("required") || i.getAttribute("aria-required") === "true",
+          }));
+
+        if (loose.length === 0) return [];
+        const h = document.querySelector("h1,h2");
+        const heading = h ? (h.textContent ?? "").replace(/\s+/g, " ").trim() : "";
+        return [
+          {
+            name: (heading || "fields on this screen").slice(0, 60),
+            /* NOT a real method, and that is the discriminator. Nothing was
+               declared, so nothing may be assumed about what pressing a
+               button here would do. */
+            method: "none",
+            fields: loose,
+            submitLabel: "",
+          },
+        ];
+      })(),
+    ),
     /* A table is how a business object shows itself. Column names describe the
        entity; row counts describe how much of it there is. */
     tables: Array.prototype.slice.call(document.querySelectorAll("table")).map((t: Element) => {
