@@ -12,6 +12,8 @@
  * Exits non-zero when a model the availability list shows as ready did not
  * answer, so CI or a cron can gate on it.
  */
+/* FIRST. Imports hoist, so anything below already read process.env. */
+import "./load-env";
 import { probeAllModels } from "@/lib/ai/models/probe";
 
 async function main(): Promise<void> {

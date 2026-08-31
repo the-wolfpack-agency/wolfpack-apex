@@ -23,6 +23,8 @@
  * measurably cheaper for the same work. That is the difference between a
  * capability and a slide.
  */
+/* FIRST. Imports hoist, so anything below already read process.env. */
+import "./load-env";
 import { query } from "@/lib/db";
 
 interface Row extends Record<string, unknown> {

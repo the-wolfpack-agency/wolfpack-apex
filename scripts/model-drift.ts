@@ -33,6 +33,8 @@
  * Baseline: demo/model-drift-baseline.json, committed on purpose so a change
  * in model behaviour shows up in a diff somebody reviews.
  */
+/* FIRST. Imports hoist, so anything below already read process.env. */
+import "./load-env";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { getAIClient } from "@/lib/ai";

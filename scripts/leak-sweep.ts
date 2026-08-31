@@ -35,6 +35,8 @@
  *   PROBE_URL=... PROBE_EMAIL=... PROBE_PASSWORD=... npx tsx scripts/leak-sweep.ts --probe
  */
 
+/* FIRST. Imports hoist, so anything below already read process.env. */
+import "./load-env";
 import { NEVER_SEND_KINDS, redactText, type RedactionKind } from "@/lib/ai/redaction";
 
 interface Hit {

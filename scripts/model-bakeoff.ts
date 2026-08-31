@@ -32,6 +32,8 @@
  * Needs: DATABASE_URL and the provider credentials. Models that are not
  * configured are reported as such rather than skipped silently.
  */
+/* FIRST. Imports hoist, so anything below already read process.env. */
+import "./load-env";
 import { readFileSync } from "node:fs";
 import { runComparison, COMPARISON_MAX_TOKENS } from "@/lib/ai/comparison";
 import { getAIClient } from "@/lib/ai";

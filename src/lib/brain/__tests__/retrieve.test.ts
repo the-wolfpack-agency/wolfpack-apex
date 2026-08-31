@@ -136,3 +136,148 @@ describe("keeping the better of the two", () => {
     expect(mockQuery).toHaveBeenCalledTimes(1);
   });
 });
+
+/**
+ * Which of the two attempts is kept, and why.
+ *
+ * THE BUG THESE WERE WRITTEN FOR. The comparator led with hit COUNT and fell
+ * back to score, so a broad rewrite returning eight weak passages beat a
+ * precise first pass returning three strong ones. Since shouldExpand only
+ * fires on relevance failures, ranking by volume answered a question nobody
+ * had asked, and a payment-terms question came back holding a restaurant
+ * deposit receipt.
+ */
+describe("choosing between the first attempt and the rewrite", () => {
+  const hits = (n: number, score: number) =>
+    execution(Array.from({ length: n }, () => ({ score })));
+
+  /* THE EXACT SHAPE OF THE DEFECT. Eight weak beats three strong under the
+     old rule; under the new one it does not. */
+  it("does not prefer more results over better ones", async () => {
+    mockQuery
+      .mockResolvedValueOnce(hits(3, 0.88))
+      .mockResolvedValueOnce(hits(8, 0.41));
+    const r = await retrieve({
+      userId: "u",
+      userRole: "cto",
+      query: "what are the payment terms",
+      /* Rejected first, and the rewrite is no better: both wrong. */
+      judge: async () => "irrelevant",
+      expand: async () => "different words",
+    });
+    expect(r.expansionHelped).toBe(false);
+    expect(r.execution.hits).toHaveLength(3);
+  });
+
+  /* A VERDICT OUTRANKS A SCORE. The judge decides relevance; the score only
+     says how alike two pieces of text are. Getting this backwards was the
+     first version of the fix. */
+  it("keeps a lower-scoring rewrite the judge accepts over a rejected first pass", async () => {
+    mockQuery
+      .mockResolvedValueOnce(hits(3, 0.88))
+      .mockResolvedValueOnce(hits(2, 0.52));
+    let call = 0;
+    const r = await retrieve({
+      userId: "u",
+      userRole: "cto",
+      query: "what are the payment terms",
+      judge: async () => (++call === 1 ? "irrelevant" : "relevant"),
+      expand: async () => "invoice settlement wording",
+    });
+    expect(r.expansionHelped).toBe(true);
+    expect(r.execution.hits[0].score).toBe(0.52);
+  });
+
+  it("keeps the first pass when the rewrite is judged wrong too", async () => {
+    mockQuery
+      .mockResolvedValueOnce(hits(2, 0.40))
+      .mockResolvedValueOnce(hits(9, 0.95));
+    const r = await retrieve({
+      userId: "u",
+      userRole: "cto",
+      query: "what are the payment terms",
+      judge: async () => "irrelevant",
+      expand: async () => "different words",
+    });
+    /* Even at 0.95. A confident match on the wrong subject is the failure the
+       judge exists to catch, and score cannot see it. */
+    expect(r.expansionHelped).toBe(false);
+    expect(r.execution.hits).toHaveLength(2);
+  });
+
+  /* When the first pass was thin rather than wrong, no verdict is in play and
+     the scores are directly comparable. */
+  it("prefers the stronger hit when neither was rejected", async () => {
+    mockQuery
+      .mockResolvedValueOnce(hits(4, 0.30))
+      .mockResolvedValueOnce(hits(1, 0.81));
+    const r = await retrieve({
+      userId: "u",
+      userRole: "cto",
+      query: "q",
+      /* No judge: the trigger is the weak top score, not a rejection. */
+      expand: async () => "better words",
+    });
+    expect(r.expansionHelped).toBe(true);
+    expect(r.execution.hits).toHaveLength(1);
+  });
+
+  /* More material of the SAME quality genuinely is more useful to a model, so
+     count still decides, but only once score has said the two attempts found
+     comparable things. */
+  it("uses count only to break a genuine tie in quality", async () => {
+    /* Both under SEMANTIC_SCORE_FLOOR, which is what makes the first pass
+       thin enough to be worth retrying at all. Scores above the floor never
+       reach this comparison, because no rewrite is attempted. */
+    mockQuery
+      .mockResolvedValueOnce(hits(2, 0.30))
+      .mockResolvedValueOnce(hits(6, 0.32));
+    const r = await retrieve({
+      userId: "u",
+      userRole: "cto",
+      query: "q",
+      expand: async () => "more words",
+    });
+    expect(r.expansionHelped).toBe(true);
+    expect(r.execution.hits).toHaveLength(6);
+  });
+
+  it("does not pay to judge the rewrite when the first pass was not rejected", async () => {
+    mockQuery
+      .mockResolvedValueOnce(hits(1, 0.20))
+      .mockResolvedValueOnce(hits(1, 0.90));
+    let calls = 0;
+    await retrieve({
+      userId: "u",
+      userRole: "cto",
+      query: "q",
+      judge: async () => {
+        calls += 1;
+        return "relevant";
+      },
+      expand: async () => "better words",
+    });
+    /* One call, on the first pass. A second opinion costs money and settles
+       nothing when the scores already can. */
+    expect(calls).toBe(1);
+  });
+
+  it("survives a judge that throws on the second attempt", async () => {
+    mockQuery
+      .mockResolvedValueOnce(hits(2, 0.30))
+      .mockResolvedValueOnce(hits(2, 0.85));
+    let call = 0;
+    const r = await retrieve({
+      userId: "u",
+      userRole: "cto",
+      query: "q",
+      judge: async () => {
+        if (++call === 1) return "irrelevant";
+        throw new Error("judge unavailable");
+      },
+      expand: async () => "other words",
+    });
+    /* Falls back to comparing scores rather than failing the retrieval. */
+    expect(r.expansionHelped).toBe(true);
+  });
+});

@@ -19,6 +19,8 @@
  * really run, so a run that finds nothing exits non-zero and says so.
  */
 
+/* FIRST. Imports hoist, so anything below already read process.env. */
+import "./load-env";
 import { query } from "@/lib/db";
 import { getValidToken } from "@/lib/microsoft-graph";
 import { searchSharePoint } from "@/lib/integrations/microsoft-sharepoint";

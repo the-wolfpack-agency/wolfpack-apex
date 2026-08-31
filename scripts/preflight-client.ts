@@ -13,6 +13,8 @@
  * Usage:
  *   PROD_URL=https://client.vercel.app npx tsx scripts/preflight-client.ts
  */
+/* FIRST. Imports hoist, so anything below already read process.env. */
+import "./load-env";
 import { query } from "@/lib/db";
 import { isEmbeddingConfigured } from "@/lib/brain/embedder";
 import {
