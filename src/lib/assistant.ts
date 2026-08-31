@@ -2421,6 +2421,16 @@ interface KnowledgeMatch {
    below (typically 0.2–0.35). */
 const KB_MIN_SIMILARITY = 0.45;
 
+/**
+ * Which knowledge entries are allowed to answer. Exported so the rule is
+ * testable on its own, because it is one condition and it shipped wrong.
+ */
+export function pickUsableKnowledge<T extends { rating: number | null; source?: string }>(
+  results: T[],
+): T[] {
+  return results.filter((r) => (r.rating === null ? r.source !== "ai" : r.rating > 2));
+}
+
 async function tryKnowledgeBase(
   message: string,
   /* So a failed lookup is not mistaken for an empty knowledge base. */
@@ -2428,11 +2438,32 @@ async function tryKnowledgeBase(
 ): Promise<KnowledgeMatch | null> {
   try {
     const results = await searchKnowledge(message, 5);
-    // Unrated entries (rating === null) are KEPT — they represent fresh
-    // knowledge the team just added. Only entries explicitly graded low
-    // (rating <= 2) are skipped. Walk the top matches so a slightly
-    // different phrasing still lands on a good entry.
-    const usable = results.filter((r) => r.rating === null || r.rating > 2);
+    /* Unrated entries are KEPT when a person wrote them: they are fresh
+       knowledge the team just added and waiting for a rating does not make
+       them truer. Entries explicitly graded low (rating <= 2) are skipped.
+       Walk the top matches so a slightly different phrasing still lands on a
+       good entry.
+
+       AI-AUTHORED ENTRIES ARE NOT KEPT UNTIL SOMEBODY RATES THEM, and that
+       exception is the whole point. Every past model answer is saved here with
+       source='ai' and no rating, so this path was replaying them at zero
+       tokens under a badge that reads "From knowledge base" in green. A model
+       improvisation laundered into a cited fact about the client's own
+       business.
+
+       Measured 2026-08-31: 190 of 215 rows are source='ai' and every one is
+       unrated, so the comment's assumption that unrated means "just added by
+       the team" was false for 88 per cent of the table. Two of twenty-three
+       demo prompts hit one. "What does the brand ambassador training cover"
+       returned generic dealership boilerplate that had nothing to do with this
+       client, and "what issues are assigned to me" returned a model's
+       suggestion to go and search GitHub by hand, complete with a real
+       username, while the tool that actually lists those issues sat unused.
+
+       A rating is a person saying it was right. Until then a model answer is
+       a model answer, and the honest thing is to ask the model again with
+       today's context rather than to quote yesterday's guess. */
+    const usable = pickUsableKnowledge(results);
     if (usable.length === 0) return null;
     const top = usable[0];
     /* Quality gate: only serve from KB when the top match is actually
