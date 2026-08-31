@@ -35,6 +35,26 @@ import { redactText, NEVER_SEND_KINDS, type RedactionKind } from "@/lib/ai/redac
 export interface ScannedChunk {
   documentId: string;
   content: string;
+  /** What a person calls the document, for a list they can act on. */
+  filename?: string;
+}
+
+/**
+ * One document and what it carries.
+ *
+ * KINDS AND COUNTS, NEVER VALUES, and this is the part most likely to be
+ * "improved" later by somebody who wants to show a snippet for context. A
+ * list saying which document holds a card number is a work queue. The same
+ * list with the number beside it is a copy of the exposure, in a page that is
+ * easier to read than the original and shared more casually.
+ */
+export interface DocumentFinding {
+  documentId: string;
+  filename: string;
+  /** Kinds present, never-send first. */
+  kinds: { kind: RedactionKind; occurrences: number; neverSend: boolean }[];
+  /** True when any kind is one that never reaches a provider. */
+  holdsNeverSend: boolean;
 }
 
 export interface ExposureReading {
@@ -47,12 +67,20 @@ export interface ExposureReading {
   documentsWithNeverSend: number;
   /** Documents holding anything at all. */
   documentsWithSomething: number;
+  /**
+   * Per document, so somebody can work through them.
+   *
+   * Never-send documents first: they are the ones that change a decision
+   * about who may quote what.
+   */
+  documents: DocumentFinding[];
 }
 
 export function scanExposure(chunks: readonly ScannedChunk[]): ExposureReading {
   const byKind = new Map<RedactionKind, number>();
   const docsAny = new Set<string>();
   const docsNeverSend = new Set<string>();
+  const perDocument = new Map<string, { filename: string; kinds: Map<RedactionKind, number> }>();
   let chunksWithSomething = 0;
 
   for (const chunk of chunks) {
@@ -60,11 +88,41 @@ export function scanExposure(chunks: readonly ScannedChunk[]): ExposureReading {
     if (result.hits.length === 0) continue;
     chunksWithSomething += 1;
     docsAny.add(chunk.documentId);
+
+    const doc = perDocument.get(chunk.documentId) ?? {
+      filename: chunk.filename ?? chunk.documentId,
+      kinds: new Map<RedactionKind, number>(),
+    };
     for (const hit of result.hits) {
       byKind.set(hit.kind, (byKind.get(hit.kind) ?? 0) + 1);
+      doc.kinds.set(hit.kind, (doc.kinds.get(hit.kind) ?? 0) + 1);
       if (NEVER_SEND_KINDS.has(hit.kind)) docsNeverSend.add(chunk.documentId);
     }
+    perDocument.set(chunk.documentId, doc);
   }
+
+  const documents: DocumentFinding[] = [...perDocument.entries()]
+    .map(([documentId, d]) => {
+      const kinds = [...d.kinds.entries()]
+        .map(([kind, occurrences]) => ({
+          kind,
+          occurrences,
+          neverSend: NEVER_SEND_KINDS.has(kind),
+        }))
+        .sort((a, b) => Number(b.neverSend) - Number(a.neverSend) || b.occurrences - a.occurrences);
+      return {
+        documentId,
+        filename: d.filename,
+        kinds,
+        holdsNeverSend: kinds.some((k) => k.neverSend),
+      };
+    })
+    /* The ones that change a decision first. */
+    .sort(
+      (a, b) =>
+        Number(b.holdsNeverSend) - Number(a.holdsNeverSend) ||
+        a.filename.localeCompare(b.filename),
+    );
 
   return {
     chunksScanned: chunks.length,
@@ -79,6 +137,7 @@ export function scanExposure(chunks: readonly ScannedChunk[]): ExposureReading {
       .sort((a, b) => Number(b.neverSend) - Number(a.neverSend) || b.occurrences - a.occurrences),
     documentsWithNeverSend: docsNeverSend.size,
     documentsWithSomething: docsAny.size,
+    documents,
   };
 }
 

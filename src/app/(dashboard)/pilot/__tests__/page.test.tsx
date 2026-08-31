@@ -460,3 +460,94 @@ it("says nothing about testing when there was none", async () => {
   await screen.findByTestId("pilot-answers");
   expect(screen.queryByTestId("pilot-excluded-testing")).toBeNull();
 });
+
+/**
+ * What the gate stops, asked for rather than assumed.
+ *
+ * Run over our own corpus: 623 of 5,006 passages carry something removed
+ * before it reaches a model, and 59 documents hold a value that never reaches
+ * a provider at all. The panel is the client-facing half of that, and the
+ * thing it must never do is show what it found.
+ */
+describe("the corpus exposure panel", () => {
+  const exposure = {
+    chunksScanned: 5006,
+    chunksWithSomething: 623,
+    byKind: [{ kind: "credit_card", occurrences: 60, neverSend: true }],
+    documentsWithSomething: 214,
+    documentsWithNeverSend: 59,
+    documents: [
+      {
+        documentId: "d1",
+        filename: "UPS Invoice 941.14.PDF",
+        kinds: [{ kind: "credit_card", occurrences: 2, neverSend: true }],
+        holdsNeverSend: true,
+      },
+    ],
+    truncated: false,
+    durationMs: 1200,
+  };
+
+  /* ON DEMAND. Scanning every passage because somebody opened a tab would make
+     the page slow and would run a full scan on a whim. */
+  it("does not scan until asked", async () => {
+    respond({ ...base });
+    render(<PilotPage />);
+    await screen.findByTestId("pilot-exposure-run");
+    expect(screen.queryByTestId("pilot-exposure-result")).toBeNull();
+  });
+
+  it("shows what was found when asked", async () => {
+    respond({ ...base });
+    render(<PilotPage />);
+    const button = await screen.findByTestId("pilot-exposure-run");
+
+    mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => exposure });
+    button.click();
+
+    const result = await screen.findByTestId("pilot-exposure-result");
+    expect(result).toHaveTextContent("623");
+    expect(result).toHaveTextContent("59");
+    expect(result).toHaveTextContent("UPS Invoice 941.14.PDF");
+    expect(result).toHaveTextContent("credit_card");
+  });
+
+  /* THE ONE RULE THIS PANEL EXISTS UNDER. A list naming which document holds a
+     card number is a work queue. The same list with the number beside it is a
+     copy of the exposure, in a page easier to read than the original. */
+  it("never renders a value it found", async () => {
+    respond({ ...base });
+    render(<PilotPage />);
+    const button = await screen.findByTestId("pilot-exposure-run");
+    mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => exposure });
+    button.click();
+
+    const result = await screen.findByTestId("pilot-exposure-result");
+    expect(result.textContent ?? "").not.toMatch(/\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}/);
+  });
+
+  /* A button that does nothing and reports nothing is indistinguishable from a
+     corpus with nothing in it, which is the opposite finding. */
+  it("says the scan failed rather than showing an empty result", async () => {
+    respond({ ...base });
+    render(<PilotPage />);
+    const button = await screen.findByTestId("pilot-exposure-run");
+    mockFetchWithRefresh.mockResolvedValue({ ok: false, status: 500 });
+    button.click();
+
+    const failed = await screen.findByTestId("pilot-exposure-failed");
+    expect(failed).toHaveTextContent(/not the same as finding nothing/i);
+  });
+
+  /* It proves the boundary, not that anybody did anything wrong. */
+  it("does not read as an accusation", async () => {
+    respond({ ...base });
+    render(<PilotPage />);
+    const button = await screen.findByTestId("pilot-exposure-run");
+    mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => exposure });
+    button.click();
+
+    const result = await screen.findByTestId("pilot-exposure-result");
+    expect(result).toHaveTextContent(/not that anybody did anything wrong/i);
+  });
+});

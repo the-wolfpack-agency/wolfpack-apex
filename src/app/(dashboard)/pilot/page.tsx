@@ -83,6 +83,38 @@ function Figure({
   );
 }
 
+interface ExposureKind {
+  kind: string;
+  occurrences: number;
+  neverSend: boolean;
+}
+
+interface ExposureDocument {
+  documentId: string;
+  filename: string;
+  kinds: ExposureKind[];
+  holdsNeverSend: boolean;
+}
+
+/**
+ * What the scan returns.
+ *
+ * No matched value appears anywhere in this shape, and none should ever be
+ * added: a list naming which document holds a card number is a work queue,
+ * and the same list with the number beside it is a copy of the exposure in a
+ * page easier to read than the original.
+ */
+interface ExposureResponse {
+  chunksScanned: number;
+  chunksWithSomething: number;
+  byKind: ExposureKind[];
+  documentsWithSomething: number;
+  documentsWithNeverSend: number;
+  documents: ExposureDocument[];
+  truncated: boolean;
+  durationMs: number;
+}
+
 export default function PilotPage() {
   const [snap, setSnap] = useState<
     | (PhaseOneSnapshot & {
@@ -93,6 +125,11 @@ export default function PilotPage() {
     | null
   >(null);
   const [failed, setFailed] = useState(false);
+  /* ASKED FOR, NOT LOADED. Scanning every indexed passage takes seconds and
+     reads the whole corpus, so running it because somebody opened a tab would
+     make the page slow and would scan on a whim. */
+  const [exposure, setExposure] = useState<ExposureResponse | null>(null);
+  const [exposureState, setExposureState] = useState<"idle" | "running" | "failed">("idle");
 
   useEffect(() => {
     /* Redirect rather than render an empty page. A signed-out visitor seeing
@@ -216,6 +253,82 @@ export default function PilotPage() {
                 because the same contamination on a day of heavy testing would
                 overstate instead. A number that shrank deserves its reason
                 beside it rather than a question later. */}
+            {/* WHAT THE GATE STOPS, ASKED FOR RATHER THAN ASSUMED.
+                Every other figure on this page is a count of what happened.
+                This one is a scan somebody runs, because it reads the whole
+                corpus and because "show me" is the moment it means something.
+
+                It never renders a matched value. The list says which document
+                carries what kind, which is a work queue; the same list with
+                the values beside it would be a copy of the exposure in a page
+                that is easier to read than the original. */}
+            <div className="wp-pilot-exposure" data-testid="pilot-exposure">
+              <button
+                type="button"
+                className="wp-pilot-button"
+                data-testid="pilot-exposure-run"
+                disabled={exposureState === "running"}
+                onClick={async () => {
+                  setExposureState("running");
+                  try {
+                    const res = await fetchWithRefresh("/api/pilot/exposure");
+                    if (!res.ok) throw new Error(String(res.status));
+                    setExposure((await res.json()) as ExposureResponse);
+                    setExposureState("idle");
+                  } catch {
+                    /* Said, never swallowed. A button that does nothing and
+                       reports nothing is indistinguishable from a corpus with
+                       nothing in it, which is the opposite finding. */
+                    setExposureState("failed");
+                  }
+                }}
+              >
+                {exposureState === "running"
+                  ? "Reading every indexed passage…"
+                  : "Check what never reaches a model"}
+              </button>
+
+              {exposureState === "failed" ? (
+                <p className="wp-pilot-aside" data-testid="pilot-exposure-failed">
+                  The scan could not be run. That is not the same as finding nothing, and
+                  nothing above should be read as a result.
+                </p>
+              ) : null}
+
+              {exposure ? (
+                <div data-testid="pilot-exposure-result">
+                  <p className="wp-pilot-aside">
+                    {exposure.chunksWithSomething.toLocaleString()} of{" "}
+                    {exposure.chunksScanned.toLocaleString()} passages carry something removed
+                    before it reaches a model, across{" "}
+                    {exposure.documentsWithSomething.toLocaleString()} document(s).{" "}
+                    {exposure.documentsWithNeverSend.toLocaleString()} hold a value that is
+                    never sent to any provider at all.
+                  </p>
+                  <ul className="wp-pilot-list">
+                    {exposure.documents.map((d) => (
+                      <li key={d.documentId}>
+                        <strong>{d.filename}</strong>{" "}
+                        {d.kinds.map((k) => `${k.kind} (${k.occurrences})`).join(", ")}
+                        {d.holdsNeverSend ? " — never sent" : null}
+                      </li>
+                    ))}
+                  </ul>
+                  {exposure.truncated ? (
+                    <p className="wp-pilot-aside">
+                      Showing the first {exposure.documents.length}. The count above is the
+                      whole figure.
+                    </p>
+                  ) : null}
+                  <p className="wp-pilot-aside">
+                    This says the boundary holds, not that anybody did anything wrong:
+                    invoices contain card numbers, which is what an invoice is. What it
+                    changes is who should be able to quote which document.
+                  </p>
+                </div>
+              ) : null}
+            </div>
+
             {typeof snap.excludedAsTesting === "number" && snap.excludedAsTesting > 0 ? (
               <p className="wp-pilot-aside" data-testid="pilot-excluded-testing">
                 A further {snap.excludedAsTesting.toLocaleString()} answers came from our own
