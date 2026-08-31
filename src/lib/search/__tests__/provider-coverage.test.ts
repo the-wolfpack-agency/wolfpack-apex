@@ -103,6 +103,8 @@ export const SEARCH_PROVIDER_EXEMPT_TOOLS: Record<string, string> = {
     "opens the agent control-plane widget (run an agent); a task-launch surface, not a searchable index",
   "feedback.ts":
     "the /feedback slash-command tool; writes user feedback, returns a compose widget, not searchable",
+  "capability-scope.ts":
+    "shared helper module (not a tool); decides which tools a deployment is actually connected to, for the capability menu",
   "gate.ts":
     "shared helper module (not a tool); exports the agent/role tool-access gate used by the dispatcher and scan",
   "integrations-list-widget-tool.ts":
