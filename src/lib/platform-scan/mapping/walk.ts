@@ -32,6 +32,7 @@ import { ShapeSampler } from "./shapes";
 import type { MappedSurface, MapCoverage, MappedForm, ObservedIntegration } from "./types";
 import type { NetworkObservation } from "../network/observations";
 import { observedIntegrations } from "./integrations";
+import { readVolume, findExports } from "./volume";
 
 /** What the driver needs a page to tell it. One visit, one answer. */
 export interface ReadSurface {
@@ -45,6 +46,8 @@ export interface ReadSurface {
   tables: { caption: string | null; columns: string[]; rowCount: number }[];
   /** Every clickable control, unfiltered. The policy decides, not the reader. */
   controls: ClickCandidate[];
+  /** Quantity phrases the screen displayed, verbatim and bounded. */
+  countPhrases?: string[];
   loadMs: number;
 }
 
@@ -326,6 +329,17 @@ export async function walkSystem(
       }
     }
 
+    /* HOW MUCH, AND WHETHER IT CAN BE MOVED. Both read from what the screen
+       already showed: a count comes from a phrase the system displayed about
+       itself, and an export is an affordance among the controls that were
+       harvested anyway. Nothing extra is touched to find either, and the
+       export is never pressed. */
+    const volume = readVolume(read.countPhrases ?? []);
+    const exports = findExports(
+      read.controls.map((c) => c.text || c.label || ""),
+      read.links,
+    );
+
     const surface: MappedSurface = {
       url: read.url,
       signature: sig,
@@ -335,6 +349,9 @@ export async function walkSystem(
       linksTo: [...onward],
       forms: read.forms,
       tables: read.tables,
+      recordCount: volume.total,
+      recordCountFrom: volume.from,
+      ...(exports.length > 0 ? { exports } : {}),
       status: read.status,
       loadMs: read.loadMs,
     };

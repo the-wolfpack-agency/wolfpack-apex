@@ -114,6 +114,35 @@ export function systemMapToMarkdown(row: WalkedMapRow): BrainDocument {
     out.push(``);
   }
 
+  /* HOW MUCH AND WHETHER IT MOVES, in the document somebody asks questions
+     of. "How many records are in the CRM" and "can we get our data out" are
+     exactly the questions a rollout turns on. */
+  const counted = m.surfaces.filter((s) => typeof s.recordCount === "number");
+  const allExports = m.surfaces.flatMap((s) => s.exports ?? []);
+  if (counted.length > 0 || allExports.length > 0) {
+    out.push(`## How much ${m.platform} holds, and whether it can be moved`, ``);
+    for (const s of counted
+      .sort((a, b) => (b.recordCount ?? 0) - (a.recordCount ?? 0))
+      .slice(0, 12)) {
+      out.push(`- ${s.signature} showed ${s.recordCount} record(s), from the phrase "${s.recordCountFrom}".`);
+    }
+    if (counted.length > 0) {
+      /* Unknown, not zero, said in the part that gets quoted. */
+      out.push(
+        ``,
+        `Screens that stated no total are unknown rather than empty; a count here means the system displayed it.`,
+      );
+    }
+    const kinds = [...new Set(allExports.map((e) => e.kind))];
+    out.push(
+      ``,
+      allExports.length > 0
+        ? `Ways data appeared to be gettable out: ${kinds.join(", ")}. These were seen, not used: nothing was downloaded.`
+        : `No way to export was visible on the screens that were opened, which is not the same as there being none.`,
+      ``,
+    );
+  }
+
   const patterns = (m.coverage.patterns ?? []).filter((p) => p.visited < p.instances.length);
   if (patterns.length > 0) {
     out.push(

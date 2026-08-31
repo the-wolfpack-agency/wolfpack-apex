@@ -54,6 +54,14 @@ export interface HarvestedPage {
   forms: HarvestedForm[];
   tables: ReadSurface["tables"];
   controls: ReadSurface["controls"];
+  /**
+   * Phrases on the page that state a quantity, verbatim and bounded.
+   *
+   * Only the matched phrases, never page text. Returning a body sample to
+   * parse later would be the easy version and would carry a client's records
+   * into a stored map.
+   */
+  countPhrases: string[];
 }
 
 /**
@@ -187,6 +195,29 @@ export function harvestSurface(): HarvestedPage {
         ];
       })(),
     ),
+    /* HOW MUCH OF IT THERE IS, WITHOUT CARRYING ANY OF IT.
+       Migration scoping needs volume: a business object holding forty records
+       and one holding four hundred thousand are different projects. A list
+       screen almost always says so somewhere, in a pager or a total.
+       ONLY THE COUNT PHRASES ARE RETURNED, never page text. Returning a body
+       sample to parse later would be the easy version and would carry a
+       client's records into a stored map. The match is done here, in the
+       page, and only the matched phrase travels. */
+    countPhrases: (() => {
+      const text = (document.body?.textContent ?? "").replace(/\s+/g, " ");
+      const out: string[] = [];
+      const patterns = [
+        /\b\d[\d,]*\s*(?:-|to|–)\s*\d[\d,]*\s+of\s+\d[\d,]*\b/gi,
+        /\bof\s+\d[\d,]{2,}\b/gi,
+        /\b\d[\d,]*\s+(?:entries|records|results|rows|items|submissions)\b/gi,
+        /\b(?:entries|records|results|rows|items|submissions)\s*:?\s*\d[\d,]*\b/gi,
+      ];
+      for (const re of patterns) {
+        const found = text.match(re);
+        if (found) for (const m of found.slice(0, 4)) out.push(m.trim().slice(0, 40));
+      }
+      return out.slice(0, 8);
+    })(),
     /* A table is how a business object shows itself. Column names describe the
        entity; row counts describe how much of it there is. */
     tables: Array.prototype.slice.call(document.querySelectorAll("table")).map((t: Element) => {

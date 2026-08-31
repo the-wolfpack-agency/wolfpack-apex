@@ -41,6 +41,7 @@ import { inventoryForms } from "@/lib/platform-scan/mapping/form-inventory";
 import { inferEntities } from "@/lib/platform-scan/mapping/entities";
 import { buildSystemMap } from "@/lib/platform-scan/mapping/explore";
 import { describeIntegrations } from "@/lib/platform-scan/mapping/integrations";
+import { describeExports } from "@/lib/platform-scan/mapping/volume";
 import { assessWalkedTraffic } from "@/lib/platform-scan/mapping/assess";
 import { integrationHostsFor } from "@/lib/platform-scan/mapping/known-integrations";
 import { systemMapToMarkdown } from "@/lib/platform-scan/mapping/to-brain";
@@ -296,6 +297,34 @@ if (!baseUrl || !authorisedBy) {
       }
     }
     for (const c of assessment.report.caveats) console.log(`  note: ${c.slice(0, 150)}`);
+
+    /* HOW MUCH, AND WHETHER IT MOVES. The two questions a rollout is scoped
+       on, and the two the walk used to leave somebody to answer by opening
+       every screen. */
+    const counted = surfaces.filter((s) => typeof s.recordCount === "number");
+    if (counted.length > 0) {
+      console.log(`\nHow much is in there, where a screen said so:`);
+      for (const s of counted
+        .sort((a, b) => (b.recordCount ?? 0) - (a.recordCount ?? 0))
+        .slice(0, 10)) {
+        console.log(
+          `  ${String(s.recordCount).padStart(8)}  ${s.signature.slice(0, 46).padEnd(46)} "${s.recordCountFrom}"`,
+        );
+      }
+      /* SILENT ON THE REST, DELIBERATELY. A screen that stated no total is
+         unknown, not empty, and listing them as zero would put a wrong number
+         into a migration estimate. */
+      const silent = surfaces.length - counted.length;
+      if (silent > 0) {
+        console.log(`  ${silent} screen(s) stated no total. That is unknown, not zero.`);
+      }
+    }
+
+    const allExports = surfaces.flatMap((s) => s.exports ?? []);
+    console.log(`\nGetting data out: ${describeExports(allExports)}`);
+    for (const e of [...new Map(allExports.map((e) => [e.label, e])).values()].slice(0, 6)) {
+      console.log(`  ${e.kind.padEnd(9)} ${e.label}`);
+    }
 
     const byReason = new Map<string, number>();
     for (const s of coverage.skipped) byReason.set(s.reason, (byReason.get(s.reason) ?? 0) + 1);
