@@ -31,7 +31,10 @@ async function safely<T>(fn: () => Promise<T>): Promise<T | null> {
   }
 }
 
-async function gather(): Promise<Check[]> {
+/* Exported so the Phase 1 readiness command can ask the same questions rather
+   than asking slightly different ones. Two commands that disagree about
+   whether a deployment is ready is worse than either alone. */
+export async function gather(): Promise<Check[]> {
   const checks: Check[] = [];
 
   /* 1. The deployment is answering at all. Everything else is measured through
@@ -148,6 +151,10 @@ async function gather(): Promise<Check[]> {
   return checks;
 }
 
+/* Only when run directly. Imported by the Phase 1 command, this file must not
+   also start its own report and exit the process out from under it. */
+const RUN_DIRECTLY = process.argv[1]?.includes("preflight-client");
+
 async function main(): Promise<void> {
   console.log(`Preflight for ${BASE}\n`);
   const report = assessPreflight(await gather());
@@ -160,7 +167,9 @@ async function main(): Promise<void> {
   process.exit(report.readyToHandOver ? 0 : 1);
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+if (RUN_DIRECTLY) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}

@@ -24,6 +24,7 @@
     "check:merge-orphans": "npx tsx scripts/check-merge-orphans.ts",
     "scan:silent-catches": "npx tsx scripts/scan-silent-catches.ts",
     "walkthrough": "npx tsx scripts/walkthrough.ts",
+    "phase1": "npx tsx scripts/phase1-readiness.ts",
     "self-scan": "npx tsx scripts/self-scan-ai-surfaces.ts",
     "start": "next start",
     "test:e2e:prod": "PROD_URL=${PROD_URL:-https://wolfpack-instinct.vercel.app} playwright test tests/e2e/ --config=playwright.config.ts",
