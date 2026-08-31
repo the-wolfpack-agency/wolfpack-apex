@@ -27,6 +27,9 @@ import { detectAmbiguity } from "@/lib/brain/ambiguous-question";
 import { quoteWindow } from "@/lib/brain/quote-window";
 import { TurnDegradation, type DegradationKind } from "@/lib/assistant/degraded-answer";
 import { judgeRelevance, RELEVANCE_MATERIAL_PER_HIT } from "@/lib/brain/relevance";
+import { strongHits, judgeMaterial } from "@/lib/brain/strong-hits";
+import type { QueryExecution } from "@/lib/brain/query";
+import { expandQuestion } from "@/lib/brain/expand-query";
 import { redactText, NEVER_QUOTE_KINDS } from "@/lib/ai/redaction";
 import { looksTabular } from "@/lib/brain/query";
 import { neutralizeInjection } from "@/lib/brain/security";
@@ -2860,17 +2863,88 @@ async function tryBrain(
      * query expansion shipped unproven: its trigger is a judge rejection and
      * the harness never judged.
      *
-     * No judge and no expander passed here, so behavior is byte-for-byte what
-     * it was: retrieve() with neither is plain retrieval. The judge still runs
-     * below, where it always has. This is the wiring, not the behavior
-     * change, and the two are worth keeping separate. */
-    const { execution: result } = await retrieve({
+     * BOTH ARE PASSED NOW, AND THE EVAL IS WHY. Wired but unused, expansion
+     * had never run outside the harness. Graded on the reviewed pairs it moves
+     * recall from 25 per cent to 33, MRR 0.208 to 0.292, firing on half the
+     * questions and helping on three.
+     *
+     * THE LARGER NUMBER IS REAL AND WAS NOT TAKEN. A looser trigger scores 42
+     * per cent, and buying it means rewriting almost everything: measured on
+     * 30 real queries that had ALREADY found something, that version fired on
+     * 26 of them. Each firing is a model call and about two seconds. Trading
+     * two seconds on nearly every question for nine points on the ones that
+     * fail is not a trade a person waiting for an answer would make, so the
+     * conservative trigger ships and the gap is a measurement problem rather
+     * than a missing feature. Closing it needs a calibrated threshold for
+     * keyword scores, and that needs a bigger labeled set than twelve pairs.
+     *
+     * WHAT IT COSTS AS SHIPPED. The judge is $0.000150 a call and already ran
+     * here, so it is not new. Expansion adds a rewrite at $0.000017 and a
+     * second search, on questions that found nothing or were judged wrong.
+     * Against an answer that costs $0.003903, that is a rounding error.
+     *
+     * IT MAKES THE FAILING PATH SLOWER, WHICH IS THE TRADE THAT WAS TAKEN. A
+     * question that would have returned nothing spends about two more seconds
+     * before answering. Nobody minds waiting for an answer; they mind waiting
+     * for "I could not find that". Questions that succeed first time are
+     * untouched, and that is now true rather than assumed.
+     *
+     * The judge here sees exactly what the judge below sees, through the same
+     * two functions, because two judges shaped differently are two judges that
+     * can disagree about the same passages. */
+    const quotableQuestion = carriesEnoughToQuote(message);
+    const judgeForRetrieval = async (question: string, hits: QueryExecution["hits"]) => {
+      const material = judgeMaterial(strongHits(hits, quotableQuestion));
+      /* Nothing worth an opinion. Saying "unjudged" leaves the decision to the
+         shape gates rather than inventing a verdict on an empty string. */
+      if (!material) return "unjudged" as const;
+      const verdict = await judgeRelevance(question, material, async (input) => {
+        const res = await getAIClient().complete({
+          messages: [
+            { role: "system", content: input.system },
+            { role: "user", content: input.prompt },
+          ],
+          max_tokens: input.maxTokens,
+          model_tier: "cheap",
+          metadata: { feature: "brain.retrieval_relevance", user_id: userId, user_role: userRole },
+        });
+        return res.content;
+      });
+      return verdict.verdict;
+    };
+
+    const retrieved = await retrieve({
       userId,
       userRole,
       query: message,
       limit: 5,
       conversationId,
+      judge: judgeForRetrieval,
+      expand: (question) =>
+        expandQuestion(question, async (input) => {
+          const res = await getAIClient().complete({
+            messages: [
+              { role: "system", content: input.system },
+              { role: "user", content: input.prompt },
+            ],
+            max_tokens: input.maxTokens,
+            model_tier: "cheap",
+            metadata: { feature: "brain.query_expansion", user_id: userId, user_role: userRole },
+          });
+          return res.content;
+        }),
     });
+    const result = retrieved.execution;
+
+    if (retrieved.expanded) {
+      /* Recorded so the production effect is measurable rather than assumed.
+         The eval measured twelve questions; this measures every real one. */
+      trackEvent("brain.query_expanded", userId, userRole, {
+        helped: retrieved.expansionHelped,
+        first_was_rejected: retrieved.firstWasRejected,
+        hits: result.hits.length,
+      });
+    }
     /* THE LAST HIDING PLACE.
      *
      * Measured against the deployed URL 2026-08-29, one turn, no exception:
@@ -2955,17 +3029,10 @@ async function tryBrain(
      * Which matters more than it looks, because on the same day the production
      * log showed 252 brain queries in 30 days and NOT ONE semantic hit, so in
      * practice every answer here has been taking the keyword branch. */
-    const quotable = carriesEnoughToQuote(message);
-    const strong = result.hits.filter((h) => {
-      /* SEMANTIC IS EXEMPT FROM THE SUBJECT-WORD TEST, NOT FROM HAVING TO BE
-         CLOSE. Qdrant already refuses anything under SEMANTIC_SCORE_FLOOR, and
-         this repeats the check because the exemption is only safe while that
-         floor exists: for one afternoon it did not, and every query on record
-         came back with five confident hits. Belt and braces on the one branch
-         that answers without asking anything else. */
-      if (h.source.includes("semantic")) return h.score >= SEMANTIC_SCORE_FLOOR;
-      return quotable && h.score >= 0.05;
-    });
+    /* The same filter the judge inside retrieve() used, from one definition.
+       Two copies of this rule are two judges that can disagree about the same
+       passages, and this product has already shipped that bug once. */
+    const strong = strongHits(result.hits, quotableQuestion);
     if (strong.length === 0) return { strong: null, context };
 
     /* DID IT FIND THE RIGHT THING, OR MERELY SOMETHING?
@@ -3013,22 +3080,31 @@ async function tryBrain(
      * turns that would otherwise be confidently wrong or wrongly refused. The
      * whole argument for the judge was that this is the cheapest place to
      * spend, and starving it of the text defeated that. */
-    const material = strong
-      .slice(0, 3)
-      .map((h) => h.content.slice(0, RELEVANCE_MATERIAL_PER_HIT))
-      .join("\n\n");
-    const relevance = await judgeRelevance(message, material, async (input) => {
-      const res = await getAIClient().complete({
-        messages: [
-          { role: "system", content: input.system },
-          { role: "user", content: input.prompt },
-        ],
-        max_tokens: input.maxTokens,
-        model_tier: "cheap",
-        metadata: { feature: "brain.retrieval_relevance", user_id: userId, user_role: userRole },
-      });
-      return res.content;
-    });
+    /* ALREADY JUDGED, SO DO NOT JUDGE AGAIN.
+     *
+     * retrieve() ran this exact judge on this exact material, and reports the
+     * verdict for whichever attempt it kept. Asking a second time would double
+     * the cost of every question and, worse, could return a different answer
+     * to the same question and leave two parts of one turn disagreeing.
+     *
+     * "unjudged" means no verdict applies to what we are holding, which
+     * happens when nothing was strong enough to show the judge or when a
+     * rewrite won on score without needing an opinion. Then we ask. */
+    const relevance =
+      retrieved.keptVerdict !== "unjudged"
+        ? { verdict: retrieved.keptVerdict, reason: "" }
+        : await judgeRelevance(message, judgeMaterial(strong), async (input) => {
+            const res = await getAIClient().complete({
+              messages: [
+                { role: "system", content: input.system },
+                { role: "user", content: input.prompt },
+              ],
+              max_tokens: input.maxTokens,
+              model_tier: "cheap",
+              metadata: { feature: "brain.retrieval_relevance", user_id: userId, user_role: userRole },
+            });
+            return res.content;
+          });
 
     if (relevance.verdict === "irrelevant") {
       trackEvent("brain.retrieval_judged_irrelevant", userId, userRole, {

@@ -66,6 +66,23 @@ export interface FirstPass {
    * paying for.
    */
   judgedIrrelevant?: boolean;
+  /**
+   * Whether the top hit came from the semantic side.
+   *
+   * WITHOUT THIS, THE SCORE TEST BELOW COMPARES TWO DIFFERENT SCALES. A
+   * semantic score is a cosine similarity and the floor is a real threshold on
+   * it. A keyword score is a text-rank number from an entirely different
+   * calculation: the retriever treats 0.05 as the bar for a keyword hit worth
+   * quoting, so keyword tops sit an order of magnitude under a floor that was
+   * never about them.
+   *
+   * Measured on 30 real queries that had already found something: 26 of them,
+   * 87 per cent, would have triggered a paid rewrite. Not one had a semantic
+   * top hit. Left alone this would have added a model call and roughly two
+   * seconds to almost every question in the product, in the name of rescuing
+   * questions that were not failing.
+   */
+  topIsSemantic?: boolean;
 }
 
 /**
@@ -77,12 +94,25 @@ export interface FirstPass {
  */
 export function shouldExpand(first: FirstPass, semanticFloor: number): boolean {
   /* Retrieved confidently from the wrong place. This is the vocabulary
-     failure, and it is invisible to every number here. */
+     failure, it is invisible to every number here, and it is the reason
+     expansion exists. */
   if (first.judgedIrrelevant) return true;
   if (first.hitCount === 0) return true;
-  /* Found something, but nothing convincing. The floor is passed in rather
-     than restated so this cannot disagree with the retriever about what
-     "convincing" means. */
+
+  /* THE SCORE TEST ONLY APPLIES TO A SCORE THE FLOOR IS ABOUT.
+   *
+   * Found something, but nothing convincing. The floor is passed in rather
+   * than restated so this cannot disagree with the retriever about what
+   * "convincing" means, and for the same reason it is only asked about
+   * semantic hits: it is a threshold on cosine similarity, and a keyword rank
+   * is not a cosine similarity.
+   *
+   * There is deliberately no keyword equivalent. We have a validated floor for
+   * one scale and none for the other, and inventing a number here would be
+   * guessing at the exact place a wrong guess is most expensive. A keyword
+   * result that is genuinely wrong still gets caught: the judge says so, and
+   * that is the branch above. */
+  if (!first.topIsSemantic) return false;
   return first.topScore < semanticFloor;
 }
 
@@ -118,4 +148,38 @@ export function parseExpansion(raw: string, original: string): string {
   if (cleaned.length < 3 || cleaned.length > 300) return original;
   if (/\b(?:I |cannot|sorry|unable)\b/i.test(cleaned)) return original;
   return cleaned;
+}
+
+/**
+ * Ask a model for the words the documents probably use.
+ *
+ * Composes the three pieces above the way judgeRelevance composes its own:
+ * the caller supplies a completion function and knows nothing about prompts,
+ * this knows the prompt and nothing about cost or which model runs it.
+ *
+ * FALLS BACK TO THE ORIGINAL ON ANY FAILURE, and that is the whole error
+ * policy. A rewrite is an optimization; a rewrite that throws should cost a
+ * question nothing. Returning the original means retrieve() sees an unchanged
+ * string, skips the second retrieval, and the reader gets exactly what they
+ * would have got without this.
+ */
+export async function expandQuestion(
+  question: string,
+  complete: (input: { system: string; prompt: string; maxTokens: number }) => Promise<string>,
+): Promise<string> {
+  const original = (question ?? "").trim();
+  if (!original) return question;
+  try {
+    const raw = await complete({
+      system: EXPANSION_SYSTEM,
+      prompt: original,
+      maxTokens: EXPANSION_MAX_TOKENS,
+    });
+    return parseExpansion(raw, original);
+  } catch {
+    /* silent-ok: the caller compares the result to the original and does
+       nothing when they match, so a failure here is indistinguishable from
+       "no better wording exists", which is the correct outcome either way. */
+    return original;
+  }
 }
