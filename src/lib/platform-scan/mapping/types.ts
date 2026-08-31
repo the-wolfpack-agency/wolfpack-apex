@@ -26,6 +26,8 @@
  * has the numbers to qualify its own claims.
  */
 
+import type { ExportAffordance } from "./volume";
+
 /** One page or view the map reached. */
 export interface MappedSurface {
   /** Canonical URL as visited. */
@@ -45,6 +47,16 @@ export interface MappedSurface {
   forms: MappedForm[];
   /** Tabular data on the page, which is how a business object shows itself. */
   tables: { caption: string | null; columns: string[]; rowCount: number }[];
+  /**
+   * How many records the screen said it holds. Null means it did not say,
+   * which is NOT zero: "holds nothing" and "did not state" are opposite facts
+   * and a migration plan built on the wrong one is wrong by a whole object.
+   */
+  recordCount?: number | null;
+  /** The phrase the count was read from, so a reviewer can check. */
+  recordCountFrom?: string | null;
+  /** Ways data appeared to be gettable out. Detected, never pressed. */
+  exports?: ExportAffordance[];
   /** HTTP status when the surface was fetched. */
   status: number | null;
   /** Milliseconds to load. A slow screen IS a finding for the report. */
