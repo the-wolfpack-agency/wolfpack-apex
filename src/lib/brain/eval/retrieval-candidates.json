@@ -1,44 +1,138 @@
 [
   {
-    "question": "who owns the Porsche account",
-    "expectFilename": "BA102_Day 1_MLG_V8_4-20-26",
-    "timesCited": 2,
+    "question": "Where is the 'Clienteling: The Right Cayenne' workshop held during Day 3 of the event?",
+    "expectFilename": "2026 E4 Launch Event Footprint_4 24 2026.xlsx",
     "reviewed": false,
-    "concern": "Looks genuine. Somebody asked a real question and cited that document. Needs a human to confirm the guide actually answers it rather than merely mentioning the account."
+    "source": "generated",
+    "passage": "nne + 1 ICE Macan (Lead/Follow)\",\"Drive to Omni Interlocken 28 pax | PTX Driver 3-4 | Docent 2 14 Cayenne EV 2 ICE Cayenne + 1 ICE Macan (Lead/Follow)\",,4:50 PM - 6:20 PM,:90,\"Drive to Om ni Interlocken 28 pax | PTX Driver 5-6 | Docent 3 14 Cayenne EV 2 ICE Cayenne + 1 ICE Macan (Lead/Follow)\",\"Drive to Omni Interlocke",
+    "answer": "Omni - Pavilion [4750 SF]"
   },
   {
-    "question": "Meeting Notes with McDonalds",
-    "expectFilename": "Meeting Notes with McDonalds",
-    "timesCited": 52,
+    "question": "How can participants access the Change Management Plan form in PMA?",
+    "expectFilename": "BA102_Day 3_MLG_V8_4-21-26.pdf",
     "reviewed": false,
-    "concern": "REJECT: the question is the filename. Retrieval cannot fail this, so it measures nothing and would inflate every score it appears in."
+    "source": "generated",
+    "passage": ". R. T. goal, choose another and create a second plan. - You will build your Change Management Plan by following the link in your Training Guide on PMA. This will let you share your plan with managers, update it as you go, and discuss during coaching. Do: • Explain the activity and use questions to confirm that partici",
+    "answer": "You’ll find a link to the Change Management Plan form in your Training Guide."
   },
   {
-    "question": "this is feedback",
-    "expectFilename": "BA202 Phase 2 Susie Sample 360 Report",
-    "timesCited": 27,
+    "question": "What happens if the Client fails to pay sums due under the agreement within the specified timeframe?",
+    "expectFilename": "Mike Abrashoff Contract 2025.pdf",
     "reviewed": false,
-    "concern": "REJECT: not a question. Nothing was being asked, so there is no right document to find."
+    "source": "generated",
+    "passage": "ip, INC, which approval will not be unreasonably withheld or delayed. 9) DEFAULT AND REMEDIES. If the Client breaches any of its material obligations hereunder, such materiality to be assessed in the sole opinion of Grassroots Leadership, INC, including the payment terms, the full amount of the fee shall become due and",
+    "answer": "The balance will accrue interest at the rate of 1% per month."
   },
   {
-    "question": "what is my busiest day this week",
-    "expectFilename": "Screenshot 2026-06-03 at 11.56.00 AM",
-    "timesCited": 2,
+    "question": "What is recommended for preparing for a one-on-one coaching call?",
+    "expectFilename": "BA101 Mobile Coach Rules.csv",
     "reviewed": false,
-    "concern": "REJECT: a calendar question. The answer is in the calendar, not the library, and grading document retrieval on it would score the wrong system."
+    "source": "generated",
+    "passage": "xperience? Text YES or NO. \",WUNSR,\"Condition: Response Regexp Value /\\bn\\b|\\bno(t|pe)*\\b|nega|\\bnah\\b|don(')*t think|never|did not|didn't/i Action: N/A Next Rule: wk10d03. 1. no Condition: Response Regexp Value /(\\by\\b|\\byes\\b|\\byrs\\b|\\byea(h)*\\b|yep|yup|sure|of course|certain|yip|(absolutely|indubitably|affirmative|d",
+    "answer": "I'd strongly recommend taking another spin through your iTrainer workbook before then - it's your one-stop-shop for session prep!"
   },
   {
-    "question": "how many open tasks do I have",
-    "expectFilename": "Screenshot 2026-06-19 at 1.18.00 PM",
-    "timesCited": 2,
+    "question": "What activity is suggested for participants to reflect on their learning and set future goals?",
+    "expectFilename": "BA102_Day 4_MLG_V8_4-21-26.pdf",
     "reviewed": false,
-    "concern": "REJECT: a tasks question, same reason. The cited file is a screenshot somebody happened to open in the same session."
+    "source": "generated",
+    "passage": "t 1 29 COMMENCEMENT DAY 4 Six-Month Note Activity 10 minutes Do: • Give each participant a notecard and envelope. • Have them think about everything they’ve learned during the course—both the material covered and the conversations they’ve had inside and outside the room. • Ask them to think about what they want to have",
+    "answer": "Participants are asked to write a note of congratulations to themselves about what they want to have accomplished six months from now and place it in a self-addressed envelope to be sent back to them later."
   },
   {
-    "question": "whats in sharepoint",
-    "expectFilename": "Ba Comms1_Registration & Sign Up.mp4.pla",
-    "timesCited": 2,
+    "question": "What is the purpose of the Porsche Brand Ambassador 101 program?",
+    "expectFilename": "2026_STRATEGY_Updated.pdf",
     "reviewed": false,
-    "concern": "REJECT: no single document answers 'what is in SharePoint', and a video playlist is not the answer to it. A pair with no correct answer grades noise."
+    "source": "generated",
+    "passage": "adership capability, accountability, and operational excellence. Enable Product and Market Readiness Prepare teams for Porsche’s evolving product portfolio. 5 BRAND AMBASSADOR 101 28 CLASSES 32 PARTICIPANTS BA 101 builds frontline capability by strengthening communication, engagement, and customer interaction skills es",
+    "answer": "BA 101 builds frontline capability by strengthening communication, engagement, and customer interaction skills essential to the Porsche experience."
+  },
+  {
+    "question": "What performance benefits does rear-axle steering provide in the 911 GTS models?",
+    "expectFilename": "Content Cards_SPARK x TINS_Graphics #2.pdf",
+    "reviewed": false,
+    "source": "generated",
+    "passage": "turbocharger provides near-instant response. The engine’s horizontally opposed construction and traditional position in the rear end of the 911 allows for a low center of gravity. It all adds up to even more impressive performance figures than the predecessor of the new 911, the type 992. The 992. 2 GTS accelerates to ",
+    "answer": "Rear-axle steering enhances performance and day-to-day usability by making maneuvering at low speeds easier while significantly increasing driving stability at higher speeds."
+  },
+  {
+    "question": "What is SPARK and how is it integrated into Porsche's training programs?",
+    "expectFilename": "2026_PCNA ACADEMY STRATEGY_FINAL.pdf",
+    "reviewed": false,
+    "source": "generated",
+    "passage": "upport Storytelling Facilitated discussions and applied exercises to build skills, confidence, and behaviors required to deliver client-centric experiences. Post Launch Training Equivalency test for participants not attending the program Survey results analysis and reporting Field Training Managers visits after launch ",
+    "answer": "SPARK is a fully integrated customer experience framework delivered through required web-based training modules and embedded across all training programs and learning paths."
+  },
+  {
+    "question": "Which DiSC behavior styles are considered more people-focused rather than task-focused?",
+    "expectFilename": "BA201 Knowledge Test Questions.csv",
+    "reviewed": false,
+    "source": "generated",
+    "passage": "DiSC, which behavior styles are more people-focused (vs. task-focused)? \",,4,Y,Dominance and Influence,Steadiness and Conscientiousness,Dominance and Conscientiousness,Influence and Steadiness,,,Y Multiple Choice,\"Chris likes to speak in terms of feelings, is energetic and uses a lot of vocal inflection. Which of the D",
+    "answer": "Steadiness and Influence."
+  },
+  {
+    "question": "What is the Peak-End Rule and how can it be applied to client experiences?",
+    "expectFilename": "BA101_Day 3_MLG_V8_4-21-26.pdf",
+    "reviewed": false,
+    "source": "generated",
+    "passage": "art 2: Anticipated Timing Peak-End Rule Discussion 10 minutes Crafting the Client Experience Activity 40 minutes From Inspiration to Action 10 minutes Total 60 minutes BRAND AMBASSADOR 101 Draft 1 23 CRAFTING THE CLIENT EXPERIENCE PA R T 0 2 DAY 3 Peak-End Rule Discussion 10 minutes Ask: • Who here has been to a Disney",
+    "answer": "The Peak-End Rule suggests that people remember the peaks and ends of an experience, and it can be applied to client experiences by enhancing memorable moments (peaks), creating a strong finale (ends), and addressing negative moments (pits)"
+  },
+  {
+    "question": "What is the towing capacity of the Porsche Cayenne Electric compared to the Mercedes-Benz EQE SUV?",
+    "expectFilename": "E4 Cayenne_Comp Graphics_Training Guide_V1_5-19-26.pdf",
+    "reviewed": false,
+    "source": "generated",
+    "passage": "ty 27. 6 cu. ft. 14. 0 cu. ft. Board 1: Porsche Cayenne vs. Mercedes-Benz EQE SUV (CANADA) Porsche Cayenne Electric Mercedes-Benz EQE 500 4MATIC SUV Model Choices Cayenne Electric Cayenne S Electric Cayenne Turbo Electric EQE 350 4MATIC SUV EQE 500 4MATIC SUV AMG EQE SUV Powertrain Choices Dual-motor AWD Dual-motor AWD",
+    "answer": "The Porsche Cayenne Electric has a towing capacity of 3,500 kg, while the Mercedes-Benz EQE SUV has a towing capacity of 1,600 kg."
+  },
+  {
+    "question": "What happens if invoices are not paid within 30 days?",
+    "expectFilename": "viaPeople Work Order_Wolfpack Agency_360 Feedback_5-7-25[36].docx.pdf",
+    "reviewed": false,
+    "source": "generated",
+    "passage": "support at support@viaPeople. com, 8:00am-6:00pm EST. Level 2 support can be extended to weekends and after hours (Saturday and Sunday) for an additional charge. Term. The term of this Work Order (the “Term”) shall commence upon the Effective Date and continue for an initial term of 12 months. The Term will then automa",
+    "answer": "Any invoices not paid within thirty (30) days of the due date shall accrue interest at the lesser of: (i) 1 ½% per month or (ii) the highest rate permissible under applicable law, from the date such invoices were due."
+  },
+  {
+    "question": "What are some functions that can be controlled using the Alexa Voice Assistant in 2026 Porsche vehicles?",
+    "expectFilename": "MY26 Product Updates.pdf",
+    "reviewed": false,
+    "source": "generated",
+    "passage": "ata volume to power the onboard App Center and third-party apps. APP CENTER 2026 Porsche Model Year Updates | © 2025 Porsche Cars North America, Inc. For internal authorized Porsche dealer use only and cannot be copied or distributed. Alexa® Voice Assistant provides convenient control of individual vehicle functions an",
+    "answer": "Sample functions include navigation (e.g., adding/changing destination, searching for charging stations), air conditioning (e.g., seat heating, temperature adjustment), media controls (e.g., activating music streaming apps), and additional "
+  },
+  {
+    "question": "What activity involves writing a note to oneself for future reflection, and how is it delivered?",
+    "expectFilename": "BA101_Day 4_MLG_V8_4-21-26.pdf",
+    "reviewed": false,
+    "source": "generated",
+    "passage": "t 1 29 COMMENCEMENT DAY 4 Six-Month Note Activity 10 minutes Do: • Give each participant a notecard and envelope. • Have them think about everything they’ve learned during the course—both the material covered and the conversations they’ve had inside and outside the room. • Ask them to think about what they want to have",
+    "answer": "Participants write a note of congratulations to themselves, place it in a self-addressed envelope, and receive the note six months later."
+  },
+  {
+    "question": "What is the storage capacity of the cargo area with the rear seats folded?",
+    "expectFilename": "Cayenne Electric_Day 2_Storage Star_V4_5-21-26.pdf",
+    "reviewed": false,
+    "source": "generated",
+    "passage": "s. Participants will learn more about this story in the Storytelling module on Day 3. – Interesting fact: The wind tunnel building is located equal distance between design and engineering buildings—a symbol of Porsche’s emphasis on collaboration between groups. – Adaptive roof spoiler (Rear) – Adaptive cooling air flap",
+    "answer": "The cargo area has 56.1 cubic feet (Canada: 1,588 litres) of storage with the rear seats folded."
+  },
+  {
+    "question": "When did Porsche achieve its first overall victory at the Targa Florio, and with which car?",
+    "expectFilename": "2025 CI BA100 PPT Reference.pdf",
+    "reviewed": false,
+    "source": "generated",
+    "passage": "direction of Ferry Porsche, design of an all-wheel drive Grand Prix racecar the ‘Cisitalia’ (Type 360) – is begun for Italian industrialist Piero Dusio. 62 2 3 4 1 Agenda 5 5 Introduction to Porsche History and Heritage Ferdinand Porsche First Vehicles – Let’s go Racing! \"Dr. Ing. h. c. F. Porsche GmbH“ Passing the Bat",
+    "answer": "In 1956, with the 550 A Spyder."
+  },
+  {
+    "question": "Who provided feedback on Susan Sample's performance and in what roles?",
+    "expectFilename": "BA202 Phase 2 Susie Sample 360 Report.pdf",
+    "reviewed": false,
+    "source": "generated",
+    "passage": "um dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum. [Maggie Manager rating Susan Sample as MGR] Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut en",
+    "answer": "Maggie Manager as MGR, Dottie Direct as DIRECT_REPORT, Donald Direct as DIRECT_REPORT, Drake Report as DIRECT_REPORT, and Jen Speerbrecher as PEER."
   }
 ]

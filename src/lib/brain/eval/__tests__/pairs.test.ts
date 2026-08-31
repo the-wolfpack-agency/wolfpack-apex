@@ -18,11 +18,15 @@ import path from "node:path";
 
 const DIR = path.join(process.cwd(), "src", "lib", "brain", "eval");
 
+import { namesTheFile, collidingPairs } from "@/lib/brain/eval/pair-quality";
+
 interface Pair {
   question: string;
   expectFilename: string;
   reviewed?: boolean;
-  concern?: string;
+  /** Generated candidates carry the evidence a reviewer needs. */
+  passage?: string;
+  answer?: string;
 }
 
 const pairs: Pair[] = JSON.parse(
@@ -97,13 +101,31 @@ describe("the candidate queue", () => {
     for (const c of candidates) expect(graded.has(c.question.trim().toLowerCase())).toBe(false);
   });
 
-  /* A queue of raw harvester output is a slog nobody works through. Each entry
-     carries why it is doubtful, so reviewing it is a decision rather than an
-     investigation. */
-  it("says what is doubtful about each one", () => {
+  /* A queue nobody can review is a queue nobody reviews. Each candidate
+     carries the passage its question came from and the answer that passage
+     gives, so a decision takes seconds and needs no document opened. */
+  it("carries the evidence needed to judge it", () => {
     for (const c of candidates) {
-      expect(typeof c.concern).toBe("string");
-      expect((c.concern ?? "").length).toBeGreaterThan(40);
+      expect((c.passage ?? "").length).toBeGreaterThan(80);
+      expect((c.answer ?? "").length).toBeGreaterThan(10);
     }
+  });
+
+  /* THE RULES HAVE TO HAVE RUN. Both the filename rule and the collision rule
+     have reported catching nothing on a run where nothing happened to trigger
+     them, which reads exactly like a rule that is broken. Asserting the output
+     is clean is the check that the generator applied them at all. */
+  it("holds nothing the quality rules should have removed", () => {
+    for (const c of candidates) {
+      expect(namesTheFile(c.question, c.expectFilename)).toBe(false);
+    }
+    expect(collidingPairs(candidates).size).toBe(0);
+  });
+
+  /* One question per document, so a good score cannot come from finding one
+     document repeatedly. */
+  it("asks about a different document each time", () => {
+    const files = candidates.map((c) => c.expectFilename);
+    expect(new Set(files).size).toBe(files.length);
   });
 });
