@@ -97,6 +97,53 @@ in use, Entra sign-in logs and Defender for Cloud Apps show which AI services
 staff are actually signing into, which is a different and often more
 uncomfortable report.
 
+## Week one: learn their words before quoting a number
+
+A figure computed correctly from well-formed data can still be wrong by ten
+times, and nothing in the data says so.
+
+Ours was calendars. Of 801 entries across six people, 30 were somebody being
+away and held 2,763 hours, 64 were trips and events holding 2,304, and 707
+were meetings holding 557. Eleven per cent of the calendar carried ninety per
+cent of the hours and none of it was a meeting. A "how much time does this
+team spend in meetings" answer built on that reports five and a half thousand
+hours where the truth is five hundred and forty-seven.
+
+The events were well formed. The arithmetic was correct. It was found because
+somebody who knows that calendar said an entry reading OOO is a vacation day.
+
+**Every client has one of these and it will not be OOO.** A dealership marks
+floor duty and demo drives on the same calendar as meetings. An agency blocks
+shoot days. Somebody prefixes every placeholder with HOLD. The same shape
+turns up wherever a local convention hides inside well-formed data: a CRM
+stage that means "dead" but is spelled like a live one, a DMS status code
+every branch uses differently, an account named for a project rather than a
+customer.
+
+**So it is asked, in week one, before any figure is quoted.** Run the
+calibration on their calendar and their records, take the entries that carry
+the weight, and put them in front of somebody who knows. The report names them
+without knowing what they are:
+
+> 19 of 801 calendar entries account for more than half the hours. That is
+> usually a local convention rather than a busy team. The largest are: Avryl
+> Trip, Alicia OOO, F1 Las Vegas. Somebody who knows this calendar should say
+> what those are.
+
+It asks and never concludes, because reading the data is exactly what does not
+produce the answer.
+
+**What comes back becomes configuration, not code.** Their words are recorded
+per deployment rather than added to a built-in list, because a pattern right
+for one client is wrong for the next: "demo" is a test drive at a dealership
+and a sales meeting everywhere else.
+
+**The rule this sets.** No number about how their people spend time, how much
+is in a system, or how a pipeline is moving goes in a document or on a screen
+until somebody on their side has told us what the outliers are. A number
+quoted before that conversation is a number we may have to withdraw, and
+withdrawing one costs more than the week it would have taken to ask.
+
 ## Phase 1: documents, read only
 
 **What it is.** Their SharePoint library, read into the Brain, answerable

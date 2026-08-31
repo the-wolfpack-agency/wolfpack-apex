@@ -117,3 +117,41 @@ describe("the Copilot ask stays on the safe side of the line", () => {
     expect(CLIENT_DEPLOYMENT_PLAYBOOK).not.toMatch(/AiEnterpriseInteraction/);
   });
 });
+
+/**
+ * The week-one calibration claim.
+ *
+ * The playbook now promises that we ask a client what their outlying entries
+ * mean before quoting a figure. It is there because our own meeting-time
+ * number was ten times too large until somebody said an OOO entry is a
+ * vacation day, and the promise is only worth making if the numbers in it are
+ * the real ones and the tooling behind it exists.
+ */
+describe("the calibration promise is the measured one", () => {
+  it("carries the figures that were actually measured", () => {
+    expect(CLIENT_DEPLOYMENT_PLAYBOOK).toMatch(/801 entries/);
+    expect(CLIENT_DEPLOYMENT_PLAYBOOK).toMatch(/2,763 hours/);
+    /* Matched across the line break the markdown wraps on, since the figure
+       is what matters and the wrapping is not. */
+    expect(CLIENT_DEPLOYMENT_PLAYBOOK).toMatch(/707\s+were meetings holding 557/);
+  });
+
+  /* THE RULE IT SETS, which is the part a client will hold us to. */
+  it("commits to asking before quoting a number", () => {
+    expect(CLIENT_DEPLOYMENT_PLAYBOOK).toMatch(/before any figure is quoted/i);
+    expect(CLIENT_DEPLOYMENT_PLAYBOOK).toMatch(/asks and never concludes/i);
+  });
+
+  /* Says the quirk will not be ours, because a client reading about OOO could
+     reasonably conclude the tool only knows about holidays. */
+  it("says every client has a different one", () => {
+    expect(CLIENT_DEPLOYMENT_PLAYBOOK).toMatch(/will not be OOO/i);
+    expect(CLIENT_DEPLOYMENT_PLAYBOOK).toMatch(/floor duty|demo drives/i);
+  });
+
+  /* And that their answer is configuration rather than a code change, which
+     is what makes it a week-one activity rather than a build item. */
+  it("says their words become configuration", () => {
+    expect(CLIENT_DEPLOYMENT_PLAYBOOK).toMatch(/configuration, not code/i);
+  });
+});
