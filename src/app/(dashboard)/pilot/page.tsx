@@ -208,6 +208,21 @@ export default function PilotPage() {
               by reading their own systems, which is what makes this cheap, auditable and
               predictable, and it is the opposite of how a chatbot works.
             </p>
+            {/* SAID ON THE PAGE, NOT IN SOMEBODY'S MEMORY.
+                These figures counted our own eval harnesses and demo accounts
+                as usage until 2026-08-31: eleven per cent of the answers and
+                twenty-nine per cent of the model calls. It understated us,
+                which is the luckier direction and not a reason to leave it,
+                because the same contamination on a day of heavy testing would
+                overstate instead. A number that shrank deserves its reason
+                beside it rather than a question later. */}
+            {typeof snap.excludedAsTesting === "number" && snap.excludedAsTesting > 0 ? (
+              <p className="wp-pilot-aside" data-testid="pilot-excluded-testing">
+                A further {snap.excludedAsTesting.toLocaleString()} answers came from our own
+                testing and tooling rather than from a person, and are excluded from every
+                figure above.
+              </p>
+            ) : null}
           </section>
 
           {/* WHAT IT COSTS AND WHAT IT STOPPED.

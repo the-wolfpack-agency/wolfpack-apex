@@ -18,6 +18,15 @@ export interface PhaseOneSnapshot {
   /** Times the product declined to answer rather than guess. */
   declined: number;
   /** Whether the figures above could be read at all. */
+  /**
+   * Answers set aside as testing rather than use.
+   *
+   * On the page so a shrinking number has its explanation beside it. Before
+   * this existed, eleven per cent of the tool answers and twenty-nine per cent
+   * of the model answers were our own harnesses, counted as the client's
+   * usage.
+   */
+  excludedAsTesting?: number;
   readable: boolean;
 }
 

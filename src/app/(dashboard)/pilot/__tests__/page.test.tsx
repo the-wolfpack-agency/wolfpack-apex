@@ -425,3 +425,38 @@ describe("what the same work costs elsewhere", () => {
   });
 });
 
+
+/**
+ * The page counted our own testing as the client's usage.
+ *
+ * Measured over thirty days on 2026-08-31: eleven per cent of the tool
+ * answers and twenty-nine per cent of the model answers came from eval
+ * harnesses, transcript probes and demo accounts. The headline share of
+ * answers served without a model read 67.9 per cent where the truth for
+ * people was 72.7.
+ */
+/**
+ * The page counted our own testing as the client's usage.
+ *
+ * Measured over thirty days on 2026-08-31: eleven per cent of the tool
+ * answers and twenty-nine per cent of the model answers came from eval
+ * harnesses, transcript probes and demo accounts. The headline share of
+ * answers served without a model read 67.9 per cent where the truth for
+ * people was 72.7. It understated us, which is the luckier direction and not
+ * a reason to leave it.
+ */
+it("names what was excluded as testing rather than quietly shrinking", async () => {
+  respond({ ...base, excludedAsTesting: 686 });
+  render(<PilotPage />);
+  const note = await screen.findByTestId("pilot-excluded-testing");
+  expect(note).toHaveTextContent("686");
+  expect(note).toHaveTextContent(/testing and tooling rather than from a person/i);
+});
+
+/* A deployment with no testing traffic must not carry a sentence about it. */
+it("says nothing about testing when there was none", async () => {
+  respond({ ...base, excludedAsTesting: 0 });
+  render(<PilotPage />);
+  await screen.findByTestId("pilot-answers");
+  expect(screen.queryByTestId("pilot-excluded-testing")).toBeNull();
+});
