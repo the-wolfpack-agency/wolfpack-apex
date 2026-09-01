@@ -24,6 +24,7 @@
  */
 
 import { familyStem } from "@/lib/brain/eval/pair-quality";
+import { isOurOwnTooling } from "./library-provenance";
 
 export interface LibraryDocument {
   filename: string;
@@ -108,16 +109,24 @@ export function libraryQuestions(docs: readonly LibraryDocument[]): Observation[
   if (docs.length === 0) return [];
   const out: Observation[] = [];
 
-  const families = [...findFamilies(docs).entries()]
+  /* A QUESTION THAT HAS BEEN ANSWERED STOPS BEING ASKED. The largest family
+     here was our own platform-scan tool writing into the library, which is
+     what the first run of this asked about and a person answered. Continuing
+     to raise it would train somebody to skim the section, and the section is
+     only worth having if every line in it is still open. */
+  const supplied = docs.filter((d) => !isOurOwnTooling(d.filename));
+  if (supplied.length === 0) return [];
+
+  const families = [...findFamilies(supplied).entries()]
     .filter(([, members]) => members.length >= FAMILY_THRESHOLD)
     .sort((a, b) => b[1].length - a[1].length);
 
   for (const [, members] of families) {
-    const share = members.length / docs.length;
+    const share = members.length / supplied.length;
     if (share < FAMILY_SHARE_WORTH_ASKING) continue;
     out.push({
       noticed:
-        `${members.length} of ${docs.length} documents share a naming pattern, ` +
+        `${members.length} of ${supplied.length} documents share a naming pattern, ` +
         `which is ${Math.round(share * 100)}% of the library.`,
       ask:
         "Are these one thing that gets re-exported, output from a tool writing into this " +
@@ -126,7 +135,7 @@ export function libraryQuestions(docs: readonly LibraryDocument[]): Observation[
     });
   }
 
-  const c = concentration(docs);
+  const c = concentration(supplied);
   if (c.documents > 0 && c.documents <= 10 && c.ofTotal > 20) {
     out.push({
       noticed:

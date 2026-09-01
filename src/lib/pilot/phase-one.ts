@@ -88,7 +88,18 @@ export async function getPhaseOneSnapshot(
   const bounded = Math.max(1, Math.min(365, Math.floor(days)));
   try {
     const [corpus, sources, activity] = await Promise.all([
-      query<{ passages: string }>(`SELECT count(*)::text AS passages FROM brain_chunks`),
+      /* THE CLIENT'S LIBRARY, NOT OURS PLUS THEIRS. 438 of 982 indexed
+         documents are output from our own platform-scan tool, so an
+         unqualified count describes a library 80 per cent bigger than the one
+         that can answer their questions. A figure that flatters us by counting
+         our own output gets checked once and never trusted again. The scans
+         stay searchable; they just stop being quoted as the client's. */
+      query<{ passages: string }>(
+        `SELECT count(*)::text AS passages
+           FROM brain_chunks c
+           JOIN brain_documents d ON d.id = c.document_id
+          WHERE d.filename NOT ILIKE 'platform-scan-%'`,
+      ),
       query<{ libraries: string }>(
         `SELECT count(*)::text AS libraries
            FROM instinct_sharepoint_sources

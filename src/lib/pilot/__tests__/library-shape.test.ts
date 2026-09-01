@@ -33,7 +33,10 @@ describe("what it notices", () => {
      document. */
   it("spots a naming pattern that covers a large share of the library", () => {
     const docs = [
-      ...many(40, (i) => doc(`platform-scan-wolfpack-auto-src-${i}.txt`)),
+      /* A client-side family, not ours. platform-scan-* is excluded now that
+         somebody has told us what it is, so using it here would test the
+         exclusion rather than the rule. */
+      ...many(40, (i) => doc(`Weekly Ops Export ${i}.csv`)),
       ...many(60, (i) => doc(`Client Agreement ${i}.pdf`)),
     ];
     const q = libraryQuestions(docs).find((x) => /naming pattern/.test(x.noticed));
@@ -66,11 +69,10 @@ describe("what it notices", () => {
 
   it("orders by how much of the library each concerns", () => {
     /* The family name has to be in the first three words, because that is
-       where familyStem looks. "platform-scan-0" and "platform-scan-1" are
-       different stems: only dates are stripped, and a trailing number usually
-       distinguishes a document rather than a re-run of one. */
+       where familyStem looks: only dates are stripped, and a trailing number
+       usually distinguishes a document rather than a re-run of one. */
     const docs = [
-      ...many(40, (i) => doc(`platform-scan-wolfpack-auto-${i}.txt`, 1)),
+      ...many(40, (i) => doc(`Weekly Ops Export ${i}.csv`, 1)),
       ...many(3, (i) => doc(`Big Export ${i}.xlsx`, 900)),
       ...many(57, (i) => doc(`Doc ${i}.pdf`, 1)),
     ];
@@ -130,5 +132,42 @@ describe("the rules underneath", () => {
     expect(FAMILY_THRESHOLD).toBeGreaterThanOrEqual(3);
     expect(FAMILY_SHARE_WORTH_ASKING).toBeGreaterThan(0);
     expect(FAMILY_SHARE_WORTH_ASKING).toBeLessThan(0.5);
+  });
+});
+
+/**
+ * A question that has been answered stops being asked.
+ *
+ * The first run of this noticed 413 of 982 documents sharing a naming pattern
+ * and asked what they were. A person answered: our own platform-scan tool,
+ * run against client systems. Raising it every time from then on would train
+ * somebody to skim the section, and the section is only worth having while
+ * every line in it is still open.
+ */
+describe("what somebody has already explained", () => {
+  it("stops asking about our own tooling", () => {
+    const docs = [
+      ...many(40, (i) => doc(`platform-scan-wolfpack-auto-src-${i}.txt`)),
+      ...many(60, (i) => doc(`Client Agreement ${i}.pdf`)),
+    ];
+    expect(libraryQuestions(docs).find((x) => /naming pattern/.test(x.noticed))).toBeUndefined();
+  });
+
+  /* And the figures it does report describe the client's library rather than
+     ours. 413 tool artifacts in a count of 982 makes a library look 80 per
+     cent bigger than the one that can answer anything. */
+  it("counts only what somebody supplied", () => {
+    const docs = [
+      ...many(40, (i) => doc(`platform-scan-${i}-x.txt`, 1)),
+      ...many(10, (i) => doc(`Big Export ${i}.xlsx`, 900)),
+      ...many(50, (i) => doc(`Note ${i}.md`, 1)),
+    ];
+    const q = libraryQuestions(docs).find((x) => /half the searchable text/.test(x.noticed));
+    /* 60 supplied documents, not 100. */
+    expect(q?.noticed).toMatch(/of 60 documents/);
+  });
+
+  it("says nothing when the library is only our tooling", () => {
+    expect(libraryQuestions(many(50, (i) => doc(`platform-scan-${i}-y.txt`)))).toEqual([]);
   });
 });
