@@ -89,15 +89,30 @@ export async function getPhaseOneSnapshot(
   const bounded = Math.max(1, Math.min(365, Math.floor(days)));
   try {
     const [corpus, scans, sources, activity] = await Promise.all([
-      query<{ passages: string }>(`SELECT count(*)::text AS passages FROM brain_chunks`),
+      /* THE CLIENT'S LIBRARY, NOT OURS PLUS THEIRS. 438 of 982 indexed
+         documents are output from our own platform-scan tool, so an
+         unqualified count describes a library 80 per cent bigger than the one
+         that can answer their questions. A figure that flatters us by counting
+         our own output gets checked once and never trusted again. The scans
+         stay searchable; they just stop being quoted as the client's. */
+      query<{ passages: string }>(
+        `SELECT count(*)::text AS passages
+           FROM brain_chunks c
+           JOIN brain_documents d ON d.id = c.document_id
+          WHERE d.filename NOT ILIKE 'platform-scan-%'`,
+      ),
       /* SCANS ARE THE PART A LIBRARY QUIETLY LOSES. A photographed agreement
          or an exported slide carries no text, so it indexes as a filename and
          answers nothing, and on a dashboard it is indistinguishable from a
          document that was read. Counting the ones OCR recovered is the only
-         way that difference shows. */
+         way that difference shows.
+
+         NOT filtered by filename the way the passage count above is: this
+         counts a repair that happened, and a scan we recovered is a scan we
+         recovered whoever put the file there. */
       query<{ scans: string }>(
         `SELECT count(*)::text AS scans FROM instinct_events
-          WHERE event_type = 'brain.document_ocred'`,
+          WHERE event_type = 'brain.document_ocred'`
       ),
       query<{ libraries: string }>(
         `SELECT count(*)::text AS libraries
