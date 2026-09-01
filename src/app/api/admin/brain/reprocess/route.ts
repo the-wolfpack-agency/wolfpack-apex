@@ -66,13 +66,27 @@ async function gate(req: NextRequest) {
 /**
  * Long enough to drain a batch, matching the SharePoint sync routes.
  *
- * Measured 2026-09-01: the first run that could actually download anything
- * indexed 22 documents in about 50 seconds and was then killed by the default
- * 60-second budget, returning a 500 with nothing to say about the 28 it had
- * not reached. The sync routes that fetch from the same drives already run at
- * 300, for the same reason.
+ * Measured 2026-09-01: the first run that could download anything indexed 22
+ * documents in about 50 seconds and was then killed at the 60-second default,
+ * returning a 500 with nothing to say about the 28 it had not reached.
  */
 export const maxDuration = 300;
+
+/**
+ * How long a run gives itself, and why it is not derived from maxDuration.
+ *
+ * maxDuration is a REQUEST. The platform caps it by plan, and asking for 300
+ * does not mean getting 300. Two runs on 2026-09-01 set a deadline of 240
+ * seconds from that assumption, were killed anyway, and recorded no event at
+ * all: the deadline was never reached, so the report was never written and the
+ * documents each run HAD repaired were invisible.
+ *
+ * So the budget is a flat number that fits inside the smallest limit the
+ * platform is known to enforce here, rather than arithmetic on a ceiling we do
+ * not control. Finishing early costs nothing: the queue drains across runs
+ * either way, and only a run that returns says how far it got.
+ */
+const BUDGET_MS = 45_000;
 
 const NO_STORE = { "Cache-Control": "no-store, max-age=0" };
 
@@ -99,9 +113,6 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const started = Date.now();
-  /* A minute of headroom under maxDuration, so the report always gets written
-     and returned rather than being cut off mid-flush. */
-  const BUDGET_MS = (maxDuration - 60) * 1000;
   const g = await gate(req);
   if (g.error) return g.error;
   const user = g.user!;
