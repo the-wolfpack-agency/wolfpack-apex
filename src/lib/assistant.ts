@@ -22,6 +22,7 @@ import { matchSavedRoutine } from "@/lib/assistant/routines/saved";
 import { searchKnowledge, saveAnswer } from "@/lib/knowledge";
 import { markCited as markBrainCited, type SemanticStatus } from "@/lib/brain/query";
 import { retrieve } from "@/lib/brain/retrieve";
+import { makeExpander } from "@/lib/brain/expand-runner";
 import { asksForSynthesis } from "@/lib/brain/question-terms";
 import { detectAmbiguity } from "@/lib/brain/ambiguous-question";
 import { quoteWindow } from "@/lib/brain/quote-window";
@@ -29,7 +30,6 @@ import { TurnDegradation, type DegradationKind } from "@/lib/assistant/degraded-
 import { judgeRelevance, RELEVANCE_MATERIAL_PER_HIT } from "@/lib/brain/relevance";
 import { strongHits, judgeMaterial } from "@/lib/brain/strong-hits";
 import type { QueryExecution } from "@/lib/brain/query";
-import { expandQuestion } from "@/lib/brain/expand-query";
 import { redactText, NEVER_QUOTE_KINDS } from "@/lib/ai/redaction";
 import { looksTabular } from "@/lib/brain/query";
 import { neutralizeInjection } from "@/lib/brain/security";
@@ -2920,19 +2920,25 @@ async function tryBrain(
       limit: 5,
       conversationId,
       judge: judgeForRetrieval,
-      expand: (question) =>
-        expandQuestion(question, async (input) => {
-          const res = await getAIClient().complete({
-            messages: [
-              { role: "system", content: input.system },
-              { role: "user", content: input.prompt },
-            ],
-            max_tokens: input.maxTokens,
-            model_tier: "cheap",
-            metadata: { feature: "brain.query_expansion", user_id: userId, user_role: userRole },
-          });
-          return res.content;
-        }),
+      /* ASK AGAIN IN THE WORDS THE DOCUMENTS USE.
+       *
+       * retrieve() has accepted a rewriter since it was written and was never
+       * given one here, so the second attempt returned before it began and
+       * only the eval script ever exercised it. Measured cost of that: "do we
+       * pay half now and half later?" asked five times by people and answered
+       * none of them, while the work order that answers it says fifty per
+       * cent on execution and the remainder on delivery.
+       *
+       * It fires only when shouldExpand agrees the first pass was thin, so an
+       * ordinary question that found its answer pays nothing.
+       *
+       * Through makeExpander rather than inline: the runner marks the prompt
+       * as carrying PII so a rewrite goes through the same redaction and
+       * budget as every other call, and it returns the question unchanged on
+       * a provider failure. A rewrite is an optimization on a question that
+       * already failed, so an outage during one must cost the reader nothing
+       * beyond the answer they were not getting anyway. */
+      expand: makeExpander({ userId, userRole }),
     });
     const result = retrieved.execution;
 
