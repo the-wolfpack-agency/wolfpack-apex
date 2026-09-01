@@ -95,12 +95,21 @@ jobs:
         if: steps.cfg.outputs.configured == 'true' && steps.pw-cache.outputs.cache-hit != 'true'
         timeout-minutes: 8
         run: npx playwright install chromium
+      # THE RETRY BELOW HAD NEVER RUN. A step timeout is not catchable by the
+      # shell, so a first attempt that hung for the full six minutes killed the
+      # step outright and neither the retry nor the warning ever executed. It
+      # failed that way twice on 2026-09-01, both times on a slow apt mirror
+      # taking five minutes to fetch 21MB of fonts.
+      #
+      # Each attempt is bounded by `timeout` now, so a hang ends the ATTEMPT
+      # rather than the step, and the fallback its author wrote is reachable.
+      # The step budget covers both attempts plus the sleep, with room to spare.
       - name: Install OS libraries for Chromium
         if: steps.cfg.outputs.configured == 'true'
-        timeout-minutes: 6
+        timeout-minutes: 12
         run: |
-          npx playwright install-deps chromium \
-            || (echo "retrying once" && sleep 15 && npx playwright install-deps chromium) \
+          timeout 240 npx playwright install-deps chromium \
+            || (echo "retrying once" && sleep 15 && timeout 240 npx playwright install-deps chromium) \
             || echo "::warning::playwright install-deps failed (apt mirror). Continuing: a genuinely missing library surfaces as a browser launch failure in the next step."
 
       # HARD GATES — one parallel invocation; must pass on PR + push. A parity
