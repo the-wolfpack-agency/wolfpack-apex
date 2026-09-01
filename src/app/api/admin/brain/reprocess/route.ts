@@ -81,12 +81,19 @@ export const maxDuration = 300;
  * all: the deadline was never reached, so the report was never written and the
  * documents each run HAD repaired were invisible.
  *
- * So the budget is a flat number that fits inside the smallest limit the
- * platform is known to enforce here, rather than arithmetic on a ceiling we do
- * not control. Finishing early costs nothing: the queue drains across runs
+ * THE BUDGET ALSO HAS TO LEAVE ROOM FOR THE SLOWEST SINGLE DOCUMENT. The
+ * deadline is checked BETWEEN documents, so a run sitting at 44 seconds with a
+ * 45 second budget will happily start one more. That was survivable while
+ * every document was a parse. Now that scans reach the OCR route it is not: a
+ * Computer Vision read submits and then polls, and one document can take
+ * fifteen or twenty seconds on its own. Two runs today died exactly that way,
+ * inside a document they had been entitled to begin.
+ *
+ * Thirty seconds leaves the better part of a minute for whatever was already
+ * in flight. Finishing early costs nothing: the queue drains across runs
  * either way, and only a run that returns says how far it got.
  */
-const BUDGET_MS = 45_000;
+const BUDGET_MS = 30_000;
 
 const NO_STORE = { "Cache-Control": "no-store, max-age=0" };
 
