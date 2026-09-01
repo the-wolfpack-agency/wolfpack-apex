@@ -34,6 +34,24 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
+      - name: Refuse to run without the credentials this reads
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          # A CHECK THAT CANNOT READ ITS EVIDENCE MUST NOT REPORT ON IT.
+          #
+          # Without DATABASE_URL every capability reads "unknown", which by
+          # design does not fail the job: a broken probe is a hole in the check,
+          # not a verdict about the product. Correct, and it means this job
+          # would go green every night having measured nothing.
+          #
+          # Measured 2026-09-01: DATABASE_URL is not a repository secret, an
+          # environment secret, or reachable at org level. Thirteen workflows
+          # reference secrets that do not exist and get an empty string.
+          if [ -z "$DATABASE_URL" ]; then
+            echo "::error::DATABASE_URL is not set for Actions, so this would report every capability as unreadable and exit green. Add it as a repository secret."
+            exit 1
+          fi
       - name: What we claim, and what has done it
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}

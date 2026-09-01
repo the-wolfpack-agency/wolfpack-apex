@@ -43,6 +43,28 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
+      - name: Refuse to run without the credentials this grades with
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          QDRANT_URL: ${{ secrets.QDRANT_URL }}
+          QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
+          AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
+          AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+          AZURE_OPENAI_EMBEDDING_DEPLOYMENT: ${{ secrets.AZURE_OPENAI_EMBEDDING_DEPLOYMENT }}
+        run: |
+          # The eval already refuses to grade half the product, and it did
+          # exactly that here on 2026-09-01: the vector store never answered
+          # because none of these secrets exist for Actions. That refusal is
+          # correct and reads as a broken workflow, so it says which ones.
+          missing=""
+          for v in DATABASE_URL QDRANT_URL QDRANT_API_KEY AZURE_OPENAI_ENDPOINT \
+                   AZURE_OPENAI_API_KEY AZURE_OPENAI_EMBEDDING_DEPLOYMENT; do
+            [ -z "${!v}" ] && missing="$missing $v"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Not configured for Actions:$missing. These live in Vercel, not in repository secrets, so this workflow cannot grade retrieval until they are added."
+            exit 1
+          fi
       - name: Grade the reviewed pairs
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
