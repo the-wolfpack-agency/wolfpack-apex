@@ -236,8 +236,12 @@ describe("how long a run gives itself", () => {
     await POST(req({ limit: 10 }));
     const opts = mockReprocess.mock.calls[0][2] as { deadline: number };
     const budget = opts.deadline - before;
-    /* Comfortably under a 60-second cap, so the report is always written. */
+    /* Comfortably under a 60-second cap AND leaving room for the slowest
+       single document, because the deadline is checked between documents. An
+       OCR read polls and can take fifteen to twenty seconds on its own, so a
+       budget close to the cap gets killed inside a document it was entitled to
+       begin. Two runs died that way on 2026-09-01. */
     expect(budget).toBeGreaterThan(10_000);
-    expect(budget).toBeLessThan(55_000);
+    expect(budget).toBeLessThanOrEqual(35_000);
   });
 });
