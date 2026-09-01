@@ -90,7 +90,9 @@ export async function ensureBrainCollection(): Promise<void> {
     await qd("GET", `/collections/${BRAIN_COLLECTION}`);
     return; // already there
   } catch {
-    // fall through to create
+    /* silent-ok: asking whether a collection exists by fetching it, so a
+       failure here IS the answer and the next line acts on it. A collection
+       that cannot be created will fail loudly on the very next call. */
   }
   await qd("PUT", `/collections/${BRAIN_COLLECTION}`, {
     vectors: { size: EMBED_DIM, distance: "Cosine" },
@@ -103,7 +105,9 @@ export async function ensureBrainCollection(): Promise<void> {
         field_schema: "keyword",
       });
     } catch {
-      // indexes are optional; collection still works
+      /* silent-ok: payload indexes make filters cheaper and nothing depends on
+         them existing. The collection serves the same results either way, so
+         there is no degraded state for a caller to be told about. */
     }
   }
 }
@@ -124,7 +128,9 @@ export async function deleteByDocumentId(documentId: string): Promise<void> {
       },
     });
   } catch {
-    // best-effort — if qdrant is down the row still gets removed from PG
+    /* silent-ok: Postgres is the record and the row is already gone from it.
+       A vector left behind is reachable only through a chunk that no longer
+       exists, so nothing a reader does can surface it. */
   }
 }
 
@@ -192,14 +198,34 @@ export async function searchBrain(
  * ANN without leaking our Qdrant URL. Returns a Map keyed by point_id;
  * missing ids are simply absent from the map (never throws per-point).
  *
- * If the whole Qdrant call fails (network, 5xx) we return an empty Map
- * rather than throwing — callers degrade to a fingerprint-only pack.
+ * IT REPORTS WHETHER IT WORKED, WHICH AN EMPTY MAP CANNOT.
+ *
+ * It used to return an empty Map on failure and say nothing. An empty Map is
+ * also what "these chunks genuinely have no vectors" looks like, so the caller
+ * could not tell a healthy pack of unembedded chunks from a pack downloaded
+ * during a Qdrant outage. Both ship chunks with an empty embedding, the
+ * client's second-level search quietly degrades to keyword scoring, and
+ * nothing anywhere records that it happened.
+ *
+ * That is the same failure this codebase has already lived twice: a bare catch
+ * with the comment "degrade silently" hid a half-dead hybrid search for over a
+ * month, and 252 real queries went by with not one semantic hit while every
+ * number on the dashboard looked fine. Named after semanticStatus in query.ts,
+ * which exists for exactly this reason.
  */
-export async function fetchBrainVectors(
-  pointIds: string[],
-): Promise<Map<string, number[]>> {
+export interface BrainVectors {
+  vectors: Map<string, number[]>;
+  /** "ok" when Qdrant answered, whatever it answered with. */
+  status: "ok" | "failed";
+  /** Present only on failure, and short enough to log. */
+  error?: string;
+}
+
+export async function fetchBrainVectors(pointIds: string[]): Promise<BrainVectors> {
   const out = new Map<string, number[]>();
-  if (pointIds.length === 0) return out;
+  /* Nothing asked for is not a failure, and calling it one would make every
+     empty page look like an outage. */
+  if (pointIds.length === 0) return { vectors: out, status: "ok" };
   try {
     const res = await qd<{
       result: { id: string; vector?: number[] | Record<string, number[]> }[];
@@ -216,11 +242,14 @@ export async function fetchBrainVectors(
           : null;
       if (v && v.length > 0) out.set(String(p.id), v);
     }
-  } catch {
-    // best-effort — pack caller sees "no vectors available" and ships
-    // chunks without embeddings. Level-2 ANN degrades to keyword-only.
+  } catch (err) {
+    return {
+      vectors: out,
+      status: "failed",
+      error: (err as Error)?.message?.slice(0, 200) ?? "unknown",
+    };
   }
-  return out;
+  return { vectors: out, status: "ok" };
 }
 
 export async function brainHealth(): Promise<boolean> {
@@ -228,6 +257,9 @@ export async function brainHealth(): Promise<boolean> {
     await qd("GET", "/collections");
     return true;
   } catch {
+    /* silent-ok: this IS the report. A health check that cannot reach the
+       service is answering its own question, and there is no caller to tell
+       anything the return value does not already say. */
     return false;
   }
 }

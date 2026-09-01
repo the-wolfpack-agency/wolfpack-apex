@@ -338,7 +338,9 @@ async function queryBrainOnce(opts: QueryOpts): Promise<QueryExecution> {
       conversationId: opts.conversationId ?? null,
     });
   } catch {
-    // non-blocking — the user still gets their answer
+    /* silent-ok: the query log is a record OF the answer, not part of
+       producing it. Losing a row costs a line in the gap report; failing the
+       query over it would cost somebody the answer the row was describing. */
   }
 
   /* ANALYTICS MUST NEVER COST SOMEBODY THEIR ANSWER.
@@ -415,7 +417,9 @@ export async function markCited(
       query_log_id: queryLogId,
     });
   } catch {
-    // audit-loop writes are never fatal
+    /* silent-ok: this marks an answer as having been cited, after the reader
+       already has it. Nothing downstream is waiting on it and there is no
+       user-visible behavior to degrade. */
   }
 }
 

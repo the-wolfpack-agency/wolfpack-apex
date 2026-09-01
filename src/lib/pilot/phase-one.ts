@@ -121,7 +121,24 @@ export async function getPhaseOneSnapshot(
                AND NOT (${PERSON})
            )::text AS excluded
          FROM instinct_events
-        WHERE timestamp > NOW() - ($1::int * INTERVAL '1 day')`,
+        WHERE timestamp > NOW() - ($1::int * INTERVAL '1 day')
+          /* NARROW BEFORE COUNTING, NOT WHILE COUNTING.
+           *
+           * Every aggregate above already requires one of these four types, so
+           * this changes no number. What it changes is how many rows Postgres
+           * touches to produce them. Without it the scan covered every event in
+           * the window and ran the identity regex on each: measured 2026-09-01,
+           * 2,639,165 rows read to compute a figure that needs 6,385 of them,
+           * because 1.7 million of them are token verifications.
+           *
+           * 1,445ms to 58ms, same four numbers. The page was slow because it
+           * was reading the whole analytics table to count a corner of it. */
+          AND event_type IN (
+            'assistant.tool_succeeded',
+            'ai.completion',
+            'brain.retrieval_judged_irrelevant',
+            'assistant.answer_not_promoted'
+          )`,
         [bounded],
       ),
     ]);

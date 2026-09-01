@@ -69,6 +69,16 @@ interface PackResponse {
   chunks: PackResponseChunk[];
   next_cursor: string | null;
   total: number;
+  /**
+   * False when the vector store could not be reached for this page.
+   *
+   * The chunks are still here and still usable; what the client loses is the
+   * second-level semantic search, which falls back to keyword scoring. Without
+   * this flag that fallback is invisible: the client cannot tell a page whose
+   * chunks have no embeddings from a page it could not get them for, and it
+   * searches worse without knowing why.
+   */
+  embeddings_available: boolean;
 }
 
 export async function GET(req: NextRequest) {
@@ -159,7 +169,9 @@ export async function GET(req: NextRequest) {
   // the client pack store does not treat the call as a hard failure.
   if (rowsRes.fromCache) {
     return NextResponse.json(
-      { chunks: [], next_cursor: null, total: 0 } as PackResponse,
+      /* No chunks were asked for, so nothing was lost. Reporting this as a
+         degradation would cry wolf on every shadow-mode request. */
+      { chunks: [], next_cursor: null, total: 0, embeddings_available: true } as PackResponse,
       {
         status: 200,
         headers: { "Cache-Control": "private, max-age=300" },
@@ -171,13 +183,30 @@ export async function GET(req: NextRequest) {
   const hasMore = rowsRes.rows.length > limit;
   const nextCursor = hasMore ? pageRows[pageRows.length - 1]?.id ?? null : null;
 
-  // Best-effort vector fetch. If Qdrant is down the chunks still ship
-  // without embeddings; the client's Level-2 ANN degrades to keyword
-  // scoring only.
+  /* Vectors are best-effort: if Qdrant is down the chunks still ship, and the
+     client's second-level search falls back to keyword scoring rather than
+     failing. What is NOT optional is saying so. Shipping a degraded pack that
+     looks identical to a healthy one is how a half-dead hybrid search survived
+     a month here, so the degradation is recorded and told to the client. */
   const pointIds = pageRows
     .map((r) => r.qdrant_point_id)
     .filter((x): x is string => Boolean(x));
-  const vectorMap = await fetchBrainVectors(pointIds);
+  const fetched = await fetchBrainVectors(pointIds);
+  const vectorMap = fetched.vectors;
+
+  if (fetched.status === "failed") {
+    try {
+      await trackEvent("brain.pack_vectors_degraded", user.id, user.role, {
+        requested: pointIds.length,
+        error: fetched.error ?? "unknown",
+      });
+    } catch {
+      /* silent-ok: the degradation is already on the response as
+         embeddings_available, so a failed analytics write costs a count and
+         not the signal. Failing the pack over it would turn a degraded
+         download into no download. */
+    }
+  }
 
   const chunks: PackResponseChunk[] = pageRows.map((r) => ({
     id: r.id,
@@ -216,6 +245,7 @@ export async function GET(req: NextRequest) {
     chunks,
     next_cursor: nextCursor,
     total,
+    embeddings_available: fetched.status === "ok",
   };
   return NextResponse.json(body, {
     status: 200,
