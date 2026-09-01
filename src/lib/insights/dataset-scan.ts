@@ -58,6 +58,19 @@ export interface Dimension {
 export interface Withheld {
   claim: string;
   why: string;
+  /** Which dimension it concerns, when it concerns one. */
+  dimension?: string;
+  /**
+   * How much of that dimension is in doubt.
+   *
+   * THE DISTINCTION MATTERS DOWNSTREAM. "venue is on 16 per cent of records"
+   * disqualifies every claim about venue. "two of nine roles are too thin to
+   * compare" disqualifies those two and says nothing about the other seven.
+   * Collapsing them makes one thin group silence a dimension that is otherwise
+   * the best-evidenced thing in the dataset, which a recommendation layer then
+   * refuses to act on for no reason.
+   */
+  scope: "whole" | "some-values";
 }
 
 export interface DatasetScan {
@@ -130,6 +143,8 @@ export function scanDataset(records: readonly DatasetRecord[], documents: number
     if (d.present > 0 && coverage < MIN_COVERAGE) {
       withheld.push({
         claim: `Anything about ${d.name} across the whole dataset`,
+        dimension: d.name,
+        scope: "whole",
         why:
           `${d.name} is recorded on ${d.present} of ${records.length} records ` +
           `(${Math.round(coverage * 100)}%). The breakdown below describes those records ` +
@@ -146,11 +161,15 @@ export function scanDataset(records: readonly DatasetRecord[], documents: number
     if (months.values.length < 2) {
       withheld.push({
         claim: "Any trend over time",
+        dimension: "month",
+        scope: "whole",
         why: "Every record falls in one period, so there is nothing to compare it against.",
       });
     } else if (share > MAX_SINGLE_PERIOD_SHARE) {
       withheld.push({
         claim: "Any trend over time",
+        dimension: "month",
+        scope: "whole",
         why:
           `${Math.round(share * 100)}% of records fall in ${top.value}. A trend drawn across ` +
           `periods that uneven describes the sampling rather than the thing being measured.`,
@@ -164,6 +183,11 @@ export function scanDataset(records: readonly DatasetRecord[], documents: number
     if (thin.length > 0 && thin.length < d.values.length) {
       withheld.push({
         claim: `Comparisons involving ${thin.length} of the ${d.values.length} ${d.name} values`,
+        dimension: d.name,
+        /* Only these values are in doubt. The rest of the dimension is fine,
+           and treating the whole thing as unusable would throw away the
+           best-evidenced cut in most datasets. */
+        scope: "some-values",
         why:
           `They carry fewer than ${MIN_RECORDS_PER_CUT} records each ` +
           `(${thin.map((t) => `${t.value}: ${t.records}`).slice(0, 3).join(", ")}` +
