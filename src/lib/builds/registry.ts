@@ -56,6 +56,14 @@ export const CLIENT_BUILDS: ClientBuild[] = [
     data: "Every figure is measured against our own Microsoft tenant and query log. Nothing on the page is illustrative.",
   },
   {
+    href: "/builds/insight-scan",
+    title: "Results against plan",
+    client: "Wolfpack, on our own indexed corpus",
+    stage: "in flight",
+    what: "What a dataset scan should look like: actions for one team, each carrying the gap it closes, the records under it, and what would make it wrong.",
+    data: "Measured live against 5,257 evaluation records in the indexed corpus. The plan it compares against is illustrative and ours, and the page says so.",
+  },
+  {
     href: "/builds/course-program",
     title: "New course, new client",
     client: "Wolfpack, for a client not yet named",

@@ -49,7 +49,7 @@ test.describe("client builds", () => {
 
   /* THE MECHANISM, ASSERTED. Every build page carries the marker, including
      when the link is shared without the register around it. */
-  for (const path of ["/pilot", "/builds/change-management", "/builds/course-program"]) {
+  for (const path of ["/pilot", "/builds/change-management", "/builds/course-program", "/builds/insight-scan"]) {
     test(`${path} carries the client-build marker`, async ({ page }) => {
       await page.goto(`${target.baseUrl}${path}`, { waitUntil: "domcontentloaded" });
       const banner = page.getByTestId("build-banner");
@@ -97,13 +97,36 @@ test.describe("client builds", () => {
     await expect(page.getByTestId("cp-open")).toContainText(/who is the client/i);
   });
 
+  /* THE REFUSALS HAVE TO SURVIVE A DEPLOY. They are the whole difference
+     between this page and the scan it improves on: without them a reader can
+     only accept the recommendations whole or reject them whole. */
+  test("the scan page renders its refusals, not just its advice", async ({ page }) => {
+    /* The capability gate cannot pass on a stubbed session, so the page shows
+       its unreadable state. That is the correct behavior and worth asserting:
+       a signed-out visitor must see "could not be read" rather than a page
+       that looks like a dataset with nothing in it. */
+    await page.goto(`${target.baseUrl}/builds/insight-scan`, { waitUntil: "domcontentloaded" });
+    await expectRendered(page, "/builds/insight-scan", ["what the data will not carry"]);
+
+    const unreadable = page.getByTestId("scan-unreadable");
+    const actions = page.getByTestId("scan-actions");
+    /* One or the other, never neither: neither is a blank page. */
+    await expect(unreadable.or(actions).first()).toBeVisible({ timeout: 20_000 });
+
+    if (await actions.isVisible()) {
+      await expect(page.getByTestId("scan-plan")).toContainText(/measured against/i);
+    } else {
+      await expect(unreadable).toContainText(/not the same as it having nothing in it/i);
+    }
+  });
+
   /* A wide table is the classic way a document page starts scrolling
      sideways on a laptop, and nobody notices until a client opens it. */
   test("the page body never scrolls sideways", async ({ page }) => {
     await page.setViewportSize({ width: 900, height: 900 });
-    for (const path of ["/builds/change-management", "/builds/course-program"]) {
+    for (const path of ["/builds/change-management", "/builds/course-program", "/builds/insight-scan"]) {
       await page.goto(`${target.baseUrl}${path}`, { waitUntil: "domcontentloaded" });
-      await expectRendered(page, path, ["change management plan", "taking the method"]);
+      await expectRendered(page, path, ["change management plan", "taking the method", "what the data will not carry"]);
       const wide = await page.evaluate(
         () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
       );
