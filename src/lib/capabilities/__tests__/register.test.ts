@@ -15,6 +15,8 @@ import {
   isFailing,
   describe as describeStatus,
   FRESH_DAYS,
+  HOT_CAPABILITIES,
+  HOT_FRESH_DAYS,
   type CapabilityStatus,
 } from "@/lib/capabilities/register";
 
@@ -113,5 +115,35 @@ describe("the register itself", () => {
     expect(line).toMatch(/NEVER/);
     expect(line).toMatch(/never once/);
     expect(line).toMatch(/scanned document/i);
+  });
+});
+
+/**
+ * Some capabilities go stale in days, not weeks.
+ *
+ * WHY. On 2026-09-01 semantic search returned 403 on every query from one
+ * environment and the register still read "demonstrated", because it had
+ * fired that morning and the grace period was forty-five days. Something that
+ * runs on every question does not need six weeks of benefit of the doubt: an
+ * outage would have read as healthy until the middle of October.
+ */
+describe("capabilities that should fire constantly", () => {
+  it("goes stale in days for a hot capability", () => {
+    expect(verdictFor(1000, daysAgo(HOT_FRESH_DAYS + 1), 1, NOW, HOT_FRESH_DAYS)).toBe("stale");
+    expect(verdictFor(1000, daysAgo(1), 1, NOW, HOT_FRESH_DAYS)).toBe("demonstrated");
+  });
+
+  it("keeps the long grace period for one that runs occasionally", () => {
+    /* A repair sweep firing weekly must not be called stale for a quiet
+       fortnight, or the register cries wolf and gets ignored. */
+    expect(verdictFor(3, daysAgo(20), 1, NOW)).toBe("demonstrated");
+  });
+
+  it("names the ones that run on every question", () => {
+    expect(HOT_CAPABILITIES.has("semantic_retrieval")).toBe(true);
+    expect(HOT_CAPABILITIES.has("relevance_judge")).toBe(true);
+    /* The repair is deliberately not hot: it runs nightly at most. */
+    expect(HOT_CAPABILITIES.has("document_repair")).toBe(false);
+    expect(HOT_FRESH_DAYS).toBeLessThan(FRESH_DAYS);
   });
 });

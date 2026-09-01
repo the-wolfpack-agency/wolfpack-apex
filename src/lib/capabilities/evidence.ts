@@ -15,6 +15,9 @@ import { query } from "@/lib/db";
 import {
   CAPABILITIES,
   verdictFor,
+  HOT_CAPABILITIES,
+  HOT_FRESH_DAYS,
+  FRESH_DAYS,
   type Capability,
   type CapabilityStatus,
 } from "./register";
@@ -97,7 +100,16 @@ export async function readCapabilities(now = new Date()): Promise<CapabilityStat
       c.provenBy.kind === "count" ? c.provenBy.atLeast : (c.provenBy.atLeast ?? 1);
     out.push({
       capability: c,
-      verdict: verdictFor(seen.count, seen.lastSeen, required, now),
+      /* Something that fires on every question is stale in days, not weeks.
+         A total outage of semantic search would otherwise read as healthy for
+         six weeks, which is most of the way back to not checking. */
+      verdict: verdictFor(
+        seen.count,
+        seen.lastSeen,
+        required,
+        now,
+        HOT_CAPABILITIES.has(c.id) ? HOT_FRESH_DAYS : FRESH_DAYS,
+      ),
       observations: seen.count ?? 0,
       lastSeen: seen.lastSeen,
     });

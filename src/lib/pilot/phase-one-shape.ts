@@ -11,6 +11,15 @@ export interface PhaseOneSnapshot {
   passages: number;
   /** Distinct libraries connected, scoped to this workspace. */
   libraries: number;
+  /**
+   * Scanned documents recovered by OCR.
+   *
+   * A photographed agreement or an exported slide carries no text, so it
+   * indexes as a filename and answers nothing. On a dashboard that is
+   * indistinguishable from a document that was read, which is why the count
+   * is here rather than folded into the passage total.
+   */
+  scansRead: number;
   /** Questions answered directly from connected systems, no model involved. */
   toolAnswers: number;
   /** Questions that needed a model. */

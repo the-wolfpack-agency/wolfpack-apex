@@ -126,12 +126,39 @@ the weight, and put them in front of somebody who knows. The report names them
 without knowing what they are:
 
 > 19 of 801 calendar entries account for more than half the hours. That is
-> usually a local convention rather than a busy team. The largest are: Avryl
-> Trip, Alicia OOO, F1 Las Vegas. Somebody who knows this calendar should say
-> what those are.
+> usually a local convention rather than a busy team. The largest are a trip,
+> a block of time off, and an offsite. Somebody who knows this calendar should
+> say what those are.
 
 It asks and never concludes, because reading the data is exactly what does not
 produce the answer.
+
+### A library is not only the documents that carry text
+
+Roughly one document in five arrives as a picture: a scanned agreement, a
+photographed whiteboard, a slide exported as an image. Nothing in it is
+quotable, so it indexes as a filename and answers nothing, and it looks
+identical on a dashboard to a document that was read.
+
+Those are read here. Optical character recognition runs on the passages that
+came back empty, and the text lands in the same index as everything else, so a
+scan is quotable and citable exactly like a native document.
+
+**It picks the cheap route first, and says what it spent.** A purpose-built OCR
+API costs roughly a thirtieth of a vision model per page, so that is asked
+first and a model is only reached for when the cheap route says it genuinely
+could not read the page. Every call is audited and there is a per-document cost
+ceiling, because "we can read anything" and "we will spend anything reading it"
+are different promises.
+
+**What it does not claim.** A page nobody can read is still a page nobody can
+read: handwriting, a photograph at an angle, a scan too faint to resolve. Those
+come back saying so rather than returning a confident transcription of the
+wrong words, and they are not retried nightly against the same failure.
+
+Measured on our own library: 17 scanned documents read, averaging 1,634
+characters each, from files that had nothing quotable in them since the day
+they were ingested.
 
 **What comes back becomes configuration, not code.** Their words are recorded
 per deployment rather than added to a built-in list, because a pattern right
