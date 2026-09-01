@@ -11,6 +11,13 @@ import "./load-env";
  * eval, the calendar calibration. None of them failed loudly, because a
  * capability nothing exercises does not degrade. It simply never was.
  *
+ * WHAT IS NOT HERE. Query expansion and the library-figure correction are
+ * written, tested and open as pull requests (#614, #650), and nothing in main
+ * supplies a rewriter or excludes our own tooling from the count. They were in
+ * an earlier draft of this file, which is the same mistake in miniature that
+ * the release is about: describing a capability from the code that exists
+ * rather than from what runs. An entry goes in when it is on main.
+ *
  * Entries are written for somebody who was not here. "Fixed the repair sweep"
  * means nothing; "the nightly job reported success while repairing nothing for
  * weeks" is the fact a reader can do something with.
@@ -47,20 +54,11 @@ const ENTRIES: ReleaseEntry[] = [
     category: "feature",
   },
   {
-    title: "Query expansion is switched on",
-    description:
-      "When a question's words do not match the way documents are written, the product now asks again in other words. It was built and wired to accept a rewriter that nothing ever supplied. Turning it on raises retrieval on the labeled set. The looser trigger scores higher still and was not taken: measured against thirty real queries that had already found their answer, it would have rewritten twenty-six of them, at a model call and about two seconds each.",
-    how_to_use:
-      "Automatic. It only fires when the first attempt found nothing or the relevance judge rejected what it found.",
-    area: "Instinct",
-    category: "improvement",
-  },
-  {
     title: "Week one says something specific about a client's own library",
     description:
-      "Phase One described the product. It now reads the client's library and asks about what it finds, as questions rather than conclusions. On our own it noticed that 413 of 982 documents shared a naming pattern and asked what they were: the answer, from a person, was our own scanning tool writing into the library. A report that had concluded instead would have been confidently wrong about the client's data on the first page it ever showed them.",
+      "Phase One described the product. It now reads the client's library and asks about what it finds, as questions rather than conclusions. On our own it noticed that 413 of 982 documents shared a naming pattern and asked what they were, rather than concluding something about them. A report that had concluded instead would have been confidently wrong about the client's data on the first page it ever showed them.",
     how_to_use:
-      "On the Phase One page. An answered question stops being asked, and the figures now count the client's library rather than ours plus theirs.",
+      "On the Phase One page. An answered question stops being asked.",
     area: "Instinct",
     category: "feature",
   },
@@ -116,7 +114,7 @@ async function main(): Promise<void> {
     version: "2026.09.01",
     title: "The day the product started proving its own claims",
     summary:
-      "Eighteen changes, and one finding eighteen times: capabilities that were built, tested, configured, and had never once run. OCR on scanned documents, query expansion, the nightly document repair, the retrieval eval, the calendar calibration. None of them failed loudly, because a capability nothing exercises does not degrade. It simply never was, and the code reads identically either way. The library went from 884 readable documents to 982, and a register now asks daily whether each thing we claim has ever done its job on real data.",
+      "Eighteen changes, and one finding eighteen times: capabilities that were built, tested, configured, and had never once run. OCR on scanned documents, the nightly document repair, the retrieval eval, the calendar calibration. None of them failed loudly, because a capability nothing exercises does not degrade. It simply never was, and the code reads identically either way. The library went from 884 readable documents to 982, and a register now asks daily whether each thing we claim has ever done its job on real data.",
     released_on: "2026-09-01",
     entries: ENTRIES,
     published: true,
