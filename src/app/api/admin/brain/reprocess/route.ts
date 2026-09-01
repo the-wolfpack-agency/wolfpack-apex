@@ -22,6 +22,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { findCandidates, reprocessFixable } from "@/lib/brain/reprocess";
+import { findRepairIdentity, NO_IDENTITY_MESSAGE } from "@/lib/brain/repair-identity";
 import { downloadDriveItem } from "@/lib/connectors/sharepoint/sync";
 import { query } from "@/lib/db";
 import { recordAudit } from "@/lib/audit-log";
@@ -113,11 +114,36 @@ export async function POST(req: NextRequest) {
   }
   const anyDrive = [...driveFor.values()][0];
 
+  /* WHOSE ACCESS THE DOWNLOAD USES, AND ONLY WHEN THERE IS NOBODY.
+   *
+   * A signed-in caller repairs on their OWN token. That is a property worth
+   * keeping and a test protects it: an admin pressing repair must not quietly
+   * reach files through somebody else's access, whatever the job is doing.
+   *
+   * The scheduled path is the exception, because user.id is "cron", which is
+   * right for the audit row and useless for Graph. "cron" has never completed
+   * an OAuth flow, so getValidToken returns null and every document fails with
+   * no_token. That was true of every scheduled run this job has ever made, and
+   * reconnecting Microsoft would not have changed it.
+   *
+   * So only the cron borrows, and only from an account that already connected.
+   * It grants no new access: a delegated token reads exactly the drives that
+   * person can read, which is the boundary the original ingest ran under. */
+  const borrowing = user.id === "cron";
+  const identity = borrowing ? await findRepairIdentity() : null;
+  if (borrowing && !identity) {
+    return NextResponse.json(
+      { ok: false, considered: 0, repaired: 0, stillFailing: 0, error: NO_IDENTITY_MESSAGE },
+      { status: 200, headers: NO_STORE },
+    );
+  }
+  const downloadAs = identity?.userEmail ?? user.id;
+
   try {
     const report = await reprocessFixable(
       async (driveItemId) => {
         if (!anyDrive) return null;
-        return downloadDriveItem(user.id, anyDrive, driveItemId);
+        return downloadDriveItem(downloadAs, anyDrive, driveItemId);
       },
       { userId: user.id, role: user.role },
       { limit },
@@ -135,6 +161,10 @@ export async function POST(req: NextRequest) {
         repaired: report.repaired,
         still_failing: report.stillFailing,
         limit,
+        /* Named, because a repair that rewrites a document library under a
+           borrowed identity should record whose access it used. Equal to the
+           actor on an interactive run, which is the point. */
+        ran_as: downloadAs,
       },
     }).catch(() => undefined);
 
