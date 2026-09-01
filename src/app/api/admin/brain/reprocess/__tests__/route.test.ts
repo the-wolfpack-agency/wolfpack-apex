@@ -106,13 +106,18 @@ describe("the run", () => {
     expect(mockReprocess).toHaveBeenCalledWith(
       expect.any(Function),
       { userId: "u1", role: "cto" },
-      { limit: 10 },
+      /* A deadline rides along now: the run stops on its own clock rather than
+         being killed by the platform, which loses the report. */
+      { limit: 10, deadline: expect.any(Number) },
     );
   });
 
   it("defaults the limit rather than repairing the whole library by surprise", async () => {
     await POST(req({}));
-    expect(mockReprocess).toHaveBeenCalledWith(expect.any(Function), expect.anything(), { limit: 100 });
+    expect(mockReprocess).toHaveBeenCalledWith(expect.any(Function), expect.anything(), {
+      limit: 100,
+      deadline: expect.any(Number),
+    });
   });
 
   it("downloads on the caller's own token, never a shared one", async () => {
