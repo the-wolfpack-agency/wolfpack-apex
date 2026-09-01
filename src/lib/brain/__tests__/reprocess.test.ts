@@ -182,10 +182,17 @@ describe("repairing in place", () => {
     expect(mockUpdateStatus).toHaveBeenCalledWith("d1", "indexed", null);
   });
 
-  it("survives a re-fetch that throws, and says so on the row", async () => {
+  /* THIS TEST USED TO ASSERT THE BUG. It required the fetch error to be
+     written onto the row, which is exactly what erased the diagnosis that made
+     the document repairable and dropped it out of the candidate set forever.
+     A rate limit or an expired token says something about the connection and
+     nothing about the file. The run still reports the failure; it just does
+     not record a verdict on a document it never managed to read. */
+  it("survives a re-fetch that throws, and reports it without judging the file", async () => {
     const r = await reprocessFixable(async () => { throw new Error("graph 429"); }, ACTOR);
     expect(r.stillFailing).toBe(1);
-    expect(mockUpdateStatus).toHaveBeenCalledWith("d1", "failed", expect.stringMatching(/graph 429/));
+    expect(r.outcomes[0].detail).toMatch(/graph 429/);
+    expect(mockUpdateStatus).not.toHaveBeenCalled();
   });
 
   it("emits per-document and per-run events, so the repair is measurable", async () => {
@@ -342,5 +349,82 @@ describe("how many documents a repair run takes", () => {
       /* And the two forms have to describe the same set. */
       expect(new RegExp(f.source, "i").source).toBe(f.test.source.replace(/^\/|\/i$/g, ""));
     }
+  });
+});
+
+/**
+ * A repair that could not download must not pass judgment on the file.
+ *
+ * THE INCIDENT, 2026-09-01. Every Microsoft token expired on 2026-08-26. A run
+ * took fifty documents, failed to download all fifty, and rewrote each one's
+ * status_detail from "docx mimeType" to "re-fetch failed: no_token".
+ *
+ * That detail is not in FIXABLE, so all fifty dropped out of the candidate set
+ * permanently. The fixable queue fell from 186 to 136 and the no_token pile
+ * grew from 37 to 87. The repair was eating its own work queue one batch per
+ * night, and the sweep printed "still failing 0" while it happened, because it
+ * read result.failed and the API returns stillFailing.
+ *
+ * A fetch failure says something about the connection, never about the file.
+ */
+describe("a repair that cannot reach the file", () => {
+  function docNeedingRepair() {
+    mockQuery.mockResolvedValueOnce({
+      rows: [
+        {
+          id: "d1",
+          filename: "BA106 OSPM_Guide.docx",
+          kind: "docx",
+          status: "failed",
+          status_detail: 'DOMParser.parseFromString: the provided mimeType "undefined" is not valid',
+          ms_drive_item_id: "drive-1",
+        },
+      ],
+    });
+  }
+
+  it("leaves the diagnosis alone when the download throws", async () => {
+    docNeedingRepair();
+    const writesBefore = mockQuery.mock.calls.length;
+
+    await reprocessFixable(
+      async () => {
+        throw new Error("no_token");
+      },
+      { userId: "u", role: "cto" },
+    );
+
+    /* THE ASSERTION THAT WOULD HAVE SAVED THE QUEUE. Only the SELECT ran. No
+       UPDATE touched the row, so it is still a docx that failed on the parser
+       bug and the next run will still find it. */
+    const updates = mockQuery.mock.calls
+      .slice(writesBefore)
+      .filter((c: unknown[]) => /^\s*UPDATE\b/i.test(String(c[0])));
+    expect(updates).toHaveLength(0);
+  });
+
+  it("leaves the diagnosis alone when the download returns nothing", async () => {
+    docNeedingRepair();
+    const before = mockQuery.mock.calls.length;
+    await reprocessFixable(async () => null, { userId: "u", role: "cto" });
+    expect(
+      mockQuery.mock.calls.slice(before).filter((c: unknown[]) => /^\s*UPDATE\b/i.test(String(c[0]))),
+    ).toHaveLength(0);
+  });
+
+  /* Silence would be worse than the overwrite: the run has to say it failed,
+     it just must not write that verdict onto the document. */
+  it("still reports the failure", async () => {
+    docNeedingRepair();
+    const report = await reprocessFixable(
+      async () => {
+        throw new Error("no_token");
+      },
+      { userId: "u", role: "cto" },
+    );
+    expect(report.considered).toBe(1);
+    expect(report.repaired).toBe(0);
+    expect(report.stillFailing).toBe(1);
+    expect(report.outcomes[0].detail).toMatch(/no_token/);
   });
 });

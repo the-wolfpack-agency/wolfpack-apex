@@ -76,7 +76,10 @@ async function main() {
   const result = await runRes.json();
 
   const repaired = Number(result.repaired ?? 0);
-  const failed = Number(result.failed ?? 0);
+  /* The API field is stillFailing. Reading `failed` meant this line printed
+     "still failing 0" on a run where all fifty failed, which is how a repair
+     that fixed nothing read as a quiet success for three nights. */
+  const failed = Number(result.stillFailing ?? 0);
   const considered = Number(result.considered ?? 0);
   console.log(`[repair] repaired ${repaired}, still failing ${failed}`);
 
@@ -91,6 +94,17 @@ async function main() {
   if (remaining > 0) {
     console.log(`[repair] ${remaining} still waiting; the next run takes the next ${LIMIT}.`);
   }
+  /* EVERY ATTEMPT FAILING IS NOT A QUIET DAY EITHER. The usual cause is the
+     Microsoft connection having expired, which no amount of retrying fixes and
+     which a green tick will hide until somebody asks why the library is thin. */
+  if (considered > 0 && repaired === 0) {
+    console.error(
+      `[repair] took ${considered} documents and repaired none of them. ` +
+        `Check the Microsoft connection before the next run.`,
+    );
+    process.exit(1);
+  }
+
   if (considered === 0 && waiting > 0) {
     console.error(
       `[repair] ${waiting} documents are waiting and this run took none of them. ` +

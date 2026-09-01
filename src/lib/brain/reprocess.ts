@@ -222,15 +222,29 @@ async function reprocessOne(
     return fail("failed", "no drive item to re-fetch");
   }
 
+  /* A FETCH THAT FAILED SAYS NOTHING ABOUT THE DOCUMENT.
+   *
+   * This used to overwrite status_detail with the fetch error, which erased
+   * the diagnosis that made the document repairable in the first place. Since
+   * a fetch error is not in FIXABLE, the document then dropped out of the
+   * candidate set and no later run would ever look at it again.
+   *
+   * Measured 2026-09-01. Every Microsoft token expired on 2026-08-26, so a run
+   * took 50 documents, failed to download all 50, and rewrote every one from
+   * "docx mimeType" to "re-fetch failed: no_token". The fixable queue went
+   * from 186 to 136 and the no_token pile grew from 37 to 87. The repair was
+   * destroying its own work queue, one batch per night, and reporting success.
+   *
+   * A transient failure leaves the row exactly as it found it. The outcome is
+   * still returned, so the run reports what happened; what it must not do is
+   * launder an outage into a permanent verdict about a file it never read. */
   let buffer: Buffer | null;
   try {
     buffer = await fetchBytes(doc.driveItemId);
   } catch (err) {
-    await updateDocumentStatus(doc.id, "failed", `re-fetch failed: ${(err as Error).message}`);
     return fail("failed", `re-fetch failed: ${(err as Error).message}`);
   }
   if (!buffer || buffer.length === 0) {
-    await updateDocumentStatus(doc.id, "failed", "re-fetch returned no bytes");
     return fail("failed", "re-fetch returned no bytes");
   }
 
