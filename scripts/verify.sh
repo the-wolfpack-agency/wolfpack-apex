@@ -167,6 +167,11 @@ stage_enabled lint      && run_stage "lint"       npm run lint
 # Structural, and costs milliseconds: an unbounded CI job is a six-hour hang
 # waiting to happen, and the only symptom is a check that never finishes.
 stage_enabled lint      && run_stage "ci-timeouts" npm run ci:check-timeouts
+# Also structural, also milliseconds. A tag-pinned action is code somebody else
+# can change tomorrow, running in CI with this repository's secrets. CI already
+# enforces it; carrying it here is the difference between finding out before
+# the push and after it.
+stage_enabled lint      && run_stage "action-pins" npm run ci:check-action-pins
 stage_enabled typecheck && run_stage "typecheck"  npx tsc --noEmit
 stage_enabled unit      && run_stage "unit-tests" run_unit_tests
 
