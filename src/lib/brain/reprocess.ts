@@ -75,6 +75,29 @@ export const FIXABLE: Array<{ id: string; test: RegExp; source: string; why: str
     source: "sync extractor unavailable",
     why: "classified as a kind with no extractor, often a misclassified xlsx or docx",
   },
+  {
+    /* THE OCR PATH EXISTS AND NOTHING HAS EVER REACHED IT.
+     *
+     * reprocessOne already routes an extraction failure through the OCR
+     * policy, picks the cheap purpose-built API over a vision model, and
+     * checks the cost ceiling before spending. All of it is wired, tested and
+     * paid for: the credentials resolve in production through the shared
+     * AZURE_COGNITIVE_* fallback.
+     *
+     * It has run zero times. Measured 2026-09-01: no brain.document_ocred
+     * event has ever fired, because a scanned PDF fails with "contained no
+     * extractable text" and that phrase was not in this list, so
+     * findCandidates never selected one. 56 of them sit re-fetchable, a
+     * capability away from being answerable.
+     *
+     * SELF-LIMITING BY CONSTRUCTION. If the OCR cannot read a page the repair
+     * writes "ocr <reason>" onto the row, which is not a pattern here, so the
+     * document drops out rather than being retried nightly forever. */
+    id: "ocr_never_tried",
+    test: /no extractable text|scanned/i,
+    source: "no extractable text|scanned",
+    why: "a scan the OCR route can read, which nothing had ever asked it to",
+  },
 ];
 
 /**
