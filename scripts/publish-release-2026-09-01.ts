@@ -11,12 +11,16 @@ import "./load-env";
  * eval, the calendar calibration. None of them failed loudly, because a
  * capability nothing exercises does not degrade. It simply never was.
  *
- * WHAT IS NOT HERE. Query expansion and the library-figure correction are
- * written, tested and open as pull requests (#614, #650), and nothing in main
- * supplies a rewriter or excludes our own tooling from the count. They were in
- * an earlier draft of this file, which is the same mistake in miniature that
- * the release is about: describing a capability from the code that exists
- * rather than from what runs. An entry goes in when it is on main.
+ * WHAT IS NOT HERE, AND WHY THE LIST SHRANK AND GREW. The library-figure
+ * correction is written, tested and open as PR #650; nothing on main excludes
+ * our own tooling from the count, so its entry says what the page asks rather
+ * than what it counts. It goes in when that lands.
+ *
+ * Query expansion was pulled from this file and then put back. The check that
+ * pulled it grepped for expandQuery, which is the FILE name, while the wiring
+ * calls expandQuestion. Absent from a search is not absent from the codebase,
+ * and a search for the wrong string returns exactly what a genuinely missing
+ * feature returns. Verified the second time by reading the merge, not a grep.
  *
  * Entries are written for somebody who was not here. "Fixed the repair sweep"
  * means nothing; "the nightly job reported success while repairing nothing for
@@ -52,6 +56,15 @@ const ENTRIES: ReleaseEntry[] = [
       "Runs daily and fails only when something has never run. Seven capabilities on it today, all demonstrated.",
     area: "Instinct",
     category: "feature",
+  },
+  {
+    title: "Query expansion is switched on",
+    description:
+      "When a question's words do not match the way documents are written, the product now asks again in other words. It was built and wired to accept a rewriter that nothing ever supplied, so the second attempt returned before it began. Measured cost: \"do we pay half now and half later?\" was asked five times by people and answered none of them, while the work order that answers it says fifty per cent on execution and the remainder on delivery. Its embedding scored below the floor entirely, zero hits rather than a near miss, which is exactly the case no amount of ranking reaches.",
+    how_to_use:
+      "Automatic. It only fires when the first attempt found nothing or the relevance judge rejected what it found, so an ordinary question that found its answer pays nothing. The rewrite runs on the cheap tier at sixty tokens and returns the original question if the provider fails.",
+    area: "Instinct",
+    category: "improvement",
   },
   {
     title: "Week one says something specific about a client's own library",
