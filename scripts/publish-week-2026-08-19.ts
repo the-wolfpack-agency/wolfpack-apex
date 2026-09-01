@@ -10,6 +10,8 @@
  * It reuses createRelease, the same write path both release scripts use, so
  * there is one way into this table and not a second.
  */
+/* FIRST. Imports hoist, so anything below already read process.env. */
+import "./load-env";
 import { createRelease, type ReleaseEntry } from "@/lib/releases";
 
 const entries: ReleaseEntry[] = [

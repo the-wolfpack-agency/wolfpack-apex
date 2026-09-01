@@ -7,6 +7,8 @@
  * Usage: npm run engineering:seed  (needs DATABASE_URL)
  */
 
+/* FIRST. Imports hoist, so anything below already read process.env. */
+import "./load-env";
 import { upsertPage } from "@/lib/engineering";
 
 interface Seed {

@@ -31,6 +31,42 @@ const SCRIPTS = path.join(process.cwd(), "scripts");
 /** Modules that read process.env while being imported. */
 const READS_ENV = /from\s+"@\/lib\/(db|qdrant|neo4j|ai\/|brain\/|integrations\/)/;
 
+/**
+ * FOLLOWS THE IMPORT, BECAUSE THE FIRST VERSION DID NOT.
+ *
+ * It matched only DIRECT imports of an env-reading module, so a script
+ * importing @/lib/releases sailed through: releases imports @/lib/db, reads
+ * DATABASE_URL at module load, and the connection is refused with an empty
+ * error message. publish-loc-snapshot failed exactly that way on 2026-09-01,
+ * printing "[loc] failed:" and nothing after it.
+ *
+ * Two hops is enough for this repository and cheap. A rule that recursed
+ * without a bound would follow a cycle forever, and one that stopped at zero
+ * hops was the bug.
+ */
+function reachesEnv(modulePath: string, depth = 0): boolean {
+  if (depth > 2) return false;
+  for (const candidate of [`${modulePath}.ts`, `${modulePath}/index.ts`]) {
+    const full = path.join(process.cwd(), "src", "lib", candidate);
+    if (!fs.existsSync(full)) continue;
+    const src = fs.readFileSync(full, "utf8");
+    if (READS_ENV.test(src)) return true;
+    for (const m of src.matchAll(/from\s+"@\/lib\/([a-zA-Z0-9/_-]+)"/g)) {
+      if (reachesEnv(m[1], depth + 1)) return true;
+    }
+  }
+  return false;
+}
+
+/** True when a script reaches process.env directly or through what it imports. */
+function scriptReadsEnv(source: string): boolean {
+  if (READS_ENV.test(source)) return true;
+  for (const m of source.matchAll(/from\s+"@\/lib\/([a-zA-Z0-9/_-]+)"/g)) {
+    if (reachesEnv(m[1])) return true;
+  }
+  return false;
+}
+
 const scriptFiles = fs
   .readdirSync(SCRIPTS)
   .filter((f) => f.endsWith(".ts") && f !== "load-env.ts");
@@ -41,7 +77,7 @@ describe("scripts that need the environment", () => {
 
     for (const file of scriptFiles) {
       const source = fs.readFileSync(path.join(SCRIPTS, file), "utf8");
-      if (!READS_ENV.test(source)) continue;
+      if (!scriptReadsEnv(source)) continue;
 
       const imports = source
         .split("\n")
@@ -66,8 +102,17 @@ describe("scripts that need the environment", () => {
      anything would pass silently and guard nothing. */
   it("actually matches the scripts it is meant to cover", () => {
     const covered = scriptFiles.filter((f) =>
-      READS_ENV.test(fs.readFileSync(path.join(SCRIPTS, f), "utf8")),
+      scriptReadsEnv(fs.readFileSync(path.join(SCRIPTS, f), "utf8")),
     );
     expect(covered.length).toBeGreaterThan(10);
+  });
+
+  /* THE HOLE THE FIRST VERSION HAD. A script importing @/lib/releases reaches
+     the database through it, and matching only direct imports missed every one
+     of them: eleven scripts, including the release publisher. */
+  it("follows an import to find an env reader one hop away", () => {
+    expect(scriptReadsEnv('import { createRelease } from "@/lib/releases";')).toBe(true);
+    /* And still leaves alone a script that reaches nothing. */
+    expect(scriptReadsEnv('import { readFileSync } from "node:fs";')).toBe(false);
   });
 });

@@ -19,6 +19,8 @@
  * Usage:  npx tsx scripts/publish-release-2026-08-22.ts [--dry-run]
  * Needs:  DATABASE_URL
  */
+/* FIRST. Imports hoist, so anything below already read process.env. */
+import "./load-env";
 import { createRelease, type ReleaseEntry } from "@/lib/releases";
 
 const DRY = process.argv.includes("--dry-run");

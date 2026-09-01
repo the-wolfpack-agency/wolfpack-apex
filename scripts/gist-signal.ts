@@ -10,6 +10,8 @@
  * Reads only. Writes nothing, stores nothing, and prints no message text.
  */
 
+/* FIRST. Imports hoist, so anything below already read process.env. */
+import "./load-env";
 import { extractGists } from "@/lib/gist/extract";
 import { measureSignal, MIN_OBSERVATIONS } from "@/lib/gist/signal";
 
