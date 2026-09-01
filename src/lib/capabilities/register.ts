@@ -66,6 +66,21 @@ export interface Capability {
  */
 export const FRESH_DAYS = 45;
 
+/**
+ * Capabilities that run constantly, and so go stale in days rather than weeks.
+ *
+ * Semantic search fires on every question. Forty-five days of grace on
+ * something that should leave a trace hourly means a total outage reads as
+ * healthy for six weeks, which is most of the way back to not checking at all.
+ */
+export const HOT_CAPABILITIES: ReadonlySet<string> = new Set([
+  "semantic_retrieval",
+  "relevance_judge",
+]);
+
+/** Days of grace for something that should run many times a day. */
+export const HOT_FRESH_DAYS = 2;
+
 export const CAPABILITIES: Capability[] = [
   {
     id: "ocr",
@@ -159,6 +174,7 @@ export function verdictFor(
   lastSeen: string | null,
   required: number,
   now: Date,
+  freshDays: number = FRESH_DAYS,
 ): Verdict {
   /* Null means the query failed. An unreadable signal and an absent one lead
      to opposite actions, and this whole register exists because those two look
@@ -167,7 +183,7 @@ export function verdictFor(
   if (observations < required) return "never";
   if (!lastSeen) return "stale";
   const age = (now.getTime() - new Date(lastSeen).getTime()) / 86_400_000;
-  return age <= FRESH_DAYS ? "demonstrated" : "stale";
+  return age <= freshDays ? "demonstrated" : "stale";
 }
 
 /** What a job should exit non-zero on. */
