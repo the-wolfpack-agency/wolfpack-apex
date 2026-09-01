@@ -77,7 +77,27 @@ async function main() {
 
   const repaired = Number(result.repaired ?? 0);
   const failed = Number(result.failed ?? 0);
+  const considered = Number(result.considered ?? 0);
   console.log(`[repair] repaired ${repaired}, still failing ${failed}`);
+
+  /* A PARTIAL DRAIN MUST NOT READ LIKE A FINISHED ONE.
+   *
+   * This job asks what is waiting with one limit and repairs with another, so
+   * a healthy run legitimately leaves documents behind. For three nights it
+   * reported 186 waiting and then repaired 0, and nothing in the output said
+   * those two numbers were about different sets. Saying what is left turns a
+   * silent stall into a number that stops going down. */
+  const remaining = waiting - considered;
+  if (remaining > 0) {
+    console.log(`[repair] ${remaining} still waiting; the next run takes the next ${LIMIT}.`);
+  }
+  if (considered === 0 && waiting > 0) {
+    console.error(
+      `[repair] ${waiting} documents are waiting and this run took none of them. ` +
+        `That is a stall, not a quiet day.`,
+    );
+    process.exit(1);
+  }
 
   /* Still-failing documents are NOT a job failure. Some will never extract:
      a scanned PDF with no text layer, a file type nothing can read. Reporting
