@@ -22,7 +22,7 @@
  *   red   = rgba(232,123,123,*) error
  *   blue  = rgba(82,154,232,*)  info / auto-ack accent
  *
- * Props are intentionally minimal: parent owns the optimiztic state
+ * Props are intentionally minimal: parent owns the optimistic state
  * after a PATCH, so the row can stay a controlled component.
  */
 

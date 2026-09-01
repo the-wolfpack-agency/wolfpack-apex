@@ -263,7 +263,7 @@ export default function VersionHistoryPanel(props: VersionHistoryPanelProps) {
       const data = (await r.json()) as { version: BriefVersionEntryView };
       onRestore(data.version);
       setSelected(null);
-      // Prepend the restore row optimiztically so the timeline updates
+      // Prepend the restore row optimistically so the timeline updates
       // without a second GET.
       setVersions((prev) =>
         prev === null ? [data.version] : [data.version, ...prev],

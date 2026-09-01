@@ -2,8 +2,8 @@
  * HR Field Extractor — comprehensive tests for W-4 and I-9 field extraction.
  *
  * Tests cover:
- *   - W-4 extraction against realiztic 2026 IRS W-4 text
- *   - I-9 extraction against realiztic USCIS I-9 text
+ *   - W-4 extraction against realistic 2026 IRS W-4 text
+ *   - I-9 extraction against realistic USCIS I-9 text
  *   - SSN masking — full SSN is NEVER returned
  *   - Partial extraction (some fields missing)
  *   - Empty/garbage text returns all nulls with completeness 0 (or near-0)
@@ -47,7 +47,7 @@ import {
 } from "@/lib/hr-field-extractor";
 import type { W4Fields, I9Fields, ExtractionResult } from "@/lib/hr-field-extractor";
 
-/* ----------------------- Realiztic form text fixtures ----------------- */
+/* ----------------------- Realistic form text fixtures ----------------- */
 
 const W4_FULL_TEXT = `Form W-4
 2026

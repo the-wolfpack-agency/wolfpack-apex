@@ -588,7 +588,7 @@ export default function BulletinBoardPage({
       .catch(() => undefined);
   }
 
-  function patchNoteOptimiztic(id: string, patch: Partial<Note>) {
+  function patchNoteOptimistic(id: string, patch: Partial<Note>) {
     setNotes((prev) =>
       prev.map((n) => (n.id === id ? { ...n, ...patch } : n)),
     );
@@ -918,7 +918,7 @@ export default function BulletinBoardPage({
               onDeactivate={() => {
                 if (activeNoteId === n.id) setActiveNoteId(null);
               }}
-              onPatchOptimiztic={patchNoteOptimiztic}
+              onPatchOptimistic={patchNoteOptimistic}
               onPatchDebounced={patchNoteDebounced}
               onPatchImmediate={patchNoteServer}
               onDelete={() => void deleteNote(n.id)}
@@ -1297,7 +1297,7 @@ function NoteView({
   active,
   onActivate,
   onDeactivate,
-  onPatchOptimiztic,
+  onPatchOptimistic,
   onPatchDebounced,
   onPatchImmediate,
   onDelete,
@@ -1307,7 +1307,7 @@ function NoteView({
   active: boolean;
   onActivate: () => void;
   onDeactivate: () => void;
-  onPatchOptimiztic: (id: string, patch: Partial<Note>) => void;
+  onPatchOptimistic: (id: string, patch: Partial<Note>) => void;
   // patchNoteServer accepts a wider input that includes the server's
   // `association` setter; cast at the call site.
   onPatchDebounced: (id: string, patch: Partial<Note>, ms?: number) => void;
@@ -1352,7 +1352,7 @@ function NoteView({
       const dyPct = ((ev.clientY - startY) / rect.height) * 100;
       const nx = clampPct(startPctX + dxPct, 0, 100 - note.width_pct);
       const ny = clampPct(startPctY + dyPct, 0, 100 - note.height_pct);
-      onPatchOptimiztic(note.id, { x_pct: nx, y_pct: ny });
+      onPatchOptimistic(note.id, { x_pct: nx, y_pct: ny });
       onPatchDebounced(note.id, { x_pct: nx, y_pct: ny });
     }
     function onUp() {
@@ -1381,7 +1381,7 @@ function NoteView({
       const dhPct = ((ev.clientY - startY) / rect.height) * 100;
       const nw = clampPct(startW + dwPct, 8, 100 - note.x_pct);
       const nh = clampPct(startH + dhPct, 8, 100 - note.y_pct);
-      onPatchOptimiztic(note.id, { width_pct: nw, height_pct: nh });
+      onPatchOptimistic(note.id, { width_pct: nw, height_pct: nh });
       onPatchDebounced(note.id, { width_pct: nw, height_pct: nh });
     }
     function onUp() {
@@ -1396,13 +1396,13 @@ function NoteView({
     setEditing(false);
     onDeactivate();
     if (bodyDraft !== note.body) {
-      onPatchOptimiztic(note.id, { body: bodyDraft });
+      onPatchOptimistic(note.id, { body: bodyDraft });
       void onPatchImmediate(note.id, { body: bodyDraft });
     }
   }
 
   function changeColor(color: string) {
-    onPatchOptimiztic(note.id, { color });
+    onPatchOptimistic(note.id, { color });
     void onPatchImmediate(note.id, { color });
     setPaletteOpen(false);
   }
@@ -1412,9 +1412,9 @@ function NoteView({
     id: string;
     label: string;
   }) {
-    /* Optimiztic — local state still uses camelCase fields per the
+    /* Optimistic — local state still uses camelCase fields per the
        lib's response shape. */
-    onPatchOptimiztic(note.id, {
+    onPatchOptimistic(note.id, {
       associationKind: p.kind,
       associationId: p.kind ? p.id : null,
       associationLabel: p.kind ? p.label : null,

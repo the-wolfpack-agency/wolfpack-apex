@@ -32,8 +32,8 @@ const EXTENSIONS = new Set([".ts", ".tsx", ".md", ".css", ".sql", ".yml", ".yaml
 
 /** Stem to preferred spelling. One entry covers every inflection. */
 const PREFER: Array<[RegExp, string]> = [
-  [/\bsummaris/gi, "summariz"],
-  [/\borganis/gi, "organiz"],
+  [/\\bsummaris(e|es|ed|ing|ation|ations|able)\\b/gi, "summariz"],
+  [/\\borganis(e|es|ed|ing|ation|ations|able)\\b/gi, "organiz"],
   [/\bprogramme/gi, "program"],
   [/\bbehaviour/gi, "behavior"],
   [/\bcentre/gi, "center"],
@@ -41,22 +41,22 @@ const PREFER: Array<[RegExp, string]> = [
   [/\bfavour/gi, "favor"],
   [/\bcatalogue/gi, "catalog"],
   [/\bjudgement/gi, "judgment"],
-  [/\bprioritis/gi, "prioritiz"],
+  [/\\bprioritis(e|es|ed|ing|ation|ations|able)\\b/gi, "prioritiz"],
   /* Verb forms only: "optimistic" and "optimism" are correct. */
   [/\boptimis(e|ed|es|ing|ation|ations)\b/gi, "optimiz"],
-  [/\brecognis/gi, "recogniz"],
+  [/\\brecognis(e|es|ed|ing|ation|ations|able)\\b/gi, "recogniz"],
   [/\brealis(e|ed|ing|es)\b/gi, "realiz-"],
-  [/\bauthoris/gi, "authoriz"],
-  [/\butilis/gi, "utiliz"],
-  [/\bnormalis/gi, "normaliz"],
-  [/\binitialis/gi, "initializ"],
-  [/\bspecialis/gi, "specializ"],
-  [/\bstandardis/gi, "standardiz"],
-  [/\bcustomis/gi, "customiz"],
-  [/\bminimis/gi, "minimiz"],
-  [/\bmaximis/gi, "maximiz"],
-  [/\bapologis/gi, "apologiz"],
-  [/\bpersonalis/gi, "personaliz"],
+  [/\\bauthoris(e|es|ed|ing|ation|ations|able)\\b/gi, "authoriz"],
+  [/\\butilis(e|es|ed|ing|ation|ations|able)\\b/gi, "utiliz"],
+  [/\\bnormalis(e|es|ed|ing|ation|ations|able)\\b/gi, "normaliz"],
+  [/\\binitialis(e|es|ed|ing|ation|ations|able)\\b/gi, "initializ"],
+  [/\\bspecialis(e|es|ed|ing|ation|ations|able)\\b/gi, "specializ"],
+  [/\\bstandardis(e|es|ed|ing|ation|ations|able)\\b/gi, "standardiz"],
+  [/\\bcustomis(e|es|ed|ing|ation|ations|able)\\b/gi, "customiz"],
+  [/\\bminimis(e|es|ed|ing|ation|ations|able)\\b/gi, "minimiz"],
+  [/\\bmaximis(e|es|ed|ing|ation|ations|able)\\b/gi, "maximiz"],
+  [/\\bapologis(e|es|ed|ing|ation|ations|able)\\b/gi, "apologiz"],
+  [/\\bpersonalis(e|es|ed|ing|ation|ations|able)\\b/gi, "personaliz"],
   [/\blabelled/gi, "labeled"],
   [/\blabelling/gi, "labeling"],
   [/\bmodelling/gi, "modeling"],
@@ -128,11 +128,46 @@ describe("spelling", () => {
     expect(found.slice(0, 25).join("\n")).toBe("");
   });
 
+  /* WORDS A BARE STEM WOULD EAT, AND DID.
+   *
+   * The first version of this list used stems like /\brealis/ and
+   * /\boptimis/, which match "realistic", "realism", "optimistic" and
+   * "specialist" too. Those are correct in both variants, and the sweep
+   * rewrote them into realiztic, realizm, optimiztic and specializt across 85
+   * files before anyone read the output.
+   *
+   * Every stem is bound to a British ending now, and these are the words that
+   * prove it. */
+  it("leaves alone the words that are correct in both variants", () => {
+    const safe = [
+      "realistic expectations",
+      "a realism about the numbers",
+      "optimistic forecast",
+      "the specialist team",
+      "organism",
+      "analysis of the data",
+      "the analyses agree",
+      "isCancelled",
+      "a cancelled meeting",
+    ];
+    for (const phrase of safe) {
+      const hit = PREFER.find(([p]) => {
+        p.lastIndex = 0;
+        return p.test(phrase);
+      });
+      expect(hit ? `${phrase} -> flagged by ${hit[0]}` : "").toBe("");
+    }
+  });
+
   /* The list is the whole test, so a change that stopped it matching would
      pass silently and guard nothing. */
   it("has a working list", () => {
     expect(/\bprogramme/i.test("the programme runs")).toBe(true);
     expect(/\bcentre/i.test("the centre")).toBe(true);
+    /* And the bound stems still catch the real thing. */
+    const realis = PREFER.find(([p]) => String(p).includes("realis"))![0];
+    realis.lastIndex = 0;
+    expect(realis.test("we realised late")).toBe(true);
     /* And does not flag the words that are correct here. */
     expect(/\banalyse\b/i.test("the analysis of the data")).toBe(false);
     expect(PREFER.some(([p]) => p.test("isCancelled"))).toBe(false);

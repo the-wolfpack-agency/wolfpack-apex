@@ -443,10 +443,10 @@ describe("mergeThreadMessages", () => {
     expect(mergeThreadMessages(prev, [msg("a"), msg("b")])).toBe(prev);
   });
 
-  it("preserves a still-pending optimiztic message not yet echoed by the server", () => {
-    const prev = [msg("a"), msg("optimiztic-1", { pending: true, role: "me" })];
+  it("preserves a still-pending optimistic message not yet echoed by the server", () => {
+    const prev = [msg("a"), msg("optimistic-1", { pending: true, role: "me" })];
     const out = mergeThreadMessages(prev, [msg("a")]);
-    expect(out.map((m) => m.id)).toEqual(["a", "optimiztic-1"]);
+    expect(out.map((m) => m.id)).toEqual(["a", "optimistic-1"]);
   });
 
   it("does not duplicate a message once the server confirms it (same id)", () => {
@@ -1009,8 +1009,8 @@ describe("MessagesPage — inline compose", () => {
     expect(body).toEqual({ content: "hi", contentType: "text" });
   });
 
-  test("optimiztic message appears immediately and resolves to server shape on success", async () => {
-    // Gate the POST so we can observe optimiztic state before resolution.
+  test("optimistic message appears immediately and resolves to server shape on success", async () => {
+    // Gate the POST so we can observe optimistic state before resolution.
     let resolvePost!: (v: any) => void;
     const postPromise = new Promise((res) => {
       resolvePost = res;
@@ -1026,19 +1026,19 @@ describe("MessagesPage — inline compose", () => {
     });
     await selectChat1AndWaitForComposer();
     fireEvent.change(screen.getByTestId("messages-compose-input"), {
-      target: { value: "optimiztic hello" },
+      target: { value: "optimistic hello" },
     });
     await act(async () => {
       fireEvent.click(screen.getByTestId("messages-compose-send"));
     });
 
-    // Optimiztic row present.
+    // Optimistic row present.
     await waitFor(() => {
       const pending = document.querySelector(
-        '[data-testid^="message-optimiztic-"][data-pending="true"]',
+        '[data-testid^="message-optimistic-"][data-pending="true"]',
       );
       expect(pending).not.toBeNull();
-      expect((pending as HTMLElement).textContent).toMatch(/optimiztic hello/);
+      expect((pending as HTMLElement).textContent).toMatch(/optimistic hello/);
     });
 
     // Resolve the POST.
@@ -1048,7 +1048,7 @@ describe("MessagesPage — inline compose", () => {
           id: "srv-42",
           createdDateTime: "2026-04-23T12:00:00Z",
           from: { displayName: "You" },
-          body: { contentType: "text", content: "optimiztic hello" },
+          body: { contentType: "text", content: "optimistic hello" },
         }),
       );
       // Yield a microtask.
@@ -1060,10 +1060,10 @@ describe("MessagesPage — inline compose", () => {
     });
     const serverNode = screen.getByTestId("message-srv-42");
     expect(serverNode.getAttribute("data-pending")).toBe("false");
-    expect(serverNode.textContent).toMatch(/optimiztic hello/);
-    // Optimiztic row gone.
+    expect(serverNode.textContent).toMatch(/optimistic hello/);
+    // Optimistic row gone.
     expect(
-      document.querySelector('[data-testid^="message-optimiztic-"]'),
+      document.querySelector('[data-testid^="message-optimistic-"]'),
     ).toBeNull();
 
     // Analytics: compose_sent fired with length.
@@ -1071,7 +1071,7 @@ describe("MessagesPage — inline compose", () => {
     expect(sent).toBeDefined();
     expect(sent!.metadata).toEqual({
       chat_id: "chat-1",
-      length: "optimiztic hello".length,
+      length: "optimistic hello".length,
     });
   });
 
@@ -1132,7 +1132,7 @@ describe("MessagesPage — inline compose", () => {
     ).toMatch(/fresh ping/);
   });
 
-  test("scope_missing response shows inline prompt, removes optimiztic, no error toast", async () => {
+  test("scope_missing response shows inline prompt, removes optimistic, no error toast", async () => {
     wireApiRouter((url, init) => {
       if (url === "/api/ms/chats") return ok({ chats: SAMPLE_CHATS });
       if (url === "/api/ms/chats/chat-1" && (!init || init.method === "GET"))
@@ -1159,9 +1159,9 @@ describe("MessagesPage — inline compose", () => {
     );
     // No error toast.
     expect(screen.queryByTestId("messages-toast")).toBeNull();
-    // Optimiztic removed.
+    // Optimistic removed.
     expect(
-      document.querySelector('[data-testid^="message-optimiztic-"]'),
+      document.querySelector('[data-testid^="message-optimistic-"]'),
     ).toBeNull();
     // Analytics.
     const bodies = analyticsBodies();
@@ -1177,7 +1177,7 @@ describe("MessagesPage — inline compose", () => {
     ).toBeDefined();
   });
 
-  test("write_disabled response shows inline write-disabled hint + removes optimiztic", async () => {
+  test("write_disabled response shows inline write-disabled hint + removes optimistic", async () => {
     wireApiRouter((url, init) => {
       if (url === "/api/ms/chats") return ok({ chats: SAMPLE_CHATS });
       if (url === "/api/ms/chats/chat-1" && (!init || init.method === "GET"))
@@ -1202,7 +1202,7 @@ describe("MessagesPage — inline compose", () => {
     });
     expect(screen.queryByTestId("messages-toast")).toBeNull();
     expect(
-      document.querySelector('[data-testid^="message-optimiztic-"]'),
+      document.querySelector('[data-testid^="message-optimistic-"]'),
     ).toBeNull();
     const bodies = analyticsBodies();
     expect(
@@ -1217,7 +1217,7 @@ describe("MessagesPage — inline compose", () => {
     ).toBeDefined();
   });
 
-  test("500 response shows error toast + rolls back optimiztic", async () => {
+  test("500 response shows error toast + rolls back optimistic", async () => {
     wireApiRouter((url, init) => {
       if (url === "/api/ms/chats") return ok({ chats: SAMPLE_CHATS });
       if (url === "/api/ms/chats/chat-1" && (!init || init.method === "GET"))
@@ -1240,7 +1240,7 @@ describe("MessagesPage — inline compose", () => {
     });
     expect(screen.getByTestId("messages-toast").textContent).toMatch(/couldn'?t send/i);
     expect(
-      document.querySelector('[data-testid^="message-optimiztic-"]'),
+      document.querySelector('[data-testid^="message-optimistic-"]'),
     ).toBeNull();
     // Draft restored so the user can retry.
     expect(
@@ -1256,7 +1256,7 @@ describe("MessagesPage — inline compose", () => {
     ).toBeDefined();
   });
 
-  test("network error shows error toast + rolls back optimiztic + fires compose_failed:network", async () => {
+  test("network error shows error toast + rolls back optimistic + fires compose_failed:network", async () => {
     mockFetchWithRefresh.mockImplementation((url: string, init: any) => {
       if (url === "/api/ms/chats")
         return Promise.resolve(ok({ chats: SAMPLE_CHATS }));
@@ -1917,7 +1917,7 @@ describe("MessagesPage — collapsible sections + Teams & channels", () => {
     });
   });
 
-  test("channel composer: optimiztic message + swap to server response on send", async () => {
+  test("channel composer: optimistic message + swap to server response on send", async () => {
     wireApiRouter((url, init) => {
       if (url === "/api/ms/chats") return ok({ chats: SAMPLE_CHATS });
       if (url === "/api/ms/teams")
@@ -1980,7 +1980,7 @@ describe("MessagesPage — collapsible sections + Teams & channels", () => {
     });
   });
 
-  test("channel composer: scope_missing response shows hint + rolls back optimiztic", async () => {
+  test("channel composer: scope_missing response shows hint + rolls back optimistic", async () => {
     wireApiRouter((url, init) => {
       if (url === "/api/ms/chats") return ok({ chats: SAMPLE_CHATS });
       if (url === "/api/ms/teams")
@@ -2018,10 +2018,10 @@ describe("MessagesPage — collapsible sections + Teams & channels", () => {
         /ChannelMessage\.Send/,
       );
     });
-    // Optimiztic was rolled back — only the inline error remains, no
-    // optimiztic-* row in the thread.
+    // Optimistic was rolled back — only the inline error remains, no
+    // optimistic-* row in the thread.
     expect(
-      document.querySelector('[data-testid^="channel-message-optimiztic"]'),
+      document.querySelector('[data-testid^="channel-message-optimistic"]'),
     ).toBeNull();
   });
 

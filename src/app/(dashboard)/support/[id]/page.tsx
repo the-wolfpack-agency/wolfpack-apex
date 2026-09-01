@@ -12,7 +12,7 @@
  *
  * The page intentionally does NOT refetch after every mutation — every
  * mutating endpoint already returns the new ticket shape, so we treat
- * those responses as authoritative and apply them optimiztically.
+ * those responses as authoritative and apply them optimistically.
  */
 
 import { useCallback, useEffect, useState } from "react";

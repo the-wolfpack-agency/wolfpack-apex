@@ -3,7 +3,7 @@
  *
  * Pre-built briefs for non-technical team members (Max, Meghan) to start
  * from instead of filling out every section from scratch. Every template
- * is a realiztic `SiteBrief` that passes `validateBrief()` end-to-end
+ * is a realistic `SiteBrief` that passes `validateBrief()` end-to-end
  * and shows off a mix of section types the platform supports.
  *
  * Contract:

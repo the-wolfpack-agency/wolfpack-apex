@@ -142,7 +142,7 @@ describe("integrations this workspace runs, as an explanation", () => {
   it("accounts for a host belonging to a connected integration", () => {
     const { report } = assessWalkedTraffic({
       ...base,
-      /* A permissive policy, which is the realiztic case and the reason a
+      /* A permissive policy, which is the realistic case and the reason a
          second source is needed at all. */
       entryHeaders: { "content-security-policy": "default-src https://*" },
       observations: [obs("https://graph.microsoft.com/v1.0/me")],

@@ -22,10 +22,10 @@
  *   - Read scope missing on list → `messages-scope-missing` card.
  *   - Read scope missing on thread → `messages-thread-scope-missing`.
  *   - Write scope missing (Chat.ReadWrite) → inline hint under the
- *     composer linking to /settings. Optimiztic message is removed.
+ *     composer linking to /settings. Optimistic message is removed.
  *   - Write disabled by workspace flag → inline hint pointing at the
- *     "Reply in Teams" deep-link. Optimiztic removed.
- *   - 5xx / network → transient error toast, optimiztic rolled back.
+ *     "Reply in Teams" deep-link. Optimistic removed.
+ *   - 5xx / network → transient error toast, optimistic rolled back.
  *
  * Analytics fired: messages.compose_sent, messages.compose_failed,
  * messages.scope_prompt_shown, messages.write_disabled_shown.
@@ -215,13 +215,13 @@ export interface ChatMessage {
    */
   deletedDateTime?: string;
   /**
-   * Set to "me" on optimiztic messages appended by the composer before
+   * Set to "me" on optimistic messages appended by the composer before
    * the server round-trip resolves. Allows the UI to distinguish
    * pending local writes from server-confirmed ones.
    */
   role?: "me" | "other";
   /**
-   * True while the optimiztic POST is inflight. Flipped false (or the
+   * True while the optimistic POST is inflight. Flipped false (or the
    * whole message is swapped for the server response) on resolution.
    */
   pending?: boolean;
@@ -230,7 +230,7 @@ export interface ChatMessage {
 /**
  * Merge a freshly-fetched server thread into the currently-displayed one for
  * the in-place ambient refresh (the open-thread poll). Server messages win by
- * id; any still-`pending` optimiztic local message not yet echoed by the
+ * id; any still-`pending` optimistic local message not yet echoed by the
  * server is kept at the end so a just-sent bubble does not vanish mid-send.
  * Returns the SAME `prev` array reference when nothing changed, so React skips
  * the re-render and the auto-scroll effect on a no-op poll.
@@ -1155,7 +1155,7 @@ export default function MessagesPage() {
   }
 
   // Channel compose handler — POSTs to /api/ms/teams/.../messages,
-  // applies optimiztic message immediately, swaps to the server's
+  // applies optimistic message immediately, swaps to the server's
   // version (or rolls back) on response. Returns a result object so
   // the pane can surface scope_missing / graph_error inline.
   type ChannelSendResult =
@@ -1166,15 +1166,15 @@ export default function MessagesPage() {
     channelId: string,
     content: string,
   ): Promise<ChannelSendResult> {
-    const optimizticId = `optimiztic-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const optimiztic: ChannelMessageSummary = {
-      id: optimizticId,
+    const optimisticId = `optimistic-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const optimistic: ChannelMessageSummary = {
+      id: optimisticId,
       createdDateTime: new Date().toISOString(),
       from: { displayName: "You" },
       body: { contentType: "text", content },
       bodyText: content,
     };
-    setChannelMessages((prev) => [...(prev ?? []), optimiztic]);
+    setChannelMessages((prev) => [...(prev ?? []), optimistic]);
     try {
       const res = await fetchWithRefresh(
         `/api/ms/teams/${encodeURIComponent(teamId)}/channels/${encodeURIComponent(channelId)}/messages`,
@@ -1194,7 +1194,7 @@ export default function MessagesPage() {
       };
       if (data.scope_missing) {
         setChannelMessages((prev) =>
-          (prev ?? []).filter((m) => m.id !== optimizticId),
+          (prev ?? []).filter((m) => m.id !== optimisticId),
         );
         fireAnalytics("messages.channel_compose_failed", {
           team_id: teamId,
@@ -1205,7 +1205,7 @@ export default function MessagesPage() {
       }
       if (data.graph_error) {
         setChannelMessages((prev) =>
-          (prev ?? []).filter((m) => m.id !== optimizticId),
+          (prev ?? []).filter((m) => m.id !== optimisticId),
         );
         fireAnalytics("messages.channel_compose_failed", {
           team_id: teamId,
@@ -1222,7 +1222,7 @@ export default function MessagesPage() {
       }
       if (!res.ok || !data.message) {
         setChannelMessages((prev) =>
-          (prev ?? []).filter((m) => m.id !== optimizticId),
+          (prev ?? []).filter((m) => m.id !== optimisticId),
         );
         fireAnalytics("messages.channel_compose_failed", {
           team_id: teamId,
@@ -1231,10 +1231,10 @@ export default function MessagesPage() {
         });
         return { ok: false, reason: "error" };
       }
-      // Swap optimiztic → server response.
+      // Swap optimistic → server response.
       setChannelMessages((prev) =>
         (prev ?? []).map((m) =>
-          m.id === optimizticId ? (data.message as ChannelMessageSummary) : m,
+          m.id === optimisticId ? (data.message as ChannelMessageSummary) : m,
         ),
       );
       fireAnalytics("messages.channel_compose_sent", {
@@ -1245,7 +1245,7 @@ export default function MessagesPage() {
       return { ok: true };
     } catch {
       setChannelMessages((prev) =>
-        (prev ?? []).filter((m) => m.id !== optimizticId),
+        (prev ?? []).filter((m) => m.id !== optimisticId),
       );
       fireAnalytics("messages.channel_compose_failed", {
         team_id: teamId,
@@ -1274,7 +1274,7 @@ export default function MessagesPage() {
      updates without a manual page refresh. It never shows a spinner, never
      touches the draft, and a no-op merge returns the same array (no
      re-render, no scroll). Skipped while a send is inflight so it cannot
-     race the optimiztic swap, and bailed if the user switched chats while
+     race the optimistic swap, and bailed if the user switched chats while
      the fetch was in flight. */
   const refreshThread = useCallback(async (chatId: string) => {
     if (sendingRef.current) return;
@@ -1466,14 +1466,14 @@ export default function MessagesPage() {
     setMentionHighlight(0);
     void loadThread(chat);
     // Bug 2 fix: advance the read-state cursor so the chat list re-
-    // renders without bold + dot. Optimiztic update first so the UI
+    // renders without bold + dot. Optimistic update first so the UI
     // flips instantly; the POST is fire-and-forget but failures don't
     // roll back (worst case the cursor catches up on next mount).
     advanceReadState(chat.id, "chat");
   }
 
   /**
-   * Bug 2 helper: optimiztically advance the local read-state map and
+   * Bug 2 helper: optimistically advance the local read-state map and
    * POST to /api/messages/read-state. Same fn handles chats / channels
    * / teams via the `kind` param — storage is shared, the analytics
    * dimension splits adoption per surface.
@@ -1711,9 +1711,9 @@ export default function MessagesPage() {
     if (trimmed.length === 0 || sending) return;
 
     const chatId = selectedChat.id;
-    const optimizticId = `optimiztic-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const optimiztic: ChatMessage = {
-      id: optimizticId,
+    const optimisticId = `optimistic-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const optimistic: ChatMessage = {
+      id: optimisticId,
       from: { displayName: "You" },
       createdDateTime: new Date().toISOString(),
       body: { contentType: "text", content: trimmed },
@@ -1724,7 +1724,7 @@ export default function MessagesPage() {
     setSending(true);
     setComposeHint(null);
     forceScrollRef.current = true; // snap to the message we just sent
-    setMessages((prev) => [...(prev ?? []), optimiztic]);
+    setMessages((prev) => [...(prev ?? []), optimistic]);
     setDraft("");
 
     // If the user inserted any @mentions, transform the plain-text
@@ -1765,7 +1765,7 @@ export default function MessagesPage() {
       };
 
       if (data?.scope_missing) {
-        setMessages((prev) => (prev ?? []).filter((m) => m.id !== optimizticId));
+        setMessages((prev) => (prev ?? []).filter((m) => m.id !== optimisticId));
         setComposeHint("scope_missing");
         setDraft(trimmed);
         fireAnalytics("messages.compose_failed", {
@@ -1775,7 +1775,7 @@ export default function MessagesPage() {
         return;
       }
       if (data?.write_disabled) {
-        setMessages((prev) => (prev ?? []).filter((m) => m.id !== optimizticId));
+        setMessages((prev) => (prev ?? []).filter((m) => m.id !== optimisticId));
         setComposeHint("write_disabled");
         setDraft(trimmed);
         fireAnalytics("messages.compose_failed", {
@@ -1785,7 +1785,7 @@ export default function MessagesPage() {
         return;
       }
       if (!res.ok) {
-        setMessages((prev) => (prev ?? []).filter((m) => m.id !== optimizticId));
+        setMessages((prev) => (prev ?? []).filter((m) => m.id !== optimisticId));
         setDraft(trimmed);
         setToast({ key: Date.now(), text: "Couldn't send. Try again." });
         fireAnalytics("messages.compose_failed", {
@@ -1795,11 +1795,11 @@ export default function MessagesPage() {
         return;
       }
 
-      // Success: swap optimiztic → server response.
+      // Success: swap optimistic → server response.
       const server: ChatMessage = {
-        id: data.id ?? optimizticId,
+        id: data.id ?? optimisticId,
         from: data.from ?? { displayName: "You" },
-        createdDateTime: data.createdDateTime ?? optimiztic.createdDateTime,
+        createdDateTime: data.createdDateTime ?? optimistic.createdDateTime,
         body:
           data.body && (data.body.content ?? "").length > 0
             ? data.body
@@ -1808,7 +1808,7 @@ export default function MessagesPage() {
         pending: false,
       };
       setMessages((prev) =>
-        (prev ?? []).map((m) => (m.id === optimizticId ? server : m)),
+        (prev ?? []).map((m) => (m.id === optimisticId ? server : m)),
       );
 
       // Bump this chat's row in the LEFT list so the timestamp +
@@ -1891,7 +1891,7 @@ export default function MessagesPage() {
         lastAiDraftRef.current = null; // one-shot per draft
       }
     } catch {
-      setMessages((prev) => (prev ?? []).filter((m) => m.id !== optimizticId));
+      setMessages((prev) => (prev ?? []).filter((m) => m.id !== optimisticId));
       setDraft(trimmed);
       setToast({ key: Date.now(), text: "Couldn't send. Try again." });
       fireAnalytics("messages.compose_failed", {
@@ -2691,7 +2691,7 @@ export default function MessagesPage() {
                        events and have no attachments. Rendering them
                        produces noise bubbles showing only a timestamp
                        — the inbox screenshot bug. Drop them before
-                       the renderer runs. Pending (optimiztic) messages
+                       the renderer runs. Pending (optimistic) messages
                        are always kept so the user sees their own
                        outgoing message render immediately. */
                     .filter((m) => m.pending || !isNoiseMessage(m))

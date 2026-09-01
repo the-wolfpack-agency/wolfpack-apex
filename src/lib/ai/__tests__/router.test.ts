@@ -298,10 +298,10 @@ describe("router — failover", () => {
   });
 
   it("Azure 5xx falls back to Anthropic and reports fallback_used=true", async () => {
-    // A realiztically shaped Azure endpoint. "example.azure.com" is not one:
+    // A realistically shaped Azure endpoint. "example.azure.com" is not one:
     // real resources live under <name>.openai.azure.com, and since the egress
     // allowlist was wired into the provider a fixture that does not look like a
-    // real endpoint is correctly refused. Making the fixture realiztic is the
+    // real endpoint is correctly refused. Making the fixture realistic is the
     // fix; adding a test hostname to a production allowlist would not be.
     process.env.AZURE_OPENAI_ENDPOINT = "https://test-resource.openai.azure.com";
     process.env.AZURE_OPENAI_API_KEY = "akey";

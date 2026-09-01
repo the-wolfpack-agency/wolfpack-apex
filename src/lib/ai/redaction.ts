@@ -520,7 +520,7 @@ export function redactMessages(
  * A credential, an SSN, a card number or an IBAN is different: there is no
  * question a person can ask this product where sending one to a third-party
  * model is the right answer. Those are almost always pasted by accident, into
- * a chat box, as part of a log or a document dump. That is the realiztic
+ * a chat box, as part of a log or a document dump. That is the realistic
  * incident here, and this is the class that stops it.
  *
  * Callers who genuinely need the full set (the OGIAM ledger, agent actions)

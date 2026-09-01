@@ -7,7 +7,7 @@
  *      notify_all:true and hits the server directly (not the offline helper).
  *   2. Delete uses ConfirmDialog, not window.confirm — cancel aborts,
  *      confirm fires DELETE.
- *   3. Thread + reply delete are optimiztic: the row disappears before
+ *   3. Thread + reply delete are optimistic: the row disappears before
  *      the network call resolves, and a rollback+toast surfaces on error.
  */
 
@@ -252,10 +252,10 @@ test("reply delete opens ConfirmDialog and Confirm issues DELETE", async () => {
 });
 
 // ---------------------------------------------------------------------------
-// Task 3 — optimiztic delete for threads + replies, with rollback on error.
+// Task 3 — optimistic delete for threads + replies, with rollback on error.
 // ---------------------------------------------------------------------------
 
-test("thread delete is optimiztic: row disappears before server resolves", async () => {
+test("thread delete is optimistic: row disappears before server resolves", async () => {
   let resolveDelete: ((res: Response) => void) | undefined;
   mockFetchWithRefresh.mockImplementation((url: string, init?: RequestInit) => {
     if (init?.method === "DELETE" && url === "/api/discussions/d-1") {
@@ -275,7 +275,7 @@ test("thread delete is optimiztic: row disappears before server resolves", async
     fireEvent.click(screen.getByTestId("confirm-dialog-confirm"));
   });
 
-  // Before the DELETE resolves, the optimiztic update has already closed
+  // Before the DELETE resolves, the optimistic update has already closed
   // the detail view and dropped the row from the list.
   await waitFor(() => {
     expect(screen.queryByTestId("thread-edit-btn")).toBeNull();
@@ -320,7 +320,7 @@ test("thread delete rolls back + toasts when server returns 500", async () => {
   expect(screen.getByTestId("thread-edit-btn")).toBeInTheDocument();
 });
 
-test("reply delete is optimiztic and rolls back on error", async () => {
+test("reply delete is optimistic and rolls back on error", async () => {
   mockFetchWithRefresh.mockImplementation((url: string, init?: RequestInit) => {
     if (
       init?.method === "DELETE" &&

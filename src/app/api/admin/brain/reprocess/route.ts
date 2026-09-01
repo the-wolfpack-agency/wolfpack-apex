@@ -63,6 +63,17 @@ async function gate(req: NextRequest) {
   return { user: auth.user };
 }
 
+/**
+ * Long enough to drain a batch, matching the SharePoint sync routes.
+ *
+ * Measured 2026-09-01: the first run that could actually download anything
+ * indexed 22 documents in about 50 seconds and was then killed by the default
+ * 60-second budget, returning a 500 with nothing to say about the 28 it had
+ * not reached. The sync routes that fetch from the same drives already run at
+ * 300, for the same reason.
+ */
+export const maxDuration = 300;
+
 const NO_STORE = { "Cache-Control": "no-store, max-age=0" };
 
 /** What a run WOULD do. Read-only. */
@@ -87,6 +98,10 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const started = Date.now();
+  /* A minute of headroom under maxDuration, so the report always gets written
+     and returned rather than being cut off mid-flush. */
+  const BUDGET_MS = (maxDuration - 60) * 1000;
   const g = await gate(req);
   if (g.error) return g.error;
   const user = g.user!;
@@ -140,13 +155,20 @@ export async function POST(req: NextRequest) {
   const downloadAs = identity?.userEmail ?? user.id;
 
   try {
+    /* STOP BEFORE THE PLATFORM STOPS US.
+     *
+     * A run killed at the function limit returns a 500 and loses the report,
+     * so the work it DID do is invisible and the next run cannot be told how
+     * far the last one got. Finishing early with an honest count beats being
+     * cut off with none: the queue is drained across runs either way, and only
+     * one of the two says so. */
     const report = await reprocessFixable(
       async (driveItemId) => {
         if (!anyDrive) return null;
         return downloadDriveItem(downloadAs, anyDrive, driveItemId);
       },
       { userId: user.id, role: user.role },
-      { limit },
+      { limit, deadline: started + BUDGET_MS },
     );
     /* AUDITED, because this rewrites a document library. A repair that
        silently replaced the chunks behind a client's citations, with no record

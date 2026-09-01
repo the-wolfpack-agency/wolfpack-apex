@@ -28,7 +28,7 @@ describe("renderQrSvg", () => {
     expect(() => renderQrSvg("a")).not.toThrow();
     expect(() =>
       renderQrSvg(
-        "https://wolfpack-instinct.vercel.app/q/abc1234?with=some&params=for-realizm",
+        "https://wolfpack-instinct.vercel.app/q/abc1234?with=some&params=for-realism",
       ),
     ).not.toThrow();
   });

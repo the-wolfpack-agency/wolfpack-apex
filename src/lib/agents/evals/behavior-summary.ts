@@ -1,5 +1,5 @@
 /**
- * Reading the behavior scores back, in words a non-specializt can act on.
+ * Reading the behavior scores back, in words a non-specialist can act on.
  *
  * The eval now runs on every task and writes agent.behavior_scored. Data nobody
  * reads is the same failure as a control nobody calls, one step later: it looks

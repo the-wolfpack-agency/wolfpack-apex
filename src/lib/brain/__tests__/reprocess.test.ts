@@ -428,3 +428,56 @@ describe("a repair that cannot reach the file", () => {
     expect(report.outcomes[0].detail).toMatch(/no_token/);
   });
 });
+
+/**
+ * Finishing early beats being cut off.
+ *
+ * THE RUN THAT PROMPTED IT. The first repair that could actually download
+ * anything indexed 22 documents in about 50 seconds and was then killed by the
+ * platform's default 60-second budget. It returned a 500, so the 22 successes
+ * were invisible in the report and the next run had no idea how far it got.
+ *
+ * The queue drains across runs either way. Only one of the two says so.
+ */
+describe("a repair that runs out of time", () => {
+  function candidates(n: number) {
+    mockQuery.mockResolvedValueOnce({
+      rows: Array.from({ length: n }, (_, i) => ({
+        id: `d${i}`,
+        filename: `doc-${i}.docx`,
+        kind: "docx",
+        status: "failed",
+        status_detail: 'DOMParser.parseFromString: the provided mimeType "undefined" is not valid',
+        ms_drive_item_id: `drive-${i}`,
+      })),
+    });
+  }
+
+  it("stops on its own clock and still returns a report", async () => {
+    candidates(20);
+    const report = await reprocessFixable(async () => Buffer.from("x"), { userId: "u", role: "cto" }, {
+      /* Already past, so it stops before the first document. */
+      deadline: Date.now() - 1,
+    });
+    expect(report.ranOutOfTime).toBe(true);
+    expect(report.attempted).toBe(0);
+    /* The count of what was WAITING survives, which is what tells the next run
+       there is still work. */
+    expect(report.considered).toBe(20);
+  });
+
+  it("does not claim it ran out when it finished the batch", async () => {
+    candidates(2);
+    const report = await reprocessFixable(async () => Buffer.from("x"), { userId: "u", role: "cto" }, {
+      deadline: Date.now() + 60_000,
+    });
+    expect(report.ranOutOfTime).toBe(false);
+    expect(report.attempted).toBe(2);
+  });
+
+  it("runs to the end when given no deadline", async () => {
+    candidates(3);
+    const report = await reprocessFixable(async () => Buffer.from("x"), { userId: "u", role: "cto" });
+    expect(report.attempted).toBe(3);
+  });
+});

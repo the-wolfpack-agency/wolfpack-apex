@@ -82,7 +82,7 @@ describe("what it must never take", () => {
  * phrase it claims never gets the chance to be a document question. That makes
  * an ambiguous noun expensive.
  *
- * Measured on the deployed URL 2026-08-29, walking a realiztic task. Asked
+ * Measured on the deployed URL 2026-08-29, walking a realistic task. Asked
  * "what are the payment terms in the viaPeople work order?" — about a document
  * sitting in SharePoint — the assistant replied:
  *

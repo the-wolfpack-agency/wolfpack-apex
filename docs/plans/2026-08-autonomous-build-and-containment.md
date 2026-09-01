@@ -79,7 +79,7 @@ short-lived token, on our own infrastructure rather than in a Vercel function.
 
 - **Stops:** the same class as A, but enforced by the kernel rather than by our
   code, so a bug in our fetch wrapper is not a bypass.
-- **Cost:** high. A new runtime to operate, patch, and monitor. Realiztically a
+- **Cost:** high. A new runtime to operate, patch, and monitor. Realistically a
   quarter of work, and it changes the deploy story for the whole agent surface.
 - **When it is right:** when we run agents for clients on client data, which is
   the direction `/admin/agents` is heading.
