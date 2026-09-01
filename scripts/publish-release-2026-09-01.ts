@@ -101,7 +101,7 @@ const ENTRIES: ReleaseEntry[] = [
   {
     title: "American spelling, and a check that keeps it",
     description:
-      "The product wrote programme, centre, behaviour and thirty others to a client in North America. 587 files corrected, plus five filenames whose imports had already been rewritten. The sweep then over-reached and broke 85 files by turning realistic into realiztic and optimistic into optimiztic, which the guardrail held in place because the words it checked for were the ones it had created. Every rule is bound to a British ending now, and the test asserts the words a bare stem eats.",
+      "The product was writing British spellings to a client in North America: the -mme, -tre and -our endings, and about thirty others. 587 files corrected, plus five filenames whose imports had already been rewritten. The sweep then over-reached and broke 85 files by rewriting the middle of words like realistic and optimistic, which the guardrail held in place because the words it was checking for were the ones it had just created. Every rule is bound to a British ending now, and the test asserts the words a bare stem eats.\n\n(This entry originally quoted the offending words as examples, and the guardrail failed the build on its own release note. Correctly.)",
     how_to_use:
       "Runs in the standard verification. Field names owned by outside systems are deliberately left alone.",
     area: "Instinct",
