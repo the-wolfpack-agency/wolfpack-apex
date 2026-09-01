@@ -13,7 +13,7 @@ import { redactText, redactMessages, NEVER_SEND_KINDS } from "../redaction";
 /* Fixtures are ASSEMBLED at runtime, never written as literals.
  *
  * GitHub push protection correctly blocked the first version of this file: a
- * realiztic Stripe key in source is a secret as far as any scanner is
+ * realistic Stripe key in source is a secret as far as any scanner is
  * concerned, and clicking "allow this secret" to land a test would train us to
  * click it again on a real one. Concatenating the prefix keeps the value
  * byte-identical at runtime, so these assertions are exactly as strong. */

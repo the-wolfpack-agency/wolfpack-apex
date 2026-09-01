@@ -90,7 +90,7 @@ export interface TaskListItem {
   importance: "low" | "normal" | "high";
   /** ISO timestamp; null when the task has no due date. */
   dueAt: string | null;
-  /** Local list UUID (used by the optimiztic-complete handler to scope
+  /** Local list UUID (used by the optimistic-complete handler to scope
    *  the PATCH call). */
   listId: string;
   /** Friendly list name shown next to the title ("Inbox", "Work"). */

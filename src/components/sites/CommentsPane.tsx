@@ -15,7 +15,7 @@
  *   - Click a comment → postMessage `comment.focus` to the preview
  *     iframe so the designer sees which section it targets.
  *   - Resolve button per top-level comment (recursive on the server;
- *     the whole thread flips at once). Optimiztic UI: the local state
+ *     the whole thread flips at once). Optimistic UI: the local state
  *     flips to resolved immediately; a failure reverts + surfaces an
  *     error.
  *   - Reply composer per comment (POST with parent_comment_id).
@@ -150,7 +150,7 @@ export default function CommentsPane({ siteId, previewIframeRef }: Props) {
   }
 
   async function handleResolve(commentId: string) {
-    // Optimiztic update: flip this + any children locally.
+    // Optimistic update: flip this + any children locally.
     setComments((prev) =>
       prev.map((c) =>
         c.id === commentId || c.parentCommentId === commentId

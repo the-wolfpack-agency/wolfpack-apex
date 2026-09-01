@@ -161,7 +161,7 @@ describe("PATCH — happy path", () => {
   });
 });
 
-describe("PATCH — optimiztic concurrency", () => {
+describe("PATCH — optimistic concurrency", () => {
   const cachedSourceLocal = {
     code: "WOLFPACK-AUTO",
     description: "x",

@@ -300,7 +300,7 @@ describe("/bulletin/[id]", () => {
        /api/tasks?limit=50 fires → we resolve with two tasks → user
        picks one → PATCH fires.
 
-       PATCH responses echo the patch body back so optimiztic state in
+       PATCH responses echo the patch body back so optimistic state in
        the page survives the re-merge from the server response. */
     mockFetchWithRefresh.mockImplementation((url: string, init?: any) => {
       if (typeof url === "string" && url.startsWith("/api/tasks")) {

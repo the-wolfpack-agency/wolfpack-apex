@@ -51,7 +51,7 @@ export interface ComplianceFinding {
   title: string;
   verdict: Verdict;
   severity: Severity;
-  /** What we saw. One or two sentences a non-specializt can act on. */
+  /** What we saw. One or two sentences a non-specialist can act on. */
   detail: string;
   /** Present only when we can point at something concrete. */
   evidence?: Record<string, unknown>;

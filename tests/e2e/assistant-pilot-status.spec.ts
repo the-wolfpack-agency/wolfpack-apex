@@ -209,7 +209,7 @@ test.describe("pilot status widget", () => {
     /* A source that genuinely answered zero still shows zero. */
     await expect(page.getByTestId("pilot-status-count-documents")).toHaveText("0");
 
-    /* And the headline declines to be optimiztic. */
+    /* And the headline declines to be optimistic. */
     await expect(widget).toHaveAttribute("data-readiness", "unknown");
     await expect(page.getByTestId("pilot-status-headline")).toHaveText("Not enough signal");
     await expect(page.getByTestId("pilot-status-subtitle")).toContainText(

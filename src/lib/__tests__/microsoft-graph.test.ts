@@ -7,7 +7,7 @@
  *   - Calendar event data shape
  *   - Email data shape
  *   - Contact data shape
- *   - Demo data quality (realiztic CEO day)
+ *   - Demo data quality (realistic CEO day)
  *   - Error handling
  *   - Migration file
  *   - Analytics event types
@@ -190,7 +190,7 @@ describe("Demo Data Quality", () => {
     ms = await import("@/lib/microsoft-graph");
   });
 
-  test("calendar events have realiztic subjects", async () => {
+  test("calendar events have realistic subjects", async () => {
     const today = new Date().toISOString().split("T")[0];
     const events = await ms.fetchCalendarEvents("user-1", today, today);
     for (const ev of events) {

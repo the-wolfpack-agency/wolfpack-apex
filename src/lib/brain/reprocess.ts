@@ -103,6 +103,8 @@ export interface ReprocessOutcome {
 }
 
 export interface ReprocessReport {
+  /** True when the run stopped on its own clock with candidates left. */
+  ranOutOfTime?: boolean;
   considered: number;
   attempted: number;
   repaired: number;
@@ -379,13 +381,23 @@ async function reprocessOne(
 export async function reprocessFixable(
   fetchBytes: FetchBytes,
   actor: { userId: string; role: string },
-  opts: { limit?: number; strandedMinutes?: number } = {},
+  opts: { limit?: number; strandedMinutes?: number; deadline?: number } = {},
 ): Promise<ReprocessReport> {
   const candidates = await findCandidates(opts);
   const outcomes: ReprocessOutcome[] = [];
   let skippedNoDriveItem = 0;
+  let ranOutOfTime = false;
 
   for (const c of candidates) {
+    /* STOPS EARLY RATHER THAN BEING STOPPED. A run killed at the platform's
+       limit returns nothing: the documents it repaired are invisible to the
+       report and the next run cannot know how far this one got. Leaving the
+       rest for the next run costs nothing, because the queue drains across
+       runs regardless, and only this way does the count come back. */
+    if (opts.deadline && Date.now() >= opts.deadline) {
+      ranOutOfTime = true;
+      break;
+    }
     if (!c.driveItemId) skippedNoDriveItem += 1;
     outcomes.push(await reprocessOne(c, fetchBytes, actor));
   }
@@ -394,6 +406,7 @@ export async function reprocessFixable(
   const report: ReprocessReport = {
     considered: candidates.length,
     attempted: outcomes.length,
+    ranOutOfTime,
     repaired,
     stillFailing: outcomes.length - repaired,
     skippedNoDriveItem,

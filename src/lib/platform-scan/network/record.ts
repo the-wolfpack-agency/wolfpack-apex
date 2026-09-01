@@ -44,7 +44,7 @@ export interface RecorderOptions {
    *
    * A long walk of a busy application can produce tens of thousands of
    * requests, and the map is stored as one JSON document. The cap is generous
-   * enough that no realiztic assessment reaches it and low enough that a
+   * enough that no realistic assessment reaches it and low enough that a
    * pathological page cannot exhaust memory. Reaching it is REPORTED by
    * truncated(), never silent, because a capped observation set that looked
    * complete would understate what a system contacts.

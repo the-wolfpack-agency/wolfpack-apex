@@ -31,16 +31,16 @@ export interface CommitmentsSidebarProps {
   krs: KrView[];
   /** Only the commitments belonging to the current user. */
   myCommitments: ContributionView[];
-  onOptimizticAdd?: (row: ContributionView) => void;
-  onOptimizticGrade?: (id: string, grade: ContributionView["graded_as"]) => void;
+  onOptimisticAdd?: (row: ContributionView) => void;
+  onOptimisticGrade?: (id: string, grade: ContributionView["graded_as"]) => void;
 }
 
 export default function CommitmentsSidebar({
   week_of,
   krs,
   myCommitments,
-  onOptimizticAdd,
-  onOptimizticGrade,
+  onOptimisticAdd,
+  onOptimisticGrade,
 }: CommitmentsSidebarProps) {
   const { pendingCount } = useOfflineQueue(GOAL_COMMITMENTS_ENDPOINT, "POST", {
     resourceType: "goal_commitment",
@@ -74,8 +74,8 @@ export default function CommitmentsSidebar({
       } else {
         setFlash("Offline — will send on reconnect.");
       }
-      if (onOptimizticAdd) {
-        onOptimizticAdd({
+      if (onOptimisticAdd) {
+        onOptimisticAdd({
           id: res.id,
           user_id: "me",
           kr_id: krId,
@@ -98,7 +98,7 @@ export default function CommitmentsSidebar({
     grade: ContributionView["graded_as"],
   ) {
     if (!grade) return;
-    if (onOptimizticGrade) onOptimizticGrade(row.id, grade);
+    if (onOptimisticGrade) onOptimisticGrade(row.id, grade);
     try {
       await sendGradeOffline({
         contribution_id: row.id,

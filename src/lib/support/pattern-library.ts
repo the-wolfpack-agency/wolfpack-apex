@@ -140,7 +140,7 @@ export function _resetDraftCacheForTests(): void {
 // ---------------------------------------------------------------------------
 
 const SYSTEM_PROMPT = [
-  "You are a Wolfpack support specializt drafting an email response to a user.",
+  "You are a Wolfpack support specialist drafting an email response to a user.",
   "Draft a clear, friendly response. Reference the matched troubleshooting patterns provided.",
   "Use the customer's first name if it is known from the ticket. Otherwise greet them as 'there'.",
   "Do not use em dashes anywhere in the response.",

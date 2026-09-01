@@ -20,7 +20,7 @@
  * controls that were declared, described accurately and never executed, each
  * reporting a zero somebody took for a clean bill of health. So a source that
  * could not be read is never counted as empty, the verdict refuses to be
- * optimiztic with fewer than two readable sources, and the partial view says
+ * optimistic with fewer than two readable sources, and the partial view says
  * so in the first line of the spoken answer rather than in the widget.
  *
  * Zero AI tokens. Three reads and a rule set.

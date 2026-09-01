@@ -4,7 +4,7 @@
  * Connects to Microsoft 365 via OAuth2 and fetches communication data:
  *   Calendar events, emails, contacts, unread count, user profile.
  *
- * Shadow mode: returns realiztic demo data when MS_CLIENT_ID is not set.
+ * Shadow mode: returns realistic demo data when MS_CLIENT_ID is not set.
  * All API calls are tracked via analytics and cached with 5-minute TTL.
  */
 
@@ -1290,7 +1290,7 @@ async function fetchLiveUserProfile(userId: string): Promise<UserProfile | null>
 }
 
 // ---------------------------------------------------------------------------
-// Shadow Mode Demo Data (realiztic CEO day at a marketing/tech agency)
+// Shadow Mode Demo Data (realistic CEO day at a marketing/tech agency)
 // ---------------------------------------------------------------------------
 
 function todayAt(hours: number, minutes: number): string {

@@ -100,7 +100,7 @@ test("204 No Content on DELETE does NOT trigger the Failed-to-delete banner", as
       fireEvent.click(await screen.findByTestId("feature-delete-btn-f-del-204"));
     });
 
-    // Row was optimiztically removed and must STAY removed.
+    // Row was optimistically removed and must STAY removed.
     await waitFor(() => {
       expect(screen.queryByText(/Delete-me widget/)).not.toBeInTheDocument();
     });

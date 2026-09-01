@@ -4,7 +4,7 @@
  * Assembles data from QuickBooks, Microsoft Graph, knowledge base,
  * and journal entries into a single actionable briefing.
  *
- * Shadow mode: returns realiztic demo data for a 5-person agency CEO.
+ * Shadow mode: returns realistic demo data for a 5-person agency CEO.
  * Cached for 30 minutes to avoid redundant computation.
  */
 

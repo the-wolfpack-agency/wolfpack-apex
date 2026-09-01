@@ -83,7 +83,7 @@ high we can sell today, and each one unlocks a higher ceiling when it ships (see
 [deferred-track.md](security/deferred-track.md)):
 
 - **SSO (SAML / OIDC).** Required to sell into larger security-reviewed accounts.
-  Until it ships, the top of the Best range is the realiztic ceiling.
+  Until it ships, the top of the Best range is the realistic ceiling.
 - **Full database-layer tenant isolation.** Needed before a multi-tenant
   enterprise claim. Today we run a single primary tenant; price and message
   accordingly.

@@ -155,7 +155,7 @@ earlier:
   correlating that with the security and API layers, is now buildable. It was not
   cleanly buildable as one product a few years ago. We built it.
 
-## 4. Realiztic value at scale
+## 4. Realistic value at scale
 
 Markets for context (real and growing): application security and pen testing is a
 multi-billion-dollar market (pen testing alone roughly $2B to $4B, broader AppSec
@@ -190,7 +190,7 @@ subscription blended $4k to $8k per system per month for Pro/Enterprise.
 | Year 3 (category traction) | 35 | 2.5 | $7k/mo | ~$7.3M | ~$300k | Requires repeatable sales motion |
 
 These are execution-dependent. The honest read: a focused, well-executed niche
-product starting from warm relationships can realiztically reach roughly $0.5M
+product starting from warm relationships can realistically reach roughly $0.5M
 ARR in year 1 and a few million ARR within 2 to 3 years. Security SaaS trades at
 roughly 5x to 10x ARR, so a few million ARR implies tens of millions of
 enterprise value at the upper end of execution. That is a real, valuable
@@ -246,7 +246,7 @@ the gate in production are the open work.
 - Active pen testing carries liability; the signed rules-of-engagement + fail-closed
   harness mitigate it, but it must stay disciplined.
 - Security sales cycles are long for cold logos; the warm-client beachhead is what
-  makes year 1 realiztic. The multi-budget expansion thesis depends on actually
+  makes year 1 realistic. The multi-budget expansion thesis depends on actually
   landing the adjacent budgets, which is a sales motion we still have to prove.
 - Incumbents will add AI and may attempt cross-layer; our answer is the cross-scan
   insight engine and history, the published benchmarks, and the governed
@@ -266,7 +266,7 @@ an in-product loop from finding to fix to safe promotion. The honest caveats are
 named (the database layer is the lightest, and the gate defaults to monitor mode);
 neither undercuts the thesis, and both are in-progress, not vapor.
 
-The realiztic path is unchanged in shape and stronger in substance: land the warm
+The realistic path is unchanged in shape and stronger in substance: land the warm
 clients read-only, convert to continuous subscriptions, expand across the adjacent
 budgets (a11y, QA, AI governance) on the same platform, graduate to authorized
 active testing, and let case studies and the published benchmark compound into new

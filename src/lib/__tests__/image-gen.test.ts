@@ -363,7 +363,7 @@ describe("checkPrompt — input validation", () => {
   });
 
   it("blocks NSFW keywords", () => {
-    const res = checkPrompt("A photorealiztic nude portrait");
+    const res = checkPrompt("A photorealistic nude portrait");
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.reason).toBe("prompt_blocked");
   });

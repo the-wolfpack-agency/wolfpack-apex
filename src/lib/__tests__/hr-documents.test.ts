@@ -1,7 +1,7 @@
 /**
  * HR Documents classifier + persistence unit tests.
  *
- * Tests every supported category against realiztic excerpts from real
+ * Tests every supported category against realistic excerpts from real
  * IRS / USCIS / BCBS forms. Locks the classifier behavior so a future
  * weight tweak can't silently regress an existing match.
  */

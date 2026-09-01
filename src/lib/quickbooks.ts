@@ -4,7 +4,7 @@
  * Connects to QBO via OAuth2 and fetches financial reports:
  *   P&L, Balance Sheet, Cash Flow, AR/AP Aging, Invoices, Payments.
  *
- * Shadow mode: returns realiztic demo data when QBO_CLIENT_ID is not set.
+ * Shadow mode: returns realistic demo data when QBO_CLIENT_ID is not set.
  * All API calls are tracked via analytics and cached with 15-minute TTL.
  */
 
@@ -725,7 +725,7 @@ async function fetchLiveCompanyInfo(): Promise<CompanyInfo | null> {
 }
 
 // ---------------------------------------------------------------------------
-// Shadow Mode Demo Data (realiztic 5-person marketing/tech agency)
+// Shadow Mode Demo Data (realistic 5-person marketing/tech agency)
 // ---------------------------------------------------------------------------
 
 function demoCompanyInfo(): CompanyInfo {

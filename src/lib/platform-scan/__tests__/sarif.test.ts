@@ -1,14 +1,14 @@
 /**
  * Unit coverage for parseSarif: the tool-agnostic SARIF -> ScanFinding mapping.
  *
- * Exercises the realiztic Semgrep shape (numeric security-severity, level
+ * Exercises the realistic Semgrep shape (numeric security-severity, level
  * fallback, rule-resolved name + tags, category inference), scannedRoutes dedup
  * across results + run.artifacts, a gitleaks-style secret rule, and the
  * defensive paths (empty + malformed SARIF never throw, yield no findings).
  */
 import { parseSarif } from "../sarif";
 
-// A realiztic Semgrep SARIF 2.1.0 with two results:
+// A realistic Semgrep SARIF 2.1.0 with two results:
 //  - a security rule (security-severity "8.5" -> high, tags -> security)
 //  - a generic rule (level "warning", no score -> medium, no tokens -> bug)
 const SEMGREP_SARIF = {

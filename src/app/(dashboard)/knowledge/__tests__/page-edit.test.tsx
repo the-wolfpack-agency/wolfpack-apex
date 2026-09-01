@@ -242,7 +242,7 @@ test("Delete confirm-cancel does NOT call the network", async () => {
   }
 });
 
-test("Delete confirm-accept calls deleteKnowledgeEntryOffline + removes row optimiztically", async () => {
+test("Delete confirm-accept calls deleteKnowledgeEntryOffline + removes row optimistically", async () => {
   await renderPage();
 
   const confirmSpy = jest.spyOn(window, "confirm").mockReturnValue(true);

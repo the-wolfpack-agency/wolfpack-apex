@@ -227,7 +227,7 @@ describe("<RecognizeView />", () => {
     expect(await screen.findByTestId("recognize-drop-zone")).toBeInTheDocument();
   });
 
-  it("reclassify PATCHes the API and optimiztically updates the displayed type", async () => {
+  it("reclassify PATCHes the API and optimistically updates the displayed type", async () => {
     const initial = mkRecognized({
       classification: mkClassification({ type: "receipt", confidence: 0.6 }),
     });
@@ -264,7 +264,7 @@ describe("<RecognizeView />", () => {
       fireEvent.change(select, { target: { value: "invoice" } });
     });
 
-    /* Optimiztic — the type label flips immediately to "Invoice". */
+    /* Optimistic — the type label flips immediately to "Invoice". */
     await waitFor(() =>
       expect(screen.getByTestId("classification-type-label")).toHaveTextContent(
         "Invoice",

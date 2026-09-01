@@ -6,7 +6,7 @@
  * THE SHAPE THAT WAS WRONG. rateMessage returns false when the message is not
  * in a conversation the rater owns, and the route answers 200 with
  * { success: false }. A 200 does not throw, so the client's catch never ran
- * and the optimiztic thumb stayed filled in over nothing.
+ * and the optimistic thumb stayed filled in over nothing.
  *
  * Nothing fails that check today: measured 2026-08-30, zero of 16,332
  * assistant messages sit in an unowned conversation. The shape is still the
@@ -25,7 +25,7 @@ import "@testing-library/jest-dom";
 
 /* The handler under test is inside a large client component, so this exercises
    the logic it implements rather than mounting the whole chat: the assertion
-   is about what happens to the optimiztic update, which is self-contained. */
+   is about what happens to the optimistic update, which is self-contained. */
 function makeRater(fetchImpl: (body: unknown) => Promise<{ ok: boolean; json: () => Promise<unknown> }>) {
   const state = new Map<string, number | undefined>([["m1", undefined]]);
   return {

@@ -143,7 +143,7 @@ export default function TasksPage() {
   async function handleToggleComplete(task: Task) {
     const nextStatus: TaskStatus =
       task.status === "completed" ? "notStarted" : "completed";
-    // Optimiztic update
+    // Optimistic update
     setTasks((prev) =>
       prev.map((t) => (t.id === task.id ? { ...t, status: nextStatus } : t)),
     );

@@ -17,7 +17,7 @@
  *   "Send to user" opens a confirmation modal that previews exactly
  *   what will go out (To, From: support@thewolfpack.agency, Subject,
  *   Body). Only the modal's "Send to <email>" button calls POST
- *   /api/support/tickets/[id]/send. Optimiztic update: the response
+ *   /api/support/tickets/[id]/send. Optimistic update: the response
  *   ticket is patched into local state without a refetch so the page
  *   immediately flips to its sent presentation.
  *
