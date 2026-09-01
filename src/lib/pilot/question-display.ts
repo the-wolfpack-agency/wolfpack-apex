@@ -34,6 +34,7 @@
  */
 
 import { redactText } from "@/lib/ai/redaction";
+import { maskKnownNames } from "@/lib/privacy/mask-names";
 
 /** Longer than this and it is a passage somebody pasted, not a question. */
 export const MAX_CHARS = 110;
@@ -94,28 +95,6 @@ function shorten(text: string): string {
 }
 
 /**
- * Replace known people with what they are.
- *
- * Longest first, so "nick homyk" is matched before "nick" and a full name is
- * never left as a surname next to a placeholder.
- */
-function maskNames(text: string, known: readonly string[]): { text: string; hit: boolean } {
-  let out = text;
-  let hit = false;
-  for (const name of known) {
-    /* Escaped because a directory holds names with dots and hyphens in them,
-       and an unescaped one silently becomes a wildcard that masks real words. */
-    const safe = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const re = new RegExp(`(?<![a-z])${safe}(?![a-z])`, "gi");
-    if (re.test(out)) {
-      hit = true;
-      out = out.replace(re, "a colleague");
-    }
-  }
-  return { text: out, hit };
-}
-
-/**
  * What a reader should see instead of the query, or null to show nothing.
  *
  * `known` is lowercase full names and first names from the workspace
@@ -135,13 +114,13 @@ export function forDisplay(raw: string, known: readonly string[] = []): DisplayQ
     return null;
   }
 
-  const masked = maskNames(cleaned, known);
+  const masked = maskKnownNames(cleaned, known);
   const long = masked.text.length > MAX_CHARS;
   const text = shorten(masked.text);
 
   /* Length is reported ahead of masking, because a truncated line explains
      itself and a name that was swapped out does not. */
   if (long) return { text, withheld: "paste" };
-  if (masked.hit) return { text, withheld: "name" };
+  if (masked.masked) return { text, withheld: "name" };
   return { text };
 }

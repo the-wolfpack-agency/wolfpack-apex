@@ -23,11 +23,18 @@
  * question: who is away, when, and where the cover has gaps. It is classified
  * out of the meeting figures and kept, rather than filtered away.
  *
- * NAME AND SHAPE ARE BOTH NEEDED. "Alicia OOO" says what it is; "F1 Las
- * Vegas" and "Avryl Trip" do not, and are only distinguishable as
+ * NAME AND SHAPE ARE BOTH NEEDED. A title reading "OOO" says what it is; a
+ * conference name and a trip do not, and are only distinguishable as
  * non-meetings by lasting a hundred and ninety-two hours. Either signal alone
  * misses most of the total.
+ *
+ * The real titles are deliberately not written here. They were, and the same
+ * three strings then appeared verbatim on a client-facing page including a
+ * colleague's name beside their time off. A doc comment is where a bad example
+ * gets copied from.
  */
+
+import { maskKnownNames } from "@/lib/privacy/mask-names";
 
 export type CalendarKind =
   /** A real meeting between people. */
@@ -219,15 +226,27 @@ export function findConcentration(events: readonly CalendarEventShape[]): Concen
  * Phrased as a question because it IS one. Our own quirk was found by a person
  * saying "anyone whose meeting says OOO is just a vacation day", which no
  * amount of reading the data would have produced.
+ *
+ * THE EXAMPLES NAME PEOPLE, AND THAT IS THE POINT OF THEM AND ALSO THE RISK.
+ * Asking "what are these" needs the titles, but a calendar entry title is
+ * whatever somebody typed, and on our own data the largest entries included a
+ * colleague's name beside their time off. That went onto a client-facing page.
+ *
+ * So `known` is the workspace directory, and anyone in it is replaced by what
+ * they are to the reader. It is a last line rather than a first: a title
+ * naming somebody outside the directory still goes through, which is why the
+ * question is asked of a person who already has access to the calendar rather
+ * than published beside a figure.
  */
-export function calibrationQuestion(c: Concentration): string | null {
+export function calibrationQuestion(c: Concentration, known: readonly string[] = []): string | null {
   if (!c.dominated) return null;
+  const examples = c.examples.map((e) => maskKnownNames(e, known, "a colleague").text);
   return [
     `${c.entries} of ${c.totalEntries} calendar entries account for more than half the hours.`,
     `That is usually a local convention rather than a busy team: an entry that is not a meeting,`,
     `sitting on the same calendar as meetings.`,
     ``,
-    `The largest are: ${c.examples.join(", ")}.`,
+    `The largest are: ${examples.join(", ")}.`,
     ``,
     `Before any figure about meeting time is quoted, somebody who knows this calendar should say`,
     `what those are. Ours turned out to be holidays and a trip, which made the meeting total`,

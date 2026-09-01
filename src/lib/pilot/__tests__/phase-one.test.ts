@@ -20,6 +20,7 @@ import {
 const SNAP = (o: Partial<PhaseOneSnapshot> = {}): PhaseOneSnapshot => ({
   passages: 4769,
   libraries: 6,
+  scansRead: 17,
   toolAnswers: 3268,
   modelAnswers: 437,
   declined: 49,
@@ -58,17 +59,35 @@ describe("the number the product is sold on", () => {
 });
 
 describe("reading the snapshot", () => {
-  function respond(passages: string, libraries: string, activity: Record<string, string>) {
+  /* Positional, and the order has to match the Promise.all in phase-one.ts.
+     A query added in the middle silently shifts every mock after it: when the
+     scans count went in, the library assertion started reading the scan mock
+     and the test failed on a number nobody had changed. */
+  function respond(
+    passages: string,
+    libraries: string,
+    activity: Record<string, string>,
+    scans = "0",
+  ) {
     mockQuery
       .mockResolvedValueOnce({ rows: [{ passages }] })
+      .mockResolvedValueOnce({ rows: [{ scans }] })
       .mockResolvedValueOnce({ rows: [{ libraries }] })
       .mockResolvedValueOnce({ rows: [activity] });
   }
 
   it("reports what it read", async () => {
-    respond("4769", "6", { tool_answers: "3268", model_answers: "437", declined: "49" });
+    respond("4769", "6", { tool_answers: "3268", model_answers: "437", declined: "49" }, "17");
     const s = await getPhaseOneSnapshot(WS, 60);
     expect(s).toMatchObject({ passages: 4769, libraries: 6, declined: 49, readable: true });
+  });
+
+  /* A scan carries no text, so it indexes as a filename and answers nothing.
+     On a dashboard that is indistinguishable from a document that was read,
+     which is the whole reason this count is reported separately. */
+  it("counts the scans OCR recovered", async () => {
+    respond("100", "1", { tool_answers: "1", model_answers: "1", declined: "0" }, "17");
+    expect((await getPhaseOneSnapshot(WS, 60)).scansRead).toBe(17);
   });
 
   it("scopes the library count to one workspace", async () => {

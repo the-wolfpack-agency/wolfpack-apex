@@ -44,6 +44,7 @@ import type { PhaseOneSnapshot } from "./phase-one-shape";
 const EMPTY: PhaseOneSnapshot = {
   passages: 0,
   libraries: 0,
+  scansRead: 0,
   toolAnswers: 0,
   modelAnswers: 0,
   declined: 0,
@@ -87,8 +88,17 @@ export async function getPhaseOneSnapshot(
 ): Promise<PhaseOneSnapshot> {
   const bounded = Math.max(1, Math.min(365, Math.floor(days)));
   try {
-    const [corpus, sources, activity] = await Promise.all([
+    const [corpus, scans, sources, activity] = await Promise.all([
       query<{ passages: string }>(`SELECT count(*)::text AS passages FROM brain_chunks`),
+      /* SCANS ARE THE PART A LIBRARY QUIETLY LOSES. A photographed agreement
+         or an exported slide carries no text, so it indexes as a filename and
+         answers nothing, and on a dashboard it is indistinguishable from a
+         document that was read. Counting the ones OCR recovered is the only
+         way that difference shows. */
+      query<{ scans: string }>(
+        `SELECT count(*)::text AS scans FROM instinct_events
+          WHERE event_type = 'brain.document_ocred'`,
+      ),
       query<{ libraries: string }>(
         `SELECT count(*)::text AS libraries
            FROM instinct_sharepoint_sources
@@ -145,6 +155,7 @@ export async function getPhaseOneSnapshot(
 
     return {
       passages: Number(corpus.rows[0]?.passages ?? 0),
+      scansRead: Number(scans.rows[0]?.scans ?? 0),
       libraries: Number(sources.rows[0]?.libraries ?? 0),
       toolAnswers: Number(activity.rows[0]?.tool_answers ?? 0),
       modelAnswers: Number(activity.rows[0]?.model_answers ?? 0),
