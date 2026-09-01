@@ -21,6 +21,8 @@
  * Usage:  npx tsx scripts/publish-loc-snapshot.ts [--dry-run]
  * Needs:  DATABASE_URL, and the sibling repos checked out under mono/
  */
+/* FIRST. Imports hoist, so anything below already read process.env. */
+import "./load-env";
 import { execSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join, dirname } from "node:path";
@@ -113,6 +115,15 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  console.error("[loc] failed:", (err as Error).message);
+  /* THE WHOLE ERROR, NOT ITS MESSAGE. A pg error carries the useful part in
+     `detail`, `constraint` and `code`, and `.message` alone printed an empty
+     string here: "[loc] failed:" with nothing after it, which says less than
+     no output at all. */
+  const e = err as Error & { code?: string; detail?: string; constraint?: string };
+  console.error("[loc] failed:", e.message || "(no message)");
+  if (e.code) console.error("  code:", e.code);
+  if (e.detail) console.error("  detail:", e.detail);
+  if (e.constraint) console.error("  constraint:", e.constraint);
+  if (!e.message && !e.code) console.error("  raw:", JSON.stringify(err).slice(0, 300));
   process.exit(1);
 });

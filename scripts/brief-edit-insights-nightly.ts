@@ -18,6 +18,8 @@
  * invoke the script end-to-end without infra).
  */
 
+/* FIRST. Imports hoist, so anything below already read process.env. */
+import "./load-env";
 import { trackEvent } from "@/lib/analytics";
 import {
   computeBriefEditInsights,
