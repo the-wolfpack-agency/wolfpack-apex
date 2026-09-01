@@ -33,7 +33,7 @@
 import { randomBytes, createHash, timingSafeEqual } from "node:crypto";
 import { query } from "@/lib/db";
 
-/** Human-facing key prefix. Lets a leaked string be grep'd + recognised. */
+/** Human-facing key prefix. Lets a leaked string be grep'd + recognized. */
 const KEY_NAMESPACE = "ogk_";
 /** Bytes of entropy in the key body. 32 bytes = 256 bits. */
 const KEY_BYTES = 32;
@@ -118,7 +118,7 @@ function prefixOf(plaintext: string): string {
  * Mint a new scoped API key. Generates `ogk_<base64url(32 bytes)>`, stores ONLY
  * the sha256 hash + prefix + last4, and returns the plaintext ONCE.
  *
- * The capabilities are normalised (trimmed, de-duped, non-empty) so a malformed
+ * The capabilities are normalized (trimmed, de-duped, non-empty) so a malformed
  * allowlist can't slip a blank capability past the gate.
  */
 export async function createApiKey(
@@ -131,7 +131,7 @@ export async function createApiKey(
   const last4 = plaintextKey.slice(-4);
   const keyHash = hashKey(plaintextKey);
 
-  const capabilities = normaliseCapabilities(input.capabilities);
+  const capabilities = normalizeCapabilities(input.capabilities);
 
   await query(
     `INSERT INTO instinct_gate_api_keys
@@ -155,7 +155,7 @@ export async function createApiKey(
 }
 
 /** Trim, drop blanks, de-dupe an allowlist of capability strings. */
-function normaliseCapabilities(caps: unknown): string[] {
+function normalizeCapabilities(caps: unknown): string[] {
   if (!Array.isArray(caps)) return [];
   const seen = new Set<string>();
   for (const c of caps) {

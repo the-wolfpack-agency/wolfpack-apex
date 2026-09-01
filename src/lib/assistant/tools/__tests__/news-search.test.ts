@@ -6,7 +6,7 @@
  * reach outside the workspace except three fixed-purpose tools.
  *
  * The tests are grouped by the thing that could go wrong:
- *   1. the question is recognised, and sentences that merely mention news are not
+ *   1. the question is recognized, and sentences that merely mention news are not
  *   2. the filter answers about the topic asked for, not a topic sharing a word
  *   3. a publisher being down degrades the answer instead of failing it
  *   4. "found nothing" and "could not look" are never reported as each other
@@ -46,7 +46,7 @@ function feed(...titles: string[]) {
   return { ok: true, text: async () => `<rss><channel>${items}</channel></rss>` };
 }
 
-describe("recognising the question", () => {
+describe("recognizing the question", () => {
   test.each([
     ["please get me the latest article about spaceX", "spaceX"],
     ["latest news on Porsche", "Porsche"],

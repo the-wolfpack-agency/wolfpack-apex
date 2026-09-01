@@ -71,7 +71,7 @@ export async function discoverRepoFiles(
   const doFetch = opts?.fetchImpl ?? fetch;
   /* Resolve the token per-client when a workspaceId is supplied (installation
      token if the client linked the App, else the PAT). With no workspaceId we
-     read the PAT directly - identical to the pre-App behaviour. Resolution
+     read the PAT directly - identical to the pre-App behavior. Resolution
      never throws; if it ever did we degrade to no auth (public repos only). */
   let token: string | undefined;
   if (opts?.workspaceId) {

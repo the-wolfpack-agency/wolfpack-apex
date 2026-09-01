@@ -1,14 +1,14 @@
 /**
  * A routine reached from a chat message.
  *
- * The behaviour under test is ORDER. "run my morning" contains words several
+ * The behavior under test is ORDER. "run my morning" contains words several
  * tool intents match, so if routines were tried after tool dispatch the command
  * would be swallowed by whichever tool matched first and the person would get a
  * calendar instead of their morning. It is also the reason the match is exact:
  * a five-step chain firing at somebody who asked a question is much worse than
- * one that did not recognise its own name.
+ * one that did not recognize its own name.
  */
-import { matchRoutine } from "../catalogue";
+import { matchRoutine } from "../catalog";
 import { getTools } from "@/lib/assistant/tools/registry";
 import "@/lib/assistant/tools";
 

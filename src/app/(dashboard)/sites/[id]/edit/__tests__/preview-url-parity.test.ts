@@ -15,7 +15,7 @@
  * Fix: when `dirty=false` AND a `preview_url` exists, compute a bare
  * `/sites/[id]/preview?t=...` URL so preview.tsx's `selectPreviewSource`
  * falls through to the deployed-iframe branch. This suite pins that
- * behaviour so the bug cannot silently regress.
+ * behavior so the bug cannot silently regress.
  */
 
 import { selectEditorPreviewUrl } from "@/app/(dashboard)/sites/[id]/edit/page";

@@ -30,7 +30,7 @@ airgapped. **The airgap was irrelevant** because the secret was born weak. Any
 plan of ours that treats isolation as the whole answer inherits this failure.
 
 **[The vending-machine study](https://techcrunch.com/2026/07/29/claude-opus-5-became-downright-ruthless-when-tasked-with-running-a-vending-machine/)** — given an open-ended objective
-(maximise cash) and no effective oversight, the agent colluded, deceived
+(maximize cash) and no effective oversight, the agent colluded, deceived
 suppliers, and concealed a broken promise for a week. Management's
 "report received and may or may not be acted upon" was the whole oversight
 mechanism. The researchers' conclusion: frontier models are not ready to be
@@ -69,7 +69,7 @@ permits a named set of hosts and refuses everything else, logging the refusal.
   infrastructure on Vercel, and a real egress proxy when we move to a runtime
   that supports one.
 - **Weakness:** on Vercel we control the app's own fetch, not the platform's.
-  It is enforcement-in-process, which stops mistakes and bounded misbehaviour,
+  It is enforcement-in-process, which stops mistakes and bounded misbehavior,
   not a determined exploit of the runtime itself.
 
 ### Option B — Move agent execution to an isolated runner
@@ -165,7 +165,7 @@ Proposed, reusing what exists:
 1. **Element addressing.** The preview renderer emits a stable path per section
    and field. `spec-diff`'s probe already indexes elements by tag and own text
    in a live DOM — the same technique gives a click target an address.
-2. **Inspector binds to the selection.** Typography, spacing and colour edit the
+2. **Inspector binds to the selection.** Typography, spacing and color edit the
    theme tokens that already exist (`site-theme-tokens.ts`), not ad-hoc CSS, so
    an edit stays inside the design system and the scaffolder can reproduce it.
 3. **Prompted change on one element.** "Make this heading tighter" applies to
@@ -200,7 +200,7 @@ a claim about the client's business. These are not hard for a model; they are
 things a model should not have the *authority* to do.
 
 **The middle, and the honest bit:** brand voice, imagery choice, and
-prioritisation. A model can propose; a person should accept. Not because the
+prioritization. A model can propose; a person should accept. Not because the
 output is bad, but because there is no test that says it is right, and the
 directive we work under is that nothing ships without a test that would catch
 its failure.
@@ -211,7 +211,7 @@ is the same line the acceptance layer already draws.
 
 ---
 
-## 6. Standardised prompts
+## 6. Standardized prompts
 
 The failure mode you named — "my prompts are sometimes the cause of confusion" —
 is the same one the acceptance criteria form solved for requirements. Apply it to
@@ -240,7 +240,7 @@ exists. What the incidents say to add:
   steps rather than only its successes.
 - **Golden task set with a gate.** Fixed tasks with known-correct outputs; a
   model or prompt change that regresses the set does not ship. Same shape as the
-  spec-diff fidelity fixtures, applied to agent behaviour.
+  spec-diff fidelity fixtures, applied to agent behavior.
 
 ---
 

@@ -21,7 +21,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 /* Same shape as the other crons: Vercel presents the shared secret, and an
-   unset secret means nothing is authorised rather than everything. */
+   unset secret means nothing is authorized rather than everything. */
 function isAuthorizedCron(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET;
   if (!secret) return false;

@@ -23,11 +23,18 @@
  * question: who is away, when, and where the cover has gaps. It is classified
  * out of the meeting figures and kept, rather than filtered away.
  *
- * NAME AND SHAPE ARE BOTH NEEDED. "Alicia OOO" says what it is; "F1 Las
- * Vegas" and "Avryl Trip" do not, and are only distinguishable as
+ * NAME AND SHAPE ARE BOTH NEEDED. A title reading "OOO" says what it is; a
+ * conference name and a trip do not, and are only distinguishable as
  * non-meetings by lasting a hundred and ninety-two hours. Either signal alone
  * misses most of the total.
+ *
+ * The real titles are deliberately not written here. They were, and the same
+ * three strings then appeared verbatim on a client-facing page including a
+ * colleague's name beside their time off. A doc comment is where a bad example
+ * gets copied from.
  */
+
+import { maskKnownNames } from "@/lib/privacy/mask-names";
 
 export type CalendarKind =
   /** A real meeting between people. */
@@ -50,7 +57,7 @@ export interface CalendarEventShape {
 /**
  * Words that say the entry is somebody being away.
  *
- * Bounded by word edges so "Portfolio Optimisation Overview" does not match
+ * Bounded by word edges so "Portfolio Optimization Overview" does not match
  * on the letters of a leave word, and deliberately short: a list long enough
  * to catch every phrasing would catch meetings about leave policy too.
  */
@@ -93,7 +100,7 @@ function hoursBetween(startAt: string | null, endAt: string | null): number | nu
  * What this entry actually is.
  *
  * Name first, because a person naming their entry is the most reliable signal
- * there is. Shape second, for the ones nobody labelled.
+ * there is. Shape second, for the ones nobody labeled.
  */
 export function classifyCalendarEvent(
   event: CalendarEventShape,
@@ -106,7 +113,7 @@ export function classifyCalendarEvent(
   /* An appointment about a topic is a meeting, whatever the topic is. */
   const aboutSomething = ABOUT_A_TOPIC.test(subject);
 
-  /* This organisation's own vocabulary first: it knows itself better than a
+  /* This organization's own vocabulary first: it knows itself better than a
      built-in list does. */
   if (matchesAny(conventions.timeOff) && !aboutSomething) return "time-off";
   if (matchesAny(conventions.notAMeeting)) return "multi-day-block";
@@ -115,7 +122,7 @@ export function classifyCalendarEvent(
 
   const hours = hoursBetween(event.startAt, event.endAt);
   if (hours !== null && hours >= NOT_A_MEETING_HOURS) {
-    /* Long AND unlabelled. A trip, a conference, a week at a race: not a
+    /* Long AND unlabeled. A trip, a conference, a week at a race: not a
        meeting, and not somebody's leave either, so it is neither counted as
        meeting time nor reported as time off. */
     return "multi-day-block";
@@ -124,7 +131,7 @@ export function classifyCalendarEvent(
   if (matchesAny(conventions.hold) || PERSONAL_HOLD.test(subject)) return "personal-hold";
 
   /* An entry with nobody else invited is a note to self rather than a
-     meeting, however it is named. Checked last so a labelled one-person
+     meeting, however it is named. Checked last so a labeled one-person
      holiday is still time off. */
   if (event.attendeeCount === 0 && hours !== null && hours >= 4) return "personal-hold";
 
@@ -132,7 +139,7 @@ export function classifyCalendarEvent(
 }
 
 /**
- * Patterns that mean something particular to ONE organisation.
+ * Patterns that mean something particular to ONE organization.
  *
  * Ours needed none: "OOO" is universal enough to be built in. A client's will
  * not be. A dealership marks floor duty and demo drives on the same calendar
@@ -145,7 +152,7 @@ export function classifyCalendarEvent(
  * test drive at a dealership and a sales meeting everywhere else.
  */
 export interface CalendarConventions {
-  /** Extra ways this organisation says somebody is away. */
+  /** Extra ways this organization says somebody is away. */
   timeOff?: RegExp[];
   /** Extra ways it marks a block on its own time. */
   hold?: RegExp[];
@@ -156,7 +163,7 @@ export interface CalendarConventions {
 /**
  * The signature of a convention nobody has told us about yet.
  *
- * A handful of entries holding most of the hours is what an unlabelled
+ * A handful of entries holding most of the hours is what an unlabeled
  * convention looks like from outside. On our own calendar, ninety-four of 801
  * entries held ninety per cent of the time and every one was a holiday or a
  * trip. The data was well formed and the arithmetic was correct, which is
@@ -219,15 +226,27 @@ export function findConcentration(events: readonly CalendarEventShape[]): Concen
  * Phrased as a question because it IS one. Our own quirk was found by a person
  * saying "anyone whose meeting says OOO is just a vacation day", which no
  * amount of reading the data would have produced.
+ *
+ * THE EXAMPLES NAME PEOPLE, AND THAT IS THE POINT OF THEM AND ALSO THE RISK.
+ * Asking "what are these" needs the titles, but a calendar entry title is
+ * whatever somebody typed, and on our own data the largest entries included a
+ * colleague's name beside their time off. That went onto a client-facing page.
+ *
+ * So `known` is the workspace directory, and anyone in it is replaced by what
+ * they are to the reader. It is a last line rather than a first: a title
+ * naming somebody outside the directory still goes through, which is why the
+ * question is asked of a person who already has access to the calendar rather
+ * than published beside a figure.
  */
-export function calibrationQuestion(c: Concentration): string | null {
+export function calibrationQuestion(c: Concentration, known: readonly string[] = []): string | null {
   if (!c.dominated) return null;
+  const examples = c.examples.map((e) => maskKnownNames(e, known, "a colleague").text);
   return [
     `${c.entries} of ${c.totalEntries} calendar entries account for more than half the hours.`,
     `That is usually a local convention rather than a busy team: an entry that is not a meeting,`,
     `sitting on the same calendar as meetings.`,
     ``,
-    `The largest are: ${c.examples.join(", ")}.`,
+    `The largest are: ${examples.join(", ")}.`,
     ``,
     `Before any figure about meeting time is quoted, somebody who knows this calendar should say`,
     `what those are. Ours turned out to be holidays and a trip, which made the meeting total`,

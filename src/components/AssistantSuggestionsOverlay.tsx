@@ -8,7 +8,7 @@
  * This overlay re-uses the same AssistantStarterPrompts component
  * so the prompt list, role-gating, and connector-status filtering
  * stay single-sourced. It adds:
- *   - role=dialog + aria-modal + aria-labelledby
+ *   - role=dialog + aria-modal + aria-labeledby
  *   - Escape key closes
  *   - Click outside the panel closes
  *   - Focus restored to the previously-focused element on close
@@ -116,7 +116,7 @@ export function AssistantSuggestionsOverlay({
       className="fixed inset-0 z-[60] flex items-start justify-center bg-black/60 px-4 pt-12 sm:pt-20 overflow-y-auto"
       role="dialog"
       aria-modal="true"
-      aria-labelledby="assistant-suggestions-title"
+      aria-labeledby="assistant-suggestions-title"
     >
       <div
         data-testid="assistant-suggestions-overlay"

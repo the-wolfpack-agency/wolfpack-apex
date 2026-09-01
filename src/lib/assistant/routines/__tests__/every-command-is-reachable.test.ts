@@ -16,7 +16,7 @@
  * a template with a name nobody can invoke now fails here rather than in front
  * of a customer.
  */
-import { matchRoutine, BUILT_IN_ROUTINES } from "../catalogue";
+import { matchRoutine, BUILT_IN_ROUTINES } from "../catalog";
 import { ROUTINE_TEMPLATES } from "../templates";
 
 const ALL = [...BUILT_IN_ROUTINES, ...ROUTINE_TEMPLATES];
@@ -57,7 +57,7 @@ describe("every offered command is reachable from a message", () => {
 
 describe("a question is not a command", () => {
   /* The matcher stays exact. A five-step chain firing at somebody who asked a
-     question is much worse than one that did not recognise its own name, and
+     question is much worse than one that did not recognize its own name, and
      widening this to catch near misses would trade a visible failure for an
      invisible one. */
   it.each([

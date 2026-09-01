@@ -47,7 +47,7 @@ export type EgressCapability =
  *
  * `target-scan` is empty on purpose. Scan targets are supplied per run and
  * verified by the ownership gate, so they cannot be listed here — the runner
- * passes them as `extraHosts` and the ownership check is what authorises them.
+ * passes them as `extraHosts` and the ownership check is what authorizes them.
  */
 export const EGRESS_ALLOWLIST: Readonly<Record<EgressCapability, readonly string[]>> = {
   // Azure exposes model endpoints under three different hostnames depending on
@@ -73,7 +73,7 @@ export type EgressVerdict =
   | { allowed: true; capability: EgressCapability; host: string }
   | { allowed: false; reason: string; refusedBecause: "bad-url" | "scheme" | "not-allowlisted" };
 
-/** Normalise for comparison: lowercase, no leading www, no trailing dot. */
+/** Normalize for comparison: lowercase, no leading www, no trailing dot. */
 export function normalizeHost(value: string): string {
   return value.toLowerCase().replace(/\.$/, "").replace(/^www\./, "");
 }
@@ -94,7 +94,7 @@ export function hostMatches(host: string, allowed: string): boolean {
 /**
  * May this capability reach this URL?
  *
- * `extraHosts` covers the per-run case (a scan target authorised by the
+ * `extraHosts` covers the per-run case (a scan target authorized by the
  * ownership gate). It is a parameter rather than a mutable module list so one
  * run cannot widen the allowlist for the next.
  */

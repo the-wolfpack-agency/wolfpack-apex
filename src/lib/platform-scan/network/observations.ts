@@ -53,7 +53,7 @@ export type TrackerKind = "analytics" | "advertising" | "social" | "tag-manager"
 /**
  * Hosts we can name. Precision-first, matching the platform-scan detector
  * philosophy: a short list of things we are SURE about beats a long list that
- * cries wolf. Anything unrecognised is "unknown", which is a prompt to look
+ * cries wolf. Anything unrecognized is "unknown", which is a prompt to look
  * rather than an accusation.
  */
 const KNOWN_HOSTS: readonly { suffix: string; kind: TrackerKind; name: string }[] = [
@@ -217,7 +217,7 @@ export interface ClassifiedRequest extends NetworkObservation {
   host: string;
   party: Party;
   kind: TrackerKind;
-  /** Vendor name when recognised; null means unrecognised, not benign. */
+  /** Vendor name when recognized; null means unrecognized, not benign. */
   vendor: string | null;
 }
 

@@ -482,7 +482,7 @@ export interface ScanRow {
 }
 
 /**
- * Last N scans for a code, fully denormalised including the matched
+ * Last N scans for a code, fully denormalized including the matched
  * client's name (LEFT JOIN so unmatched scans still come through).
  *
  * Capped to 500 rows. The route layer additionally requires auth.

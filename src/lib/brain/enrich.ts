@@ -12,7 +12,7 @@
  *
  * THE ECONOMICS ARE THE POINT. One cheap-tier call per document at ingest, not
  * per question. Cost is bounded by the size of the library rather than by
- * usage, and every future question benefits. Summarising at query time pays
+ * usage, and every future question benefits. Summarizing at query time pays
  * again for every asking and helps only that asking.
  *
  * FENCING IS REUSED, NEVER REIMPLEMENTED. An ingested document is untrusted
@@ -51,7 +51,7 @@ export function buildSummaryPrompt(filename: string, text: string): string {
 /**
  * Read the reply without trusting its shape.
  *
- * A model asked for two labelled lines usually gives two labelled lines. When
+ * A model asked for two labeled lines usually gives two labeled lines. When
  * it does not, the useful failure is an empty result the caller can skip, not
  * a thrown error that fails an ingest over a formatting wobble: a document
  * without a summary is still a document worth having.
@@ -79,7 +79,7 @@ export function parseSummaryReply(raw: string): DocumentSummary {
 /**
  * The line a summary chunk carries into the index.
  *
- * Labelled, because it is the one chunk that is ours rather than the
+ * Labeled, because it is the one chunk that is ours rather than the
  * document's, and somebody reading a citation should be able to tell.
  */
 export function summaryChunkText(s: DocumentSummary): string {
@@ -92,7 +92,7 @@ export function summaryChunkText(s: DocumentSummary): string {
  * Describe one document. Never throws: enrichment is an improvement to
  * retrieval, and a model being unavailable must not cost the document itself.
  */
-export async function summariseDocument(
+export async function summarizeDocument(
   filename: string,
   text: string,
   complete: (input: { system: string; prompt: string; maxTokens: number }) => Promise<string>,

@@ -1,0 +1,78 @@
+# Grade retrieval against the reviewed pairs, where the real credentials are.
+#
+# WHY IT HAS TO RUN HERE. The eval needs an embedder AND a reachable vector
+# store. Locally the Qdrant key comes back from `vercel env pull` as the string
+# "[SENSITIVE]", so a local run searches with a rejected key, gets 403 on every
+# query, and grades the keyword half alone. On 2026-09-01 that produced numbers
+# reported as recall which were nothing of the kind.
+#
+# The eval refuses that now rather than grading it. Refusing is correct and
+# leaves nobody able to run it, so this is where it runs.
+#
+# ON DEMAND AND WEEKLY. Every run costs model calls: a relevance judgment per
+# question and a rewrite for each one that fails. That is cents, not dollars,
+# and still not something to spend on every push.
+name: Retrieval eval
+
+on:
+  schedule:
+    - cron: "20 6 * * 1"
+  workflow_dispatch:
+    inputs:
+      expand:
+        description: "Grade with query expansion on"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: retrieval-eval
+  cancel-in-progress: false
+
+jobs:
+  grade:
+    runs-on: ubuntu-latest
+    # Twenty-eight questions, each a retrieval and up to two model calls.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v4.0.4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Refuse to run without the credentials this grades with
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          QDRANT_URL: ${{ secrets.QDRANT_URL }}
+          QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
+          AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
+          AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+          AZURE_OPENAI_EMBEDDING_DEPLOYMENT: ${{ secrets.AZURE_OPENAI_EMBEDDING_DEPLOYMENT }}
+        run: |
+          # The eval already refuses to grade half the product, and it did
+          # exactly that here on 2026-09-01: the vector store never answered
+          # because none of these secrets exist for Actions. That refusal is
+          # correct and reads as a broken workflow, so it says which ones.
+          missing=""
+          for v in DATABASE_URL QDRANT_URL QDRANT_API_KEY AZURE_OPENAI_ENDPOINT \
+                   AZURE_OPENAI_API_KEY AZURE_OPENAI_EMBEDDING_DEPLOYMENT; do
+            [ -z "${!v}" ] && missing="$missing $v"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Not configured for Actions:$missing. These live in Vercel, not in repository secrets, so this workflow cannot grade retrieval until they are added."
+            exit 1
+          fi
+      - name: Grade the reviewed pairs
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          QDRANT_URL: ${{ secrets.QDRANT_URL }}
+          QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
+          AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
+          AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+          AZURE_OPENAI_EMBEDDING_DEPLOYMENT: ${{ secrets.AZURE_OPENAI_EMBEDDING_DEPLOYMENT }}
+          AZURE_OPENAI_DEPLOYMENT_CHEAP: ${{ secrets.AZURE_OPENAI_DEPLOYMENT_CHEAP }}
+          EXPAND: ${{ inputs.expand == false && '0' || '1' }}
+        run: npm run eval:retrieval

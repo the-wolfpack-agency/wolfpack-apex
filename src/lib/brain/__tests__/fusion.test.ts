@@ -10,7 +10,7 @@
  *   FILENAME_MATCH_WEIGHT = 9             to lift 0.10 above a 0.45 semantic hit
  *
  * Each was added for a real failure and chosen by arithmetic rather than
- * evidence. Measured against the labelled eval set on 2026-08-29:
+ * evidence. Measured against the labeled eval set on 2026-08-29:
  *
  *   score addition     50% ranked first, MRR 0.557
  *   reciprocal rank    67% ranked first, MRR 0.700

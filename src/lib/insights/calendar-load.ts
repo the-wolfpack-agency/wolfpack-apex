@@ -62,7 +62,7 @@ export interface LoadEvent extends CalendarEventShape {
    * everyone's holidays counted six times. A meeting is different and needs no
    * such rule: an attendee really did spend that hour.
    */
-  organiser?: string | null;
+  organizer?: string | null;
 }
 
 const HOUR = 3_600_000;
@@ -79,7 +79,7 @@ function hours(startAt: string | null, endAt: string | null): number | null {
  * The longest run of meetings that touch, per person.
  *
  * Counted rather than a percentage because "four in a row" is a thing
- * somebody recognises about their own Tuesday, and "63% fragmentation" is
+ * somebody recognizes about their own Tuesday, and "63% fragmentation" is
  * not. Two meetings count as a run of two only if the second starts when the
  * first ends or earlier; a five-minute gap breaks it, which is the point,
  * because five minutes is not a break.
@@ -101,12 +101,12 @@ export function longestRun(events: readonly { startAt: string; endAt: string }[]
 }
 
 /**
- * Summarise a set of calendar entries per person.
+ * Summarize a set of calendar entries per person.
  *
  * Pure, so the arithmetic that produces a number somebody quotes is testable
  * without a database.
  */
-export function summariseLoad(
+export function summarizeLoad(
   events: readonly LoadEvent[],
   windowDays: number,
   conventions: CalendarConventions = {},
@@ -126,9 +126,9 @@ export function summariseLoad(
         entry.meetings.push(event);
         break;
       case "time-off":
-        /* Only the organiser is away. Everybody else is looking at somebody
+        /* Only the organizer is away. Everybody else is looking at somebody
            else's holiday on their own calendar. */
-        if (!event.organiser || event.organiser === event.person) {
+        if (!event.organizer || event.organizer === event.person) {
           entry.timeOffHours += length;
         }
         break;

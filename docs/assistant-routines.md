@@ -22,7 +22,7 @@ Nearly all of the parts are built. The missing piece is small and specific.
 |---|---|
 | 46 registered tools (mail, calendar, GitHub, financials, CRM, Brain, Teams) | built |
 | Capability gate per tool (`tools/gate.ts`) | built |
-| OGIAM authorisation on every action (`ogiam/authorize`) | built |
+| OGIAM authorization on every action (`ogiam/authorize`) | built |
 | Hash-chained action ledger (`ogiam/ledger`) | built |
 | Human approval queue with TTL (`agents/approvals/store`) | built |
 | In-app notification on state change (`notifications/in-app`) | built |
@@ -89,13 +89,13 @@ description of somebody's morning and become a program with no test suite.
 Nothing here needs a new permission model. Every step dispatches through the
 existing pipeline, so a routine can never do something its owner could not do
 one message at a time: the capability gate still runs per tool, OGIAM still
-authorises each action, the ledger still records each outcome, and every write
+authorizes each action, the ledger still records each outcome, and every write
 tool still stops for confirmation. A routine is a faster path through the same
 gates, never a way around them.
 
 ---
 
-# The catalogue
+# The catalog
 
 Every prompt below maps to a tool that exists today. Where a step has no tool
 yet, it is marked **[GAP]** with what would need building. Those are proposals,
@@ -124,7 +124,7 @@ HUMAN: read, adjust the three
 ```
 
 The value is not the summary. It is that steps 1-4 happened before the person
-sat down, and the only thing asked of them is the judgement in step 5.
+sat down, and the only thing asked of them is the judgment in step 5.
 
 ## Anyone: mail to done
 
@@ -275,7 +275,7 @@ Object types matching the vocabulary those tools already speak:
 
 | Object type | What it holds | Which prompts it lights up |
 |---|---|---|
-| `dealer` | Centres: region, group, contacts, performance | "how is the southwest region tracking" |
+| `dealer` | Centers: region, group, contacts, performance | "how is the southwest region tracking" |
 | `contact` | Customers and dealer staff | `who_is`, "who owns this account" |
 | `deal` | Enquiry through delivery, with stage and value | "what's in the pipeline this month" |
 | `vehicle` | Stock: VIN, model, status, location | "what do we have in stock" |
@@ -294,7 +294,7 @@ week, and do they have the stock to close them?"
   someone else's pitch.
 - **Isolated to a demo workspace.** The connector reports `isConfigured()` false
   everywhere else, so demo records can never appear beside a client's real ones.
-- **Visibly demo.** Labelled in the UI, not merely known to be fake by the
+- **Visibly demo.** Labeled in the UI, not merely known to be fake by the
   person presenting.
 - **Internally consistent.** Dates, stages and totals that survive arithmetic,
   because the first thing a sharp prospect does is add up a column.

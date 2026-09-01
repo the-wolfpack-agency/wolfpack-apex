@@ -169,7 +169,7 @@ function trackingFinding(input: ComplianceInput): ComplianceFinding {
   if (!facts.pageLoaded || observations.length === 0) {
     return {
       id: "tracking-before-consent",
-      title: "Tracking behaviour could not be checked",
+      title: "Tracking behavior could not be checked",
       verdict: "unverifiable",
       severity: "medium",
       detail:

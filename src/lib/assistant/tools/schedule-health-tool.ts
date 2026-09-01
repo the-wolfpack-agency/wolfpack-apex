@@ -16,14 +16,14 @@ import { trackEvent } from "@/lib/analytics";
 import { registerTool } from "./registry";
 import type { ToolDef, ToolResult } from "./types";
 import {
-  analyseSchedule,
+  analyzeSchedule,
   renderSchedule,
   DEFAULT_HOURS,
   type ScheduleEvent,
 } from "@/lib/insights/schedule-health";
 
 const ParamSchema = z.object({
-  /** Window to analyse. Two weeks by default: one is too noisy to
+  /** Window to analyze. Two weeks by default: one is too noisy to
       generalise from, a quarter buries a change that just started. */
   days: z.number().int().min(7).max(90).default(14),
   /** Look back over what happened, or forward at what is committed. */
@@ -71,7 +71,7 @@ function matchIntent(message: string): Params | null {
 export const scheduleHealthTool: ToolDef<Params, ScheduleHealthData> = {
   name: "schedule_health",
   description:
-    "Analyse the shape of a person's calendar: how much unbooked time is actually usable, where the back-to-back runs are, what the standing meetings cost, and which hours are worth defending. Rule-based; no AI tokens.",
+    "Analyze the shape of a person's calendar: how much unbooked time is actually usable, where the back-to-back runs are, what the standing meetings cost, and which hours are worth defending. Rule-based; no AI tokens.",
   paramSchema: ParamSchema,
   capability: "calendar.read",
   matchIntent,
@@ -134,7 +134,7 @@ export const scheduleHealthTool: ToolDef<Params, ScheduleHealthData> = {
       timeZone = null;
     }
 
-    const report = analyseSchedule(events, {
+    const report = analyzeSchedule(events, {
       days: params.days,
       hours: DEFAULT_HOURS,
       timeZone,
@@ -143,7 +143,7 @@ export const scheduleHealthTool: ToolDef<Params, ScheduleHealthData> = {
     /* Shape only. What is IN somebody's calendar is among the most
        sensitive data we hold, and none of it is needed to learn whether
        this analysis is worth keeping. */
-    trackEvent("assistant.schedule_analysed", ctx.userId, ctx.userRole, {
+    trackEvent("assistant.schedule_analyzed", ctx.userId, ctx.userRole, {
       days: params.days,
       direction: params.direction,
       /* The zone is not personal data and it decides whether every

@@ -9,7 +9,7 @@
 import {
   mayProcessHere,
   regionOfModel,
-  normaliseRequirement,
+  normalizeRequirement,
   modelRegionEnvVar,
   providerRegionEnvVar,
   REGION_UNKNOWN,
@@ -64,9 +64,9 @@ describe("mayProcessHere", () => {
   });
 });
 
-describe("normaliseRequirement", () => {
+describe("normalizeRequirement", () => {
   it("lowercases, trims, drops blanks and de-duplicates", () => {
-    expect(normaliseRequirement([" EU ", "eu", "", "US"])).toEqual(["eu", "us"]);
+    expect(normalizeRequirement([" EU ", "eu", "", "US"])).toEqual(["eu", "us"]);
   });
 });
 
@@ -92,7 +92,7 @@ describe("regionOfModel", () => {
     ).toBe("eu");
   });
 
-  it("normalises whatever the environment holds", () => {
+  it("normalizes whatever the environment holds", () => {
     expect(
       regionOfModel({ modelId: "x", provider: "azure" }, { AI_PROVIDER_REGION_AZURE: "  EU  " }),
     ).toBe("eu");

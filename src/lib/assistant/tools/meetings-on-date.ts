@@ -130,7 +130,7 @@ function dayBounds(
     iana === "UTC"
       ? Date.UTC(y, monthIdx, day)
       : zonedWallClockToUtcMs(y, monthIdx + 1, day, 0, 0, 0, iana);
-  /* Date.UTC normalises day+1 over month and year ends. */
+  /* Date.UTC normalizes day+1 over month and year ends. */
   const nextUtc = new Date(Date.UTC(y, monthIdx, day + 1));
   const nextMs =
     iana === "UTC"

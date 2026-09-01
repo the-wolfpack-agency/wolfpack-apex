@@ -93,7 +93,7 @@ function matchWhoIsIntent(message: string): Params | null {
  * question that escapes the roster ends up answered from whatever documents
  * happen to mention people.
  *
- * So these are recognised as their own shape and answered from the team table.
+ * So these are recognized as their own shape and answered from the team table.
  */
 const ROSTER_RE =
   /^\s*(?:who(?:'s|\s+is|\s+are)?\s+(?:on\s+(?:the|our|my)\s+team|here|we|us)|who\s+works\s+here|who\s+(?:do\s+we|does\s+the\s+team)\s+have(?:\s+in\s+(?<area>.{2,40}?))?|show\s+me\s+(?:the|our)\s+team|list\s+(?:the|our)\s+team)\s*[?.!]*\s*$/i;

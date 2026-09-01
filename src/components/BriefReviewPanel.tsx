@@ -11,10 +11,10 @@
  *
  * IT IS NOT A SCORE
  *
- * There is no grade, no percentage and no colour scale. Every finding is a
+ * There is no grade, no percentage and no color scale. Every finding is a
  * missing FACT and the question that supplies it, because the useful output is
- * the question, not a judgement about the writing. A number would invite people
- * to optimise the number.
+ * the question, not a judgment about the writing. A number would invite people
+ * to optimize the number.
  */
 
 import { useCallback, useState } from "react";

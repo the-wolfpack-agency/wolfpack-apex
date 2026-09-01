@@ -153,7 +153,7 @@ export function AssistantHistoryOverlay({
       className="fixed inset-0 z-[60] flex items-start justify-center bg-black/60 px-4 pt-12 sm:pt-20 overflow-y-auto"
       role="dialog"
       aria-modal="true"
-      aria-labelledby="assistant-history-title"
+      aria-labeledby="assistant-history-title"
     >
       <div
         data-testid="assistant-history-overlay"

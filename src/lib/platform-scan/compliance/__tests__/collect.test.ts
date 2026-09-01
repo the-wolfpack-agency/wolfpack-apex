@@ -33,7 +33,7 @@ function fakePage(over: Partial<{ gotoThrows: string; evaluateThrows: string; he
       if (over.gotoThrows) throw new Error(over.gotoThrows);
       // Emit the recorded responses once navigation starts.
       for (const r of over.responses ?? []) for (const h of handlers.response ?? []) h(r);
-      // headers() is a METHOD on Playwright's Response. Modelling it as a
+      // headers() is a METHOD on Playwright's Response. Modeling it as a
       // property is how a fake ends up validating the same bug the code has.
       return { status: () => 200, headers: () => over.headers ?? {} } as never;
     },

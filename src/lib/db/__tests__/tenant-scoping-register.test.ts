@@ -30,7 +30,7 @@
  *
  * WHAT THIS TEST DOES, AND DELIBERATELY DOES NOT DO
  *
- * It does not fix 149 tables. That is a migration programme with backfills and
+ * It does not fix 149 tables. That is a migration program with backfills and
  * query changes, and pretending otherwise would be worse than saying so.
  *
  * It makes the debt COUNTABLE and stops it growing: a new table must carry

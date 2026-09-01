@@ -40,7 +40,7 @@ const PNG_1x1_RED = Buffer.from(
   "89504e470d0a1a0a" + // signature
     "0000000d49484452" + // IHDR len + type
     "0000000100000001" + // 1x1
-    "08020000000000" + // depth 8, colour 2 (RGB), rest zero
+    "08020000000000" + // depth 8, color 2 (RGB), rest zero
     "00000000" + // fake CRC
     "0000000c49444154" + // IDAT len=12 (arbitrary — decoder checks crc-less)
     "789c63f8cfc0f00f00030001" + // deflate stream (not exact)

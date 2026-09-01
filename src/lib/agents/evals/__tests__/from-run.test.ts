@@ -1,5 +1,5 @@
 /**
- * Feeding a real run into the behaviour eval.
+ * Feeding a real run into the behavior eval.
  *
  * The tests worth reading are the ones that stop this adapter from
  * manufacturing a pass. It would be trivial to hand the eval the executor's own

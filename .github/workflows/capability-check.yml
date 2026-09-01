@@ -1,0 +1,58 @@
+# Ask every capability we claim whether it has ever actually done it.
+#
+# Four capabilities were built, tested, configured in production and had never
+# run once. Every one was found by accident, weeks late, while chasing
+# something else. None failed loudly, because a capability nothing exercises
+# does not degrade: it simply never was, and the code reads the same either way.
+#
+# Runs daily and on demand. Fails only when something on the register has NEVER
+# done its job, which is a fact worth a red tick and one nothing else catches.
+name: Capability check
+
+on:
+  schedule:
+    - cron: "40 13 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: capability-check
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    # Six counting queries and an install. Generous, and far short of the
+    # six-hour default a hang would otherwise burn.
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v4.0.4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Refuse to run without the credentials this reads
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          # A CHECK THAT CANNOT READ ITS EVIDENCE MUST NOT REPORT ON IT.
+          #
+          # Without DATABASE_URL every capability reads "unknown", which by
+          # design does not fail the job: a broken probe is a hole in the check,
+          # not a verdict about the product. Correct, and it means this job
+          # would go green every night having measured nothing.
+          #
+          # Measured 2026-09-01: DATABASE_URL is not a repository secret, an
+          # environment secret, or reachable at org level. Thirteen workflows
+          # reference secrets that do not exist and get an empty string.
+          if [ -z "$DATABASE_URL" ]; then
+            echo "::error::DATABASE_URL is not set for Actions, so this would report every capability as unreadable and exit green. Add it as a repository secret."
+            exit 1
+          fi
+      - name: What we claim, and what has done it
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: npm run capabilities

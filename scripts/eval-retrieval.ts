@@ -30,7 +30,12 @@
  * Deployment-specific by design: a client's own eval set is the only one that
  * can tell them their deployment works.
  */
-import { readFileSync } from "node:fs";
+/* FIRST. Imports hoist, so anything below already read process.env. */
+import "./load-env";
+import { readFileSync, existsSync } from "node:fs";
+
+/** The reviewed set, in the repo, so a reviewer can read what was graded. */
+const DEFAULT_PAIRS = "src/lib/brain/eval/retrieval-pairs.json";
 import { retrieve } from "@/lib/brain/retrieve";
 import { judgeRelevance } from "@/lib/brain/relevance";
 import { getAIClient } from "@/lib/ai/router";
@@ -41,25 +46,54 @@ import {
 } from "@/lib/brain/expand-query";
 import { RELEVANCE_MATERIAL_PER_HIT } from "@/lib/brain/relevance";
 import { isEmbeddingConfigured } from "@/lib/brain/embedder";
+import { brainHealth } from "@/lib/brain/qdrant";
 import { query } from "@/lib/db";
 import { mapWithConcurrency } from "@/lib/search/providers/util";
 import {
   gradeRetrieval,
   describeEval,
-  type LabelledPair,
+  type LabeledPair,
   type RankedResult,
 } from "@/lib/brain/retrieval-eval";
 
 async function main(): Promise<void> {
-  const path = process.argv[2];
-  if (!path) {
-    console.error('usage: npx tsx scripts/eval-retrieval.ts pairs.json');
+  /* Defaults to the reviewed set in the repo. The pairs used to live in a
+     scratch folder on one machine, which meant the measurement that gated a
+     production decision could not be read by anyone reviewing it. */
+  const path = process.argv[2] ?? DEFAULT_PAIRS;
+  if (!existsSync(path)) {
+    console.error(
+      `No pairs at ${path}.\n` +
+        `Reviewed pairs live in ${DEFAULT_PAIRS}; run "npm run eval:retrieval" to grade them.`,
+    );
     process.exit(2);
   }
 
   /* REFUSES RATHER THAN GRADING HALF. Without embeddings queryBrain returns
      keyword hits only, and the resulting number describes a system nobody
      ships. */
+  /* AND THE VECTOR STORE HAS TO ANSWER, NOT MERELY BE CONFIGURED.
+   *
+   * This check used to stop at the embedder. On 2026-09-01 a local run had a
+   * working embedder and a Qdrant key the server rejected with 403 on every
+   * search, so queryBrain caught the error, marked the semantic half failed,
+   * and returned keyword hits alone. The eval graded that and reported it as
+   * recall.
+   *
+   * Every figure it produced that day, 25 per cent found and 29 with expansion,
+   * was the keyword half wearing the whole product's name. Refusing on an
+   * unconfigured embedder while running on an unreachable index is the same
+   * mistake this guard was written to prevent, one layer further down. */
+  if (!(await brainHealth())) {
+    console.error(
+      "The vector store did not answer, so only the keyword half would run.\n" +
+        "That grades half the product and the number would not mean what it says.\n" +
+        "Check QDRANT_URL and QDRANT_API_KEY: a stale key fails every search with 403,\n" +
+        "and queryBrain degrades quietly rather than throwing.",
+    );
+    process.exit(2);
+  }
+
   if (!isEmbeddingConfigured()) {
     console.error(
       "No embedding deployment configured, so only the keyword half would run.\n" +
@@ -70,9 +104,9 @@ async function main(): Promise<void> {
     process.exit(2);
   }
 
-  const pairs = JSON.parse(readFileSync(path, "utf8")) as LabelledPair[];
+  const pairs = JSON.parse(readFileSync(path, "utf8")) as LabeledPair[];
   if (!Array.isArray(pairs) || pairs.length === 0) {
-    console.error("No labelled pairs. An empty eval set scores zero, not perfect.");
+    console.error("No labeled pairs. An empty eval set scores zero, not perfect.");
     process.exit(2);
   }
 

@@ -57,7 +57,7 @@ export function isFollowThrough(message: string): boolean {
  * thing that was just denied.
  */
 const REFUSAL_RE =
-  /\b(needs a higher-privilege role|not authorised|not authorized|don'?t have a confident answer|isn'?t configured|no .* connected)\b/i;
+  /\b(needs a higher-privilege role|not authorized|not authorized|don'?t have a confident answer|isn'?t configured|no .* connected)\b/i;
 
 export function extractOffer(assistantText: string): string | null {
   if (!assistantText) return null;
@@ -102,7 +102,7 @@ export function resolveFollowThrough(
 /**
  * The assistant's last turn in this conversation.
  *
- * Kept here rather than in the route so the whole behaviour, including
+ * Kept here rather than in the route so the whole behavior, including
  * where the previous turn comes from, is testable in one place. Returns
  * null on anything unexpected: a follow-through that cannot find its
  * antecedent asks, which is the same answer it gives when there was no

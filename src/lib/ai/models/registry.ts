@@ -153,12 +153,12 @@ export const MODEL_REGISTRY: readonly ModelSpec[] = Object.freeze([
   // registry had no Anthropic entries, so `cheapest at tier` compared Azure and
   // OpenAI to each other and never to Claude. On a deployment where Anthropic
   // is the only configured provider, selection had nothing to choose and the
-  // /admin/ai-router page reported decisions over a catalogue that excluded the
+  // /admin/ai-router page reported decisions over a catalog that excluded the
   // model actually answering.
   //
   // PRICED FROM THE PROVIDER'S OWN TABLE, converted per-million to per-thousand
   // at the point of use. Retyping the numbers here is how a registry price and
-  // a billed price drift apart, and the whole value of this catalogue is that
+  // a billed price drift apart, and the whole value of this catalog is that
   // the two agree.
   {
     id: "claude-haiku-4-5",

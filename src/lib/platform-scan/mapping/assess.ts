@@ -12,7 +12,7 @@
  * declarations builder, the host baseline, and the detector. What this module
  * contributes is the three things that are different about a walk.
  *
- * ONE: CONSENT WAS NEVER ASKED ABOUT. The walk signs in as an authorised user
+ * ONE: CONSENT WAS NEVER ASKED ABOUT. The walk signs in as an authorized user
  * of an internal system. Passing "no consent mechanism found" would be
  * literally true and completely misleading, stamping "fired before consent" on
  * every host in a client's report on the strength of a question nobody asked.

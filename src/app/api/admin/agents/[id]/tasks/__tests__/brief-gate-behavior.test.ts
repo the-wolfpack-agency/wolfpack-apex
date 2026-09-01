@@ -2,7 +2,7 @@
 /**
  * What the brief check does when work reaches an agent.
  *
- * Behavioural only. An earlier draft of this file asserted the panel was ABSENT
+ * Behavioral only. An earlier draft of this file asserted the panel was ABSENT
  * from the page it used to sit on, which is a snapshot of a decision rather
  * than a property of the system: do that for every relocated feature and you
  * accumulate assertions that can only ever fail for the wrong reason.

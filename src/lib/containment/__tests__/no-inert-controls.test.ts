@@ -57,7 +57,7 @@ const CONTROL_DIRS = [
 const KNOWN_INERT: Readonly<Record<string, string>> = {
   // 2026-08-02. The self-test is what would let containment report PROVEN
   // rather than "not demonstrated". Nothing runs it, so boundaryProven is
-  // false on every behaviour eval today — which the eval already reports
+  // false on every behavior eval today — which the eval already reports
   // honestly (#226), so this is a known gap and not a hidden one. Wiring it
   // needs a batch runner that can reach the canary hosts, which is real work
   // rather than a call site.

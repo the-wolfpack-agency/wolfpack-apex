@@ -43,7 +43,7 @@ beforeEach(() => {
   mockProbeAll.mockResolvedValue([{ label: "People", verdict: "works", detail: "3 item(s)" }]);
 });
 
-describe("authorisation", () => {
+describe("authorization", () => {
   it("403s without settings.manage_team", async () => {
     mockRequireCap.mockResolvedValue({
       ok: false,

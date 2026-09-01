@@ -12,7 +12,7 @@
  * A journey that only passes against the corpus it was written for measures
  * nothing. So the steps are split:
  *
- *   - UNIVERSAL steps work on any deployment, because they test behaviour
+ *   - UNIVERSAL steps work on any deployment, because they test behavior
  *     rather than content: does it refuse cleanly when a connector is missing,
  *     does it explain itself, does it invent an answer when none exists.
  *   - CORPUS steps need one fact from whoever owns the deployment, supplied as
@@ -58,7 +58,7 @@ export interface JourneyConfig {
 /**
  * Steps that hold on ANY deployment, because none of them needs our data.
  *
- * Each tests a behaviour that is either right or wrong regardless of what is in
+ * Each tests a behavior that is either right or wrong regardless of what is in
  * the corpus, which is what makes them portable.
  */
 export const UNIVERSAL_STEPS: JourneyStep[] = [
@@ -157,7 +157,7 @@ export function buildJourney(config: JourneyConfig = {}): JourneyStep[] {
       because: "A question this deployment's own documents are known to answer.",
     }),
   );
-  /* Universal behaviour, then every module's declared capability, then the
+  /* Universal behavior, then every module's declared capability, then the
      deployment's own corpus questions. */
   return [...UNIVERSAL_STEPS, ...moduleSteps(), ...corpus];
 }

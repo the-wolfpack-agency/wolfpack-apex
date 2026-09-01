@@ -4,7 +4,7 @@
  * Stacked PRs plus squash-merge silently drop work: B is merged into A's
  * branch, A is squash-merged into main taking only A's diff, and B's code is
  * nowhere while GitHub shows both as merged. It has happened at least three
- * times in this repository. The judgement lives in src/lib/ci/merge-orphans.ts
+ * times in this repository. The judgment lives in src/lib/ci/merge-orphans.ts
  * and is tested there; this only fetches and prints.
  *
  *   npm run check:merge-orphans

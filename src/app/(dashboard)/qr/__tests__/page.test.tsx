@@ -188,7 +188,7 @@ describe("/qr page", () => {
     /* jsdom won't let us reliably reassign window.location for this
        page (its Location object is non-configurable in our toolchain),
        and assigning .href triggers an actual jsdom navigation that
-       cannot be cleanly intercepted. So we assert the *behavioural
+       cannot be cleanly intercepted. So we assert the *behavioral
        contract*: when there's no token, the page renders only the
        loading skeleton (auth gate stays unchecked) and never paints
        the main "qr-page" UI — which is what the redirect would

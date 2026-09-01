@@ -30,7 +30,7 @@
  * row on every click. We now route that to COMPOSE so the user
  * confirms before anything is persisted.
  *
- * Handler behaviour:
+ * Handler behavior:
  *   - Message present and non-empty → call recordUserFeedback() and
  *     return the FeedbackWidgetSpec in `mode: "recorded"` state. The
  *     analytics event fires from inside the lib so every entry path

@@ -30,11 +30,11 @@ function makeWorkbook(sheets: Array<{ name: string; rows: Array<Array<string | n
 }
 
 describe("classifyKind: xlsx", () => {
-  it("recognises both MIME flavors", () => {
+  it("recognizes both MIME flavors", () => {
     expect(classifyKind(XLSX_MIME, "anything")).toBe("xlsx");
     expect(classifyKind(XLS_MIME, "anything")).toBe("xlsx");
   });
-  it("recognises .xlsx and .xls extensions when MIME is generic", () => {
+  it("recognizes .xlsx and .xls extensions when MIME is generic", () => {
     expect(classifyKind("application/octet-stream", "Codes.xlsx")).toBe("xlsx");
     expect(classifyKind("application/octet-stream", "old.xls")).toBe("xlsx");
   });

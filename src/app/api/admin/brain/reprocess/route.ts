@@ -22,6 +22,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { findCandidates, reprocessFixable } from "@/lib/brain/reprocess";
+import { findRepairIdentity, NO_IDENTITY_MESSAGE } from "@/lib/brain/repair-identity";
 import { downloadDriveItem } from "@/lib/connectors/sharepoint/sync";
 import { query } from "@/lib/db";
 import { recordAudit } from "@/lib/audit-log";
@@ -62,6 +63,38 @@ async function gate(req: NextRequest) {
   return { user: auth.user };
 }
 
+/**
+ * Long enough to drain a batch, matching the SharePoint sync routes.
+ *
+ * Measured 2026-09-01: the first run that could download anything indexed 22
+ * documents in about 50 seconds and was then killed at the 60-second default,
+ * returning a 500 with nothing to say about the 28 it had not reached.
+ */
+export const maxDuration = 300;
+
+/**
+ * How long a run gives itself, and why it is not derived from maxDuration.
+ *
+ * maxDuration is a REQUEST. The platform caps it by plan, and asking for 300
+ * does not mean getting 300. Two runs on 2026-09-01 set a deadline of 240
+ * seconds from that assumption, were killed anyway, and recorded no event at
+ * all: the deadline was never reached, so the report was never written and the
+ * documents each run HAD repaired were invisible.
+ *
+ * THE BUDGET ALSO HAS TO LEAVE ROOM FOR THE SLOWEST SINGLE DOCUMENT. The
+ * deadline is checked BETWEEN documents, so a run sitting at 44 seconds with a
+ * 45 second budget will happily start one more. That was survivable while
+ * every document was a parse. Now that scans reach the OCR route it is not: a
+ * Computer Vision read submits and then polls, and one document can take
+ * fifteen or twenty seconds on its own. Two runs today died exactly that way,
+ * inside a document they had been entitled to begin.
+ *
+ * Thirty seconds leaves the better part of a minute for whatever was already
+ * in flight. Finishing early costs nothing: the queue drains across runs
+ * either way, and only a run that returns says how far it got.
+ */
+const BUDGET_MS = 30_000;
+
 const NO_STORE = { "Cache-Control": "no-store, max-age=0" };
 
 /** What a run WOULD do. Read-only. */
@@ -86,6 +119,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const started = Date.now();
   const g = await gate(req);
   if (g.error) return g.error;
   const user = g.user!;
@@ -113,14 +147,46 @@ export async function POST(req: NextRequest) {
   }
   const anyDrive = [...driveFor.values()][0];
 
+  /* WHOSE ACCESS THE DOWNLOAD USES, AND ONLY WHEN THERE IS NOBODY.
+   *
+   * A signed-in caller repairs on their OWN token. That is a property worth
+   * keeping and a test protects it: an admin pressing repair must not quietly
+   * reach files through somebody else's access, whatever the job is doing.
+   *
+   * The scheduled path is the exception, because user.id is "cron", which is
+   * right for the audit row and useless for Graph. "cron" has never completed
+   * an OAuth flow, so getValidToken returns null and every document fails with
+   * no_token. That was true of every scheduled run this job has ever made, and
+   * reconnecting Microsoft would not have changed it.
+   *
+   * So only the cron borrows, and only from an account that already connected.
+   * It grants no new access: a delegated token reads exactly the drives that
+   * person can read, which is the boundary the original ingest ran under. */
+  const borrowing = user.id === "cron";
+  const identity = borrowing ? await findRepairIdentity() : null;
+  if (borrowing && !identity) {
+    return NextResponse.json(
+      { ok: false, considered: 0, repaired: 0, stillFailing: 0, error: NO_IDENTITY_MESSAGE },
+      { status: 200, headers: NO_STORE },
+    );
+  }
+  const downloadAs = identity?.userEmail ?? user.id;
+
   try {
+    /* STOP BEFORE THE PLATFORM STOPS US.
+     *
+     * A run killed at the function limit returns a 500 and loses the report,
+     * so the work it DID do is invisible and the next run cannot be told how
+     * far the last one got. Finishing early with an honest count beats being
+     * cut off with none: the queue is drained across runs either way, and only
+     * one of the two says so. */
     const report = await reprocessFixable(
       async (driveItemId) => {
         if (!anyDrive) return null;
-        return downloadDriveItem(user.id, anyDrive, driveItemId);
+        return downloadDriveItem(downloadAs, anyDrive, driveItemId);
       },
       { userId: user.id, role: user.role },
-      { limit },
+      { limit, deadline: started + BUDGET_MS },
     );
     /* AUDITED, because this rewrites a document library. A repair that
        silently replaced the chunks behind a client's citations, with no record
@@ -135,6 +201,10 @@ export async function POST(req: NextRequest) {
         repaired: report.repaired,
         still_failing: report.stillFailing,
         limit,
+        /* Named, because a repair that rewrites a document library under a
+           borrowed identity should record whose access it used. Equal to the
+           actor on an interactive run, which is the point. */
+        ran_as: downloadAs,
       },
     }).catch(() => undefined);
 

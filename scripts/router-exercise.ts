@@ -12,6 +12,8 @@
  * Read-only. It selects models; it never calls one, so running it costs
  * nothing and touches no vendor.
  */
+/* FIRST. Imports hoist, so anything below already read process.env. */
+import "./load-env";
 import { runExercise, missingConfigForSwitching } from "@/lib/ai/models/exercise";
 
 function main(): void {

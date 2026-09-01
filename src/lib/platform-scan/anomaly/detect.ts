@@ -112,7 +112,7 @@ export interface DetectInput {
    * NOT THE SAME AS FINDING NO BANNER, and the difference is the reason this
    * exists. consentAtMs of null means "we looked and there was no mechanism",
    * so every tracker fired without consent and the cutoff becomes infinite.
-   * A system walk signs in as an authorised user of an internal tool and never
+   * A system walk signs in as an authorized user of an internal tool and never
    * asks the consent question, so passing null would stamp "fired before
    * consent" on every host in a client's report on the strength of a question
    * nobody asked.
@@ -127,7 +127,7 @@ export interface DetectInput {
 }
 
 /** Categories where an unexplained appearance is genuinely serious. A CDN we do
- *  not recognise is worth a look; an unrecognised session-replay vendor is
+ *  not recognize is worth a look; an unrecognized session-replay vendor is
  *  recording the client's visitors. */
 const SEVERE_KINDS: ReadonlySet<TrackerKind> = new Set<TrackerKind>(["session-replay", "advertising"]);
 

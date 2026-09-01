@@ -41,7 +41,7 @@ async function runSweep(actorId: string, actorRole: string): Promise<NextRespons
        it still give the right answer", which is a different question and the
        one that was false all day on 2026-08-28 while every probe would have
        read green. Runs after the probes so a Graph outage shows up as an
-       integration failure rather than as six mysterious behaviour failures. */
+       integration failure rather than as six mysterious behavior failures. */
     const selfCheck = await runAssistantSelfCheck().catch(() => null);
 
     /* EVERY INTEGRATION JOINS THE FAN-OUT, AND THE SLOWEST ONE IS THE SEARCH.

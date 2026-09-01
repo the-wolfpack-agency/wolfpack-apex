@@ -2,7 +2,7 @@
  * The gist route, as a contract.
  *
  * The assertion that matters most is the unreadable one. A page arguing that
- * the product learns from its own behaviour must not report a clean quarter
+ * the product learns from its own behavior must not report a clean quarter
  * when it simply could not read the store, which is the failure this codebase
  * has now found in four separate places.
  */

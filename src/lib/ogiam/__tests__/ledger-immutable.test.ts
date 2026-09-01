@@ -8,7 +8,7 @@
  *      ogiam_decisions and ogiam_action_outcomes that raises, so the record an
  *      agent is judged against cannot be rewritten or deleted after the fact.
  *   2. The ledger library only ever INSERTs into those tables, so the trigger
- *      never fires at runtime (verified by a static scan AND a behavioural
+ *      never fires at runtime (verified by a static scan AND a behavioral
  *      simulation where the client refuses UPDATE/DELETE).
  *
  * No live Postgres in unit tests, so we combine a migration parse, a source
@@ -101,7 +101,7 @@ describe("append-only ledger immutability coverage", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Behavioural simulation - the client refuses UPDATE/DELETE on the OGIAM
+// Behavioral simulation - the client refuses UPDATE/DELETE on the OGIAM
 // tables; both ledger writers still complete because they only INSERT.
 // ---------------------------------------------------------------------------
 const mockConnect = jest.fn();

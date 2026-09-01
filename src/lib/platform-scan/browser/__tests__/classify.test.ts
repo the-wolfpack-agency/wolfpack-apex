@@ -288,7 +288,7 @@ describe("dialogNoAccessibleName", () => {
     ).not.toBeNull();
   });
 
-  it("guard: properly-labelled role=dialog is NOT flagged", () => {
+  it("guard: properly-labeled role=dialog is NOT flagged", () => {
     expect(
       dialogNoAccessibleName(
         el({ tag: "div", isDialog: true, role: "dialog", accessibleName: "Confirm" }),
@@ -298,7 +298,7 @@ describe("dialogNoAccessibleName", () => {
     ).toBeNull();
   });
 
-  it("guard: properly-labelled role=alertdialog is NOT flagged", () => {
+  it("guard: properly-labeled role=alertdialog is NOT flagged", () => {
     expect(
       dialogNoAccessibleName(
         el({ tag: "div", isDialog: true, role: "alertdialog", accessibleName: "Warning" }),

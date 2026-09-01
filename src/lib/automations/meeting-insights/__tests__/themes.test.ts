@@ -3,7 +3,7 @@
  *
  * The Postgres `query` helper from @/lib/db is mocked. We assert that
  * each helper builds a sensible SQL shape, parameterises correctly, and
- * normalises the result rows.
+ * normalizes the result rows.
  */
 
 const mockQuery = jest.fn();

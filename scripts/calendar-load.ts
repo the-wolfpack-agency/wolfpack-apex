@@ -7,7 +7,7 @@
 import "./load-env";
 
 import { query } from "@/lib/db";
-import { summariseLoad, describeLoad, type LoadEvent } from "@/lib/insights/calendar-load";
+import { summarizeLoad, describeLoad, type LoadEvent } from "@/lib/insights/calendar-load";
 
 async function main() {
   const i = process.argv.indexOf("--days");
@@ -36,10 +36,10 @@ async function main() {
     startAt: r.start_at,
     endAt: r.end_at,
     attendeeCount: Number(r.attendees),
-    organiser: r.organizer_email,
+    organizer: r.organizer_email,
   }));
 
-  console.log(describeLoad(summariseLoad(events, days)));
+  console.log(describeLoad(summarizeLoad(events, days)));
   process.exit(0);
 }
 

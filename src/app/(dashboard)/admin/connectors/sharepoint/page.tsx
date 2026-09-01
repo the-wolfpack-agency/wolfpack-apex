@@ -446,7 +446,7 @@ export default function AdminSharepointPage() {
                   className="mt-2 rounded p-2 text-xs"
                   style={{
                     /* Gold, not red. This is progress with more to do, and
-                       colouring it as a failure would send somebody looking
+                       coloring it as a failure would send somebody looking
                        for a fault that is not there. */
                     background: "rgba(234,179,8,0.08)",
                     border: "1px solid rgba(234,179,8,0.4)",

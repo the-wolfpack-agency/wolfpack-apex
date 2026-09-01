@@ -9,7 +9,7 @@
  *
  * A client plugging us into a twelve-year-old system has none of that
  * yet, and is owed an answer anyway. These two generators produce one,
- * because the subject is not the client's behaviour. It is the topology
+ * because the subject is not the client's behavior. It is the topology
  * of their systems, which exists in full the moment the second source
  * is connected:
  *

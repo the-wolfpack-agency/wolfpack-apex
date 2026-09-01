@@ -55,7 +55,7 @@ export async function GET(_req: NextRequest) {
     );
     stillExists = r.rows.length > 0;
   } catch {
-    /* DB unreachable → trust the JWT (shadow-mode behaviour). */
+    /* DB unreachable → trust the JWT (shadow-mode behavior). */
     stillExists = true;
   }
 

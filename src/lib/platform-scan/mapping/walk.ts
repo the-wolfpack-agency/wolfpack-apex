@@ -9,7 +9,7 @@
  * This is the driver: it walks, and it asks the existing rules every question
  * rather than deciding anything itself. Where to go next is explore.ts. What
  * is safe to click is click-policy.ts. When to stop is the budget. Keeping the
- * judgement out of the driver is what lets all of it stay testable without a
+ * judgment out of the driver is what lets all of it stay testable without a
  * browser, and this file testable without a client system.
  *
  * READ-ONLY BY CONSTRUCTION, INHERITED RATHER THAN RESTATED. The reader it

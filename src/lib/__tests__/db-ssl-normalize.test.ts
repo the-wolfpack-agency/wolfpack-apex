@@ -2,7 +2,7 @@
  * normalizeDatabaseUrlSsl — guards against the pg / pg-connection-string
  * upcoming SECURITY WARNING for sslmode=require|prefer|verify-ca.
  * The function rewrites the URL to sslmode=verify-full so the warning
- * never fires + the strict-cert behaviour is preserved across the lib
+ * never fires + the strict-cert behavior is preserved across the lib
  * upgrade.
  */
 

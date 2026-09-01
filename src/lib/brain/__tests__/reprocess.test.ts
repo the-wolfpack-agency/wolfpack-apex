@@ -58,7 +58,7 @@ jest.mock("../chunker", () => ({
   chunkText: (t: string) => [{ content: t, token_estimate: 10 }],
 }));
 
-import { findCandidates, reprocessFixable, FIXABLE } from "../reprocess";
+import { findCandidates, reprocessFixable, FIXABLE, MAX_REPAIR_BYTES } from "../reprocess";
 
 const ACTOR = { userId: "u1", role: "cto" };
 
@@ -104,12 +104,27 @@ describe("choosing what to retry", () => {
     expect((await findCandidates())[0].reason).toBe("extractor_now_exists");
   });
 
-  it("does NOT retry a genuinely scanned PDF", async () => {
-    /* Sixty-two of these exist. Retrying them re-downloads the whole set on
-       every run, ends in the same state, and teaches whoever reads the report
-       to ignore it. They need OCR, which is a different change. */
-    mockQuery.mockResolvedValue({
+  /* THIS TEST USED TO ASSERT THE OPPOSITE, AND WAS RIGHT TO.
+   *
+   * When it was written nothing could read a scan, so re-downloading one was
+   * spending bandwidth to reach the same dead end. reprocessOne has since
+   * grown an OCR route with a cost policy, and the credentials for it resolve
+   * in production. The premise changed; the assertion had not, and it was the
+   * reason not one document had ever reached that route. */
+  it("retries a scanned PDF now that something can read one", async () => {
+    mockQuery.mockResolvedValueOnce({
       rows: [row({ kind: "pdf", status: "failed", status_detail: "PDF contained no extractable text (scanned?)" })],
+    });
+    const found = await findCandidates();
+    expect(found).toHaveLength(1);
+    expect(found[0].reason).toBe("ocr_never_tried");
+  });
+
+  /* And it stops retrying the moment the OCR says it cannot, so a page nobody
+     can read does not cost money every night. */
+  it("does not retry a scan the OCR already refused", async () => {
+    mockQuery.mockResolvedValueOnce({
+      rows: [row({ kind: "pdf", status: "failed", status_detail: "ocr returned no text" })],
     });
     expect(await findCandidates()).toHaveLength(0);
   });
@@ -182,10 +197,17 @@ describe("repairing in place", () => {
     expect(mockUpdateStatus).toHaveBeenCalledWith("d1", "indexed", null);
   });
 
-  it("survives a re-fetch that throws, and says so on the row", async () => {
+  /* THIS TEST USED TO ASSERT THE BUG. It required the fetch error to be
+     written onto the row, which is exactly what erased the diagnosis that made
+     the document repairable and dropped it out of the candidate set forever.
+     A rate limit or an expired token says something about the connection and
+     nothing about the file. The run still reports the failure; it just does
+     not record a verdict on a document it never managed to read. */
+  it("survives a re-fetch that throws, and reports it without judging the file", async () => {
     const r = await reprocessFixable(async () => { throw new Error("graph 429"); }, ACTOR);
     expect(r.stillFailing).toBe(1);
-    expect(mockUpdateStatus).toHaveBeenCalledWith("d1", "failed", expect.stringMatching(/graph 429/));
+    expect(r.outcomes[0].detail).toMatch(/graph 429/);
+    expect(mockUpdateStatus).not.toHaveBeenCalled();
   });
 
   it("emits per-document and per-run events, so the repair is measurable", async () => {
@@ -270,5 +292,301 @@ describe("a scan with no extractable text", () => {
     mockExtract.mockResolvedValue({ ok: false, reason: "failed", detail: "docx parse: broken" });
     await reprocessFixable(fetchBytes, ACTOR);
     expect(mockOcrImage).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * What `limit` means, and the night it meant something else.
+ *
+ * THE INCIDENT. The nightly sweep asks the endpoint what is waiting, then asks
+ * it to repair. The first call used the endpoint default of 200 and reported
+ * 186 documents waiting. The second sent limit 50 and repaired nothing, three
+ * nights running, exiting green each time.
+ *
+ * The cause was ordering: the query took the newest N rows and JavaScript then
+ * discarded the ones nothing can fix. So `limit` meant "rows to look at" while
+ * every caller read it as "documents to repair", and the newest fifty happened
+ * to be scanned PDFs and expired-token rows that no repair addresses.
+ *
+ *     limit  50  ->    0 candidates      of 186 repairable
+ *     limit 100  ->   49
+ *     limit 200  ->   98
+ *
+ * Ninety Word documents of a client's course material sat unreadable behind a
+ * job reporting success. Fixability is decided in SQL now, before the limit.
+ */
+describe("how many documents a repair run takes", () => {
+  /* Rows the SQL would return: the caller's limit applied to rows that are
+     ALREADY fixable, which is what the new query does. */
+  function givenFixable(count: number) {
+    mockQuery.mockResolvedValueOnce({
+      rows: Array.from({ length: count }, (_, i) => ({
+        id: `d${i}`,
+        filename: `doc-${i}.docx`,
+        kind: "docx",
+        status: "failed",
+        status_detail: 'DOMParser.parseFromString: the provided mimeType "undefined" is not valid',
+        ms_drive_item_id: `drive-${i}`,
+      })),
+    });
+  }
+
+  it("asks the database for fixable rows rather than filtering afterwards", async () => {
+    givenFixable(50);
+    await findCandidates({ limit: 50 });
+
+    const [sql, args] = mockQuery.mock.calls[0];
+    /* THE ASSERTION THAT WOULD HAVE CAUGHT IT. The fixability test has to be
+       inside the statement, or the LIMIT lands on the wrong set of rows. */
+    expect(sql).toMatch(/status_detail\s*~\*/i);
+    expect(sql.indexOf("status_detail")).toBeLessThan(sql.indexOf("LIMIT"));
+    /* And the patterns come from FIXABLE, so the planner and the repairer
+       cannot disagree about what fixable means. */
+    expect(args[0]).toEqual(FIXABLE.map((f) => f.source));
+  });
+
+  it("returns as many as it was asked for when that many are waiting", async () => {
+    givenFixable(50);
+    expect(await findCandidates({ limit: 50 })).toHaveLength(50);
+  });
+
+  it("returns everything waiting when fewer than the limit remain", async () => {
+    givenFixable(7);
+    expect(await findCandidates({ limit: 50 })).toHaveLength(7);
+  });
+
+  /* Every pattern must be something Postgres can run. A JavaScript-only
+     construct would match in the planner and not in the repairer, which is a
+     quieter version of the same bug. */
+  it("keeps every fixable pattern portable to Postgres", () => {
+    for (const f of FIXABLE) {
+      expect(f.source).not.toMatch(/\\[dswbDSWB]|\(\?[:=!<]/);
+      /* And the two forms have to describe the same set. */
+      expect(new RegExp(f.source, "i").source).toBe(f.test.source.replace(/^\/|\/i$/g, ""));
+    }
+  });
+});
+
+/**
+ * A repair that could not download must not pass judgment on the file.
+ *
+ * THE INCIDENT, 2026-09-01. Every Microsoft token expired on 2026-08-26. A run
+ * took fifty documents, failed to download all fifty, and rewrote each one's
+ * status_detail from "docx mimeType" to "re-fetch failed: no_token".
+ *
+ * That detail is not in FIXABLE, so all fifty dropped out of the candidate set
+ * permanently. The fixable queue fell from 186 to 136 and the no_token pile
+ * grew from 37 to 87. The repair was eating its own work queue one batch per
+ * night, and the sweep printed "still failing 0" while it happened, because it
+ * read result.failed and the API returns stillFailing.
+ *
+ * A fetch failure says something about the connection, never about the file.
+ */
+describe("a repair that cannot reach the file", () => {
+  function docNeedingRepair() {
+    mockQuery.mockResolvedValueOnce({
+      rows: [
+        {
+          id: "d1",
+          filename: "BA106 OSPM_Guide.docx",
+          kind: "docx",
+          status: "failed",
+          status_detail: 'DOMParser.parseFromString: the provided mimeType "undefined" is not valid',
+          ms_drive_item_id: "drive-1",
+        },
+      ],
+    });
+  }
+
+  it("leaves the diagnosis alone when the download throws", async () => {
+    docNeedingRepair();
+    const writesBefore = mockQuery.mock.calls.length;
+
+    await reprocessFixable(
+      async () => {
+        throw new Error("no_token");
+      },
+      { userId: "u", role: "cto" },
+    );
+
+    /* THE ASSERTION THAT WOULD HAVE SAVED THE QUEUE. Only the SELECT ran. No
+       UPDATE touched the row, so it is still a docx that failed on the parser
+       bug and the next run will still find it. */
+    const updates = mockQuery.mock.calls
+      .slice(writesBefore)
+      .filter((c: unknown[]) => /^\s*UPDATE\b/i.test(String(c[0])));
+    expect(updates).toHaveLength(0);
+  });
+
+  it("leaves the diagnosis alone when the download returns nothing", async () => {
+    docNeedingRepair();
+    const before = mockQuery.mock.calls.length;
+    await reprocessFixable(async () => null, { userId: "u", role: "cto" });
+    expect(
+      mockQuery.mock.calls.slice(before).filter((c: unknown[]) => /^\s*UPDATE\b/i.test(String(c[0]))),
+    ).toHaveLength(0);
+  });
+
+  /* Silence would be worse than the overwrite: the run has to say it failed,
+     it just must not write that verdict onto the document. */
+  it("still reports the failure", async () => {
+    docNeedingRepair();
+    const report = await reprocessFixable(
+      async () => {
+        throw new Error("no_token");
+      },
+      { userId: "u", role: "cto" },
+    );
+    expect(report.considered).toBe(1);
+    expect(report.repaired).toBe(0);
+    expect(report.stillFailing).toBe(1);
+    expect(report.outcomes[0].detail).toMatch(/no_token/);
+  });
+});
+
+/**
+ * Finishing early beats being cut off.
+ *
+ * THE RUN THAT PROMPTED IT. The first repair that could actually download
+ * anything indexed 22 documents in about 50 seconds and was then killed by the
+ * platform's default 60-second budget. It returned a 500, so the 22 successes
+ * were invisible in the report and the next run had no idea how far it got.
+ *
+ * The queue drains across runs either way. Only one of the two says so.
+ */
+describe("a repair that runs out of time", () => {
+  function candidates(n: number) {
+    mockQuery.mockResolvedValueOnce({
+      rows: Array.from({ length: n }, (_, i) => ({
+        id: `d${i}`,
+        filename: `doc-${i}.docx`,
+        kind: "docx",
+        status: "failed",
+        status_detail: 'DOMParser.parseFromString: the provided mimeType "undefined" is not valid',
+        ms_drive_item_id: `drive-${i}`,
+      })),
+    });
+  }
+
+  it("stops on its own clock and still returns a report", async () => {
+    candidates(20);
+    const report = await reprocessFixable(async () => Buffer.from("x"), { userId: "u", role: "cto" }, {
+      /* Already past, so it stops before the first document. */
+      deadline: Date.now() - 1,
+    });
+    expect(report.ranOutOfTime).toBe(true);
+    expect(report.attempted).toBe(0);
+    /* The count of what was WAITING survives, which is what tells the next run
+       there is still work. */
+    expect(report.considered).toBe(20);
+  });
+
+  it("does not claim it ran out when it finished the batch", async () => {
+    candidates(2);
+    const report = await reprocessFixable(async () => Buffer.from("x"), { userId: "u", role: "cto" }, {
+      deadline: Date.now() + 60_000,
+    });
+    expect(report.ranOutOfTime).toBe(false);
+    expect(report.attempted).toBe(2);
+  });
+
+  it("runs to the end when given no deadline", async () => {
+    candidates(3);
+    const report = await reprocessFixable(async () => Buffer.from("x"), { userId: "u", role: "cto" });
+    expect(report.attempted).toBe(3);
+  });
+});
+
+/**
+ * One oversized file must not take a whole batch with it.
+ *
+ * A repair pulls the whole file into a Buffer to re-extract it. Exceeding the
+ * function's memory does not raise an error a catch can see: the process dies,
+ * the request returns 500, and the report never gets written, so every
+ * document the run had already repaired disappears with it.
+ *
+ * Measured 2026-09-01. Once the small files drained, four consecutive runs
+ * died almost immediately and moved the queue by one or two each. The queue
+ * held a 44.7MB file and ten others over 25MB, sorted to the front. One
+ * document was killing a batch of fifty.
+ */
+describe("files too big to pull into memory", () => {
+  it("excludes them in the query, not in the loop", async () => {
+    mockQuery.mockResolvedValueOnce({ rows: [] });
+    await findCandidates({ limit: 50 });
+
+    const [sql, args] = mockQuery.mock.calls[0];
+    /* In SQL, because a document skipped in the loop has already been
+       downloaded, which is the thing that kills the process. */
+    expect(String(sql)).toMatch(/size_bytes/);
+    expect(args).toContain(MAX_REPAIR_BYTES);
+  });
+
+  /* Unknown is not the same fact as too big, and the download is the next
+     thing that would find out either way. */
+  it("lets a document with no recorded size through", async () => {
+    mockQuery.mockResolvedValueOnce({ rows: [] });
+    await findCandidates({ limit: 50 });
+    expect(String(mockQuery.mock.calls[0][0])).toMatch(/size_bytes IS NULL OR/);
+  });
+
+  it("keeps a ceiling big enough for anything with text in it", () => {
+    /* Everything above it in this corpus is video, image sets and design
+       files, which would fail extraction even if they fit. */
+    expect(MAX_REPAIR_BYTES).toBeGreaterThanOrEqual(8 * 1024 * 1024);
+    expect(MAX_REPAIR_BYTES).toBeLessThanOrEqual(25 * 1024 * 1024);
+  });
+});
+
+/**
+ * The OCR route existed, was paid for, and nothing ever reached it.
+ *
+ * reprocessOne already routes an extraction failure through the OCR policy,
+ * prefers the cheap purpose-built API over a vision model, and checks a cost
+ * ceiling before spending. All of it wired and tested.
+ *
+ * It had run zero times. Measured 2026-09-01: not one brain.document_ocred
+ * event in the product's life, because a scanned PDF fails with "contained no
+ * extractable text" and that phrase was not in FIXABLE, so findCandidates
+ * never selected one. 56 scanned documents sat re-fetchable, a capability away
+ * from being answerable, behind a list that did not mention them.
+ */
+describe("scans reaching the OCR route", () => {
+  it("treats a scan with no extractable text as fixable", () => {
+    const scan = FIXABLE.find((f) => f.test.test("PDF contained no extractable text (scanned?)"));
+    expect(scan?.id).toBe("ocr_never_tried");
+  });
+
+  /* SELF-LIMITING BY CONSTRUCTION. When OCR cannot read a page the repair
+     writes "ocr <reason>" onto the row. That must not match, or a page nothing
+     can read gets re-downloaded and re-OCR'd every night forever, spending
+     real money on the same failure. */
+  it("does not re-queue a scan the OCR already refused", () => {
+    for (const detail of [
+      "ocr too_large — image 5562198 bytes exceeds Vision limit",
+      "ocr returned no text",
+      "ocr unreadable: handwriting",
+    ]) {
+      expect(FIXABLE.find((f) => f.test.test(detail))).toBeUndefined();
+    }
+  });
+
+  it("still matches the two reasons that were already fixable", () => {
+    expect(
+      FIXABLE.find((f) => f.test.test('DOMParser.parseFromString: the provided mimeType "undefined"'))?.id,
+    ).toBe("docx_mimetype");
+    expect(FIXABLE.find((f) => f.test.test("sync extractor unavailable for image"))?.id).toBe(
+      "extractor_now_exists",
+    );
+  });
+
+  /* The Postgres form has to describe the same set as the RegExp, or the
+     planner and the repairer disagree about what is waiting. */
+  it("keeps the new pattern portable to Postgres", () => {
+    const scan = FIXABLE.find((f) => f.id === "ocr_never_tried")!;
+    expect(scan.source).not.toMatch(/\\[dswbDSWB]|\(\?[:=!<]/);
+    expect(new RegExp(scan.source, "i").test("PDF contained no extractable text (scanned?)")).toBe(
+      true,
+    );
   });
 });

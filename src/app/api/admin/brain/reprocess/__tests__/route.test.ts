@@ -106,13 +106,18 @@ describe("the run", () => {
     expect(mockReprocess).toHaveBeenCalledWith(
       expect.any(Function),
       { userId: "u1", role: "cto" },
-      { limit: 10 },
+      /* A deadline rides along now: the run stops on its own clock rather than
+         being killed by the platform, which loses the report. */
+      { limit: 10, deadline: expect.any(Number) },
     );
   });
 
   it("defaults the limit rather than repairing the whole library by surprise", async () => {
     await POST(req({}));
-    expect(mockReprocess).toHaveBeenCalledWith(expect.any(Function), expect.anything(), { limit: 100 });
+    expect(mockReprocess).toHaveBeenCalledWith(expect.any(Function), expect.anything(), {
+      limit: 100,
+      deadline: expect.any(Number),
+    });
   });
 
   it("downloads on the caller's own token, never a shared one", async () => {
@@ -215,4 +220,28 @@ describe("the cron path", () => {
       expect(audited).toBe(true);
     }),
   );
+});
+
+/**
+ * The budget has to fit the limit the platform actually enforces.
+ *
+ * maxDuration is a request, not a guarantee: it is capped by plan. Two runs on
+ * 2026-09-01 derived a 240-second deadline from a declared 300, were killed
+ * anyway, and recorded no event at all, so the documents each had already
+ * repaired were invisible to the report and to the next run.
+ */
+describe("how long a run gives itself", () => {
+  it("fits inside the smallest limit the platform is known to enforce", async () => {
+    const before = Date.now();
+    await POST(req({ limit: 10 }));
+    const opts = mockReprocess.mock.calls[0][2] as { deadline: number };
+    const budget = opts.deadline - before;
+    /* Comfortably under a 60-second cap AND leaving room for the slowest
+       single document, because the deadline is checked between documents. An
+       OCR read polls and can take fifteen to twenty seconds on its own, so a
+       budget close to the cap gets killed inside a document it was entitled to
+       begin. Two runs died that way on 2026-09-01. */
+    expect(budget).toBeGreaterThan(10_000);
+    expect(budget).toBeLessThanOrEqual(35_000);
+  });
 });

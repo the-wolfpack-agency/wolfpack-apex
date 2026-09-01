@@ -72,7 +72,7 @@ function request(extra: Record<string, unknown> = {}) {
 
 describe("router verification — when it must NOT spend", () => {
   it("does not check at all unless the caller asked", async () => {
-    /* Every existing call site must be unchanged in cost and behaviour. */
+    /* Every existing call site must be unchanged in cost and behavior. */
     mockMessagesCreate.mockResolvedValue(reply(""));
     await getAIClient().complete(request());
     expect(mockMessagesCreate).toHaveBeenCalledTimes(1);
@@ -385,7 +385,7 @@ describe("router verification — independence of the judge", () => {
  */
 describe("the reviewer, and when it is asked", () => {
   it("stays silent on a sound answer when improve is true", async () => {
-    /* The old behaviour, kept deliberately: an existing caller passing true
+    /* The old behavior, kept deliberately: an existing caller passing true
        must not start paying for a second call. */
     mockMessagesCreate.mockResolvedValue(reply("The invoice total is $4,200."));
     await getAIClient().complete(request({ verify: true, improve: true }));
@@ -446,7 +446,7 @@ describe("the reviewer, and when it is asked", () => {
  * guess, because its zero looked identical and turned out to be a gate that
  * could not fire.
  *
- * response-safety.test.ts proves the detector recognises the payloads. This
+ * response-safety.test.ts proves the detector recognizes the payloads. This
  * proves the router actually asks it, on the ordinary path, with no flag to
  * opt in. Together they mean the zero can be read as good news.
  */

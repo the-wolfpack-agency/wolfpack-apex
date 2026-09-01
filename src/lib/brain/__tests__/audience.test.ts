@@ -53,7 +53,7 @@ describe("narrowing a set of documents to what a role may read", () => {
     expect(params[2]).toBe("sales");
   });
 
-  /* BEHAVIOUR DELIBERATELY CHANGED on 2026-08-27, and the old assertion is
+  /* BEHAVIOR DELIBERATELY CHANGED on 2026-08-27, and the old assertion is
      replaced rather than relaxed.
      
      This used to short-circuit: a role that reads everything got its ids back

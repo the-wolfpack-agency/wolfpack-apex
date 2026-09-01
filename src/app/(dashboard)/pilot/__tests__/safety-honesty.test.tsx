@@ -19,7 +19,7 @@
  * against the production database: a pasted card number, a national ID inside
  * a genuine question, bank details, and an API key. None reached the answer.
  * Bank details pasted alongside a real question had the details removed and
- * the question answered from the SOW, which is the behaviour worth having.
+ * the question answered from the SOW, which is the behavior worth having.
  */
 
 import "@testing-library/jest-dom";
@@ -97,7 +97,7 @@ describe("the safety tiles say what they measure", () => {
     expect(tile.textContent).toMatch(/removed from questions/i);
   });
 
-  /* Removing data must not mean refusing to help: the measured behaviour is
+  /* Removing data must not mean refusing to help: the measured behavior is
      that the question is still answered. */
   it("promises the question is still answered", async () => {
     await renderWith(52);

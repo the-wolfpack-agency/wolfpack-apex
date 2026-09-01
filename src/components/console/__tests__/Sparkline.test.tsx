@@ -64,7 +64,7 @@ describe("Sparkline", () => {
     expect(screen.queryByTestId("sparkline-dot")).not.toBeInTheDocument();
   });
 
-  test("custom accent colour is applied to the line stroke", () => {
+  test("custom accent color is applied to the line stroke", () => {
     render(<Sparkline data={[1, 2, 3]} accent="var(--wp-gold)" />);
     expect(
       screen.getByTestId("sparkline-line").getAttribute("stroke"),

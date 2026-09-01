@@ -7,7 +7,7 @@
  * promise is checked for the first time by a person who typed "run my
  * morning" and got a failure at step three.
  */
-import { BUILT_IN_ROUTINES, matchRoutine, routineById } from "../catalogue";
+import { BUILT_IN_ROUTINES, matchRoutine, routineById } from "../catalog";
 import { getToolByName } from "@/lib/assistant/tools/registry";
 import "@/lib/assistant/tools";
 import { referencedSlots } from "../slots";
@@ -24,7 +24,7 @@ describe("matching what somebody typed", () => {
   });
 
   /* A five-step chain that fires at somebody asking a question is much worse
-     than one that failed to recognise its own name. */
+     than one that failed to recognize its own name. */
   it("does not fire on a sentence that merely contains the command", () => {
     expect(matchRoutine("what happens when I run my morning routine")).toBeNull();
     expect(matchRoutine("should I run my morning before standup")).toBeNull();

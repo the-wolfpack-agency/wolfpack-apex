@@ -30,7 +30,7 @@ describe("the client guide teaches only what works", () => {
     expect(taught.sort()).toEqual(supported.sort());
   });
 
-  /* THE ONE THAT MATTERS. summarise currently returns a list. Teaching it
+  /* THE ONE THAT MATTERS. summarize currently returns a list. Teaching it
      would send every client down the path that produced the original
      complaint. */
   it("never teaches an action that routes elsewhere", () => {
@@ -76,7 +76,7 @@ describe("the client guide teaches only what works", () => {
 });
 
 describe("the operator notes carry what the client is not told", () => {
-  /* Support needs this on day one: somebody WILL type "summarise this" and
+  /* Support needs this on day one: somebody WILL type "summarize this" and
      needs an answer better than "that's odd". Separate from the client guide,
      because documenting a gap is not the same as teaching a workaround. */
   it("lists the actions that behave like something else", () => {

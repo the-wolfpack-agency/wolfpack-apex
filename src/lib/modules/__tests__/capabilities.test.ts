@@ -1,8 +1,8 @@
 /**
  * A contract nobody verifies becomes marketing inside a week.
  *
- * This file exists so the declaration cannot say "we support summarise" while
- * summarise returns a list. Without that, the capability registry becomes a
+ * This file exists so the declaration cannot say "we support summarize" while
+ * summarize returns a list. Without that, the capability registry becomes a
  * second place where the truth is not, and the drift it was built to prevent
  * happens inside the thing preventing it.
  *
@@ -11,7 +11,7 @@
  *
  *   ASK       "what are the payment terms in our SOW?"     -> answer + citation
  *   FIND      "what documents do we have about onboarding"  -> browsable list
- *   SUMMARISE "summarize the onboarding document"           -> browsable list
+ *   SUMMARIZE "summarize the onboarding document"           -> browsable list
  */
 import {
   MODULE_CAPABILITIES,
@@ -24,8 +24,8 @@ import { matchDocumentQuestion } from "@/lib/assistant/tools/search";
 
 describe("the declaration must be honest", () => {
   /* THE ASSERTION THE WHOLE FILE IS FOR. An action claiming to be supported
-     must return the shape its verb implies. "Summarise" that returns a list is
-     not a supported summarise, whatever the registry says. */
+     must return the shape its verb implies. "Summarize" that returns a list is
+     not a supported summarize, whatever the registry says. */
   it("never marks an action supported when it behaves like another one", () => {
     for (const m of MODULE_CAPABILITIES) {
       for (const a of m.actions) {
@@ -51,29 +51,29 @@ describe("the declaration must be honest", () => {
     }
   });
 
-  /* Records the measured state of documents. If summarise is ever fixed, this
+  /* Records the measured state of documents. If summarize is ever fixed, this
      test fails and forces the registry to be updated in the same change, which
      is the point: the contract cannot lag the engine. */
-  /* SUMMARISE WAS THE GAP THIS FILE WAS BUILT AROUND, and it closed on
+  /* SUMMARIZE WAS THE GAP THIS FILE WAS BUILT AROUND, and it closed on
      2026-08-30. It spent two attempts as `routes_elsewhere`, which was the
      contract working: the first fix shipped, made things worse, and this
      declaration never claimed otherwise.
      Retained as an assertion rather than deleted, because the failure mode it
-     guards is a summarise that quietly goes back to returning a list. */
-  it("records that summarise now answers from the document", () => {
-    const summarise = MODULE_CAPABILITIES.flatMap((m) => m.actions).find(
-      (a) => a.id === "documents.summarise",
+     guards is a summarize that quietly goes back to returning a list. */
+  it("records that summarize now answers from the document", () => {
+    const summarize = MODULE_CAPABILITIES.flatMap((m) => m.actions).find(
+      (a) => a.id === "documents.summarize",
     )!;
-    expect(summarise.status).toBe("supported");
-    expect(summarise.returns).toBe("synthesised");
+    expect(summarize.status).toBe("supported");
+    expect(summarize.returns).toBe("synthesised");
     /* behavesLike described the DETOUR. There is no longer one to describe. */
-    expect(summarise.behavesLike).toBeUndefined();
+    expect(summarize.behavesLike).toBeUndefined();
   });
 });
 
 describe("what the interface may offer", () => {
   /* THE RULE THAT PREVENTS THE ORIGINAL DEFECT. The interface offered
-     "summarise" and the engine returned a list. Only supported actions are
+     "summarize" and the engine returned a list. Only supported actions are
      offerable, so that cannot be built again by accident. */
   it("offers only supported actions", () => {
     for (const a of offerableActions("documents")) {
@@ -81,8 +81,8 @@ describe("what the interface may offer", () => {
     }
   });
 
-  it("offers summarise, now that it summarises", () => {
-    expect(offerableActions("documents").map((a) => a.id)).toContain("documents.summarise");
+  it("offers summarize, now that it summarizes", () => {
+    expect(offerableActions("documents").map((a) => a.id)).toContain("documents.summarize");
   });
 
   /* THE WALKTHROUGH IS NOW THREE MOVES WIDE, not two. That is the whole point
@@ -92,7 +92,7 @@ describe("what the interface may offer", () => {
     expect(offerableActions("documents").map((a) => a.id).sort()).toEqual([
       "documents.ask",
       "documents.find",
-      "documents.summarise",
+      "documents.summarize",
     ]);
   });
 
@@ -151,7 +151,7 @@ describe("every action is usable as an interface entry", () => {
 
 describe("the registry scales to the modules coming next", () => {
   /* Sources come from PROMPT_REQUIREMENTS so DMS and CRM cannot be declared
-     here under names nothing else recognises. */
+     here under names nothing else recognizes. */
   it("uses only source names the rest of the product knows", () => {
     for (const s of declaredSources()) {
       expect((PROMPT_REQUIREMENTS as readonly string[]).includes(s)).toBe(true);

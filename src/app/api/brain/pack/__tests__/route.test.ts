@@ -50,7 +50,9 @@ beforeEach(() => {
   mockSafeQuery.mockReset();
   mockFetchBrainVectors.mockReset();
   mockTrackEvent.mockReset();
-  mockFetchBrainVectors.mockResolvedValue(new Map());
+  /* The reachable-but-empty case: Qdrant answered and had nothing for these
+     points. Distinct from unreachable, which is what the new tests cover. */
+  mockFetchBrainVectors.mockResolvedValue({ vectors: new Map(), status: "ok" });
 });
 
 describe("GET /api/brain/pack", () => {
@@ -71,6 +73,7 @@ describe("GET /api/brain/pack", () => {
   it("400 when workspace param is missing", async () => {
     mockRequireCapability.mockResolvedValue(AUTHED);
     const { GET } = await import("@/app/api/brain/pack/route");
+    /* No workspace on purpose. This is the assertion. */
     const res = await GET(get("http://x/api/brain/pack"));
     expect(res.status).toBe(400);
   });
@@ -146,12 +149,13 @@ describe("GET /api/brain/pack", () => {
       rows: [{ total: 100 }],
       fromCache: false,
     });
-    mockFetchBrainVectors.mockResolvedValueOnce(
-      new Map([
+    mockFetchBrainVectors.mockResolvedValueOnce({
+      vectors: new Map([
         ["p1", [0.1, 0.2]],
         ["p2", [0.3, 0.4]],
       ]),
-    );
+      status: "ok",
+    });
 
     const { GET } = await import("@/app/api/brain/pack/route");
     const res = await GET(
@@ -249,7 +253,14 @@ describe("GET /api/brain/pack", () => {
     const res = await GET(get("http://x/api/brain/pack?workspace=default"));
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body).toEqual({ chunks: [], next_cursor: null, total: 0 });
+    expect(body).toEqual({
+      chunks: [],
+      next_cursor: null,
+      total: 0,
+      /* Nothing was asked for, so nothing was lost. Reporting a degradation
+         here would cry wolf on every shadow-mode request. */
+      embeddings_available: true,
+    });
   });
 
   it("fires brain.pack_page_downloaded analytics", async () => {
@@ -272,5 +283,94 @@ describe("GET /api/brain/pack", () => {
       "cto",
       expect.objectContaining({ workspace: "default" }),
     );
+  });
+});
+
+/**
+ * A pack that shipped without embeddings, and whether anybody can tell.
+ *
+ * THE FAILURE THIS GUARDS. fetchBrainVectors returned an empty Map when Qdrant
+ * was unreachable, which is also what "these chunks have no vectors" looks
+ * like. Both shipped chunks with an empty embedding, the client's second-level
+ * search fell back to keyword scoring, and nothing recorded it. That is the
+ * same shape as the bare catch that hid a half-dead hybrid search here for
+ * over a month while every number on the dashboard looked healthy.
+ */
+describe("GET /api/brain/pack when the vector store is unreachable", () => {
+  /* Same three mocked queries the happy-path test uses, in the same order:
+     membership check, the page itself, then the total. */
+  function pageWithChunks() {
+    mockRequireCapability.mockResolvedValue(AUTHED);
+    mockSafeQuery.mockResolvedValueOnce({ rows: [{ count: 1 }], fromCache: false });
+    mockSafeQuery.mockResolvedValueOnce({
+      rows: [
+        {
+          id: "c1",
+          document_id: "d1",
+          chunk_idx: 0,
+          content: "first",
+          qdrant_point_id: "p1",
+          filename: "a.pdf",
+          kind: "pdf",
+          created_at: "2024-01-01T00:00:00Z",
+        },
+      ],
+      fromCache: false,
+    });
+    mockSafeQuery.mockResolvedValueOnce({ rows: [{ total: 1 }], fromCache: false });
+  }
+
+  it("tells the client its semantic search is degraded", async () => {
+    pageWithChunks();
+    mockFetchBrainVectors.mockResolvedValueOnce({
+      vectors: new Map(),
+      status: "failed",
+      error: "connect ECONNREFUSED",
+    });
+
+    const { GET } = await import("@/app/api/brain/pack/route");
+    const res = await GET(get("http://x/api/brain/pack?workspace=default"));
+    const body = await res.json();
+
+    /* The chunks still ship. Losing the page as well would turn a degraded
+       download into no download. */
+    expect(res.status).toBe(200);
+    expect(body.chunks).toHaveLength(1);
+    expect(body.embeddings_available).toBe(false);
+  });
+
+  it("records the degradation rather than swallowing it", async () => {
+    pageWithChunks();
+    mockFetchBrainVectors.mockResolvedValueOnce({
+      vectors: new Map(),
+      status: "failed",
+      error: "connect ECONNREFUSED",
+    });
+
+    const { GET } = await import("@/app/api/brain/pack/route");
+    await GET(get("http://x/api/brain/pack?workspace=default"));
+
+    const degraded = mockTrackEvent.mock.calls.find(
+      (c: unknown[]) => c[0] === "brain.pack_vectors_degraded",
+    );
+    expect(degraded).toBeDefined();
+    /* The reason, so somebody can act on it without reproducing the outage. */
+    expect(degraded?.[3]).toMatchObject({ error: expect.stringContaining("ECONNREFUSED") });
+  });
+
+  /* THE DISTINCTION THE WHOLE CHANGE IS ABOUT. Reachable-and-empty must not
+     look like unreachable, or the signal cries wolf and gets ignored. */
+  it("does not report a degradation when the store answered with nothing", async () => {
+    pageWithChunks();
+    mockFetchBrainVectors.mockResolvedValueOnce({ vectors: new Map(), status: "ok" });
+
+    const { GET } = await import("@/app/api/brain/pack/route");
+    const res = await GET(get("http://x/api/brain/pack?workspace=default"));
+    const body = await res.json();
+
+    expect(body.embeddings_available).toBe(true);
+    expect(
+      mockTrackEvent.mock.calls.some((c: unknown[]) => c[0] === "brain.pack_vectors_degraded"),
+    ).toBe(false);
   });
 });

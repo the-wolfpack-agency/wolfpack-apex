@@ -56,18 +56,72 @@ import type { BrainDocument } from "./types";
  * document only becomes a candidate when somebody has actually fixed the thing
  * that broke it.
  */
-export const FIXABLE: Array<{ id: string; test: RegExp; why: string }> = [
+export const FIXABLE: Array<{ id: string; test: RegExp; source: string; why: string }> = [
   {
     id: "docx_mimetype",
     test: /DOMParser|mimeType|docx parse/i,
+    /* The same pattern in a form Postgres understands, kept beside the RegExp
+       so the two cannot describe different sets of documents. Plain
+       alternation only: anything needing JS-specific syntax would have to be
+       expressed for both engines and checked, and a repair that quietly
+       matched different rows in the planner and the repairer is the bug this
+       whole change is about. */
+    source: "DOMParser|mimeType|docx parse",
     why: "the xmldom 0.9 mimeType break, fixed in #402 by moving off mammoth",
   },
   {
     id: "extractor_now_exists",
     test: /sync extractor unavailable/i,
+    source: "sync extractor unavailable",
     why: "classified as a kind with no extractor, often a misclassified xlsx or docx",
   },
+  {
+    /* THE OCR PATH EXISTS AND NOTHING HAS EVER REACHED IT.
+     *
+     * reprocessOne already routes an extraction failure through the OCR
+     * policy, picks the cheap purpose-built API over a vision model, and
+     * checks the cost ceiling before spending. All of it is wired, tested and
+     * paid for: the credentials resolve in production through the shared
+     * AZURE_COGNITIVE_* fallback.
+     *
+     * It has run zero times. Measured 2026-09-01: no brain.document_ocred
+     * event has ever fired, because a scanned PDF fails with "contained no
+     * extractable text" and that phrase was not in this list, so
+     * findCandidates never selected one. 56 of them sit re-fetchable, a
+     * capability away from being answerable.
+     *
+     * SELF-LIMITING BY CONSTRUCTION. If the OCR cannot read a page the repair
+     * writes "ocr <reason>" onto the row, which is not a pattern here, so the
+     * document drops out rather than being retried nightly forever. */
+    id: "ocr_never_tried",
+    test: /no extractable text|scanned/i,
+    source: "no extractable text|scanned",
+    why: "a scan the OCR route can read, which nothing had ever asked it to",
+  },
 ];
+
+/**
+ * The largest file a run will pull into memory.
+ *
+ * A repair downloads the whole file into a Buffer to re-extract it. On a
+ * serverless function that is bounded by the instance's memory, and exceeding
+ * it does not raise an error a catch can see: the process dies, the request
+ * returns 500, and the report never gets written. Every document the run had
+ * already repaired disappears with it.
+ *
+ * Measured 2026-09-01. Once the small files had drained, four consecutive runs
+ * died almost immediately and moved the queue by one or two documents each.
+ * The queue at that point held a 44.7MB file and ten others over 25MB, sorted
+ * to the front by created_at. One oversized document was killing an entire
+ * batch of fifty.
+ *
+ * Ten megabytes covers every document in this corpus that carries extractable
+ * text: the ones above it are video, image sets and design files, which have
+ * no text to recover and would fail extraction even if they fit. Refusing them
+ * by size is honest about why, and it is a refusal that says so on the row
+ * rather than looking like a crash.
+ */
+export const MAX_REPAIR_BYTES = 10 * 1024 * 1024;
 
 /** What one document's OCR may cost before the repair refuses it. */
 export const OCR_CEILING_CENTS = 25;
@@ -95,6 +149,8 @@ export interface ReprocessOutcome {
 }
 
 export interface ReprocessReport {
+  /** True when the run stopped on its own clock with candidates left. */
+  ranOutOfTime?: boolean;
   considered: number;
   attempted: number;
   repaired: number;
@@ -128,14 +184,45 @@ export async function findCandidates(
    * 332 pointless writes, a status change for the 167 that were merely
    * skipped, and a report that reads like work happened. Selecting only what
    * is repairable means an empty candidate list is the honest answer. */
+  /* FIXABILITY IS DECIDED IN SQL, NOT AFTER THE LIMIT.
+   *
+   * It used to select the newest N rows and then discard the ones nothing can
+   * fix, which made `limit` mean "rows to look at" while every caller read it
+   * as "documents to repair". The two are wildly different when the newest
+   * rows are the unfixable ones.
+   *
+   * Measured 2026-09-01, with 186 repairable documents waiting:
+   *
+   *     limit  50  ->    0 candidates     <- what the nightly job sends
+   *     limit 100  ->   49
+   *     limit 200  ->   98                <- what the plan step reports
+   *     limit 500  ->  186
+   *
+   * So the sweep logged "186 documents waiting on a repair" and then "repaired
+   * 0, still failing 0" every night, and exited green, because its two steps
+   * asked the same question with different limits and got different answers.
+   * Ninety Word documents of the client's course material sat unreadable
+   * behind a job that reported success.
+   *
+   * The patterns come from FIXABLE rather than being restated here, so the
+   * planner and the repairer cannot drift about what "fixable" means. */
+  const fixablePatterns = FIXABLE.map((f) => f.source);
   const { rows } = await query<BrainDocument>(
     `SELECT * FROM brain_documents
       WHERE ms_drive_item_id IS NOT NULL
-        AND (status IN ('failed','skipped')
-             OR (status = ANY($1::text[]) AND updated_at < NOW() - ($2::int * INTERVAL '1 minute')))
+        /* Excluded in SQL rather than skipped in the loop, so an oversized
+           document never reaches a download that would kill the process and
+           take the whole batch's report with it. A null size is allowed
+           through: unknown is not the same as too big, and the download itself
+           is the next thing that would find out. */
+        AND (size_bytes IS NULL OR size_bytes <= $5)
+        AND (
+          (status IN ('failed','skipped') AND status_detail ~* ANY($1::text[]))
+          OR (status = ANY($2::text[]) AND updated_at < NOW() - ($3::int * INTERVAL '1 minute'))
+        )
       ORDER BY created_at DESC
-      LIMIT $3`,
-    [NON_TERMINAL as unknown as string[], stranded, limit],
+      LIMIT $4`,
+    [fixablePatterns, NON_TERMINAL as unknown as string[], stranded, limit, MAX_REPAIR_BYTES],
   );
 
   const out: ReprocessCandidate[] = [];
@@ -189,15 +276,29 @@ async function reprocessOne(
     return fail("failed", "no drive item to re-fetch");
   }
 
+  /* A FETCH THAT FAILED SAYS NOTHING ABOUT THE DOCUMENT.
+   *
+   * This used to overwrite status_detail with the fetch error, which erased
+   * the diagnosis that made the document repairable in the first place. Since
+   * a fetch error is not in FIXABLE, the document then dropped out of the
+   * candidate set and no later run would ever look at it again.
+   *
+   * Measured 2026-09-01. Every Microsoft token expired on 2026-08-26, so a run
+   * took 50 documents, failed to download all 50, and rewrote every one from
+   * "docx mimeType" to "re-fetch failed: no_token". The fixable queue went
+   * from 186 to 136 and the no_token pile grew from 37 to 87. The repair was
+   * destroying its own work queue, one batch per night, and reporting success.
+   *
+   * A transient failure leaves the row exactly as it found it. The outcome is
+   * still returned, so the run reports what happened; what it must not do is
+   * launder an outage into a permanent verdict about a file it never read. */
   let buffer: Buffer | null;
   try {
     buffer = await fetchBytes(doc.driveItemId);
   } catch (err) {
-    await updateDocumentStatus(doc.id, "failed", `re-fetch failed: ${(err as Error).message}`);
     return fail("failed", `re-fetch failed: ${(err as Error).message}`);
   }
   if (!buffer || buffer.length === 0) {
-    await updateDocumentStatus(doc.id, "failed", "re-fetch returned no bytes");
     return fail("failed", "re-fetch returned no bytes");
   }
 
@@ -332,13 +433,23 @@ async function reprocessOne(
 export async function reprocessFixable(
   fetchBytes: FetchBytes,
   actor: { userId: string; role: string },
-  opts: { limit?: number; strandedMinutes?: number } = {},
+  opts: { limit?: number; strandedMinutes?: number; deadline?: number } = {},
 ): Promise<ReprocessReport> {
   const candidates = await findCandidates(opts);
   const outcomes: ReprocessOutcome[] = [];
   let skippedNoDriveItem = 0;
+  let ranOutOfTime = false;
 
   for (const c of candidates) {
+    /* STOPS EARLY RATHER THAN BEING STOPPED. A run killed at the platform's
+       limit returns nothing: the documents it repaired are invisible to the
+       report and the next run cannot know how far this one got. Leaving the
+       rest for the next run costs nothing, because the queue drains across
+       runs regardless, and only this way does the count come back. */
+    if (opts.deadline && Date.now() >= opts.deadline) {
+      ranOutOfTime = true;
+      break;
+    }
     if (!c.driveItemId) skippedNoDriveItem += 1;
     outcomes.push(await reprocessOne(c, fetchBytes, actor));
   }
@@ -347,6 +458,7 @@ export async function reprocessFixable(
   const report: ReprocessReport = {
     considered: candidates.length,
     attempted: outcomes.length,
+    ranOutOfTime,
     repaired,
     stillFailing: outcomes.length - repaired,
     skippedNoDriveItem,

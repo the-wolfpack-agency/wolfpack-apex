@@ -90,7 +90,7 @@ function sha256Hex(input: string): string {
   return createHash("sha256").update(input).digest("hex");
 }
 
-/** ISO country from Vercel's edge header, normalised. Null when absent. */
+/** ISO country from Vercel's edge header, normalized. Null when absent. */
 function edgeCountry(headers: Headers): string | null {
   const c = headers.get("x-vercel-ip-country");
   if (!c) return null;
@@ -183,7 +183,7 @@ export async function POST(
     }
 
     // 4. Persist + analytics. Fingerprint is a truncated sha256(ip+ua) —
-    //    enough to recognise repeat submitters, never raw PII. Attribution
+    //    enough to recognize repeat submitters, never raw PII. Attribution
     //    (device/country/referrer) is derived SERVER-SIDE from headers —
     //    same vocabulary as the view beacon + QR scans — so the funnel
     //    joins cleanly; durationMs is the one client-supplied signal and is

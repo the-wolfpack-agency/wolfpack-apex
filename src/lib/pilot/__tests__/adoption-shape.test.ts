@@ -109,7 +109,7 @@ describe("the numbers a pilot most needs", () => {
  * The panel's entire value is that it is believable: it is the section a
  * competitor will not show. One fabricated-looking row costs more credibility
  * than the real rows earn, so the filter belongs in the query rather than in
- * somebody's judgement at demo time.
+ * somebody's judgment at demo time.
  */
 describe("the repeated-failures panel shows questions, not keystrokes", () => {
   /** The predicate the SQL applies: at least two letters. */

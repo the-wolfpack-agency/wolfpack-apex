@@ -3,7 +3,7 @@
  *
  * The engine is tested next door. What matters here is that people
  * reach it in the words they would actually use, that the window they
- * asked for is the window analysed, and that nothing from inside a
+ * asked for is the window analyzed, and that nothing from inside a
  * calendar leaks into analytics.
  */
 
@@ -46,7 +46,7 @@ async function tool() {
 describe("people reach it in their own words", () => {
   it.each([
     "where are meetings doing more harm than good",
-    "analyse my calendar",
+    "analyze my calendar",
     "what are my ideal times of day",
     "when should I do focus work",
     "where is my week going",
@@ -63,18 +63,18 @@ describe("people reach it in their own words", () => {
 
   it("takes the window from the question when one is given", async () => {
     const t = await tool();
-    expect(t.matchIntent!("analyse my calendar for the last 30 days")?.days).toBe(30);
+    expect(t.matchIntent!("analyze my calendar for the last 30 days")?.days).toBe(30);
     expect(t.matchIntent!("review my schedule over the past 4 weeks")?.days).toBe(28);
-    expect(t.matchIntent!("analyse my calendar for the quarter")?.days).toBe(90);
+    expect(t.matchIntent!("analyze my calendar for the quarter")?.days).toBe(90);
     /* Two weeks when nobody said: one week is too noisy to generalise
        from, a quarter buries a change that just started. */
-    expect(t.matchIntent!("analyse my calendar")?.days).toBe(14);
+    expect(t.matchIntent!("analyze my calendar")?.days).toBe(14);
   });
 
   it("looks forward when the question is about what is committed", async () => {
     const t = await tool();
-    expect(t.matchIntent!("analyse my schedule for the coming month")?.direction).toBe("ahead");
-    expect(t.matchIntent!("analyse my calendar")?.direction).toBe("past");
+    expect(t.matchIntent!("analyze my schedule for the coming month")?.direction).toBe("ahead");
+    expect(t.matchIntent!("analyze my calendar")?.direction).toBe("past");
   });
 });
 
@@ -145,7 +145,7 @@ describe("what reaches analytics", () => {
     await t.handler({ days: 14, direction: "past" }, CTX);
 
     const [event, , , meta] = mockTrack.mock.calls[0];
-    expect(event).toBe("assistant.schedule_analysed");
+    expect(event).toBe("assistant.schedule_analyzed");
     expect(meta).toMatchObject({ days: 14, meetings: 2 });
     const serialized = JSON.stringify(meta);
     expect(serialized).not.toContain("Ackerman");
@@ -153,7 +153,7 @@ describe("what reaches analytics", () => {
   });
 });
 
-describe("it asks whose day it is analysing", () => {
+describe("it asks whose day it is analyzing", () => {
   it("uses the person's mailbox timezone, not the server's", async () => {
     /* On Vercel the server is UTC. A Detroit dealer told to defend UTC
        afternoons acts on it once and never opens the tool again. */

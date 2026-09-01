@@ -29,7 +29,7 @@ async function answerFor(role: string) {
   return res;
 }
 
-describe("recognising the question", () => {
+describe("recognizing the question", () => {
   it.each([
     "what can you do",
     "What can you do?",
@@ -86,7 +86,7 @@ describe("the answer is read from the product, not written about it", () => {
   });
 
   /* Not connected is not not built, so the capability is offered as a next
-     step rather than hidden or apologised for. */
+     step rather than hidden or apologized for. */
   it("offers the unconnected systems as something to connect", async () => {
     const res = await answerFor("cto");
     expect(res.answer).toMatch(/Connect .*and I can answer about that too/i);

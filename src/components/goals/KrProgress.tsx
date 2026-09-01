@@ -4,7 +4,7 @@
  * KrProgress — a single KR row with metric label + progress bar.
  *
  * The progress is clamped to [0, 100]% so over-achievement still renders
- * as a full bar with a clearly-labelled "X% of target" number (e.g.
+ * as a full bar with a clearly-labeled "X% of target" number (e.g.
  * 130% lands at a solid 100% bar with "130% of target" in the meta
  * text).
  */

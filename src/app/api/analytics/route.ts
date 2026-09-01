@@ -254,7 +254,7 @@ async function fetchGateActivity(): Promise<GateActivity | null> {
   }
   const total = counts.pass + counts.warn + counts.reject;
 
-  const recentRejections = await safeQuery<{ file_name: string; reasons: string; ts: string }>(
+  const recenterjections = await safeQuery<{ file_name: string; reasons: string; ts: string }>(
     `SELECT
        metadata->>'file_name' AS file_name,
        metadata->>'reasons'   AS reasons,
@@ -271,7 +271,7 @@ async function fetchGateActivity(): Promise<GateActivity | null> {
     passed: counts.pass,
     warned: counts.warn,
     rejected: counts.reject,
-    recent_rejections: recentRejections.rows.map((r) => ({
+    recent_rejections: recenterjections.rows.map((r) => ({
       file_name: r.file_name || "(unknown)",
       reasons: r.reasons || "no reason recorded",
       when: r.ts,

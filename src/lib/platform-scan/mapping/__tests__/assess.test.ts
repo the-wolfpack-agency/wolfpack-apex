@@ -26,7 +26,7 @@ const base = {
 };
 
 describe("consent, which a walk never asks about", () => {
-  /* THE REASON THIS MODULE EXISTS. The walk signs in as an authorised user of
+  /* THE REASON THIS MODULE EXISTS. The walk signs in as an authorized user of
      an internal system. Reporting every host as firing before consent would be
      a claim about a question nobody asked. */
   it("does not stamp 'before consent' on hosts it never asked about", () => {

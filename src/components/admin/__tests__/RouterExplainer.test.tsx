@@ -17,7 +17,7 @@ import RouterExplainer from "@/components/admin/RouterExplainer";
 describe("RouterExplainer", () => {
   test("leads with the thing that is actually unusual", () => {
     render(<RouterExplainer />);
-    // Not the model catalogue, not the cost: that most questions never reach a
+    // Not the model catalog, not the cost: that most questions never reach a
     // model at all is the claim nobody expects and the one that is true.
     expect(screen.getByText(/Most questions never reach an AI model at all/i)).toBeInTheDocument();
   });

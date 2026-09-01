@@ -89,7 +89,7 @@ describe("history without the field still reads", () => {
     expect(g.outcome).toBe("dead_end");
   });
 
-  it("still recognises an outage in old messages", () => {
+  it("still recognizes an outage in old messages", () => {
     const g = gistsFrom(
       turn({
         outcome_kind: null,

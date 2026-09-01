@@ -1,4 +1,4 @@
--- A broadcast is a message the organisation sent, and it needs somewhere to go.
+-- A broadcast is a message the organization sent, and it needs somewhere to go.
 --
 -- An announcement written into every person's assistant is stored as an
 -- assistant message with source 'broadcast'. That value was not in this

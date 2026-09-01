@@ -32,7 +32,7 @@ jest.mock("@/lib/analytics", () => ({
 import "@/lib/assistant/tools";
 
 import { getTools } from "@/lib/assistant/tools/registry";
-import { matchRoutine } from "@/lib/assistant/routines/catalogue";
+import { matchRoutine } from "@/lib/assistant/routines/catalog";
 import { isQuestionShaped, searchTermsFor } from "@/lib/brain/question-terms";
 import { welcomePromptsForRole } from "@/lib/assistant/welcome-prompts";
 import { buildStarterCategoriesForTest } from "@/components/AssistantStarterPrompts";

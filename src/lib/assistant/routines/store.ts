@@ -104,7 +104,7 @@ export function trackRun(run: RoutineRun, userRole: string): void {
     steps_done: run.outcomes.filter((o) => o.status === "ok").length,
     /* HOW MUCH OF THIS NEEDED A MODEL AT ALL.
        The claim being made to a client is that their tools are being operated
-       from one place and the AI is used only where judgement is actually
+       from one place and the AI is used only where judgment is actually
        required. That claim should be a measurement rather than a sentence in a
        deck: a routine that runs six steps and calls a model once is a fact
        these two counters can produce on demand, per routine, per week. It is

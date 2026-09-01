@@ -187,7 +187,7 @@ describe("favicon-generator", () => {
     expectInert(paletteToFaviconSvg({ bg: "#000000", fg: "#ffffff", monogram: payload }));
   });
 
-  it("rejects a colour that is not a colour, rather than interpolating it", () => {
+  it("rejects a color that is not a color, rather than interpolating it", () => {
     // bg and fg land inside a fill attribute. A value like `#000" onload="x`
     // would break out of the attribute if it were passed through.
     expectInert(paletteToFaviconSvg({ bg: `#000" onload="alert(1)`, fg: "#ffffff", monogram: "AB" }));

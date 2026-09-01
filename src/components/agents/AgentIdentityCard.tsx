@@ -8,7 +8,7 @@
  * it has behaved, so the safe answer is no. This card answers those two
  * questions in the order someone actually asks them:
  *
- *   who is this        name, role, and a stable face so it is recognisable
+ *   who is this        name, role, and a stable face so it is recognizable
  *   what can it touch   the systems it can reach, concretely enough to refuse
  *   what has it done    its record, and whether that record means anything
  *   what is behind it   which model, and whose
@@ -18,7 +18,7 @@
  * A face makes a thing feel trustworthy. That is why this works and why it is
  * dangerous. The rule is that the card may make an agent easier to UNDERSTAND
  * and must never make it look safer than the evidence supports — so the avatar
- * is identical for a well-behaved and a misbehaving agent, the colour that
+ * is identical for a well-behaved and a misbehaving agent, the color that
  * carries meaning is the standing pill and nothing else, and an agent whose
  * limits were never demonstrated says so in the same words however tidy the
  * rest of the card looks.
@@ -47,8 +47,8 @@ export interface AgentIdentityCardProps {
     description?: string | null;
     connections?: string[];
   };
-  /** From the behaviour summary. Absent means never scored, which is NOT clean. */
-  behaviour?: { standing: "good" | "attention" | "unknown"; runs: number };
+  /** From the behavior summary. Absent means never scored, which is NOT clean. */
+  behavior?: { standing: "good" | "attention" | "unknown"; runs: number };
   boundaryProven?: boolean;
   model?: { id: string; clientSupplied: boolean };
   testId?: string;
@@ -74,7 +74,7 @@ const TRUST_LABEL: Record<"good" | "attention" | "unknown", string> = {
 
 export default function AgentIdentityCard({
   agent,
-  behaviour,
+  behavior,
   boundaryProven,
   model,
   testId,
@@ -84,8 +84,8 @@ export default function AgentIdentityCard({
   const state = describeState(agent.state);
   const trust = trustLine({
     state: agent.state,
-    standing: behaviour?.standing,
-    runs: behaviour?.runs,
+    standing: behavior?.standing,
+    runs: behavior?.runs,
     boundaryProven,
   });
   const hue = hueFor(agent.id);
@@ -124,7 +124,7 @@ export default function AgentIdentityCard({
           <div style={{ display: "flex", gap: "0.55rem", alignItems: "center", flexWrap: "wrap" }}>
             <strong style={{ fontSize: "1.05rem" }}>{agent.name}</strong>
             <StatusPill status={agent.state} label={state.label} size="sm" testId={stateTestId} />
-            {/* The one place colour carries a judgement. */}
+            {/* The one place color carries a judgment. */}
             <StatusPill
               status={trust.tone}
               label={TRUST_LABEL[trust.tone]}

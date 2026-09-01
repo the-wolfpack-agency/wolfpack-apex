@@ -3,7 +3,7 @@
  * no new runtime dep). Embeds inside MetricTile or stands alone.
  *
  * Renders one <polyline> for the trend, an optional filled area under it, and
- * an optional dot on the most-recent point. Accent colour comes from a
+ * an optional dot on the most-recent point. Accent color comes from a
  * --wp-* token (default --wp-info). Handles 0, 1, and n points gracefully:
  *   - 0 points  → an empty <svg> placeholder (keeps layout stable)
  *   - 1 point   → a flat baseline + the single dot
@@ -26,7 +26,7 @@ export interface SparklineProps {
   height?: number;
   /** Stroke width of the trend line. */
   strokeWidth?: number;
-  /** Accent colour. Pass any --wp-* var expression; defaults to info blue. */
+  /** Accent color. Pass any --wp-* var expression; defaults to info blue. */
   accent?: string;
   /** Fill a translucent area under the line. */
   area?: boolean;

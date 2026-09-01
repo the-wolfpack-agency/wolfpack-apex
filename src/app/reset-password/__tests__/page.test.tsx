@@ -154,7 +154,7 @@ describe("ResetPasswordPage — show password", () => {
     expect(screen.getByTestId("reset-password-input")).toHaveValue("correct-horse");
   });
 
-  test("it is labelled, so it is reachable without sight", () => {
+  test("it is labeled, so it is reachable without sight", () => {
     render(<ResetPasswordPage />);
     expect(screen.getByLabelText(/show password/i)).toBeInTheDocument();
   });

@@ -52,7 +52,7 @@ const ids = (text: string, rules: readonly PolicyRule[] = auto) =>
 
 describe("content policy — allowing ordinary answers", () => {
   it("leaves a clean answer untouched", () => {
-    const text = "The Cayenne is available in six exterior colours. Your local Centre can show you each one.";
+    const text = "The Cayenne is available in six exterior colors. Your local Center can show you each one.";
     const v = applyPolicy(text, "response", auto);
     expect(v.action).toBe("allow");
     expect(v.findings).toHaveLength(0);
@@ -66,9 +66,9 @@ describe("content policy — allowing ordinary answers", () => {
      one who never had it. */
   it.each([
     ["financing without a rate", "Financing is available through our lending partner, who will confirm your rate."],
-    ["price without a promise", "Pricing starts at the figure shown and varies by Centre."],
-    ["delivery without a date", "Delivery timing depends on the build slot, and your Centre will keep you posted."],
-    ["warranty without a decision", "Warranty terms are in your owner's pack, and the service centre can confirm what applies."],
+    ["price without a promise", "Pricing starts at the figure shown and varies by Center."],
+    ["delivery without a date", "Delivery timing depends on the build slot, and your Center will keep you posted."],
+    ["warranty without a decision", "Warranty terms are in your owner's pack, and the service center can confirm what applies."],
     ["safety without an assurance", "Recall notices are published in the owner portal, which shows anything open on your VIN."],
     ["a competitor named neutrally", "Customers often cross-shop the BMW X5, and both are strong cars."],
     ["tax mentioned, not advised", "Your invoice shows the tax collected at purchase."],

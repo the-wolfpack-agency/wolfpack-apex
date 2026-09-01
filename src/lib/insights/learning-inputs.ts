@@ -87,7 +87,7 @@ export const LEARNING_INPUTS: LearningInput[] = [
   },
   {
     extractor: "contact-signals",
-    couldAnswer: "who this organisation deals with outside it, and how often",
+    couldAnswer: "who this organization deals with outside it, and how often",
     sources: ["instinct_audit_log", "instinct_calendar_events", "instinct_sent_mail"],
     syncedInstead: "instinct_ms_contacts",
   },

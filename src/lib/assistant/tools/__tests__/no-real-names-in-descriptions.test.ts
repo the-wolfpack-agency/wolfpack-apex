@@ -4,7 +4,7 @@
  * WHAT WAS THERE. get_related_records described itself as "Find records
  * related to a person or company (Acme's opportunities, Jorge's deals,
  * contacts for Acme)". Jorge is a colleague, and he was the ONLY person named
- * anywhere in the catalogue, so the line did not read as an example. It read
+ * anywhere in the catalog, so the line did not read as an example. It read
  * as the product having been built around one company's staff, and a client
  * seeing somebody else's employee in a capability list reasonably wonders
  * whose data is in there.

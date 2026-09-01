@@ -37,7 +37,7 @@ describe("a named document outranks a topical resemblance", () => {
     expect(Math.min(1, RAW_FILENAME_RANK * FILENAME_MATCH_WEIGHT)).toBeLessThanOrEqual(1);
   });
 
-  /* The weight is a judgement about evidence, not a measurement, and it should
+  /* The weight is a judgment about evidence, not a measurement, and it should
      stay in a range somebody can defend rather than drifting upward whenever a
      query misses. */
   it("stays within a defensible range", () => {

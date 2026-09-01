@@ -16,7 +16,7 @@
  * A false match invents a disagreement between two different people and
  * destroys trust in every true one. So a match needs an identifier that
  * a human would also accept: an email address, or failing that a
- * normalised full name. Anything with neither is not guessed at, it is
+ * normalized full name. Anything with neither is not guessed at, it is
  * counted as unmatchable and reported as such, because "we could not
  * line these up" is a real finding about their data and hiding it would
  * make the comparison look cleaner than it is.
@@ -47,7 +47,7 @@ const LAST_KEYS = ["lastname", "last_name", "surname", "familyname"];
  * Keys that hold the record rather than being part of it.
  *
  * HubSpot returns { id, properties: { email, firstname, ... } }. Every
- * field a person would recognise is one level down, so a comparison
+ * field a person would recognize is one level down, so a comparison
  * that reads the top level sees a record with no email, no name and
  * nothing to match on.
  *

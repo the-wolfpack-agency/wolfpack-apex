@@ -13,7 +13,7 @@ const row = (over: Partial<WalkedMapRow> = {}, mapOver: Record<string, unknown> 
     formCount: 13,
     frontierRemaining: 0,
     stopReason: "frontier-exhausted",
-    authorisedBy: "CTO, Acme",
+    authorizedBy: "CTO, Acme",
     generatedAt: "2026-08-30T00:00:00.000Z",
     map: {
       platform: "cognito-forms",
@@ -61,9 +61,9 @@ describe("what the document lets somebody ask", () => {
     expect(markdown).toContain("124");
   });
 
-  /* Unrecognised is a prompt to ask, not a benign default, and the wording has
+  /* Unrecognized is a prompt to ask, not a benign default, and the wording has
      to survive being quoted on its own. */
-  it("does not let an unrecognised host read as a harmless one", () => {
+  it("does not let an unrecognized host read as a harmless one", () => {
     const { markdown } = systemMapToMarkdown(row());
     expect(markdown).toMatch(/telemetry\.unknown\.example[\s\S]{0,160}worth asking about/);
   });
@@ -92,7 +92,7 @@ describe("a map has a date, and a system changes", () => {
     expect(markdown).toMatch(/floor, not a total/);
   });
 
-  it("names who authorised the walk", () => {
+  it("names who authorized the walk", () => {
     expect(systemMapToMarkdown(row()).markdown).toContain("CTO, Acme");
   });
 

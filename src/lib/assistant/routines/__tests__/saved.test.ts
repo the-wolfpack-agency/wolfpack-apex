@@ -9,7 +9,7 @@
  * Both get refused rather than repaired.
  */
 import { rowToRoutine, isReservedCommand, saveRoutine } from "../saved";
-import { BUILT_IN_ROUTINES } from "../catalogue";
+import { BUILT_IN_ROUTINES } from "../catalog";
 
 const steps = [
   { kind: "tool", tool: "search_mail", params: {}, label: "Read the overnight email" },
@@ -77,7 +77,7 @@ describe("reading a stored routine back", () => {
     expect(rowToRoutine(row({ steps: JSON.stringify(steps) }))?.steps).toHaveLength(2);
   });
 
-  it("REFUSES a routine with an unrecognised step rather than skipping it", () => {
+  it("REFUSES a routine with an unrecognized step rather than skipping it", () => {
     /* A chain silently missing its third step still runs, still reports
        success, and has quietly stopped doing part of somebody's job. */
     expect(rowToRoutine(row({ steps: [steps[0], { kind: "telepathy", label: "x" }] }))).toBeNull();

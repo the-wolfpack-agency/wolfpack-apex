@@ -53,7 +53,7 @@ export interface Scenario {
 /**
  * Scenarios that hold on ANY deployment.
  *
- * No filename, no figure, no topic only we hold. Each one tests a BEHAVIOUR
+ * No filename, no figure, no topic only we hold. Each one tests a BEHAVIOR
  * that either works or does not regardless of what is in the corpus, which is
  * what makes them portable to a client instance on day one.
  */
@@ -153,7 +153,7 @@ export interface CorpusScenarioConfig {
 /**
  * Content questions must answer, not list.
  *
- * Only built when the deployment names a document, because "summarise X" needs
+ * Only built when the deployment names a document, because "summarize X" needs
  * an X that exists in their corpus. Portable in shape, specific in content,
  * which is the same split every other corpus check uses.
  */
@@ -168,7 +168,7 @@ export function contentQuestionScenario(config: CorpusScenarioConfig): Scenario 
         say: `summarize ${name}`,
         /* A LIST IS THE FAILURE HERE, and it is why this scenario exists: the
            classifier reads "Found 3 results" as `list`, which is a correct
-           answer to "find" and the wrong one to "summarise". */
+           answer to "find" and the wrong one to "summarize". */
         expect: ["substantive"],
         budgetMs: 15_000,
         because: "Asking for a summary must not return a list of documents.",

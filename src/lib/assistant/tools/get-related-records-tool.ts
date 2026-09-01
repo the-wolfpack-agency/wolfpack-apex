@@ -198,7 +198,7 @@ export const getRelatedRecordsTool: ToolDef<Params, RelatedRecordsData> = {
   description:
     /* NO REAL NAMES IN A DESCRIPTION A CLIENT READS. This said "Acme's
        opportunities, Jorge's deals, contacts for Acme". Jorge is a colleague,
-       and he was the only person named anywhere in the catalogue, so the line
+       and he was the only person named anywhere in the catalog, so the line
        read as the product having been built around one company's staff rather
        than as an example. A client seeing somebody else's employee in a
        capability list reasonably wonders whose data is in there. Phrased by

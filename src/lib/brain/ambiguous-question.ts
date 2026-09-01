@@ -8,7 +8,7 @@
  *   "when do we have to pay?"
  *     -> "The closest things I hold are ... name it and I will read it"
  *
- * Same shape of question, opposite behaviour, and the first one is a wrong
+ * Same shape of question, opposite behavior, and the first one is a wrong
  * answer delivered with the product's full confidence. Neither question names
  * a subject: "upfront on what?" is what a person would ask back.
  *

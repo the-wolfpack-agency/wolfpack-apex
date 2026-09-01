@@ -121,7 +121,7 @@ describe("firedBeforeConsent", () => {
     expect(out).toEqual([]);
   });
 
-  it("flags an unrecognised host, since unknown is not the same as harmless", () => {
+  it("flags an unrecognized host, since unknown is not the same as harmless", () => {
     const out = firedBeforeConsent([req({ url: "https://who-is-this.test/px", atMs: 10 })], null);
     expect(out.map((c) => c.host)).toEqual(["who-is-this.test"]);
   });

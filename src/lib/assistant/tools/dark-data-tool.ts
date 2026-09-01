@@ -5,7 +5,7 @@
  * answering it means holding the schema and every statement the system
  * has run in one place, and nobody has ever had both halves at once.
  *
- * Reads catalogue and planner statistics only. No row of anybody's data
+ * Reads catalog and planner statistics only. No row of anybody's data
  * is touched, which is what makes it a question we are allowed to ask
  * of a production database at all.
  */
@@ -39,7 +39,7 @@ function matchIntent(message: string): Params | null {
 export const darkDataTool: ToolDef<Params, DarkDataToolData> = {
   name: "dark_data",
   description:
-    "Diff a connected legacy database's schema against every statement it has run, to find populated columns no query names. Catalogue and planner statistics only; reads no rows.",
+    "Diff a connected legacy database's schema against every statement it has run, to find populated columns no query names. Catalog and planner statistics only; reads no rows.",
   paramSchema: ParamSchema,
   capability: "*",
   matchIntent,
@@ -72,7 +72,7 @@ export const darkDataTool: ToolDef<Params, DarkDataToolData> = {
       dark_columns: report.dark.length,
       statements_examined: report.statementsExamined,
       excluded_star_tables: report.starSelectTables.length,
-      unanalysed_columns: report.unanalysed,
+      unanalyzed_columns: report.unanalyzed,
     });
 
     return {

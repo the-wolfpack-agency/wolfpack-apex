@@ -841,10 +841,10 @@ function normalizeBehavior(raw: unknown): { days: number; agents: AgentBehaviorS
 }
 
 /**
- * Behaviour panel plus its own fetch.
+ * Behavior panel plus its own fetch.
  *
  * Self-contained so a failure here cannot affect the roster: the fleet page
- * must still render if the behaviour read is unavailable. The panel renders an
+ * must still render if the behavior read is unavailable. The panel renders an
  * explicit "nothing to report yet, which is not a clean bill of health" state,
  * so a failed load never reads as reassurance.
  */

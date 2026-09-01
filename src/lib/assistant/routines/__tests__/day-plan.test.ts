@@ -415,7 +415,7 @@ describe("the step that reads it all together", () => {
   });
 
   it("is not added to a day that is entirely the person's own", () => {
-    /* Nothing was gathered, so a model call would be spent summarising an
+    /* Nothing was gathered, so a model call would be spent summarizing an
        empty set. */
     const r = draftRoutine(
       p([

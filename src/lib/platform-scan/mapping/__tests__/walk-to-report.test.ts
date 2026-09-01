@@ -182,7 +182,7 @@ describe("from the walk to the client-facing section", () => {
         {
           platform: p[1], entry_url: p[2], map: p[3],
           surface_count: p[4], entity_count: p[5], form_count: p[6],
-          frontier_remaining: p[7], stop_reason: p[8], authorised_by: p[9],
+          frontier_remaining: p[7], stop_reason: p[8], authorized_by: p[9],
           generated_at: new Date("2026-08-30T00:00:00.000Z"),
         },
       ],
@@ -210,7 +210,7 @@ describe("from the walk to the client-facing section", () => {
         {
           platform: p[1], entry_url: p[2], map: p[3],
           surface_count: p[4], entity_count: p[5], form_count: p[6],
-          frontier_remaining: p[7], stop_reason: p[8], authorised_by: p[9],
+          frontier_remaining: p[7], stop_reason: p[8], authorized_by: p[9],
           generated_at: new Date("2026-08-30T00:00:00.000Z"),
         },
       ],
@@ -233,7 +233,7 @@ describe("watching where the data goes", () => {
     expect(trafficObserved).toBe(true);
   });
 
-  it("names the vendor it recognises", async () => {
+  it("names the vendor it recognizes", async () => {
     const { integrations } = await walkAndStore();
     expect(integrations.find((i) => i.vendor === "Google Analytics")).toBeTruthy();
   });
@@ -260,7 +260,7 @@ describe("watching where the data goes", () => {
         {
           platform: p[1], entry_url: p[2], map: p[3],
           surface_count: p[4], entity_count: p[5], form_count: p[6],
-          frontier_remaining: p[7], stop_reason: p[8], authorised_by: p[9],
+          frontier_remaining: p[7], stop_reason: p[8], authorized_by: p[9],
           generated_at: new Date("2026-08-30T00:00:00.000Z"),
         },
       ],

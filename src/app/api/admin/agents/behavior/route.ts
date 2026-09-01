@@ -1,7 +1,7 @@
 /**
- * Behaviour scores for the fleet.
+ * Behavior scores for the fleet.
  *
- * Read-only. The scores come from the behaviour eval that runs on every task
+ * Read-only. The scores come from the behavior eval that runs on every task
  * (see lib/agents/evals), which reads the executor's record rather than the
  * agent's account of itself, so nothing here can be influenced by an agent
  * describing its run differently.

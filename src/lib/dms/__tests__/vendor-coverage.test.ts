@@ -46,7 +46,7 @@ describe("the three meanings of a blank field", () => {
     expect(whyEmpty("wolfpack-auto", "price")).toBe("no-value-for-this-vehicle");
   });
 
-  it("names the system rather than apologising", () => {
+  it("names the system rather than apologizing", () => {
     const line = describeGap("cdk", ["price", "vin"])!;
     expect(line).toContain("CDK");
     expect(line).toMatch(/does not expose/);

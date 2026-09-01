@@ -54,7 +54,7 @@ describe("analyzeRetro", () => {
   });
 
   it("deduplicates suggestions and orders them stably", () => {
-    // The same list every time is what lets an operator recognise a pattern
+    // The same list every time is what lets an operator recognize a pattern
     // rather than re-read it.
     const a = analyzeRetro(retro({ rounds: 4, causes: ["unstated-done", "unstated-target", "unstated-target"] }));
     const b = analyzeRetro(retro({ rounds: 4, causes: ["unstated-target", "unstated-done"] }));

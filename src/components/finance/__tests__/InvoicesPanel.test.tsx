@@ -10,7 +10,7 @@ import "@testing-library/jest-dom";
  *   2. Managers see the drop zone (rendered via <label htmlFor=...>),
  *      which natively triggers the hidden file input on click.
  *   3. Drag-over flips the visual state (data-attr so tests don't
- *      depend on exact colour values).
+ *      depend on exact color values).
  *   4. Dropping a file fires the upload POST exactly once.
  *   5. Status chips still render correctly under the drop zone.
  *   6. Upload spinner state ("Reading invoice…") locks the zone while
@@ -125,7 +125,7 @@ describe("<InvoicesPanel /> — hero drop zone", () => {
 
     /* After drag-over the heading swaps to "Drop to upload" — using
        text as the assertion handle keeps the test independent of
-       exact CSS colour values which are easy to fiddle with. */
+       exact CSS color values which are easy to fiddle with. */
     expect(zone).toHaveTextContent(/drop to upload/i);
   });
 

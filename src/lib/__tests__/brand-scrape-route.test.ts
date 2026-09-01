@@ -186,7 +186,7 @@ describe("POST /api/brand/scrape", () => {
     );
   });
 
-  test("ceo role also authorised", async () => {
+  test("ceo role also authorized", async () => {
     mockGetUser.mockReturnValue({ ...USER, role: "ceo" });
     mockImport.mockResolvedValue({
       ok: true,
@@ -198,7 +198,7 @@ describe("POST /api/brand/scrape", () => {
     expect(res.status).toBe(200);
   });
 
-  test("ops role (level=2, >= sales) authorised", async () => {
+  test("ops role (level=2, >= sales) authorized", async () => {
     mockGetUser.mockReturnValue({ ...USER, role: "ops" });
     mockImport.mockResolvedValue({
       ok: true,

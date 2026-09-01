@@ -10,7 +10,7 @@
  * halves in one place.
  *
  * We do. #340 already reads the statement shapes and the table
- * catalogue. This subtracts one from the other.
+ * catalog. This subtracts one from the other.
  *
  * THE DIRECTION THIS IS ALLOWED TO BE WRONG IN
  *
@@ -29,7 +29,7 @@
  *     every column in it. Star-select means the statement text cannot
  *     tell us which columns were read, so nothing about that table is
  *     knowable this way and we say so instead of guessing.
- *   - A column whose table has never been analysed is excluded. No
+ *   - A column whose table has never been analyzed is excluded. No
  *     sample means no evidence it holds anything, and "there is data
  *     in here nobody reads" requires knowing there is data in it.
  *   - Structural columns are excluded. A primary key nobody names
@@ -86,8 +86,8 @@ export interface DarkDataReport {
   dark: DarkColumn[];
   /** Tables excluded because a SELECT * makes their columns unknowable. */
   starSelectTables: string[];
-  /** Columns skipped because their table has never been analysed. */
-  unanalysed: number;
+  /** Columns skipped because their table has never been analyzed. */
+  unanalyzed: number;
   /** How many statements the conclusion is drawn from. */
   statementsExamined: number;
 }
@@ -104,7 +104,7 @@ function mentioned(corpus: string, column: string): boolean {
  *
  * Matched by looking for the table name after FROM or JOIN in any
  * statement that selects a star. Deliberately broad: a table caught
- * here is simply excluded, and excluding a table we could have analysed
+ * here is simply excluded, and excluding a table we could have analyzed
  * costs a finding we never claimed.
  */
 export function starSelectTables(shapes: string[], tables: string[]): Set<string> {
@@ -130,7 +130,7 @@ export function findDarkData(scan: LegacyScan): DarkDataReport {
     return {
       dark: [],
       starSelectTables: [],
-      unanalysed: 0,
+      unanalyzed: 0,
       statementsExamined: 0,
     };
   }
@@ -140,7 +140,7 @@ export function findDarkData(scan: LegacyScan): DarkDataReport {
   const corpus = shapeTexts.join("\n");
   const starred = starSelectTables(shapeTexts, tableNames);
 
-  let unanalysed = 0;
+  let unanalyzed = 0;
   const dark: DarkColumn[] = [];
 
   for (const col of scan.columns) {
@@ -148,7 +148,7 @@ export function findDarkData(scan: LegacyScan): DarkDataReport {
     if (STRUCTURAL.has(col.column.toLowerCase())) continue;
     if (tooAmbiguousToJudge(col.column)) continue;
     if (col.nullFraction === null) {
-      unanalysed++;
+      unanalyzed++;
       continue;
     }
     if (col.nullFraction >= MOSTLY_NULL) continue;
@@ -167,7 +167,7 @@ export function findDarkData(scan: LegacyScan): DarkDataReport {
   return {
     dark,
     starSelectTables: [...starred].sort(),
-    unanalysed,
+    unanalyzed,
     statementsExamined: scan.shapes.length,
   };
 }
@@ -232,10 +232,10 @@ export function renderDarkData(report: DarkDataReport, dbName: string): string {
         `text and it is excluded entirely.`,
     );
   }
-  if (report.unanalysed > 0) {
+  if (report.unanalyzed > 0) {
     lines.push(
       "",
-      `${report.unanalysed} columns sit in tables the planner has never sampled, so whether ` +
+      `${report.unanalyzed} columns sit in tables the planner has never sampled, so whether ` +
         `they hold anything is unknown and they are excluded too.`,
     );
   }

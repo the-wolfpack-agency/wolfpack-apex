@@ -22,7 +22,7 @@
  *
  * THE RE-IDENTIFICATION LINE. A gist specific enough to be useful can be
  * specific enough to identify: "asked about a named incentive tier in a small
- * market" is a shape AND a fingerprint. The defence is that no field here can
+ * market" is a shape AND a fingerprint. The defense is that no field here can
  * carry a subject at all. Nothing names a topic, a document, a person or a
  * place. What survives is how the machine behaved, which is the only part
  * worth learning from anyway.

@@ -67,7 +67,7 @@ describe("choices offered only when they are relevant", () => {
 });
 
 describe("the wording", () => {
-  it("does not apologise, and says why it is asking", () => {
+  it("does not apologize, and says why it is asking", () => {
     /* "Sorry, I could not find anything" tells somebody the product failed.
        Saying it would rather ask than guess tells them it is being careful,
        which is both truer and the thing being sold. */

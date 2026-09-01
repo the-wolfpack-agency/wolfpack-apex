@@ -153,7 +153,7 @@ function bytesLabel(n: number | null): string {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function summariseRow(r: RawVersionRow): string {
+function summarizeRow(r: RawVersionRow): string {
   if (r.kind === "ai_extraction") {
     const mime = r.detail_mime ?? "image";
     const size = bytesLabel(r.detail_size);
@@ -169,7 +169,7 @@ function summariseRow(r: RawVersionRow): string {
   return `Edited: "${trimmed}"`;
 }
 
-function normaliseBrief(raw: SiteBrief | string | null | undefined): SiteBrief {
+function normalizeBrief(raw: SiteBrief | string | null | undefined): SiteBrief {
   if (!raw) return { client: "", product: { name: "" }, pages: [] };
   if (typeof raw === "string") {
     try {
@@ -186,10 +186,10 @@ function toEntry(row: RawVersionRow): BriefVersionEntry {
     id: row.id,
     kind: row.kind,
     siteId: row.site_id,
-    brief: normaliseBrief(row.brief),
+    brief: normalizeBrief(row.brief),
     authorId: row.author_id,
     authorRole: row.author_role,
-    summary: summariseRow(row),
+    summary: summarizeRow(row),
     createdAt:
       typeof row.created_at === "string"
         ? row.created_at
@@ -379,7 +379,7 @@ export async function restoreVersion(
       "site_not_found",
     );
   }
-  const currentBrief = normaliseBrief(current.rows[0].brief);
+  const currentBrief = normalizeBrief(current.rows[0].brief);
   const restoredBrief = target.brief;
 
   const fieldChanges = diffBriefs(currentBrief, restoredBrief).length;

@@ -233,7 +233,7 @@ describe("InboxPanel", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Folder-aware behaviour (Drafts / Sent / Archived)
+// Folder-aware behavior (Drafts / Sent / Archived)
 // ---------------------------------------------------------------------------
 
 describe("InboxPanel — folder awareness", () => {

@@ -1,5 +1,5 @@
 /**
- * Reading the behaviour scores back, in words a non-specialist can act on.
+ * Reading the behavior scores back, in words a non-specialist can act on.
  *
  * The eval now runs on every task and writes agent.behavior_scored. Data nobody
  * reads is the same failure as a control nobody calls, one step later: it looks
@@ -38,7 +38,7 @@ export interface AgentBehaviorSummary {
   lastScoredAt: string | null;
   /** One sentence, written for someone who is not an engineer. */
   headline: string;
-  /** Drives the colour. Never "good" while anything is unproven. */
+  /** Drives the color. Never "good" while anything is unproven. */
   standing: "good" | "attention" | "unknown";
 }
 
@@ -162,7 +162,7 @@ export function summarizeRows(rows: EventRow[]): AgentBehaviorSummary[] {
 }
 
 /**
- * Behaviour over the last N days.
+ * Behavior over the last N days.
  *
  * Returns an empty list rather than throwing when analytics cannot be read. The
  * caller renders "not scored yet", which is honest: we genuinely do not know.

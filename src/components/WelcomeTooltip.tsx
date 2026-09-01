@@ -118,7 +118,7 @@ export default function WelcomeTooltip() {
       }}
       data-testid="welcome-tooltip"
       role="dialog"
-      aria-labelledby="welcome-tooltip-title"
+      aria-labeledby="welcome-tooltip-title"
     >
       <div className="flex items-start justify-between gap-2">
         <h3

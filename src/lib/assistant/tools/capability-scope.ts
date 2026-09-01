@@ -21,7 +21,7 @@
  *
  * NOT CONNECTED IS NOT THE SAME AS NOT BUILT, and the wording carries that.
  * These capabilities are real and work the moment a system is linked, so they
- * are named as something to connect rather than hidden or apologised for. The
+ * are named as something to connect rather than hidden or apologized for. The
  * list of what works today stays honest, and the offer stays visible.
  */
 

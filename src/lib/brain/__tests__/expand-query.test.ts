@@ -1,7 +1,7 @@
 /**
  * Ask again in the words the documents use.
  *
- * Four of twelve labelled questions never surface their document, and all four
+ * Four of twelve labeled questions never surface their document, and all four
  * are the same shape: the person and the paper describe one fact differently.
  *
  *   asked   "how much do we owe upfront?"
@@ -25,27 +25,31 @@ describe("deciding whether to pay for a second attempt", () => {
   });
 
   it("expands when it found something unconvincing", () => {
-    expect(shouldExpand({ hitCount: 5, topScore: 0.2 }, FLOOR)).toBe(true);
+    /* Semantic, because the floor is a threshold on cosine similarity and a
+       keyword rank is not one. */
+    expect(shouldExpand({ hitCount: 5, topScore: 0.2, topIsSemantic: true }, FLOOR)).toBe(true);
   });
 
   /* THE COST ARGUMENT. Two thirds of questions already find their document at
      rank one; paying for all of them to help the third that struggles is the
      fixed-cascade mistake in a different costume. */
   it("does not expand after a confident retrieval", () => {
-    expect(shouldExpand({ hitCount: 5, topScore: 0.55 }, FLOOR)).toBe(false);
+    expect(shouldExpand({ hitCount: 5, topScore: 0.55, topIsSemantic: true }, FLOOR)).toBe(false);
   });
 
   /* Expanding after a GOOD retrieval risks replacing a correct answer with a
      differently-worded one: a regression that looks like a feature. */
   it("treats the floor as the boundary, not a suggestion", () => {
-    expect(shouldExpand({ hitCount: 3, topScore: FLOOR }, FLOOR)).toBe(false);
-    expect(shouldExpand({ hitCount: 3, topScore: FLOOR - 0.01 }, FLOOR)).toBe(true);
+    expect(shouldExpand({ hitCount: 3, topScore: FLOOR, topIsSemantic: true }, FLOOR)).toBe(false);
+    expect(
+      shouldExpand({ hitCount: 3, topScore: FLOOR - 0.01, topIsSemantic: true }, FLOOR),
+    ).toBe(true);
   });
 });
 
 describe("the trigger that actually matters", () => {
   /* THE ONE I GOT WRONG. Gating on a thin result seemed obvious and fired on
-     nothing: measured against the labelled set, "how much do we owe upfront?"
+     nothing: measured against the labeled set, "how much do we owe upfront?"
      retrieves four hits scoring 0.42 to 0.45, comfortably above the floor.
      They are the wrong documents, and no score can say so. The eval caught it
      by changing nothing at all between two runs. */

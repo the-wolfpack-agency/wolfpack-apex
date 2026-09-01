@@ -70,7 +70,7 @@ beforeEach(() => {
 const paramsOf = () => mockWrite.mock.calls[0][1] as unknown[];
 
 describe("saving a walked map", () => {
-  it("writes the denormalised counts alongside the document", async () => {
+  it("writes the denormalized counts alongside the document", async () => {
     await saveWalkedMap("ws-1", MAP, "CTO, Acme");
     const p = paramsOf();
     expect(p[0]).toBe("ws-1");
@@ -98,12 +98,12 @@ describe("saving a walked map", () => {
 
   /* Walking somebody else's system is a permitted act. The record that it was
      permitted outlives the map, so it cannot be defaulted into existence. */
-  it("refuses to store a walk nobody authorised", async () => {
-    await expect(saveWalkedMap("ws-1", MAP, "  ")).rejects.toThrow(/authorised/i);
+  it("refuses to store a walk nobody authorized", async () => {
+    await expect(saveWalkedMap("ws-1", MAP, "  ")).rejects.toThrow(/authorized/i);
     expect(mockWrite).not.toHaveBeenCalled();
   });
 
-  it("keeps who authorised it", async () => {
+  it("keeps who authorized it", async () => {
     await saveWalkedMap("ws-1", MAP, "  CTO, Acme  ");
     expect(paramsOf()[9]).toBe("CTO, Acme");
   });
@@ -124,7 +124,7 @@ describe("reading walked maps", () => {
     form_count: 2,
     frontier_remaining: 34,
     stop_reason: "page-budget",
-    authorised_by: "CTO, Acme",
+    authorized_by: "CTO, Acme",
     generated_at: new Date("2026-08-30T00:00:00.000Z"),
   };
 

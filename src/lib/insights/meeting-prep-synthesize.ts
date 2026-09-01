@@ -93,7 +93,7 @@ export interface SynthesizeContext {
 /**
  * System prompt — kept tight on purpose. Every word is intentional:
  *  - JSON-only output (no prose preamble, no trailing commentary).
- *  - Severity scale fixed to {low,med,high} so the widget can colour-
+ *  - Severity scale fixed to {low,med,high} so the widget can color-
  *    code without a free-text guesser.
  *  - source_refs is mandatory on every talking point + risk flag so the
  *    user can click out to the underlying record. Hallucinated refs are
@@ -126,7 +126,7 @@ Rules:
 
 function buildUserMessage(sources: MeetingSources): string {
   /* The input is already structured JSON; pass it verbatim under a
-   * labelled wrapper so the model sees what's data vs. instructions. */
+   * labeled wrapper so the model sees what's data vs. instructions. */
   return JSON.stringify({ MeetingSources: sources });
 }
 

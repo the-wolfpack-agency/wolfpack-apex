@@ -161,7 +161,7 @@ const RULES: Rule[] = [
   {
     dimension: "decision-owner",
     missing: "what to do when the work hits something only you can decide",
-    ask: "If this runs into a judgement that is yours rather than mine (a brand choice, a client commitment, a spend), should I stop and ask, or proceed on a stated assumption?",
+    ask: "If this runs into a judgment that is yours rather than mine (a brand choice, a client commitment, a spend), should I stop and ask, or proceed on a stated assumption?",
     cost: "This is the one gap engineering cannot close by trying harder. A task that ends at a decision looks exactly like a task that failed, so it gets retried instead of escalated, and the retries are the expensive part.",
     // Added after a real loop: a check stayed red because a font cut is a brand
     // decision that changes public-site typography. Three rounds went into
@@ -197,19 +197,19 @@ const RULES: Rule[] = [
 ];
 
 /**
- * Does this brief plausibly run into a judgement that is not the engineer's?
+ * Does this brief plausibly run into a judgment that is not the engineer's?
  *
  * Asking every brief who decides would be the checker inventing work, which is
  * the failure mode the whole file exists to avoid: "fix the failing test" has no
  * decision in it. But a brief that touches design, brand, client-facing copy or
  * money almost always does, and that is where a task quietly stalls - the work
- * reaches the judgement, cannot make it, and gets retried instead of escalated.
+ * reaches the judgment, cannot make it, and gets retried instead of escalated.
  *
  * Keyword-based and therefore approximate. It is deliberately tuned to stay
  * quiet: a false negative costs one question that was not asked, a false
  * positive costs the reviewer its credibility on every brief after it.
  */
-const JUDGEMENT_TERRITORY =
+const JUDGMENT_TERRITORY =
   /\b(design|designer|brand|branding|font|typeface|typography|colou?r|logo|copy|wording|naming|name it|look and feel|layout|client|customer|price|pricing|spend|budget|cost|contract|legal|terms|policy|ready for|sign.?off|approve)\b/i;
 
 /** A brief with a single ask does not need a sequencing plan, and asking for one
@@ -240,7 +240,7 @@ export function reviewPrompt(text: string): PromptReview {
 
   const multipart = partCount(trimmed) > 1;
 
-  const judgement = JUDGEMENT_TERRITORY.test(trimmed);
+  const judgment = JUDGMENT_TERRITORY.test(trimmed);
   // Only worth asking of work that is LIKELY TO TAKE SEVERAL ATTEMPTS: something
   // already failing, or a brief with enough parts that partial reports pile up.
   //
@@ -255,7 +255,7 @@ export function reviewPrompt(text: string): PromptReview {
 
   const findings = RULES.filter((r) => {
     if (r.dimension === "sequencing" && !multipart) return false;
-    if (r.dimension === "decision-owner" && !judgement) return false;
+    if (r.dimension === "decision-owner" && !judgment) return false;
     if (r.dimension === "reporting-cadence" && !iterative) return false;
     return !r.satisfied(trimmed);
   }).map(({ satisfied: _satisfied, ...f }) => f);

@@ -22,6 +22,8 @@
  *       recurring rate for every month after March up to and including this one
  * Needs: DATABASE_URL
  */
+/* FIRST. Imports hoist, so anything below already read process.env. */
+import "./load-env";
 import { query } from "@/lib/db";
 import { toCents } from "@/lib/ai/spend-baseline";
 

@@ -929,6 +929,115 @@ a:hover { color: var(--wp-gold-hover); }
   line-height: 1.5;
   margin: 0.35rem 0 0;
 }
+/* THE ONE THING ON THIS PAGE A PERSON CAN PRESS.
+ *
+ * It shipped with a class that did not exist, so it rendered as plain text
+ * between two paragraphs and read as a heading. Nobody would have known the
+ * capability was there, which makes an on-demand scan worse than no scan: the
+ * feature is present, invisible, and the page looks like it is claiming
+ * something it does not do.
+ *
+ * Solid gold rather than outlined, because every other element here is a
+ * figure or a sentence and there is nothing else competing to be the action.
+ */
+.wp-pilot-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.25rem 0 1rem;
+  padding: 0.7rem 1.15rem;
+  background: var(--wp-gold, #e8b528);
+  color: var(--wp-dark, #0b0d11);
+  border: 1px solid var(--wp-gold, #e8b528);
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  transition: background 120ms ease, transform 120ms ease;
+}
+.wp-pilot-button:hover:not(:disabled) {
+  background: var(--wp-gold-hover, #f2c84a);
+}
+.wp-pilot-button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+/* Keyboard users get the same affordance, and a gold-on-gold outline would be
+   invisible against the button itself. */
+.wp-pilot-button:focus-visible {
+  outline: 2px solid var(--wp-text, #e9edf4);
+  outline-offset: 2px;
+}
+/* Running, not broken. It stays gold and dims rather than turning grey, so a
+   scan in progress does not read as a control that has become unavailable. */
+.wp-pilot-button:disabled {
+  cursor: progress;
+  opacity: 0.65;
+}
+@media (prefers-reduced-motion: reduce) {
+  .wp-pilot-button {
+    transition: none;
+  }
+  .wp-pilot-button:active:not(:disabled) {
+    transform: none;
+  }
+}
+
+/* The documents the scan found. A work queue, so it is read down rather than
+   scanned across, and the filename leads because that is what somebody opens. */
+.wp-pilot-list {
+  margin: 0.75rem 0 1rem;
+  padding-left: 1.15rem;
+  color: var(--wp-text-dim, #b4bcc8);
+  font-size: 0.86rem;
+  line-height: 1.7;
+}
+
+/* A HUNDRED RESULTS MUST NOT PUSH THE PAGE DOWN.
+ *
+ * The exposure scan returns up to a hundred documents and the first version
+ * rendered all of them inline, so pressing the button buried every section
+ * below it under a wall somebody had to scroll past to get anywhere. The list
+ * is meant to be sifted, not endured.
+ *
+ * Scrolls inside its own box rather than being truncated: the whole point of
+ * the panel is finding the document you care about, and a "show more" that
+ * hides ninety of them makes that worse. The page keeps its shape and the
+ * list keeps all of its rows.
+ *
+ * The height is a little over ten rows, which is enough to read as a list
+ * with more below rather than as a cut-off. */
+.wp-pilot-scroll {
+  max-height: 19rem;
+  overflow-y: auto;
+  /* Its own edge, so it reads as a region that scrolls rather than as the
+     page ending. */
+  border: 1px solid var(--wp-dark-border, rgba(255, 255, 255, 0.12));
+  border-radius: 8px;
+  padding: 0.5rem 0.75rem;
+  background: var(--wp-dark-surface, rgba(255, 255, 255, 0.03));
+  /* Contains the scroll chaining, so reaching the bottom of the list does not
+     carry on scrolling the page underneath it. */
+  overscroll-behavior: contain;
+}
+.wp-pilot-scroll .wp-pilot-list {
+  margin: 0;
+}
+.wp-pilot-list strong {
+  color: var(--wp-text, #e9edf4);
+  font-weight: 600;
+}
+
+/* WHY A LINE IS NOT WHAT SOMEBODY TYPED. A shortened question and a short one
+   look identical, so the note has to be visible enough to be read and quiet
+   enough not to compete with the question it qualifies. */
+.wp-pilot-note {
+  color: var(--wp-text-muted, #929cad);
+  font-size: 0.78rem;
+  font-style: italic;
+  white-space: nowrap;
+}
+
 .wp-pilot-aside {
   color: var(--wp-text-muted, #929cad);
   font-size: 0.88rem;
@@ -1153,7 +1262,7 @@ a:hover { color: var(--wp-gold-hover); }
 
 /* WHAT THIS PRODUCT CAN DO, in the chat.
    Replaces sixty bullets of markdown. The starters lead because they are the
-   only part most people need; the catalogue is reference and collapses. */
+   only part most people need; the catalog is reference and collapses. */
 .wp-cap { display: flex; flex-direction: column; gap: 1.25rem; margin-top: 0.5rem; }
 .wp-cap-head {
   font-size: 0.75rem;
@@ -1261,3 +1370,197 @@ a:hover { color: var(--wp-gold-hover); }
   padding-top: 0.875rem;
   border-top: 1px solid var(--wp-dark-border, rgba(255, 255, 255, 0.12));
 }
+
+/* CLIENT BUILDS. Pages under /builds belong to an engagement rather than to
+   Instinct, and the banner is the only thing on the screen that says so. It
+   has to read as a different KIND of element from the page it sits on, or it
+   becomes part of the design and stops being a warning. Hence the rule down
+   the left edge and the flat ground rather than the glass panels used
+   everywhere else. */
+.wp-build-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0 0 1.75rem;
+  padding: 0.85rem 1.1rem;
+  border-left: 3px solid var(--wp-gold, #c9a227);
+  border-radius: 0 6px 6px 0;
+  background: color-mix(in srgb, var(--wp-gold, #c9a227) 8%, transparent);
+}
+/* A concept is the one that gets mistaken for a product, so it is the one
+   that does not share the accent with everything else. */
+.wp-build-banner--concept {
+  border-left-color: #7f8da3;
+  background: color-mix(in srgb, #7f8da3 10%, transparent);
+}
+.wp-build-banner-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.6rem;
+  margin: 0;
+  font-size: 0.82rem;
+}
+.wp-build-banner-stage {
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 0.16rem 0.5rem;
+  border-radius: 3px;
+  background: var(--wp-gold, #c9a227);
+  color: #14171c;
+}
+.wp-build-stage--concept,
+.wp-build-banner--concept .wp-build-banner-stage {
+  background: #7f8da3;
+  color: #12151a;
+}
+.wp-build-banner-client { color: var(--wp-text, #e6e9ef); font-weight: 600; }
+.wp-build-banner-link { margin-left: auto; color: var(--wp-text-muted, #929cad); }
+.wp-build-banner-link:hover { color: var(--wp-gold, #c9a227); }
+.wp-build-banner-data {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.6;
+  color: var(--wp-text-muted, #929cad);
+  max-width: 78ch;
+}
+
+.wp-build-list { list-style: none; padding: 0; margin: 2rem 0 0; display: grid; gap: 1rem; }
+.wp-build-card {
+  padding: 1.1rem 1.25rem;
+  border: 1px solid var(--wp-border, #262b34);
+  border-radius: 8px;
+  background: var(--wp-panel, #171a20);
+}
+.wp-build-card h2 { margin: 0.5rem 0 0.4rem; font-size: 1.12rem; }
+.wp-build-card-top { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: baseline; margin: 0; font-size: 0.82rem; }
+.wp-build-card-what { margin: 0 0 0.4rem; line-height: 1.6; max-width: 78ch; }
+.wp-build-card-data { margin: 0; font-size: 0.84rem; color: var(--wp-text-muted, #929cad); line-height: 1.55; max-width: 78ch; }
+
+.wp-build-quote {
+  margin: 1rem 0 0;
+  padding: 0.9rem 1.1rem;
+  border-left: 2px solid var(--wp-border, #262b34);
+  color: var(--wp-text, #e6e9ef);
+  font-size: 1.02rem;
+  line-height: 1.65;
+  max-width: 72ch;
+}
+
+/* The flow list is numbered because the order IS the finding: three of the
+   four moments fall outside what a form can hold. */
+.wp-build-flow { list-style: none; padding: 0; margin: 1.25rem 0 0; display: grid; gap: 0.5rem; }
+.wp-build-flow li {
+  display: grid;
+  grid-template-columns: 1.6rem minmax(11rem, 1fr) 2fr auto;
+  gap: 0.75rem;
+  align-items: baseline;
+  padding: 0.6rem 0.75rem;
+  border-radius: 6px;
+  background: var(--wp-panel, #171a20);
+  font-size: 0.88rem;
+  line-height: 1.55;
+}
+.wp-build-flow-n { color: var(--wp-text-muted, #929cad); font-variant-numeric: tabular-nums; }
+.wp-build-flow-step { font-weight: 600; }
+.wp-build-flow-today { color: var(--wp-text-muted, #929cad); }
+.wp-build-flow-tag { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.07em; white-space: nowrap; }
+.wp-build-flow--held .wp-build-flow-tag { color: #6f9e78; }
+.wp-build-flow--loose .wp-build-flow-tag { color: #c98a3c; }
+
+.wp-build-findings { list-style: none; padding: 0; margin: 1.25rem 0 0; display: grid; gap: 1.1rem; }
+.wp-build-findings h3 { margin: 0 0 0.3rem; font-size: 1rem; }
+.wp-build-findings p { margin: 0; line-height: 1.6; max-width: 78ch; }
+.wp-build-evidence {
+  margin-top: 0.35rem !important;
+  font-size: 0.8rem;
+  color: var(--wp-text-muted, #929cad);
+  font-variant-numeric: tabular-nums;
+}
+
+.wp-build-states { list-style: none; counter-reset: none; padding: 0; margin: 1.25rem 0 0; display: grid; gap: 0.5rem; }
+.wp-build-states li {
+  display: grid;
+  grid-template-columns: minmax(8rem, auto) 2fr 2fr;
+  gap: 0.85rem;
+  padding: 0.6rem 0.75rem;
+  border-radius: 6px;
+  background: var(--wp-panel, #171a20);
+  font-size: 0.88rem;
+  line-height: 1.55;
+}
+.wp-build-state-name { font-weight: 700; color: var(--wp-gold, #c9a227); }
+.wp-build-state-leaves { color: var(--wp-text-muted, #929cad); }
+
+/* A wide table must scroll inside its own box; the page body never scrolls
+   sideways. */
+.wp-build-table-wrap { overflow-x: auto; margin: 1.25rem 0 0; }
+.wp-build-table { border-collapse: collapse; width: 100%; min-width: 46rem; font-size: 0.87rem; }
+.wp-build-table th, .wp-build-table td {
+  text-align: left;
+  vertical-align: top;
+  padding: 0.7rem 0.85rem;
+  border-bottom: 1px solid var(--wp-border, #262b34);
+  line-height: 1.55;
+}
+.wp-build-table th { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--wp-text-muted, #929cad); }
+.wp-build-table td strong { display: block; margin-bottom: 0.25rem; }
+.wp-build-table td span { color: var(--wp-text-muted, #929cad); }
+
+@media (max-width: 720px) {
+  .wp-build-flow li, .wp-build-states li { grid-template-columns: 1fr; gap: 0.3rem; }
+  .wp-build-flow-tag { white-space: normal; }
+}
+
+/* THE COMMITMENT LADDER. Numbered because it genuinely is a sequence and the
+   sequence is the finding: each artifact feeds the next one, and a course that
+   ships them as separate worksheets has copied the parts and missed the
+   design. */
+.wp-build-ladder { list-style: none; padding: 0; margin: 1.25rem 0 0; display: grid; gap: 0.4rem; }
+.wp-build-ladder li {
+  display: grid;
+  grid-template-columns: 1.6rem 1fr;
+  gap: 0.75rem;
+  align-items: baseline;
+  padding: 0.6rem 0.75rem;
+  border-radius: 6px;
+  background: var(--wp-panel, #171a20);
+  font-size: 0.9rem;
+  line-height: 1.55;
+}
+/* Each rung sits slightly further in, so the build-up reads as a build-up. */
+.wp-build-ladder li:nth-child(2) { margin-left: 0.75rem; }
+.wp-build-ladder li:nth-child(3) { margin-left: 1.5rem; }
+.wp-build-ladder li:nth-child(4) { margin-left: 2.25rem; }
+.wp-build-ladder li:nth-child(5) { margin-left: 3rem; }
+.wp-build-ladder li:nth-child(6) { margin-left: 3.75rem; }
+
+/* Whether a component travels is the column a reader scans for, so it reads as
+   a state rather than as more prose. */
+.wp-build-travel {
+  display: inline-block;
+  white-space: nowrap;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  padding: 0.16rem 0.45rem;
+  border-radius: 3px;
+}
+.wp-build-travel--structure-and-wording { background: rgba(111, 158, 120, 0.18); color: #8fc39a; }
+.wp-build-travel--structure { background: rgba(201, 162, 39, 0.16); color: #d8bc63; }
+.wp-build-travel--not-at-all { background: rgba(201, 138, 60, 0.18); color: #dd9f5c; }
+
+@media (max-width: 720px) {
+  .wp-build-ladder li { grid-template-columns: 1fr; gap: 0.25rem; }
+  .wp-build-ladder li:nth-child(n) { margin-left: 0; }
+}
+
+/* Confidence on a recommendation. Reads as a state rather than prose, because
+   it is the field a reader scans before deciding whether to argue with the
+   line. Semantic rather than accent color: this is good/caution/stop, not
+   branding. */
+.wp-build-travel--strong { background: rgba(111, 158, 120, 0.18); color: #8fc39a; }
+.wp-build-travel--limited { background: rgba(201, 162, 39, 0.16); color: #d8bc63; }
+.wp-build-travel--insufficient { background: rgba(201, 138, 60, 0.18); color: #dd9f5c; }

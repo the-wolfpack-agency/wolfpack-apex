@@ -7,7 +7,7 @@
  * headers and laid out in a responsive equal-height grid. Each card stacks
  * vertically (status chip, then name, then body) so it never squeezes on a
  * phone, and the body has real hierarchy: a bright summary, then softer bullet
- * lists with coloured dot markers, so it reads as sections rather than a wall of
+ * lists with colored dot markers, so it reads as sections rather than a wall of
  * text. A lightweight status filter + live/in-flight counts sit on top (also the
  * current-engagements read).
  */
@@ -21,7 +21,7 @@ import {
   type SeverityTone,
 } from "@/components/console";
 
-/** Product lifecycle -> console severity tone (drives the StatusPill colour). */
+/** Product lifecycle -> console severity tone (drives the StatusPill color). */
 const STATUS_TONE: Record<ProductStatus, SeverityTone> = {
   live: "success",
   in_flight: "warning",
@@ -53,7 +53,7 @@ const GROUPS: { key: string; label: string; test: (s: ProductStatus) => boolean 
   { key: "other", label: "Other", test: (s) => s !== "live" && !isInFlight(s) },
 ];
 
-/** A labelled bullet list with coloured dot markers, dimmer than the summary so
+/** A labeled bullet list with colored dot markers, dimmer than the summary so
  *  the card reads as distinct sections instead of one block of text. */
 function Section({ title, items, marker }: { title: string; items: string[]; marker: string }) {
   if (!items.length) return null;

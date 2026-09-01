@@ -341,7 +341,7 @@ describe("identifiers that look like credentials and are not", () => {
   });
 
   it("still catches an ordinary long base64 secret", () => {
-    /* The generic rule is broad on purpose: a credential we fail to recognise
+    /* The generic rule is broad on purpose: a credential we fail to recognize
        is the expensive miss. Only the Graph prefix is exempt. */
     const out = redactText(
       "secret aGVsbG93b3JsZGhlbGxvd29ybGRoZWxsb3dvcmxkaGVsbG93b3JsZA==",
@@ -384,7 +384,7 @@ describe("national identifiers", () => {
   it("does not match a two-letter code that could not be one", () => {
     /* D, F, I, Q, U and V are not issued as the first letter. Honouring
        the real allocation rules is what stops this firing on any pair of
-       letters followed by digits, of which a parts catalogue is full. */
+       letters followed by digits, of which a parts catalog is full. */
     expect(red("part QQ123456C on the shelf")).not.toContain("NATIONAL_ID");
     expect(red("code DF123456A")).not.toContain("NATIONAL_ID");
   });

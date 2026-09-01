@@ -189,7 +189,7 @@ const IBAN_RE =
  * Identifier shapes that are LONG AND BASE64 AND NOT SECRETS.
  *
  * The generic 40-plus-base64 rule below is deliberately broad, because a
- * credential we fail to recognise is the expensive miss. The cost is that
+ * credential we fail to recognize is the expensive miss. The cost is that
  * Microsoft Graph identifiers match it: an event id is a long base64 run, and
  * "Meeting ID: [API_KEY_1]-XIwLg..." is what a person then reads.
  *

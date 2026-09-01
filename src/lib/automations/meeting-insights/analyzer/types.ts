@@ -44,7 +44,7 @@ export interface MeetingNextStep {
 }
 
 /**
- * Full analysis output. `topics` is denormalised to a flat string[] for
+ * Full analysis output. `topics` is denormalized to a flat string[] for
  * the GIN-indexed theme tracker; `attendees` etc. stay structured.
  */
 export interface MeetingAnalysis {
@@ -75,7 +75,7 @@ export interface MeetingAnalysisResult {
 
 /**
  * Bumped when the prompt or schema changes. Stored on every row so we
- * can re-analyse with a new prompt without losing prior history.
+ * can re-analyze with a new prompt without losing prior history.
  *
  * Format: 'YYYY-MM-DD.N'.
  */

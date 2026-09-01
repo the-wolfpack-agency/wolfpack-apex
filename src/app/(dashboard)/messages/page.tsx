@@ -74,7 +74,7 @@ export interface ChatMember {
  *
  * We accept the legacy string form too so existing test fixtures
  * (and any cached JSON in users' Service Worker) keep working — the
- * `previewTextOf` / `previewTimeOf` helpers below normalise.
+ * `previewTextOf` / `previewTimeOf` helpers below normalize.
  */
 export type ChatLastMessagePreview =
   | string
@@ -512,7 +512,7 @@ export function buildMentionHtml(
   }[];
 } {
   // Sort longest-first by tagText so prefix collisions resolve in
-  // favour of the longest match (Bob Smith before Bob).
+  // favor of the longest match (Bob Smith before Bob).
   const ordered = [...pending].sort(
     (a, b) => b.tagText.length - a.tagText.length,
   );

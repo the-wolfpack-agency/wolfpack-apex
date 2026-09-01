@@ -7,7 +7,7 @@
  *      - Multi-frame path : `briefFromFrames({ frames: [...], ... })`
  *        where `frames` is either N images (one per wireframe page) OR
  *        a single PDF (pages handled by the vision model directly).
- *   2. We extract a deterministic colour palette from the FIRST frame
+ *   2. We extract a deterministic color palette from the FIRST frame
  *      (documented choice: first frame is the "hero" of the designer's
  *      set — the page users land on). Palette extraction never needs
  *      the LLM.
@@ -278,7 +278,7 @@ RULES:
 - Detect EVERY visible section type: hero, stats, cards, testimonial, pricing, faq, video, gallery, text, callout, banner, quote.
 - Extract any copy you can read from the image — headings, body, CTA labels. If illegible, invent a short plausible placeholder that fits the visual hierarchy.
 - Visual hierarchy: the largest, boldest text in the top band is the hero heading. A button-styled element is a CTA. Small grey text is body/muted copy.
-- If you can infer brand colour hints from the mock-up (primary button colour, accent stripe, page background, body-text colour), put them in theme.colors as 6-digit hex. The caller will override with measured palette colours, so hints are guidance only.
+- If you can infer brand color hints from the mock-up (primary button color, accent stripe, page background, body-text color), put them in theme.colors as 6-digit hex. The caller will override with measured palette colors, so hints are guidance only.
 - stats.items[].value MUST be a number (no units; put "K"/"M"/"B" etc. in suffix).
 - gallery.images MUST be an array (empty is fine).
 - Always include at least one hero section on the home page even if the image is minimal.
@@ -335,7 +335,7 @@ function classifySourceKind(frames: BriefFrame[]): BriefSourceKind {
 
 /**
  * Merge the extracted palette into the brief's theme. Palette wins over
- * the model's guess — colours you CAN measure beat colours you GUESS at.
+ * the model's guess — colors you CAN measure beat colors you GUESS at.
  * If the palette is empty (JPEG decode, etc.) we keep whatever the model
  * supplied. Existing font hint from the model is preserved.
  */

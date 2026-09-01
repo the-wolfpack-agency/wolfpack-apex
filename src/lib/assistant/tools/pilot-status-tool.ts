@@ -84,7 +84,7 @@ interface PilotStatusData {
  * engagement noun or the "left to do" framing, and the negative cases are
  * pinned in the tests so a later widening cannot quietly steal them.
  */
-const SUBJECT = "(?:the\\s+|this\\s+|our\\s+|my\\s+)?(?:pilot|project|engagement|rollout|programme|program|phase\\s*(?:one|1|two|2)|poc|trial|onboarding)";
+const SUBJECT = "(?:the\\s+|this\\s+|our\\s+|my\\s+)?(?:pilot|project|engagement|rollout|program|program|phase\\s*(?:one|1|two|2)|poc|trial|onboarding)";
 
 const INTENT_RE = new RegExp(
   [

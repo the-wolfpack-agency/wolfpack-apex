@@ -24,7 +24,7 @@
  *   - source:   "heuristic" | "ai"  (text path)
  *                "vision"           (image path — single or multi)
  *   - metadata is populated on the vision path with the extracted
- *     colour palette, latency, generationId, and for the multi-frame
+ *     color palette, latency, generationId, and for the multi-frame
  *     path a `frameCount` field so the learning loop can segment by
  *     page count.
  *
@@ -362,7 +362,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // ── Text path (existing behaviour) ──────────────────────────
+    // ── Text path (existing behavior) ──────────────────────────
     if (!isTextMime(mime)) {
       trackEvent("site.brief_image_rejected", user.id, user.role, {
         reason: "unsupported_mime",

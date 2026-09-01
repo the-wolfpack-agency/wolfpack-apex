@@ -1,9 +1,9 @@
 /**
- * Connection-string normalisation, extracted so the per-tenant pool factory can
+ * Connection-string normalization, extracted so the per-tenant pool factory can
  * use it without importing src/lib/db.ts — which imports the pool factory, and
  * would be a cycle.
  *
- * Behaviour is unchanged; db.ts re-exports it so every existing caller and its
+ * Behavior is unchanged; db.ts re-exports it so every existing caller and its
  * tests keep working against the same name.
  */
 /**
@@ -12,7 +12,7 @@
  * change the meaning of `sslmode=require` (and `prefer` / `verify-ca`)
  * to libpq-compatible weaker semantics; the library currently emits
  * a SECURITY WARNING on every boot when those modes are seen. Setting
- * verify-full explicitly preserves today's strict-cert behaviour
+ * verify-full explicitly preserves today's strict-cert behavior
  * across the upcoming upgrade and silences the warning.
  *
  * Pure for unit testing; returns undefined when input is undefined so

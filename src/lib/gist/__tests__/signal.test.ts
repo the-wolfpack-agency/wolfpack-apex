@@ -38,7 +38,7 @@ describe("what counts as a bad ending", () => {
     expect(endedBadly(gist({ outcome: "re_asked" }))).toBe(true);
   });
 
-  /* THE JUDGEMENT CALL, ASSERTED. 94.8% of turns are single_turn. Calling it
+  /* THE JUDGMENT CALL, ASSERTED. 94.8% of turns are single_turn. Calling it
      bad puts the base rate at 95% and makes every lift meaningless; calling it
      good is the flattering half of an ambiguity nothing can resolve. It stays
      in the population and out of the label. */

@@ -25,7 +25,7 @@ function toneColor(tone: string): string {
     case "good":
       return "var(--wp-success, #16a34a)";
     default:
-      /* dark: the source was not read. Deliberately not a severity colour. */
+      /* dark: the source was not read. Deliberately not a severity color. */
       return "var(--wp-text-muted, #6b7280)";
   }
 }

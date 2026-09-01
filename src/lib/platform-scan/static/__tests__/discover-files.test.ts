@@ -169,7 +169,7 @@ describe("discoverRepoFiles", () => {
   });
 
   it("uses the PAT directly when no workspaceId is supplied (zero regression)", async () => {
-    /* The pre-App behaviour: no workspaceId → the raw PAT, resolver untouched. */
+    /* The pre-App behavior: no workspaceId → the raw PAT, resolver untouched. */
     process.env[ENV_KEY] = "pat-direct";
     const resolveToken = jest.fn();
     const fetchImpl = jest.fn(async () =>

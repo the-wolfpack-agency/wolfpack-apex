@@ -45,7 +45,7 @@ describe("reading how much a system holds", () => {
 });
 
 describe("finding a way data could leave", () => {
-  it("recognises an export control", () => {
+  it("recognizes an export control", () => {
     const out = findExports(["Export to CSV", "Save"]);
     expect(out).toEqual([{ kind: "download", label: "Export to CSV" }]);
   });
@@ -57,7 +57,7 @@ describe("finding a way data could leave", () => {
     expect(findExports(["Save", "Send to client", "Submit", "Share"])).toEqual([]);
   });
 
-  it("recognises an API or webhook surface", () => {
+  it("recognizes an API or webhook surface", () => {
     expect(findExports(["Developer settings"])[0].kind).toBe("api");
   });
 

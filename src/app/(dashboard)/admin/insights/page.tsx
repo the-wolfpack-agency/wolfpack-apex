@@ -347,7 +347,7 @@ export default function InsightsAdminPage() {
           the SYSTEM did. Not one described what the PERSON did in response,
           and the response is where frustration lives. That is why the
           customer-success view could only say "joined and has done nothing
-          since": it was the only behavioural signal that existed.
+          since": it was the only behavioral signal that existed.
           Derived from stored messages rather than emitted, so it reaches back
           to the first day instead of starting at zero today. */}
       {degradation?.outcomes ? (

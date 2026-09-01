@@ -25,7 +25,7 @@
  * is never stale, and is scoped by the reader's own SharePoint permissions
  * rather than by a copy of them we maintain. The Brain answers WHAT IS INSIDE
  * one, semantically and with citations, which genuinely requires text we hold.
- * Ranked together in one list and labelled distinctly, so a reader can tell
+ * Ranked together in one list and labeled distinctly, so a reader can tell
  * which of their documents we hold a copy of and which is still theirs.
  *
  * A FAILURE IS NOT AN EMPTY LIBRARY. Every reason searchSharePoint returns is

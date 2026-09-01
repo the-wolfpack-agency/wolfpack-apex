@@ -26,6 +26,8 @@
  * filter, and that is what surfaced the missing gate.
  */
 import { useEffect, useState } from "react";
+import BuildBanner from "@/components/BuildBanner";
+import { buildFor } from "@/lib/builds/registry";
 import type { CapabilitySnapshot } from "@/lib/insights/capability-snapshot";
 import {
   compareCosts,
@@ -83,16 +85,115 @@ function Figure({
   );
 }
 
+interface LibraryQuestion {
+  noticed: string;
+  ask: string;
+  examples: string[];
+}
+
+interface GapItem {
+  question: string;
+  asked: number;
+  system?: string;
+  /** Set when the wording was shortened or a name was taken out. */
+  withheld?: "paste" | "name" | "remark";
+}
+
+/**
+ * A line, and a plain note when it is not what somebody typed.
+ *
+ * The note exists because a shortened question and a short question look
+ * identical on the page, and a reader who cannot tell them apart will read a
+ * truncation as the whole of what was asked.
+ */
+function GapLine({ item, verb }: { item: GapItem; verb: string }) {
+  const note =
+    item.withheld === "paste"
+      ? "shortened"
+      : item.withheld === "name"
+        ? "name withheld"
+        : null;
+  return (
+    <li>
+      <strong>{item.question}</strong> {verb} {item.asked}×
+      {item.system ? `, ${item.system}` : null}
+      {note ? <span className="wp-pilot-note"> {note}</span> : null}
+    </li>
+  );
+}
+
+/**
+ * What people asked that nothing could answer.
+ *
+ * The two lists are separate because they need different people. "Connect
+ * your CRM" is a decision; "the answer is not in your documents" is somebody
+ * writing one. A single list of failures mixes a sales conversation with a
+ * content backlog and produces neither.
+ */
+interface GapsSnapshot {
+  wouldConnect: GapItem[];
+  missing: GapItem[];
+  closed: GapItem[];
+  wanted: { actions: { action: string; asked: number }[]; other: number };
+  statements: number;
+  readable: boolean;
+}
+
+interface ExposureKind {
+  kind: string;
+  occurrences: number;
+  neverSend: boolean;
+}
+
+interface ExposureDocument {
+  documentId: string;
+  filename: string;
+  kinds: ExposureKind[];
+  holdsNeverSend: boolean;
+}
+
+/**
+ * What the scan returns.
+ *
+ * No matched value appears anywhere in this shape, and none should ever be
+ * added: a list naming which document holds a card number is a work queue,
+ * and the same list with the number beside it is a copy of the exposure in a
+ * page easier to read than the original.
+ */
+interface ExposureResponse {
+  chunksScanned: number;
+  chunksWithSomething: number;
+  byKind: ExposureKind[];
+  documentsWithSomething: number;
+  documentsWithNeverSend: number;
+  documents: ExposureDocument[];
+  truncated: boolean;
+  durationMs: number;
+}
+
+/* This page is engagement work, not a shipped feature, and until the register
+   existed nothing on it said so. */
+const pilotBuild = buildFor("/pilot");
+
 export default function PilotPage() {
   const [snap, setSnap] = useState<
     | (PhaseOneSnapshot & {
         adoption?: AdoptionSnapshot;
         capability?: CapabilitySnapshot;
         tokenUsage?: TokenUsage | null;
+        gaps?: GapsSnapshot;
+        libraryQuestions?: { questions: LibraryQuestion[]; readable: boolean };
       })
     | null
   >(null);
   const [failed, setFailed] = useState(false);
+  /* ASKED FOR, NOT LOADED. Scanning every indexed passage takes seconds and
+     reads the whole corpus, so running it because somebody opened a tab would
+     make the page slow and would scan on a whim. */
+  const [exposure, setExposure] = useState<ExposureResponse | null>(null);
+  const [exposureState, setExposureState] = useState<
+    "idle" | "running" | "failed"
+  >("idle");
 
   useEffect(() => {
     /* Redirect rather than render an empty page. A signed-out visitor seeing
@@ -108,6 +209,8 @@ export default function PilotPage() {
         const res = await fetchWithRefresh("/api/pilot/phase-one");
         if (!res.ok) throw new Error(String(res.status));
         const data = (await res.json()) as PhaseOneSnapshot & {
+          gaps?: GapsSnapshot;
+          libraryQuestions?: { questions: LibraryQuestion[]; readable: boolean };
           adoption?: AdoptionSnapshot;
           capability?: CapabilitySnapshot;
           tokenUsage?: TokenUsage | null;
@@ -130,7 +233,10 @@ export default function PilotPage() {
      table already leads with, so the two figures describe the same vendor. */
   const reuseCost =
     snap?.tokenUsage && comparison.length > 0
-      ? repeatSavings(snap.tokenUsage, COMPARISON_PRICES.find((p) => p.label === comparison[0].label)!)
+      ? repeatSavings(
+          snap.tokenUsage,
+          COMPARISON_PRICES.find((p) => p.label === comparison[0].label)!,
+        )
       : null;
   const share = snap ? deterministicShare(snap) : null;
   const answers = snap ? answersGiven(snap) : 0;
@@ -138,13 +244,14 @@ export default function PilotPage() {
 
   return (
     <main className="wp-pilot" data-testid="phase-one-dashboard">
+      {pilotBuild ? <BuildBanner build={pilotBuild} /> : null}
       <header className="wp-pilot-head">
         <p className="wp-pilot-eyebrow">Phase one · last 60 days</p>
         <h1>Their library, read and answerable</h1>
         <p className="wp-pilot-sub">
-          Everything below is measured on this deployment. It is what a client sees in
-          phase one, running on our own data so the shape is proven before theirs is in
-          it.
+          Everything below is measured on this deployment. It is what a client
+          sees in phase one, running on our own data so the shape is proven
+          before theirs is in it.
         </p>
       </header>
 
@@ -153,8 +260,9 @@ export default function PilotPage() {
            assistant, which is more alarming and less true than saying the
            figures could not be read. */
         <p className="wp-pilot-unreadable" data-testid="pilot-unreadable">
-          These figures could not be read just now. That is not an empty corpus and not a
-          quiet week: it is an unmeasured one, and the difference matters.
+          These figures could not be read just now. That is not an empty corpus
+          and not a quiet week: it is an unmeasured one, and the difference
+          matters.
         </p>
       ) : !snap ? (
         <p className="wp-pilot-sub" data-testid="pilot-loading">
@@ -162,6 +270,27 @@ export default function PilotPage() {
         </p>
       ) : (
         <>
+          {snap.libraryQuestions?.questions?.length ? (
+            <section className="wp-pilot-section" data-testid="pilot-library-questions">
+              <h2>What only you can tell us</h2>
+              <p className="wp-pilot-aside">
+                Things about this library that look like findings and might not be. Reading data
+                and concluding from it is the expensive mistake in week one: on our own library,
+                42% of the documents turned out to be output from our own tools writing into it.
+                So these are questions, and none of them is a number we intend to quote.
+              </p>
+              <ul className="wp-build-findings">
+                {snap.libraryQuestions.questions.map((q) => (
+                  <li key={q.noticed}>
+                    <h3>{q.noticed}</h3>
+                    <p>{q.ask}</p>
+                    <p className="wp-build-evidence">{q.examples.join(" · ")}</p>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
+
           <section className="wp-pilot-section">
             <h2>What we can read</h2>
             <div className="wp-pilot-figures">
@@ -171,6 +300,14 @@ export default function PilotPage() {
                 note="Indexed, scoped by the library each came from"
                 testId="pilot-passages"
               />
+              {snap.scansRead > 0 ? (
+                <Figure
+                  label="Scans read"
+                  value={snap.scansRead.toLocaleString()}
+                  note="Documents that arrived as pictures and carried no text. Read by OCR, quotable and citable like any other."
+                  testId="pilot-scans-read"
+                />
+              ) : null}
               <Figure
                 value={snap.libraries.toLocaleString()}
                 label="Libraries connected"
@@ -204,9 +341,10 @@ export default function PilotPage() {
               />
             </div>
             <p className="wp-pilot-aside">
-              The line between those last two is the product. Most questions are answered
-              by reading their own systems, which is what makes this cheap, auditable and
-              predictable, and it is the opposite of how a chatbot works.
+              The line between those last two is the product. Most questions are
+              answered by reading their own systems, which is what makes this
+              cheap, auditable and predictable, and it is the opposite of how a
+              chatbot works.
             </p>
             {/* SAID ON THE PAGE, NOT IN SOMEBODY'S MEMORY.
                 These figures counted our own eval harnesses and demo accounts
@@ -216,11 +354,248 @@ export default function PilotPage() {
                 because the same contamination on a day of heavy testing would
                 overstate instead. A number that shrank deserves its reason
                 beside it rather than a question later. */}
-            {typeof snap.excludedAsTesting === "number" && snap.excludedAsTesting > 0 ? (
-              <p className="wp-pilot-aside" data-testid="pilot-excluded-testing">
-                A further {snap.excludedAsTesting.toLocaleString()} answers came from our own
-                testing and tooling rather than from a person, and are excluded from every
-                figure above.
+          </section>
+
+          {/* WHAT THEY ASKED AND DID NOT GET.
+              A build backlog written by the people using it rather than
+              guessed at in a planning meeting, and the one panel here that
+              says what to do next rather than what happened.
+
+              An unreadable log and a client with no unanswered questions are
+              the same empty list and opposite facts, so the read carries
+              whether it worked. */}
+          {snap.gaps && !snap.gaps.readable ? (
+            <section className="wp-pilot-section">
+              <h2>What we could not answer</h2>
+              <p className="wp-pilot-aside" data-testid="pilot-gaps-unreadable">
+                These figures could not be read. That is not the same as nothing
+                having gone unanswered, and nothing here should be taken as a
+                result.
+              </p>
+            </section>
+          ) : snap.gaps ? (
+            <section className="wp-pilot-section" data-testid="pilot-gaps">
+              <h2>What we could not answer</h2>
+
+              {snap.gaps.wouldConnect.length > 0 ? (
+                <>
+                  <p className="wp-pilot-aside">
+                    Asked about systems nothing is connected to. Connecting one
+                    answers these without anybody writing a document.
+                  </p>
+                  <ul
+                    className="wp-pilot-list"
+                    data-testid="pilot-gaps-connect"
+                  >
+                    {snap.gaps.wouldConnect.map((g) => (
+                      <GapLine key={g.question} item={g} verb="asked" />
+                    ))}
+                  </ul>
+                </>
+              ) : null}
+
+              {snap.gaps.missing.length > 0 ? (
+                <>
+                  <p className="wp-pilot-aside">
+                    Asked of a system that IS connected, searched, and not
+                    there. These are gaps in the content rather than in the
+                    connections.
+                  </p>
+                  <ul
+                    className="wp-pilot-list"
+                    data-testid="pilot-gaps-missing"
+                  >
+                    {snap.gaps.missing.map((g) => (
+                      <GapLine key={g.question} item={g} verb="asked" />
+                    ))}
+                  </ul>
+                </>
+              ) : null}
+
+              {snap.gaps.wanted.actions.length > 0 ||
+              snap.gaps.wanted.other > 0 ? (
+                <>
+                  <p className="wp-pilot-aside">
+                    Instructions rather than questions: things somebody expected
+                    the product to do. No document closes these, and nobody
+                    files a request for something they assumed would work. Shown
+                    as the action asked for, not as what anybody typed.
+                  </p>
+                  <ul className="wp-pilot-list" data-testid="pilot-gaps-wanted">
+                    {snap.gaps.wanted.actions.map((a) => (
+                      <li key={a.action}>
+                        <strong>{a.action}</strong> asked {a.asked}×
+                      </li>
+                    ))}
+                    {snap.gaps.wanted.other > 0 ? (
+                      <li data-testid="pilot-gaps-wanted-other">
+                        {snap.gaps.wanted.other} further{" "}
+                        {snap.gaps.wanted.other === 1 ? "request" : "requests"}{" "}
+                        of other kinds
+                      </li>
+                    ) : null}
+                  </ul>
+                </>
+              ) : null}
+
+              {snap.gaps.closed.length > 0 ? (
+                <>
+                  <p className="wp-pilot-aside">
+                    Went unanswered then, answered now. The clearest evidence
+                    there is that what arrived since changed something.
+                  </p>
+                  <ul className="wp-pilot-list" data-testid="pilot-gaps-closed">
+                    {snap.gaps.closed.map((g) => (
+                      <GapLine key={g.question} item={g} verb="failed" />
+                    ))}
+                  </ul>
+                </>
+              ) : null}
+
+              {snap.gaps.statements > 0 ? (
+                <p
+                  className="wp-pilot-aside"
+                  data-testid="pilot-gaps-statements"
+                >
+                  {snap.gaps.statements} further{" "}
+                  {snap.gaps.statements === 1 ? "entry was" : "entries were"}{" "}
+                  left out as remarks rather than questions. Nothing was missing
+                  to answer them, so they are not gaps.
+                </p>
+              ) : null}
+
+              {snap.gaps.wouldConnect.length === 0 &&
+              snap.gaps.missing.length === 0 &&
+              snap.gaps.wanted.actions.length === 0 ? (
+                <p className="wp-pilot-aside" data-testid="pilot-gaps-none">
+                  Every question asked in this window was answered by a
+                  connected system.
+                </p>
+              ) : null}
+            </section>
+          ) : null}
+
+          <section className="wp-pilot-section">
+            <h2>What never reaches a model</h2>
+            {/* WHAT THE GATE STOPS, ASKED FOR RATHER THAN ASSUMED.
+                Every other figure on this page is a count of what happened.
+                This one is a scan somebody runs, because it reads the whole
+                corpus and because "show me" is the moment it means something.
+
+                It never renders a matched value. The list says which document
+                carries what kind, which is a work queue; the same list with
+                the values beside it would be a copy of the exposure in a page
+                that is easier to read than the original. */}
+            <div className="wp-pilot-exposure" data-testid="pilot-exposure">
+              {/* A PERSON HAS TO KNOW WHAT PRESSING IT WILL DO. The scan is the
+                  only thing on this page somebody performs rather than reads,
+                  and an unexplained button on a page of figures gets left
+                  alone. */}
+              <p className="wp-pilot-aside">
+                Some of what a company keeps should never be sent to a model at
+                all: card numbers, keys, bank details. They are removed at the
+                boundary whether or not anybody has looked. Press this to read
+                every indexed passage and see which documents are carrying them.
+              </p>
+              <button
+                type="button"
+                className="wp-pilot-button"
+                data-testid="pilot-exposure-run"
+                disabled={exposureState === "running"}
+                onClick={async () => {
+                  setExposureState("running");
+                  try {
+                    const res = await fetchWithRefresh("/api/pilot/exposure");
+                    if (!res.ok) throw new Error(String(res.status));
+                    setExposure((await res.json()) as ExposureResponse);
+                    setExposureState("idle");
+                  } catch {
+                    /* Said, never swallowed. A button that does nothing and
+                       reports nothing is indistinguishable from a corpus with
+                       nothing in it, which is the opposite finding. */
+                    setExposureState("failed");
+                  }
+                }}
+              >
+                {exposureState === "running"
+                  ? "Reading every indexed passage…"
+                  : "Check what never reaches a model"}
+              </button>
+
+              {exposureState === "failed" ? (
+                <p
+                  className="wp-pilot-aside"
+                  data-testid="pilot-exposure-failed"
+                >
+                  The scan could not be run. That is not the same as finding
+                  nothing, and nothing above should be read as a result.
+                </p>
+              ) : null}
+
+              {exposure ? (
+                <div data-testid="pilot-exposure-result">
+                  <p className="wp-pilot-aside">
+                    {exposure.chunksWithSomething.toLocaleString()} of{" "}
+                    {exposure.chunksScanned.toLocaleString()} passages carry
+                    something removed before it reaches a model, across{" "}
+                    {exposure.documentsWithSomething.toLocaleString()}{" "}
+                    document(s).{" "}
+                    {exposure.documentsWithNeverSend.toLocaleString()} hold a
+                    value that is never sent to any provider at all.
+                  </p>
+                  {/* Scrolls in its own box rather than pushing the page
+                      down. A hundred documents rendered inline buried every
+                      section below the button under a wall somebody had to
+                      scroll past to get anywhere. */}
+                  <div
+                    className="wp-pilot-scroll"
+                    data-testid="pilot-exposure-scroll"
+                  >
+                    <ul className="wp-pilot-list">
+                      {exposure.documents.map((d) => (
+                        <li key={d.documentId}>
+                          <strong>{d.filename}</strong>{" "}
+                          {d.kinds
+                            .map((k) => `${k.kind} (${k.occurrences})`)
+                            .join(", ")}
+                          {d.holdsNeverSend ? " — never sent" : null}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                  <p className="wp-pilot-aside">
+                    {exposure.documents.length.toLocaleString()} document(s)
+                    listed above, never-send first. Scroll the box to read the
+                    rest.
+                  </p>
+                  {exposure.truncated ? (
+                    <p className="wp-pilot-aside">
+                      Showing the first {exposure.documents.length}. The count
+                      above is the whole figure.
+                    </p>
+                  ) : null}
+                  <p className="wp-pilot-aside">
+                    This says the boundary holds, not that anybody did anything
+                    wrong: invoices contain card numbers, which is what an
+                    invoice is. What it changes is who should be able to quote
+                    which document.
+                  </p>
+                </div>
+              ) : null}
+            </div>
+          </section>
+
+          <section className="wp-pilot-section">
+            <h2>What we set aside</h2>
+            {typeof snap.excludedAsTesting === "number" &&
+            snap.excludedAsTesting > 0 ? (
+              <p
+                className="wp-pilot-aside"
+                data-testid="pilot-excluded-testing"
+              >
+                A further {snap.excludedAsTesting.toLocaleString()} answers came
+                from our own testing and tooling rather than from a person, and
+                are excluded from every figure above.
               </p>
             ) : null}
           </section>
@@ -238,20 +613,32 @@ export default function PilotPage() {
               FAILED, and silently omitting the section for that would hide it,
               which is the mistake this page exists to avoid. */}
           {snap.capability === null ? (
-            <section className="wp-pilot-section" data-testid="pilot-capability">
+            <section
+              className="wp-pilot-section"
+              data-testid="pilot-capability"
+            >
               <h2>What it costs to run</h2>
-              <p className="wp-pilot-aside" data-testid="pilot-capability-unreadable">
+              <p
+                className="wp-pilot-aside"
+                data-testid="pilot-capability-unreadable"
+              >
                 These figures could not be read just now. That is not a product
-                doing nothing, and the difference matters enough to say so rather
-                than leave the section out.
+                doing nothing, and the difference matters enough to say so
+                rather than leave the section out.
               </p>
             </section>
           ) : snap.capability ? (
-            <section className="wp-pilot-section" data-testid="pilot-capability">
+            <section
+              className="wp-pilot-section"
+              data-testid="pilot-capability"
+            >
               <h2>What it costs to run</h2>
               <div className="wp-pilot-figures">
                 <Figure
-                  value={reading(snap.capability.efficiency.deterministicSharePct, "%")}
+                  value={reading(
+                    snap.capability.efficiency.deterministicSharePct,
+                    "%",
+                  )}
                   label="Answered without AI"
                   note="Read straight from connected systems, at no model cost"
                   testId="pilot-cap-deterministic"
@@ -282,7 +669,9 @@ export default function PilotPage() {
                     question, bank details and an API key. None reached the
                     answer. */}
                 <Figure
-                  value={reading(snap.capability.safety.sensitiveInputsRedacted)}
+                  value={reading(
+                    snap.capability.safety.sensitiveInputsRedacted,
+                  )}
                   label="Cards, IDs and keys removed from questions"
                   note="Taken out before any model or outside service saw them. The question is still answered."
                   testId="pilot-cap-inputs-redacted"
@@ -297,7 +686,7 @@ export default function PilotPage() {
                      This tile read "Answers withheld as unsafe" on the admin
                      page once, which a client reasonably read as the product
                      blocking them. A guardrail asserts this wording against
-                     the router's actual behaviour. */
+                     the router's actual behavior. */
                   label="Answers flagged for review"
                   /* Phrased without the verb at all. "Recorded and delivered,
                      not blocked" was honest and still tripped the guardrail,
@@ -321,37 +710,46 @@ export default function PilotPage() {
                   because it is the question a client asks after the demo
                   rather than during it. Every claim here is a shipped control
                   with a test behind it, not a roadmap item. */}
-              <div className="wp-pilot-resilience" data-testid="pilot-resilience">
+              <div
+                className="wp-pilot-resilience"
+                data-testid="pilot-resilience"
+              >
                 <h3 className="wp-pilot-subhead">When something breaks</h3>
                 <ul className="wp-pilot-list">
                   <li>
-                    <strong>A brief failure is retried, not shown to you.</strong>
-                    When a model is throttled or a connection drops, the request is
-                    made again before anybody sees anything. Most of these clear in
-                    under a second, and until this shipped every one of them ended
-                    somebody&rsquo;s question.
+                    <strong>
+                      A brief failure is retried, not shown to you.
+                    </strong>
+                    When a model is throttled or a connection drops, the request
+                    is made again before anybody sees anything. Most of these
+                    clear in under a second, and until this shipped every one of
+                    them ended somebody&rsquo;s question.
                   </li>
                   <li>
-                    <strong>An outage says so, and never blames your documents.</strong>
-                    If part of the system cannot be reached, the answer names what
-                    could not be read and states plainly that nothing has been lost
-                    and nothing needs re-uploading. It used to say &ldquo;I don&rsquo;t
-                    have information on that yet&rdquo; about a document it was
-                    holding, which reads as your library having gone missing.
+                    <strong>
+                      An outage says so, and never blames your documents.
+                    </strong>
+                    If part of the system cannot be reached, the answer names
+                    what could not be read and states plainly that nothing has
+                    been lost and nothing needs re-uploading. It used to say
+                    &ldquo;I don&rsquo;t have information on that yet&rdquo;
+                    about a document it was holding, which reads as your library
+                    having gone missing.
                   </li>
                   <li>
-                    <strong>Pasted data never reaches a model.</strong>
-                    A card number, national ID or key typed into a question is
-                    removed before the prompt leaves this system, and the question
-                    is still answered from your documents. Tested with all four,
+                    <strong>Pasted data never reaches a model.</strong>A card
+                    number, national ID or key typed into a question is removed
+                    before the prompt leaves this system, and the question is
+                    still answered from your documents. Tested with all four,
                     including data pasted alongside a real question.
                   </li>
                   <li>
                     <strong>A quiet number is treated as a question.</strong>
-                    Every figure on this page states what a zero means, because a
-                    control that never ran and a control that found nothing look
-                    identical otherwise. Where we cannot evidence a check firing,
-                    we say that instead of showing you a clean-looking count.
+                    Every figure on this page states what a zero means, because
+                    a control that never ran and a control that found nothing
+                    look identical otherwise. Where we cannot evidence a check
+                    firing, we say that instead of showing you a clean-looking
+                    count.
                   </li>
                 </ul>
               </div>
@@ -382,7 +780,10 @@ export default function PilotPage() {
               rather than hand-set. The assumptions stay, moved below where
               they inform rather than delay. */}
           {comparison.length > 0 && snap.tokenUsage ? (
-            <section className="wp-pilot-section" data-testid="pilot-cost-comparison">
+            <section
+              className="wp-pilot-section"
+              data-testid="pilot-cost-comparison"
+            >
               <h2>What the same work costs elsewhere</h2>
 
               <div className="wp-cost-hero">
@@ -401,7 +802,10 @@ export default function PilotPage() {
                   </p>
                 </div>
                 {comparison[0].multipleOfActual !== null ? (
-                  <p className="wp-cost-hero-multiple" data-testid="pilot-cost-headline">
+                  <p
+                    className="wp-cost-hero-multiple"
+                    data-testid="pilot-cost-headline"
+                  >
                     {comparison[0].multipleOfActual}&times;
                   </p>
                 ) : null}
@@ -422,7 +826,12 @@ export default function PilotPage() {
                     multiple: c.multipleOfActual,
                   })),
                 ].map((row) => (
-                  <li key={row.label} className={row.ours ? "wp-cost-bar-row is-ours" : "wp-cost-bar-row"}>
+                  <li
+                    key={row.label}
+                    className={
+                      row.ours ? "wp-cost-bar-row is-ours" : "wp-cost-bar-row"
+                    }
+                  >
                     <span className="wp-cost-bar-label">{row.label}</span>
                     <span className="wp-cost-bar-track">
                       <span
@@ -442,7 +851,9 @@ export default function PilotPage() {
                     <span className="wp-cost-bar-value">
                       ${row.cost.toFixed(2)}
                       {row.multiple !== null ? (
-                        <em className="wp-cost-bar-multiple">{row.multiple}&times;</em>
+                        <em className="wp-cost-bar-multiple">
+                          {row.multiple}&times;
+                        </em>
                       ) : null}
                     </span>
                   </li>
@@ -459,28 +870,30 @@ export default function PilotPage() {
               {reuseCost !== null && snap.tokenUsage.reusedAnswers ? (
                 <p className="wp-cost-compounds" data-testid="pilot-cost-reuse">
                   <strong>
-                    {snap.tokenUsage.reusedAnswers.toLocaleString()} answers came from
-                    work already done.
+                    {snap.tokenUsage.reusedAnswers.toLocaleString()} answers
+                    came from work already done.
                   </strong>{" "}
-                  Each was worked out once and has been free ever since. A product
-                  that bills for every ask would have charged roughly $
+                  Each was worked out once and has been free ever since. A
+                  product that bills for every ask would have charged roughly $
                   {reuseCost.toFixed(2)} to answer those same repeats at{" "}
-                  {comparison[0].label} rates, and would charge again the next time
-                  anyone asks. That gap widens with use rather than staying flat.
+                  {comparison[0].label} rates, and would charge again the next
+                  time anyone asks. That gap widens with use rather than staying
+                  flat.
                 </p>
               ) : null}
 
               <p className="wp-pilot-aside">
-                Based on {snap.tokenUsage.inputTokens.toLocaleString()} tokens in and{" "}
-                {snap.tokenUsage.outputTokens.toLocaleString()} out across{" "}
-                {snap.tokenUsage.calls.toLocaleString()} model calls. It holds that token
-                count fixed and changes only the price, so it is the cost of our traffic at
-                their rates rather than a forecast of another product&rsquo;s bill.
-                Published list prices recorded {PRICES_RECORDED_ON}, before any negotiated
-                discount. This table prices only the traffic that genuinely reached a
-                model, so it is the smallest of the savings: most questions are answered
-                straight from connected systems, and the answers that did need a model are
-                kept rather than bought again.
+                Based on {snap.tokenUsage.inputTokens.toLocaleString()} tokens
+                in and {snap.tokenUsage.outputTokens.toLocaleString()} out
+                across {snap.tokenUsage.calls.toLocaleString()} model calls. It
+                holds that token count fixed and changes only the price, so it
+                is the cost of our traffic at their rates rather than a forecast
+                of another product&rsquo;s bill. Published list prices recorded{" "}
+                {PRICES_RECORDED_ON}, before any negotiated discount. This table
+                prices only the traffic that genuinely reached a model, so it is
+                the smallest of the savings: most questions are answered
+                straight from connected systems, and the answers that did need a
+                model are kept rather than bought again.
               </p>
             </section>
           ) : null}
@@ -496,9 +909,9 @@ export default function PilotPage() {
               />
             </div>
             <p className="wp-pilot-aside">
-              Published rather than hidden, because a system that says it cannot find
-              something is the one worth believing when it does answer. A count nobody can
-              see turns that into a promise.
+              Published rather than hidden, because a system that says it cannot
+              find something is the one worth believing when it does answer. A
+              count nobody can see turns that into a promise.
             </p>
           </section>
 
@@ -516,9 +929,12 @@ export default function PilotPage() {
             <section className="wp-pilot-section" data-testid="pilot-adoption">
               <h2>Is the team using it</h2>
               {!snap.adoption.readable ? (
-                <p className="wp-pilot-aside" data-testid="pilot-adoption-unreadable">
-                  Adoption could not be read just now. That is not the same as nobody
-                  using it, and this panel will not guess which.
+                <p
+                  className="wp-pilot-aside"
+                  data-testid="pilot-adoption-unreadable"
+                >
+                  Adoption could not be read just now. That is not the same as
+                  nobody using it, and this panel will not guess which.
                 </p>
               ) : (
                 <>
@@ -540,7 +956,9 @@ export default function PilotPage() {
                       testId="pilot-adoption-active"
                     />
                     <Figure
-                      value={(neverStarted(snap.adoption) ?? 0).toLocaleString()}
+                      value={(
+                        neverStarted(snap.adoption) ?? 0
+                      ).toLocaleString()}
                       label="Never started"
                       note="Have access and have never asked anything"
                       testId="pilot-adoption-never"
@@ -559,8 +977,9 @@ export default function PilotPage() {
                   {snap.adoption.repeatedFailures.length > 0 ? (
                     <div data-testid="pilot-adoption-failures">
                       <p className="wp-pilot-aside">
-                        Asked more than once and never answered. Each one is somebody who
-                        kept trying, and none of them arrived as a complaint.
+                        Asked more than once and never answered. Each one is
+                        somebody who kept trying, and none of them arrived as a
+                        complaint.
                       </p>
                       <ul className="wp-pilot-list">
                         {snap.adoption.repeatedFailures.map((f) => (
@@ -582,39 +1001,49 @@ export default function PilotPage() {
                           : "Most of the team has tried it and few have drifted away."}
                   </p>
 
-              {/* WHAT WE DO ABOUT IT, named next to the number that triggers it.
+                  {/* WHAT WE DO ABOUT IT, named next to the number that triggers it.
                   A dashboard that reports adoption and stops is a scoreboard.
                   Each line below is tied to a figure above, so the plan moves
                   when the figure does rather than being restated every month. */}
-              <div data-testid="pilot-adoption-plan">
-                <h3 className="wp-pilot-subhead">How we move these numbers</h3>
-                <ul className="wp-pilot-list">
-                  <li>
-                    <strong>The ones who never started.</strong> They get reached where they
-                    already work rather than in another tool: the weekly briefing, mail,
-                    and Teams all carry the same short prompt, written for the job they
-                    actually do. One person&rsquo;s first useful question is worth more
-                    than ten broadcasts.
-                  </li>
-                  <li>
-                    <strong>Every repeated failure above is a real request.</strong> One that
-                    nobody filed as one. Each becomes either a connected source or an
-                    honest &ldquo;we do not hold that&rdquo;, and the person who asked is
-                    told which. That is how the list gets shorter.
-                  </li>
-                  <li>
-                    <strong>A new source earns its own invitation.</strong> When a library
-                    or system connects, the people whose work lives in it are the ones who
-                    hear about it, with examples drawn from their own material rather than
-                    a feature announcement.
-                  </li>
-                  <li>
-                    <strong>Drift is treated as a question, not a churn number.</strong>{" "}
-                    Somebody who used it and stopped is asked what they went back to. That
-                    answer is the cheapest research in the pilot.
-                  </li>
-                </ul>
-              </div>
+                  <div data-testid="pilot-adoption-plan">
+                    <h3 className="wp-pilot-subhead">
+                      How we move these numbers
+                    </h3>
+                    <ul className="wp-pilot-list">
+                      <li>
+                        <strong>The ones who never started.</strong> They get
+                        reached where they already work rather than in another
+                        tool: the weekly briefing, mail, and Teams all carry the
+                        same short prompt, written for the job they actually do.
+                        One person&rsquo;s first useful question is worth more
+                        than ten broadcasts.
+                      </li>
+                      <li>
+                        <strong>
+                          Every repeated failure above is a real request.
+                        </strong>{" "}
+                        One that nobody filed as one. Each becomes either a
+                        connected source or an honest &ldquo;we do not hold
+                        that&rdquo;, and the person who asked is told which.
+                        That is how the list gets shorter.
+                      </li>
+                      <li>
+                        <strong>A new source earns its own invitation.</strong>{" "}
+                        When a library or system connects, the people whose work
+                        lives in it are the ones who hear about it, with
+                        examples drawn from their own material rather than a
+                        feature announcement.
+                      </li>
+                      <li>
+                        <strong>
+                          Drift is treated as a question, not a churn number.
+                        </strong>{" "}
+                        Somebody who used it and stopped is asked what they went
+                        back to. That answer is the cheapest research in the
+                        pilot.
+                      </li>
+                    </ul>
+                  </div>
                 </>
               )}
             </section>

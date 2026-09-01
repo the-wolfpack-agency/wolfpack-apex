@@ -12,9 +12,9 @@
  *    click can convert a lead, send an email, or fire a workflow, and "we were
  *    only mapping" does not undo it.
  *
- * 2. It never leaves the origin it was authorised for. A client system links
+ * 2. It never leaves the origin it was authorized for. A client system links
  *    outward constantly — docs, status pages, vendor sites — and following
- *    those means scanning systems nobody authorised.
+ *    those means scanning systems nobody authorized.
  *
  * 3. It refuses anything that looks like it ends the session or destroys
  *    something, by name. Logging ourselves out mid-map is merely annoying;

@@ -70,7 +70,7 @@ export function endedBadly(g: TurnGist): boolean {
      The product declining to guess between several documents is the correct
      answer to a question with no subject, and it replaced a confident wrong
      one. Counting it as a failure would teach every downstream measure to
-     prefer the behaviour that was just fixed. */
+     prefer the behavior that was just fixed. */
   /* degraded IS bad. Both it and asked_which are honest, and that is where
      the resemblance stops: asking which document is the right answer to a
      vague question; an outage is the product failing somebody who asked a

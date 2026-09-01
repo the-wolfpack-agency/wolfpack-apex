@@ -60,7 +60,7 @@ export const DATA_QUESTIONS: DataQuestion[] = [
     id: "recent_documents",
     ask: "what documents do we have about onboarding",
     title: "Onboarding material",
-    why: "Onboarding is the corpus every organisation has and the one new joiners look for first.",
+    why: "Onboarding is the corpus every organization has and the one new joiners look for first.",
   },
   {
     id: "agreements",
@@ -72,7 +72,7 @@ export const DATA_QUESTIONS: DataQuestion[] = [
     id: "policy",
     ask: "what is our policy on pto",
     title: "Policy",
-    why: "Policy questions are the highest-volume internal request in most organisations and the cheapest to deflect.",
+    why: "Policy questions are the highest-volume internal request in most organizations and the cheapest to deflect.",
   },
   {
     id: "team_shape",

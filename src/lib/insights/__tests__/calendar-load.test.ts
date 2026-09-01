@@ -5,7 +5,7 @@
  * reads a log of calendar writes INSTINCT made, which is a different question,
  * and the synced calendar it needed was empty until the sync was scheduled.
  */
-import { summariseLoad, longestRun, describeLoad, type LoadEvent } from "../calendar-load";
+import { summarizeLoad, longestRun, describeLoad, type LoadEvent } from "../calendar-load";
 
 const day = (h: number, m = 0) => new Date(Date.UTC(2026, 7, 31, h, m)).toISOString();
 const ev = (
@@ -26,7 +26,7 @@ describe("what counts as load", () => {
   /* THE MISTAKE THIS IS WRITTEN TO AVOID. On our own calendar, time away and
      trips held ninety per cent of the hours. */
   it("keeps a holiday out of the meeting hours", () => {
-    const load = summariseLoad(
+    const load = summarizeLoad(
       [ev("alicia", "Alicia OOO", 0, 192, 8), ev("alicia", "Porsche weekly", 9, 1)],
       7,
     );
@@ -37,12 +37,12 @@ describe("what counts as load", () => {
 
   /* Not discarded: who is off and when answers its own question. */
   it("reports the time away in days somebody would say out loud", () => {
-    const load = summariseLoad([ev("alicia", "Alicia OOO", 0, 16, 0)], 7);
+    const load = summarizeLoad([ev("alicia", "Alicia OOO", 0, 16, 0)], 7);
     expect(load.people[0].timeOffDays).toBe(2);
   });
 
   it("leaves trips and holds out of both figures", () => {
-    const load = summariseLoad(
+    const load = summarizeLoad(
       [ev("max", "F1 Las Vegas", 0, 192, 0), ev("max", "Focus time", 9, 2, 0)],
       7,
     );
@@ -52,7 +52,7 @@ describe("what counts as load", () => {
   /* A meeting with nobody else invited is a note to self, and separating them
      is what makes a load figure credible to the person it describes. */
   it("counts meetings with nobody else invited separately", () => {
-    const load = summariseLoad(
+    const load = summarizeLoad(
       [ev("nick", "Draft the SOW", 9, 1, 0), ev("nick", "Porsche weekly", 11, 1, 4)],
       7,
     );
@@ -61,7 +61,7 @@ describe("what counts as load", () => {
 });
 
 describe("the longest run of meetings", () => {
-  /* "Four in a row" is a thing somebody recognises about their own Tuesday.
+  /* "Four in a row" is a thing somebody recognizes about their own Tuesday.
      "63% fragmentation" is not. */
   it("counts meetings that touch", () => {
     expect(
@@ -101,13 +101,13 @@ describe("what it refuses to imply", () => {
   /* An empty result and a broken sync look identical as a number and mean
      opposite things. */
   it("does not let an empty calendar read as a quiet week", () => {
-    expect(describeLoad(summariseLoad([], 7))).toMatch(/not the same as a quiet one/i);
+    expect(describeLoad(summarizeLoad([], 7))).toMatch(/not the same as a quiet one/i);
   });
 
   /* Counted, never scored as zero: an entry with no times cannot contribute
      hours and pretending it contributes none is a different lie. */
   it("counts entries it could not use", () => {
-    const load = summariseLoad(
+    const load = summarizeLoad(
       [{ person: "nick", subject: "No times", startAt: null, endAt: null }],
       7,
     );
@@ -119,7 +119,7 @@ describe("what it refuses to imply", () => {
   });
 
   it("says what was excluded, next to the numbers", () => {
-    const text = describeLoad(summariseLoad([ev("nick", "Porsche weekly", 9, 1)], 7));
+    const text = describeLoad(summarizeLoad([ev("nick", "Porsche weekly", 9, 1)], 7));
     expect(text).toMatch(/excluded from the meeting figures/i);
     expect(text).toMatch(/tenfold/i);
   });
@@ -133,9 +133,9 @@ describe("what it refuses to imply", () => {
  * holidays, counted six times. It looked plausible and was wrong for everyone.
  */
 describe("whose time off it actually is", () => {
-  const ooo = (person: string, organiser: string) => ({
+  const ooo = (person: string, organizer: string) => ({
     person,
-    organiser,
+    organizer,
     subject: "Alicia OOO",
     startAt: day(0),
     endAt: new Date(Date.parse(day(0)) + 16 * 3_600_000).toISOString(),
@@ -143,7 +143,7 @@ describe("whose time off it actually is", () => {
   });
 
   it("credits the holiday to the person who is away", () => {
-    const load = summariseLoad([ooo("alicia", "alicia"), ooo("nick", "alicia")], 7);
+    const load = summarizeLoad([ooo("alicia", "alicia"), ooo("nick", "alicia")], 7);
     const alicia = load.people.find((p) => p.person === "alicia")!;
     const nick = load.people.find((p) => p.person === "nick")!;
     expect(alicia.timeOffDays).toBe(2);
@@ -152,7 +152,7 @@ describe("whose time off it actually is", () => {
 
   /* Somebody else's holiday on your calendar is not your meeting either. */
   it("does not turn a colleague's holiday into a meeting", () => {
-    const load = summariseLoad([ooo("nick", "alicia")], 7);
+    const load = summarizeLoad([ooo("nick", "alicia")], 7);
     expect(load.people[0]).toMatchObject({ meetings: 0, meetingHours: 0, timeOffDays: 0 });
   });
 
@@ -160,16 +160,16 @@ describe("whose time off it actually is", () => {
   it("still counts a meeting on every attendee's calendar", () => {
     const meeting = (person: string) => ({
       ...ev(person, "Porsche weekly", 9, 1),
-      organiser: "nick",
+      organizer: "nick",
     });
-    const load = summariseLoad([meeting("nick"), meeting("alicia")], 7);
+    const load = summarizeLoad([meeting("nick"), meeting("alicia")], 7);
     expect(load.people.map((p) => p.meetingHours)).toEqual([1, 1]);
   });
 
-  /* An entry with no organiser recorded is the person's own, which is the
+  /* An entry with no organizer recorded is the person's own, which is the
      safe reading: a calendar with no invitation is a note to self. */
-  it("treats an unorganised entry as the person's own", () => {
-    const load = summariseLoad(
+  it("treats an unorganized entry as the person's own", () => {
+    const load = summarizeLoad(
       [{ person: "nick", subject: "Vacation", startAt: day(0), endAt: day(8), attendeeCount: 0 }],
       7,
     );

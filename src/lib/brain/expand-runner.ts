@@ -39,7 +39,7 @@ export interface ExpandContext {
 /**
  * Build the rewriter to hand to retrieve().
  *
- * Returns the original question on any failure. A rewrite is an optimisation
+ * Returns the original question on any failure. A rewrite is an optimization
  * on a question that already failed, so a provider outage during one must
  * cost the reader nothing beyond the answer they were not getting anyway,
  * and retrieve() treats an unchanged question as "do not bother retrying".
