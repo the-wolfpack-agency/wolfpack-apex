@@ -221,3 +221,23 @@ describe("the cron path", () => {
     }),
   );
 });
+
+/**
+ * The budget has to fit the limit the platform actually enforces.
+ *
+ * maxDuration is a request, not a guarantee: it is capped by plan. Two runs on
+ * 2026-09-01 derived a 240-second deadline from a declared 300, were killed
+ * anyway, and recorded no event at all, so the documents each had already
+ * repaired were invisible to the report and to the next run.
+ */
+describe("how long a run gives itself", () => {
+  it("fits inside the smallest limit the platform is known to enforce", async () => {
+    const before = Date.now();
+    await POST(req({ limit: 10 }));
+    const opts = mockReprocess.mock.calls[0][2] as { deadline: number };
+    const budget = opts.deadline - before;
+    /* Comfortably under a 60-second cap, so the report is always written. */
+    expect(budget).toBeGreaterThan(10_000);
+    expect(budget).toBeLessThan(55_000);
+  });
+});
