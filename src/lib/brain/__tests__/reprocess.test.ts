@@ -58,7 +58,7 @@ jest.mock("../chunker", () => ({
   chunkText: (t: string) => [{ content: t, token_estimate: 10 }],
 }));
 
-import { findCandidates, reprocessFixable, FIXABLE } from "../reprocess";
+import { findCandidates, reprocessFixable, FIXABLE, MAX_REPAIR_BYTES } from "../reprocess";
 
 const ACTOR = { userId: "u1", role: "cto" };
 
@@ -479,5 +479,46 @@ describe("a repair that runs out of time", () => {
     candidates(3);
     const report = await reprocessFixable(async () => Buffer.from("x"), { userId: "u", role: "cto" });
     expect(report.attempted).toBe(3);
+  });
+});
+
+/**
+ * One oversized file must not take a whole batch with it.
+ *
+ * A repair pulls the whole file into a Buffer to re-extract it. Exceeding the
+ * function's memory does not raise an error a catch can see: the process dies,
+ * the request returns 500, and the report never gets written, so every
+ * document the run had already repaired disappears with it.
+ *
+ * Measured 2026-09-01. Once the small files drained, four consecutive runs
+ * died almost immediately and moved the queue by one or two each. The queue
+ * held a 44.7MB file and ten others over 25MB, sorted to the front. One
+ * document was killing a batch of fifty.
+ */
+describe("files too big to pull into memory", () => {
+  it("excludes them in the query, not in the loop", async () => {
+    mockQuery.mockResolvedValueOnce({ rows: [] });
+    await findCandidates({ limit: 50 });
+
+    const [sql, args] = mockQuery.mock.calls[0];
+    /* In SQL, because a document skipped in the loop has already been
+       downloaded, which is the thing that kills the process. */
+    expect(String(sql)).toMatch(/size_bytes/);
+    expect(args).toContain(MAX_REPAIR_BYTES);
+  });
+
+  /* Unknown is not the same fact as too big, and the download is the next
+     thing that would find out either way. */
+  it("lets a document with no recorded size through", async () => {
+    mockQuery.mockResolvedValueOnce({ rows: [] });
+    await findCandidates({ limit: 50 });
+    expect(String(mockQuery.mock.calls[0][0])).toMatch(/size_bytes IS NULL OR/);
+  });
+
+  it("keeps a ceiling big enough for anything with text in it", () => {
+    /* Everything above it in this corpus is video, image sets and design
+       files, which would fail extraction even if they fit. */
+    expect(MAX_REPAIR_BYTES).toBeGreaterThanOrEqual(8 * 1024 * 1024);
+    expect(MAX_REPAIR_BYTES).toBeLessThanOrEqual(25 * 1024 * 1024);
   });
 });

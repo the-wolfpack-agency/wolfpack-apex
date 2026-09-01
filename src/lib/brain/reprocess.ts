@@ -77,6 +77,29 @@ export const FIXABLE: Array<{ id: string; test: RegExp; source: string; why: str
   },
 ];
 
+/**
+ * The largest file a run will pull into memory.
+ *
+ * A repair downloads the whole file into a Buffer to re-extract it. On a
+ * serverless function that is bounded by the instance's memory, and exceeding
+ * it does not raise an error a catch can see: the process dies, the request
+ * returns 500, and the report never gets written. Every document the run had
+ * already repaired disappears with it.
+ *
+ * Measured 2026-09-01. Once the small files had drained, four consecutive runs
+ * died almost immediately and moved the queue by one or two documents each.
+ * The queue at that point held a 44.7MB file and ten others over 25MB, sorted
+ * to the front by created_at. One oversized document was killing an entire
+ * batch of fifty.
+ *
+ * Ten megabytes covers every document in this corpus that carries extractable
+ * text: the ones above it are video, image sets and design files, which have
+ * no text to recover and would fail extraction even if they fit. Refusing them
+ * by size is honest about why, and it is a refusal that says so on the row
+ * rather than looking like a crash.
+ */
+export const MAX_REPAIR_BYTES = 10 * 1024 * 1024;
+
 /** What one document's OCR may cost before the repair refuses it. */
 export const OCR_CEILING_CENTS = 25;
 
@@ -164,13 +187,19 @@ export async function findCandidates(
   const { rows } = await query<BrainDocument>(
     `SELECT * FROM brain_documents
       WHERE ms_drive_item_id IS NOT NULL
+        /* Excluded in SQL rather than skipped in the loop, so an oversized
+           document never reaches a download that would kill the process and
+           take the whole batch's report with it. A null size is allowed
+           through: unknown is not the same as too big, and the download itself
+           is the next thing that would find out. */
+        AND (size_bytes IS NULL OR size_bytes <= $5)
         AND (
           (status IN ('failed','skipped') AND status_detail ~* ANY($1::text[]))
           OR (status = ANY($2::text[]) AND updated_at < NOW() - ($3::int * INTERVAL '1 minute'))
         )
       ORDER BY created_at DESC
       LIMIT $4`,
-    [fixablePatterns, NON_TERMINAL as unknown as string[], stranded, limit],
+    [fixablePatterns, NON_TERMINAL as unknown as string[], stranded, limit, MAX_REPAIR_BYTES],
   );
 
   const out: ReprocessCandidate[] = [];
