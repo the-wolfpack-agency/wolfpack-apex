@@ -18,6 +18,7 @@ import { getPhaseOneSnapshot } from "@/lib/pilot/phase-one";
 import { getAdoptionSnapshot } from "@/lib/pilot/adoption";
 import { readCapabilitySnapshot } from "@/lib/insights/capability-snapshot";
 import { getGapsSnapshot } from "@/lib/pilot/gaps";
+import { readLibraryQuestions } from "@/lib/pilot/library-questions";
 import { connectedSystems } from "@/lib/assistant/tools/capability-scope";
 import type { GapSystem } from "@/lib/insights/unanswered";
 import { getTokenUsage } from "@/lib/pilot/token-usage";
@@ -58,7 +59,7 @@ export async function GET(req: NextRequest) {
   if (linked.has("dms")) answerable.add("dealer-system");
   if (linked.has("quickbooks")) answerable.add("finance");
 
-  const [snapshot, adoption, capability, tokenUsage, gaps] = await Promise.all([
+  const [snapshot, adoption, capability, tokenUsage, gaps, libraryQuestions] = await Promise.all([
     getPhaseOneSnapshot(workspaceId, days),
     getAdoptionSnapshot(workspaceId, days),
     readCapabilitySnapshot(days).catch(() => null),
@@ -67,9 +68,13 @@ export async function GET(req: NextRequest) {
        lengths. */
     getTokenUsage(days).catch(() => null),
     getGapsSnapshot(answerable, days),
+    /* WEEK ONE'S MOST USEFUL OUTPUT IS A QUESTION. Reading a client's library
+       and telling them what it means is the most expensive mistake available:
+       42 per cent of our own turned out to be our tooling writing into it. */
+    readLibraryQuestions(),
   ]);
 
-  return NextResponse.json({ ...snapshot, adoption, capability, tokenUsage, gaps }, {
+  return NextResponse.json({ ...snapshot, adoption, capability, tokenUsage, gaps, libraryQuestions }, {
     status: 200,
     /* Never cached: a dashboard figure that is minutes old invites somebody to
        act on a number that has already moved. */

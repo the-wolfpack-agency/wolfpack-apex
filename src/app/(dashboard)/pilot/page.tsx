@@ -85,6 +85,12 @@ function Figure({
   );
 }
 
+interface LibraryQuestion {
+  noticed: string;
+  ask: string;
+  examples: string[];
+}
+
 interface GapItem {
   question: string;
   asked: number;
@@ -175,6 +181,7 @@ export default function PilotPage() {
         capability?: CapabilitySnapshot;
         tokenUsage?: TokenUsage | null;
         gaps?: GapsSnapshot;
+        libraryQuestions?: { questions: LibraryQuestion[]; readable: boolean };
       })
     | null
   >(null);
@@ -200,6 +207,7 @@ export default function PilotPage() {
         if (!res.ok) throw new Error(String(res.status));
         const data = (await res.json()) as PhaseOneSnapshot & {
           gaps?: GapsSnapshot;
+          libraryQuestions?: { questions: LibraryQuestion[]; readable: boolean };
           adoption?: AdoptionSnapshot;
           capability?: CapabilitySnapshot;
           tokenUsage?: TokenUsage | null;
@@ -255,6 +263,27 @@ export default function PilotPage() {
         </p>
       ) : (
         <>
+          {snap.libraryQuestions?.questions?.length ? (
+            <section className="wp-pilot-section" data-testid="pilot-library-questions">
+              <h2>What only you can tell us</h2>
+              <p className="wp-pilot-aside">
+                Things about this library that look like findings and might not be. Reading data
+                and concluding from it is the expensive mistake in week one: on our own library,
+                42% of the documents turned out to be output from our own tools writing into it.
+                So these are questions, and none of them is a number we intend to quote.
+              </p>
+              <ul className="wp-build-findings">
+                {snap.libraryQuestions.questions.map((q) => (
+                  <li key={q.noticed}>
+                    <h3>{q.noticed}</h3>
+                    <p>{q.ask}</p>
+                    <p className="wp-build-evidence">{q.examples.join(" · ")}</p>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
+
           <section className="wp-pilot-section">
             <h2>What we can read</h2>
             <div className="wp-pilot-figures">

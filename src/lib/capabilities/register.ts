@@ -109,6 +109,18 @@ export const CAPABILITIES: Capability[] = [
       "The whole cost argument rests on it. A router that always picks the same model is indistinguishable from one that cannot pick another.",
   },
   {
+    /* ADDED THE DAY IT WAS BUILT, deliberately. The calendar version of this
+       idea, findConcentration and calibrationQuestion, was written months ago
+       and nothing has ever called it. That is the fifth capability found this
+       way, and the only reason this one will not join it is that the register
+       now asks. */
+    id: "library_questions",
+    claim: "In week one we can say something specific about a client's own library, as a question.",
+    provenBy: { kind: "event", event: "insights.library_questioned" },
+    matters:
+      "The alternative is a first meeting spent describing the product. This is the moment a client sees it reading their data rather than reciting a demo.",
+  },
+  {
     id: "relevance_judge",
     claim: "We can tell a confident retrieval from the wrong place, and refuse it.",
     provenBy: { kind: "event", event: "brain.retrieval_judged_irrelevant" },
