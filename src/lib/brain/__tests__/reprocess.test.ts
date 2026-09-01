@@ -272,3 +272,75 @@ describe("a scan with no extractable text", () => {
     expect(mockOcrImage).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * What `limit` means, and the night it meant something else.
+ *
+ * THE INCIDENT. The nightly sweep asks the endpoint what is waiting, then asks
+ * it to repair. The first call used the endpoint default of 200 and reported
+ * 186 documents waiting. The second sent limit 50 and repaired nothing, three
+ * nights running, exiting green each time.
+ *
+ * The cause was ordering: the query took the newest N rows and JavaScript then
+ * discarded the ones nothing can fix. So `limit` meant "rows to look at" while
+ * every caller read it as "documents to repair", and the newest fifty happened
+ * to be scanned PDFs and expired-token rows that no repair addresses.
+ *
+ *     limit  50  ->    0 candidates      of 186 repairable
+ *     limit 100  ->   49
+ *     limit 200  ->   98
+ *
+ * Ninety Word documents of a client's course material sat unreadable behind a
+ * job reporting success. Fixability is decided in SQL now, before the limit.
+ */
+describe("how many documents a repair run takes", () => {
+  /* Rows the SQL would return: the caller's limit applied to rows that are
+     ALREADY fixable, which is what the new query does. */
+  function givenFixable(count: number) {
+    mockQuery.mockResolvedValueOnce({
+      rows: Array.from({ length: count }, (_, i) => ({
+        id: `d${i}`,
+        filename: `doc-${i}.docx`,
+        kind: "docx",
+        status: "failed",
+        status_detail: 'DOMParser.parseFromString: the provided mimeType "undefined" is not valid',
+        ms_drive_item_id: `drive-${i}`,
+      })),
+    });
+  }
+
+  it("asks the database for fixable rows rather than filtering afterwards", async () => {
+    givenFixable(50);
+    await findCandidates({ limit: 50 });
+
+    const [sql, args] = mockQuery.mock.calls[0];
+    /* THE ASSERTION THAT WOULD HAVE CAUGHT IT. The fixability test has to be
+       inside the statement, or the LIMIT lands on the wrong set of rows. */
+    expect(sql).toMatch(/status_detail\s*~\*/i);
+    expect(sql.indexOf("status_detail")).toBeLessThan(sql.indexOf("LIMIT"));
+    /* And the patterns come from FIXABLE, so the planner and the repairer
+       cannot disagree about what fixable means. */
+    expect(args[0]).toEqual(FIXABLE.map((f) => f.source));
+  });
+
+  it("returns as many as it was asked for when that many are waiting", async () => {
+    givenFixable(50);
+    expect(await findCandidates({ limit: 50 })).toHaveLength(50);
+  });
+
+  it("returns everything waiting when fewer than the limit remain", async () => {
+    givenFixable(7);
+    expect(await findCandidates({ limit: 50 })).toHaveLength(7);
+  });
+
+  /* Every pattern must be something Postgres can run. A JavaScript-only
+     construct would match in the planner and not in the repairer, which is a
+     quieter version of the same bug. */
+  it("keeps every fixable pattern portable to Postgres", () => {
+    for (const f of FIXABLE) {
+      expect(f.source).not.toMatch(/\\[dswbDSWB]|\(\?[:=!<]/);
+      /* And the two forms have to describe the same set. */
+      expect(new RegExp(f.source, "i").source).toBe(f.test.source.replace(/^\/|\/i$/g, ""));
+    }
+  });
+});

@@ -56,15 +56,23 @@ import type { BrainDocument } from "./types";
  * document only becomes a candidate when somebody has actually fixed the thing
  * that broke it.
  */
-export const FIXABLE: Array<{ id: string; test: RegExp; why: string }> = [
+export const FIXABLE: Array<{ id: string; test: RegExp; source: string; why: string }> = [
   {
     id: "docx_mimetype",
     test: /DOMParser|mimeType|docx parse/i,
+    /* The same pattern in a form Postgres understands, kept beside the RegExp
+       so the two cannot describe different sets of documents. Plain
+       alternation only: anything needing JS-specific syntax would have to be
+       expressed for both engines and checked, and a repair that quietly
+       matched different rows in the planner and the repairer is the bug this
+       whole change is about. */
+    source: "DOMParser|mimeType|docx parse",
     why: "the xmldom 0.9 mimeType break, fixed in #402 by moving off mammoth",
   },
   {
     id: "extractor_now_exists",
     test: /sync extractor unavailable/i,
+    source: "sync extractor unavailable",
     why: "classified as a kind with no extractor, often a misclassified xlsx or docx",
   },
 ];
@@ -128,14 +136,39 @@ export async function findCandidates(
    * 332 pointless writes, a status change for the 167 that were merely
    * skipped, and a report that reads like work happened. Selecting only what
    * is repairable means an empty candidate list is the honest answer. */
+  /* FIXABILITY IS DECIDED IN SQL, NOT AFTER THE LIMIT.
+   *
+   * It used to select the newest N rows and then discard the ones nothing can
+   * fix, which made `limit` mean "rows to look at" while every caller read it
+   * as "documents to repair". The two are wildly different when the newest
+   * rows are the unfixable ones.
+   *
+   * Measured 2026-09-01, with 186 repairable documents waiting:
+   *
+   *     limit  50  ->    0 candidates     <- what the nightly job sends
+   *     limit 100  ->   49
+   *     limit 200  ->   98                <- what the plan step reports
+   *     limit 500  ->  186
+   *
+   * So the sweep logged "186 documents waiting on a repair" and then "repaired
+   * 0, still failing 0" every night, and exited green, because its two steps
+   * asked the same question with different limits and got different answers.
+   * Ninety Word documents of the client's course material sat unreadable
+   * behind a job that reported success.
+   *
+   * The patterns come from FIXABLE rather than being restated here, so the
+   * planner and the repairer cannot drift about what "fixable" means. */
+  const fixablePatterns = FIXABLE.map((f) => f.source);
   const { rows } = await query<BrainDocument>(
     `SELECT * FROM brain_documents
       WHERE ms_drive_item_id IS NOT NULL
-        AND (status IN ('failed','skipped')
-             OR (status = ANY($1::text[]) AND updated_at < NOW() - ($2::int * INTERVAL '1 minute')))
+        AND (
+          (status IN ('failed','skipped') AND status_detail ~* ANY($1::text[]))
+          OR (status = ANY($2::text[]) AND updated_at < NOW() - ($3::int * INTERVAL '1 minute'))
+        )
       ORDER BY created_at DESC
-      LIMIT $3`,
-    [NON_TERMINAL as unknown as string[], stranded, limit],
+      LIMIT $4`,
+    [fixablePatterns, NON_TERMINAL as unknown as string[], stranded, limit],
   );
 
   const out: ReprocessCandidate[] = [];
