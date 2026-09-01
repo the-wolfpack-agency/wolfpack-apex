@@ -88,6 +88,9 @@ export type InstinctEventType =
      vocabulary. Carries both wordings and whether it helped, because the pair
      is the only evidence for whether the extra call earns its cost. */
   | "brain.query_expanded"
+  /* A dataset scan ran: how much it read, how much it would act on, and how
+     much it declined. */
+  | "insights.dataset_scanned"
   /* A pack shipped without embeddings because the vector store could not be
      reached. The chunks are fine; the client's semantic search is not. */
   | "brain.pack_vectors_degraded"

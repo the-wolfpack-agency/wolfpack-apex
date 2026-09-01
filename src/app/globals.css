@@ -1556,3 +1556,11 @@ a:hover { color: var(--wp-gold-hover); }
   .wp-build-ladder li { grid-template-columns: 1fr; gap: 0.25rem; }
   .wp-build-ladder li:nth-child(n) { margin-left: 0; }
 }
+
+/* Confidence on a recommendation. Reads as a state rather than prose, because
+   it is the field a reader scans before deciding whether to argue with the
+   line. Semantic rather than accent color: this is good/caution/stop, not
+   branding. */
+.wp-build-travel--strong { background: rgba(111, 158, 120, 0.18); color: #8fc39a; }
+.wp-build-travel--limited { background: rgba(201, 162, 39, 0.16); color: #d8bc63; }
+.wp-build-travel--insufficient { background: rgba(201, 138, 60, 0.18); color: #dd9f5c; }

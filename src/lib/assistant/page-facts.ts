@@ -159,6 +159,25 @@ export const PAGE_FACTS: Record<string, PageFact> = {
     ],
     related_pages: ["builds", "pilot"],
   },
+  "insight-scan": {
+    domain: "insight-scan",
+    route: "/builds/insight-scan",
+    title: "Results against plan",
+    purpose:
+      "Turns a dataset into actions for one team, each carrying the gap it closes, the records under it, what would show it worked, and what would make it wrong. Gaps it will not act on are on the page with the reason.",
+    what_you_can_do: [
+      "See what to do about a shortfall against plan, addressed to a named team.",
+      "Check any single recommendation against the records behind it rather than accepting the page whole.",
+      "See which gaps the data will not support acting on, and why each one was left alone.",
+      "See the plan the variances were measured against, so the numbers can be argued with.",
+    ],
+    how_to: [
+      "Open Client Builds from the left nav, then Results against plan.",
+      "Read the confidence beside each action: it is a record count, not an adjective.",
+      "The two sections after the actions are the ones a less careful scan leaves out.",
+    ],
+    related_pages: ["builds", "pilot"],
+  },
   playbook: {
     domain: "playbook",
     route: "/playbook",
