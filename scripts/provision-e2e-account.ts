@@ -29,6 +29,8 @@
  * Rerunning without --rotate is safe and idempotent: an existing account keeps
  * its password, so a re-run cannot silently break a CI job that is using it.
  */
+/* FIRST. Imports hoist, so anything below already read process.env. */
+import "./load-env";
 import { randomBytes } from "crypto";
 import { hashPassword } from "@/lib/auth";
 import { query } from "@/lib/db";
@@ -184,7 +186,7 @@ async function main(): Promise<void> {
   }
 
   /* --all provisions the whole set. Without it the script keeps its original
-     single-account behaviour, so an existing CI job cannot change meaning
+     single-account behavior, so an existing CI job cannot change meaning
      because somebody added a flag. */
   if (process.argv.includes("--all")) {
     await provisionAll();

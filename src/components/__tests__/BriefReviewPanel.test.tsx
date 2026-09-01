@@ -50,7 +50,7 @@ it("asks the question rather than grading the writing", async () => {
 
   const result = await screen.findByTestId("brief-review-result");
   expect(result).toHaveTextContent(/Does this have to work on the deployed URL/);
-  // No score, no grade, no percentage: a number invites optimising the number.
+  // No score, no grade, no percentage: a number invites optimizing the number.
   expect(result.textContent ?? "").not.toMatch(/\b\d+\s*(%|\/\s*\d+|out of)\b/);
   expect(result.textContent ?? "").not.toMatch(/\b(score|grade|rating)\b/i);
 });

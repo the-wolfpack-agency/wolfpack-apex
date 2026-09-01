@@ -8,7 +8,7 @@
  */
 import {
   observeVersion,
-  normaliseVersion,
+  normalizeVersion,
   isMaterial,
   quarantineIsStale,
   type KnownVersion,
@@ -20,20 +20,20 @@ const known = (v: string, calls = 100): KnownVersion => ({
   callCount: calls,
 });
 
-describe("normaliseVersion", () => {
+describe("normalizeVersion", () => {
   it("trims and lowercases", () => {
-    expect(normaliseVersion("  GPT-4o-2024-11-20 ")).toBe("gpt-4o-2024-11-20");
+    expect(normalizeVersion("  GPT-4o-2024-11-20 ")).toBe("gpt-4o-2024-11-20");
   });
 
   it("does NOT strip the date suffix", () => {
     /* The tempting simplification, and it would blind this module to the exact
        change it exists to catch. */
-    expect(normaliseVersion("gpt-4o-2024-11-20")).not.toBe("gpt-4o");
+    expect(normalizeVersion("gpt-4o-2024-11-20")).not.toBe("gpt-4o");
   });
 
   it("treats absent as empty rather than throwing", () => {
-    expect(normaliseVersion(null)).toBe("");
-    expect(normaliseVersion(undefined)).toBe("");
+    expect(normalizeVersion(null)).toBe("");
+    expect(normalizeVersion(undefined)).toBe("");
   });
 });
 

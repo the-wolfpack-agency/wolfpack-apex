@@ -1,7 +1,7 @@
 /**
  * Contract for GET /api/people/roster.
  *
- * Locked behaviours:
+ * Locked behaviors:
  *   - 403 without hr.employees.view
  *   - 200 merges employees + members + invites into one list
  *   - 503 rather than an empty roster when the database is unreachable

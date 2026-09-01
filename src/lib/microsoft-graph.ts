@@ -4,7 +4,7 @@
  * Connects to Microsoft 365 via OAuth2 and fetches communication data:
  *   Calendar events, emails, contacts, unread count, user profile.
  *
- * Shadow mode: returns realistic demo data when MS_CLIENT_ID is not set.
+ * Shadow mode: returns realiztic demo data when MS_CLIENT_ID is not set.
  * All API calls are tracked via analytics and cached with 5-minute TTL.
  */
 
@@ -332,9 +332,9 @@ export function verifyState(state: string | null): string | null {
 /* flow instead — admin consents once, app reads any user's data via  */
 /* /users/{id}/{path} endpoints.                                       */
 /*                                                                     */
-/* Behaviour is feature-flagged via INSTINCT_GRAPH_APP_ONLY:           */
+/* Behavior is feature-flagged via INSTINCT_GRAPH_APP_ONLY:           */
 /*   - "true"  → validators try app-only first, fall back to delegated*/
-/*   - unset/false → delegated only (today's behaviour)                */
+/*   - unset/false → delegated only (today's behavior)                */
 /*                                                                     */
 /* This keeps the door open: the helpers ship now, validators opt in  */
 /* once tenant admin consent for application permissions is granted   */
@@ -427,7 +427,7 @@ function isAppOnlyEnabled(): boolean {
  * Get the right Graph token for reading data ABOUT `userId`. When the
  * app-only flag is on AND we can mint an app-only token AND we know
  * the user's email, we return the app-only token + user path. Otherwise
- * we fall back to the user's delegated token (existing behaviour).
+ * we fall back to the user's delegated token (existing behavior).
  *
  * Returns null when neither path is viable (no delegated token AND
  * app-only unavailable) — caller should treat as "skip this user".
@@ -506,7 +506,7 @@ export function graphPathForReadToken(token: ReadToken, suffix: string): string 
 /**
  * Generate the Microsoft OAuth2 authorization URL for the SIGN-IN flow
  * (no existing Instinct session). The state encodes a `signin:` prefix
- * + a random nonce; the callback recognises this and provisions or
+ * + a random nonce; the callback recognizes this and provisions or
  * upserts the user record from the OAuth profile + mints an Instinct
  * JWT — single click for both Instinct auth + Graph token grant.
  *
@@ -1290,7 +1290,7 @@ async function fetchLiveUserProfile(userId: string): Promise<UserProfile | null>
 }
 
 // ---------------------------------------------------------------------------
-// Shadow Mode Demo Data (realistic CEO day at a marketing/tech agency)
+// Shadow Mode Demo Data (realiztic CEO day at a marketing/tech agency)
 // ---------------------------------------------------------------------------
 
 function todayAt(hours: number, minutes: number): string {

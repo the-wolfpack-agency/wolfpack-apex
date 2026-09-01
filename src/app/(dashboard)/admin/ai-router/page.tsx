@@ -44,7 +44,7 @@ import type { SeverityTone } from "@/components/console";
 import RouterFlow from "@/components/admin/RouterFlow";
 import RouterExplainer from "@/components/admin/RouterExplainer";
 import type { RouterInsights } from "@/lib/ai/models/insights";
-import { summariseQuality, type SignalTrend } from "@/lib/learning/answer-quality";
+import { summarizeQuality, type SignalTrend } from "@/lib/learning/answer-quality";
 import type { QualityWeek } from "@/lib/learning/answer-quality";
 import type { ProbeReport } from "@/lib/ai/models/probe";
 
@@ -59,6 +59,10 @@ function normalize(raw: unknown): RouterInsights | null {
     /* Absent means no. An older deploy, or a payload that lost the field,
        must not silently offer a control the server will refuse. */
     canProbe: b.canProbe === true,
+    /* Absent on a payload from a deploy that predates the retry, which is a
+       different thing from "no retries happened" and must not be reported as
+       a confident zero. Normalized to 0 here and the tile says which. */
+    retriesRecovered: typeof b.retriesRecovered === "number" ? b.retriesRecovered : 0,
     days: typeof b.days === "number" ? b.days : 30,
     totalDecisions: b.totalDecisions ?? 0,
     estimatedCostUsd: b.estimatedCostUsd ?? 0,
@@ -432,11 +436,29 @@ export default function AiRouterPage() {
                 testId="router-metric-cheap"
               />
               <MetricTile value={data.fallbacks} label="Fell back" kicker="Preferred model unavailable" testId="router-metric-fallbacks" />
+              {/* THE RECOVERY THAT APPLIES TO THIS DEPLOYMENT.
+                  A fallback needs a second provider to swap to, and
+                  pickFallback returns null unless Anthropic is keyed, which it
+                  is not here. So "Fell back" will read zero however much goes
+                  wrong, and until 2026-08-30 that zero was accurate for the
+                  worst possible reason: there was no recovery at all and every
+                  transient failure ended somebody's question.
+                  A retry is what actually saves a turn here, and it is
+                  invisible by design: the person got their answer and nothing
+                  said the first attempt failed. Counting it is what turns a
+                  silent success into evidence, and into early warning that a
+                  dependency is degrading before it fails for good. */}
+              <MetricTile
+                value={data.retriesRecovered}
+                label="Recovered by retry"
+                kicker="A blip nobody saw"
+                testId="router-metric-retries"
+              />
             </ConsoleGrid>
             {/* The caveat now only appears when there is genuinely nothing
                 measured, which means completions are not being recorded: a
                 different and worse problem than a missing estimate. When spend
-                IS measured, the old sentence apologised for a number nobody
+                IS measured, the old sentence apologized for a number nobody
                 was being shown any more. */}
             {!data.actualCalls && data.decisionsWithoutEstimate > 0 && (
               <p style={notice} data-testid="router-estimate-caveat">
@@ -507,7 +529,7 @@ export default function AiRouterPage() {
                 </div>
                 {/* MEASURED FIRST, ESTIMATED ONLY AS A FALLBACK.
                     This read "$0.00 estimated (12 without an estimate)", which
-                    apologised for a number instead of reporting the one we
+                    apologized for a number instead of reporting the one we
                     had: ai.completion has carried the provider's own tokens
                     and cost all along and was never read here. An estimate
                     made before the answer exists cannot know how long the
@@ -683,7 +705,7 @@ const TREND_LABEL: Record<SignalTrend, string> = {
    automatically good news: it is also what a check that stopped running looks
    like. Every trend renders neutral and the sentence underneath carries the
    meaning, which is the only way to say "this rose, and that is the gate
-   working" without the colour contradicting it. */
+   working" without the color contradicting it. */
 const TREND_TONE: Record<SignalTrend, SeverityTone> = {
   up: "info",
   down: "info",
@@ -700,7 +722,7 @@ function rateLabel(r: number | null): string {
 }
 
 function QualityPanelBody({ weeks }: { weeks: QualityWeek[] }) {
-  const summary = summariseQuality(weeks);
+  const summary = summarizeQuality(weeks);
 
   return (
     <div data-testid="router-quality-panel">
@@ -804,7 +826,7 @@ const button: React.CSSProperties = {
   fontSize: "0.9rem",
 };
 /* The refusal list. Built from the same tokens as `list`/`row` above rather
-   than new colours: this panel is evidence in a console, not a callout. */
+   than new colors: this panel is evidence in a console, not a callout. */
 const ruleList: React.CSSProperties = {
   listStyle: "none",
   padding: 0,

@@ -31,7 +31,7 @@ describe("classification", () => {
     ["Training.pptx", ""],
     ["deck.PPTX", ""],
     ["", "application/vnd.openxmlformats-officedocument.presentationml.presentation"],
-  ])("recognises %s as a deck", (filename, contentType) => {
+  ])("recognizes %s as a deck", (filename, contentType) => {
     expect(classifyKind(contentType, filename)).toBe("pptx");
   });
 
@@ -81,7 +81,7 @@ describe("a whole deck", () => {
   /* A slide reads "Signature moments" in 40pt and the notes carry the
      paragraph explaining what that means. Indexing only the face retrieves
      the title and loses the substance. */
-  it("includes speaker notes, labelled", async () => {
+  it("includes speaker notes, labeled", async () => {
     const buf = await deck({
       "ppt/slides/slide1.xml": wrap(para("Signature moments")),
       "ppt/notesSlides/notesSlide1.xml": wrap(para("Collect feedback from the group")),

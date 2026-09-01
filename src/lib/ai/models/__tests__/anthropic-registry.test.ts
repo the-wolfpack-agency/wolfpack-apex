@@ -1,17 +1,17 @@
 /**
- * Claude in the selection catalogue.
+ * Claude in the selection catalog.
  *
  * The gateway has called Anthropic all along: anthropic-provider.ts maps every
  * tier to a model and bills against its own price table. The SELECTION
  * registry had no Anthropic entries, so "cheapest at tier" compared Azure and
  * OpenAI to each other and never to Claude. On a deployment where Anthropic is
  * the only configured provider, selection had nothing to choose, and the
- * router page reported decisions over a catalogue that excluded the model
+ * router page reported decisions over a catalog that excluded the model
  * actually answering.
  *
  * That is a correctness bug wearing the clothes of a missing feature, which is
  * why these tests are about agreement between two files rather than about a
- * catalogue being longer.
+ * catalog being longer.
  */
 import { MODEL_REGISTRY, isModelAvailable, getModel } from "@/lib/ai/models/registry";
 import { selectModel } from "@/lib/ai/models/router";
@@ -21,7 +21,7 @@ const anthropicOnly = { ANTHROPIC_API_KEY: "k", NODE_ENV: "test" } as NodeJS.Pro
 
 describe("the registry describes the models the gateway actually calls", () => {
   test("every tier the provider maps has a registry entry", () => {
-    /* If these fall out of step, the router page describes a catalogue the
+    /* If these fall out of step, the router page describes a catalog the
        gateway does not use. */
     /* Collected rather than asserted one at a time: Jest's expect takes a
        single argument, so the message form (Playwright's) silently changes the
@@ -48,7 +48,7 @@ describe("availability follows the key", () => {
 describe("selection can now choose Claude", () => {
   test("an Anthropic-only deployment selects a real model instead of nothing", () => {
     /* The case that was broken: nothing else configured, so before this the
-       catalogue offered no candidate at all. */
+       catalog offered no candidate at all. */
     const chosen = selectModel({ requiredTier: "small" }, anthropicOnly);
     expect(chosen.model.provider).toBe("anthropic");
     expect(chosen.model.id).toBe("claude-haiku-4-5");
@@ -71,7 +71,7 @@ describe("selection can now choose Claude", () => {
     expect(selectModel({ requiredTier: "small" }, bothConfigured).model.id).toBe("gpt-4o-mini");
   });
 
-  test("the catalogue stays internally consistent", () => {
+  test("the catalog stays internally consistent", () => {
     for (const m of MODEL_REGISTRY) {
       expect(m.inputPricePer1kUsd).toBeGreaterThan(0);
       expect(m.outputPricePer1kUsd).toBeGreaterThan(0);

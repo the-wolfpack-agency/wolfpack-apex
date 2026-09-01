@@ -40,6 +40,7 @@ const SELECT_COLS = "user_id, hidden_hrefs, updated_at";
  */
 export const KNOWN_NAV_HREFS: readonly string[] = [
   "/assistant",
+  "/builds",
   "/",
   "/search",
   "/emails",

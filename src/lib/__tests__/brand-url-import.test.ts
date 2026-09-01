@@ -102,7 +102,7 @@ describe("extractCssPalette", () => {
     const out = extractCssPalette(css);
     expect(out).toEqual(["#aabbcc", "#112233", "#ffffff"]);
   });
-  test("normalises short hex", () => {
+  test("normalizes short hex", () => {
     const css = `--color-primary: #abc;`;
     const out = extractCssPalette(css);
     expect(out).toEqual(["#aabbcc"]);

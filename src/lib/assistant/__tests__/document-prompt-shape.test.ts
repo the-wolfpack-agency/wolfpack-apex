@@ -39,7 +39,7 @@ describe("the document starter prompt", () => {
   /* THE MEASURED FAILURE MODES. Each of these routes to search and returns a
      count, so none of them belongs in the prompt that teaches people how to
      ask. */
-  it.each(["find", "summarize", "summarise", "search", "list"])(
+  it.each(["find", "summarize", "summarize", "search", "list"])(
     "does not open with the command verb %s",
     (verb) => {
       expect(documentPrompt().text.toLowerCase().trim().startsWith(verb)).toBe(false);

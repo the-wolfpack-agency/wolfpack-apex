@@ -17,7 +17,7 @@
  * PRECISION-FIRST, matching the detector philosophy in this directory. The
  * host table is short and each entry is a domain that vendor actually serves
  * from. A guess that names the wrong vendor in a client report costs more
- * trust than a miss costs coverage, so unrecognised origins are counted and
+ * trust than a miss costs coverage, so unrecognized origins are counted and
  * never guessed at.
  */
 
@@ -48,7 +48,7 @@ const VENDOR_HOSTS: ReadonlyArray<[suffix: string, integration: string]> = [
   ["mandrillapp.com", "Email provider"],
 ];
 
-/** Which vendor an origin belongs to, or null when we do not recognise it. */
+/** Which vendor an origin belongs to, or null when we do not recognize it. */
 export function vendorForOrigin(origin: string): string | null {
   let host: string;
   try {
@@ -145,7 +145,7 @@ export function recommendFromDataFlows(map: DataFlowMap): AutomationRecommendati
     });
   }
 
-  /* 3. Unrecognised vendors are counted, never guessed at. Naming the wrong
+  /* 3. Unrecognized vendors are counted, never guessed at. Naming the wrong
         company in a client report costs more trust than a miss costs
         coverage. */
   const unknown = map.exitPoints.filter((e) => vendorForOrigin(e.origin) === null);
@@ -159,7 +159,7 @@ export function recommendFromDataFlows(map: DataFlowMap): AutomationRecommendati
         "Each one is a company receiving something about your visitors. A list nobody maintains tends to grow, and every entry is a dependency and a disclosure.",
       suggestedAction:
         "Review the list and confirm each is still needed. Removing one is usually faster than justifying it later.",
-      source: "data_flow:unrecognised_vendors",
+      source: "data_flow:unrecognized_vendors",
       evidence: {
         count: unknown.length,
         origins: unknown.slice(0, 10).map((u) => u.origin).join(", "),

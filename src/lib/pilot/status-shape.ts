@@ -17,7 +17,7 @@
  *
  * So the arithmetic here returns `null`, never `0`, for anything it could not
  * measure, every source carries the reason it is dark, and the headline
- * verdict refuses to be optimistic about a system it could not read. A tool
+ * verdict refuses to be optimiztic about a system it could not read. A tool
  * that says "on track" because the task store was down is worse than a tool
  * that says nothing.
  */
@@ -190,7 +190,7 @@ export function nextMeeting(r: PilotStatusReading): StatusMeeting | null {
 /**
  * The headline verdict.
  *
- * REFUSES TO BE OPTIMISTIC ABOUT WHAT IT DID NOT READ. With fewer than two
+ * REFUSES TO BE OPTIMIZTIC ABOUT WHAT IT DID NOT READ. With fewer than two
  * readable sources there is no cross-system view to have an opinion about, so
  * the answer is `unknown` however clean the one source that answered looked.
  * A dark task store is exactly the condition under which "on track" is both

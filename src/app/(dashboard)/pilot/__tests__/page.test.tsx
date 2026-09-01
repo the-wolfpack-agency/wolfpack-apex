@@ -382,7 +382,7 @@ describe("what the same work costs elsewhere", () => {
   /* THE ASSUMPTION HAS TO BE ON THE PAGE, not just in the code comment. Holding
      the token count fixed and changing only the price is the only comparison
      our own data supports, and presenting it as a forecast of another
-     product's bill would be a guess about their behaviour. */
+     product's bill would be a guess about their behavior. */
   it("states its own assumption and dates its prices", async () => {
     respond({ ...base, tokenUsage });
     render(<PilotPage />);
@@ -425,3 +425,346 @@ describe("what the same work costs elsewhere", () => {
   });
 });
 
+
+/**
+ * The page counted our own testing as the client's usage.
+ *
+ * Measured over thirty days on 2026-08-31: eleven per cent of the tool
+ * answers and twenty-nine per cent of the model answers came from eval
+ * harnesses, transcript probes and demo accounts. The headline share of
+ * answers served without a model read 67.9 per cent where the truth for
+ * people was 72.7.
+ */
+/**
+ * The page counted our own testing as the client's usage.
+ *
+ * Measured over thirty days on 2026-08-31: eleven per cent of the tool
+ * answers and twenty-nine per cent of the model answers came from eval
+ * harnesses, transcript probes and demo accounts. The headline share of
+ * answers served without a model read 67.9 per cent where the truth for
+ * people was 72.7. It understated us, which is the luckier direction and not
+ * a reason to leave it.
+ */
+it("names what was excluded as testing rather than quietly shrinking", async () => {
+  respond({ ...base, excludedAsTesting: 686 });
+  render(<PilotPage />);
+  const note = await screen.findByTestId("pilot-excluded-testing");
+  expect(note).toHaveTextContent("686");
+  expect(note).toHaveTextContent(/testing and tooling rather than from a person/i);
+});
+
+/* A deployment with no testing traffic must not carry a sentence about it. */
+it("says nothing about testing when there was none", async () => {
+  respond({ ...base, excludedAsTesting: 0 });
+  render(<PilotPage />);
+  await screen.findByTestId("pilot-answers");
+  expect(screen.queryByTestId("pilot-excluded-testing")).toBeNull();
+});
+
+/**
+ * What the gate stops, asked for rather than assumed.
+ *
+ * Run over our own corpus: 623 of 5,006 passages carry something removed
+ * before it reaches a model, and 59 documents hold a value that never reaches
+ * a provider at all. The panel is the client-facing half of that, and the
+ * thing it must never do is show what it found.
+ */
+describe("the corpus exposure panel", () => {
+  const exposure = {
+    chunksScanned: 5006,
+    chunksWithSomething: 623,
+    byKind: [{ kind: "credit_card", occurrences: 60, neverSend: true }],
+    documentsWithSomething: 214,
+    documentsWithNeverSend: 59,
+    documents: [
+      {
+        documentId: "d1",
+        filename: "UPS Invoice 941.14.PDF",
+        kinds: [{ kind: "credit_card", occurrences: 2, neverSend: true }],
+        holdsNeverSend: true,
+      },
+    ],
+    truncated: false,
+    durationMs: 1200,
+  };
+
+  /* ON DEMAND. Scanning every passage because somebody opened a tab would make
+     the page slow and would run a full scan on a whim. */
+  it("does not scan until asked", async () => {
+    respond({ ...base });
+    render(<PilotPage />);
+    await screen.findByTestId("pilot-exposure-run");
+    expect(screen.queryByTestId("pilot-exposure-result")).toBeNull();
+  });
+
+  it("shows what was found when asked", async () => {
+    respond({ ...base });
+    render(<PilotPage />);
+    const button = await screen.findByTestId("pilot-exposure-run");
+
+    mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => exposure });
+    button.click();
+
+    const result = await screen.findByTestId("pilot-exposure-result");
+    expect(result).toHaveTextContent("623");
+    expect(result).toHaveTextContent("59");
+    expect(result).toHaveTextContent("UPS Invoice 941.14.PDF");
+    expect(result).toHaveTextContent("credit_card");
+  });
+
+  /* THE ONE RULE THIS PANEL EXISTS UNDER. A list naming which document holds a
+     card number is a work queue. The same list with the number beside it is a
+     copy of the exposure, in a page easier to read than the original. */
+  it("never renders a value it found", async () => {
+    respond({ ...base });
+    render(<PilotPage />);
+    const button = await screen.findByTestId("pilot-exposure-run");
+    mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => exposure });
+    button.click();
+
+    const result = await screen.findByTestId("pilot-exposure-result");
+    expect(result.textContent ?? "").not.toMatch(/\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}/);
+  });
+
+  /* A button that does nothing and reports nothing is indistinguishable from a
+     corpus with nothing in it, which is the opposite finding. */
+  it("says the scan failed rather than showing an empty result", async () => {
+    respond({ ...base });
+    render(<PilotPage />);
+    const button = await screen.findByTestId("pilot-exposure-run");
+    mockFetchWithRefresh.mockResolvedValue({ ok: false, status: 500 });
+    button.click();
+
+    const failed = await screen.findByTestId("pilot-exposure-failed");
+    expect(failed).toHaveTextContent(/not the same as finding nothing/i);
+  });
+
+  /* It proves the boundary, not that anybody did anything wrong. */
+  it("does not read as an accusation", async () => {
+    respond({ ...base });
+    render(<PilotPage />);
+    const button = await screen.findByTestId("pilot-exposure-run");
+    mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => exposure });
+    button.click();
+
+    const result = await screen.findByTestId("pilot-exposure-result");
+    expect(result).toHaveTextContent(/not that anybody did anything wrong/i);
+  });
+});
+
+/**
+ * The capability has to be findable and the button has to look pressable.
+ *
+ * It shipped inside another panel, styled with a class that did not exist, so
+ * it rendered as plain text between two paragraphs and read as a heading.
+ * A feature nobody can see is worse than no feature: the page appears to
+ * claim something it does not offer.
+ */
+describe("the exposure scan is discoverable", () => {
+  it("has a heading of its own rather than trailing another panel", async () => {
+    respond({ ...base });
+    render(<PilotPage />);
+    /* By role, because the button's own label contains the same words and a
+       text match finds both. */
+    expect(
+      await screen.findByRole("heading", { name: /What never reaches a model/i }),
+    ).toBeInTheDocument();
+  });
+
+  /* A person has to know what pressing it will do before they press it. */
+  it("says what the scan does before it is run", async () => {
+    respond({ ...base });
+    render(<PilotPage />);
+    await screen.findByTestId("pilot-exposure-run");
+    expect(screen.getByText(/read every indexed passage/i)).toBeInTheDocument();
+  });
+
+  /* An element that is not a button cannot be reached by keyboard, and a div
+     with an onClick is the usual way that happens. */
+  it("is a real button", async () => {
+    respond({ ...base });
+    render(<PilotPage />);
+    const el = await screen.findByTestId("pilot-exposure-run");
+    expect(el.tagName).toBe("BUTTON");
+    expect(el).toHaveClass("wp-pilot-button");
+  });
+});
+
+/**
+ * A hundred results must not push the page down.
+ *
+ * The scan returns up to a hundred documents and the first version rendered
+ * all of them inline, so pressing the button buried every section below it
+ * under a wall somebody had to scroll past to get anywhere.
+ */
+describe("the exposure list stays in its own box", () => {
+  const manyDocuments = Array.from({ length: 100 }, (_, i) => ({
+    documentId: `d${i}`,
+    filename: `Invoice ${i}.pdf`,
+    kinds: [{ kind: "credit_card", occurrences: 1, neverSend: true }],
+    holdsNeverSend: true,
+  }));
+
+  const exposure = {
+    chunksScanned: 5006,
+    chunksWithSomething: 623,
+    byKind: [{ kind: "credit_card", occurrences: 60, neverSend: true }],
+    documentsWithSomething: 214,
+    documentsWithNeverSend: 59,
+    documents: manyDocuments,
+    truncated: true,
+    durationMs: 1200,
+  };
+
+  async function runScan() {
+    respond({ ...base });
+    render(<PilotPage />);
+    const button = await screen.findByTestId("pilot-exposure-run");
+    mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => exposure });
+    button.click();
+    return screen.findByTestId("pilot-exposure-result");
+  }
+
+  it("puts the results in a scrolling region rather than inline", async () => {
+    await runScan();
+    expect(await screen.findByTestId("pilot-exposure-scroll")).toHaveClass("wp-pilot-scroll");
+  });
+
+  /* Scrolls rather than truncates: the point of the panel is finding the
+     document you care about, and a "show more" hiding ninety of them makes
+     that worse. */
+  it("still renders every document it was given", async () => {
+    const result = await runScan();
+    expect(result).toHaveTextContent("Invoice 0.pdf");
+    expect(result).toHaveTextContent("Invoice 99.pdf");
+  });
+
+  /* Somebody has to know there is more below the fold of a box. */
+  it("says how many are listed and that the box scrolls", async () => {
+    const result = await runScan();
+    expect(result).toHaveTextContent(/100 document\(s\) listed above/i);
+    expect(result).toHaveTextContent(/Scroll the box/i);
+  });
+});
+
+/**
+ * What people asked and did not get.
+ *
+ * A build backlog written by the people using it rather than guessed at in a
+ * planning meeting, and the one panel here that says what to do next rather
+ * than what happened.
+ */
+describe("the gaps panel", () => {
+  const gaps = {
+    wouldConnect: [{ question: "how many cayennes are on the lot", asked: 9, system: "dealer-system" }],
+    missing: [{ question: "what is our refund policy", asked: 5, system: "documents" }],
+    closed: [{ question: "what are the payment terms in our sow?", asked: 18 }],
+    wanted: { actions: [{ action: "schedule a meeting", asked: 3 }], other: 2 },
+    statements: 4,
+    readable: true,
+  };
+
+  /* THE SPLIT THE PANEL EXISTS FOR. One is a decision somebody makes in an
+     afternoon, the other is somebody writing a document. A single list of
+     failures mixes a sales conversation with a content backlog. */
+  it("keeps connect-this apart from write-this", async () => {
+    respond({ ...base, gaps });
+    render(<PilotPage />);
+    const connect = await screen.findByTestId("pilot-gaps-connect");
+    expect(connect).toHaveTextContent("how many cayennes are on the lot");
+    expect(connect).toHaveTextContent("dealer-system");
+
+    const missing = screen.getByTestId("pilot-gaps-missing");
+    expect(missing).toHaveTextContent("what is our refund policy");
+    expect(missing).not.toHaveTextContent("cayennes");
+  });
+
+  /* Unmet demand for an ACTION is invisible everywhere else: nobody files a
+     request for something they assumed would work. */
+  it("shows what somebody expected the product to do", async () => {
+    respond({ ...base, gaps });
+    render(<PilotPage />);
+    const wanted = await screen.findByTestId("pilot-gaps-wanted");
+    expect(wanted).toHaveTextContent("schedule a meeting");
+    /* Requests whose verb is not on the list are counted. Dropping them
+       silently would read as nobody having wanted anything. */
+    expect(screen.getByTestId("pilot-gaps-wanted-other")).toHaveTextContent(/2 further requests/i);
+  });
+
+  /* NO INSTRUCTION IS QUOTED, EVER. The measured reason: "book me 30 minutes
+     with dana tomorrow" was on the live page, and neither that colleague nor
+     the client named in the next entry appears in any table this workspace
+     holds, so no mask could have reached them. */
+  it("never renders the words of an instruction", async () => {
+    respond({ ...base, gaps });
+    render(<PilotPage />);
+    const wanted = await screen.findByTestId("pilot-gaps-wanted");
+    expect(wanted).not.toHaveTextContent(/dana|30 minutes|tomorrow/i);
+  });
+
+  /* A shortened question and a short one look identical, and a reader who
+     cannot tell them apart reads a truncation as the whole question. */
+  it("marks a line that is not what somebody typed", async () => {
+    respond({
+      ...base,
+      gaps: {
+        ...gaps,
+        wouldConnect: [
+          { question: "a person's name", asked: 15, system: "directory", withheld: "name" },
+        ],
+        closed: [{ question: "analyze the survey data in the workbook and…", asked: 1, withheld: "paste" }],
+      },
+    });
+    render(<PilotPage />);
+    expect(await screen.findByTestId("pilot-gaps-connect")).toHaveTextContent("name withheld");
+    expect(screen.getByTestId("pilot-gaps-closed")).toHaveTextContent("shortened");
+  });
+
+  /* An exclusion nobody can see is indistinguishable from nobody having
+     asked, which is the failure this whole page is built around. */
+  it("reports how many entries were left out as remarks", async () => {
+    respond({ ...base, gaps });
+    render(<PilotPage />);
+    expect(await screen.findByTestId("pilot-gaps-statements")).toHaveTextContent(
+      /4 further entries were left out as remarks/i,
+    );
+  });
+
+  /* The best evidence there is that uploading changed something. */
+  it("shows gaps that have since closed", async () => {
+    respond({ ...base, gaps });
+    render(<PilotPage />);
+    expect(await screen.findByTestId("pilot-gaps-closed")).toHaveTextContent(
+      "what are the payment terms in our sow?",
+    );
+  });
+
+  /* AN UNREADABLE LOG AND A CLIENT WITH NO GAPS ARE THE SAME EMPTY LIST AND
+     OPPOSITE FACTS. */
+  it("says the figures could not be read rather than showing nothing", async () => {
+    respond({ ...base, gaps: { ...gaps, readable: false } });
+    render(<PilotPage />);
+    expect(await screen.findByTestId("pilot-gaps-unreadable")).toHaveTextContent(
+      /not the same as nothing having gone unanswered/i,
+    );
+    expect(screen.queryByTestId("pilot-gaps-connect")).toBeNull();
+  });
+
+  it("says so plainly when everything was answered", async () => {
+    respond({
+      ...base,
+      gaps: {
+        wouldConnect: [],
+        missing: [],
+        closed: [],
+        wanted: { actions: [], other: 0 },
+        statements: 0,
+        readable: true,
+      },
+    });
+    render(<PilotPage />);
+    expect(await screen.findByTestId("pilot-gaps-none")).toHaveTextContent(
+      /Every question asked in this window was answered/i,
+    );
+  });
+});

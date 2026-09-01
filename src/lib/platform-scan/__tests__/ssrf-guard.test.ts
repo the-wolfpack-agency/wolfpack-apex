@@ -59,7 +59,7 @@ describe("assertScannableUrl", () => {
 
   it("blocks an IPv6 literal, which URL.hostname wraps in brackets", async () => {
     // The regression this pins: URL.hostname returns "[::1]", not "::1", and
-    // net.isIP does not recognise the bracketed form. Every IPv6 literal —
+    // net.isIP does not recognize the bracketed form. Every IPv6 literal —
     // loopback, unspecified, unique-local, link-local — passed straight through
     // this guard until 2026-08-02. isPrivateIPv6 already stripped brackets, but
     // isPrivateIp gated on net.isIPv6 first, so that stripping never ran.
@@ -77,7 +77,7 @@ describe("assertScannableUrl", () => {
   });
 
   it("blocks an IPv4-mapped address in the HEX form URL.hostname produces", async () => {
-    // The second half of the same bug. URL.hostname normalises
+    // The second half of the same bug. URL.hostname normalizes
     // "::ffff:169.254.169.254" to "::ffff:a9fe:a9fe", so the dotted-quad branch
     // never fired and the AWS metadata endpoint was reachable this way.
     expect(isPrivateIPv6("::ffff:a9fe:a9fe")).toBe(true); // 169.254.169.254

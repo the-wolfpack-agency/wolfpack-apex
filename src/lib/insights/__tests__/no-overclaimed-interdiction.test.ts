@@ -16,7 +16,7 @@
  * The failure mode is one-directional and quiet: nobody files a bug because a
  * dashboard flatters the product. So it is asserted here instead.
  *
- * This guards the WORDING against the BEHAVIOUR. If the router ever does start
+ * This guards the WORDING against the BEHAVIOR. If the router ever does start
  * withholding flagged answers, this test should be changed in the same commit
  * that changes the router, and not before.
  */

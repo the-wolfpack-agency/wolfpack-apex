@@ -65,7 +65,7 @@ export function generateApiDoc(repoPath: string, filePath: string): GeneratedDoc
   const baseAbs = resolve(repoPath);
   const fullPath = resolve(baseAbs, filePath);
   // Use path.relative as the canonical containment check — CodeQL's
-  // js/path-injection sanitizer recognises this exact pattern.
+  // js/path-injection sanitizer recognizes this exact pattern.
   const rel = relative(baseAbs, fullPath);
   const escapesBase =
     rel.startsWith("..") ||

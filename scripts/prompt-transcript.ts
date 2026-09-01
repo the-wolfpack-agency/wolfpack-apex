@@ -32,6 +32,10 @@
  * Needs: DATABASE_URL. Set AI keys to exercise the paths that reach a model;
  * without them those answers degrade honestly, which is itself worth seeing.
  */
+/* First, and the order matters: imports are hoisted, so anything below this
+   would otherwise read an empty process.env. See scripts/load-env.ts. */
+import "./load-env";
+
 import { readFileSync } from "node:fs";
 import { chat } from "@/lib/assistant";
 

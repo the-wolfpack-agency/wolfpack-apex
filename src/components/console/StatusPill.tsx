@@ -4,8 +4,8 @@
  *
  * Maps the input string to a tone via `toneForStatus` (severity.ts) and tints
  * a pill with the matching --wp-* token: a translucent fill + a same-hue
- * border + the token-coloured label, plus a tiny status dot. Never hard-codes
- * a colour. Pure presentational.
+ * border + the token-colored label, plus a tiny status dot. Never hard-codes
+ * a color. Pure presentational.
  */
 
 "use client";
@@ -29,7 +29,7 @@ export interface StatusPillProps {
 }
 
 /** Same-hue translucent fill behind the pill. We reuse the token via
- *  color-mix so we never introduce a second source of colour. */
+ *  color-mix so we never introduce a second source of color. */
 function fillFor(varExpr: string): string {
   return `color-mix(in srgb, ${varExpr} 14%, transparent)`;
 }

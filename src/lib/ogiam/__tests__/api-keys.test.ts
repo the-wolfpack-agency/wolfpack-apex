@@ -156,7 +156,7 @@ describe("createApiKey", () => {
     }
   });
 
-  it("normalises capabilities (trims, drops blanks, de-dupes)", async () => {
+  it("normalizes capabilities (trims, drops blanks, de-dupes)", async () => {
     await createApiKey({
       workspaceId: "ws_a",
       agent: "a",

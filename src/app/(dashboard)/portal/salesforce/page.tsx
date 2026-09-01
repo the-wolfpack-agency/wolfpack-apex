@@ -25,7 +25,7 @@ interface PipelineSnapshot {
   byStage: Array<{ stage: string; count: number; amount: number }>;
 }
 
-interface RecentRecord {
+interface Recentercord {
   id: string;
   name: string;
   type: "contacts" | "opportunities" | "accounts";
@@ -35,7 +35,7 @@ interface RecentRecord {
 interface DashboardResponse {
   notConfigured: boolean;
   pipeline: PipelineSnapshot;
-  recent: RecentRecord[];
+  recent: Recentercord[];
   connector: string;
 }
 

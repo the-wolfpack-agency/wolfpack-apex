@@ -17,7 +17,7 @@ import { mapDay, draftRoutine } from "../day-plan";
 import { readRepair, checkRoutine } from "../heal";
 import { replaceTool } from "../edit";
 import { ROUTINE_TEMPLATES } from "../templates";
-import { BUILT_IN_ROUTINES } from "../catalogue";
+import { BUILT_IN_ROUTINES } from "../catalog";
 import { getTools } from "@/lib/assistant/tools/registry";
 import "@/lib/assistant/tools";
 import type { Routine } from "../types";

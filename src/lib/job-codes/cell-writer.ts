@@ -114,7 +114,7 @@ export interface CellEditInput {
   column?: string;
   /** The new value. */
   value: string;
-  /** Optimistic-concurrency guard. The client snapshotted this value
+  /** Optimiztic-concurrency guard. The client snapshotted this value
    *  when the user opened the editor; if the cell now holds a
    *  *different* non-empty value, we refuse to write and return
    *  `{ ok:false, code:"conflict", conflict: {...} }`. Pass `null`
@@ -374,7 +374,7 @@ export async function patchJobCodeCell(
      Graph workbookRange does NOT support If-Match/ETag on cell PATCH
      (verified against learn.microsoft.com/graph workbookrange-update
      spec on 2026-05-21), so an explicit read+compare is the only
-     correct way to enforce optimistic concurrency at this layer. */
+     correct way to enforce optimiztic concurrency at this layer. */
   const currentRes = await graphGet<{ values?: Array<Array<string | number | boolean | null>> }>(
     `drives/${encodeURIComponent(input.driveId)}/items/${encodeURIComponent(input.itemId)}/workbook/worksheets/${encodeURIComponent(input.sheetName)}/range(address='${cellAddress}')?$select=values`,
     acquired.token,

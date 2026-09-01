@@ -33,7 +33,7 @@ const exit = (origin: string, pages = 1) => ({
   pages: Array.from({ length: pages }, (_, i) => `/p${i}`),
 });
 
-describe("recognising a vendor", () => {
+describe("recognizing a vendor", () => {
   it.each([
     ["https://js.stripe.com", "Stripe"],
     ["https://api.stripe.com", "Stripe"],
@@ -52,7 +52,7 @@ describe("recognising a vendor", () => {
     },
   );
 
-  it("returns null for anything it does not recognise, rather than guessing", () => {
+  it("returns null for anything it does not recognize, rather than guessing", () => {
     expect(vendorForOrigin("https://analytics.unknown-co.example")).toBeNull();
   });
 });
@@ -120,7 +120,7 @@ describe("the vendors they already use", () => {
 
   /* Naming the wrong company in a client report costs more trust than a miss
      costs coverage. */
-  it("never invents a play for an unrecognised origin", () => {
+  it("never invents a play for an unrecognized origin", () => {
     const recs = recommendFromDataFlows({
       ...empty,
       exitPoints: [exit("https://something.unknown.example")],
@@ -130,7 +130,7 @@ describe("the vendors they already use", () => {
 });
 
 describe("sprawl", () => {
-  it("raises unrecognised third parties only once there are enough to matter", () => {
+  it("raises unrecognized third parties only once there are enough to matter", () => {
     const four = Array.from({ length: 4 }, (_, i) => exit(`https://v${i}.example`));
     expect(
       recommendFromDataFlows({ ...empty, exitPoints: four }).filter(
@@ -143,7 +143,7 @@ describe("sprawl", () => {
     expect(recs.find((r) => r.key === "operational:third_party_sprawl")?.evidence.count).toBe(5);
   });
 
-  it("does not count recognised vendors as unidentified", () => {
+  it("does not count recognized vendors as unidentified", () => {
     const mixed = [
       exit("https://js.stripe.com"),
       ...Array.from({ length: 4 }, (_, i) => exit(`https://v${i}.example`)),

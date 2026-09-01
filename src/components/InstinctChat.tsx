@@ -232,6 +232,9 @@ export default function InstinctChat({
   const [fileError, setFileError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const [expandedSources, setExpandedSources] = useState<Record<string, boolean>>({});
+  /* Which answer was just copied, so the button can say so. Index rather than
+     a boolean: two answers must not both read "Copied". */
+  const [copiedAnswer, setCopiedAnswer] = useState<number | null>(null);
   const [isOnline, setIsOnline] = useState<boolean>(
     typeof navigator !== "undefined" ? navigator.onLine : true,
   );
@@ -591,10 +594,10 @@ export default function InstinctChat({
          * Replacing the local array with that snapshot drops the
          * pending assistant message + its widget. Instead, APPEND the
          * server-side rows we don't have locally and PRESERVE any
-         * local-only (no id) optimistic messages. */
+         * local-only (no id) optimiztic messages. */
         /* Race-safe merge (see mergeRefreshedMessages): preserves any local
          * row the snapshot does not yet represent, by id OR role+content, so
-         * an optimistic assistant reply carrying a server messageId is not
+         * an optimiztic assistant reply carrying a server messageId is not
          * dropped when a refresh races the server's assistant-message save. */
         setMessages((prev) => mergeRefreshedMessages(prev, remote));
         void fetchWithRefresh("/api/analytics", {
@@ -1140,22 +1143,37 @@ export default function InstinctChat({
   async function handleRate(msgId: string | undefined, rating: number) {
     if (!msgId) return;
 
-    setMessages((prev) =>
-      prev.map((m) => (m.id === msgId ? { ...m, rating } : m)),
-    );
+    /* Optimiztic, so the thumb responds instantly. Remembered so it can be put
+       back: a rating that did not save must not keep looking saved. */
+    const previous = messages.find((m) => m.id === msgId)?.rating;
+    setMessages((prev) => prev.map((m) => (m.id === msgId ? { ...m, rating } : m)));
 
+    /* A FAILED RATING USED TO LOOK EXACTLY LIKE A SAVED ONE.
+     *
+     * rateMessage returns false when the message is not in a conversation the
+     * rater owns, and the route answers 200 with { success: false }. A 200
+     * does not throw, so the catch below never ran, and the optimiztic thumb
+     * stayed filled in over nothing.
+     *
+     * Nothing fails that check today: measured 2026-08-30, zero of 16,332
+     * assistant messages sit in an unowned conversation. The shape is still
+     * wrong, and it is the shape this codebase has spent the week removing:
+     * a failure spelled exactly like a success. Somebody who rates an answer
+     * and is silently ignored stops rating, and never says why. */
     try {
-      await fetchWithRefresh("/api/assistant", {
+      const res = await fetchWithRefresh("/api/assistant", {
         method: "POST",
         headers: authHeaders(),
-        body: JSON.stringify({
-          action: "rate",
-          messageId: msgId,
-          rating,
-        }),
+        body: JSON.stringify({ action: "rate", messageId: msgId, rating }),
       });
+      const saved = res.ok && ((await res.json().catch(() => ({}))) as { success?: boolean }).success;
+      if (!saved) {
+        setMessages((prev) => prev.map((m) => (m.id === msgId ? { ...m, rating: previous } : m)));
+      }
     } catch {
-      // Rating failure is non-fatal
+      /* Offline or refused. Put it back rather than leave a rating that was
+         never recorded looking like one that was. */
+      setMessages((prev) => prev.map((m) => (m.id === msgId ? { ...m, rating: previous } : m)));
     }
   }
 
@@ -1781,7 +1799,17 @@ export default function InstinctChat({
                         : undefined);
                     if (!widgetSpec) return null;
                     return (
-                      <ChatWidget spec={widgetSpec} workflowId={msg.workflowId} />
+                      <ChatWidget
+                        spec={widgetSpec}
+                        workflowId={msg.workflowId}
+                        /* Fills the composer rather than sending, the same
+                           way the fallback chips below do. Somebody almost
+                           always wants to change a word first. */
+                        onPickPrompt={(prompt) => {
+                          setInput(prompt);
+                          setTimeout(() => inputRef.current?.focus(), 0);
+                        }}
+                      />
                     );
                   })()}
 
@@ -1827,6 +1855,43 @@ export default function InstinctChat({
                       </div>
                     )}
 
+                  {/* COPY, WHICH IS THE CLEAREST "THIS WAS USEFUL" THERE IS.
+                      No copy affordance existed at all, and the only other
+                      post-answer signal, source_viewed, has fired ONCE in the
+                      product's life (2026-04-23). So 99.4% of conversations
+                      end after one question and nothing can say whether that
+                      is somebody satisfied or somebody giving up.
+                      Records THAT an answer was copied, never what it said:
+                      message position, the answer's source, and the workflow
+                      id. No content, no selection, no keystrokes. */}
+                  {msg.role === "assistant" && msg.content?.trim() ? (
+                    <button
+                      type="button"
+                      className="mt-2 text-xs underline"
+                      style={{ color: "var(--wp-text-muted, #6b7280)" }}
+                      data-testid={`copy-answer-${idx}`}
+                      onClick={() => {
+                        void navigator.clipboard?.writeText(msg.content).catch(() => {});
+                        setCopiedAnswer(idx);
+                        void fetchWithRefresh("/api/analytics", {
+                          method: "POST",
+                          headers: canonicalJsonHeaders(),
+                          body: JSON.stringify({
+                            event: "assistant.answer_copied",
+                            metadata: {
+                              answer_source: msg.source ?? "unknown",
+                              answer_length: msg.content.length,
+                              has_sources: Boolean(msg.sources?.length),
+                              ...(msg.workflowId ? { workflow_id: msg.workflowId } : {}),
+                            },
+                          }),
+                        }).catch(() => {});
+                      }}
+                    >
+                      {copiedAnswer === idx ? "Copied" : "Copy"}
+                    </button>
+                  ) : null}
+
                   {msg.role === "assistant" &&
                     msg.sources &&
                     msg.sources.length > 0 && (
@@ -1845,6 +1910,16 @@ export default function InstinctChat({
                                   event: "assistant.source_viewed",
                                   metadata: {
                                     source_type: msg.sources[0]?.type ?? "unknown",
+                                    /* JOIN KEYS. This event carried only a
+                                       source_type, so it could say somebody
+                                       looked at a knowledge source and never
+                                       WHICH answer they were reading. That is
+                                       the whole question: did the person who
+                                       got this answer go and check it. */
+                                    action: "expanded",
+                                    source_count: msg.sources.length,
+                                    answer_source: msg.source ?? "unknown",
+                                    ...(msg.workflowId ? { workflow_id: msg.workflowId } : {}),
                                   },
                                 }),
                               }).catch(() => {});
@@ -1873,7 +1948,14 @@ export default function InstinctChat({
                                       headers: canonicalJsonHeaders(),
                                       body: JSON.stringify({
                                         event: "assistant.source_viewed",
-                                        metadata: { source_type: s.type },
+                                        metadata: {
+                                          source_type: s.type,
+                                          action: "opened",
+                                          answer_source: msg.source ?? "unknown",
+                                          ...(msg.workflowId
+                                            ? { workflow_id: msg.workflowId }
+                                            : {}),
+                                        },
                                       }),
                                     }).catch(() => {});
                                   }}

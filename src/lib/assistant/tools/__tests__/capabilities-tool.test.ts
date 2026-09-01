@@ -12,6 +12,7 @@
 import { capabilitiesTool, matchCapabilitiesIntent } from "../capabilities-tool";
 import { getTools } from "../registry";
 import { canInvokeTool } from "../gate";
+import { backingSystemFor } from "../capability-scope";
 import "../index";
 
 jest.mock("@/lib/analytics", () => ({ trackEvent: jest.fn() }));
@@ -28,7 +29,7 @@ async function answerFor(role: string) {
   return res;
 }
 
-describe("recognising the question", () => {
+describe("recognizing the question", () => {
   it.each([
     "what can you do",
     "What can you do?",
@@ -61,11 +62,34 @@ describe("the answer is read from the product, not written about it", () => {
   });
 
   it("counts the tools the caller can actually invoke", async () => {
+    /* ACTUALLY INVOKE means role AND connection, which is what this test was
+       always named for. Role alone would count a CRM search on a deployment
+       with no CRM, and a caller who tries it gets nothing: the count would be
+       describing the codebase rather than the product in front of them. */
     const res = await answerFor("cto");
-    const expected = getTools().filter(
+    const rolePermitted = getTools().filter(
       (t) => canInvokeTool("cto", t.capability) && t.name !== "what_can_you_do",
+    );
+    const behindAnUnlinkedSystem = rolePermitted.filter(
+      (t) => backingSystemFor(t.name) !== null,
     ).length;
-    expect(res.data.toolCount).toBe(expected);
+    expect(res.data.toolCount).toBe(rolePermitted.length - behindAnUnlinkedSystem);
+  });
+
+  /* THE MEASURED FAILURE. On this deployment, with nothing connected, the
+     answer advertised six CRM capabilities and a dealer inventory widget.
+     Somebody running dealerships reads the list and goes straight for those. */
+  it("does not advertise a CRM on a deployment with no CRM", async () => {
+    const res = await answerFor("cto");
+    expect(res.answer).not.toMatch(/in the configured CRM/i);
+    expect(res.answer).not.toMatch(/CRM records/i);
+  });
+
+  /* Not connected is not not built, so the capability is offered as a next
+     step rather than hidden or apologized for. */
+  it("offers the unconnected systems as something to connect", async () => {
+    const res = await answerFor("cto");
+    expect(res.answer).toMatch(/Connect .*and I can answer about that too/i);
   });
 
   it("says nothing is sent without confirmation, because that is the deciding fact", async () => {

@@ -18,7 +18,7 @@
  *
  * Padding cannot hold three bars level when their contents differ, because the
  * result depends on the tallest child in each. An explicit height can, so the
- * bars declare a height and centre whatever they hold inside it.
+ * bars declare a height and center whatever they hold inside it.
  *
  * Changing this value moves all three together, which is the point.
  */

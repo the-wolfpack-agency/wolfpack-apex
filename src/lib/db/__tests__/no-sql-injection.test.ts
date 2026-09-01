@@ -48,6 +48,8 @@ const SRC = join(__dirname, "..", "..", "..");
 const QUOTED_INTERPOLATION_OK: Readonly<Record<string, string>> = {
   "lib/assistant.ts":
     "${capabilityDenialSql(\"a.content\")} — the fragment is built from a module-constant array of literals in assistant/capability-denial.ts, and that function rejects any argument that is not a bare or table-qualified identifier before building anything. No reader value reaches it: the only call site passes a string literal, and a future call site that passed one would throw rather than interpolate. Tested in assistant/__tests__/capability-denial.test.ts.",
+  "lib/pilot/phase-one.ts":
+    "${PERSON} — a module constant holding a fixed predicate that matches an account id or an email address. It contains no interpolation of its own, is not exported, and no caller can influence it: the only way to change it is to edit the constant. It exists because the counting has to happen inside the aggregate rather than by filtering rows afterwards, and because the pilot page was reporting our own eval harnesses as the client's usage until it did.",
   "app/api/insights/ai-cost/route.ts":
     "INTERVAL '${days} days' — days is Number.parseInt then Math.min(365, Math.max(1, n)), so it is an integer 1..365 before it reaches the string. Postgres cannot take a placeholder inside an interval literal.",
 };

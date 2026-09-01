@@ -43,7 +43,7 @@ export interface CeilingVerdict {
  * Test seam, for the same reason as _setContainmentStateForTests.
  *
  * The ceiling fails closed, so a suite that never provisioned an agent gets a
- * refusal — correct behaviour, and useless noise in a suite exercising the
+ * refusal — correct behavior, and useless noise in a suite exercising the
  * executor's routing rather than its limits. The seam makes a test say out
  * loud that it is not exercising the ceiling, instead of the limiter quietly
  * having a convenient exception baked into it.

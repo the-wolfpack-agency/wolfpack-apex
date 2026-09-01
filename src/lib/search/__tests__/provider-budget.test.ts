@@ -119,7 +119,7 @@ describe("the provider time budget", () => {
     expect(events).toContain("assistant.search_provider_executed");
   });
 
-  /* A rejecting provider is a FAILURE, not a timeout. Relabelling one as the
+  /* A rejecting provider is a FAILURE, not a timeout. Relabeling one as the
      other would hide a broken integration behind a latency story. */
   it("still reports a rejecting provider as failed", async () => {
     mockProviders = [

@@ -13,7 +13,7 @@
  *
  * `enabled` is gated on the DSN being set, so local dev and any environment
  * without NEXT_PUBLIC_SENTRY_DSN behaves exactly as before. Nothing is sent and
- * nothing is initialised beyond the no-op client.
+ * nothing is initialized beyond the no-op client.
  *
  * Mirrors wolfpack-auto's setup deliberately — same sample rates, same env
  * gating — so the two products behave the same way and there is one pattern to

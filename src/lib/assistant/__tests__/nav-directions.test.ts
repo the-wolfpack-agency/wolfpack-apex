@@ -14,7 +14,7 @@
  * that cannot tell those apart would forbid the fix.
  *
  * Two ways to satisfy it: put the page in the rail, or stop telling people it
- * is there. Both are one line, and picking is a judgement about whether the
+ * is there. Both are one line, and picking is a judgment about whether the
  * page deserves a slot rather than a thing to work around.
  */
 import { PAGE_FACTS } from "@/lib/assistant/page-facts";
@@ -27,9 +27,17 @@ const DIRECTS_TO_NAV = /from the left nav/i;
 
 function reachableFromRail(route: string): boolean {
   if (NAV_HREFS.has(route)) return true;
-  /* A nav entry deeper than the route still reaches it: "/hr/documents" in the
-     rail means somebody looking for "/hr" finds a way in. */
-  return [...NAV_HREFS].some((h) => h.startsWith(route + "/"));
+  return [...NAV_HREFS].some((h) => {
+    /* A nav entry deeper than the route still reaches it: "/hr/documents" in
+       the rail means somebody looking for "/hr" finds a way in. */
+    if (h.startsWith(route + "/")) return true;
+    /* And a SECTION in the rail reaches its own pages: "/builds" means
+       "/builds/course-program" is one click away, which is exactly what the
+       instruction says. Excludes "/" deliberately, because Dashboard being in
+       the rail would otherwise make every route in the product "reachable"
+       and this check would stop checking anything. */
+    return h !== "/" && route.startsWith(h + "/");
+  });
 }
 
 describe("what the assistant tells people about the left nav", () => {

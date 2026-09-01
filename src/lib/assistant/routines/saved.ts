@@ -1,7 +1,7 @@
 /**
  * Chains people kept.
  *
- * The built-in catalogue is three routines written by us. This is where the
+ * The built-in catalog is three routines written by us. This is where the
  * ones somebody saved from their own described day live, and the reason the
  * offer at the end of a plan leads anywhere.
  *
@@ -13,7 +13,7 @@
  * that no longer makes sense is dropped rather than repaired: a half-understood
  * chain that runs is worse than one that does not appear.
  */
-import { BUILT_IN_ROUTINES } from "./catalogue";
+import { BUILT_IN_ROUTINES } from "./catalog";
 import type { Routine, RoutineStep } from "./types";
 
 export interface SavedRoutineOwner {
@@ -29,7 +29,7 @@ export function isReservedCommand(command: string): boolean {
 /**
  * Is this step shape one the runner can still execute?
  *
- * Deliberately strict. Anything unrecognised makes the whole routine
+ * Deliberately strict. Anything unrecognized makes the whole routine
  * unreadable rather than being skipped, because a chain silently missing its
  * third step still runs, still reports success, and quietly stopped doing part
  * of somebody's job.
@@ -148,23 +148,23 @@ export async function listSavedRoutines(owner: SavedRoutineOwner): Promise<Routi
  * The saved routine this message names, if any.
  *
  * Built-ins are matched first by the caller, so this only ever sees messages
- * that were not one of ours. Exact match, same as the catalogue: a chain that
+ * that were not one of ours. Exact match, same as the catalog: a chain that
  * fires because somebody's sentence resembled its name is worse than one that
- * did not recognise itself.
+ * did not recognize itself.
  */
 export async function matchSavedRoutine(
   owner: SavedRoutineOwner,
   message: string,
 ): Promise<Routine | null> {
   if (message.length > 120) return null;
-  const text = normalise(message);
+  const text = normalize(message);
   if (!text) return null;
   const saved = await listSavedRoutines(owner);
   return saved.find((r) => r.command === text) ?? null;
 }
 
-/** Same normalisation the catalogue uses, and linear for the same reason. */
-function normalise(message: string): string {
+/** Same normalization the catalog uses, and linear for the same reason. */
+function normalize(message: string): string {
   let text = message.trim().toLowerCase();
   for (const prefix of ["please ", "can you ", "could you "]) {
     while (text.startsWith(prefix)) text = text.slice(prefix.length).trimStart();

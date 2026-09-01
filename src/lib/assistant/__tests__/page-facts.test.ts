@@ -2,7 +2,7 @@
  * page-facts — zero-token page-description priority.
  *
  * These tests pin:
- *   1. Every registered PAGE_FACTS entry matches three realistic user
+ *   1. Every registered PAGE_FACTS entry matches three realiztic user
  *      questions with confidence >= 0.6.
  *   2. Ambiguous questions resolve deterministically.
  *   3. Non-page questions return null so the main chain runs.
@@ -54,7 +54,7 @@ import {
 import { matchPageFacts, _debugScoreAll } from "../page-facts-matcher";
 
 // ---------------------------------------------------------------------------
-// Round-trip: every domain, three realistic phrasings.
+// Round-trip: every domain, three realiztic phrasings.
 // ---------------------------------------------------------------------------
 
 interface Probe {

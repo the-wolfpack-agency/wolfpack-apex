@@ -1,7 +1,7 @@
 /**
  * routine_templates — workflows somebody can adopt instead of describing.
  *
- * WHAT MAKES THIS DIFFERENT FROM A CATALOGUE
+ * WHAT MAKES THIS DIFFERENT FROM A CATALOG
  *
  * Every template is checked against the LIVE registry and the reader's own role
  * before it is offered, using the same check that guards a saved chain. So the
@@ -9,7 +9,7 @@
  * connected" rather than presenting nine equal-looking options, two of which
  * fail on adoption.
  *
- * A catalogue that half-fails on contact is worse than a short one: the first
+ * A catalog that half-fails on contact is worse than a short one: the first
  * thing somebody learns about the product is that it promises things it cannot
  * do.
  *
@@ -183,7 +183,7 @@ export const routineTemplatesTool: ToolDef<Params, TemplatesData> = {
       action: "list",
       ready: ready.length,
       /* WHAT PEOPLE ARE SHOWN AND CANNOT USE. Over a few workspaces this is the
-         clearest statement of which integration to prioritise: it is measured
+         clearest statement of which integration to prioritize: it is measured
          demand rather than a guess. */
       blocked: blocked.length,
     });

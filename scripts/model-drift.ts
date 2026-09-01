@@ -5,7 +5,7 @@
  * answers "has it changed". A provider can update a model under a stable name,
  * a prompt edit can move every answer at once, a price can change, and a
  * latency can double, and each of those is invisible to a suite that asserts
- * behaviour rather than remembering it.
+ * behavior rather than remembering it.
  *
  * That is the gap against the tools that sell continuous evaluation: not that
  * they test better, but that they test AGAIN and tell you what moved. A
@@ -31,9 +31,11 @@
  *   npx tsx scripts/model-drift.ts --pin deepseek   # a configured provider
  *
  * Baseline: demo/model-drift-baseline.json, committed on purpose so a change
- * in model behaviour shows up in a diff somebody reviews.
+ * in model behavior shows up in a diff somebody reviews.
  */
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+/* FIRST. Imports hoist, so anything below already read process.env. */
+import "./load-env";
+import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { getAIClient } from "@/lib/ai";
 import { verifyAnswer } from "@/lib/ai/verification";
@@ -46,8 +48,8 @@ const BASELINE = join(process.cwd(), "demo", "model-drift-baseline.json");
 const PROMPTS = [
   "Reply with exactly the word: ready",
   "What is 17 multiplied by 23? Reply with only the number.",
-  "List three primary colours, comma separated, nothing else.",
-  "Summarise in one sentence: a dealer reported that two demo vehicles were double-booked for the same weekend.",
+  "List three primary colors, comma separated, nothing else.",
+  "Summarize in one sentence: a dealer reported that two demo vehicles were double-booked for the same weekend.",
   "A customer asks whether their warranty covers a cracked windscreen. Answer in one sentence without promising anything.",
 ];
 
@@ -153,14 +155,48 @@ async function main(): Promise<void> {
     );
   }
 
-  if (!existsSync(BASELINE) || update) {
+  /* READ IT, DO NOT ASK WHETHER IT EXISTS FIRST.
+   *
+   * This called existsSync and then readFileSync further down, which CodeQL
+   * flagged as js/file-system-race: between the question and the answer the
+   * file can go away, and the read then throws with a stack trace instead of
+   * the sentence a person needs.
+   *
+   * Reading once removes the window entirely. It also lets the two states be
+   * told apart, which the existence check could not: "no baseline yet" is a
+   * first run and is fine, "baseline unreadable" is corruption and is not.
+   * Reporting the second as the first would silently overwrite a baseline
+   * somebody was relying on, which is the whole point of having one. */
+  let before: Sample[] | null = null;
+  if (!update) {
+    let raw: string | null = null;
+    try {
+      raw = readFileSync(BASELINE, "utf8");
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException)?.code !== "ENOENT") {
+        console.error(`\nBaseline at ${BASELINE} could not be read: ${(err as Error).message}`);
+        console.error("Refusing to overwrite it. Fix or remove it, then run again.");
+        process.exit(1);
+      }
+      /* ENOENT is a first run, and the only case that may write. */
+    }
+    if (raw !== null) {
+      try {
+        before = JSON.parse(raw) as Sample[];
+      } catch (err) {
+        console.error(`\nBaseline at ${BASELINE} is not valid JSON: ${(err as Error).message}`);
+        console.error("Refusing to overwrite it. Fix or remove it, then run again.");
+        process.exit(1);
+      }
+    }
+  }
+
+  if (before === null) {
     mkdirSync(dirname(BASELINE), { recursive: true });
     writeFileSync(BASELINE, `${JSON.stringify(now, null, 2)}\n`);
     console.log(`\nBaseline written to ${BASELINE}. Nothing asserted on a first run.`);
     return;
   }
-
-  const before: Sample[] = JSON.parse(readFileSync(BASELINE, "utf8"));
   const drift = compare(now, before);
   if (drift.length === 0) {
     console.log("\nNo drift. Same models, same verdicts, costs and latencies within tolerance.");

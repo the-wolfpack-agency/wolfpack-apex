@@ -67,7 +67,7 @@ function buildStarterCategories(): StarterCategory[] {
        * and hiding the whole category until every integration is connected
        * would keep them invisible on exactly the days somebody is setting up.
        *
-       * These commands are asserted against the real routine catalogue in
+       * These commands are asserted against the real routine catalog in
        * __tests__/starter-prompts-are-real.test.ts, so a routine that is
        * renamed or removed fails the build rather than leaving a chip that
        * does nothing. */

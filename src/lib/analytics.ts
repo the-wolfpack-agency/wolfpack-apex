@@ -527,6 +527,7 @@ export type InstinctEventType =
      one served the answer instead. Recorded rather than absorbed: a silent
      degrade hides a stale deployment name forever. */
   | "ai.tier_degraded_missing_deployment"
+  | "ai.provider_retry_succeeded"
   | "assistant.broadcast_sent"
   /* A draft answer read by a second model before it was sent. Records whether
      it was reviewed at all and whether the reviewer changed anything, because
@@ -723,7 +724,7 @@ export type InstinctEventType =
   //   approval, or failed), every step governed under its identity.
   | "agent.task_assigned"
   | "agent.task_completed"
-  // Behaviour eval on a completed run: was the boundary held, and does the
+  // Behavior eval on a completed run: was the boundary held, and does the
   // agent's own account match the executor's record. Scored from the
   // executor's step list, never from the agent's description of itself.
   // honesty is "unproven" until an agent writes its own summary — the
@@ -845,6 +846,12 @@ export type InstinctEventType =
   // platform.scan_findings_auto_resolved { platform, count, scan_id }
   // platform.system_profiled { platform, entities, integrations, routes, criticals }
   | "platform.system_profiled"
+  // platform.system_walked { platform, surfaces, entities, forms, frontier_remaining,
+  //   stop_reason, sampled_shapes }. A walk of a live system the client runs but we
+  //   cannot read the source of. frontier_remaining and stop_reason travel WITH the
+  //   counts on purpose: a map that stopped early and a map that finished look
+  //   identical once the numbers are separated from how they were obtained.
+  | "platform.system_walked"
   // platform.target_onboarded { platform, has_static, has_api } / target_offboarded { platform }
   | "platform.target_onboarded"
   | "platform.target_offboarded"
@@ -1209,13 +1216,13 @@ export type InstinctEventType =
   //     The disagreeing VALUES are the client's customer data and stay in
   //     the answer the user asked for, never in this table.
   | "assistant.cross_source_compared"
-  //   assistant.schedule_analysed { days, direction, meetings, usable_blocks,
+  //   assistant.schedule_analyzed { days, direction, meetings, usable_blocks,
   //     stranded_hours, back_to_back_runs }: SHAPE only. What is in somebody's
   //     calendar is among the most sensitive data we hold, and none of it is
   //     needed to learn whether the analysis is worth keeping.
-  | "assistant.schedule_analysed"
+  | "assistant.schedule_analyzed"
   //   assistant.dark_data_scanned { dark_columns, statements_examined,
-  //     excluded_star_tables, unanalysed_columns }: counts only. Column names
+  //     excluded_star_tables, unanalyzed_columns }: counts only. Column names
   //     are the client's schema, theirs to see and not ours to accumulate.
   | "assistant.dark_data_scanned"
   //   system.triple_write_degraded { store, reason } - a durable entity reached
@@ -1300,6 +1307,7 @@ export type InstinctEventType =
      documents instead. { strong_hits, tabular_hits }. A quote is fast and
      free; a CSV row printed verbatim names the people in it. */
   | "assistant.brain_quote_declined_tabular"
+  | "assistant.brain_answer_contested"
   | "assistant.brain_quote_declined_for_synthesis"
   /* Personal data removed from an answer at the ANSWER boundary rather than
      the model boundary. ai.response_redacted only ever covered the model path,
@@ -1557,6 +1565,19 @@ export type InstinctEventType =
   | "assistant.welcome_dismissed"
   | "assistant.welcome_prompt_clicked"
   | "assistant.fallback_chip_clicked"
+  /* WHAT THE PERSON DID WITH THE ANSWER.
+   *
+   * The only two facts on this page that a database cannot derive: a copy and
+   * a source click both happen entirely in the browser and leave no row.
+   * Everything else about an answer's outcome is read from instinct_messages
+   * instead, which reaches back to day one rather than starting at zero today.
+   *
+   * SCOPED TO WHICH ANSWER, NEVER WHAT IT SAID. The metadata carries the
+   * message and workflow id and the answer's source. No content, no selection,
+   * no keystrokes, no scroll depth. These name individuals, so the rule is
+   * that they record that somebody acted rather than what they read. */
+  | "assistant.answer_copied"
+  | "assistant.answer_source_opened"
   // Form-field-level analytics: which fields users skip + which
   // fields trip server validation. Tells us which optional fields
   // earn their space and which required fields are confusing.

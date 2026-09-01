@@ -139,13 +139,13 @@ export function RecognizeView() {
     async (correctedType: DocumentType) => {
       if (view.kind !== "recognized") return;
       const prev = view.doc;
-      /* Optimistic update — we trust the server confirms the patch.
+      /* Optimiztic update — we trust the server confirms the patch.
          If it doesn't, we surface the error AND roll the view back. */
-      const optimistic: RecognizedDocument = {
+      const optimiztic: RecognizedDocument = {
         ...prev,
         classification: { ...prev.classification, type: correctedType },
       };
-      setView({ kind: "recognized", doc: optimistic });
+      setView({ kind: "recognized", doc: optimiztic });
       try {
         const res = await fetchWithRefresh(
           `/api/documents/recognize/${encodeURIComponent(prev.id)}`,

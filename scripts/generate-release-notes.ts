@@ -20,6 +20,8 @@
  *   --no-email  write the release but skip the team email
  */
 
+/* FIRST. Imports hoist, so anything below already read process.env. */
+import "./load-env";
 import { execFileSync } from "node:child_process";
 import { getAIClient, NoProviderAvailableError } from "@/lib/ai";
 import { createRelease, type ReleaseEntry } from "@/lib/releases";

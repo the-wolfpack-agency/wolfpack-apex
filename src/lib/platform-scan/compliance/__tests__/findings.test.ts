@@ -87,7 +87,7 @@ describe("policy findings claim presence, never adequacy", () => {
     expect(f.verdict).toBe("present");
   });
 
-  it("recognises policy links in other languages", () => {
+  it("recognizes policy links in other languages", () => {
     // A client-facing scan that only reads English would report a German site
     // as non-compliant for having an Impressum.
     const de = get(input({ facts: facts({ links: [{ href: "/impressum", text: "Impressum" }] }) }), "terms");

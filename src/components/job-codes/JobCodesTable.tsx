@@ -197,7 +197,7 @@ export function JobCodesTable() {
       columnHeader: string,
       column: "D" | "E" | "F",
       value: string,
-      /* Snapshot at editor-open. Server uses this for optimistic-
+      /* Snapshot at editor-open. Server uses this for optimiztic-
          concurrency conflict detection in cell-writer.ts. */
       expectedValue: string,
       /* Set true on the second pass after the user picks Overwrite —
@@ -249,7 +249,7 @@ export function JobCodesTable() {
           }));
           return false;
         }
-        /* Optimistically reflect the saved value in the table. */
+        /* Optimiztically reflect the saved value in the table. */
         setCodes((prev) =>
           prev.map((r) =>
             r.code === code

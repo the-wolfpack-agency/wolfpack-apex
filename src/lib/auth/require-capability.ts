@@ -96,7 +96,7 @@ export function hasCapability(
 /** Resolve the caller from the HttpOnly access-token cookie. Used as
  *  the fallback when a request arrives without an Authorization header
  *  — i.e. a browser navigation to an admin route (OAuth start, snapshot
- *  download links). The same JWT shape is in both, so behaviour is
+ *  download links). The same JWT shape is in both, so behavior is
  *  identical once the user is constructed. */
 async function userFromCookie(): Promise<TeamMember | null> {
   try {

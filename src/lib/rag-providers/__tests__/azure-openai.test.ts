@@ -122,12 +122,32 @@ describe("createAzureOpenAIEmbedder.embed", () => {
     expect((meta as { error: string }).error).toMatch(/ECONNRESET/);
   });
 
-  test("429 response: returns [], emits _failed with HTTP status detail", async () => {
+  /* A 429 IS NOW RETRIED ONCE BEFORE IT COUNTS AS A FAILURE.
+   *
+   * This asserted that a single 429 returned [] and reported a failure, which
+   * was the behavior and was the bug. Measured over 90 days of production:
+   * 178 of these, each one silently dropping the Brain to keyword-only with
+   * nobody told. The request was fine; the service was busy.
+   *
+   * So the contract moved: one throttle is survived, two is a failure. The
+   * test moved with it rather than being loosened. */
+  test("a single 429 is retried, so a throttle does not halve the search", async () => {
+    mockFetchOnce({ ok: false, status: 429, textBody: "Too Many Requests" });
     mockFetchOnce({
-      ok: false,
-      status: 429,
-      textBody: "Too Many Requests — retry after 30s",
+      ok: true,
+      status: 200,
+      jsonBody: { data: [{ embedding: [1, 1, 1], index: 0 }] },
     });
+    const out = await createAzureOpenAIEmbedder(CFG).embed(["a"]);
+    expect(out).toEqual([[1, 1, 1]]);
+    /* Recovered, so nothing is reported as FAILED. The success event still
+       fires: a retry that worked is still a call that happened. */
+    expect(mockEmit.mock.calls.map((c) => c[0])).not.toContain("rag.embedding_failed");
+  });
+
+  test("429 twice: returns [], emits _failed with HTTP status detail", async () => {
+    mockFetchOnce({ ok: false, status: 429, textBody: "Too Many Requests — retry after 30s" });
+    mockFetchOnce({ ok: false, status: 429, textBody: "Too Many Requests — retry after 30s" });
     const emb = createAzureOpenAIEmbedder(CFG);
     const out = await emb.embed(["a", "b"]);
     expect(out).toEqual([]);
@@ -136,6 +156,9 @@ describe("createAzureOpenAIEmbedder.embed", () => {
     expect(eventName).toBe("rag.embedding_failed");
     expect((meta as { error: string }).error).toMatch(/HTTP 429/);
     expect((meta as { error: string }).error).toMatch(/Too Many Requests/);
+    /* Named, so a throttle that survived a retry is distinguishable from a
+       first-try failure when somebody reads these later. */
+    expect((meta as { retried: boolean }).retried).toBe(true);
   });
 
   test("out-of-order response indices are re-sorted in returned array", async () => {

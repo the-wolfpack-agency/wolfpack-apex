@@ -12,9 +12,9 @@
  *    click can convert a lead, send an email, or fire a workflow, and "we were
  *    only mapping" does not undo it.
  *
- * 2. It never leaves the origin it was authorised for. A client system links
+ * 2. It never leaves the origin it was authorized for. A client system links
  *    outward constantly — docs, status pages, vendor sites — and following
- *    those means scanning systems nobody authorised.
+ *    those means scanning systems nobody authorized.
  *
  * 3. It refuses anything that looks like it ends the session or destroys
  *    something, by name. Logging ourselves out mid-map is merely annoying;
@@ -47,7 +47,13 @@ export const DEFAULT_BUDGET: ExploreBudget = {
 const VOLATILE = [
   /^\d+$/,
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, // uuid
-  /^[a-zA-Z0-9]{15,18}$/, // salesforce record id
+  /* A record id, which needs a DIGIT. Matching any 15-18 character
+     alphanumeric run also matches ordinary words: mapping a real tenant on
+     2026-08-30, "porscheacademyus" is 16 characters and became ":id", so
+     every surface in the map read /:id/home and the org disappeared from its
+     own map. Real ids from Salesforce, Cognito and the rest all carry digits;
+     a lowercase slug does not. */
+  /^(?=[a-zA-Z0-9]{15,18}$)(?=.*\d)[a-zA-Z0-9]+$/,
   /^\d{4}-\d{2}-\d{2}$/, // date
 ];
 
@@ -102,13 +108,53 @@ export function normalizeForDangerCheck(value: string): string {
     .toLowerCase();
 }
 
-export type SkipReason = "off-origin" | "dangerous" | "already-seen" | "not-http" | "too-deep";
+export type SkipReason =
+  | "off-origin"
+  | "outside-tenant"
+  | "dangerous"
+  | "already-seen"
+  | "not-http"
+  | "too-deep";
 
 /** Should this link be followed? Returns the reason when not, so the map can
  *  report what it deliberately did not look at. */
+/**
+ * Is this path inside that one, on a segment boundary?
+ *
+ * A bare startsWith is wrong on a multi-tenant host and wrong in the dangerous
+ * direction: "/acme" prefixes "/acmecorp", so confining a map to one client's
+ * org would happily walk another client's. Caught while testing the confinement
+ * itself, before it ever ran.
+ */
+export function withinPath(pathname: string, prefix: string): boolean {
+  if (pathname === prefix) return true;
+  const base = prefix.endsWith("/") ? prefix : `${prefix}/`;
+  return pathname.startsWith(base);
+}
+
 export function shouldFollow(
   candidate: string,
-  ctx: { origin: string; seen: ReadonlySet<string>; depth: number; maxDepth: number },
+  ctx: {
+    origin: string;
+    seen: ReadonlySet<string>;
+    depth: number;
+    maxDepth: number;
+    /**
+     * The path every surface must sit under, on a shared-domain SaaS.
+     *
+     * SAME ORIGIN IS TOO LOOSE FOR A MULTI-TENANT PRODUCT. Mapping a real
+     * tenant on 2026-08-30, the walk left the customer's org and spent 17 of
+     * 40 surfaces inside the vendor's own documentation, because
+     * cognitoforms.com serves /porscheacademyus and /support from one host.
+     *
+     * The cost is not only wasted surfaces. The frontier finished at 301
+     * because a documentation site is effectively unbounded, the form count
+     * filled with the vendor's newsletter and support-chat widgets, and the
+     * refusal list filled with their controls rather than the client's. A map
+     * of somebody else's marketing site is worse than a small map.
+     */
+    confineTo?: string;
+  },
 ): { follow: true } | { follow: false; reason: SkipReason } {
   let url: URL;
   try {
@@ -118,6 +164,9 @@ export function shouldFollow(
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") return { follow: false, reason: "not-http" };
   if (url.origin !== ctx.origin) return { follow: false, reason: "off-origin" };
+  if (ctx.confineTo && !withinPath(url.pathname, ctx.confineTo)) {
+    return { follow: false, reason: "outside-tenant" };
+  }
   const inspectable = normalizeForDangerCheck(`${url.pathname}${url.search}`);
   if (DANGEROUS.test(inspectable)) return { follow: false, reason: "dangerous" };
   if (ctx.depth >= ctx.maxDepth) return { follow: false, reason: "too-deep" };

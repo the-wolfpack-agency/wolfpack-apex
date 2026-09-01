@@ -291,7 +291,7 @@ const SIGNALS: Array<{
  * prints a direction is a dashboard whose directions cannot be trusted when
  * it matters, so this one declines.
  */
-export function summariseQuality(weeks: QualityWeek[]): QualitySummary {
+export function summarizeQuality(weeks: QualityWeek[]): QualitySummary {
   if (weeks.length === 0) {
     return {
       signals: [],

@@ -13,7 +13,7 @@
  * specs that assert rendering, because the point there is what the page does
  * with an answer, not whether a model was reachable.
  *
- * Everything else is the real application: the real starter-prompt catalogue,
+ * Everything else is the real application: the real starter-prompt catalog,
  * the real routines page, the real client-side auth guard. A chip that is
  * missing from the panel, or a page that renders blank on a 200, fails here.
  */

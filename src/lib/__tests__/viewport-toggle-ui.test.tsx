@@ -41,7 +41,7 @@ describe("VIEWPORT_WIDTHS constant", () => {
 });
 
 describe("ViewportToggle — rendering", () => {
-  it("renders three buttons labelled Mobile / Tablet / Desktop", () => {
+  it("renders three buttons labeled Mobile / Tablet / Desktop", () => {
     render(<ViewportToggle value="desktop" onChange={() => {}} />);
     expect(screen.getByTestId("viewport-toggle-mobile")).toBeInTheDocument();
     expect(screen.getByTestId("viewport-toggle-tablet")).toBeInTheDocument();

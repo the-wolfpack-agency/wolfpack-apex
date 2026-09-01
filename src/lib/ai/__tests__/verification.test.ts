@@ -6,7 +6,7 @@
  * A missed bad answer ships something thin. A FALSE FLAG spends real money
  * asking a larger model to fix an answer that was already fine, on every
  * request that trips it, forever. That is how a cost-saving feature becomes a
- * cost centre, so roughly half of these tests assert that good answers are left
+ * cost center, so roughly half of these tests assert that good answers are left
  * alone.
  */
 import { verifyAnswer, shouldEscalate } from "../verification";

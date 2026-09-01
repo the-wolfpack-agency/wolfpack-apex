@@ -7,7 +7,7 @@
  * greeting, a "what are my meetings" lookup and a multi-step reasoning question
  * with three screenshots attached all declared the same capability floor. The
  * routing infrastructure was in place and welded shut: the selection router
- * would faithfully pick the same tier every time, so the catalogue of models in
+ * would faithfully pick the same tier every time, so the catalog of models in
  * `lib/ai/models/registry.ts` had exactly one reachable band.
  *
  * The tier is a statement about what the TASK needs, not about cost directly.
@@ -148,7 +148,7 @@ export function selectAssistantTier(input: TierInput): TierChoice {
 
   if (attachmentChars >= HEAVY_ATTACHMENT_CHARS) {
     /* Reading a dense document or several screenshots and answering about them
-       is the case where a small model visibly degrades: it starts summarising
+       is the case where a small model visibly degrades: it starts summarizing
        instead of answering, or drops half the attachment. */
     return { tier: "premium", reason: "heavy_attachment" };
   }
@@ -202,7 +202,7 @@ export function selectAssistantTier(input: TierInput): TierChoice {
     return { tier: "cheap", reason: "short_statement" };
   }
 
-  /* Everything else keeps exactly the behaviour that shipped before this
-     existed. An unrecognised turn is never a reason to spend less. */
+  /* Everything else keeps exactly the behavior that shipped before this
+     existed. An unrecognized turn is never a reason to spend less. */
   return { tier: "standard", reason: "default" };
 }

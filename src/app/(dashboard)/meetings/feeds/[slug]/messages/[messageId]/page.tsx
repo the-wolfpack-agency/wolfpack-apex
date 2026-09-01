@@ -464,7 +464,7 @@ function InsightsSection({
             marginTop: "0.5rem",
           }}
         >
-          Analysing…
+          Analyzing…
         </div>
       ) : !analysis ? (
         <div

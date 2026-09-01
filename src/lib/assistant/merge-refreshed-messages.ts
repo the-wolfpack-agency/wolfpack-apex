@@ -3,12 +3,12 @@
  * into the locally-held view, without dropping a turn that is shown locally
  * but not yet in the snapshot.
  *
- * Why this exists: the chat surface adds an assistant reply optimistically
+ * Why this exists: the chat surface adds an assistant reply optimiztically
  * with the server-issued messageId, then a background refresh (poll or
  * cross-tab broadcast) re-fetches the conversation. If that refresh races
  * the server's assistant-message save, the snapshot can contain the user
  * row but not the assistant row. An earlier merge preserved only no-id
- * optimistic rows, so an id-bearing assistant reply absent from the snapshot
+ * optimiztic rows, so an id-bearing assistant reply absent from the snapshot
  * was silently dropped: the reply appeared and then vanished a few seconds
  * later. This merge keeps any local row the snapshot does not represent,
  * matched by id OR by role+content (so an id-mismatched persist still dedupes).

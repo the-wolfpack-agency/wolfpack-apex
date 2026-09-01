@@ -178,7 +178,7 @@ export default function GoalsPage() {
     })();
   }, []);
 
-  function handleOptimisticAdd(row: ContributionView) {
+  function handleOptimizticAdd(row: ContributionView) {
     const injected: ContributionView = { ...row, user_id: userId };
     weekly.data && (weekly.data.commitments = [...teamCommitments, injected]);
     // Also inject into the matching KR stream so the board surfaces the
@@ -189,7 +189,7 @@ export default function GoalsPage() {
     }));
   }
 
-  function handleOptimisticGrade(
+  function handleOptimizticGrade(
     id: string,
     grade: ContributionView["graded_as"],
   ) {
@@ -298,8 +298,8 @@ export default function GoalsPage() {
             week_of={week_of}
             krs={allKrs}
             myCommitments={myCommitments}
-            onOptimisticAdd={handleOptimisticAdd}
-            onOptimisticGrade={handleOptimisticGrade}
+            onOptimizticAdd={handleOptimizticAdd}
+            onOptimizticGrade={handleOptimizticGrade}
           />
         </div>
       </div>

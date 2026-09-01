@@ -188,7 +188,7 @@ export async function runClientAssessment(
   /* THE OWNERSHIP FLOOR, FIRST AND FAIL-CLOSED. Everything below this line
      sends traffic to somebody else's system. An unreadable answer is treated
      as "not verified", because the cost of being wrong is scanning a system
-     nobody authorised us to touch. */
+     nobody authorized us to touch. */
   let verified = false;
   try {
     verified = await isVerified(workspaceId, platform);

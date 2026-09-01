@@ -25,7 +25,7 @@ jest.mock("@/lib/db", () => ({ safeQuery: jest.fn(() => Promise.resolve({ rows: 
 import "@/lib/assistant/tools";
 import { runAgentTask } from "@/lib/agents/tasks/executor";
 
-/* Containment gate: these suites exercise the executor's own behaviour, not the
+/* Containment gate: these suites exercise the executor's own behavior, not the
    stop or the budget, so they declare an enabled workspace with a fresh ledger.
    Saying it out loud beats a gate that silently does not apply — the executor
    fails closed by design, and a suite that did not opt in would be testing the

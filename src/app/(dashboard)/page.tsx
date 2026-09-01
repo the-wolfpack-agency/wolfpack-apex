@@ -178,7 +178,7 @@ export default function DashboardPage() {
   const [showBriefing, setShowBriefing] = useState(false);
   const [setupStatus, setSetupStatus] = useState<SetupStatus | null>(null);
   const [setupComplete, setSetupComplete] = useState(true); // default true to avoid flash
-  // Personalized Quick Actions — initialised to the static fallback so the
+  // Personalized Quick Actions — initialized to the static fallback so the
   // tile is never empty. Replaced once /api/insights/quick-actions resolves.
   const [quickActions, setQuickActions] = useState<QuickAction[]>(FALLBACK_QUICK_ACTIONS);
   // Ref guard — fire the rendered analytics event exactly once per mount.

@@ -174,7 +174,7 @@ export default function BulletinIndexPage() {
         return;
       }
       const data = (await res.json()) as { board: Board };
-      /* Optimistically prepend so the user sees the new board even on
+      /* Optimiztically prepend so the user sees the new board even on
          routers that delay the navigation. */
       setBoards((prev) => [data.board, ...prev]);
       setTitle("");

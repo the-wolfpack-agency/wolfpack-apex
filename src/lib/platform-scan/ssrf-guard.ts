@@ -48,7 +48,7 @@ export function isPrivateIPv6(ip: string): boolean {
   if (x.startsWith("::ffff:")) {
     const rest = x.slice("::ffff:".length);
     if (net.isIPv4(rest)) return isPrivateIPv4(rest);
-    // ...but URL.hostname NORMALISES the dotted form to hex, so
+    // ...but URL.hostname NORMALIZES the dotted form to hex, so
     // "::ffff:169.254.169.254" arrives as "::ffff:a9fe:a9fe" and the check
     // above never fires. Decode the two hex groups back to a dotted quad.
     // Without this, the AWS metadata endpoint was reachable in IPv4-mapped
@@ -88,7 +88,7 @@ export async function assertScannableUrl(raw: string): Promise<void> {
     throw new SsrfBlockedError(`blocked scan scheme: ${u.protocol}`);
   }
   // URL.hostname keeps the brackets around an IPv6 literal ("[::1]"), and
-  // net.isIP does not recognise that form — so every IPv6 literal, loopback and
+  // net.isIP does not recognize that form — so every IPv6 literal, loopback and
   // link-local included, walked straight through this guard. Strip them before
   // any check. Found by a redirect test in the compliance scanner; it affected
   // every caller of this function, not just that one.

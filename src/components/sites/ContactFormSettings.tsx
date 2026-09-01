@@ -156,7 +156,7 @@ export default function ContactFormSettings({
         border: "1px solid rgba(255,255,255,0.08)",
         borderRadius: 8,
       }}
-      aria-labelledby="contact-form-settings-heading"
+      aria-labeledby="contact-form-settings-heading"
     >
       <h3 id="contact-form-settings-heading" style={{ marginTop: 0 }}>
         Contact form

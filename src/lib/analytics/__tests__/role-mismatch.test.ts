@@ -5,7 +5,7 @@
  * that does nothing, and nobody reports that: there is no error to screenshot
  * and no message to quote, so it arrives as somebody quietly using the product
  * less. The Porsche build caught a real user attempting three times to submit
- * a user to an organisation he was not part of. Three attempts, no complaint.
+ * a user to an organization he was not part of. Three attempts, no complaint.
  */
 import { shouldReportMismatch, controlKey } from "../role-mismatch";
 

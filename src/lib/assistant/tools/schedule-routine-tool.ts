@@ -19,7 +19,7 @@
 import { z } from "zod";
 import { trackEvent } from "@/lib/analytics";
 import { registerTool } from "./registry";
-import { matchRoutine } from "@/lib/assistant/routines/catalogue";
+import { matchRoutine } from "@/lib/assistant/routines/catalog";
 import { matchSavedRoutine } from "@/lib/assistant/routines/saved";
 import { parseSchedule, describeSchedule, isValidTimeZone } from "@/lib/assistant/routines/schedule";
 import {

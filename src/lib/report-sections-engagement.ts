@@ -20,6 +20,8 @@ import {
 } from "@/lib/platform-scan/store";
 import { queryAuditLog } from "@/lib/audit-log";
 import { listSystemProfiles } from "@/lib/platform-scan/profile/store";
+import { listWalkedMaps } from "@/lib/platform-scan/mapping/store";
+import { capabilityNote } from "@/lib/platform-scan/network/observations";
 import { listRecommendations } from "@/lib/platform-scan/recommend/store";
 import { pentestFindings } from "@/lib/platform-scan/pentest/findings";
 
@@ -71,7 +73,10 @@ export async function genSystemMap(ctx: ReportContext): Promise<string> {
   try {
     const profiles = await listSystemProfiles(ws(ctx));
     if (profiles.length === 0) {
-      out.push(EMPTY_SYSTEM_MAP);
+      const walked = await walkedSection(ctx);
+      /* A walked map is a system map. Saying "nothing has been profiled" while
+         holding one would be the report contradicting its own contents. */
+      out.push(...(walked.length > 0 ? walked : [EMPTY_SYSTEM_MAP]));
       return out.join("\n");
     }
     for (const row of profiles) {
@@ -104,10 +109,119 @@ export async function genSystemMap(ctx: ReportContext): Promise<string> {
         ``,
       );
     }
+    out.push(...(await walkedSection(ctx)));
     return out.join("\n");
   } catch {
     return [`## System Map`, ``, EMPTY_SYSTEM_MAP].join("\n");
   }
+}
+
+/**
+ * Systems learned by walking them, rendered separately and labeled as such.
+ *
+ * NOT MERGED WITH THE PROFILED ONES, and the separation is the point. A
+ * profile read the source; a walk saw the outside of a running product. They
+ * support different claims, and a reader who cannot tell which one a number
+ * came from will over-trust the weaker of the two.
+ *
+ * Every walked map states what it did NOT see, in the same breath as what it
+ * did. A map with places still queued is a sample, and a sample presented as
+ * an estate is how a client ends up being told their system is smaller than
+ * it is.
+ */
+async function walkedSection(ctx: ReportContext): Promise<string[]> {
+  const maps = await listWalkedMaps(ws(ctx)).catch(() => []);
+  if (maps.length === 0) return [];
+
+  const out: string[] = [];
+  for (const row of maps) {
+    const m = row.map;
+    out.push(
+      `### ${row.platform} (walked, not read)`,
+      ``,
+      `Observed from outside a running system: no source was available, so file` +
+        ` counts, tests and migrations are unknown rather than zero.`,
+      ``,
+      `**Entry point**: ${row.entryUrl}`,
+      `**Authorized by**: ${row.authorizedBy}`,
+      ``,
+      `| Observed | Count |`,
+      `|----------|-------|`,
+      `| Screens opened | ${row.surfaceCount} |`,
+      `| Business objects | ${row.entityCount} |`,
+      `| Distinct forms | ${row.formCount} |`,
+      ``,
+    );
+
+    /* THE CAVEAT TRAVELS WITH THE NUMBERS, never as a footnote. */
+    if (row.frontierRemaining > 0) {
+      out.push(
+        `> **This map is incomplete.** ${row.frontierRemaining} screens were still` +
+          ` queued when the walk stopped (${row.stopReason ?? "reason not recorded"}).` +
+          ` Every count above is a floor, not a total.`,
+        ``,
+      );
+    }
+
+    const sampled = (m.coverage.patterns ?? []).filter((p) => p.visited < p.instances.length);
+    if (sampled.length > 0) {
+      out.push(
+        `**Repeated screens were sampled, not walked.** ` +
+          sampled
+            .slice(0, 6)
+            .map((p) => `\`${p.shape}\` (${p.instances.length} exist, ${p.visited} opened)`)
+            .join("; "),
+        ``,
+      );
+    }
+
+    /* WHERE DATA LEAVES THE ORGANIZATION. Deliberately above the object list:
+       a reader scanning the section should meet this before the inventory,
+       because it is the finding that changes what somebody does next. */
+    if (m.integrations.length > 0) {
+      out.push(
+        `**Outside services contacted**`,
+        ``,
+        `| Service | Host | Requests | Screens |`,
+        `|---------|------|----------|---------|`,
+      );
+      for (const i of m.integrations.slice(0, 15)) {
+        /* "unrecognized" rather than blank: a host nobody could name is a
+           prompt to ask, and an empty cell reads as nothing to see. */
+        out.push(
+          `| ${i.vendor ?? "_unrecognized_"} | ${i.host} | ${i.requestCount} | ${i.seenOn.length} |`,
+        );
+      }
+      out.push(``);
+
+      /* WORTH ASKING, KEPT OUT OF THE SEVERITY. Some of these vendors also
+         sell session recording, which would capture what is on screen rather
+         than only which screens were used. A scan cannot see whether that is
+         switched on, so it asks instead of scoring. On a product the client
+         administers but does not control, these vendors are the SaaS
+         company's choice and the client usually does not know they are
+         there. */
+      const questions = m.integrations
+        .map((i) => ({ host: i.host, note: capabilityNote(i.host) }))
+        .filter((q): q is { host: string; note: string } => q.note !== null);
+      if (questions.length > 0) {
+        out.push(`**Worth asking whoever operates this system**`, ``);
+        for (const q of questions) out.push(`- ${q.note}`);
+        out.push(``);
+      }
+    }
+
+    if (m.entities.length > 0) {
+      out.push(`| Business object | Fields observed |`, `|-----------------|-----------------|`);
+      for (const e of m.entities.slice(0, 20)) {
+        const fields =
+          e.attributes.length > 0 ? e.attributes.slice(0, 6).join(", ") : "none observed";
+        out.push(`| ${e.name} | ${fields} |`);
+      }
+      out.push(``);
+    }
+  }
+  return out;
 }
 
 const REMEDIATION: Record<string, string> = {

@@ -71,7 +71,7 @@ export default function DiscussionsPage() {
     | null
   >(null);
 
-  // Transient toast for optimistic-delete rollback. `key` is just a
+  // Transient toast for optimiztic-delete rollback. `key` is just a
   // monotonic tag so repeated same-text toasts re-render.
   const [toast, setToast] = useState<{ key: number; text: string } | null>(
     null,
@@ -132,7 +132,7 @@ export default function DiscussionsPage() {
     const thread = selectedThread;
     const threadId = thread.discussion.id;
 
-    // Optimistic: close the detail view + drop the row from the list
+    // Optimiztic: close the detail view + drop the row from the list
     // immediately. On failure we restore both so the user doesn't see a
     // silent revert on next refresh.
     const previousThreads = threads;
@@ -210,7 +210,7 @@ export default function DiscussionsPage() {
     if (!selectedThread) return;
     const discussionId = selectedThread.discussion.id;
 
-    // Optimistic: yank the reply row from the currently-open detail view
+    // Optimiztic: yank the reply row from the currently-open detail view
     // so it disappears immediately. On failure we splice it back in at the
     // same index and surface a toast.
     const previousReplies = selectedThread.replies;

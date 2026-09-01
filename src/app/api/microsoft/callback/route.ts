@@ -312,7 +312,7 @@ export async function GET(req: NextRequest) {
     return res;
   }
 
-  // CONNECT FLOW (existing behaviour): just redirect back to the page
+  // CONNECT FLOW (existing behavior): just redirect back to the page
   // they came from with the ms=connected banner.
   const rawReturnTo = url.searchParams.get("returnTo");
   const safePath =

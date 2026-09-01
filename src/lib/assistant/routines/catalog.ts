@@ -8,7 +8,7 @@
  * that did not exist yesterday; all of it is carrying that a person is
  * currently doing between tools.
  *
- * The list is short on purpose. A catalogue of twenty routines nobody asked
+ * The list is short on purpose. A catalog of twenty routines nobody asked
  * for is a menu, and a menu is another thing to read before starting work.
  * These three are the ones whose steps are all backed by tools that exist
  * today, so every one of them runs end to end rather than demonstrating an
@@ -52,6 +52,9 @@ export const BUILT_IN_ROUTINES: readonly Routine[] = Object.freeze([
         kind: "tool",
         slot: "agenda",
         tool: "good_morning_widget",
+        /* Reads only, and needs nothing from the other two, so the three run
+           together rather than as three round trips a person waits through. */
+        concurrent: true,
         params: {},
         label: "Reading today's calendar",
       },
@@ -59,6 +62,9 @@ export const BUILT_IN_ROUTINES: readonly Routine[] = Object.freeze([
         kind: "tool",
         slot: "tasks",
         tool: "task_list_widget",
+        /* Reads only, and needs nothing from the other two, so the three run
+           together rather than as three round trips a person waits through. */
+        concurrent: true,
         params: { limit: 20 },
         label: "Collecting what is open",
       },
@@ -66,13 +72,16 @@ export const BUILT_IN_ROUTINES: readonly Routine[] = Object.freeze([
         kind: "tool",
         slot: "brief",
         tool: "meeting_prep",
+        /* Reads only, and needs nothing from the other two, so the three run
+           together rather than as three round trips a person waits through. */
+        concurrent: true,
         params: {},
         label: "Preparing your next meeting",
       },
       {
         kind: "model",
         slot: "plan",
-        /* The judgement is the ONLY thing asked of the person, and it is asked
+        /* The judgment is the ONLY thing asked of the person, and it is asked
            once. Four separate summaries would put the reading back on them,
            which is the work this routine exists to remove. */
         prompt:
@@ -220,7 +229,7 @@ export function routineById(id: string): Routine | null {
  * Deliberately strict: an exact command, optionally wrapped in the politeness
  * people put around a request. A fuzzy match here would occasionally fire a
  * five-step chain at somebody who was asking a question, and a chain that runs
- * uninvited is far worse than one that did not recognise its own name.
+ * uninvited is far worse than one that did not recognize its own name.
  */
 export function matchRoutine(message: string): Routine | null {
   /* BOUNDED, AND SCANNED RATHER THAN PATTERN-MATCHED.
@@ -260,7 +269,7 @@ export function matchRoutine(message: string): Routine | null {
    *
    * Still exact. Eleven more names is eleven more exact matches, not a fuzzier
    * matcher: a five-step chain firing at somebody who asked a question remains
-   * far worse than one that did not recognise its own name.
+   * far worse than one that did not recognize its own name.
    */
   return (
     BUILT_IN_ROUTINES.find((r) => text === r.command) ??

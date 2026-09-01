@@ -25,7 +25,7 @@ import { listRecentRuns } from "@/lib/assistant/routines/store";
 import { listSchedules } from "@/lib/assistant/routines/schedule-store";
 import { describeSchedule } from "@/lib/assistant/routines/schedule";
 import { humanStepFindings } from "@/lib/assistant/routines/human-insight";
-import { BUILT_IN_ROUTINES } from "@/lib/assistant/routines/catalogue";
+import { BUILT_IN_ROUTINES } from "@/lib/assistant/routines/catalog";
 import { buildAreaMap, describeAreaMap } from "@/lib/assistant/routines/area-map";
 
 export const runtime = "nodejs";

@@ -58,7 +58,7 @@ describe("StatusPill — render + variants", () => {
     expect(pill.getAttribute("data-status")).toBe("critical");
   });
 
-  test("uses the error token colour for a critical status", () => {
+  test("uses the error token color for a critical status", () => {
     render(<StatusPill status="critical" />);
     expect(screen.getByTestId("status-pill").style.color).toBe(TONE_VAR.error);
   });

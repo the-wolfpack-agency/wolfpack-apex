@@ -77,7 +77,7 @@ const AUDITED: Readonly<Record<string, string>> = {
   "lib/qr/svg.ts":
     "SAFE, verified by running it: the input is encoded into QR modules and never interpolated into the document, so hostile text does not appear in the output at all.",
   "lib/favicon-generator.ts":
-    "SAFE, verified by running it: resolveMonogram strips to alphanumerics before it reaches the SVG, and a colour that is not a colour is replaced with a default rather than interpolated into the fill attribute.",
+    "SAFE, verified by running it: resolveMonogram strips to alphanumerics before it reaches the SVG, and a color that is not a color is replaced with a default rather than interpolated into the fill attribute.",
   "lib/html-sanitize.ts": "SAFE: this IS the sanitizer. Its template wraps input for DOMPurify to parse, which is the point.",
 };
 

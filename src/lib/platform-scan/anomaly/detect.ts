@@ -105,12 +105,29 @@ export interface DetectInput {
   /** When the visitor could first have consented. Null when no mechanism was
    *  found, which means nothing had consent, not that consent was unnecessary. */
   consentAtMs?: number | null;
+  /**
+   * Whether consent was evaluated at all. Defaults to true, which is right for
+   * a compliance scan of a public page.
+   *
+   * NOT THE SAME AS FINDING NO BANNER, and the difference is the reason this
+   * exists. consentAtMs of null means "we looked and there was no mechanism",
+   * so every tracker fired without consent and the cutoff becomes infinite.
+   * A system walk signs in as an authorized user of an internal tool and never
+   * asks the consent question, so passing null would stamp "fired before
+   * consent" on every host in a client's report on the strength of a question
+   * nobody asked.
+   *
+   * False suppresses the claim in both directions: nothing is reported as
+   * firing before consent, and a caveat says why, because silence would read
+   * as consent having been obtained.
+   */
+  consentAssessed?: boolean;
   /** True when the page did not load. Suppresses disappearance reporting. */
   pageLoaded?: boolean;
 }
 
 /** Categories where an unexplained appearance is genuinely serious. A CDN we do
- *  not recognise is worth a look; an unrecognised session-replay vendor is
+ *  not recognize is worth a look; an unrecognized session-replay vendor is
  *  recording the client's visitors. */
 const SEVERE_KINDS: ReadonlySet<TrackerKind> = new Set<TrackerKind>(["session-replay", "advertising"]);
 
@@ -174,6 +191,12 @@ export function detectAnomalies(input: DetectInput): AnomalyReport {
     caveats.push("The page did not load, so this scan observed little or nothing. Treat the result as incomplete.");
   }
 
+  const consentAssessed = input.consentAssessed !== false;
+  if (!consentAssessed) {
+    caveats.push(
+      "Consent was not evaluated by this scan, so nothing below is reported as firing before consent. That is not a finding that consent was obtained: the question was not asked.",
+    );
+  }
   const consentCutoff = input.consentAtMs ?? Number.POSITIVE_INFINITY;
   const findings: AnomalyFinding[] = [];
 
@@ -181,7 +204,7 @@ export function detectAnomalies(input: DetectInput): AnomalyReport {
     const explained = explanationFor(input.declarations, req.host);
     const prior = baseline.get(req.host);
     const novelty: Novelty = !hasBaseline ? "no-baseline" : prior ? "known" : "new";
-    const beforeConsent = req.kind !== "cdn" && req.atMs < consentCutoff;
+    const beforeConsent = consentAssessed && req.kind !== "cdn" && req.atMs < consentCutoff;
 
     // A declared, known, unremarkable host is not a finding. Reporting every
     // request the site legitimately makes is how a report becomes unread.

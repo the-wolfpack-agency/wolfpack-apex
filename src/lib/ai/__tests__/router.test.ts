@@ -72,6 +72,10 @@ afterAll(() => {
   delete process.env.ANTHROPIC_API_KEY;
   delete process.env.AZURE_OPENAI_ENDPOINT;
   delete process.env.AZURE_OPENAI_API_KEY;
+  /* Compatible providers are read from env at registry build time, so a
+     leftover here would silently give every later test a fallback it was
+     written without. */
+  for (const k of Object.keys(process.env)) if (k.startsWith("AI_COMPAT_")) delete process.env[k];
   delete process.env.AI_PROVIDER_PRIMARY;
   global.fetch = originalFetch;
 });
@@ -229,11 +233,40 @@ describe("router — anthropic-only routing today", () => {
 });
 
 describe("router — failover", () => {
-  it("anthropic 5xx with no fallback available propagates the error", async () => {
+  /* ONE TRANSIENT FAILURE IS RECOVERED, and this test used to assert the
+     opposite. It rejected ONCE and expected the error to reach the caller,
+     which was the behavior: there was no retry anywhere in the router, so a
+     single blip lost the turn even with no second provider to blame.
+     A deployment with one provider is this product's own (Azure alone,
+     Anthropic unkeyed), so "no fallback available" was the common case rather
+     than the corner. It now tries once more before giving up. */
+  it("a single 5xx with no fallback is retried rather than surfaced", async () => {
     const err = Object.assign(new Error("boom"), {
       status: 500,
       name: "InternalServerError",
     });
+    mockMessagesCreate.mockRejectedValueOnce(err);
+    mockMessagesCreate.mockResolvedValueOnce(fakeOk("recovered"));
+
+    const out = await getAIClient().complete({
+      messages: [{ role: "user", content: "x" }],
+      max_tokens: 10,
+      model_tier: "standard",
+      metadata: { feature: "failover.no.fallback" },
+    });
+
+    expect(out.content).toContain("recovered");
+    /* The recovery is recorded. A retry that quietly works is the kind of
+       success that hides a worsening dependency until it fails for good. */
+    expect(mockTrackEvent.mock.calls.map((c) => c[0])).toContain("ai.provider_retry_succeeded");
+  });
+
+  it("a provider failing twice with no fallback propagates the error", async () => {
+    const err = Object.assign(new Error("boom"), {
+      status: 500,
+      name: "InternalServerError",
+    });
+    mockMessagesCreate.mockRejectedValueOnce(err);
     mockMessagesCreate.mockRejectedValueOnce(err);
     await expect(
       getAIClient().complete({
@@ -243,14 +276,32 @@ describe("router — failover", () => {
         metadata: { feature: "failover.no.fallback" },
       }),
     ).rejects.toMatchObject({ message: "boom" });
-    expect(mockTrackEvent).not.toHaveBeenCalled();
+    /* No ai.completion event, because nothing completed. The retry event is
+       absent too: it only fires on a recovery. */
+    expect(mockTrackEvent.mock.calls.map((c) => c[0])).not.toContain("ai.completion");
+  });
+
+  /* A 4xx must NOT be retried: it fails identically the second time and
+     retrying spends money twice to reach the same place. */
+  it("does not retry a bad request", async () => {
+    const err = Object.assign(new Error("bad request"), { status: 400 });
+    mockMessagesCreate.mockRejectedValueOnce(err);
+    await expect(
+      getAIClient().complete({
+        messages: [{ role: "user", content: "x" }],
+        max_tokens: 10,
+        model_tier: "standard",
+        metadata: { feature: "failover.no.retry.4xx" },
+      }),
+    ).rejects.toMatchObject({ message: "bad request" });
+    expect(mockMessagesCreate).toHaveBeenCalledTimes(1);
   });
 
   it("Azure 5xx falls back to Anthropic and reports fallback_used=true", async () => {
-    // A realistically shaped Azure endpoint. "example.azure.com" is not one:
+    // A realiztically shaped Azure endpoint. "example.azure.com" is not one:
     // real resources live under <name>.openai.azure.com, and since the egress
     // allowlist was wired into the provider a fixture that does not look like a
-    // real endpoint is correctly refused. Making the fixture realistic is the
+    // real endpoint is correctly refused. Making the fixture realiztic is the
     // fix; adding a test hostname to a production allowlist would not be.
     process.env.AZURE_OPENAI_ENDPOINT = "https://test-resource.openai.azure.com";
     process.env.AZURE_OPENAI_API_KEY = "akey";
@@ -278,6 +329,73 @@ describe("router — failover", () => {
     const payload = mockTrackEvent.mock.calls.find((c) => c[0] === "ai.completion")![3] as Record<string, unknown>;
     expect(payload.fallback_used).toBe(true);
   });
+
+  /**
+   * THE PRODUCTION CASE, WHICH HAD NO TEST AND NO FALLBACK.
+   *
+   * The rule was "Azure is primary, Anthropic is the fallback if its key is
+   * set". ANTHROPIC_API_KEY has never been set on this deployment, so
+   * pickFallback returned null for every retryable Azure failure, and the
+   * analytics agree: 0 fallbacks across 1,406 calls in the product's life.
+   * Meanwhile a configured OpenAI-shaped provider sat in the registry, serving
+   * calls as primary, never considered as a way out of an outage.
+   */
+  it("Azure 5xx falls back to a configured provider when Anthropic has no key", async () => {
+    delete process.env.ANTHROPIC_API_KEY;
+    process.env.AZURE_OPENAI_ENDPOINT = "https://test-resource.openai.azure.com";
+    process.env.AZURE_OPENAI_API_KEY = "akey";
+    process.env.AZURE_OPENAI_DEPLOYMENT_CHEAP = "gpt-4o-mini-dep";
+    process.env.AZURE_OPENAI_DEPLOYMENT_STANDARD = "gpt-4o-dep";
+    process.env.AI_COMPAT_PROVIDERS = "deepseek";
+    process.env.AI_COMPAT_DEEPSEEK_BASE_URL = "https://api.deepseek.com/v1";
+    process.env.AI_COMPAT_DEEPSEEK_API_KEY = "dkey";
+    process.env.AI_COMPAT_DEEPSEEK_MODEL_STANDARD = "deepseek-chat";
+    process.env.AI_COMPAT_DEEPSEEK_INPUT_PER_1K_STANDARD = "0.0001";
+    process.env.AI_COMPAT_DEEPSEEK_OUTPUT_PER_1K_STANDARD = "0.0002";
+    _resetAIClientForTests(null);
+
+    /* Azure is asked first and fails; the compatible provider answers. Both
+       go through fetch, so the order of the mocks is the order of the calls. */
+    mockFetch.mockResolvedValueOnce(azureFail(503, "azure down"));
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [{ message: { content: "from-deepseek" }, finish_reason: "stop" }],
+        usage: { prompt_tokens: 5, completion_tokens: 3 },
+        model: "deepseek-chat",
+      }),
+      text: async () => "",
+    } as unknown as Response);
+
+    const out = await getAIClient().complete({
+      messages: [{ role: "user", content: "x" }],
+      max_tokens: 10,
+      model_tier: "standard",
+      sensitivity: "public",
+      metadata: { feature: "failover.azure.to.compatible" },
+    });
+
+    expect(out.provider_used).toBe("deepseek");
+    const payload = mockTrackEvent.mock.calls.find((c) => c[0] === "ai.completion")![3] as Record<string, unknown>;
+    expect(payload.fallback_used).toBe(true);
+  });
+
+  /* NOT TESTED HERE, AND SAID RATHER THAN IMPLIED: that pickFallback never
+   * returns the provider which just failed.
+   *
+   * A test for it was written and deleted. Constructing "a compatible provider
+   * is primary and fails" turns out to be impossible through this seam,
+   * because with neither Azure nor Anthropic configured the router selects
+   * ANTHROPIC as primary and throws on the missing key without ever
+   * considering the compatible provider that is configured. That is a real
+   * defect and a separate one; it is not the production path, where Azure is
+   * configured and is primary.
+   *
+   * The deleted test passed, both with the guard and without it, for that
+   * reason. A test that cannot fail is worse than no test: it reports coverage
+   * of a rule it never reaches.
+   */
 
   it("both providers fail: throws and emits no analytics event", async () => {
     process.env.AZURE_OPENAI_ENDPOINT = "https://test-resource.openai.azure.com";
@@ -541,7 +659,7 @@ describe("router — savings are measured, not asserted", () => {
     });
   });
 
-  test("a baseline_tier records what the OLD behaviour would have cost", async () => {
+  test("a baseline_tier records what the OLD behavior would have cost", async () => {
     await getAIClient().complete({
       messages: [{ role: "user", content: "hi" }],
       max_tokens: 10,

@@ -3,14 +3,14 @@
  *
  * Moving a prompt is the one refactor where "it still works" is not observable
  * from the type system or from a passing unit test elsewhere: the model reads
- * the text, so a dropped line is a silent behaviour change that shows up as
+ * the text, so a dropped line is a silent behavior change that shows up as
  * worse output weeks later. These tests pin the text itself.
  *
  * The auto-acknowledge case is why this file exists. That prompt was a joined
  * ARRAY, and my first pass registered only its opening line. The six hard rules
  * below it are what keep an unsupervised reply from claiming an account is
  * fixed, so losing them would have turned a safe auto-reply into one that
- * asserts things it cannot see — a behaviour change dressed as a migration.
+ * asserts things it cannot see — a behavior change dressed as a migration.
  */
 import { renderPrompt } from "../registry";
 import { SUPPORT_CATEGORIZE, SUPPORT_AUTO_ACKNOWLEDGE } from "../definitions/support";

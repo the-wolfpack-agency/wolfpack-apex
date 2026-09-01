@@ -7,7 +7,7 @@
  *   - Each card renders as a <button> (keyboard + screen-reader friendly).
  *   - Each card has an `aria-label` with the template name.
  *   - Enter and Space on a focused card select the template (default
- *     browser behaviour for <button>).
+ *     browser behavior for <button>).
  *
  * Analytics:
  *   - Fires `site.template_previewed` on select — fire-and-forget to

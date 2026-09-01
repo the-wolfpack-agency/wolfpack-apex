@@ -42,7 +42,7 @@ const SCRIPT_ONLY_BY_DESIGN: Record<string, string> = {
   "backfill.ts":
     "a maintenance job run by hand via scripts/brain-backfill.ts; it embeds documents that predate the embedder and has no place in a request path",
   "retrieval-eval.ts":
-    "a measurement, not a request path: scripts/eval-retrieval.ts grades labelled question-to-document pairs so a ranking change can be judged instead of argued. Wiring it into a request would make every question pay for an evaluation nobody asked for",
+    "a measurement, not a request path: scripts/eval-retrieval.ts grades labeled question-to-document pairs so a ranking change can be judged instead of argued. Wiring it into a request would make every question pay for an evaluation nobody asked for",
 };
 
 /** Files with nothing to call. */

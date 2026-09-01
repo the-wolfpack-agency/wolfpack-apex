@@ -126,7 +126,7 @@ export interface SiteThemeFont {
 
 /**
  * Typed design-token scales surfaced by the ThemeEditor. Every scale is
- * fully optional — an un-edited brief keeps its existing behaviour. The
+ * fully optional — an un-edited brief keeps its existing behavior. The
  * template picks defaults via `resolveThemeTokens()` in site-theme-tokens.ts.
  * Values are strings (CSS dimensions / durations / easings) because we emit
  * them verbatim into `--wp-*` custom properties; zero runtime math.

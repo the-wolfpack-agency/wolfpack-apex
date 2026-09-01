@@ -55,8 +55,8 @@ CREATE TABLE IF NOT EXISTS apex_benefit_plans (
   individual_oop_max_out_of_network NUMERIC,
   primary_care_copay TEXT,                     -- raw, e.g. "$0/$0" or "DC/DC"
   primary_care_copay_in_network NUMERIC,       -- normalized: 0 if $0, NULL if DC
-  specialist_copay  TEXT,
-  specialist_copay_in_network NUMERIC,
+  specializt_copay  TEXT,
+  specializt_copay_in_network NUMERIC,
   er_copay          TEXT,
   rx_copays         TEXT,                      -- raw rx tier string
   monthly_premium_age_employee_only NUMERIC,

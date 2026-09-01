@@ -2,7 +2,7 @@
  * Prompts that read a document, a brief, or the knowledge base.
  *
  * Migrated verbatim from string constants in src/lib. The text is UNCHANGED —
- * this is a move, not a rewrite, so any behaviour difference here would be a
+ * this is a move, not a rewrite, so any behavior difference here would be a
  * bug rather than a feature. What is new is everything around it: an id an eval
  * can score, a version a regression can be bisected against, and a declared
  * scope the registry requires rather than hopes for.
@@ -133,7 +133,7 @@ export const SUPPORT_SELF_SERVE_ANSWER = definePrompt({
   scope: {
     inScope: ["the question asked", "the internal documentation supplied as context"],
     outOfScope: [
-      "asserting anything about the member's account, licences or tickets",
+      "asserting anything about the member's account, licenses or tickets",
       "promising an action or an outcome",
       "answering confidently when the question is ambiguous — recommend a ticket instead",
     ],

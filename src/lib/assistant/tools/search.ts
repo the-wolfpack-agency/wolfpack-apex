@@ -120,7 +120,7 @@ const DOCUMENT_QUESTION_RE = new RegExp(
        "what is in SharePoint about training" lands here too, and the topic is
        captured rather than swallowed into the subject. */
 
-    /* SUMMARISE AND "WHAT DOES X SAY" ARE CONTENT QUESTIONS, NOT SEARCHES.
+    /* SUMMARIZE AND "WHAT DOES X SAY" ARE CONTENT QUESTIONS, NOT SEARCHES.
      *
      * Both used to be captured here and handed to universal search, which
      * returns a browsable LIST. Somebody who asks for a summary receives a
@@ -203,7 +203,7 @@ const CONTAINER_ONLY_RE =
  * returns the whole document and buries the clause somebody wanted.
  */
 export function matchDocumentQuestion(message: string): string | null {
-  /* NORMALISED BEFORE MATCHING, WHICH IS A SECURITY PROPERTY.
+  /* NORMALIZED BEFORE MATCHING, WHICH IS A SECURITY PROPERTY.
    *
    * These patterns put `\s+` next to a lazy `.+?`, so both sides could match
    * the same space and a message of many spaces made the engine try every
@@ -222,12 +222,12 @@ export function matchDocumentQuestion(message: string): string | null {
    *
    * Collapsing whitespace first lets every pattern use a literal space, so the
    * ambiguity has nowhere to live. Same input, same matches, no backtracking. */
-  const normalised = message.replace(/\s+/g, " ").trim();
-  /* Bounded as defence in depth, so a future edit that reintroduces some other
+  const normalized = message.replace(/\s+/g, " ").trim();
+  /* Bounded as defense in depth, so a future edit that reintroduces some other
      ambiguity cannot be exploited by length alone. No document question is
      this long. */
-  if (normalised.length > 600) return null;
-  const m = DOCUMENT_QUESTION_RE.exec(normalised);
+  if (normalized.length > 600) return null;
+  const m = DOCUMENT_QUESTION_RE.exec(normalized);
   if (!m) return null;
   const g = (m.groups ?? {}) as Record<string, string | undefined>;
 
@@ -316,22 +316,41 @@ export function matchDocumentQuestion(message: string): string | null {
 const TYPED_CRM_RE =
   /\b(?:look\s+up|find|search\s+for|fetch|pull|show\s+(?:me\s+)?(?:the\s+)?)(?:\s+the)?\s+(?:contacts?|people|person|deals?|opportunit(?:y|ies)|accounts?|compan(?:y|ies))(?:\s+(?:for|called|named|with\s+name))?\s+.{2,160}$/i;
 
+/**
+ * Does this tool claim the message, without letting a broken matcher decide
+ * routing by accident?
+ *
+ * A throwing matcher must not take universal search down, which is why these
+ * were wrapped. But swallowing it silently means a tool stops claiming its own
+ * questions and nobody finds out: the message routes somewhere else and
+ * answers plausibly from the wrong source, which is worse than an error
+ * because it looks like a working product.
+ *
+ * Same protection, one line of evidence.
+ */
+function claims(name: string, match: (m: string) => unknown, message: string): boolean {
+  try {
+    return match(message) !== null;
+  } catch (err) {
+    console.warn(
+      `[search] ${name}.matchIntent threw; it will not claim this message: ${(err as Error).message}`,
+    );
+    return false;
+  }
+}
+
 function crmToolClaims(message: string): boolean {
   /* Typed-object CRM ("find the contact for Acme"). Same regex shape
    *  as PATTERNS[0] in search-external-records-tool. */
   if (TYPED_CRM_RE.test(message)) return true;
   /* Possessive related — "Acme's opportunities", "Jorge's open deals". */
-  try {
-    if (getRelatedRecordsTool.matchIntent(message) !== null) return true;
-  } catch { /* swallow */ }
+  if (claims("getRelatedRecords", (m) => getRelatedRecordsTool.matchIntent(m), message)) return true;
   /* Filter — "deals over $50k closing this month". */
-  try {
-    if (filterExternalRecordsTool.matchIntent(message) !== null) return true;
-  } catch { /* swallow */ }
+  if (claims("filterExternalRecords", (m) => filterExternalRecordsTool.matchIntent(m), message)) {
+    return true;
+  }
   /* ID-shape — "look up contact id 003abc". */
-  try {
-    if (getExternalRecordTool.matchIntent(message) !== null) return true;
-  } catch { /* swallow */ }
+  if (claims("getExternalRecord", (m) => getExternalRecordTool.matchIntent(m), message)) return true;
   return false;
 }
 
@@ -430,7 +449,7 @@ const STREET_TYPE =
  * US ZIP and ZIP+4, the two-letter-state-plus-ZIP form, and a UK postcode.
  *
  * The UK form was missing on the first pass and "221 Baker Street, London NW1
- * 6XE" fell through to a model. This engagement is US-centred, but an address
+ * 6XE" fell through to a model. This engagement is US-centerd, but an address
  * is an address and the pattern costs one alternation.
  */
 const POSTAL_TAIL =
@@ -664,7 +683,7 @@ export function relaxQuery(query: string): string | null {
 }
 
 /**
- * Name the providers that never answered, in words a reader recognises.
+ * Name the providers that never answered, in words a reader recognizes.
  *
  * Returns null on a healthy search, which is the common case and reads exactly
  * as it did before.
@@ -684,7 +703,7 @@ function degradedNote(body: SearchResponse): string | null {
   return `${list} did not answer in time, so ${d.length === 1 ? "it was" : "they were"} not searched`;
 }
 
-/* Exported for tests only. The wording IS the behaviour here: the defect this
+/* Exported for tests only. The wording IS the behavior here: the defect this
    guards was a sentence that asserted something untrue, so it has to be
    assertable directly rather than through the whole tool. */
 export { summaryAnswer as summaryAnswerForTests };

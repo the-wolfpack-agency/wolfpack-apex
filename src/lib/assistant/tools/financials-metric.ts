@@ -53,10 +53,10 @@ export function classifyMetric(text: string): FinancialMetric {
  */
 export type FinancialsFailure =
   /** Not an admin. Say nothing about financials at all. */
-  | "not_authorised"
+  | "not_authorized"
   /** Understood, but the accounting system is not connected. */
   | "not_connected"
-  /** Genuinely did not recognise a metric in the question. */
+  /** Genuinely did not recognize a metric in the question. */
   | "unknown_metric"
   /** Connected and understood, but the period holds nothing. */
   | "no_data";
@@ -105,7 +105,7 @@ export async function runFinancialsMetricOutcome(params: {
   userRole: string;
 }): Promise<FinancialsOutcome> {
   if (params.userRole !== "ceo" && params.userRole !== "cto" && params.userRole !== "evp") {
-    return { ok: false, reason: "not_authorised" };
+    return { ok: false, reason: "not_authorized" };
   }
   const status = await getConnectionStatus().catch(() => null);
   if (!status || !status.connected) return { ok: false, reason: "not_connected" };

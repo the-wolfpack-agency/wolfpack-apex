@@ -50,6 +50,23 @@ export interface CapabilitySnapshot {
   safety: {
     responsesRedacted: Reading;
     responsesFlagged: Reading;
+    /**
+     * SENSITIVE INPUT STOPPED BEFORE IT REACHED A MODEL.
+     *
+     * The control a client actually asks about, and the one that fires. A
+     * person pastes a card number, a national ID or an API key into the chat
+     * box, by mistake or in a hurry, and it is removed before the prompt
+     * leaves this process.
+     *
+     * Reported because the two OUTBOUND counters above are both zero and
+     * always have been. That is honest for what they measure, which is what a
+     * MODEL sent back, and for a product answering questions about documents
+     * that shape is genuinely rare. But a client reading "0 answers flagged"
+     * next to a promise about safety reasonably concludes the safety check
+     * found nothing, when in fact a different check has been catching real
+     * things all along and nothing showed it.
+     */
+    sensitiveInputsRedacted: Reading;
     /** True when the inspector demonstrably runs, so a zero is good news. */
     inspectorProven: boolean;
   };
@@ -86,6 +103,7 @@ export async function readCapabilitySnapshot(windowDays = 90): Promise<Capabilit
     checkpoints,
     redacted,
     flagged,
+    promptRedacted,
     tierRows,
     chunkRows,
     docRows,
@@ -95,6 +113,7 @@ export async function readCapabilitySnapshot(windowDays = 90): Promise<Capabilit
     scalar(`SELECT count(*)::text AS n FROM instinct_events WHERE event_type='ogiam.checkpoint_signed' AND timestamp > ${since}`, [days]),
     scalar(`SELECT count(*)::text AS n FROM instinct_events WHERE event_type='ai.response_redacted' AND timestamp > ${since}`, [days]),
     scalar(`SELECT count(*)::text AS n FROM instinct_events WHERE event_type='ai.response_flagged' AND timestamp > ${since}`, [days]),
+    scalar(`SELECT count(*)::text AS n FROM instinct_events WHERE event_type='ai.prompt_redacted' AND timestamp > ${since}`, [days]),
     query<{ tier: string; calls: string; usd: string | null }>(
       `SELECT COALESCE(metadata->>'tier','unknown') AS tier, count(*)::text AS calls,
               COALESCE(sum((metadata->>'cost_usd')::numeric),0)::text AS usd
@@ -192,6 +211,24 @@ export async function readCapabilitySnapshot(windowDays = 90): Promise<Capabilit
                 flagged === 0
                   ? "the inspector ran on every model answer and matched none"
                   : "model answers carried a risky shape and were logged for review; the answer was still delivered",
+            },
+      /* THE CONTROL THAT ACTUALLY FIRES, reported because the two above do
+         not. Verified end to end on 2026-08-30 against the production
+         database: a pasted card number, a national ID inside a real question,
+         bank details, and an API key. None reached the answer, and the one
+         that needed a model produced an ai.prompt_redacted row. Bank details
+         pasted alongside a genuine question had the details removed and the
+         question answered, which is the behavior worth having: the person is
+         helped and the data never leaves. */
+      sensitiveInputsRedacted:
+        promptRedacted === null
+          ? unreadable("The event store could not be read.")
+          : {
+              value: promptRedacted,
+              detail:
+                promptRedacted === 0
+                  ? "nobody has pasted a card number, identifier or key into a question in this window"
+                  : "cards, identifiers and keys removed from questions before any model or outside service saw them",
             },
       /* The inspector is proved by router-verification.test.ts, which asserts
          it runs on an ordinary completion with nothing opted in, and stays

@@ -3,8 +3,8 @@
  *
  * Verifies signAppJwt produces a real RS256 JWT (header alg + verifiable
  * signature against the public key), backdates iat, caps exp under 10 minutes,
- * and that readAppConfigFromEnv recognises configured vs not-configured states
- * (including the literal-\n PEM normalisation Vercel introduces). NEVER hits
+ * and that readAppConfigFromEnv recognizes configured vs not-configured states
+ * (including the literal-\n PEM normalization Vercel introduces). NEVER hits
  * the network; the private key is generated in-process and never logged.
  */
 
@@ -89,7 +89,7 @@ describe("readAppConfigFromEnv", () => {
     expect(readAppConfigFromEnv()).toBeNull();
   });
 
-  it("normalises literal \\n newlines (Vercel single-line env)", () => {
+  it("normalizes literal \\n newlines (Vercel single-line env)", () => {
     process.env.GITHUB_APP_ID = "123";
     process.env.GITHUB_APP_PRIVATE_KEY =
       "-----BEGIN PRIVATE KEY-----\\nMIIB\\n-----END PRIVATE KEY-----";

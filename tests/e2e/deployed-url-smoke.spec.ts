@@ -17,7 +17,7 @@
  *   - A dashboard that renders empty instead of redirecting. On 2026-04-16
  *     every API call 401'd and the page drew zeros. That is the exact shape
  *     the whole product has spent two days learning to distinguish: an empty
- *     page and an unauthorised one look identical to a reader.
+ *     page and an unauthorized one look identical to a reader.
  *   - CSP violations, which the middleware sets and an edge override can
  *     silently break.
  *   - A login form that submits before hydration, doing a native GET with no

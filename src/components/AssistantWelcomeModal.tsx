@@ -131,6 +131,46 @@ export function AssistantWelcomeModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, userRole]);
 
+  /* TYPING YOUR OWN QUESTION CLOSES IT.
+   *
+   * It did not, and the consequence was worse than a stuck panel. The composer
+   * sits above this backdrop, so somebody can type past the modal and send:
+   * measured in real Chromium on 2026-08-30, a first visit accepted the
+   * question, streamed the answer, and left the modal open ON TOP of it. Every
+   * control on that answer, the sources, the copy button, the feedback
+   * buttons, resolved to the backdrop rather than to itself and did nothing
+   * when clicked.
+   *
+   * That is the worst version of this bug, because nothing looks broken. The
+   * answer is right there, greyed slightly, and the buttons simply ignore you.
+   *
+   * Escape and click-outside were both added earlier, by measuring, and both
+   * miss this: somebody who types their own question never presses Escape and
+   * never clicks the backdrop. The modal exists to suggest a first question,
+   * so the moment somebody writes their own it has done its job.
+   *
+   * Listens for INPUT rather than focus, because a composer that autofocuses
+   * on load would dismiss this before it was ever read. Ignores input inside
+   * the panel itself, so a future search box in here cannot close it. */
+  useEffect(() => {
+    if (!open || typeof window === "undefined") return;
+    function onInput(e: Event): void {
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+      const isTextEntry =
+        target.tagName === "TEXTAREA" ||
+        (target.tagName === "INPUT" && !["checkbox", "radio", "button"].includes(
+          (target as HTMLInputElement).type,
+        ));
+      if (!isTextEntry) return;
+      if (target.closest('[data-testid="assistant-welcome-modal"]')) return;
+      handleDismiss("typed_own_question");
+    }
+    document.addEventListener("input", onInput, true);
+    return () => document.removeEventListener("input", onInput, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, userRole]);
+
   /* ASK WHAT IS CONNECTED BEFORE PROMISING IT WORKS.
    *
    * The modal offered six prompts under "each one works right now, no setup
@@ -173,7 +213,9 @@ export function AssistantWelcomeModal({
     }
   }
 
-  function handleDismiss(method: "x_button" | "click_outside" | "escape"): void {
+  function handleDismiss(
+    method: "x_button" | "click_outside" | "escape" | "typed_own_question",
+  ): void {
     setOpen(false);
     markSeen();
     track("assistant.welcome_dismissed", { method, role: userRole ?? "unknown" });
@@ -205,7 +247,7 @@ export function AssistantWelcomeModal({
       className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 px-4"
       role="dialog"
       aria-modal="true"
-      aria-labelledby="instinct-welcome-title"
+      aria-labeledby="instinct-welcome-title"
     >
       <div
         data-testid="assistant-welcome-modal"

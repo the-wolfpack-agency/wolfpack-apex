@@ -17,6 +17,8 @@
  */
 
 /** Default cookie name a session lives under when the caller doesn't specify. */
+import { assertScannableUrl, SsrfBlockedError } from "./ssrf-guard";
+
 const DEFAULT_SESSION_COOKIE = "session";
 
 /** Login request timeout. */
@@ -188,6 +190,33 @@ export async function establishSession(
   const cookieName = input.sessionCookieName ?? DEFAULT_SESSION_COOKIE;
   const timeoutMs = input.timeoutMs ?? DEFAULT_LOGIN_TIMEOUT_MS;
   const url = `${input.baseUrl}${input.loginPath}`;
+
+  /* SSRF: THE GUARD EXISTED AND THIS PATH DID NOT CALL IT.
+   *
+   * baseUrl names a scan target, so fetching a URL somebody supplied is the
+   * feature. Fetching http://169.254.169.254/ or a service on localhost is
+   * not, and nothing here told them apart: assertScannableUrl is used by eight
+   * other modules and this login path went straight past it.
+   *
+   * Flagged by CodeQL as js/request-forgery, critical, and it is right. A
+   * scanner that can be pointed at cloud metadata is a credential-exfiltration
+   * tool wearing a security-testing badge.
+   *
+   * Checked HERE rather than at the caller, because a guard somebody has to
+   * remember to call is exactly the state this was already in. */
+  try {
+    await assertScannableUrl(url);
+  } catch (err) {
+    if (err instanceof SsrfBlockedError) {
+      /* Recorded, not swallowed. A blocked login is either a misconfigured
+         target or somebody probing our egress, and both are worth seeing.
+         Returning null keeps the contract: this function already answers
+         "no session" for every failure. */
+      console.warn(`[platform-scan/session] refused to log in: ${err.message}`);
+      return null;
+    }
+    throw err;
+  }
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);

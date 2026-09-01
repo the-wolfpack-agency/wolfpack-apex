@@ -11,7 +11,7 @@
  * nobody can stand behind.
  */
 import {
-  buildCatalogue,
+  buildCatalog,
   CLIENT_MODEL_PREFIX,
   isClientModel,
   validateClientModel,
@@ -110,8 +110,8 @@ describe("a client cannot shadow one of our models", () => {
     // Should be impossible given the prefix. Defined anyway, because
     // "impossible" plus "unchecked" is how a shadowing bug survives.
     const clash = { ...ok(), id: MODEL_REGISTRY[0].id } as ClientModelSpec;
-    const catalogue = buildCatalogue(MODEL_REGISTRY, [clash]);
-    const winner = catalogue.find((m) => m.id === MODEL_REGISTRY[0].id)!;
+    const catalog = buildCatalog(MODEL_REGISTRY, [clash]);
+    const winner = catalog.find((m) => m.id === MODEL_REGISTRY[0].id)!;
     expect(isClientModel(winner)).toBe(false);
   });
 });
@@ -158,31 +158,31 @@ describe("the router treats a client model like any other", () => {
   it("selects a client model when none of ours is available", () => {
     // The real bring-your-own-model case: the client has their own inference
     // and we have no keys deployed for them at all.
-    const catalogue = buildCatalogue(MODEL_REGISTRY, [ok()]);
-    const decision = selectModel({ requiredTier: "large" }, env, catalogue);
+    const catalog = buildCatalog(MODEL_REGISTRY, [ok()]);
+    const decision = selectModel({ requiredTier: "large" }, env, catalog);
     expect(decision.model.id).toBe(`${CLIENT_MODEL_PREFIX}acme-llm`);
     expect(isClientModel(decision.model)).toBe(true);
   });
 
   it("honours a pin to a client model", () => {
-    // Without catalogue-aware pins, "bring your own model" would mean "bring
+    // Without catalog-aware pins, "bring your own model" would mean "bring
     // your own model and never have it chosen".
-    const catalogue = buildCatalogue(MODEL_REGISTRY, [ok()]);
-    const decision = selectModel({ clientPin: `${CLIENT_MODEL_PREFIX}acme-llm` }, env, catalogue);
+    const catalog = buildCatalog(MODEL_REGISTRY, [ok()]);
+    const decision = selectModel({ clientPin: `${CLIENT_MODEL_PREFIX}acme-llm` }, env, catalog);
     expect(decision.model.id).toBe(`${CLIENT_MODEL_PREFIX}acme-llm`);
     expect(decision.reason).toBe("client_pin");
   });
 
-  it("still applies cost ordering across the mixed catalogue", () => {
+  it("still applies cost ordering across the mixed catalog", () => {
     // Cheapest wins regardless of origin. A client model priced below ours is
     // chosen, which is the point of letting them supply one.
     const cheap = ok({ id: "cheap", capabilityTier: "small", inputPricePer1kUsd: 0, outputPricePer1kUsd: 0 });
     const dear = ok({ id: "dear", capabilityTier: "small", inputPricePer1kUsd: 9, outputPricePer1kUsd: 9 });
-    const decision = selectModel({ requiredTier: "small" }, env, buildCatalogue([], [dear, cheap]));
+    const decision = selectModel({ requiredTier: "small" }, env, buildCatalog([], [dear, cheap]));
     expect(decision.model.id).toBe(`${CLIENT_MODEL_PREFIX}cheap`);
   });
 
-  it("does not change behaviour for callers that pass no catalogue", () => {
+  it("does not change behavior for callers that pass no catalog", () => {
     // Every existing call site must be untouched by this feature.
     const withDefault = selectModel({ requiredTier: "small" }, env);
     const withRegistry = selectModel({ requiredTier: "small" }, env, MODEL_REGISTRY);
@@ -190,7 +190,7 @@ describe("the router treats a client model like any other", () => {
     expect(withDefault.reason).toBe(withRegistry.reason);
   });
 
-  it("returns a decision rather than throwing when the catalogue is empty", () => {
+  it("returns a decision rather than throwing when the catalog is empty", () => {
     // The router's standing contract. A client with a broken config must not
     // take the platform down.
     expect(() => selectModel({}, env, [])).not.toThrow();

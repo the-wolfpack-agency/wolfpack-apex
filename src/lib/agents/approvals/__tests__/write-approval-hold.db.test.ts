@@ -161,7 +161,7 @@ d("an agent write is actually held", () => {
   /* FAILS CLOSED ON AN UNKNOWN ACTOR. Everywhere else an unreadable source
      degrades to "we do not know" and carries on. Here the cost is an
      unapproved write against a client's system. */
-  it("holds a write from an agent it does not recognise", async () => {
+  it("holds a write from an agent it does not recognize", async () => {
     const { gate } = await mod();
     const held = await gate.holdWriteForApproval(write(UNKNOWN_AGENT));
     expect(held).not.toBeNull();

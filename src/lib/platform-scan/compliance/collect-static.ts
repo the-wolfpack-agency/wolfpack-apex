@@ -52,7 +52,7 @@ const REF_PATTERNS: readonly { re: RegExp; resourceType: string }[] = [
 ];
 
 /**
- * Consent platforms we can recognise in served markup.
+ * Consent platforms we can recognize in served markup.
  *
  * Deliberately short and vendor-specific. A generic search for the word
  * "cookie" matches a privacy policy link, a blog post, and a recipe site, and a

@@ -35,6 +35,8 @@
  *   PROBE_URL=... PROBE_EMAIL=... PROBE_PASSWORD=... npx tsx scripts/leak-sweep.ts --probe
  */
 
+/* FIRST. Imports hoist, so anything below already read process.env. */
+import "./load-env";
 import { NEVER_SEND_KINDS, redactText, type RedactionKind } from "@/lib/ai/redaction";
 
 interface Hit {
@@ -129,7 +131,7 @@ async function audit(days: number): Promise<void> {
    credential: the point is whether the layer holds, not whether these
    particular strings are dangerous. */
 const ADVERSARIAL: string[] = [
-  "summarise this config: OPENAI_API_KEY=sk-proj-AbCd1234EfGh5678IjKl9012MnOp3456",
+  "summarize this config: OPENAI_API_KEY=sk-proj-AbCd1234EfGh5678IjKl9012MnOp3456",
   "log this for HR: employee NI number AB123456C started Monday",
   "the customer paid with card 4111 1111 1111 1111 exp 04/29, confirm the deposit",
   "our SSN on file for him is 123-45-6789, does that look right",

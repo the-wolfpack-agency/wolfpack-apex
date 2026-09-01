@@ -112,7 +112,7 @@ describe("who decides, asked only where a decision is likely", () => {
     expect(dims("Bump the timeout in the e2e helper to 45 seconds")).not.toContain("decision-owner");
   });
 
-  it("stops asking once the brief says what to do at a judgement", () => {
+  it("stops asking once the brief says what to do at a judgment", () => {
     expect(dims("Get the admin design matching the prototype. Stop and ask me if a brand choice comes up.")).not.toContain(
       "decision-owner",
     );

@@ -17,7 +17,7 @@ const yaml = fs.readFileSync(WF, "utf8");
 const HARD_GATES = [
   "tests/e2e/sites-preview-reality-check.spec.ts",
   "tests/e2e/dashboard-quick-actions.spec.ts",
-  "tests/e2e/ai-router-behaviour.spec.ts",
+  "tests/e2e/ai-router-behavior.spec.ts",
   /* A hard gate because this page shipped correct and unreadable, twice: once
      with no stylesheet at all, then with a diagram that fenced and closed
      early so half of it rendered as prose. Both times the unit tests were
@@ -31,7 +31,7 @@ const HARD_GATES = [
  * Specs deliberately not run by this workflow, each with the reason.
  *
  * An unlisted spec is not a test: it rots silently and its red is invisible.
- * ai-router-behaviour.spec.ts sat unlisted from the day it was written, and by
+ * ai-router-behavior.spec.ts sat unlisted from the day it was written, and by
  * 2026-08-20 five of its assertions had been obsoleted by #279 with nothing to
  * say so. Anything genuinely out of scope belongs here, named, so the omission
  * is a decision somebody made rather than an oversight nobody can see.
@@ -50,7 +50,7 @@ const HARD_GATES = [
  * Removing a name from this list means wiring the spec into a workflow. Adding
  * one is not allowed: write the spec into a job instead.
  *
- * Snapshot taken 2026-08-20, after ai-router-behaviour.spec.ts was found red
+ * Snapshot taken 2026-08-20, after ai-router-behavior.spec.ts was found red
  * for weeks with five assertions obsoleted by #279 and nothing to report it.
  */
 const KNOWN_UNRUN: string[] = [
@@ -127,7 +127,7 @@ const KNOWN_UNRUN: string[] = [
 
 const NOT_RUN_HERE: Record<string, string> = {
   "tests/e2e/smoke.spec.ts": "runs in the post-deploy smoke workflow",
-  "tests/e2e/ai-router.spec.ts": "needs SMOKE_TEST credentials against prod; the behaviour spec covers this page without them",
+  "tests/e2e/ai-router.spec.ts": "needs SMOKE_TEST credentials against prod; the behavior spec covers this page without them",
   "tests/e2e/agent-onboarding.spec.ts": "has its own workflow (agent-onboarding-e2e.yml)",
   "tests/e2e/smoke-probe-waits.spec.ts":
     "runs in the verify gate itself, on every PR and every local run, via the " +

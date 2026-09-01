@@ -70,7 +70,7 @@ afterAll(() => {
 });
 
 describe("the scan cannot read a record", () => {
-  it("issues only fixed catalogue queries", async () => {
+  it("issues only fixed catalog queries", async () => {
     const { pool, statements } = fakePool(route);
     const { scanLegacyDatabase } = await import("@/lib/sources/legacy-postgres");
     await scanLegacyDatabase({ pool });
@@ -78,7 +78,7 @@ describe("the scan cannot read a record", () => {
     const reads = statements.filter((s) => s.startsWith("SELECT"));
     expect(reads.length).toBeGreaterThan(0);
     for (const sql of reads) {
-      /* Every SELECT targets a catalogue or statistics view, never a
+      /* Every SELECT targets a catalog or statistics view, never a
          client table. The list is written out rather than loosened to
          a pattern: adding to it should be a deliberate line in a diff
          that a reviewer sees, which is how the dark-data column scan
@@ -113,7 +113,7 @@ describe("the scan cannot read a record", () => {
   });
 
   it("strips quoted literals out of a statement shape before it is displayed", async () => {
-    /* Normalisation is Postgres's job and it is not a guarantee. A
+    /* Normalization is Postgres's job and it is not a guarantee. A
        shape ends up in screenshots and tickets, so anything still
        quoted is somebody's data. */
     const { scrubShape } = await import("@/lib/sources/legacy-postgres");
@@ -326,9 +326,9 @@ describe("what a real database taught this", () => {
     expect(i.title).not.toContain("0s");
   });
 
-  it("never reports our own catalogue queries back as the client's load", async () => {
+  it("never reports our own catalog queries back as the client's load", async () => {
     /* On an idle database the busiest statements recorded were OUR
-       scan: the read-only transaction, the timeout, and the catalogue
+       scan: the read-only transaction, the timeout, and the catalog
        selects. */
     const { pool } = fakePool((sql) => {
       if (sql.includes("pg_stat_statements") && sql.includes("total_exec_time")) {

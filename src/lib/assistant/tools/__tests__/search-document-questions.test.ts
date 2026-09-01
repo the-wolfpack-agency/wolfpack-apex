@@ -38,7 +38,7 @@ describe("content questions are released to retrieval", () => {
     "what's in the SOW",
     "what is in the contract",
     "summarize the onboarding document",
-    "summarise the contract",
+    "summarize the contract",
   ])("%s is not claimed by search", (prompt) => {
     expect(matchDocumentQuestion(prompt)).toBeNull();
   });

@@ -614,7 +614,7 @@ export interface KeywordSearchResult {
  * topical resemblance, which is where the evidence belongs: somebody naming a
  * file is telling us which document they want.
  *
- * Named rather than inlined so the number is arguable. It is a judgement about
+ * Named rather than inlined so the number is arguable. It is a judgment about
  * evidence, not a measurement, and the next person should be able to see that.
  */
 export const FILENAME_MATCH_WEIGHT = 9;

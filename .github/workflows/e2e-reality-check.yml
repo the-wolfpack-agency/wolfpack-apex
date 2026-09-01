@@ -107,7 +107,7 @@ jobs:
       # regression blocks the merge. All three specs are read-only page renders,
       # so --workers=2 is safe and roughly halves the wall time.
       #
-      # ai-router-behaviour was added on 2026-08-20 after being found red for
+      # ai-router-behavior was added on 2026-08-20 after being found red for
       # weeks: it stubs every response so it needs no credentials, which was
       # written into its header as the reason it could run everywhere, and then
       # it was never listed in a workflow. Five of its assertions had been
@@ -125,8 +125,14 @@ jobs:
           # before hydration, a CSP violation, a stale deploy alias. It runs in
           # 8 seconds and cannot flake on a session it never establishes.
           tests/e2e/deployed-url-smoke.spec.ts
-          tests/e2e/ai-router-behaviour.spec.ts
+          tests/e2e/ai-router-behavior.spec.ts
           tests/e2e/playbook-readable.spec.ts
+          # A HARD GATE FOR THE SAME REASON AS THE SMOKE SPEC: the marker that
+          # says a page is engagement work rather than a shipped feature is one
+          # banner, and a banner that renders unstyled or gets clipped fails
+          # silently. The page still looks fine and the sentence that stops a
+          # concept being demoed as a product is gone. Needs no credentials.
+          tests/e2e/client-builds.spec.ts
           --config=playwright.config.ts --workers=2 --reporter=github
 
       # SOFT SPECS — one invocation, push-to-main ONLY (off the PR critical path).

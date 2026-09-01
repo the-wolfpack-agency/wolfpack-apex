@@ -86,7 +86,7 @@ const STOPWORDS: ReadonlySet<string> = new Set([
      the entity to search for. Dropping them is what lets Graph match the
      extracted keywords to a real document. */
   "summarize",
-  "summarise",
+  "summarize",
   "summary",
   "search",
   "find",

@@ -8,7 +8,7 @@
  * WHY THE RECOMMENDATION LIVES IN CODE AND NOT IN SQL
  *
  * The counts are arithmetic and belong in a view. The reading of them is a
- * judgement, and a judgement frozen into a database view is one nobody reviews
+ * judgment, and a judgment frozen into a database view is one nobody reviews
  * again. Here it can be read, argued with, and changed when it turns out to be
  * wrong.
  *
@@ -186,7 +186,7 @@ export function readHumanSteps(rows: HumanStepRow[]): HumanFinding[] {
            their problem; "part of this looks mechanical" is an observation
            they can act on with what they already have. */
         suggestion:
-          "This one is habitual and expensive. Worth asking which part of it is mechanical, and whether a tool could carry that part while the judgement stays with you.",
+          "This one is habitual and expensive. Worth asking which part of it is mechanical, and whether a tool could carry that part while the judgment stays with you.",
       });
       continue;
     }
@@ -228,7 +228,7 @@ export function readHumanSteps(rows: HumanStepRow[]): HumanFinding[] {
 /**
  * Read the rows for a person, from the store.
  *
- * Separated from readHumanSteps so the judgement stays testable without a
+ * Separated from readHumanSteps so the judgment stays testable without a
  * database. Never throws: an insight that fails is a missing paragraph, not a
  * broken page.
  */

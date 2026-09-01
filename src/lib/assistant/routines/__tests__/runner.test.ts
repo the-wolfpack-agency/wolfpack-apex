@@ -1,7 +1,7 @@
 /**
  * The runner.
  *
- * Three behaviours carry the design, and each is here:
+ * Three behaviors carry the design, and each is here:
  *
  *   1. It STOPS at a person, and everything already done survives the stop.
  *   2. It counts machine time and human time SEPARATELY. That split is the
@@ -87,7 +87,7 @@ describe("running to the end", () => {
     let prompt = "";
     const r = routine([
       { kind: "tool", tool: "read", params: {}, label: "Reading the thing", slot: "inbox" },
-      { kind: "model", prompt: "summarise {{inbox}}", label: "Summarising it", slot: "summary" },
+      { kind: "model", prompt: "summarize {{inbox}}", label: "Summarizing it", slot: "summary" },
     ]);
 
     const run = await advance(r, startRun(r, WHO), deps({
@@ -98,7 +98,7 @@ describe("running to the end", () => {
       },
     }));
 
-    expect(prompt).toBe("summarise two threads");
+    expect(prompt).toBe("summarize two threads");
     expect(run.slots.summary).toBe("here is the summary");
   });
 });
@@ -386,7 +386,7 @@ describe("a human step somebody did not do", () => {
     expect(done.outcomes[1].status).toBe("ok");
   });
 
-  it("marks an unlabelled human step as a review, not as missed work", async () => {
+  it("marks an unlabeled human step as a review, not as missed work", async () => {
     /* An ordinary checkpoint miscounted as a missed human action would put a
        false signal into the insight this distinction exists to produce. */
     const r = routine([{ kind: "human", label: "Check this before it goes" }]);
@@ -548,5 +548,115 @@ describe("the record says which tool ran", () => {
     ]);
     const run = await advance(r, startRun(r, WHO), deps());
     for (const o of run.outcomes) expect(o.tool).toBeUndefined();
+  });
+});
+
+/**
+ * Independent reads run together; anything else does not.
+ *
+ * The morning routine reads the calendar, the open tasks and the next
+ * meeting's brief, and none needs anything from the other two. In series that
+ * is three round trips to Microsoft, roughly three and a half seconds of the
+ * nine a person waited.
+ */
+describe("steps that can run at the same time", () => {
+  const read = (tool: string, slot: string) =>
+    ({ kind: "tool" as const, tool, params: {}, label: `Reading ${tool}`, slot, concurrent: true });
+
+  it("dispatches declared reads concurrently", async () => {
+    let inFlight = 0;
+    let peak = 0;
+    const r = routine([read("a", "one"), read("b", "two"), read("c", "three")]);
+    const run = await advance(
+      r,
+      startRun(r, WHO),
+      deps({
+        dispatchTool: async () => {
+          inFlight += 1;
+          peak = Math.max(peak, inFlight);
+          await new Promise((res) => setTimeout(res, 10));
+          inFlight -= 1;
+          return { ok: true, answer: "x" };
+        },
+      }),
+    );
+    expect(run.state).toBe("done");
+    expect(peak).toBe(3);
+  });
+
+  /* THE SAFETY PROPERTY THIS MUST NOT BREAK, and the reason concurrency is
+     declared rather than inferred. A chain that gathers and then sends must
+     never dispatch the send while the gather is still in flight. */
+  it("never runs an undeclared step alongside anything", async () => {
+    const calls: string[] = [];
+    const r = routine([
+      read("gather", "one"),
+      { kind: "tool", tool: "send", params: {}, label: "Sending the thing" },
+    ]);
+    await advance(
+      r,
+      startRun(r, WHO),
+      deps({
+        dispatchTool: async (t) => {
+          calls.push(t);
+          return t === "gather" ? { ok: false, error: "unreachable" } : { ok: true };
+        },
+      }),
+    );
+    /* The send is never reached, because the gather failed and the send did
+       not opt in to running beside it. */
+    expect(calls).toEqual(["gather"]);
+  });
+
+  it("stops a batch at a step that reads a slot", async () => {
+    const calls: string[] = [];
+    const r = routine([
+      read("a", "one"),
+      { kind: "tool", tool: "b", params: { q: "{{one}}" }, label: "Uses the slot", concurrent: true },
+    ]);
+    await advance(
+      r,
+      startRun(r, WHO),
+      deps({
+        dispatchTool: async (t, p) => {
+          calls.push(`${t}:${JSON.stringify(p)}`);
+          return { ok: true, answer: "x", data: "filled" };
+        },
+      }),
+    );
+    /* b ran after a, with the slot substituted, rather than beside it with
+       the placeholder still in place. */
+    expect(calls[1]).toContain("filled");
+  });
+
+  /* techMs is what a person waited. Summing concurrent calls would report a
+     routine as slower than it was, and the whole point of the change is that
+     number going down. */
+  it("counts the wall clock once, not once per concurrent call", async () => {
+    const r = routine([read("a", "one"), read("b", "two"), read("c", "three")]);
+    let t = 0;
+    const run = await advance(
+      r,
+      startRun(r, WHO),
+      deps({
+        now: () => (t += 100),
+        dispatchTool: async () => ({ ok: true, answer: "x" }),
+      }),
+    );
+    const summed = run.outcomes.reduce((s, o) => s + o.durationMs, 0);
+    expect(summed).toBe(run.techMs);
+  });
+
+  it("reports a failure inside a batch and stops the chain", async () => {
+    const r = routine([read("a", "one"), read("b", "two")]);
+    const run = await advance(
+      r,
+      startRun(r, WHO),
+      deps({
+        dispatchTool: async (t) => (t === "b" ? { ok: false, error: "no" } : { ok: true }),
+      }),
+    );
+    expect(run.state).toBe("failed");
+    expect(run.outcomes.some((o) => o.status === "failed")).toBe(true);
   });
 });

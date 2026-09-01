@@ -2,7 +2,7 @@
  * Reading a client's existing database without reading their data.
  *
  * The pitch for middleware is "plug in and we tell you something on the
- * first day." For a company whose centre of gravity is a database older
+ * first day." For a company whose center of gravity is a database older
  * than most of its staff, the first day is exactly when we know least:
  * no chains have run, no one has asked us anything.
  *
@@ -17,7 +17,7 @@
  * WHAT THIS DELIBERATELY CANNOT DO
  *
  * There is no way to ask it for a row. Every statement it issues is a
- * fixed catalogue query written in this file; nothing accepts SQL from
+ * fixed catalog query written in this file; nothing accepts SQL from
  * a caller, a model, or a tool parameter. It runs inside an explicitly
  * READ ONLY transaction with a short timeout, so even a mistake in this
  * file cannot write to a system we do not own.
@@ -52,7 +52,7 @@ export interface LegacyTableStat {
   analyses: number;
 }
 
-/** A normalised statement shape and what it has cost since the reset. */
+/** A normalized statement shape and what it has cost since the reset. */
 export interface LegacyQueryShape {
   shape: string;
   calls: number;
@@ -63,7 +63,7 @@ export interface LegacyQueryShape {
  * One column, and whether the planner believes there is anything in it.
  *
  * null_frac comes from the planner's own sample, so knowing a column is
- * populated costs no rows read. When a table has never been analysed
+ * populated costs no rows read. When a table has never been analyzed
  * there is no sample and the fraction is unknown, which is reported as
  * unknown rather than assumed empty: claiming a column is dark when we
  * simply could not see it is the one mistake that would discredit the
@@ -73,7 +73,7 @@ export interface LegacyColumn {
   table: string;
   column: string;
   dataType: string;
-  /** null when the table has never been analysed. */
+  /** null when the table has never been analyzed. */
   nullFraction: number | null;
 }
 
@@ -113,13 +113,13 @@ export function legacyDatabaseName(env: NodeJS.ProcessEnv = process.env): string
 }
 
 /**
- * A statement shape is normalised by Postgres — literals become $1 —
- * but normalisation is not a guarantee, and a shape is displayed to a
+ * A statement shape is normalized by Postgres — literals become $1 —
+ * but normalization is not a guarantee, and a shape is displayed to a
  * user and may end up in a screenshot or a ticket.
  *
  * So anything still quoted is removed before it leaves this file. A
  * shape with a customer's name in it is that customer's data, whatever
- * catalogue it came out of.
+ * catalog it came out of.
  */
 export function scrubShape(sql: string): string {
   const collapsed = sql
@@ -145,7 +145,7 @@ const TABLE_STATS_SQL = `
   LIMIT 500`;
 
 /* Every column in the database, with the planner's null fraction where
-   one exists. information_schema is the portable catalogue and pg_stats
+   one exists. information_schema is the portable catalog and pg_stats
    is the sample; neither reads a row of anybody's data. */
 /*
  * BASE TABLE only. Against a real server this returned the columns of
@@ -193,10 +193,10 @@ const QUERY_SHAPES_LEGACY_SQL = `
 const TRACK_SETTING_SQL = `SELECT current_setting('pg_stat_statements.track', true) AS track`;
 
 /**
- * Our own catalogue queries, which pg_stat_statements happily records.
+ * Our own catalog queries, which pg_stat_statements happily records.
  *
  * On a quiet database the busiest statements were OUR scan: the read
- * only transaction, the timeout, and the catalogue selects. Reporting
+ * only transaction, the timeout, and the catalog selects. Reporting
  * those back to a client as their hot query load would be absurd, and
  * on a genuinely idle system it is what would have happened.
  */
@@ -214,7 +214,7 @@ export interface ScanDeps {
 }
 
 /**
- * Run a fixed catalogue query inside a read-only transaction.
+ * Run a fixed catalog query inside a read-only transaction.
  *
  * The transaction is the belt to the fixed-SQL braces. Postgres itself
  * refuses a write inside it, so the guarantee does not depend on this

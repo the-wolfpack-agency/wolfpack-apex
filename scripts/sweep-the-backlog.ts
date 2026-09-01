@@ -19,7 +19,7 @@
  *
  * It cannot say what SHOULD have answered: only a person can decide that
  * "i need the wolfpack letterhead" is a document lookup. So it prints the
- * misses ranked by frequency and leaves the judgement where it belongs.
+ * misses ranked by frequency and leaves the judgment where it belongs.
  *
  * Usage:  DATABASE_URL=... npx tsx scripts/sweep-the-backlog.ts
  *         DATABASE_URL=... npx tsx scripts/sweep-the-backlog.ts --days 30

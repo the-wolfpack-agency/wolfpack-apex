@@ -59,7 +59,7 @@ export function readAppConfigFromEnv(): AppJwtConfig | null {
   let privateKeyPem = process.env.GITHUB_APP_PRIVATE_KEY;
   if (!appId || !privateKeyPem) return null;
   /* Env vars frequently carry the PEM with literal "\n" instead of real
-     newlines (Vercel single-line env). Normalise so createSign accepts it. */
+     newlines (Vercel single-line env). Normalize so createSign accepts it. */
   if (privateKeyPem.includes("\\n")) {
     privateKeyPem = privateKeyPem.replace(/\\n/g, "\n");
   }

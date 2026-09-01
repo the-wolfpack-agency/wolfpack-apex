@@ -5,7 +5,7 @@
  *
  * A client can plug in their own LLM. The reason that is safe — and the reason
  * it is worth doing at all — is that a client model runs under the same gate,
- * the same containment budget, the same behaviour eval and the same audit trail
+ * the same containment budget, the same behavior eval and the same audit trail
  * as a Wolfpack one.
  *
  * The moment any of those branches on origin, the claim collapses in one of two

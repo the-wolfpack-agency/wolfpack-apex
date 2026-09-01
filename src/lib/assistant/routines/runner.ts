@@ -5,7 +5,7 @@
  *
  * It advances a run: substitute slots, dispatch a step, store the result, move
  * the cursor, and stop when a person is needed or the work is done. It is NOT
- * an agent. It does not decide what to do next, retry a judgement call, or
+ * an agent. It does not decide what to do next, retry a judgment call, or
  * work around a failure. A chain that improvises is one nobody can predict,
  * and unpredictability is disqualifying for something that sends mail on
  * somebody's behalf.
@@ -13,7 +13,7 @@
  * PURE CORE, INJECTED EDGES
  *
  * Every side effect arrives through RunnerDeps: dispatching a tool, asking a
- * model, and reading the clock. That is what lets the interesting behaviour
+ * model, and reading the clock. That is what lets the interesting behavior
  * (a step fails mid-chain, a person takes eleven minutes, a slot is missing)
  * be tested exactly rather than approximately.
  *
@@ -166,7 +166,41 @@ export async function advance(
       }
     }
 
+    /* INDEPENDENT TOOL STEPS RUN TOGETHER. See concurrentBatch: a step only
+       joins when it reads nothing a neighbour could write, so slots are still
+       filled in a defined order and a chain that pauses still pauses in the
+       right place. */
+    const batchEnd = concurrentBatch(routine.steps, cursor);
     const started = deps.now();
+
+    if (batchEnd - cursor > 1) {
+      const batch = routine.steps.slice(cursor, batchEnd) as (ToolStep | ModelStep)[];
+      /* Each step writes its own slot, so they are collected first and applied
+         in order afterwards. Writing from inside the concurrent calls would
+         make the final slot state depend on which network call returned
+         first. */
+      const results = await Promise.all(
+        batch.map((s, offset) => runStep(s, slots, deps, answers, cursor + offset)),
+      );
+      const elapsed = Math.max(0, deps.now() - started);
+      results.forEach((outcome, offset) => {
+        outcome.index = cursor + offset;
+        /* THE WALL CLOCK, SHARED, NOT COUNTED THREE TIMES. techMs is what a
+           person waited, and reporting the sum of concurrent calls would say a
+           routine took longer than it did. */
+        outcome.durationMs = offset === 0 ? elapsed : 0;
+        outcomes.push(outcome);
+      });
+      techMs += elapsed;
+
+      const failed = results.find((o) => o.status === "failed");
+      cursor = batchEnd;
+      if (failed) {
+        return { ...run, state: "failed", cursor, outcomes, slots, answers, techMs };
+      }
+      continue;
+    }
+
     const outcome = await runStep(step, slots, deps, answers, cursor);
     outcome.index = cursor;
     outcome.durationMs = Math.max(0, deps.now() - started);
@@ -267,6 +301,45 @@ export async function resume(
 }
 
 /** One tool or model step, with its slot references resolved. */
+/**
+ * Tool steps that can run at the same time as the one at `from`.
+ *
+ * WHY. The morning routine reads the calendar, then the open tasks, then the
+ * next meeting's brief, and none of the three needs anything from the other
+ * two. Run in series that is three round trips to Microsoft one after another,
+ * measured at roughly three and a half seconds of the nine a client waits.
+ *
+ * OPT-IN, AND DEFAULT SEQUENTIAL. A step joins the batch only when it is
+ * declared `concurrent`, reads no slot, and asks for nothing. Nothing is
+ * inferred: the tools carry no read-or-write marker, and a chain that gathers
+ * and then sends must never dispatch the send while the gather is still in
+ * flight, or the send goes out even when the gather failed.
+ *
+ * Slot references break a batch too, even when the slot was filled earlier,
+ * because the cost of being wrong is a routine reading a value before it is
+ * written and reporting something false with total confidence.
+ *
+ * Stops at the first step that is not a plain tool step. A model step consumes
+ * the slots the batch fills, a human step is a pause, and a step that asks for
+ * a value is a question: none may be reordered around.
+ */
+export function concurrentBatch(steps: RoutineStep[], from: number): number {
+  let end = from;
+  while (end < steps.length) {
+    const step = steps[end];
+    if (step.kind !== "tool") break;
+    /* DECLARED, NEVER INFERRED. A step runs alongside its neighbours only
+       because whoever wrote the routine said it reads and nothing more. */
+    if (step.concurrent !== true) break;
+    if (step.ask && Object.keys(step.ask).length > 0) break;
+    if (JSON.stringify(step.params ?? {}).includes("{{")) break;
+    end += 1;
+  }
+  /* A batch of one is just the step, and saying so keeps the caller's fast
+     path free of special cases. */
+  return Math.max(end, from + 1);
+}
+
 async function runStep(
   step: ToolStep | ModelStep,
   slots: Record<string, unknown>,

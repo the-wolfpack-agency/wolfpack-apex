@@ -7,6 +7,7 @@
  * report compliance nobody established.
  */
 import {
+  capabilityNote,
   classify,
   partyOf,
   identify,
@@ -120,7 +121,7 @@ describe("firedBeforeConsent", () => {
     expect(out).toEqual([]);
   });
 
-  it("flags an unrecognised host, since unknown is not the same as harmless", () => {
+  it("flags an unrecognized host, since unknown is not the same as harmless", () => {
     const out = firedBeforeConsent([req({ url: "https://who-is-this.test/px", atMs: 10 })], null);
     expect(out.map((c) => c.host)).toEqual(["who-is-this.test"]);
   });
@@ -191,5 +192,95 @@ describe("one observation set, three questions", () => {
     expect(firedBeforeConsent(observations, 3000).map((c) => c.host)).toEqual(["mystery-tracker.test"]);
     expect(outsideJurisdiction(observations, ["DE"]).outside.map((c) => c.host)).toEqual(["mystery-tracker.test"]);
     expect(unexplained(observations, ["google-analytics.com"]).map((c) => c.host)).toEqual(["mystery-tracker.test"]);
+  });
+});
+
+/**
+ * Hosts a real scan met and could not name.
+ *
+ * Every URL here was contacted during a walk of a client's forms platform on
+ * 2026-08-30. Five of the seven third parties came back "unknown", which
+ * scores medium, so a product that records user sessions read exactly like an
+ * unremarkable CDN.
+ */
+describe("what the first live scan could not name", () => {
+  it("names Pendo", () => {
+    for (const url of ["https://data.pendo.io/data/ptm.gif", "https://cdn.pendo.io/agent/x.js"]) {
+      expect(identify(url).name).toBe("Pendo");
+    }
+  });
+
+  /* CLASSIFIED ON WHAT WAS OBSERVED, NOT ON WHAT THE VENDOR SELLS.
+     Pendo was first put in session-replay because Pendo sells session replay.
+     That is a fact about a price list: replay is a feature an operator
+     switches on, and a scan from outside cannot see whether it is enabled.
+     Scoring a host into SEVERE_KINDS on something nobody measured is the
+     crying wolf these detectors exist to avoid. */
+  it("does not score a vendor by its price list", () => {
+    expect(identify("https://data.pendo.io/data/ptm.gif").kind).toBe("analytics");
+    expect(identify("https://dev.visualwebsiteoptimizer.com/j.php").kind).toBe("analytics");
+  });
+
+  it("names Visual Website Optimizer without overstating what it is", () => {
+    expect(identify("https://dev.visualwebsiteoptimizer.com/j.php").name).toBe(
+      "Visual Website Optimizer",
+    );
+  });
+
+  it("names the product's own object storage so a reader can dismiss it", () => {
+    expect(identify("https://cognitoprod.blob.core.windows.net/x.png").name).toBe(
+      "Azure Blob Storage",
+    );
+  });
+
+  /* reCAPTCHA is a security control the site uses to protect itself, which is
+     close to the opposite of an unexplained tracker. The host alone cannot
+     tell them apart, because google.com serves both. */
+  it("tells reCAPTCHA apart from google.com generally", () => {
+    expect(identify("https://www.google.com/recaptcha/api2/aframe")).toEqual({
+      kind: "cdn",
+      name: "Google reCAPTCHA",
+    });
+    expect(identify("https://www.google.com/search?q=x")).toEqual({ kind: "unknown", name: null });
+  });
+
+  it("still refuses to name a host it has no signature for", () => {
+    expect(identify("https://telemetry.unknown.example/ingest")).toEqual({
+      kind: "unknown",
+      name: null,
+    });
+  });
+
+  /* Dot-boundary, as elsewhere: a lookalike domain must not inherit a real
+     vendor's name or its severity. */
+  it("does not let a lookalike domain borrow a vendor name", () => {
+    expect(identify("https://evil-pendo.io/x.js").name).toBeNull();
+    expect(identify("https://notpendo.io/x.js").name).toBeNull();
+  });
+});
+
+/**
+ * The question a severity must not answer for you.
+ *
+ * A vendor that sells session recording is worth asking about. Whether that
+ * feature is switched on is invisible from outside, so it belongs in a
+ * question rather than in a score.
+ */
+describe("what a scan cannot prove but should ask", () => {
+  it("asks about a vendor that could be recording", () => {
+    const note = capabilityNote("data.pendo.io");
+    expect(note).toMatch(/session replay/i);
+    /* Phrased so it can be asked without accusing anybody. */
+    expect(note).toMatch(/worth asking/i);
+    expect(note).toMatch(/not visible from outside/i);
+  });
+
+  it("matches on the dot boundary like everything else here", () => {
+    expect(capabilityNote("cdn.pendo.io")).not.toBeNull();
+    expect(capabilityNote("evil-pendo.io")).toBeNull();
+  });
+
+  it("has nothing to ask about an ordinary host", () => {
+    expect(capabilityNote("fonts.googleapis.com")).toBeNull();
   });
 });

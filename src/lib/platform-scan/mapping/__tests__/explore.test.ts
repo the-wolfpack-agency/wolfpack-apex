@@ -94,9 +94,9 @@ describe("what it refuses to touch", () => {
     if (!decision.follow) expect(decision.reason).toBe("dangerous");
   });
 
-  it("never leaves the origin it was authorised for", () => {
+  it("never leaves the origin it was authorized for", () => {
     // A client system links outward constantly. Following those means scanning
-    // systems nobody authorised us to touch.
+    // systems nobody authorized us to touch.
     for (const url of ["https://help.salesforce.com/docs", "https://status.example.com", "https://evil.example.net"]) {
       const decision = shouldFollow(url, ctx());
       expect(decision.follow).toBe(false);
@@ -172,6 +172,7 @@ describe("coverage is stated before anything is claimed", () => {
     surfacesReached: 60,
     frontierRemaining: 340,
     skipped: [],
+    patterns: [],
     maxDepthReached: 4,
     stopReason: "page-budget",
     durationMs: 1000,

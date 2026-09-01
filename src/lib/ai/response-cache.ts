@@ -142,7 +142,7 @@ const ISO_TIMESTAMP_RE =
      2. A bare (non-parenthesised) area code now REQUIRES a following
         separator; only the `(NNN)` form may abut the next group. This
         breaks the all-digit chain so the engine can't try N partitions.
-   Real shapes "(555) 123-4567" and "+1 555-987-6543" still normalise
+   Real shapes "(555) 123-4567" and "+1 555-987-6543" still normalize
    identically (see response-cache.test.ts "strips phone numbers").
    Left boundary is a negative lookbehind (?<!\d) because \b fails before "(". */
 const PHONE_RE =

@@ -53,7 +53,7 @@ export type TrackerKind = "analytics" | "advertising" | "social" | "tag-manager"
 /**
  * Hosts we can name. Precision-first, matching the platform-scan detector
  * philosophy: a short list of things we are SURE about beats a long list that
- * cries wolf. Anything unrecognised is "unknown", which is a prompt to look
+ * cries wolf. Anything unrecognized is "unknown", which is a prompt to look
  * rather than an accusation.
  */
 const KNOWN_HOSTS: readonly { suffix: string; kind: TrackerKind; name: string }[] = [
@@ -78,6 +78,86 @@ const KNOWN_HOSTS: readonly { suffix: string; kind: TrackerKind; name: string }[
   { suffix: "unpkg.com", kind: "cdn", name: "unpkg" },
   { suffix: "gstatic.com", kind: "cdn", name: "Google static" },
   { suffix: "googleapis.com", kind: "cdn", name: "Google APIs" },
+
+  /* ADDED FROM A REAL SCAN, 2026-08-30. Walking a client's forms platform
+     found seven third-party hosts and could name two of them. The five it
+     could not were reported as "unknown", which scores medium, so a product
+     that records user sessions on a system holding client data read exactly
+     like an unremarkable CDN.
+     Named here because being unable to name a host is a prompt to look, and
+     these have now been looked at. */
+  /* BOTH ANALYTICS, AND THE REASON IS THE WHOLE PHILOSOPHY OF THIS FILE.
+     Pendo was first classified session-replay because Pendo SELLS session
+     replay. That is a fact about a price list, not about the scan: replay is
+     a feature an operator switches on, and a scan from outside sees a host
+     being contacted and cannot see whether it is enabled.
+     Classifying on capability rather than observation puts a host into
+     SEVERE_KINDS on the strength of something nobody measured, which is
+     exactly the crying wolf these detectors exist to avoid. What was observed
+     is analytics traffic. That both vendors ALSO offer recording is a question
+     to ask, and it is asked in CAPABILITY_NOTE rather than smuggled into a
+     severity where nobody can see the reasoning. */
+  { suffix: "pendo.io", kind: "analytics", name: "Pendo" },
+  { suffix: "visualwebsiteoptimizer.com", kind: "analytics", name: "Visual Website Optimizer" },
+  /* The product's own object storage, not a third party in any meaningful
+     sense, but it IS a different origin and pretending otherwise would be its
+     own kind of dishonesty. Named so a reader can dismiss it quickly. */
+  { suffix: "blob.core.windows.net", kind: "cdn", name: "Azure Blob Storage" },
+];
+
+/**
+ * Vendors that can do more than a scan can prove they did.
+ *
+ * A host being contacted shows a vendor is present. It does not show which of
+ * that vendor's features are switched on, and where a product offers session
+ * recording that difference is the whole question: analytics tells somebody
+ * which screens were used, recording can capture what was on them.
+ *
+ * Kept OUT of the severity, deliberately. A scan that scored a host high
+ * because its vendor sells a feature would be reporting a price list. This is
+ * a question for whoever operates the system, phrased so it can be asked
+ * without accusing anybody of anything.
+ *
+ * It matters most for a vendor nobody chose. On a SaaS product a customer
+ * administers but does not control, the embedded vendors belong to the SaaS
+ * company, and the customer usually has no idea they are there.
+ */
+export const CAPABILITY_NOTE: Readonly<Record<string, string>> = {
+  "pendo.io":
+    "Pendo also sells session replay, which can record what is on screen. Whether it is switched on here is set by whoever operates this system, is not visible from outside, and is worth asking them.",
+  "visualwebsiteoptimizer.com":
+    "Visual Website Optimizer also sells session recording. Whether it is switched on here is set by whoever operates this system, is not visible from outside, and is worth asking them.",
+  "hotjar.com":
+    "Hotjar records sessions as its main product. Whether those recordings are masked on this system is worth asking whoever operates it.",
+  "clarity.ms":
+    "Microsoft Clarity records sessions as its main product. Whether those recordings are masked on this system is worth asking whoever operates it.",
+  "fullstory.com":
+    "FullStory records sessions as its main product. Whether those recordings are masked on this system is worth asking whoever operates it.",
+};
+
+/** The question worth asking about a host, when there is one. */
+export function capabilityNote(host: string): string | null {
+  for (const [suffix, note] of Object.entries(CAPABILITY_NOTE)) {
+    if (host === suffix || host.endsWith(`.${suffix}`)) return note;
+  }
+  return null;
+}
+
+/**
+ * Hosts that need the PATH to identify, not just the name.
+ *
+ * google.com was contacted on all 38 screens of that scan and reported as an
+ * unexplained third party. It is reCAPTCHA: a security control the site is
+ * using to protect itself, which is close to the opposite of an unexplained
+ * tracker. Matching on the host alone cannot tell the two apart, because
+ * google.com serves both.
+ *
+ * Kept to signatures that cannot mean anything else, in the same spirit as the
+ * detectors: a rule that guesses is worse than no rule.
+ */
+const KNOWN_PATHS: readonly { suffix: string; path: RegExp; kind: TrackerKind; name: string }[] = [
+  { suffix: "google.com", path: /^\/recaptcha\//, kind: "cdn", name: "Google reCAPTCHA" },
+  { suffix: "gstatic.com", path: /^\/recaptcha\//, kind: "cdn", name: "Google reCAPTCHA" },
 ];
 
 export function hostOf(url: string): string | null {
@@ -110,6 +190,22 @@ export function partyOf(url: string, pageUrl: string): Party {
 export function identify(url: string): { kind: TrackerKind; name: string | null } {
   const h = hostOf(url);
   if (!h) return { kind: "unknown", name: null };
+
+  /* Path rules first: they are strictly more specific, so a host that has one
+     and matches it must not be caught by a broader entry for the same host. */
+  const path = (() => {
+    try {
+      return new URL(url).pathname;
+    } catch {
+      return "";
+    }
+  })();
+  for (const k of KNOWN_PATHS) {
+    if ((h === k.suffix || h.endsWith(`.${k.suffix}`)) && k.path.test(path)) {
+      return { kind: k.kind, name: k.name };
+    }
+  }
+
   for (const k of KNOWN_HOSTS) {
     // Dot-boundary match: "evil-hotjar.com" is not a subdomain of hotjar.com.
     if (h === k.suffix || h.endsWith(`.${k.suffix}`)) return { kind: k.kind, name: k.name };
@@ -121,7 +217,7 @@ export interface ClassifiedRequest extends NetworkObservation {
   host: string;
   party: Party;
   kind: TrackerKind;
-  /** Vendor name when recognised; null means unrecognised, not benign. */
+  /** Vendor name when recognized; null means unrecognized, not benign. */
   vendor: string | null;
 }
 

@@ -32,7 +32,7 @@
  */
 
 /** One question and the document that actually answers it. */
-export interface LabelledPair {
+export interface LabeledPair {
   question: string;
   /**
    * A distinctive fragment of the correct document's filename.
@@ -42,6 +42,24 @@ export interface LabelledPair {
    * and an eval set that breaks on a re-upload gets deleted rather than fixed.
    */
   expectFilename: string;
+  /**
+   * OTHER DOCUMENTS THAT WOULD ALSO BE A CORRECT ANSWER.
+   *
+   * Some questions genuinely have several right answers and scoring them
+   * against one is not strictness, it is a broken ruler. Found on 2026-08-30:
+   * "which hotels were surveyed in August" was labeled with a single file and
+   * counted as NEVER FOUND, while the corpus holds five August surveys:
+   *
+   *   Conrad Aug 10-14, Conrad Aug 17-21, Intercontinental Aug 10-14,
+   *   Ritz Carlton Las Colinas Aug 17-21, WO 8.10-8.17_All
+   *
+   * Retrieval was returning a correct document and being marked wrong for it,
+   * which is worse than having no eval: it sends somebody optimizing a system
+   * that already works. A chunking change was nearly built to fix it.
+   *
+   * Optional, so every existing pair keeps its meaning untouched.
+   */
+  alsoAccept?: string[];
 }
 
 /** What retrieval returned, in order. */
@@ -50,7 +68,7 @@ export interface RankedResult {
 }
 
 export interface PairOutcome {
-  pair: LabelledPair;
+  pair: LabeledPair;
   /** 1-based position of the first correct document, or null if absent. */
   rank: number | null;
   /** True when it appeared anywhere in the results. */
@@ -69,7 +87,7 @@ export interface EvalReport {
    */
   mrr: number;
   /** Questions whose document never appeared. The list to work on. */
-  misses: LabelledPair[];
+  misses: LabeledPair[];
 }
 
 /** Case-insensitive, and tolerant of the separators filenames actually use. */
@@ -79,12 +97,16 @@ function matches(filename: string, fragment: string): boolean {
 }
 
 export function gradeRetrieval(
-  pairs: LabelledPair[],
+  pairs: LabeledPair[],
   run: (question: string) => RankedResult[],
 ): EvalReport {
   const outcomes: PairOutcome[] = pairs.map((pair) => {
     const results = run(pair.question);
-    const idx = results.findIndex((r) => matches(r.filename, pair.expectFilename));
+    /* Any acceptable document counts, and the FIRST one found decides the
+       rank: somebody asking a question with several right answers is served
+       by whichever arrives first, so that is what the rank should measure. */
+    const acceptable = [pair.expectFilename, ...(pair.alsoAccept ?? [])];
+    const idx = results.findIndex((r) => acceptable.some((a) => matches(r.filename, a)));
     return { pair, rank: idx === -1 ? null : idx + 1, found: idx !== -1 };
   });
 
@@ -159,7 +181,7 @@ export function isBetter(before: EvalReport, after: EvalReport): boolean {
 export function describeEval(report: EvalReport): string {
   const pct = (n: number) => `${(n * 100).toFixed(0)}%`;
   return (
-    `${report.outcomes.length} labelled questions: ` +
+    `${report.outcomes.length} labeled questions: ` +
     `${pct(report.recall)} found, ${pct(report.precisionAtOne)} ranked first, ` +
     `MRR ${report.mrr.toFixed(3)}` +
     (report.misses.length > 0 ? `, ${report.misses.length} never found` : "")

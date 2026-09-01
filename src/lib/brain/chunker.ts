@@ -16,6 +16,7 @@
  */
 
 import type { TextChunk } from "./types";
+import { applyTableHeaders } from "./tabular-header";
 
 const CHARS_PER_TOKEN = 3.5;
 export const TARGET_TOKENS = 600;
@@ -125,6 +126,25 @@ export function chunkText(raw: string, opts: ChunkOpts = {}): TextChunk[] {
   }
 
   if (current.trim()) emit(current);
+
+  /* GIVE EVERY ROW ITS COLUMN NAMES BACK.
+   *
+   * Applied after packing rather than during it, because the header depends on
+   * which SHEET a chunk landed in and that is only knowable once the chunks
+   * exist. Measured on the live corpus: a 105-chunk survey export carried its
+   * header on chunk 0 alone, so 104 chunks of hotel names and free-text
+   * answers had nothing saying which column was which.
+   *
+   * A no-op for prose, which is almost every document. */
+  const withHeaders = applyTableHeaders(chunks.map((c) => c.content));
+  for (let i = 0; i < chunks.length; i += 1) {
+    if (withHeaders[i] === chunks[i].content) continue;
+    chunks[i] = {
+      ...chunks[i],
+      content: withHeaders[i],
+      token_estimate: Math.max(1, Math.ceil(withHeaders[i].length / CHARS_PER_TOKEN)),
+    };
+  }
 
   // Defensive: ensure no chunk exceeds hard max
   for (const c of chunks) {

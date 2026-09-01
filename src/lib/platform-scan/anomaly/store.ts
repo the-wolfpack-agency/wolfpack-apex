@@ -134,7 +134,7 @@ export async function recordAnomalyRun(args: {
       target_id: targetId,
       run_id: runId,
       host: f.host,
-      vendor: f.vendor ?? "unrecognised",
+      vendor: f.vendor ?? "unrecognized",
       kind: f.kind,
       severity: f.severity,
       novelty: f.novelty,

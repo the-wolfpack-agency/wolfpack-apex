@@ -19,7 +19,7 @@
  */
 
 /** Shown on the page so a reader knows how current this is. */
-export const PLAYBOOK_UPDATED = "2026-08-26";
+export const PLAYBOOK_UPDATED = "2026-08-30";
 
 /* A plain template literal, not String.raw: raw strings do not process escape
    sequences, so the escaped backticks this content needs would have rendered
@@ -50,12 +50,99 @@ build does, and starting it late is the single most common way a pilot slips.
 | --- | --- | --- |
 | Microsoft 365 tenant consent | Their IT | Every document and calendar surface |
 | A SharePoint library, named | Their operations lead | Nothing to read until one is chosen |
-| One named role per persona | Their programme owner | Scoping is per role, not per person |
+| One named role per persona | Their program owner | Scoping is per role, not per person |
 | A test account per persona | Their IT | Verifying what a dealer sees needs a dealer |
 | Named escalation contact | Both sides | Somebody has to answer when a scan finds something |
 
 Ask for these in the first meeting, in writing. They are not a formality: the
 tenant grant alone has taken weeks elsewhere.
+
+### Also ask for: their Copilot usage export
+
+If they run Microsoft 365 they very likely have Copilot, and its usage report
+is the cheapest read we will ever get on how AI is actually landing in their
+organization. Ask their admin for a CSV export of **Copilot usage** from the
+Microsoft 365 admin center, thirty days, and the version 2 report if the
+console offers it.
+
+**What it contains.** Per person: which Copilot surfaces they touched (Teams,
+Word, Excel, PowerPoint, Outlook, OneNote, Loop, Chat), when they last touched
+each, and in the version 2 report how many prompts they submitted and on how
+many days. Identities are hashed when the tenant has "conceal user
+information" set, which many do.
+
+**What it does NOT contain, and this is the point.** No prompt text and no
+response text. It is shape without content, which is the same thing we ask of
+our own decision data. There IS an API that returns full prompts and replies,
+and we deliberately do not ask for it: a vendor who takes that has a much
+harder conversation with a legal team than one who does not, and we do not
+need it to be useful.
+
+**Ask for the export, not the API.** \`Reports.Read.All\` is tenant-wide admin
+consent, which is a materially bigger request than the delegated scopes Phase 1
+already needs, and it should not be bundled into the first grant. A CSV a
+person exports by hand answers the same question this month and costs them
+nothing. If it turns out to be worth reading every week, THEN ask for the
+scope, with the export as the argument for it.
+
+**What it can and cannot tell you.** It is adoption data, not decision data:
+who uses Copilot and how often, never what it changed or whether the change
+was good. It answers "is the investment being used", which is a real question
+a lot of buyers cannot currently answer, and it does not answer "is it making
+better decisions". Say which one you are answering.
+
+**If they run something else.** ChatGPT Enterprise, Claude and Glean each have
+their own admin export and no Microsoft surface. And if nobody is sure what is
+in use, Entra sign-in logs and Defender for Cloud Apps show which AI services
+staff are actually signing into, which is a different and often more
+uncomfortable report.
+
+## Week one: learn their words before quoting a number
+
+A figure computed correctly from well-formed data can still be wrong by ten
+times, and nothing in the data says so.
+
+Ours was calendars. Of 801 entries across six people, 30 were somebody being
+away and held 2,763 hours, 64 were trips and events holding 2,304, and 707
+were meetings holding 557. Eleven per cent of the calendar carried ninety per
+cent of the hours and none of it was a meeting. A "how much time does this
+team spend in meetings" answer built on that reports five and a half thousand
+hours where the truth is five hundred and forty-seven.
+
+The events were well formed. The arithmetic was correct. It was found because
+somebody who knows that calendar said an entry reading OOO is a vacation day.
+
+**Every client has one of these and it will not be OOO.** A dealership marks
+floor duty and demo drives on the same calendar as meetings. An agency blocks
+shoot days. Somebody prefixes every placeholder with HOLD. The same shape
+turns up wherever a local convention hides inside well-formed data: a CRM
+stage that means "dead" but is spelled like a live one, a DMS status code
+every branch uses differently, an account named for a project rather than a
+customer.
+
+**So it is asked, in week one, before any figure is quoted.** Run the
+calibration on their calendar and their records, take the entries that carry
+the weight, and put them in front of somebody who knows. The report names them
+without knowing what they are:
+
+> 19 of 801 calendar entries account for more than half the hours. That is
+> usually a local convention rather than a busy team. The largest are: Avryl
+> Trip, Alicia OOO, F1 Las Vegas. Somebody who knows this calendar should say
+> what those are.
+
+It asks and never concludes, because reading the data is exactly what does not
+produce the answer.
+
+**What comes back becomes configuration, not code.** Their words are recorded
+per deployment rather than added to a built-in list, because a pattern right
+for one client is wrong for the next: "demo" is a test drive at a dealership
+and a sales meeting everywhere else.
+
+**The rule this sets.** No number about how their people spend time, how much
+is in a system, or how a pipeline is moving goes in a document or on a screen
+until somebody on their side has told us what the outliers are. A number
+quoted before that conversation is a number we may have to withdraw, and
+withdrawing one costs more than the week it would have taken to ask.
 
 ## Phase 1: documents, read only
 
@@ -74,6 +161,20 @@ answered from their own material, with the document named.
 3. Sync. Interrupted runs resume rather than restart; throttling is waited out.
 4. Confirm with \`npx tsx scripts/prompt-transcript.ts --file <their questions>\`,
    run once per persona.
+
+**What they can ask, as of 2026-08-30.** Three shapes, and the difference
+between them is the difference between a search box and an assistant:
+
+| They say | They get |
+| --- | --- |
+| "what does the SOW say about payment" | The clause, quoted, with the document named |
+| "summarize the onboarding document" | Prose across the whole document |
+| "what documents do we have about training" | A browsable list |
+
+The middle row is new. Until this week, asking for a summary returned a list of
+filenames: somebody who asked for a summary received a filing cabinet. Asking a
+document a question and asking the library what it holds are different
+questions, and they now get differently shaped answers.
 
 **Done when.** A person in each persona asks five questions from their own work
 and gets answers from their own documents, and a question they should not be
@@ -241,7 +342,7 @@ the gate       (who is this, what may they reach, what may they be told)
 |               |               |                |
 tools           retrieval       the router        connectors
 (their          (their          (only where       (their systems,
- systems,        documents,      judgement         read first,
+ systems,        documents,      judgment         read first,
  answered        scoped by       is needed)        written later)
  directly)       audience)
 \`\`\`
@@ -255,7 +356,7 @@ chatbot works.
 ### Data flow, phase 1
 
 1. A document is read from their library by a connector holding a delegated
-   token. It is never read with more access than the person who authorised it.
+   token. It is never read with more access than the person who authorized it.
 2. Text is extracted, split into passages, and each passage is embedded.
 3. The document is described once, at ingest, so retrieval can match the
    document rather than only a slice of it.
@@ -329,7 +430,7 @@ The nouns the system knows about, and how they relate. This is what makes
 cross-system answers possible, and it is the part that grows with each phase.
 
 \`\`\`text
-Person  --works at-->  Organisation
+Person  --works at-->  Organization
   |                        |
   |--attends-->  Meeting --covers--> Document --lives in--> Library
   |                 |                    |                      |
@@ -352,7 +453,7 @@ Person  --works at-->  Organisation
 
 Each later phase adds nouns rather than replacing them: a DMS adds Vehicle and
 Booking, a CRM adds Account and Opportunity, and the relationships they already
-have to Person and Organisation are what make the second system worth more than
+have to Person and Organization are what make the second system worth more than
 the first.
 
 ### The agents, and the gate that makes them safe
@@ -364,7 +465,7 @@ that the agent is the least novel part; the gate around it is the product.
 identity, a role, and a set of operations it has scanned and been granted. It
 acts ON BEHALF OF a named person through a delegation token, so it can never
 reach anything that person could not, and the audit shows both: who acted, and
-who authorised.
+who authorized.
 
 **The gate.** A model proposes; the gate decides, executes and records. The
 model never touches a system directly. Everything an agent can do is a
@@ -386,14 +487,14 @@ client cares about:
 | Operation registry | The complete, declared list of what it can do |
 | Approvals | A human confirms before anything irreversible |
 | Grounding | Answers come from their documents, not from the model's memory |
-| Behaviour evals | The agent is scored against a fixed task set, per model version |
-| Drift detection | The same tasks re-run, and a change in behaviour is reported |
+| Behavior evals | The agent is scored against a fixed task set, per model version |
+| Drift detection | The same tasks re-run, and a change in behavior is reported |
 | Failover | A provider outage degrades rather than stops |
 | Audit | Hash-chained, so the record of what an agent did cannot be edited |
 
 **Why this matters more than the agent.** Every one of those is a question a
 corporation asks about automation and usually cannot get answered: what may it
-do, who authorised it, what did it actually do, how do we know it still
+do, who authorized it, what did it actually do, how do we know it still
 behaves the way it did last month. An agent without them is a demo. The gate
 is what makes it something an enterprise can sign off.
 
@@ -418,6 +519,28 @@ Every one of these has been asked by somebody evaluating automation, and every
 answer below is a thing that exists in the product today rather than something
 we would build if asked. Where the honest answer is a boundary, it is stated as
 a boundary.
+
+### When it goes wrong
+
+**What happens if your system is down when we ask something?**
+The answer names what could not be reached, says plainly that nothing has been
+lost and nothing needs re-uploading, and puts the fault on our side rather than
+on the question. Before that, a brief failure is simply retried: most throttles
+and connection blips clear in under a second and never reach a person.
+
+**How would we know the difference between "you have nothing on that" and "your
+search is broken"?**
+Because we say which. That distinction is the single failure this product has
+had to fix most often, in four separate places, and it is now the thing every
+number on the client dashboard is written to preserve. Where a check cannot be
+evidenced as running, the page says so instead of showing a clean-looking zero.
+
+**Somebody will paste a card number or an ID into the chat. Then what?**
+It is removed before the prompt leaves our system, so no model or outside
+service receives it, and the person is told that it was. If the message was
+otherwise a real question, the question is still answered. Tested with a card
+number, a national ID, bank details and an API key, including pasted alongside
+a genuine question.
 
 ### Their data
 
@@ -480,7 +603,7 @@ accountable hears it from us rather than from a bill.
 **Who is accountable when an agent acts?**
 A named person. An agent acts on behalf of its owner through a short-lived
 delegation token good for a single act, so it can never reach anything that
-person could not. The audit shows both: who acted, and who authorised.
+person could not. The audit shows both: who acted, and who authorized.
 
 **Can we stop it?**
 Pause or revoke, immediately. Revoke kills the credential. Both are
@@ -490,7 +613,7 @@ lifted a limit is the first question an incident review asks.
 
 **How do we know it still behaves the way it did last month?**
 It is scored against a fixed task set, attributed to the model version that
-produced the score, and the same tasks are re-run so a change in behaviour is
+produced the score, and the same tasks are re-run so a change in behavior is
 reported rather than discovered. A model vendor shipping a new version is a
 change we detect.
 
@@ -568,9 +691,17 @@ another.
 | \`npm run models:drift\` | Has anything moved since last time |
 | \`scripts/prompt-transcript.ts\` | What does a person actually see |
 | \`npm run scan:tenant-isolation\` | Can one client's data reach another |
+| \`scripts/probe-outage.sh\` | What a person is told when a dependency is down |
 
 The transcript is the one people skip and the one that finds the problems. Every
 answer-quality bug this month was found by reading an answer, not by a test.
+
+The outage probe is new, and it exists because the same was true of failures.
+Nothing had ever checked what a person sees when a dependency is down, and the
+answer turned out to be that the product told them their documents were
+missing. It points a dependency at a closed port so the failure is real on the
+real code path, and it fails if any degraded case invites somebody to
+re-upload.
 
 ## How the model spend is governed
 
@@ -590,7 +721,18 @@ answer-quality bug this month was found by reading an answer, not by a test.
 - Answers that cannot be grounded are refused rather than guessed.
 - Every model call is redacted, budgeted and audited at one place in the code.
 - Nothing is written to their systems without a person confirming it.
-- If a system is unavailable, the answer says so. It does not invent one.
+- If a system is unavailable, the answer says so, names what could not be read,
+  and states that nothing has been lost and nothing needs re-uploading. Worth
+  saying plainly that this line was aspirational until 2026-08-30: with the
+  model provider unreachable the product used to reply "I don't have
+  information on that yet, you can help me learn by adding it to the Knowledge
+  Base" about a document it was holding. It is now true, tested by
+  \`scripts/probe-outage.sh\`, and that check runs before a phase ships.
+- A brief failure is retried before anybody sees it. Throttling and connection
+  blips clear in under a second and no longer end somebody's question.
+- Something pasted by mistake never reaches a model. A card number, national ID
+  or API key typed into a question is removed before the prompt leaves the
+  system, and the question is still answered from their documents.
 
 ## When to stop and re-plan
 
@@ -598,6 +740,6 @@ answer-quality bug this month was found by reading an answer, not by a test.
   by tuning; the library is wrong.
 - A persona's questions are mostly things we cannot do. Better to widen the
   persona or narrow the promise than to answer badly.
-- Access has not arrived by the end of month one. That is a programme problem,
+- Access has not arrived by the end of month one. That is a program problem,
   and continuing to build against it hides the fact.
 `;

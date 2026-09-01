@@ -31,7 +31,7 @@ const chain = (): Routine => ({
   steps: [
     { kind: "tool", slot: "mail", tool: "read_mail", params: {}, label: "Read the mail" },
     { kind: "tool", tool: "read_calendar", params: {}, label: "Read the calendar" },
-    { kind: "model", prompt: "summarise {{mail}}", label: "Summarise it" },
+    { kind: "model", prompt: "summarize {{mail}}", label: "Summarize it" },
     { kind: "human", label: "Decide what matters", action: "review" },
   ],
 });

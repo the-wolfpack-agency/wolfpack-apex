@@ -437,7 +437,7 @@ describe("briefFromFrames — model-judgment page divergence", () => {
 describe("briefFromFrames — palette extraction source", () => {
   it("passes the first frame's bytes to extractPalette", async () => {
     // We can't easily spy on extractPalette (it's imported by the
-    // module under test), but we CAN assert the behavioural contract
+    // module under test), but we CAN assert the behavioral contract
     // indirectly: the sha256 we persist is over the concatenation, the
     // source_mime we persist is frame[0].mime. That proves the
     // orchestrator treats frame[0] as the "hero" — same frame the

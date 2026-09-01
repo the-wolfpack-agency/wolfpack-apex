@@ -39,8 +39,8 @@ export interface BenefitPlan {
   individual_oop_max_out_of_network: number | null;
   primary_care_copay: string;        // raw cell text
   primary_care_copay_in_network: number | null;
-  specialist_copay: string;
-  specialist_copay_in_network: number | null;
+  specializt_copay: string;
+  specializt_copay_in_network: number | null;
   er_copay: string;
   rx_copays: string;
   monthly_premium_age_employee_only: number | null;
@@ -247,8 +247,8 @@ function extractPlansGeneric(
       individual_oop_max_out_of_network: null,
       primary_care_copay: pcp,
       primary_care_copay_in_network: parseNumber(pcp.split("/")[0]),
-      specialist_copay: spec,
-      specialist_copay_in_network: parseNumber(spec.split("/")[0]),
+      specializt_copay: spec,
+      specializt_copay_in_network: parseNumber(spec.split("/")[0]),
       er_copay: er,
       rx_copays: "",
       monthly_premium_age_employee_only: ee_only ?? monthly_total_age,
@@ -559,7 +559,7 @@ export async function saveBenefitDocument(
           individual_deductible_in_network, individual_deductible_out_of_network,
           individual_oop_max_in_network, individual_oop_max_out_of_network,
           primary_care_copay, primary_care_copay_in_network,
-          specialist_copay, specialist_copay_in_network,
+          specializt_copay, specializt_copay_in_network,
           er_copay, rx_copays,
           monthly_premium_age_employee_only, monthly_premium_composite_employee_only,
           monthly_premium_age_employee_spouse, monthly_premium_age_employee_child,
@@ -579,8 +579,8 @@ export async function saveBenefitDocument(
         p.individual_oop_max_out_of_network,
         p.primary_care_copay,
         p.primary_care_copay_in_network,
-        p.specialist_copay,
-        p.specialist_copay_in_network,
+        p.specializt_copay,
+        p.specializt_copay_in_network,
         p.er_copay,
         p.rx_copays,
         p.monthly_premium_age_employee_only,
@@ -696,7 +696,7 @@ export async function getBenefitDocument(id: string): Promise<{
     "individual_oop_max_in_network",
     "individual_oop_max_out_of_network",
     "primary_care_copay_in_network",
-    "specialist_copay_in_network",
+    "specializt_copay_in_network",
     "monthly_premium_age_employee_only",
     "monthly_premium_composite_employee_only",
     "monthly_premium_age_employee_spouse",
@@ -756,7 +756,7 @@ export function generateBenefitInsights(plans: BenefitPlan[]): HrInsight[] {
         category: "benefits",
         severity: "info",
         title: `HMO is $${diff.toFixed(0)}/mo cheaper than PPO`,
-        body: `Your cheapest HMO ($${cheapestHmo.toFixed(0)}/mo) beats your cheapest PPO ($${cheapestPpo.toFixed(0)}/mo) by $${diff.toFixed(0)}/mo per employee, or $${(diff * 12).toFixed(0)}/yr. Worth recommending HMO unless team members have specific out-of-network specialists.`,
+        body: `Your cheapest HMO ($${cheapestHmo.toFixed(0)}/mo) beats your cheapest PPO ($${cheapestPpo.toFixed(0)}/mo) by $${diff.toFixed(0)}/mo per employee, or $${(diff * 12).toFixed(0)}/yr. Worth recommending HMO unless team members have specific out-of-network specializts.`,
         source_rule: "ppo_vs_hmo_cost_gap",
       });
     }

@@ -12,7 +12,7 @@
  * So this models what an authenticated browser can OBSERVE, and the observed
  * map feeds the same profile and recommendation pipeline that already exists.
  *
- * THE HONESTY PROBLEM AT THE CENTRE OF MAPPING
+ * THE HONESTY PROBLEM AT THE CENTER OF MAPPING
  *
  * A map is always partial. You stop because you ran out of budget, not because
  * you reached the end, and a client system is large enough that you will always
@@ -26,12 +26,14 @@
  * has the numbers to qualify its own claims.
  */
 
+import type { ExportAffordance } from "./volume";
+
 /** One page or view the map reached. */
 export interface MappedSurface {
   /** Canonical URL as visited. */
   url: string;
   /** Path with volatile ids replaced, so /Account/001x and /Account/001y are
-   *  recognised as one surface rather than two thousand. */
+   *  recognized as one surface rather than two thousand. */
   signature: string;
   title: string | null;
   /** Depth from the entry point. */
@@ -45,6 +47,16 @@ export interface MappedSurface {
   forms: MappedForm[];
   /** Tabular data on the page, which is how a business object shows itself. */
   tables: { caption: string | null; columns: string[]; rowCount: number }[];
+  /**
+   * How many records the screen said it holds. Null means it did not say,
+   * which is NOT zero: "holds nothing" and "did not state" are opposite facts
+   * and a migration plan built on the wrong one is wrong by a whole object.
+   */
+  recordCount?: number | null;
+  /** The phrase the count was read from, so a reviewer can check. */
+  recordCountFrom?: string | null;
+  /** Ways data appeared to be gettable out. Detected, never pressed. */
+  exports?: ExportAffordance[];
   /** HTTP status when the surface was fetched. */
   status: number | null;
   /** Milliseconds to load. A slow screen IS a finding for the report. */
@@ -82,7 +94,7 @@ export interface InferredEntity {
 /** An external system this platform talks to, observed on the wire. */
 export interface ObservedIntegration {
   host: string;
-  /** Vendor when recognised. Null means unrecognised, not absent. */
+  /** Vendor when recognized. Null means unrecognized, not absent. */
   vendor: string | null;
   /** Surfaces that triggered it, so "what uses Stripe" is answerable. */
   seenOn: string[];
@@ -110,6 +122,10 @@ export interface MapCoverage {
   /** Links deliberately not followed, with the reason. Off-origin, logout,
    *  and anything that looked mutating. */
   skipped: { signature: string; reason: string }[];
+  /** Repeated screen shapes: how many instances exist, and how many were
+   *  actually opened. The gap between those two numbers is the difference
+   *  between a small system and a sample of a large one. */
+  patterns: { shape: string; instances: string[]; visited: number }[];
   maxDepthReached: number;
   stopReason: StopReason;
   durationMs: number;

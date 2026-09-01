@@ -32,6 +32,8 @@
  * Needs: DATABASE_URL and the provider credentials. Models that are not
  * configured are reported as such rather than skipped silently.
  */
+/* FIRST. Imports hoist, so anything below already read process.env. */
+import "./load-env";
 import { readFileSync } from "node:fs";
 import { runComparison, COMPARISON_MAX_TOKENS } from "@/lib/ai/comparison";
 import { getAIClient } from "@/lib/ai";
@@ -41,7 +43,7 @@ import type { AIModelTier } from "@/lib/ai/types";
 /* Work this team actually does, not a benchmark from somebody else. A model
    that writes a good sonnet and a poor meeting summary is the wrong model. */
 const DEFAULT_PROMPTS = [
-  "Summarise this in two sentences: the dealer review covered Q3 delivery targets, two Centers behind on CRM hygiene, and a request for more demo vehicles in the northeast.",
+  "Summarize this in two sentences: the dealer review covered Q3 delivery targets, two Centers behind on CRM hygiene, and a request for more demo vehicles in the northeast.",
   "Turn this into three bullet points a manager can act on: survey responses say facilitators were strong, the venue was too cold, and the afternoon session ran long.",
   "Extract the action items: Jorge will send the updated roster, Ashley is chasing the Novi paperwork, and someone needs to confirm the Chantilly dates.",
   "A dealer asks how to register a demo vehicle for two consecutive weekends. Answer in three sentences.",
@@ -74,14 +76,14 @@ function reachable(): void {
     console.log(`  ${ok ? "yes" : "no "}  ${m.id.padEnd(24)} ${String(m.capabilityTier).padEnd(10)} ${m.provider}`);
   }
   if (!any) {
-    /* THE CATALOGUE IS STRICTER THAN THE PROVIDER, ON PURPOSE.
+    /* THE CATALOG IS STRICTER THAN THE PROVIDER, ON PURPOSE.
      *
      * A model counts as reachable only when its deployment name has been set.
      * The Azure provider will fall back to a default name (gpt-4o-mini,
      * gpt-4o, gpt-4) and that is how this deployment has been answering, but
      * defaulting the NAME does not mean the deployment EXISTS: on a resource
      * without it the call 404s at runtime. Reporting a model available on a
-     * guess would be the catalogue telling a comfortable story.
+     * guess would be the catalog telling a comfortable story.
      *
      * So this says what is missing rather than proceeding hopefully. */
     console.log(

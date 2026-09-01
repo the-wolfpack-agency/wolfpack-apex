@@ -45,7 +45,7 @@ const entries: ReleaseEntry[] = [
   {
     title: "Every claim on the router page names the panel that proves it",
     description:
-      "The explanation labelled each proof 'Where to point', which readers took as an instruction to point at something in the room rather than 'here is your evidence'. Each line now reads 'Proof on this page' and names the panel to scroll to. A test asserts every panel named actually exists, because a pointer to a panel that is not there is worse than no pointer: the reader looks, fails to find it, and stops believing the rest.",
+      "The explanation labeled each proof 'Where to point', which readers took as an instruction to point at something in the room rather than 'here is your evidence'. Each line now reads 'Proof on this page' and names the panel to scroll to. A test asserts every panel named actually exists, because a pointer to a panel that is not there is worse than no pointer: the reader looks, fails to find it, and stops believing the rest.",
     how_to_use: "Open Admin, Model router and expand 'What this does, in plain words'.",
     area: AREA,
     category: "improvement",

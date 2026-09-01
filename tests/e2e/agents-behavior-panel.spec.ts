@@ -1,5 +1,5 @@
 /**
- * Fleet behaviour panel reality check (/admin/agents).
+ * Fleet behavior panel reality check (/admin/agents).
  *
  * The last place to catch this before a client-facing conversation. Unit tests
  * prove the wording; this proves the panel actually renders on the deployed app
@@ -16,13 +16,13 @@ import { resolveSmokeTarget, signInIfPossible, collectConsoleAndNetworkFailures 
 
 const target = resolveSmokeTarget();
 
-test.describe("Fleet behaviour panel reality check", () => {
+test.describe("Fleet behavior panel reality check", () => {
   test.beforeEach(async ({ page }) => {
     const signedIn = await signInIfPossible(page, target);
     if (!signedIn) test.skip();
   });
 
-  test("/admin/agents renders the behaviour panel without breaking the roster", async ({ page }) => {
+  test("/admin/agents renders the behavior panel without breaking the roster", async ({ page }) => {
     const snapshot = collectConsoleAndNetworkFailures(page);
     const nav = await page.goto(`${target.baseUrl}/admin/agents`, {
       waitUntil: "domcontentloaded",

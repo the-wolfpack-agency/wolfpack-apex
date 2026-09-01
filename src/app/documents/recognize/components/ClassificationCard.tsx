@@ -5,7 +5,7 @@
  *
  * Props are owned by RecognizeView. This component never talks to the
  * network directly; it bubbles correction events back up through
- * onCorrected so the parent can PATCH the API and own the optimistic
+ * onCorrected so the parent can PATCH the API and own the optimiztic
  * update path. Keeping presentational and effectful logic apart makes
  * the card trivially testable.
  */

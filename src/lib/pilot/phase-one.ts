@@ -59,6 +59,28 @@ const EMPTY: PhaseOneSnapshot = {
  * it would have survived review, and this is the one page whose whole purpose
  * is to be shown to a client.
  */
+/**
+ * Rows a person is responsible for.
+ *
+ * THIS PAGE WAS COUNTING OUR OWN TESTING AS THE CLIENT'S USAGE. Measured over
+ * thirty days: 11 per cent of the tool answers and 29 per cent of the model
+ * answers came from eval harnesses, transcript probes and demo accounts, so
+ * the headline share of answers served without a model read 67.9 per cent
+ * where the truth for people was 72.7.
+ *
+ * It happened to understate us, which is the luckier direction and not a
+ * reason to leave it: the same contamination on a day of heavy model testing
+ * would overstate instead, and a figure that moves with our own activity is
+ * not a figure about the product.
+ *
+ * Expressed in SQL because the counting has to happen in the aggregate rather
+ * than by filtering afterwards. The rule matches isServiceIdentity in
+ * insights/traffic.ts: a person signs in and gets an account id or an email
+ * address, and our machinery passes a word it chose for itself.
+ */
+const PERSON = `(user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                 OR user_id LIKE '%@%')`;
+
 export async function getPhaseOneSnapshot(
   workspaceId: string,
   days = 60,
@@ -73,10 +95,15 @@ export async function getPhaseOneSnapshot(
           WHERE workspace_id = $1`,
         [workspaceId],
       ),
-      query<{ tool_answers: string; model_answers: string; declined: string }>(
+      query<{
+        tool_answers: string;
+        model_answers: string;
+        declined: string;
+        excluded: string;
+      }>(
         `SELECT
-           count(*) FILTER (WHERE event_type = 'assistant.tool_succeeded')::text AS tool_answers,
-           count(*) FILTER (WHERE event_type = 'ai.completion')::text AS model_answers,
+           count(*) FILTER (WHERE event_type = 'assistant.tool_succeeded' AND ${PERSON})::text AS tool_answers,
+           count(*) FILTER (WHERE event_type = 'ai.completion' AND ${PERSON})::text AS model_answers,
            /* Declining is the trust claim, so it is counted from the two places
               that actually decline: a retrieval the judge threw out, and an
               answer refused entry into knowledge. */
@@ -84,8 +111,15 @@ export async function getPhaseOneSnapshot(
              WHERE event_type IN (
                'brain.retrieval_judged_irrelevant',
                'assistant.answer_not_promoted'
-             )
-           )::text AS declined
+             ) AND ${PERSON}
+           )::text AS declined,
+           /* Counted so the page can say how much was set aside. A number
+              that quietly shrank is one somebody will query, and the answer
+              should be on the page rather than in somebody's memory. */
+           count(*) FILTER (
+             WHERE event_type IN ('assistant.tool_succeeded', 'ai.completion')
+               AND NOT (${PERSON})
+           )::text AS excluded
          FROM instinct_events
         WHERE timestamp > NOW() - ($1::int * INTERVAL '1 day')`,
         [bounded],
@@ -98,6 +132,7 @@ export async function getPhaseOneSnapshot(
       toolAnswers: Number(activity.rows[0]?.tool_answers ?? 0),
       modelAnswers: Number(activity.rows[0]?.model_answers ?? 0),
       declined: Number(activity.rows[0]?.declined ?? 0),
+      excludedAsTesting: Number(activity.rows[0]?.excluded ?? 0),
       readable: true,
     };
   } catch (err) {

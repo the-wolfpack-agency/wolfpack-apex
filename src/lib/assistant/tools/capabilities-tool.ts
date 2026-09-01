@@ -9,7 +9,7 @@
  * which is the only question they were asking: a sales lead reading about the
  * financials tools learns something they cannot use.
  *
- * So this reads the live registry and the routine catalogue, filters by the
+ * So this reads the live registry and the routine catalog, filters by the
  * caller's role through the same gate the dispatcher enforces, and describes
  * what is left. Add a tool and it appears here. Remove one and it disappears.
  * The description can never drift from the capability, because it IS the
@@ -21,13 +21,15 @@
  * things they would otherwise do in five windows. A list that opens with 40
  * individual tools buries them, and the person goes back to doing it by hand.
  */
+import type { WidgetSpec } from "@/lib/assistant/widgets/types";
 import { z } from "zod";
 import { trackEvent } from "@/lib/analytics";
 import { registerTool } from "./registry";
 import { getTools } from "./registry";
 import { canInvokeNamedTool, canInvokeTool } from "./gate";
+import { scopeToConnected, connectedSystems, describeAwaiting } from "./capability-scope";
 import { hasPersona, personaCopyFor } from "./persona";
-import { BUILT_IN_ROUTINES } from "@/lib/assistant/routines/catalogue";
+import { BUILT_IN_ROUTINES } from "@/lib/assistant/routines/catalog";
 import { PROMPT_GUIDE } from "@/lib/assistant/prompt-corpus";
 import type { ToolDef, ToolResult } from "./types";
 
@@ -229,8 +231,8 @@ export function matchCapabilitiesIntent(message: string): Params | null {
  *
  * By SUBJECT, not by the module they live in. Somebody asking what the product
  * does is thinking about their mail and their calendar, not about which file a
- * tool was written in, and a list organised by our architecture reads as a list
- * organised by nothing.
+ * tool was written in, and a list organized by our architecture reads as a list
+ * organized by nothing.
  */
 const AREAS: Array<{ title: string; match: RegExp }> = [
   { title: "Mail and people", match: /mail|email|who_is|contact|people|message/ },
@@ -270,10 +272,26 @@ export const capabilitiesTool: ToolDef<Params, CapabilitiesData> = {
     /* The SAME gate the dispatcher enforces. Listing something the caller
        cannot run would be a menu of disappointments, and a second copy of the
        permission logic here is how the menu and the runtime come to disagree. */
-    const usable = all.filter(
+    const permitted = all.filter(
       (t) => canInvokeNamedTool(ctx.userRole, t.name, t.capability) && t.name !== "what_can_you_do",
     );
-    const withheldCount = all.length - usable.length - 1;
+
+    /* ROLE IS THE RIGHT GATE AND NOT THE ONLY ONE.
+     *
+     * A tool the caller is permitted to run still cannot run if the system
+     * behind it was never linked. Measured on this deployment: no connectors,
+     * zero CRM events ever, zero dealer-system events ever, and this answer
+     * advertised six CRM capabilities and an inventory widget regardless.
+     *
+     * Somebody running dealerships reads the list and goes straight for
+     * "deals over $50k closing this month" and "how many are on the lot",
+     * which are the two most tempting lines and the two backed by nothing.
+     * This file already refuses to say yes about an unlinked mailbox when
+     * asked directly; the menu now holds to the same rule. */
+    const linked = await connectedSystems(ctx.workspaceId ?? "default");
+    const scoped = scopeToConnected(permitted, linked);
+    const usable = scoped.available;
+    const withheldCount = all.length - permitted.length - 1;
 
     /* THEY ASKED ABOUT ONE THING, so answer about that one thing.
      *
@@ -442,6 +460,15 @@ export const capabilitiesTool: ToolDef<Params, CapabilitiesData> = {
       );
     }
 
+    /* NOT CONNECTED IS NOT NOT BUILT, so this is an offer rather than a list
+       of holes. One sentence naming the systems, not six unavailable CRM
+       capabilities enumerated one by one. */
+    const offer = describeAwaiting(scoped.awaitingSystems);
+    if (offer) {
+      lines.push("");
+      lines.push(offer);
+    }
+
     if (withheldCount > 0) {
       lines.push("");
       /* Counted, not named. Saying HOW MANY is honest about the boundary;
@@ -487,10 +514,38 @@ export const capabilitiesTool: ToolDef<Params, CapabilitiesData> = {
       ...(ctx.workflowId ? { workflow_id: ctx.workflowId } : {}),
     });
 
+    /* THE SAME CONTENT, SHAPED SO SOMEBODY CAN ACT ON IT.
+     *
+     * The prose above stays and is still what a person reads if the widget
+     * cannot render: this product runs in a chat that has to degrade to text,
+     * and an answer that is only a widget is an answer that can vanish.
+     *
+     * But read end to end the prose is sixty bullets, and for the first screen
+     * somebody ever sees that is the whole job failed. They do not want the
+     * catalog, they want one thing to try. So the widget leads with the
+     * openers, keeps whole jobs next, and collapses the catalog behind the
+     * group it belongs to. Built from the SAME arrays the prose is built from,
+     * so the two cannot drift into describing different products. */
+    const widget: WidgetSpec = {
+      kind: "capabilities",
+      routines: routines.map((r) => ({ command: r.command, description: r.description })),
+      groups: (hasPersona(ctx.userRole) ? areaOrder.map((title) => ({ title })) : AREAS)
+        .map(({ title }) => ({
+          title,
+          items: (byArea.get(title) ?? []).map((i) => i.replace(/^- /, "")),
+        }))
+        .filter((g) => g.items.length > 0),
+      starters: openers.map((g) => ({ prompt: g.say[0], because: g.gives })),
+      fallbackInvitation:
+        "If none of that matches your job, describe your day instead: tell me what you do " +
+        "on a Monday, in order, and I will map it onto what I can and cannot do.",
+    };
+
     return {
       ok: true,
       data: { routineCount: routines.length, toolCount: usable.length, withheldCount },
       answer: lines.join("\n"),
+      widget,
     };
   },
 };

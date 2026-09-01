@@ -20,7 +20,7 @@
  * controls that were declared, described accurately and never executed, each
  * reporting a zero somebody took for a clean bill of health. So a source that
  * could not be read is never counted as empty, the verdict refuses to be
- * optimistic with fewer than two readable sources, and the partial view says
+ * optimiztic with fewer than two readable sources, and the partial view says
  * so in the first line of the spoken answer rather than in the widget.
  *
  * Zero AI tokens. Three reads and a rule set.
@@ -84,7 +84,7 @@ interface PilotStatusData {
  * engagement noun or the "left to do" framing, and the negative cases are
  * pinned in the tests so a later widening cannot quietly steal them.
  */
-const SUBJECT = "(?:the\\s+|this\\s+|our\\s+|my\\s+)?(?:pilot|project|engagement|rollout|programme|program|phase\\s*(?:one|1|two|2)|poc|trial|onboarding)";
+const SUBJECT = "(?:the\\s+|this\\s+|our\\s+|my\\s+)?(?:pilot|project|engagement|rollout|program|program|phase\\s*(?:one|1|two|2)|poc|trial|onboarding)";
 
 const INTENT_RE = new RegExp(
   [

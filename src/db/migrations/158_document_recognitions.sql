@@ -1,7 +1,7 @@
 -- Migration 158 — Document recognition pipeline persistence.
 --
 -- Captures every run of the recognition pipeline (classifier + extractor)
--- so the learning loop can analyse classification accuracy, extractor
+-- so the learning loop can analyze classification accuracy, extractor
 -- accuracy by type, and user corrections over time.
 --
 -- One row per file upload regardless of outcome (classifier failed,

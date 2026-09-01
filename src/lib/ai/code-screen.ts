@@ -147,7 +147,7 @@ export function detectOracleGaming(patch: string, task: CodeTask): GamingVerdict
   const reasons: GamingReason[] = [];
   const offending = new Set<string>();
 
-  /* Normalised both sides: the task names its graded tests as repo-relative
+  /* Normalized both sides: the task names its graded tests as repo-relative
      paths and a diff may carry a leading ./ */
   const graded = new Set(task.gradedBy.map((f) => f.replace(/^\.\//, "")));
   for (const f of touched) {

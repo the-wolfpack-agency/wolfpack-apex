@@ -34,7 +34,7 @@ describe("what counts as coming back", () => {
     "what's the weather",
     "show me my tasks",
     "I am done with this project",
-    "can you skip the intro when you summarise",
+    "can you skip the intro when you summarize",
     "yes",
   ])("%p is NOT a resume", (m) => {
     expect(detectResumeIntent(m)).toBe("none");
@@ -88,7 +88,7 @@ describe("what counts as a slot the resumed run cannot have", () => {
     /* A chain paused AFTER its gathering, which is the case the original check
        was written for and got right. */
     const remaining: RoutineStep[] = [
-      { kind: "model", prompt: "summarise {{inbox}}", label: "Summarise" },
+      { kind: "model", prompt: "summarize {{inbox}}", label: "Summarize" },
     ];
     expect(firstUnwritten(remaining)).toBe("inbox");
   });

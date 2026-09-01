@@ -23,9 +23,13 @@ import { searchKnowledge, saveAnswer } from "@/lib/knowledge";
 import { markCited as markBrainCited, type SemanticStatus } from "@/lib/brain/query";
 import { retrieve } from "@/lib/brain/retrieve";
 import { asksForSynthesis } from "@/lib/brain/question-terms";
+import { detectAmbiguity } from "@/lib/brain/ambiguous-question";
 import { quoteWindow } from "@/lib/brain/quote-window";
 import { TurnDegradation, type DegradationKind } from "@/lib/assistant/degraded-answer";
 import { judgeRelevance, RELEVANCE_MATERIAL_PER_HIT } from "@/lib/brain/relevance";
+import { strongHits, judgeMaterial } from "@/lib/brain/strong-hits";
+import type { QueryExecution } from "@/lib/brain/query";
+import { expandQuestion } from "@/lib/brain/expand-query";
 import { redactText, NEVER_QUOTE_KINDS } from "@/lib/ai/redaction";
 import { looksTabular } from "@/lib/brain/query";
 import { neutralizeInjection } from "@/lib/brain/security";
@@ -80,6 +84,41 @@ import { SEMANTIC_SCORE_FLOOR } from "@/lib/brain/qdrant";
 // Types
 // ---------------------------------------------------------------------------
 
+/**
+ * WHAT KIND OF ANSWER THIS WAS, decided where it is produced.
+ *
+ * WHY THIS EXISTS. The gist worked out the kind by matching the answer's
+ * PROSE: "No results found for", "I could not find a clear answer", "I could
+ * not reach the search index". That is fragile in the way only prose is, and
+ * it cost real accuracy. Measured 2026-08-30:
+ *
+ *   - 14 outage answers were read as neutral, so somebody who suffered an
+ *     outage was scored as satisfied
+ *   - 187 model-written refusals matched no pattern at all, because the model
+ *     phrases "I do not know" differently every time
+ *
+ * The product knew all of it at the moment it answered and threw it away.
+ * Declaring it here means the gist reads a fact rather than re-deriving a
+ * guess, and a NEW kind of answer is a compile-time decision rather than
+ * something noticed months later in a spreadsheet.
+ *
+ * The prose patterns stay, as the reader for messages written before this
+ * existed. They are the legacy path now, not the primary one.
+ */
+export type AnswerOutcomeKind =
+  /** Answered from the corpus or a system. The ordinary case. */
+  | "answered"
+  /** Searched and genuinely held nothing. */
+  | "nothing_found"
+  /** Several documents fit and the product declined to guess between them. */
+  | "asked_which"
+  /** Something underneath was unreachable and the reader was told. */
+  | "degraded"
+  /** An answer was produced and the quality gate refused to show it. */
+  | "low_confidence"
+  /** A connected system is needed and is not connected. */
+  | "not_connected";
+
 export type AssistantSource =
   | "page_facts"
   | "knowledge_cache"
@@ -89,7 +128,7 @@ export type AssistantSource =
   | "brain"
   | "tool"
   | "ai"
-  /* A message the organisation sent to everybody, not an answer the assistant
+  /* A message the organization sent to everybody, not an answer the assistant
      produced. Kept as its own source precisely so it can never be treated as
      one: see broadcast.ts for why that distinction is load-bearing. */
   | "broadcast"
@@ -411,7 +450,7 @@ async function findOrgQACacheHit(
           AND u.created_at > NOW() - ($2::bigint || ' milliseconds')::interval
           AND a.source IS DISTINCT FROM 'fallback'
           /* A BROADCAST IS NOT AN ANSWER. An announcement written into every
-             person's assistant is a message the organisation sent, not
+             person's assistant is a message the organization sent, not
              something the product worked out, and replaying it to whoever asks
              a vaguely similar question weeks later is how "submit expenses by
              Friday" becomes this company's standing answer about expenses.
@@ -435,7 +474,7 @@ async function findOrgQACacheHit(
              ABSENT METADATA COUNTS AS UNGROUNDED. Entries written before this
              column existed cannot be shown to have stood on anything, and the
              honest reading of "we cannot tell" for an answer served to the
-             whole organisation is not to serve it. That empties the existing
+             whole organization is not to serve it. That empties the existing
              cache, which is the point: it is currently full of answers nobody
              checked. */
           AND COALESCE((a.metadata->>'grounded')::int, 0) > 0
@@ -514,7 +553,7 @@ async function findOrgQACacheHit(
           AND u.created_at > NOW() - ($1::bigint || ' milliseconds')::interval
           AND a.source IS DISTINCT FROM 'fallback'
           /* A BROADCAST IS NOT AN ANSWER. An announcement written into every
-             person's assistant is a message the organisation sent, not
+             person's assistant is a message the organization sent, not
              something the product worked out, and replaying it to whoever asks
              a vaguely similar question weeks later is how "submit expenses by
              Friday" becomes this company's standing answer about expenses.
@@ -1063,13 +1102,13 @@ async function chatInner(
    * command would be swallowed by whichever tool matched first, and the person
    * would get a calendar instead of their morning.
    *
-   * The match is exact (see catalogue.matchRoutine): a five-step chain that
+   * The match is exact (see catalog.matchRoutine): a five-step chain that
    * fires at somebody who was asking a question is much worse than one that
-   * failed to recognise its own name.
+   * failed to recognize its own name.
    *
    * A routine costs no model tokens unless one of its own steps is a model
    * step -- the point of the feature is that it operates the tools you already
-   * have from one place, and asks a model only where judgement is required. */
+   * have from one place, and asks a model only where judgment is required. */
   /* ONE CONTEXT, BOTH PATHS. A routine dispatches the same tools a message
      does, and building the context twice is how the two quietly come to
      disagree about which workspace the caller is in. */
@@ -1332,7 +1371,7 @@ async function chatInner(
    * an unfinished setup step, and contradicts the answer the task tool gives
    * for the same underlying cause in the same minute.
    *
-   * Degrades to the old behaviour on any error: an unreachable token store
+   * Degrades to the old behavior on any error: an unreachable token store
    * must not cost somebody their answer, so it falls through to the model
    * exactly as before. */
   try {
@@ -1374,7 +1413,7 @@ async function chatInner(
      right when the question stands alone, and all of them are wrong when the
      user has just attached a file and asked about it.
      
-     This is what produced the reported behaviour. "look at the screen shot"
+     This is what produced the reported behavior. "look at the screen shot"
      with a screenshot attached was answered from three OLDER screenshots the
      brain had indexed, and a message about adding a show-password toggle came
      back as a list of 22 CRM contacts. The turn never reached the model with
@@ -1672,7 +1711,9 @@ async function chatInner(
         choice_count: ask.choices.length,
         workflow_id: workflowId,
       });
-      const msgId = await dbSaveMessage(convId, "assistant", ask.answer, "tool", 0);
+      const msgId = await dbSaveMessage(convId, "assistant", ask.answer, "tool", 0, {
+        outcome_kind: "asked_which" satisfies AnswerOutcomeKind,
+      });
       await dbUpdateConversationStats(convId, 0);
       return {
         response: ask.answer,
@@ -1925,7 +1966,19 @@ async function chatInner(
       safeContent,
       "ai",
       aiResult.tokensUsed,
-      { grounded: groundedOn },
+      {
+        grounded: groundedOn,
+        /* DECLARED WHERE IT IS DECIDED. The quality verdict and the turn's
+           degradation are both known right here, and both used to be
+           recoverable only by matching the answer's prose afterwards. A
+           model-written refusal phrases itself differently every time, which
+           is why 187 of them were being read as ordinary answers. */
+        outcome_kind: (turnDegradation.any
+          ? "degraded"
+          : quality.verdict === "reject"
+            ? "low_confidence"
+            : "answered") satisfies AnswerOutcomeKind,
+      },
     );
     await dbUpdateConversationStats(convId, aiResult.tokensUsed);
 
@@ -2034,7 +2087,12 @@ async function chatInner(
       "- Features and capabilities\n\n" +
       "The more the team adds to the knowledge base, the more I can answer without AI. Try one of these instead:";
 
-  const msgId = await dbSaveMessage(convId, "assistant", fallbackMsg, "fallback", 0);
+  const msgId = await dbSaveMessage(convId, "assistant", fallbackMsg, "fallback", 0, {
+    /* The fallback says one of two different things and they are not the same
+       failure: an outage is broken plumbing, a genuine blank is a thin corpus,
+       and only the second is fixed by connecting more sources. */
+    outcome_kind: (degraded ? "degraded" : "nothing_found") satisfies AnswerOutcomeKind,
+  });
   await dbUpdateConversationStats(convId, 0);
 
   /* Bare-fallback path (no AI provider configured / AI call returned
@@ -2366,6 +2424,16 @@ interface KnowledgeMatch {
    below (typically 0.2–0.35). */
 const KB_MIN_SIMILARITY = 0.45;
 
+/**
+ * Which knowledge entries are allowed to answer. Exported so the rule is
+ * testable on its own, because it is one condition and it shipped wrong.
+ */
+export function pickUsableKnowledge<T extends { rating: number | null; source?: string }>(
+  results: T[],
+): T[] {
+  return results.filter((r) => (r.rating === null ? r.source !== "ai" : r.rating > 2));
+}
+
 async function tryKnowledgeBase(
   message: string,
   /* So a failed lookup is not mistaken for an empty knowledge base. */
@@ -2373,11 +2441,32 @@ async function tryKnowledgeBase(
 ): Promise<KnowledgeMatch | null> {
   try {
     const results = await searchKnowledge(message, 5);
-    // Unrated entries (rating === null) are KEPT — they represent fresh
-    // knowledge the team just added. Only entries explicitly graded low
-    // (rating <= 2) are skipped. Walk the top matches so a slightly
-    // different phrasing still lands on a good entry.
-    const usable = results.filter((r) => r.rating === null || r.rating > 2);
+    /* Unrated entries are KEPT when a person wrote them: they are fresh
+       knowledge the team just added and waiting for a rating does not make
+       them truer. Entries explicitly graded low (rating <= 2) are skipped.
+       Walk the top matches so a slightly different phrasing still lands on a
+       good entry.
+
+       AI-AUTHORED ENTRIES ARE NOT KEPT UNTIL SOMEBODY RATES THEM, and that
+       exception is the whole point. Every past model answer is saved here with
+       source='ai' and no rating, so this path was replaying them at zero
+       tokens under a badge that reads "From knowledge base" in green. A model
+       improvisation laundered into a cited fact about the client's own
+       business.
+
+       Measured 2026-08-31: 190 of 215 rows are source='ai' and every one is
+       unrated, so the comment's assumption that unrated means "just added by
+       the team" was false for 88 per cent of the table. Two of twenty-three
+       demo prompts hit one. "What does the brand ambassador training cover"
+       returned generic dealership boilerplate that had nothing to do with this
+       client, and "what issues are assigned to me" returned a model's
+       suggestion to go and search GitHub by hand, complete with a real
+       username, while the tool that actually lists those issues sat unused.
+
+       A rating is a person saying it was right. Until then a model answer is
+       a model answer, and the honest thing is to ask the model again with
+       today's context rather than to quote yesterday's guess. */
+    const usable = pickUsableKnowledge(results);
     if (usable.length === 0) return null;
     const top = usable[0];
     /* Quality gate: only serve from KB when the top match is actually
@@ -2774,17 +2863,88 @@ async function tryBrain(
      * query expansion shipped unproven: its trigger is a judge rejection and
      * the harness never judged.
      *
-     * No judge and no expander passed here, so behaviour is byte-for-byte what
-     * it was: retrieve() with neither is plain retrieval. The judge still runs
-     * below, where it always has. This is the wiring, not the behaviour
-     * change, and the two are worth keeping separate. */
-    const { execution: result } = await retrieve({
+     * BOTH ARE PASSED NOW, AND THE EVAL IS WHY. Wired but unused, expansion
+     * had never run outside the harness. Graded on the reviewed pairs it moves
+     * recall from 25 per cent to 33, MRR 0.208 to 0.292, firing on half the
+     * questions and helping on three.
+     *
+     * THE LARGER NUMBER IS REAL AND WAS NOT TAKEN. A looser trigger scores 42
+     * per cent, and buying it means rewriting almost everything: measured on
+     * 30 real queries that had ALREADY found something, that version fired on
+     * 26 of them. Each firing is a model call and about two seconds. Trading
+     * two seconds on nearly every question for nine points on the ones that
+     * fail is not a trade a person waiting for an answer would make, so the
+     * conservative trigger ships and the gap is a measurement problem rather
+     * than a missing feature. Closing it needs a calibrated threshold for
+     * keyword scores, and that needs a bigger labeled set than twelve pairs.
+     *
+     * WHAT IT COSTS AS SHIPPED. The judge is $0.000150 a call and already ran
+     * here, so it is not new. Expansion adds a rewrite at $0.000017 and a
+     * second search, on questions that found nothing or were judged wrong.
+     * Against an answer that costs $0.003903, that is a rounding error.
+     *
+     * IT MAKES THE FAILING PATH SLOWER, WHICH IS THE TRADE THAT WAS TAKEN. A
+     * question that would have returned nothing spends about two more seconds
+     * before answering. Nobody minds waiting for an answer; they mind waiting
+     * for "I could not find that". Questions that succeed first time are
+     * untouched, and that is now true rather than assumed.
+     *
+     * The judge here sees exactly what the judge below sees, through the same
+     * two functions, because two judges shaped differently are two judges that
+     * can disagree about the same passages. */
+    const quotableQuestion = carriesEnoughToQuote(message);
+    const judgeForRetrieval = async (question: string, hits: QueryExecution["hits"]) => {
+      const material = judgeMaterial(strongHits(hits, quotableQuestion));
+      /* Nothing worth an opinion. Saying "unjudged" leaves the decision to the
+         shape gates rather than inventing a verdict on an empty string. */
+      if (!material) return "unjudged" as const;
+      const verdict = await judgeRelevance(question, material, async (input) => {
+        const res = await getAIClient().complete({
+          messages: [
+            { role: "system", content: input.system },
+            { role: "user", content: input.prompt },
+          ],
+          max_tokens: input.maxTokens,
+          model_tier: "cheap",
+          metadata: { feature: "brain.retrieval_relevance", user_id: userId, user_role: userRole },
+        });
+        return res.content;
+      });
+      return verdict.verdict;
+    };
+
+    const retrieved = await retrieve({
       userId,
       userRole,
       query: message,
       limit: 5,
       conversationId,
+      judge: judgeForRetrieval,
+      expand: (question) =>
+        expandQuestion(question, async (input) => {
+          const res = await getAIClient().complete({
+            messages: [
+              { role: "system", content: input.system },
+              { role: "user", content: input.prompt },
+            ],
+            max_tokens: input.maxTokens,
+            model_tier: "cheap",
+            metadata: { feature: "brain.query_expansion", user_id: userId, user_role: userRole },
+          });
+          return res.content;
+        }),
     });
+    const result = retrieved.execution;
+
+    if (retrieved.expanded) {
+      /* Recorded so the production effect is measurable rather than assumed.
+         The eval measured twelve questions; this measures every real one. */
+      trackEvent("brain.query_expanded", userId, userRole, {
+        helped: retrieved.expansionHelped,
+        first_was_rejected: retrieved.firstWasRejected,
+        hits: result.hits.length,
+      });
+    }
     /* THE LAST HIDING PLACE.
      *
      * Measured against the deployed URL 2026-08-29, one turn, no exception:
@@ -2869,17 +3029,10 @@ async function tryBrain(
      * Which matters more than it looks, because on the same day the production
      * log showed 252 brain queries in 30 days and NOT ONE semantic hit, so in
      * practice every answer here has been taking the keyword branch. */
-    const quotable = carriesEnoughToQuote(message);
-    const strong = result.hits.filter((h) => {
-      /* SEMANTIC IS EXEMPT FROM THE SUBJECT-WORD TEST, NOT FROM HAVING TO BE
-         CLOSE. Qdrant already refuses anything under SEMANTIC_SCORE_FLOOR, and
-         this repeats the check because the exemption is only safe while that
-         floor exists: for one afternoon it did not, and every query on record
-         came back with five confident hits. Belt and braces on the one branch
-         that answers without asking anything else. */
-      if (h.source.includes("semantic")) return h.score >= SEMANTIC_SCORE_FLOOR;
-      return quotable && h.score >= 0.05;
-    });
+    /* The same filter the judge inside retrieve() used, from one definition.
+       Two copies of this rule are two judges that can disagree about the same
+       passages, and this product has already shipped that bug once. */
+    const strong = strongHits(result.hits, quotableQuestion);
     if (strong.length === 0) return { strong: null, context };
 
     /* DID IT FIND THE RIGHT THING, OR MERELY SOMETHING?
@@ -2927,22 +3080,31 @@ async function tryBrain(
      * turns that would otherwise be confidently wrong or wrongly refused. The
      * whole argument for the judge was that this is the cheapest place to
      * spend, and starving it of the text defeated that. */
-    const material = strong
-      .slice(0, 3)
-      .map((h) => h.content.slice(0, RELEVANCE_MATERIAL_PER_HIT))
-      .join("\n\n");
-    const relevance = await judgeRelevance(message, material, async (input) => {
-      const res = await getAIClient().complete({
-        messages: [
-          { role: "system", content: input.system },
-          { role: "user", content: input.prompt },
-        ],
-        max_tokens: input.maxTokens,
-        model_tier: "cheap",
-        metadata: { feature: "brain.retrieval_relevance", user_id: userId, user_role: userRole },
-      });
-      return res.content;
-    });
+    /* ALREADY JUDGED, SO DO NOT JUDGE AGAIN.
+     *
+     * retrieve() ran this exact judge on this exact material, and reports the
+     * verdict for whichever attempt it kept. Asking a second time would double
+     * the cost of every question and, worse, could return a different answer
+     * to the same question and leave two parts of one turn disagreeing.
+     *
+     * "unjudged" means no verdict applies to what we are holding, which
+     * happens when nothing was strong enough to show the judge or when a
+     * rewrite won on score without needing an opinion. Then we ask. */
+    const relevance =
+      retrieved.keptVerdict !== "unjudged"
+        ? { verdict: retrieved.keptVerdict, reason: "" }
+        : await judgeRelevance(message, judgeMaterial(strong), async (input) => {
+            const res = await getAIClient().complete({
+              messages: [
+                { role: "system", content: input.system },
+                { role: "user", content: input.prompt },
+              ],
+              max_tokens: input.maxTokens,
+              model_tier: "cheap",
+              metadata: { feature: "brain.retrieval_relevance", user_id: userId, user_role: userRole },
+            });
+            return res.content;
+          });
 
     if (relevance.verdict === "irrelevant") {
       trackEvent("brain.retrieval_judged_irrelevant", userId, userRole, {
@@ -2987,11 +3149,37 @@ async function tryBrain(
      * when the strong hits are mostly tabular, this declines to answer here
      * and lets the grounded model path do it. Costs a cheap-tier call and buys
      * an answer a client can read. */
+    /* WEAK AND CONTESTED EVIDENCE IS NOT AN ANSWER.
+     *
+     * Measured 2026-08-30: "how much do we owe upfront?" quoted a chauffeur
+     * invoice, confidently, with a dollar figure. "when do we have to pay?"
+     * correctly replied "the closest things I hold are... name it". Same shape
+     * of question, opposite behavior, and the first is a wrong answer given
+     * with the product's full confidence.
+     *
+     * The existing guard only fires when the relevance judge REJECTS the hits.
+     * Here the judge accepted, and was right to: an invoice genuinely is
+     * relevant to owing money. Relevance was never the problem. Agreement was.
+     * Neither question names a subject, so several documents answer equally
+     * and picking one is a guess wearing a citation.
+     *
+     * Falls through to the same near-miss path the judge-rejection case uses,
+     * so there is one way of saying "which did you mean" rather than two. */
+    const ambiguity = detectAmbiguity(strong);
+    if (ambiguity) {
+      trackEvent("assistant.brain_answer_contested", userId, userRole, {
+        candidates: ambiguity.candidates.length,
+        top_score: Number((strong[0]?.score ?? 0).toFixed(4)),
+        module: "assistant",
+      });
+      return { strong: null, context: emptyContext, nearMisses: ambiguity.candidates };
+    }
+
     /* A SUMMARY IS NOT THREE EXCERPTS.
      *
      * The quote path below is the right answer to "what does the SOW say about
      * payment": the clause is in one chunk, quoting it costs nothing, shows its
-     * source and cannot invent anything. It is the wrong answer to "summarise
+     * source and cannot invent anything. It is the wrong answer to "summarize
      * the SOW", where what was asked for exists in no single chunk. Measured on
      * 2026-08-30, that question returned a filename, the words "chunk 2", and
      * 500 characters of the middle of a subscription clause. Summary-shaped,
@@ -3426,7 +3614,7 @@ async function callAI(
          reads every answer.
          The failure worth catching here is the other kind, an answer that is
          well formed and confident and wrong, or that answered half the
-         question. That is the judgement verification.ts says a rule cannot
+         question. That is the judgment verification.ts says a rule cannot
          make. Reviewing every answered question is what makes the claim true,
          and at this volume the cost is a rounding error against a bill that
          ran to 43 cents in sixty days. */

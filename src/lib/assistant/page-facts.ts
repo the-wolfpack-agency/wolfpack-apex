@@ -121,6 +121,44 @@ export const PAGE_FACTS: Record<string, PageFact> = {
     ],
     related_pages: ["playbook", "brain", "analytics"],
   },
+  builds: {
+    domain: "builds",
+    route: "/builds",
+    title: "Client builds",
+    purpose:
+      "The register of pages built for a client engagement rather than shipped as part of Instinct. Each one says which client it is for and whether its numbers are measured or drawn, so a concept is never mistaken for a product.",
+    what_you_can_do: [
+      "See every page in the product that belongs to a client engagement rather than to Instinct.",
+      "Tell at a glance whether a build is a concept, in flight, or live for a client.",
+      "Read what each build's numbers actually are before opening it: measured against real data, or drawn.",
+      "Put a wireframe or a mock on a real URL, in the real shell, before standing up a repo for it.",
+    ],
+    how_to: [
+      "Open Client Builds from the left nav.",
+      "Read the line under each build before opening it: it says whether the figures are measured or illustrative.",
+      "Every build page carries the same marker at the top, so the page itself says what it is even when it is shared as a link.",
+    ],
+    related_pages: ["pilot", "playbook"],
+  },
+  "course-program": {
+    domain: "course-program",
+    route: "/builds/course-program",
+    title: "New course, new client",
+    purpose:
+      "How the method behind an existing training program transfers to a new client: which components travel, which have to be rebuilt, and what we add that the original cannot measure.",
+    what_you_can_do: [
+      "See which parts of an existing course are structure that transfers and which are client-owned material that does not.",
+      "Read the commitment ladder: the order the artifacts feed each other, which is the part worth taking.",
+      "See where the original program is weakest, and what we do instead.",
+      "See what has to be known about a client before the work can be quoted.",
+    ],
+    how_to: [
+      "Open Client Builds from the left nav, then New course, new client.",
+      "Read the copyright constraint at the top first: every design decision below follows from it.",
+      "The open questions at the bottom are what a first client conversation needs to answer.",
+    ],
+    related_pages: ["builds", "pilot"],
+  },
   playbook: {
     domain: "playbook",
     route: "/playbook",

@@ -132,7 +132,7 @@ export default function NotificationBell() {
       });
       const data = (await res.json().catch(() => ({}))) as { action_url?: string | null };
       const dest = data.action_url ?? n.action_url;
-      // optimistic decrement
+      // optimiztic decrement
       setCount((c) => Math.max(0, c - 1));
       setItems((list) => list.filter((x) => x.id !== n.id));
       setOpen(false);

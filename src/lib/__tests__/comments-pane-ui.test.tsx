@@ -11,7 +11,7 @@
  *   - filter tabs switch the displayed comments
  *   - click a comment → postMessage comment.focus fires to the iframe
  *   - reply button opens composer, submit POSTs with parentCommentId
- *   - resolve button POSTs + flips local state optimistically
+ *   - resolve button POSTs + flips local state optimiztically
  *   - delete calls DELETE
  *   - error banner surfaces on fetch failure
  */
@@ -178,7 +178,7 @@ describe("CommentsPane — interactions", () => {
     );
   });
 
-  it("resolve button POSTs + flips state optimistically", async () => {
+  it("resolve button POSTs + flips state optimiztically", async () => {
     render(<CommentsPane siteId="site_1" />);
     await waitFor(() =>
       expect(screen.getByTestId("comments-pane-list")).toBeInTheDocument(),

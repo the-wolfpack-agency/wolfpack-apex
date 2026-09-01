@@ -3,7 +3,7 @@
  *
  * The whole data-flow mechanism between steps, so its failure modes are the
  * chain's failure modes. The one that matters most is a MISSING slot: the
- * tempting behaviour is to substitute nothing and carry on, and that is how a
+ * tempting behavior is to substitute nothing and carry on, and that is how a
  * routine reaches "draft the reply" holding an empty string where the customer
  * history should be, then sends something confident and wrong.
  */

@@ -188,7 +188,7 @@ describe("summarizeProtection", () => {
     expect(p.callsWithFindings).toBe(1);
   });
 
-  test("only the KIND is ever summarised, which is all the gate stores", () => {
+  test("only the KIND is ever summarized, which is all the gate stores", () => {
     /* The gate replaces values with placeholders and records kinds, by design,
        so this panel cannot leak what it caught even if somebody wanted it to. */
     const p = summarizeProtection([{ redacted_count: "1", kinds: "credit_card" }], 1);

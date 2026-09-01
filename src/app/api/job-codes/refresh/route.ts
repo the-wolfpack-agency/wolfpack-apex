@@ -16,14 +16,14 @@ import { trackEvent } from "@/lib/analytics";
 import { forceRefresh } from "@/lib/job-codes/resolver";
 
 const REFRESH_COOLDOWN_MS = 30_000;
-const recentRefreshes = new Map<string, number>();
+const recenterfreshes = new Map<string, number>();
 
 export async function POST(req: NextRequest) {
   const auth = await requireCapability(req, "jobcodes.refresh");
   if (!auth.ok) return auth.response;
 
   const now = Date.now();
-  const last = recentRefreshes.get(auth.user.id) ?? 0;
+  const last = recenterfreshes.get(auth.user.id) ?? 0;
   if (now - last < REFRESH_COOLDOWN_MS) {
     const retryAfter = Math.ceil((REFRESH_COOLDOWN_MS - (now - last)) / 1000);
     return NextResponse.json(
@@ -31,7 +31,7 @@ export async function POST(req: NextRequest) {
       { status: 429, headers: { "Retry-After": String(retryAfter) } },
     );
   }
-  recentRefreshes.set(auth.user.id, now);
+  recenterfreshes.set(auth.user.id, now);
 
   const outcome = await forceRefresh(auth.user.id, "manual");
 

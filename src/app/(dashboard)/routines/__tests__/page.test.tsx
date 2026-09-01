@@ -169,7 +169,7 @@ describe("the conclusion sits above the log", () => {
     expect(html.indexOf("What your own steps are telling you")).toBeLessThan(html.indexOf("Recent runs"));
   });
 
-  it("does not colour a skipped step as an error", async () => {
+  it("does not color a skipped step as an error", async () => {
     /* A step somebody skipped is information about the routine. Red would make
        the page feel like an assessment of the person reading it. */
     respond(payload({ findings: [finding] }));
@@ -390,7 +390,7 @@ describe("the area map", () => {
   });
 
   it("says plainly when no area's work reaches another's", async () => {
-    /* The honest answer for a young catalogue, rather than a diagram
+    /* The honest answer for a young catalog, rather than a diagram
        implying connections that are not there. */
     respond(payload({ areaMap: { ...AREA_MAP, crossings: [] } }));
     render(<Page />);

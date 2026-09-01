@@ -1,7 +1,7 @@
 /**
  * /api/qr/[id]/scans — per-scan attribution detail.
  *
- * Returns up to 500 fully-denormalised scan rows for a single code,
+ * Returns up to 500 fully-denormalized scan rows for a single code,
  * including the matched-client name (LEFT JOIN), the bot flag, UTMs,
  * lat/lng, postal, language, and the visitor hash so the dashboard
  * can group repeat scans by the same anonymous visitor.

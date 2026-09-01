@@ -371,7 +371,7 @@ function slotNameFor(text: string, index: number): string {
  * Say it back to them.
  *
  * Their words first on every line, because the whole point is that they
- * recognise their own day. Ours second.
+ * recognize their own day. Ours second.
  */
 export function renderPlan(plan: DayPlan, canChain: boolean): string {
   if (plan.steps.length === 0) {
@@ -430,7 +430,7 @@ export function renderPlan(plan: DayPlan, canChain: boolean): string {
    *
    * A tool that exists and needs a detail is not an absence. A tool the role
    * cannot run is not an absence either. Only the third kind is, and only that
-   * one is worth apologising for. Counted separately so the words can be true
+   * one is worth apologizing for. Counted separately so the words can be true
    * of what they describe, and so the numbers add up to the list above them. */
   const needsDetail = plan.steps.filter(
     (s) => s.kind === "gap" && s.reason === "needs_detail",
@@ -488,7 +488,7 @@ export function buildExtractionPrompt(
   return [
     "Someone has described their working day. Break it into the distinct steps they perform, in order.",
     "",
-    "For each step, either name ONE tool from the list below that would do it, or mark it as something only a person can do (a conversation, a decision, judgement, preparation, anything physical).",
+    "For each step, either name ONE tool from the list below that would do it, or mark it as something only a person can do (a conversation, a decision, judgment, preparation, anything physical).",
     "",
     "Rules:",
     '- Use a tool name EXACTLY as written below, or use null. Never invent a name.',

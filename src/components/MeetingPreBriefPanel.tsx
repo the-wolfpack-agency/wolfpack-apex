@@ -115,7 +115,7 @@ function formatCountdown(m: UpcomingMeeting, nowMs: number): string {
 /**
  * True when an out-of-office entry overlaps the user's LOCAL today. The OOO list
  * comes from a -30min..+48h window, which includes TOMORROW, so without this an
- * OOO scheduled for tomorrow was being labelled "Out today" (a wrong, embarrassing
+ * OOO scheduled for tomorrow was being labeled "Out today" (a wrong, embarrassing
  * client-facing error). An entry counts as today when its [start, end) overlaps
  * [local midnight today, local midnight tomorrow); a start-only entry counts when
  * its start falls within today.

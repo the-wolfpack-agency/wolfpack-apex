@@ -105,7 +105,7 @@ describe("formats OCR cannot help", () => {
   });
 });
 
-describe("the run is costed before it is authorised", () => {
+describe("the run is costed before it is authorized", () => {
   const api = decideOcrRoute({ kind: "pdf" }, BOTH);
 
   it("allows a run that fits, and says what it will cost", () => {
@@ -134,7 +134,7 @@ describe("the run is costed before it is authorised", () => {
     expect(v.estimatedCents).toBeNull();
   });
 
-  it("refuses an empty batch instead of authorising a zero-page run", () => {
+  it("refuses an empty batch instead of authorizing a zero-page run", () => {
     expect(withinOcrBudget({ pages: 0, decision: api, ceilingCents: 50 }).allowed).toBe(false);
   });
 

@@ -29,7 +29,7 @@ beforeEach(() => {
 });
 
 describe("GET", () => {
-  it("returns 200 with the fleet's behaviour", async () => {
+  it("returns 200 with the fleet's behavior", async () => {
     mockGetFleetBehavior.mockResolvedValue([{ agentId: "a1", standing: "good" }]);
     const res = await GET(get());
     expect(res.status).toBe(200);

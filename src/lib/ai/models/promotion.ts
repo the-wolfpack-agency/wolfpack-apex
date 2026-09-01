@@ -3,7 +3,7 @@
  *
  * THE PROBLEM THIS IS FOR
  *
- * A client's AI behaviour changes without anybody deciding it should. A
+ * A client's AI behavior changes without anybody deciding it should. A
  * provider ships new weights under the same name, deprecates a version, or
  * quietly alters a default, and the first anybody knows is that answers got
  * worse. Every gateway is a pass-through by design, so their answer to "the
@@ -27,7 +27,7 @@
  *
  * A model moves between them on EVIDENCE, through decide() below, which is a
  * pure function so the rule can be read, tested and argued with rather than
- * inferred from behaviour.
+ * inferred from behavior.
  *
  * IT FAILS OPEN, DELIBERATELY, AND THAT IS THE OPPOSITE OF THE RESIDENCY GATE
  *

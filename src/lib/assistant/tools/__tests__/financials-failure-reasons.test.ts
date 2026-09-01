@@ -66,11 +66,11 @@ describe("why there was no number", () => {
 
   it("separates a role refusal from both", async () => {
     const out = await runFinancialsMetricOutcome({ question: "what's our MRR", userRole: "dealer" });
-    expect(out).toEqual({ ok: false, reason: "not_authorised" });
+    expect(out).toEqual({ ok: false, reason: "not_authorized" });
   });
 
   /* The ONLY case where rephrasing is genuinely the fix. */
-  it("reports an unrecognised metric as unknown", async () => {
+  it("reports an unrecognized metric as unknown", async () => {
     const out = await runFinancialsMetricOutcome({
       question: "what is our gross margin per cohort?",
       userRole: "cto",

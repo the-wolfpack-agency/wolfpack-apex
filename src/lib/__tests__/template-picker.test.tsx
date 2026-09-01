@@ -88,14 +88,14 @@ describe("<TemplatePicker />", () => {
     expect(onSelect).toHaveBeenCalledWith("portfolio");
   });
 
-  test("Enter key on a focused card fires onSelect (native <button> behaviour)", () => {
+  test("Enter key on a focused card fires onSelect (native <button> behavior)", () => {
     const onSelect = jest.fn();
     render(<TemplatePicker onSelect={onSelect} />);
     const card = screen.getByTestId("template-card-racing_team");
     card.focus();
     expect(document.activeElement).toBe(card);
     // In jsdom, pressing Enter on a focused button fires a click event.
-    // We simulate the browser behaviour explicitly by dispatching click
+    // We simulate the browser behavior explicitly by dispatching click
     // after keyDown — both paths must reach onSelect.
     fireEvent.keyDown(card, { key: "Enter", code: "Enter" });
     fireEvent.click(card);

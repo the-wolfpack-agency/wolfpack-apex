@@ -7,7 +7,7 @@
  * UI to busy-poll until it hit its cap). Synchronous is simpler and
  * actually works for any folder that completes within maxDuration.
  *
- * maxDuration = 300s gives most realistic folders enough time. Truly
+ * maxDuration = 300s gives most realiztic folders enough time. Truly
  * huge folders (terabytes, thousands of files) need a queue worker
  * which is a separate project.
  */

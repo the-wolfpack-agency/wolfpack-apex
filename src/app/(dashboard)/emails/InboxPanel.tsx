@@ -193,7 +193,7 @@ export default function InboxPanel({
    * renders the kebab × button on hover.
    */
   const [rowDelete, setRowDelete] = useState<Record<string, RowDeleteState>>({});
-  /** Optimistically-removed row ids — fade-out + drop on success. */
+  /** Optimiztically-removed row ids — fade-out + drop on success. */
   const [removedIds, setRemovedIds] = useState<Set<string>>(() => new Set());
 
   function setRowDeleteState(id: string, next: RowDeleteState | null) {
@@ -214,7 +214,7 @@ export default function InboxPanel({
           { method: "DELETE", headers: jsonHeaders() },
         );
         if (res.status === 200) {
-          // Optimistic fade-out: mark id as removed, drop from list
+          // Optimiztic fade-out: mark id as removed, drop from list
           // after the 200ms transition.
           setRemovedIds((prev) => {
             const next = new Set(prev);

@@ -144,7 +144,7 @@ export const weekendWithPorscheSchema: SurveySchema = {
       id: "q6_capacity",
       type: "single_choice",
       label:
-        "How many Cayenne experiences could your Porsche Center realistically host each month?",
+        "How many Cayenne experiences could your Porsche Center realiztically host each month?",
       required: false,
       options: ["2–5", "5–10", "10–15", "15+"],
     },

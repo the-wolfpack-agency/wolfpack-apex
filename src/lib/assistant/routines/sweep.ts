@@ -20,7 +20,7 @@
  */
 import { notify } from "@/lib/notifications/in-app";
 import { trackEvent } from "@/lib/analytics";
-import { matchRoutine } from "./catalogue";
+import { matchRoutine } from "./catalog";
 import { matchSavedRoutine } from "./saved";
 import { runRoutine, describeRun } from "./index";
 import { dueSchedules, recordRun, MAX_CONSECUTIVE_FAILURES, type ScheduleRow } from "./schedule-store";

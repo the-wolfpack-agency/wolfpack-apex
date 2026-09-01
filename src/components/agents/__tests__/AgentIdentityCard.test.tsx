@@ -18,7 +18,7 @@ function agent(over: Record<string, unknown> = {}) {
   return {
     id: "agent-1",
     name: "Research Scout",
-    role: "Finds and summarises source material",
+    role: "Finds and summarizes source material",
     state: "active",
     connections: ["jira"],
     ...over,
@@ -26,21 +26,21 @@ function agent(over: Record<string, unknown> = {}) {
 }
 
 describe("who is this", () => {
-  it("shows the name, role and a recognisable face", () => {
+  it("shows the name, role and a recognizable face", () => {
     render(<AgentIdentityCard agent={agent()} />);
     expect(screen.getByText("Research Scout")).toBeInTheDocument();
-    expect(screen.getByText("Finds and summarises source material")).toBeInTheDocument();
+    expect(screen.getByText("Finds and summarizes source material")).toBeInTheDocument();
     expect(screen.getByTestId("agent-avatar")).toHaveTextContent("RS");
   });
 
   it("gives a misbehaving agent the SAME avatar treatment as a clean one", () => {
     // The core constraint. If a card can look friendlier, it can reassure
     // someone about an agent that has done something.
-    const clean = render(<AgentIdentityCard agent={agent()} behaviour={{ standing: "good", runs: 5 }} boundaryProven />);
+    const clean = render(<AgentIdentityCard agent={agent()} behavior={{ standing: "good", runs: 5 }} boundaryProven />);
     const cleanHue = screen.getByTestId("agent-avatar").getAttribute("data-hue");
     clean.unmount();
 
-    render(<AgentIdentityCard agent={agent()} behaviour={{ standing: "attention", runs: 5 }} boundaryProven />);
+    render(<AgentIdentityCard agent={agent()} behavior={{ standing: "attention", runs: 5 }} boundaryProven />);
     expect(screen.getByTestId("agent-avatar").getAttribute("data-hue")).toBe(cleanHue);
   });
 
@@ -76,19 +76,19 @@ describe("what has it done, and does that mean anything", () => {
   });
 
   it("does NOT call a clean record good when the boundary was never proven", () => {
-    render(<AgentIdentityCard agent={agent()} behaviour={{ standing: "good", runs: 12 }} boundaryProven={false} />);
+    render(<AgentIdentityCard agent={agent()} behavior={{ standing: "good", runs: 12 }} boundaryProven={false} />);
     expect(screen.getByTestId("agent-trust")).toHaveTextContent(/not yet proved its limits hold/);
     expect(screen.getByText("Not established")).toBeInTheDocument();
   });
 
   it("reports Behaving only when the boundary was demonstrated", () => {
-    render(<AgentIdentityCard agent={agent()} behaviour={{ standing: "good", runs: 12 }} boundaryProven />);
+    render(<AgentIdentityCard agent={agent()} behavior={{ standing: "good", runs: 12 }} boundaryProven />);
     expect(screen.getByText("Behaving")).toBeInTheDocument();
     expect(screen.getByTestId("agent-trust")).toHaveTextContent(/Stayed inside its limits across 12 tasks/);
   });
 
-  it("leads with misbehaviour", () => {
-    render(<AgentIdentityCard agent={agent()} behaviour={{ standing: "attention", runs: 3 }} boundaryProven />);
+  it("leads with misbehavior", () => {
+    render(<AgentIdentityCard agent={agent()} behavior={{ standing: "attention", runs: 3 }} boundaryProven />);
     expect(screen.getByText("Needs a look")).toBeInTheDocument();
     expect(screen.getByTestId("agent-trust")).toHaveTextContent(/before this agent is given more access/);
   });

@@ -231,6 +231,7 @@ async function main(): Promise<void> {
       /* Deduped: fifty links to the same logout is one decision, and a
          list that repeats it fifty times hides the other reasons. */
       skipped: [...new Map(skipped.map((s) => [`${s.signature}:${s.reason}`, s])).values()],
+      patterns: [],
       maxDepthReached,
       stopReason,
       durationMs: Date.now() - startedAt,

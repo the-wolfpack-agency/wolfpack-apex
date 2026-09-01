@@ -9,7 +9,7 @@
  *
  * The field was OMITTED whenever bridging returned null, and bridging returns
  * null for four quite different reasons. An override is a human decision. No
- * model available is an estate problem. A client model is correct behaviour
+ * model available is an estate problem. A client model is correct behavior
  * that must never route through our tenant. Recording all four as absence
  * threw away the distinction and made the gap look like a bug in the logging.
  *

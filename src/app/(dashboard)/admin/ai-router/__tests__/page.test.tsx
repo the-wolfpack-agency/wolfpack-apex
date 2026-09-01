@@ -115,7 +115,7 @@ describe("money", () => {
     );
   });
 
-  it("does not apologise about estimates when spend was measured", async () => {
+  it("does not apologize about estimates when spend was measured", async () => {
     respond(insights({ decisionsWithoutEstimate: 3 }));
     render(<Page />);
     await screen.findByTestId("router-headline");
@@ -354,7 +354,7 @@ describe("what the router would not let through", () => {
       {
         rule: "price_guarantee",
         title: "Promised a price",
-        why: "Pricing changes by location and by day. A guarantee made in chat is a commitment nobody in the business authorised.",
+        why: "Pricing changes by location and by day. A guarantee made in chat is a commitment nobody in the business authorized.",
         count: 2,
       },
       {
@@ -375,7 +375,7 @@ describe("what the router would not let through", () => {
     render(<Page />);
     const list = await screen.findByTestId("router-refusal-rules");
     expect(list).toHaveTextContent("Promised a price");
-    expect(list).toHaveTextContent(/commitment nobody in the business authorised/i);
+    expect(list).toHaveTextContent(/commitment nobody in the business authorized/i);
     expect(screen.getByTestId("router-metric-blocked")).toHaveTextContent("2");
     expect(screen.getByTestId("router-metric-escalated")).toHaveTextContent("1");
   });
@@ -586,9 +586,9 @@ describe("the quality trend", () => {
     expect(screen.queryByTestId("router-quality-unreadable")).not.toBeInTheDocument();
   });
 
-  /* The normaliser rebuilds the payload field by field, and a field it does
+  /* The normalizer rebuilds the payload field by field, and a field it does
      not name is dropped silently. That is how the measured spend was lost. */
-  it("survives the normaliser rather than being dropped by it", async () => {
+  it("survives the normalizer rather than being dropped by it", async () => {
     respond(insights({ quality: quality() }));
     render(<Page />);
     expect(await screen.findByTestId("router-quality-panel")).toBeInTheDocument();
@@ -601,5 +601,43 @@ describe("the quality trend", () => {
     render(<Page />);
     expect(await screen.findByTestId("router-metric-cheap")).toBeInTheDocument();
     expect(screen.queryByTestId("router-quality-panel")).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * RECOVERIES, WHICH ARE THE ONLY ONE THAT APPLIES TO THIS DEPLOYMENT.
+ *
+ * "Fell back" will read zero here however much goes wrong: a fallback swaps
+ * providers, pickFallback returns null unless Anthropic is keyed, and it is
+ * not keyed. Until 2026-08-30 that zero was accurate for the worst possible
+ * reason, because there was no recovery at all and every transient failure
+ * ended somebody's question.
+ *
+ * A retry is what actually saves a turn here, and a working one is invisible:
+ * the person got their answer and nothing said the first attempt failed.
+ */
+describe("recoveries", () => {
+  it("reports retries separately from fallbacks", async () => {
+    respond(insights({ fallbacks: 0, retriesRecovered: 3 }));
+    render(<Page />);
+    expect(await screen.findByTestId("router-metric-retries")).toHaveTextContent("3");
+    expect(await screen.findByTestId("router-metric-fallbacks")).toHaveTextContent("0");
+  });
+
+  /* A payload from a deploy that predates the retry has no field at all, which
+     is different from "no retries happened". It must render as zero rather
+     than blanking the page or showing undefined. */
+  it("renders zero for a payload that predates the field", async () => {
+    const body = insights();
+    delete (body as Record<string, unknown>).retriesRecovered;
+    respond(body);
+    render(<Page />);
+    expect(await screen.findByTestId("router-metric-retries")).toHaveTextContent("0");
+  });
+
+  it("says what the number means, so a zero is not read as nothing working", async () => {
+    respond(insights({ retriesRecovered: 0 }));
+    render(<Page />);
+    expect(await screen.findByTestId("router-metric-retries")).toHaveTextContent(/blip nobody saw/i);
   });
 });
