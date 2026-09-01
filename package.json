@@ -51,7 +51,8 @@
     "test:db": "bash scripts/db-test.sh",
     "test:e2e:changed": "npx tsx scripts/e2e-for-changes.ts",
     "gate:exercise": "tsx scripts/gate-exercise.ts",
-    "eval:retrieval": "npx tsx scripts/eval-retrieval.ts src/lib/brain/eval/retrieval-pairs.json"
+    "eval:retrieval": "npx tsx scripts/eval-retrieval.ts src/lib/brain/eval/retrieval-pairs.json",
+    "capabilities": "npx tsx scripts/capability-check.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.92.0",
