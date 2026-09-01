@@ -104,12 +104,27 @@ describe("choosing what to retry", () => {
     expect((await findCandidates())[0].reason).toBe("extractor_now_exists");
   });
 
-  it("does NOT retry a genuinely scanned PDF", async () => {
-    /* Sixty-two of these exist. Retrying them re-downloads the whole set on
-       every run, ends in the same state, and teaches whoever reads the report
-       to ignore it. They need OCR, which is a different change. */
-    mockQuery.mockResolvedValue({
+  /* THIS TEST USED TO ASSERT THE OPPOSITE, AND WAS RIGHT TO.
+   *
+   * When it was written nothing could read a scan, so re-downloading one was
+   * spending bandwidth to reach the same dead end. reprocessOne has since
+   * grown an OCR route with a cost policy, and the credentials for it resolve
+   * in production. The premise changed; the assertion had not, and it was the
+   * reason not one document had ever reached that route. */
+  it("retries a scanned PDF now that something can read one", async () => {
+    mockQuery.mockResolvedValueOnce({
       rows: [row({ kind: "pdf", status: "failed", status_detail: "PDF contained no extractable text (scanned?)" })],
+    });
+    const found = await findCandidates();
+    expect(found).toHaveLength(1);
+    expect(found[0].reason).toBe("ocr_never_tried");
+  });
+
+  /* And it stops retrying the moment the OCR says it cannot, so a page nobody
+     can read does not cost money every night. */
+  it("does not retry a scan the OCR already refused", async () => {
+    mockQuery.mockResolvedValueOnce({
+      rows: [row({ kind: "pdf", status: "failed", status_detail: "ocr returned no text" })],
     });
     expect(await findCandidates()).toHaveLength(0);
   });
@@ -520,5 +535,58 @@ describe("files too big to pull into memory", () => {
        files, which would fail extraction even if they fit. */
     expect(MAX_REPAIR_BYTES).toBeGreaterThanOrEqual(8 * 1024 * 1024);
     expect(MAX_REPAIR_BYTES).toBeLessThanOrEqual(25 * 1024 * 1024);
+  });
+});
+
+/**
+ * The OCR route existed, was paid for, and nothing ever reached it.
+ *
+ * reprocessOne already routes an extraction failure through the OCR policy,
+ * prefers the cheap purpose-built API over a vision model, and checks a cost
+ * ceiling before spending. All of it wired and tested.
+ *
+ * It had run zero times. Measured 2026-09-01: not one brain.document_ocred
+ * event in the product's life, because a scanned PDF fails with "contained no
+ * extractable text" and that phrase was not in FIXABLE, so findCandidates
+ * never selected one. 56 scanned documents sat re-fetchable, a capability away
+ * from being answerable, behind a list that did not mention them.
+ */
+describe("scans reaching the OCR route", () => {
+  it("treats a scan with no extractable text as fixable", () => {
+    const scan = FIXABLE.find((f) => f.test.test("PDF contained no extractable text (scanned?)"));
+    expect(scan?.id).toBe("ocr_never_tried");
+  });
+
+  /* SELF-LIMITING BY CONSTRUCTION. When OCR cannot read a page the repair
+     writes "ocr <reason>" onto the row. That must not match, or a page nothing
+     can read gets re-downloaded and re-OCR'd every night forever, spending
+     real money on the same failure. */
+  it("does not re-queue a scan the OCR already refused", () => {
+    for (const detail of [
+      "ocr too_large — image 5562198 bytes exceeds Vision limit",
+      "ocr returned no text",
+      "ocr unreadable: handwriting",
+    ]) {
+      expect(FIXABLE.find((f) => f.test.test(detail))).toBeUndefined();
+    }
+  });
+
+  it("still matches the two reasons that were already fixable", () => {
+    expect(
+      FIXABLE.find((f) => f.test.test('DOMParser.parseFromString: the provided mimeType "undefined"'))?.id,
+    ).toBe("docx_mimetype");
+    expect(FIXABLE.find((f) => f.test.test("sync extractor unavailable for image"))?.id).toBe(
+      "extractor_now_exists",
+    );
+  });
+
+  /* The Postgres form has to describe the same set as the RegExp, or the
+     planner and the repairer disagree about what is waiting. */
+  it("keeps the new pattern portable to Postgres", () => {
+    const scan = FIXABLE.find((f) => f.id === "ocr_never_tried")!;
+    expect(scan.source).not.toMatch(/\\[dswbDSWB]|\(\?[:=!<]/);
+    expect(new RegExp(scan.source, "i").test("PDF contained no extractable text (scanned?)")).toBe(
+      true,
+    );
   });
 });
