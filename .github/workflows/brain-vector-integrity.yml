@@ -1,0 +1,60 @@
+# Rewrite the vectors whose payload lost its text.
+#
+# WHY THIS RUNS ON A SCHEDULE. The library repair once wrote points with no
+# content payload. A point with no text cannot be a search result, and for a
+# while it crashed the semantic half of any query that ranked it. The writer is
+# fixed and the reader now skips such points, so they can no longer break a
+# query, but their documents stay unfindable by meaning until they are rebuilt.
+#
+# The ordinary embed backfill will not touch them: those chunks are marked
+# embedded, truthfully, because a vector WAS written. It was written without the
+# text. So the flag says done and the point is useless, and only a job that asks
+# the vector store which points are empty can find them. Measured 2026-09-02:
+# 731 of 5,737, 12.7% of the collection, all from the repair.
+#
+# A clean corpus makes this a no-op that exits green. It goes red only when the
+# embedder or vector store is misconfigured, which is a real signal, not noise.
+name: Brain vector integrity
+on:
+  schedule:
+    - cron: "10 8 * * *" # daily, after the repair and health sweeps have run
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  reembed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v4.0.4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Rebuild any text-less vectors
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          QDRANT_URL: ${{ secrets.QDRANT_URL }}
+          QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
+          AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
+          AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+          AZURE_OPENAI_EMBEDDING_DEPLOYMENT: ${{ secrets.AZURE_OPENAI_EMBEDDING_DEPLOYMENT }}
+        run: |
+          # REFUSES rather than skipping. A job that cannot reach the vector
+          # store or the embedder would find nothing to fix and exit green,
+          # which is the exact "reports nothing, looks healthy" failure this
+          # whole area keeps producing. Name what is missing instead.
+          missing=""
+          for v in DATABASE_URL QDRANT_URL QDRANT_API_KEY AZURE_OPENAI_ENDPOINT AZURE_OPENAI_API_KEY AZURE_OPENAI_EMBEDDING_DEPLOYMENT; do
+            if [ -z "${!v:-}" ]; then missing="$missing $v"; fi
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Missing secrets, so this would verify nothing and pass:$missing"
+            exit 1
+          fi
+          # --apply, because the point of the scheduled job is to fix them. It
+          # only rewrites empty-payload points with their own chunk text.
+          npx tsx scripts/reembed-malformed-vectors.ts --apply
