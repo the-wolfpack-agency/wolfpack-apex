@@ -162,11 +162,13 @@ async function main(): Promise<void> {
     }
 
     let repaired = 0;
+    let stoppedEarly = false;
     for (let i = 0; i < rows.length; i += BATCH) {
       const batch = rows.slice(i, i + BATCH);
       const vectors = await embedWithBackoff(batch.map((r) => r.content));
       if (!vectors) {
         console.error(`  batch at ${i} still refused after retries; stopping so the count stays honest.`);
+        stoppedEarly = true;
         break;
       }
       await upsertBrainPoints(
@@ -192,6 +194,16 @@ async function main(): Promise<void> {
 
     console.log(`\nRebuilt ${repaired} point(s) with their text.`);
     console.log("Re-run without --apply to confirm the count has fallen.");
+    /* EXIT NON-ZERO IF THE EMBEDDER GAVE UP. Rebuilding some and then stopping
+       is progress, but a scheduled job that exits green while the embedder is
+       down is the silent-partial pattern this codebase keeps producing: it
+       reports success and the queue never drains. A red job says look at the
+       embedder. The next run picks up where this one stopped, so nothing is
+       lost by failing loudly. */
+    if (stoppedEarly) {
+      console.error(`\nStopped before the end: ${rows.length - repaired} still unrebuilt. The embedder refused after retries.`);
+      process.exitCode = 1;
+    }
   } finally {
     await db.end();
   }
