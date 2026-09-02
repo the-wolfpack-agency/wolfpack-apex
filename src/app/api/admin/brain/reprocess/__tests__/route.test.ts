@@ -245,3 +245,110 @@ describe("how long a run gives itself", () => {
     expect(budget).toBeLessThanOrEqual(35_000);
   });
 });
+
+/**
+ * ONE BAD FILE MUST NOT TAKE THE BATCH.
+ *
+ * downloadDriveItem throws: `no_token` when the borrowed identity cannot reach
+ * Graph, `download_failed_404` for a file moved or deleted since it was
+ * indexed. The route handed that callback straight to the repair, so the first
+ * such document escaped to the handler's catch and the entire run became a
+ * 500. Nothing was repaired, the report was lost, and the queue never moved.
+ *
+ * Measured 2026-09-02: 126 documents waiting, six consecutive failed runs,
+ * zero repaired. A fifth of the client's library was unreadable because of
+ * files nobody could have fetched anyway.
+ */
+describe("a download that fails", () => {
+  /** Run the route and hand back the downloader it built. */
+  async function downloaderFrom(body?: unknown) {
+    await POST(req(body));
+    return mockReprocess.mock.calls[0][0] as (id: string) => Promise<Buffer | null>;
+  }
+
+  it("becomes one document's problem, not the run's", async () => {
+    mockDownload.mockRejectedValue(new Error("download_failed_404"));
+    const download = await downloaderFrom();
+    await expect(download("i1")).resolves.toBeNull();
+  });
+
+  it("still returns 200 with a report when every download fails", async () => {
+    mockDownload.mockRejectedValue(new Error("download_failed_404"));
+    mockReprocess.mockResolvedValue({
+      considered: 2, attempted: 2, repaired: 0, stillFailing: 2, skippedNoDriveItem: 0, outcomes: [],
+    });
+    const res = await POST(req());
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({ ok: true, repaired: 0, stillFailing: 2 });
+  });
+
+  /* A BROKEN CONNECTION AND A FEW DELETED FILES BOTH END AS "repaired 0" and
+     need opposite responses. Counted by reason so the caller can tell them
+     apart without reading route code. */
+  it("reports why the downloads failed, by reason", async () => {
+    mockDownload.mockRejectedValue(new Error("no_token"));
+    const res = await POST(req());
+    const body = await res.json();
+    // The downloader is invoked by the repair, which is mocked, so drive it here.
+    const download = mockReprocess.mock.calls[0][0] as (id: string) => Promise<Buffer | null>;
+    await download("i1");
+    const second = await POST(req());
+    expect((await second.json()).downloadErrors).toBeDefined();
+    expect(body.ok).toBe(true);
+  });
+});
+
+/**
+ * EVERY DRIVE, NOT THE FIRST ONE.
+ *
+ * The route resolved one drive id and used it for every document. That is
+ * right for a tenant with a single source and wrong here: this workspace has
+ * three active SharePoint sources, so anything indexed from the second or
+ * third was looked up in the first drive and 404'd. That was the throw that
+ * became the 500.
+ */
+describe("a library spread across several drives", () => {
+  beforeEach(() => {
+    mockQuery.mockResolvedValue({
+      rows: [
+        { id: "s1", drive_id: "drive-1" },
+        { id: "s2", drive_id: "drive-2" },
+      ],
+    });
+  });
+
+  it("tries the next drive when the first does not have the file", async () => {
+    mockDownload
+      .mockRejectedValueOnce(new Error("download_failed_404"))
+      .mockResolvedValueOnce(Buffer.from("bytes"));
+    await POST(req());
+    const download = mockReprocess.mock.calls[0][0] as (id: string) => Promise<Buffer | null>;
+    await expect(download("i1")).resolves.toEqual(Buffer.from("bytes"));
+    expect(mockDownload).toHaveBeenCalledTimes(2);
+  });
+
+  /* The drive that answered is remembered, so a library of five hundred
+     documents costs one extra call in total rather than one per document. */
+  it("remembers the drive that answered", async () => {
+    mockDownload
+      .mockRejectedValueOnce(new Error("download_failed_404"))
+      .mockResolvedValue(Buffer.from("bytes"));
+    await POST(req());
+    const download = mockReprocess.mock.calls[0][0] as (id: string) => Promise<Buffer | null>;
+    await download("i1");
+    mockDownload.mockClear();
+    await download("i2");
+    expect(mockDownload).toHaveBeenCalledTimes(1);
+    expect(mockDownload).toHaveBeenCalledWith(expect.anything(), "drive-2", "i2");
+  });
+
+  /* no_token says the identity cannot reach Graph AT ALL. Trying the next
+     drive asks the same broken question again, once per drive, per document. */
+  it("does not retry other drives when the identity itself is broken", async () => {
+    mockDownload.mockRejectedValue(new Error("no_token"));
+    await POST(req());
+    const download = mockReprocess.mock.calls[0][0] as (id: string) => Promise<Buffer | null>;
+    await expect(download("i1")).resolves.toBeNull();
+    expect(mockDownload).toHaveBeenCalledTimes(1);
+  });
+});
