@@ -97,7 +97,13 @@ export function liveDeps(ctx: ToolContext): RunnerDeps {
     askModel: async (prompt) => {
       const res = await getAIClient().complete({
         messages: [{ role: "user", content: boundPrompt(prompt) }],
-        max_tokens: 700,
+        /* A HARD CEILING ON THE WAIT. This was 700, and the model wrote to it:
+           measured 463 output tokens on average and up to the limit, which is
+           4.8s average and 18.8s at the tail, the dominant cost of a routine a
+           person is actively watching. A step that summarizes what four tools
+           returned does not need 700 tokens; the prompts ask for brevity and
+           this stops the one that ignores it from running long. */
+        max_tokens: 320,
         /* Cheap by default. A step summarizing what four tools just returned is
            not a reasoning problem, and paying premium prices for every step of
            every routine is how a feature that saves people time becomes a line

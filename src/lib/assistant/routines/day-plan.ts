@@ -294,6 +294,16 @@ export function draftRoutine(plan: DayPlan, id: string, command: string): Routin
         "about the same thing, say so, because that connection is the reason to look",
         "at them together at all. If nothing here needs attention, say that plainly",
         "rather than manufacturing a priority.",
+        "",
+        /* SHORT, on purpose. Measured 2026-09-02: this step averaged 463 output
+           tokens and 4.8 seconds, up to 18.8s, and it was the dominant cost of
+           'run my morning'. A person scanning a brief wants the few things that
+           matter, not an essay, so the length limit fixes the latency and the
+           readability at once. gpt-4o-mini generates tokens sequentially, so
+           fewer tokens is directly less waiting. */
+        "Keep it to at most three short points, one line each. No headings, no",
+        "preamble, no summary of what you are about to say. Lead with the single",
+        "thing most worth their attention.",
       ].join("\n"),
       label: "Reading it all together",
     };
