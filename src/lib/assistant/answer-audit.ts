@@ -44,12 +44,19 @@ export interface AnswerAudit {
 const GRAPH_ID = /\b(?:AAMk|AQMk|AAkAL)[A-Za-z0-9_\-+/=]{16,}/;
 
 /**
- * A generic opaque token: a long unbroken base64/hex run a human never types.
+ * A generic opaque token: a long high-entropy run a human never types.
  *
- * The floor is high (32 chars) and it must be a single token with no space, so
- * a sentence, a URL path, or a normal long word cannot trip it. This catches an
- * id we did not anticipate the shape of. */
-const OPAQUE_TOKEN = /\b[A-Za-z0-9+/]{32,}={0,2}\b/;
+ * PRECISION LEARNED THE HARD WAY. The first version was /[A-Za-z0-9+/]{32,}/,
+ * and on real data it flagged "mastrosthousandoaks/ConsumerDisclosure", a URL
+ * path inside a document the user had asked for. Not a leak, and a detector
+ * that cries wolf on legitimate retrieved content is one somebody switches off.
+ *
+ * Two changes fix it. The slash is gone from the class, so a URL path is not
+ * one token. And the run must contain BOTH a letter and a digit, the signature
+ * of an id or a base64 blob, which a readable word run like ConsumerDisclosure
+ * does not have. That trades a little recall for precision, and the specific
+ * case that actually leaked, a Graph id, is caught by GRAPH_ID above regardless. */
+const OPAQUE_TOKEN = /\b(?=[A-Za-z0-9+]*\d)(?=[A-Za-z0-9+]*[A-Za-z])[A-Za-z0-9+]{32,}={0,2}\b/;
 
 /** A raw cache field narrated as prose, e.g. cache status is "miss". */
 const CACHE_FIELD = /\bcache[\s_-]?(?:status|state|hit|miss)\b|"(?:hit|miss)"\s*(?:from cache)?/i;

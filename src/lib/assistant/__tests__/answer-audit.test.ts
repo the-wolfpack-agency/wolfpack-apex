@@ -61,6 +61,19 @@ describe("does not fire on ordinary prose", () => {
     expect(auditAnswer("Contact Mary-Anne Featherstone-Willoughby about it.").clean).toBe(true);
   });
 
+  /* THE FALSE POSITIVE THE HARNESS CAUGHT ITSELF. A URL path in legitimate
+     retrieved document content is not a leak, and the first detector flagged
+     it because it allowed "/" and did not require a digit. */
+  it("does not flag a URL path in legitimate document content", () => {
+    const real = "See the disclosure at /mastrosthousandoaks/ConsumerDisclosure/ | Privacy";
+    expect(auditAnswer(real).clean).toBe(true);
+  });
+
+  it("does not flag a long readable camelCase or path run with no digits", () => {
+    expect(auditAnswer("ConsumerDisclosureAndPrivacyPolicyAcknowledgement").clean).toBe(true);
+    expect(auditAnswer("folder/subfolder/AnotherFolder/DocumentTitleHere").clean).toBe(true);
+  });
+
   it("counts a single opaque leak once, not twice", () => {
     const a = auditAnswer("id AAMkAGVmZjEwMTM3LWRlYWRiZWVmY2FmZQ==");
     expect(a.findings.filter((f) => f.kind === "opaque_id")).toHaveLength(1);

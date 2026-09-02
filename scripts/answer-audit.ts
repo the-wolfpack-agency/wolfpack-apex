@@ -33,6 +33,9 @@ import { query } from "@/lib/db";
 import { chat } from "@/lib/assistant";
 import { auditAnswer } from "@/lib/assistant/answer-audit";
 import { AUDIT_PROMPTS } from "@/lib/assistant/routing-audit";
+import { minePrompts } from "@/lib/assistant/prompt-mining";
+import { buildGradePrompt, parseGrade } from "@/lib/assistant/answer-grade";
+import { getAIClient } from "@/lib/ai";
 
 /** Flatten the grouped audit prompts into a list, keeping the group for output. */
 function corpus(all: boolean): Array<{ group: string; prompt: string }> {
@@ -70,11 +73,27 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const items = corpus(process.argv.includes("--all"));
+  let items = corpus(process.argv.includes("--all"));
+
+  /* --real replaces the hand-written corpus with what people actually typed,
+     mined safe: PII dropped, actions dropped, only read-only questions kept
+     (see prompt-mining). This is how the harness grows toward what breaks. */
+  if (process.argv.includes("--real")) {
+    const { rows: raw } = await query<{ query: string }>(
+      `SELECT DISTINCT query FROM brain_query_log
+        WHERE created_at > now() - interval '30 days' ORDER BY query LIMIT 400`,
+    );
+    const mined = minePrompts(raw, 40);
+    items = mined.map((prompt) => ({ group: "real", prompt }));
+    console.log(`Mined ${mined.length} safe read-only prompt(s) from ${raw.length} real queries.\n`);
+  }
+
   console.log(`Running ${items.length} prompt(s) through chat() as ${me.role}, router and gate live.\n`);
 
+  const grading = process.argv.includes("--grade");
   const leaks: Array<{ prompt: string; findings: string; answer: string }> = [];
   let warned = 0;
+  const scores: number[] = [];
 
   for (const { group, prompt } of items) {
     let answer = "";
@@ -99,12 +118,39 @@ async function main(): Promise<void> {
     } else {
       console.log(`  clean    [${group}] ${prompt}`);
     }
+
+    /* --grade: a SEPARATE cheap-tier call judges whether the answer addressed
+       the question. Dogfoods the router again (the grade is a model call too),
+       and turns pass/fail into a number that moves when a prompt changes. */
+    if (grading && answer) {
+      try {
+        const res = await getAIClient().complete({
+          messages: [{ role: "user", content: buildGradePrompt(prompt, answer) }],
+          max_tokens: 80,
+          model_tier: "cheap",
+          metadata: { feature: "assistant.answer_grade" },
+        });
+        const g = parseGrade(res.content);
+        scores.push(g.score);
+        if (g.score < 2) console.log(`           grade ${g.score}/2: ${g.reason}`);
+      } catch {
+        /* A grader outage is not an answer defect; skip the grade, keep going. */
+      }
+    }
   }
 
   console.log(
     `\n${items.length - leaks.length}/${items.length} clean of leaks` +
       (warned ? `, ${warned} with a warning (bloat/empty)` : ""),
   );
+  if (grading && scores.length) {
+    const avg = scores.reduce((a, b) => a + b, 0) / scores.length;
+    const fully = scores.filter((s) => s === 2).length;
+    console.log(
+      `  answered: ${fully}/${scores.length} fully, average ${avg.toFixed(2)}/2 ` +
+        `(a responsiveness score, not correctness)`,
+    );
+  }
   if (leaks.length) {
     console.error(`\n${leaks.length} answer(s) leaked something a person should never see:`);
     for (const l of leaks) {
