@@ -68,12 +68,67 @@ const MAX_SLOT_CHARS = 4000;
 /** Items kept from a list, before it is worth saying how many there were. */
 const MAX_SLOT_ITEMS = 25;
 
+/**
+ * Machine plumbing that a person never reads, stripped before a slot reaches a
+ * MODEL step.
+ *
+ * WHY THIS EXISTS. A routine gathers a tool's structured output into a slot and,
+ * for a model step, stringifies the whole thing into the prompt. The model is
+ * then told "name the meeting, the message, the number", and it faithfully
+ * narrates whatever it was handed, including the fields that were never meant
+ * for a reader. Seen in a client-facing brief: "Meeting ID: AAMkAG..." and
+ * 'cache status is "miss"' printed into prose a person reads.
+ *
+ * A tool step is different and is NOT stripped: the next tool legitimately needs
+ * the id the last one returned. Only the model view is reader-facing, and only
+ * the whole-object render is touched. An EXPLICIT field reference such as
+ * {{ticket.id}} is honoured, because asking for a field by name is intent.
+ *
+ * PRECISION over breadth, the same rule the scanners follow. The id match keys
+ * on the shapes an identifier actually takes, `id` exactly, camelCase `...Id`
+ * with a capital I, and snake_case `..._id`, so it removes meetingId and
+ * to_entity_id while leaving paid, valid, and android alone.
+ */
+const PLUMBING_KEYS = new Set([
+  "cache", "cachestatus", "cached", "fromcache",
+  "cursor", "nextcursor", "nextlink", "nextpagetoken", "offset", "etag",
+  "raw", "_raw", "debug", "token", "accesstoken", "refreshtoken",
+]);
+
+function isPlumbingKey(key: string): boolean {
+  const k = key.toLowerCase();
+  if (PLUMBING_KEYS.has(k)) return true;
+  if (key === "id") return true;
+  if (/[a-z0-9]Id$/.test(key)) return true;   // camelCase: meetingId, messageId
+  if (/_id$/i.test(key)) return true;          // snake_case: to_entity_id, user_id
+  return false;
+}
+
+/** Recursively drop plumbing keys, for the reader-facing (model) view only. */
+export function stripPlumbing(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stripPlumbing);
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      if (isPlumbingKey(k)) continue;
+      out[k] = stripPlumbing(v);
+    }
+    return out;
+  }
+  return value;
+}
+
 /** One slot value, or one field of it, as text a tool parameter can hold. */
-function render(value: unknown, field?: string): string {
+function render(value: unknown, field?: string, forReader = false): string {
   const target =
     field && value && typeof value === "object"
       ? (value as Record<string, unknown>)[field]
-      : value;
+      : /* Plumbing is stripped only from a WHOLE-object render for a model
+           step. An explicit field reference above is left untouched, because
+           naming a field is intent. */
+        forReader && !field
+        ? stripPlumbing(value)
+        : value;
   if (target === null || target === undefined) return "";
   if (typeof target === "string") return bound(target);
   if (typeof target === "number" || typeof target === "boolean") return String(target);
@@ -146,7 +201,11 @@ function bound(text: string): string {
  * would fail zod validation one step later with a message about the wrong
  * thing.
  */
-export function interpolate<T>(template: T, slots: Record<string, unknown>): T {
+export function interpolate<T>(
+  template: T,
+  slots: Record<string, unknown>,
+  opts: { forReader?: boolean } = {},
+): T {
   const walk = (v: unknown): unknown => {
     if (typeof v === "string") {
       const whole = new RegExp(`^${REF.source}$`, "i").exec(v);
@@ -154,14 +213,19 @@ export function interpolate<T>(template: T, slots: Record<string, unknown>): T {
         const [, name, field] = whole;
         if (!(name in slots)) throw new MissingSlotError(name);
         const value = slots[name];
-        if (!field) return value;
+        /* A whole-object reference returns the value with its TYPE intact, so a
+           tool receives an array as an array. For a MODEL step it is
+           reader-facing, so plumbing is stripped here too; a tool step passes
+           no forReader and keeps full fidelity. An explicit field is intent and
+           is never stripped. */
+        if (!field) return opts.forReader ? stripPlumbing(value) : value;
         return value && typeof value === "object"
           ? (value as Record<string, unknown>)[field]
           : undefined;
       }
       return v.replace(new RegExp(REF.source, "gi"), (_m, name: string, field?: string) => {
         if (!(name in slots)) throw new MissingSlotError(name);
-        return render(slots[name], field);
+        return render(slots[name], field, opts.forReader);
       });
     }
     if (Array.isArray(v)) return v.map(walk);

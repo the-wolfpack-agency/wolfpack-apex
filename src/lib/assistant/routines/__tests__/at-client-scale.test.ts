@@ -105,7 +105,10 @@ describe("one tool returning a client's whole CRM", () => {
     await advance(r, startRun(r, WHO), depsCapturing(prompts, manyDeals(500)));
 
     const body = prompts[0].slice(0, prompts[0].indexOf("[showing the first"));
-    expect(body).toContain("deal-0");
+    /* Keyed on a field a reader keeps, not the id: a model step now strips
+       plumbing (ids, cache status) so a brief cannot narrate "deal-0". The
+       record itself still survives whole, which is what this test is about. */
+    expect(body).toContain("Account 0");
     /* The kept portion parses back, so no record was severed. */
     const json = body.slice(body.indexOf("["), body.lastIndexOf("]") + 1);
     expect(() => JSON.parse(json)).not.toThrow();
