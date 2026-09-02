@@ -54,7 +54,8 @@
     "eval:retrieval": "npx tsx scripts/eval-retrieval.ts src/lib/brain/eval/retrieval-pairs.json",
     "capabilities": "npx tsx scripts/capability-check.ts",
     "ci:check-action-pins": "node scripts/check-action-pins.mjs",
-    "check:upserts": "npx tsx scripts/check-upsert-targets.ts"
+    "check:upserts": "npx tsx scripts/check-upsert-targets.ts",
+    "coverage:sharepoint": "npx tsx scripts/sharepoint-coverage.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.92.0",
