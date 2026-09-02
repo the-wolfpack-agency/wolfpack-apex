@@ -42,7 +42,35 @@ import "./load-env";
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { query } from "@/lib/db";
+import { Client } from "pg";
+
+/**
+ * Its own connection, rather than @/lib/db.
+ *
+ * This check runs in three places against three different servers: a Postgres
+ * container in CI with no SSL at all, the Neon database at deploy time, and
+ * Neon again on a schedule. The app's pool is configured for production and
+ * forces SSL, so in CI it failed with "The server does not support SSL
+ * connections" and the check reported nothing.
+ *
+ * It only reads pg_catalog, so it has no need of the app's pool, its retries
+ * or its caching. SSL is decided by the host: a local server does not have it,
+ * anything else does.
+ */
+async function withClient<T>(fn: (c: Client) => Promise<T>): Promise<T> {
+  const url = process.env.DATABASE_URL!;
+  const local = /@(localhost|127\.0\.0\.1)\b/.test(url);
+  const client = new Client({
+    connectionString: url,
+    ssl: local ? false : { rejectUnauthorized: false },
+  });
+  await client.connect();
+  try {
+    return await fn(client);
+  } finally {
+    await client.end();
+  }
+}
 
 const ROOTS = ["src/lib", "src/app", "scripts"];
 const CODE = /\.(ts|tsx|mjs)$/;
@@ -198,14 +226,9 @@ export function indexRowsToMap(
 }
 
 /** Unique indexes in the live database, as table -> index descriptions. */
-export async function liveUniqueIndexes(): Promise<Map<string, LiveIndex[]>> {
-  const { rows } = await query<{
-    table_name: string;
-    columns: string[] | string;
-    predicate: string | null;
-    expression: string | null;
-  }>(UNIQUE_INDEX_SQL);
-  return indexRowsToMap(rows);
+export async function liveUniqueIndexes(client: Client): Promise<Map<string, LiveIndex[]>> {
+  const { rows } = await client.query(UNIQUE_INDEX_SQL);
+  return indexRowsToMap(rows as never);
 }
 
 /**
@@ -252,8 +275,8 @@ export function matchUpserts(
 }
 
 /** Ordinary tables in the connected database (views have no indexes). */
-export async function liveTables(): Promise<Set<string>> {
-  const { rows } = await query<{ relname: string }>(
+export async function liveTables(client: Client): Promise<Set<string>> {
+  const { rows } = await client.query<{ relname: string }>(
     `SELECT relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
       WHERE n.nspname = 'public' AND c.relkind IN ('r','p')`,
   );
@@ -290,11 +313,13 @@ async function main(): Promise<void> {
     process.exit(0);
   }
   const sites = allUpsertSites();
-  const unique = await liveUniqueIndexes();
+  const { unique, tables } = await withClient(async (c) => ({
+    unique: await liveUniqueIndexes(c),
+    tables: await liveTables(c),
+  }));
   /* ORDINARY TABLES ONLY. A view has no indexes of its own, so including them
      reported every upsert through a view as broken. src/lib/people.ts writes to
      apex_employees, which is a view: a false positive, not a defect. */
-  const tables = await liveTables();
 
   const { broken, skippedUnknownTable } = matchUpserts(sites, unique, tables);
 
