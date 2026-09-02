@@ -79,6 +79,19 @@ export interface BrainChunk {
 
 /** A ranked retrieval hit returned by query(). */
 export interface BrainQueryHit {
+  /**
+   * Whose material this passage is, when the document came from a source.
+   *
+   * The assistant searches every estate on purpose: an internal question about
+   * how we structured a launch should find the answer wherever we did it. What
+   * must not happen is an answer about one client quietly resting on another
+   * client's document, because that reads exactly like a correct answer.
+   * Carrying the estate on the passage is what lets a citation say so.
+   *
+   * Optional, and null for a document somebody uploaded by hand: it belongs to
+   * no source, which is not the same as belonging to nobody.
+   */
+  estate?: string | null;
   chunk_id: string;
   document_id: string;
   document_filename: string;
