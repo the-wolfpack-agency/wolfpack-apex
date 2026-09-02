@@ -19,7 +19,7 @@
  *   node scripts/set-qdrant-key.mjs
  */
 
-import { readFileSync, writeFileSync, copyFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 
 const ENV_FILE = ".env.local";
@@ -73,10 +73,6 @@ async function verify(key) {
 }
 
 async function main() {
-  if (!existsSync(ENV_FILE)) {
-    console.error(`${ENV_FILE} does not exist. Run this from the repository root.`);
-    process.exit(2);
-  }
 
   /* Loaded for QDRANT_URL only, so the key can be checked before it is kept. */
   const { config } = await import("dotenv");
@@ -102,8 +98,21 @@ async function main() {
     process.exit(1);
   }
 
-  copyFileSync(ENV_FILE, `${ENV_FILE}.bak`);
-  const kept = readFileSync(ENV_FILE, "utf8")
+  /* READ ONCE, then write. This checked existsSync first and read later, which
+     CodeQL flagged as a check-then-use race and was right to: between the two
+     the file can be moved, and the check adds nothing a failed read does not
+     say better. A missing file now reports itself, at the moment it matters. */
+  let current;
+  try {
+    current = readFileSync(ENV_FILE, "utf8");
+  } catch (e) {
+    console.error(`Could not read ${ENV_FILE}: ${e.message}`);
+    console.error("Run this from the repository root.");
+    process.exit(2);
+  }
+
+  writeFileSync(`${ENV_FILE}.bak`, current);
+  const kept = current
     .split("\n")
     /* EVERY existing line, not the first. The file currently holds two, and a
        replace that removes one leaves the other deciding the value. */
