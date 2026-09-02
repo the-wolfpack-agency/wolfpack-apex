@@ -81,7 +81,19 @@ describeOrSkip("every upsert has a unique index to conflict on", () => {
   /* THE ONE THAT BROKE. Pinned by name as well as by the sweep above, because
      a regression here stops the SharePoint sync and the library repair and
      says nothing while it does. */
-  it("keeps the Microsoft token upsert able to conflict", () => {
+  it("keeps the Microsoft token upsert able to conflict", async () => {
+    /* DIAGNOSTIC, kept deliberately. When this fails the question is always
+       "what does the index actually look like", and answering it from the
+       migrations has been wrong twice. Printing the live definitions turns a
+       boolean into something a person can act on. */
+    if (!(unique.get("instinct_ms_tokens") ?? []).length) {
+      const all = await pool.query(
+        `SELECT c.relkind, i.indexdef FROM pg_indexes i
+           JOIN pg_class c ON c.relname = i.tablename
+          WHERE i.tablename IN ('instinct_ms_tokens','apex_ms_tokens')`,
+      );
+      console.error("indexes present:", JSON.stringify(all.rows, null, 2));
+    }
     const forTokens = (unique.get("instinct_ms_tokens") ?? []).some(
       (ix) => ix.columns.length === 1 && ix.columns[0] === "connected_by" && !ix.predicate,
     );
