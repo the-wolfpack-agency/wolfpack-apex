@@ -451,7 +451,28 @@ export async function reprocessFixable(
       break;
     }
     if (!c.driveItemId) skippedNoDriveItem += 1;
-    outcomes.push(await reprocessOne(c, fetchBytes, actor));
+    /* ONE DOCUMENT'S FAILURE IS ONE DOCUMENT'S OUTCOME.
+     *
+     * reprocessOne can throw: a NUL byte in extracted text aborts the INSERT,
+     * and anything unhandled here escapes the loop and becomes a 500 for the
+     * whole run. The report is then lost along with every document already
+     * repaired in that batch, and the queue does not move. That is what
+     * happened on 2026-09-02: one file held 126 others.
+     *
+     * Recorded as a failed outcome carrying its reason, so the run still
+     * reports and the next one still tries the rest. */
+    try {
+      outcomes.push(await reprocessOne(c, fetchBytes, actor));
+    } catch (err) {
+      outcomes.push({
+        id: c.id,
+        filename: c.filename,
+        before: "failed",
+        after: "failed",
+        chunks: 0,
+        detail: `threw during repair: ${(err as Error).message.slice(0, 120)}`,
+      });
+    }
   }
 
   const repaired = outcomes.filter((o) => o.after === "indexed" && o.chunks > 0).length;
