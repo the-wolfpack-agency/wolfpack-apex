@@ -19,7 +19,7 @@
  */
 
 /** Shown on the page so a reader knows how current this is. */
-export const PLAYBOOK_UPDATED = "2026-08-30";
+export const PLAYBOOK_UPDATED = "2026-09-02";
 
 /* A plain template literal, not String.raw: raw strings do not process escape
    sequences, so the escaped backticks this content needs would have rendered
@@ -49,13 +49,21 @@ build does, and starting it late is the single most common way a pilot slips.
 | Needed | From whom | Why it blocks |
 | --- | --- | --- |
 | Microsoft 365 tenant consent | Their IT | Every document and calendar surface |
-| A SharePoint library, named | Their operations lead | Nothing to read until one is chosen |
+| One connected Microsoft account | Their operations lead | We discover the libraries it can reach; nothing to name by hand |
 | One named role per persona | Their program owner | Scoping is per role, not per person |
 | A test account per persona | Their IT | Verifying what a dealer sees needs a dealer |
 | Named escalation contact | Both sides | Somebody has to answer when a scan finds something |
 
 Ask for these in the first meeting, in writing. They are not a formality: the
 tenant grant alone has taken weeks elsewhere.
+
+**On the libraries: we no longer ask them to pick one.** Once a single person
+connects their Microsoft account, the product enumerates every SharePoint site
+that account can open and reports which are connected and which are not, so the
+gap is a list to act on rather than a question nobody thought to ask. On our
+own tenant that surfaced nineteen reachable sites where two had been connected.
+Each site is tagged with whose material it is, so one client's documents never
+land in another's figures.
 
 ### Also ask for: their Copilot usage export
 
