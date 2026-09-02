@@ -44,7 +44,12 @@ async function buildSchema() {
       status text NOT NULL DEFAULT 'indexed',
       uploaded_by text,
       ms_drive_item_id text NULL,
-      audience_roles text[] NULL
+      audience_roles text[] NULL,
+      /* Whose material the document is. Present because the real search
+         selects it, and a fixture missing a column the SQL under test reads
+         fails as a database error rather than as a wrong result, which sends
+         the reader looking in the wrong place. */
+      estate text NULL
     )`);
   await client.query(`
     CREATE TABLE brain_chunks (
