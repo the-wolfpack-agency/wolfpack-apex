@@ -363,7 +363,12 @@ async function runStep(
 
   try {
     if (step.kind === "model") {
-      const prompt = interpolate(step.prompt, slots);
+      /* forReader: strip machine plumbing (ids, cache status, cursors) before
+         the model sees the slot. The model narrates what it is handed, so a
+         raw "Meeting ID: AAMkAG..." in the slot became one in a client-facing
+         brief. A tool step below keeps full fidelity, because the next tool
+         needs those ids. */
+      const prompt = interpolate(step.prompt, slots, { forReader: true });
       const answer = await deps.askModel(prompt);
       if (step.slot) slots[step.slot] = answer;
       return { ...base, answer };
