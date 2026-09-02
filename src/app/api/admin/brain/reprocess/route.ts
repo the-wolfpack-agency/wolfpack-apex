@@ -145,7 +145,6 @@ export async function POST(req: NextRequest) {
   } catch {
     /* Fall through: a single-drive tenant still works off the first source. */
   }
-  const anyDrive = [...driveFor.values()][0];
 
   /* WHOSE ACCESS THE DOWNLOAD USES, AND ONLY WHEN THERE IS NOBODY.
    *
@@ -180,10 +179,51 @@ export async function POST(req: NextRequest) {
      * far the last one got. Finishing early with an honest count beats being
      * cut off with none: the queue is drained across runs either way, and only
      * one of the two says so. */
+    /* ONE BAD FILE MUST NOT TAKE THE BATCH.
+     *
+     * downloadDriveItem THROWS: no_token when the identity cannot reach Graph,
+     * download_failed_404 for a file that has been moved or deleted since it
+     * was indexed. This callback passed those straight up, so the first such
+     * document escaped to the handler's catch and the whole run became a 500.
+     * Nothing was repaired, the report was lost, and the queue never moved:
+     * measured 2026-09-02, 126 documents waiting and every run failing.
+     *
+     * A document that cannot be fetched is one document's problem. Caught
+     * here, it becomes a per-document failure and the other forty-nine in the
+     * batch still get repaired.
+     *
+     * EVERY DRIVE, NOT THE FIRST ONE. This used `anyDrive` for every document,
+     * which is correct only for a tenant with a single source. This workspace
+     * has three active ones, so anything indexed from the second or third was
+     * being looked up in the first drive and 404ing, which is where the throw
+     * was coming from. There is no drive id on the document, so the drives are
+     * tried in turn and the one that answers is remembered: after the first
+     * document, the rest of that library costs one call each. */
+    const drives = [...new Set(driveFor.values())];
+    let preferredDrive: string | null = null;
+    const downloadFailures = new Map<string, number>();
+
     const report = await reprocessFixable(
       async (driveItemId) => {
-        if (!anyDrive) return null;
-        return downloadDriveItem(downloadAs, anyDrive, driveItemId);
+        if (drives.length === 0) return null;
+        const order = preferredDrive
+          ? [preferredDrive, ...drives.filter((d) => d !== preferredDrive)]
+          : drives;
+        for (const drive of order) {
+          try {
+            const bytes = await downloadDriveItem(downloadAs, drive, driveItemId);
+            preferredDrive = drive;
+            return bytes;
+          } catch (err) {
+            const reason = (err as Error).message;
+            downloadFailures.set(reason, (downloadFailures.get(reason) ?? 0) + 1);
+            /* no_token is not about this document: the identity cannot reach
+               Graph at all, so trying the next drive asks the same broken
+               question again. Stop for this item and let the run report it. */
+            if (reason === "no_token") return null;
+          }
+        }
+        return null;
       },
       { userId: user.id, role: user.role },
       { limit, deadline: started + BUDGET_MS },
@@ -208,7 +248,15 @@ export async function POST(req: NextRequest) {
       },
     }).catch(() => undefined);
 
-    return NextResponse.json({ ok: true, ...report }, { status: 200, headers: NO_STORE });
+    /* WHY THE DOWNLOADS FAILED, COUNTED. Without this the caller sees
+       "re-fetch returned no bytes" on every document and cannot tell a broken
+       Microsoft connection from a handful of files somebody deleted. Those
+       need opposite responses and read identically. */
+    const downloadErrors = Object.fromEntries(downloadFailures);
+    return NextResponse.json(
+      { ok: true, ...report, drivesTried: drives.length, downloadErrors },
+      { status: 200, headers: NO_STORE },
+    );
   } catch (err) {
     return NextResponse.json(
       { ok: false, error: (err as Error).message },

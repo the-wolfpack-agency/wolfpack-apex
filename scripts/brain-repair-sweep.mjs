@@ -70,10 +70,26 @@ async function main() {
     body: JSON.stringify({ limit: LIMIT }),
   });
   if (!runRes.ok) {
+    /* PRINT WHAT THE ENDPOINT SAID. It returns { ok:false, error } naming the
+       cause, and this threw that away and printed the status alone. A 500 that
+       says only "500" sent somebody reading route code to find a message the
+       response was already carrying: measured 2026-09-02, six failed runs in a
+       row, 126 documents stuck, and the reason available in every one of them. */
+    const detail = await runRes.text().catch(() => "");
     console.error(`[repair] the repair run failed: HTTP ${runRes.status}`);
+    if (detail) console.error(`[repair]   ${detail.slice(0, 500)}`);
     process.exit(1);
   }
   const result = await runRes.json();
+
+  /* WHY DOWNLOADS FAILED, when any did. A broken Microsoft connection and a
+     few deleted files both end as "repaired 0" and need opposite responses. */
+  for (const [reason, n] of Object.entries(result.downloadErrors ?? {})) {
+    console.log(`[repair]   ${n} download(s) failed: ${reason}`);
+  }
+  if ((result.downloadErrors ?? {}).no_token) {
+    console.error("[repair] the identity this job borrows cannot reach Microsoft. Reconnect it.");
+  }
 
   const repaired = Number(result.repaired ?? 0);
   /* The API field is stillFailing. Reading `failed` meant this line printed
