@@ -323,6 +323,24 @@ export async function describeDocuments(
   return out;
 }
 
+/**
+ * Remove the one character Postgres text cannot hold.
+ *
+ * A `text` column stores any Unicode EXCEPT U+0000, and a document that
+ * contains one fails the whole statement with
+ * `invalid byte sequence for encoding "UTF8": 0x00`. Scanned PDFs, OCR output
+ * and some exported decks carry them as padding, so this is a property of real
+ * files rather than of corrupt ones.
+ *
+ * Measured 2026-09-02: one such document aborted every repair run, taking the
+ * other forty-nine in its batch with it, and 126 documents sat unreadable
+ * behind it. Stripping is right rather than refusing: the NUL carries no
+ * meaning to a reader and dropping it changes nothing anybody would search for.
+ */
+export function stripNulls(text: string): string {
+  return text.includes("\u0000") ? text.replace(/\u0000/g, "") : text;
+}
+
 export async function insertChunks(
   documentId: string,
   chunks: { idx: number; content: string; tokenEstimate: number }[],
@@ -330,7 +348,9 @@ export async function insertChunks(
   if (chunks.length === 0) return [];
   // Bulk insert via unnest — one round trip regardless of chunk count
   const idxs = chunks.map((c) => c.idx);
-  const contents = chunks.map((c) => c.content);
+  /* Cleaned HERE, at the single place chunks are written, rather than in each
+     extractor. There are eight of those and a new one would arrive without it. */
+  const contents = chunks.map((c) => stripNulls(c.content));
   const tokens = chunks.map((c) => c.tokenEstimate);
   const res = await query<BrainChunk>(
     `INSERT INTO brain_chunks (document_id, chunk_idx, content, token_estimate)

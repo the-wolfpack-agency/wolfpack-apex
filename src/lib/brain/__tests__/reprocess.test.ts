@@ -590,3 +590,54 @@ describe("scans reaching the OCR route", () => {
     );
   });
 });
+
+/**
+ * One document's failure must not take the batch.
+ *
+ * reprocessOne can throw. A NUL byte in extracted text aborts the INSERT with
+ * `invalid byte sequence for encoding "UTF8": 0x00`, and anything unhandled in
+ * the loop escapes to the route and becomes a 500 for the whole run. The
+ * report is lost along with every document already repaired in that batch, and
+ * the queue does not move.
+ *
+ * Measured 2026-09-02: that is exactly what happened. Six consecutive runs
+ * failed, zero were repaired, and 126 documents sat behind one file.
+ */
+describe("a document that throws mid-repair", () => {
+  const fetchBytes = async () => Buffer.from("PK bytes");
+
+  it("is recorded as failed rather than ending the run", async () => {
+    mockQuery.mockResolvedValue({ rows: [row({ id: "bad" }), row({ id: "good" })] });
+    mockInsertChunks
+      .mockRejectedValueOnce(new Error('invalid byte sequence for encoding "UTF8": 0x00'))
+      .mockResolvedValue([{ id: "c1" }]);
+
+    const r = await reprocessFixable(fetchBytes, ACTOR);
+
+    /* The run returns. Before this, it threw and the caller answered 500. */
+    expect(r.attempted).toBe(2);
+    expect(r.outcomes).toHaveLength(2);
+  });
+
+  it("still repairs the others in the batch", async () => {
+    mockQuery.mockResolvedValue({ rows: [row({ id: "bad" }), row({ id: "good" })] });
+    mockInsertChunks
+      .mockRejectedValueOnce(new Error('invalid byte sequence for encoding "UTF8": 0x00'))
+      .mockResolvedValue([{ id: "c1" }]);
+
+    const r = await reprocessFixable(fetchBytes, ACTOR);
+    expect(r.repaired).toBe(1);
+  });
+
+  /* The reason travels with the document. "failed" alone sends somebody to the
+     logs of a serverless function, which is where this spent a week. */
+  it("keeps the reason on the outcome", async () => {
+    mockQuery.mockResolvedValue({ rows: [row({ id: "bad" })] });
+    mockInsertChunks.mockRejectedValue(new Error('invalid byte sequence for encoding "UTF8": 0x00'));
+
+    const r = await reprocessFixable(fetchBytes, ACTOR);
+    expect(r.outcomes[0].detail).toMatch(/threw during repair/);
+    expect(r.outcomes[0].detail).toMatch(/UTF8/);
+    expect(r.repaired).toBe(0);
+  });
+});
