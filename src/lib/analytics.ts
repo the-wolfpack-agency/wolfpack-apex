@@ -1459,6 +1459,10 @@ export type InstinctEventType =
      run: a run that repaired forty-nine of fifty is a good run, and the one
      that threw is the thing worth looking at. */
   | "brain.document_repair_threw"
+  /* A vector whose payload has no text. It cannot be read or cited, so it is
+     skipped; counted because everything above still returns results and the
+     loss is otherwise invisible. */
+  | "brain.malformed_vector_skipped"
   | "microsoft.token_refreshed"
   /* The refresh worked and the write did not. Distinguished from a plain
      refresh because the connection is degrading while requests still succeed:

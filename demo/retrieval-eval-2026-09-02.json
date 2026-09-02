@@ -1,0 +1,10 @@
+{
+  "measured": "2026-09-02",
+  "note": "First run against a working vector store. Every earlier figure today graded the keyword half only, because the Qdrant key had expired on 2026-08-31 and the eval correctly refused rather than reporting half the product as the whole.",
+  "pairs": 28,
+  "found": 0.57,
+  "ranked_first": 0.29,
+  "mrr": 0.387,
+  "never_found": 12,
+  "known_gap": "731 of 5737 vectors (12.7%) carry no content payload and are skipped at read time, so their documents cannot be found by meaning until re-embedded."
+}

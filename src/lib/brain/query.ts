@@ -234,6 +234,10 @@ async function queryBrainOnce(opts: QueryOpts): Promise<QueryExecution> {
   const documentIds = Array.from(
     new Set([...keyword.map((k) => String(k.document_id)), ...semantic.map((s) => String(s.document_id))]),
   );
+  /* Counted so the degradation is visible. A skipped point is a document that
+     cannot be found by meaning, and a silent skip is how the original bug
+     survived: everything still returned results. */
+  let malformedPoints = 0;
   const documentMeta = await describeDocuments(documentIds);
   const meta = (id: string) => documentMeta.get(String(id));
 
@@ -256,6 +260,22 @@ async function queryBrainOnce(opts: QueryOpts): Promise<QueryExecution> {
   }
 
   for (const s of semantic) {
+    /* A POINT WITHOUT CONTENT CANNOT BE A RESULT, AND MUST NOT BE A CRASH.
+     *
+     * truncate(undefined) threw here, inside queryBrain, whose callers catch
+     * and degrade to keyword-only. So one malformed point did not spoil one
+     * result: it silently removed the semantic half of that entire query, and
+     * nothing reported it. 731 of 5,737 points were in that state on
+     * 2026-09-02, all written by the library repair, so the more documents it
+     * recovered the more of search it quietly disabled.
+     *
+     * Skipped rather than rendered empty: a hit with no text is not something
+     * a person can read or a model can cite, and passing it on would move the
+     * failure somewhere further from its cause. */
+    if (typeof s.content !== "string" || s.content.length === 0) {
+      malformedPoints += 1;
+      continue;
+    }
     const existing = byId.get(s.chunk_id);
     if (existing) {
       existing.source = "keyword+semantic";
@@ -389,11 +409,25 @@ async function queryBrainOnce(opts: QueryOpts): Promise<QueryExecution> {
     /* Recording that a search happened is worth less than the search. */
   });
 
+  /* REPORTED, because a skipped point is a document that cannot be found by
+     meaning and everything above still returns results. Emitted only when it
+     happens, so a clean corpus costs nothing and a rising count is a real
+     signal rather than noise. */
+  if (malformedPoints > 0) {
+    trackEvent("brain.malformed_vector_skipped", opts.userId, opts.userRole, {
+      skipped: malformedPoints,
+      of: semantic.length,
+    });
+  }
+
   return {
     query: opts.query,
     hits,
     keyword_hits: keyword.length,
-    semantic_hits: semantic.length,
+    /* The points that could be used, not the points that came back. Counting
+       the raw total would report a healthy semantic half while most of it was
+       being discarded. */
+    semantic_hits: semantic.length - malformedPoints,
     latency_ms,
     tokens_used: tokensUsed,
     query_log_id: queryLogId,

@@ -55,7 +55,8 @@
     "capabilities": "npx tsx scripts/capability-check.ts",
     "ci:check-action-pins": "node scripts/check-action-pins.mjs",
     "check:upserts": "npx tsx scripts/check-upsert-targets.ts",
-    "coverage:sharepoint": "npx tsx scripts/sharepoint-coverage.ts"
+    "coverage:sharepoint": "npx tsx scripts/sharepoint-coverage.ts",
+    "check:credentials": "npx tsx scripts/check-credentials.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.92.0",
