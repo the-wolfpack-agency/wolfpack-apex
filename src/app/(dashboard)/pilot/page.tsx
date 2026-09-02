@@ -28,6 +28,7 @@
 import { useEffect, useState } from "react";
 import BuildBanner from "@/components/BuildBanner";
 import { buildFor } from "@/lib/builds/registry";
+import { PROMPT_GUIDE } from "@/lib/assistant/prompt-corpus";
 import type { CapabilitySnapshot } from "@/lib/insights/capability-snapshot";
 import {
   compareCosts,
@@ -85,58 +86,38 @@ function Figure({
   );
 }
 
+/**
+ * The prompts shown to a client, curated from the verified guide.
+ *
+ * READ-ONLY, by tool name: search, meeting prep, who-is, tasks, schedule
+ * health, goals, financials, cross-source compare. No create/send form,
+ * because the first thing a client tries should not book a meeting or send a
+ * message. Ordered to lead with the library the pilot is about.
+ *
+ * Drawn from PROMPT_GUIDE rather than retyped, so the routing tests that hold
+ * that guide true also hold this list: the page cannot advertise a phrasing
+ * the product does not answer.
+ */
+const TRY_ASKING = (() => {
+  const order = [
+    "search",
+    "compare_across_sources",
+    "meeting_prep",
+    "who_is",
+    "task_list_widget",
+    "schedule_health",
+    "get_goals",
+    "get_financials_metric",
+  ];
+  return order
+    .map((tool) => PROMPT_GUIDE.find((g) => g.tool === tool))
+    .filter((g): g is (typeof PROMPT_GUIDE)[number] => Boolean(g && g.say.length > 0));
+})();
+
 interface LibraryQuestion {
   noticed: string;
   ask: string;
   examples: string[];
-}
-
-interface GapItem {
-  question: string;
-  asked: number;
-  system?: string;
-  /** Set when the wording was shortened or a name was taken out. */
-  withheld?: "paste" | "name" | "remark";
-}
-
-/**
- * A line, and a plain note when it is not what somebody typed.
- *
- * The note exists because a shortened question and a short question look
- * identical on the page, and a reader who cannot tell them apart will read a
- * truncation as the whole of what was asked.
- */
-function GapLine({ item, verb }: { item: GapItem; verb: string }) {
-  const note =
-    item.withheld === "paste"
-      ? "shortened"
-      : item.withheld === "name"
-        ? "name withheld"
-        : null;
-  return (
-    <li>
-      <strong>{item.question}</strong> {verb} {item.asked}×
-      {item.system ? `, ${item.system}` : null}
-      {note ? <span className="wp-pilot-note"> {note}</span> : null}
-    </li>
-  );
-}
-
-/**
- * What people asked that nothing could answer.
- *
- * The two lists are separate because they need different people. "Connect
- * your CRM" is a decision; "the answer is not in your documents" is somebody
- * writing one. A single list of failures mixes a sales conversation with a
- * content backlog and produces neither.
- */
-interface GapsSnapshot {
-  wouldConnect: GapItem[];
-  missing: GapItem[];
-  closed: GapItem[];
-  wanted: { actions: { action: string; asked: number }[]; other: number };
-  statements: number;
-  readable: boolean;
 }
 
 interface ExposureKind {
@@ -181,7 +162,6 @@ export default function PilotPage() {
         adoption?: AdoptionSnapshot;
         capability?: CapabilitySnapshot;
         tokenUsage?: TokenUsage | null;
-        gaps?: GapsSnapshot;
         libraryQuestions?: { questions: LibraryQuestion[]; readable: boolean };
       })
     | null
@@ -209,7 +189,6 @@ export default function PilotPage() {
         const res = await fetchWithRefresh("/api/pilot/phase-one");
         if (!res.ok) throw new Error(String(res.status));
         const data = (await res.json()) as PhaseOneSnapshot & {
-          gaps?: GapsSnapshot;
           libraryQuestions?: { questions: LibraryQuestion[]; readable: boolean };
           adoption?: AdoptionSnapshot;
           capability?: CapabilitySnapshot;
@@ -356,124 +335,32 @@ export default function PilotPage() {
                 beside it rather than a question later. */}
           </section>
 
-          {/* WHAT THEY ASKED AND DID NOT GET.
-              A build backlog written by the people using it rather than
-              guessed at in a planning meeting, and the one panel here that
-              says what to do next rather than what happened.
+          {/* WHAT YOU CAN ASK.
+              Replaces the old could-not-answer panel. A client wants to see
+              what the tool DOES, in phrasings they can type today, not a list
+              of things that failed. Every line here is a verified phrasing
+              from the prompt guide the routing tests hold us to, so the page
+              cannot show a capability the product does not have.
 
-              An unreadable log and a client with no unanswered questions are
-              the same empty list and opposite facts, so the read carries
-              whether it worked. */}
-          {snap.gaps && !snap.gaps.readable ? (
-            <section className="wp-pilot-section">
-              <h2>What we could not answer</h2>
-              <p className="wp-pilot-aside" data-testid="pilot-gaps-unreadable">
-                These figures could not be read. That is not the same as nothing
-                having gone unanswered, and nothing here should be taken as a
-                result.
-              </p>
-            </section>
-          ) : snap.gaps ? (
-            <section className="wp-pilot-section" data-testid="pilot-gaps">
-              <h2>What we could not answer</h2>
-
-              {snap.gaps.wouldConnect.length > 0 ? (
-                <>
-                  <p className="wp-pilot-aside">
-                    Asked about systems nothing is connected to. Connecting one
-                    answers these without anybody writing a document.
-                  </p>
-                  <ul
-                    className="wp-pilot-list"
-                    data-testid="pilot-gaps-connect"
-                  >
-                    {snap.gaps.wouldConnect.map((g) => (
-                      <GapLine key={g.question} item={g} verb="asked" />
-                    ))}
-                  </ul>
-                </>
-              ) : null}
-
-              {snap.gaps.missing.length > 0 ? (
-                <>
-                  <p className="wp-pilot-aside">
-                    Asked of a system that IS connected, searched, and not
-                    there. These are gaps in the content rather than in the
-                    connections.
-                  </p>
-                  <ul
-                    className="wp-pilot-list"
-                    data-testid="pilot-gaps-missing"
-                  >
-                    {snap.gaps.missing.map((g) => (
-                      <GapLine key={g.question} item={g} verb="asked" />
-                    ))}
-                  </ul>
-                </>
-              ) : null}
-
-              {snap.gaps.wanted.actions.length > 0 ||
-              snap.gaps.wanted.other > 0 ? (
-                <>
-                  <p className="wp-pilot-aside">
-                    Instructions rather than questions: things somebody expected
-                    the product to do. No document closes these, and nobody
-                    files a request for something they assumed would work. Shown
-                    as the action asked for, not as what anybody typed.
-                  </p>
-                  <ul className="wp-pilot-list" data-testid="pilot-gaps-wanted">
-                    {snap.gaps.wanted.actions.map((a) => (
-                      <li key={a.action}>
-                        <strong>{a.action}</strong> asked {a.asked}×
-                      </li>
-                    ))}
-                    {snap.gaps.wanted.other > 0 ? (
-                      <li data-testid="pilot-gaps-wanted-other">
-                        {snap.gaps.wanted.other} further{" "}
-                        {snap.gaps.wanted.other === 1 ? "request" : "requests"}{" "}
-                        of other kinds
-                      </li>
-                    ) : null}
-                  </ul>
-                </>
-              ) : null}
-
-              {snap.gaps.closed.length > 0 ? (
-                <>
-                  <p className="wp-pilot-aside">
-                    Went unanswered then, answered now. The clearest evidence
-                    there is that what arrived since changed something.
-                  </p>
-                  <ul className="wp-pilot-list" data-testid="pilot-gaps-closed">
-                    {snap.gaps.closed.map((g) => (
-                      <GapLine key={g.question} item={g} verb="failed" />
-                    ))}
-                  </ul>
-                </>
-              ) : null}
-
-              {snap.gaps.statements > 0 ? (
-                <p
-                  className="wp-pilot-aside"
-                  data-testid="pilot-gaps-statements"
-                >
-                  {snap.gaps.statements} further{" "}
-                  {snap.gaps.statements === 1 ? "entry was" : "entries were"}{" "}
-                  left out as remarks rather than questions. Nothing was missing
-                  to answer them, so they are not gaps.
-                </p>
-              ) : null}
-
-              {snap.gaps.wouldConnect.length === 0 &&
-              snap.gaps.missing.length === 0 &&
-              snap.gaps.wanted.actions.length === 0 ? (
-                <p className="wp-pilot-aside" data-testid="pilot-gaps-none">
-                  Every question asked in this window was answered by a
-                  connected system.
-                </p>
-              ) : null}
-            </section>
-          ) : null}
+              Read-only, value-first: it shows what to ask and what comes back,
+              and never a create/send action, because the first thing a client
+              tries should not book or send anything. */}
+          <section className="wp-pilot-section" data-testid="pilot-try-asking">
+            <h2>What you can ask</h2>
+            <p className="wp-pilot-aside">
+              A few of the things people type here, and what comes back. These
+              are verified phrasings, not a script: the assistant answers plenty
+              that are not on this list, in your own words.
+            </p>
+            <ul className="wp-pilot-list">
+              {TRY_ASKING.map((g) => (
+                <li key={g.goal}>
+                  <strong>&ldquo;{g.say[0]}&rdquo;</strong>
+                  <span className="wp-pilot-note"> {g.gives}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
 
           <section className="wp-pilot-section">
             <h2>What never reaches a model</h2>

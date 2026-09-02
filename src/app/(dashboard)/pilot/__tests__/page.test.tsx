@@ -648,123 +648,25 @@ describe("the exposure list stays in its own box", () => {
 });
 
 /**
- * What people asked and did not get.
+ * What you can ask.
  *
- * A build backlog written by the people using it rather than guessed at in a
- * planning meeting, and the one panel here that says what to do next rather
- * than what happened.
+ * The panel replaced the could-not-answer list: a client wants to see what
+ * the tool does, in phrasings they can type, drawn from the verified guide.
  */
-describe("the gaps panel", () => {
-  const gaps = {
-    wouldConnect: [{ question: "how many cayennes are on the lot", asked: 9, system: "dealer-system" }],
-    missing: [{ question: "what is our refund policy", asked: 5, system: "documents" }],
-    closed: [{ question: "what are the payment terms in our sow?", asked: 18 }],
-    wanted: { actions: [{ action: "schedule a meeting", asked: 3 }], other: 2 },
-    statements: 4,
-    readable: true,
-  };
-
-  /* THE SPLIT THE PANEL EXISTS FOR. One is a decision somebody makes in an
-     afternoon, the other is somebody writing a document. A single list of
-     failures mixes a sales conversation with a content backlog. */
-  it("keeps connect-this apart from write-this", async () => {
-    respond({ ...base, gaps });
+describe("what you can ask", () => {
+  it("shows verified phrasings and what each returns", async () => {
+    respond({ ...base });
     render(<PilotPage />);
-    const connect = await screen.findByTestId("pilot-gaps-connect");
-    expect(connect).toHaveTextContent("how many cayennes are on the lot");
-    expect(connect).toHaveTextContent("dealer-system");
-
-    const missing = screen.getByTestId("pilot-gaps-missing");
-    expect(missing).toHaveTextContent("what is our refund policy");
-    expect(missing).not.toHaveTextContent("cayennes");
+    const panel = await screen.findByTestId("pilot-try-asking");
+    expect(panel).toHaveTextContent(/what you can ask/i);
+    expect(panel.querySelectorAll("li").length).toBeGreaterThan(3);
   });
 
-  /* Unmet demand for an ACTION is invisible everywhere else: nobody files a
-     request for something they assumed would work. */
-  it("shows what somebody expected the product to do", async () => {
-    respond({ ...base, gaps });
+  /* Read-only by design: a first thing to try should not book or send. */
+  it("advertises no create or send action", async () => {
+    respond({ ...base });
     render(<PilotPage />);
-    const wanted = await screen.findByTestId("pilot-gaps-wanted");
-    expect(wanted).toHaveTextContent("schedule a meeting");
-    /* Requests whose verb is not on the list are counted. Dropping them
-       silently would read as nobody having wanted anything. */
-    expect(screen.getByTestId("pilot-gaps-wanted-other")).toHaveTextContent(/2 further requests/i);
-  });
-
-  /* NO INSTRUCTION IS QUOTED, EVER. The measured reason: "book me 30 minutes
-     with dana tomorrow" was on the live page, and neither that colleague nor
-     the client named in the next entry appears in any table this workspace
-     holds, so no mask could have reached them. */
-  it("never renders the words of an instruction", async () => {
-    respond({ ...base, gaps });
-    render(<PilotPage />);
-    const wanted = await screen.findByTestId("pilot-gaps-wanted");
-    expect(wanted).not.toHaveTextContent(/dana|30 minutes|tomorrow/i);
-  });
-
-  /* A shortened question and a short one look identical, and a reader who
-     cannot tell them apart reads a truncation as the whole question. */
-  it("marks a line that is not what somebody typed", async () => {
-    respond({
-      ...base,
-      gaps: {
-        ...gaps,
-        wouldConnect: [
-          { question: "a person's name", asked: 15, system: "directory", withheld: "name" },
-        ],
-        closed: [{ question: "analyze the survey data in the workbook and…", asked: 1, withheld: "paste" }],
-      },
-    });
-    render(<PilotPage />);
-    expect(await screen.findByTestId("pilot-gaps-connect")).toHaveTextContent("name withheld");
-    expect(screen.getByTestId("pilot-gaps-closed")).toHaveTextContent("shortened");
-  });
-
-  /* An exclusion nobody can see is indistinguishable from nobody having
-     asked, which is the failure this whole page is built around. */
-  it("reports how many entries were left out as remarks", async () => {
-    respond({ ...base, gaps });
-    render(<PilotPage />);
-    expect(await screen.findByTestId("pilot-gaps-statements")).toHaveTextContent(
-      /4 further entries were left out as remarks/i,
-    );
-  });
-
-  /* The best evidence there is that uploading changed something. */
-  it("shows gaps that have since closed", async () => {
-    respond({ ...base, gaps });
-    render(<PilotPage />);
-    expect(await screen.findByTestId("pilot-gaps-closed")).toHaveTextContent(
-      "what are the payment terms in our sow?",
-    );
-  });
-
-  /* AN UNREADABLE LOG AND A CLIENT WITH NO GAPS ARE THE SAME EMPTY LIST AND
-     OPPOSITE FACTS. */
-  it("says the figures could not be read rather than showing nothing", async () => {
-    respond({ ...base, gaps: { ...gaps, readable: false } });
-    render(<PilotPage />);
-    expect(await screen.findByTestId("pilot-gaps-unreadable")).toHaveTextContent(
-      /not the same as nothing having gone unanswered/i,
-    );
-    expect(screen.queryByTestId("pilot-gaps-connect")).toBeNull();
-  });
-
-  it("says so plainly when everything was answered", async () => {
-    respond({
-      ...base,
-      gaps: {
-        wouldConnect: [],
-        missing: [],
-        closed: [],
-        wanted: { actions: [], other: 0 },
-        statements: 0,
-        readable: true,
-      },
-    });
-    render(<PilotPage />);
-    expect(await screen.findByTestId("pilot-gaps-none")).toHaveTextContent(
-      /Every question asked in this window was answered/i,
-    );
+    const panel = await screen.findByTestId("pilot-try-asking");
+    expect(panel.textContent || "").not.toMatch(/\bbook\b|\bsend\b|schedule a meeting/i);
   });
 });
