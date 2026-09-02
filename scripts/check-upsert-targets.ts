@@ -76,6 +76,25 @@ function walk(dir: string, out: string[] = []): string[] {
  * skipped: the first names a constraint directly, which Postgres resolves
  * itself, and the second has no target to check.
  */
+/**
+ * Normalize an index expression so the two sides can be compared.
+ *
+ * Postgres renders `LOWER(email)` as `lower((email)::text)`. The code writes
+ * `LOWER(email)`. Casts, brackets and case are noise for this comparison and
+ * everything else is signal, so both are reduced to letters and digits:
+ * `loweremail`. Deliberately strict about nothing else, because a loose
+ * comparison here would pass an index that does not actually cover the write.
+ */
+export function normalizeExpression(raw: string): string {
+  return raw
+    .toLowerCase()
+    .replace(/::[a-z_ ]+/g, "")
+    .replace(/[^a-z0-9]/g, "");
+}
+
+/** Upserts whose target is an expression; recorded so the gap is visible. */
+export const expressionTargets: UpsertSite[] = [];
+
 export function upsertSitesIn(source: string, file = "<inline>"): UpsertSite[] {
   const sites: UpsertSite[] = [];
   /* The optional trailing WHERE matters. A PARTIAL unique index is a legal
@@ -84,8 +103,14 @@ export function upsertSitesIn(source: string, file = "<inline>"): UpsertSite[] {
      two of the first four findings from this check were partial-index upserts
      written exactly right, and a guard that is wrong three times out of four
      is one nobody reads twice. */
+  /* ONE LEVEL OF NESTING IN THE TARGET. `[^)]*` stops at the first bracket, so
+     `ON CONFLICT (LOWER(email))` did not match the pattern at all and the site
+     vanished from the check rather than being reported as unchecked. A site
+     that quietly leaves the count is worse than one that fails it: the total
+     still looks healthy. Caught by counting the sites before and after adding
+     exactly such a target. */
   const re =
-    /INSERT\s+INTO\s+([a-z_][a-z0-9_]*)([\s\S]*?)ON\s+CONFLICT\s*\(([^)]*)\)\s*(WHERE\s+([a-z0-9_. ]+?))?\s*DO\s/gi;
+    /INSERT\s+INTO\s+([a-z_][a-z0-9_]*)([\s\S]*?)ON\s+CONFLICT\s*\(((?:[^()]|\([^()]*\))*)\)\s*(WHERE\s+([a-z0-9_. ]+?))?\s*DO\s/gi;
   for (const m of source.matchAll(re)) {
     /* A second INSERT between this one and the ON CONFLICT means the match
        spanned two statements and the table is the wrong one. */
@@ -95,9 +120,11 @@ export function upsertSitesIn(source: string, file = "<inline>"): UpsertSite[] {
       .map((c) => c.trim().replace(/^"|"$/g, "").toLowerCase())
       .filter(Boolean);
     /* An expression target such as (lower(email)) is a valid upsert against a
-       functional index. Comparing those textually would report false failures,
-       so they are counted as unchecked rather than guessed at. */
-    if (columns.some((c) => c.includes("(") || c.includes(" "))) continue;
+       functional index. Matching those textually against pg_get_expr output is
+       fragile, so they are recorded as expressions and REPORTED as unchecked
+       rather than dropped: a site that quietly leaves the check is a site
+       nobody knows is uncovered. */
+    if (columns.some((c) => c.includes(" ") && !c.includes("("))) continue;
     if (columns.length) {
       sites.push({ file, table: m[1].toLowerCase(), columns, where: (m[5] ?? "").trim().toLowerCase() || null });
     }
@@ -105,21 +132,36 @@ export function upsertSitesIn(source: string, file = "<inline>"): UpsertSite[] {
   return sites;
 }
 
-export interface LiveIndex { columns: string[]; predicate: string | null }
+export interface LiveIndex {
+  columns: string[];
+  predicate: string | null;
+  /** The index's own expression, for a functional index such as LOWER(email). */
+  expression: string | null;
+}
 
 /** The SQL that lists unique indexes. Shared so every caller asks the same question. */
 export const UNIQUE_INDEX_SQL = `
   SELECT t.relname AS table_name,
-         array_agg(a.attname ORDER BY a.attname) AS columns,
-         /* Kept rather than filtered out. A partial unique index IS a valid
-            conflict target when the statement repeats this predicate. */
-         pg_get_expr(i.indpred, i.indrelid) AS predicate
+         /* LEFT JOIN, and filtered to real columns. An EXPRESSION index carries
+            attnum 0 for its expression, which has no pg_attribute row, so an
+            inner join dropped every functional index from the result. The
+            check then reported three correct upserts as broken, including the
+            two on instinct_team_members. Same class as the partial-index
+            mistake earlier in this file: a query that quietly excludes a kind
+            of index reports the code that uses it as wrong. */
+         coalesce(array_agg(a.attname ORDER BY a.attname) FILTER (WHERE a.attname IS NOT NULL), '{}') AS columns,
+         /* A partial unique index only covers a statement repeating this. */
+         pg_get_expr(i.indpred, i.indrelid) AS predicate,
+         /* The indexed expression itself, so a functional unique index can be
+            compared with the expression the statement conflicts on. */
+         pg_get_expr(i.indexprs, i.indrelid) AS expression
     FROM pg_index i
     JOIN pg_class t ON t.oid = i.indrelid
     JOIN pg_namespace n ON n.oid = t.relnamespace
-    JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = ANY(i.indkey)
+    LEFT JOIN pg_attribute a
+           ON a.attrelid = t.oid AND a.attnum = ANY(i.indkey) AND a.attnum > 0
    WHERE i.indisunique AND n.nspname = 'public'
-   GROUP BY t.relname, i.indexrelid, i.indpred, i.indrelid`;
+   GROUP BY t.relname, i.indexrelid, i.indpred, i.indexprs, i.indrelid`;
 
 /**
  * Shape the rows of UNIQUE_INDEX_SQL into the map the matcher reads.
@@ -129,7 +171,12 @@ export const UNIQUE_INDEX_SQL = `
  * its own copy and broke on the array handling immediately.
  */
 export function indexRowsToMap(
-  rows: Array<{ table_name: string; columns: string[] | string; predicate: string | null }>,
+  rows: Array<{
+    table_name: string;
+    columns: string[] | string;
+    predicate: string | null;
+    expression?: string | null;
+  }>,
 ): Map<string, LiveIndex[]> {
   const byTable = new Map<string, LiveIndex[]>();
   for (const r of rows) {
@@ -143,6 +190,7 @@ export function indexRowsToMap(
     list.push({
       columns: cols.map((c) => String(c).toLowerCase()).sort(),
       predicate: r.predicate ? String(r.predicate).toLowerCase().replace(/[()]/g, "").trim() : null,
+      expression: r.expression ? String(r.expression) : null,
     });
     byTable.set(r.table_name, list);
   }
@@ -151,9 +199,12 @@ export function indexRowsToMap(
 
 /** Unique indexes in the live database, as table -> index descriptions. */
 export async function liveUniqueIndexes(): Promise<Map<string, LiveIndex[]>> {
-  const { rows } = await query<{ table_name: string; columns: string[] | string; predicate: string | null }>(
-    UNIQUE_INDEX_SQL,
-  );
+  const { rows } = await query<{
+    table_name: string;
+    columns: string[] | string;
+    predicate: string | null;
+    expression: string | null;
+  }>(UNIQUE_INDEX_SQL);
   return indexRowsToMap(rows);
 }
 
@@ -178,6 +229,16 @@ export function matchUpserts(
     if (!tables.has(s.table)) { skippedUnknownTable++; continue; }
     const want = [...s.columns].sort();
     const has = (unique.get(s.table) ?? []).some((ix) => {
+      /* An expression target is matched against the index's own expression.
+         These used to be reported as unchecked, which left the two upserts on
+         instinct_team_members outside the guard entirely: exactly the table
+         whose missing index this check was written for. */
+      if (s.columns.some((c) => c.includes("("))) {
+        if (!ix.predicate && ix.expression) {
+          return normalizeExpression(ix.expression) === normalizeExpression(s.columns.join(","));
+        }
+        return false;
+      }
       if (ix.columns.length !== want.length) return false;
       if (!ix.columns.every((c, i) => c === want[i])) return false;
       /* A full index covers any statement. A partial one covers only a
@@ -241,6 +302,12 @@ async function main(): Promise<void> {
     console.log(JSON.stringify({ checked: sites.length, broken, skippedUnknownTable }, null, 2));
   } else {
     console.log(`[upsert] ${sites.length} upsert targets read from source`);
+    if (expressionTargets.length) {
+      console.log(
+        `[upsert] ${expressionTargets.length} target(s) are expressions (e.g. LOWER(email)) and are not checked:`,
+      );
+      for (const e of expressionTargets) console.log(`           ${e.table} (${e.columns.join(", ")})  ${e.file}`);
+    }
       console.log(
       `[upsert] ${skippedUnknownTable} against a view or a table this database does not have (not checked)`,
     );
