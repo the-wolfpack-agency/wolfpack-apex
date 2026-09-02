@@ -56,3 +56,16 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: npm run capabilities
+
+      # Added to THIS job rather than a new one, because it needs the same
+      # credential and the same refusal above. A second workflow would be a
+      # second thing to notice was red for a reason nobody remembers.
+      #
+      # Asked 2026-09-02 and unanswerable at the time: are we connected to all
+      # of SharePoint? We held six sources across two sites out of nine, three
+      # of them switched off, and the three live ones six days stale. Nothing in
+      # the product compared any of that against anything.
+      - name: What we are connected to in SharePoint
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: npm run coverage:sharepoint
