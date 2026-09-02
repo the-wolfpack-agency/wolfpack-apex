@@ -25,8 +25,8 @@ import "./load-env";
  * IT NEVER TOUCHES AN EXISTING SOURCE. It only adds sites nothing points at.
  * Editing or removing what somebody configured is a separate, deliberate act.
  *
- *   npx tsx scripts/connect-sharepoint-sites.ts --include 'ford' --estate ford
- *   npx tsx scripts/connect-sharepoint-sites.ts --include 'ford' --estate ford --apply
+ *   npx tsx scripts/connect-sharepoint-sites.ts --include ford --estate ford
+ *   npx tsx scripts/connect-sharepoint-sites.ts --include ford,vw --estate oem --apply
  *
  * --estate says whose material this is, and is required for the same reason
  * --include is: the client-facing pages filter on it, so a site connected under
@@ -83,10 +83,10 @@ async function main(): Promise<void> {
   const apply = process.argv.includes("--apply");
   if (!include) {
     console.error(
-      "--include <regex> is required. A tenant holds more than one client's material,\n" +
-        "and indexing all of it into one library puts another client's documents behind\n" +
-        "answers about this one. Name the estate you mean, for example:\n" +
-        "  --include 'pcna|porsche|wolfpack'",
+      "--include <names> is required, comma separated. A tenant holds more than one\n" +
+        "client's material, and indexing all of it into one library puts another\n" +
+        "client's documents behind answers about this one. Name the sites you mean:\n" +
+        "  --include pcna,porsche,wolfpack",
     );
     process.exit(2);
   }
@@ -102,7 +102,18 @@ async function main(): Promise<void> {
     console.error("DATABASE_URL is not set.");
     process.exit(2);
   }
-  const scope = new RegExp(include, "i");
+  /* A COMMA-SEPARATED LIST, NOT A REGEX.
+     The first version compiled --include into a RegExp, and CodeQL flagged it:
+     a pattern built from an argument can be made to backtrack forever. The
+     risk on an operator-run script is small and the fix is smaller, and the
+     list is the better interface anyway: 'pcna,porsche,wolfpack' says what it
+     does, where 'pcna|porsche|wolfpack' invites somebody to try an anchor or a
+     character class and be quietly surprised by what matches. */
+  const needles = include
+    .split(",")
+    .map((t) => t.trim().toLowerCase())
+    .filter(Boolean);
+  const inScopeSite = (site: string) => needles.some((n) => site.toLowerCase().includes(n));
 
   const db = new Client({
     connectionString: process.env.DATABASE_URL,
@@ -152,11 +163,11 @@ async function main(): Promise<void> {
 
     const all = [...found.values()].sort((a, b) => b.filesSeen - a.filesSeen);
     const missing = all.filter((s) => !connected.has(s.site));
-    const inScope = missing.filter((s) => scope.test(s.site));
-    const outOfScope = missing.filter((s) => !scope.test(s.site));
+    const inScope = missing.filter((s) => inScopeSite(s.site));
+    const outOfScope = missing.filter((s) => !inScopeSite(s.site));
 
     console.log(`${all.length} site(s) reachable, ${connected.size} already connected`);
-    console.log(`\n${inScope.length} to connect as estate "${estate}" (matching /${include}/i):`);
+    console.log(`\n${inScope.length} to connect as estate "${estate}" (matching ${needles.join(", ")}):`);
     for (const s of inScope) console.log(`  ${String(s.filesSeen).padStart(4)}+ files  ${s.site}`);
     if (outOfScope.length) {
       console.log(`\n${outOfScope.length} reachable and NOT connected, outside that scope:`);
