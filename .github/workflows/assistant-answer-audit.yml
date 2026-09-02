@@ -1,0 +1,52 @@
+# Run real prompts through the real assistant and fail on a leak.
+#
+# WHY THIS AND NOT THE ROUTING AUDIT. The routing audit checks that a phrasing
+# reaches the right tool and never runs a model, so it passed the morning brief
+# on the day that brief narrated "Meeting ID: AAMkAG..." into prose. This runs
+# each prompt through chat(), the same entry the product uses, so the same model
+# router and answer gate apply, then it reads the finished answer for the
+# failures that are wrong whoever is connected.
+#
+# WHY DAILY, NOT PER-PUSH. Every prompt here is a real model call. The detector,
+# grader and mining LOGIC is unit-tested in the normal suite on every push, for
+# free; this is the live end-to-end check, which costs cents and belongs on a
+# timer. A leak fails the run.
+name: Assistant answer audit
+on:
+  schedule:
+    - cron: "40 8 * * *" # daily, after the brain sweeps
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Read the answers, fail on a leak
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
+          AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+          AZURE_OPENAI_EMBEDDING_DEPLOYMENT: ${{ secrets.AZURE_OPENAI_EMBEDDING_DEPLOYMENT }}
+          QDRANT_URL: ${{ secrets.QDRANT_URL }}
+          QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
+        run: |
+          # REFUSES rather than skipping. A leak check that cannot produce an
+          # answer would pass having read nothing, which is the exact shape of
+          # failure this whole area keeps producing.
+          for v in DATABASE_URL AZURE_OPENAI_ENDPOINT AZURE_OPENAI_API_KEY; do
+            if [ -z "${!v:-}" ]; then
+              echo "::error::$v is not set, so no answer can be produced and this would pass having tested nothing."
+              exit 1
+            fi
+          done
+          npx tsx scripts/answer-audit.ts --real
