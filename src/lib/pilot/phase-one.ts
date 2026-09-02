@@ -82,6 +82,15 @@ const EMPTY: PhaseOneSnapshot = {
 const PERSON = `(user_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
                  OR user_id LIKE '%@%')`;
 
+/**
+ * Whose library the Phase 1 page is about.
+ *
+ * A constant rather than a parameter for now, because there is one pilot and
+ * hard-coding it makes every read that forgets the filter obvious in review.
+ * It becomes an argument the day a second client has a Phase 1 page.
+ */
+export const PILOT_ESTATE = "pcna";
+
 export async function getPhaseOneSnapshot(
   workspaceId: string,
   days = 60,
@@ -99,7 +108,15 @@ export async function getPhaseOneSnapshot(
         `SELECT count(*)::text AS passages
            FROM brain_chunks c
            JOIN brain_documents d ON d.id = c.document_id
-          WHERE d.filename NOT ILIKE 'platform-scan-%'`,
+          WHERE d.filename NOT ILIKE 'platform-scan-%'
+            /* AND ONLY THIS CLIENT'S ESTATE. The tenant holds work for several
+               clients and nineteen SharePoint sites are reachable. Without this
+               predicate, connecting any of them would silently grow the number
+               this page presents to a client as THEIR library, in the way that
+               is hardest to notice: it still reads like a fact about them.
+               Same defect the platform-scan exclusion above fixed, one scale up. */
+            AND d.estate = ${"$"}1`,
+        [PILOT_ESTATE],
       ),
       /* SCANS ARE THE PART A LIBRARY QUIETLY LOSES. A photographed agreement
          or an exported slide carries no text, so it indexes as a filename and
