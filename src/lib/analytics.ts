@@ -1455,6 +1455,10 @@ export type InstinctEventType =
   | "microsoft.api_called"
   | "microsoft.connected"
   | "microsoft.disconnected"
+  /* One document threw during a repair. Emitted per document rather than per
+     run: a run that repaired forty-nine of fifty is a good run, and the one
+     that threw is the thing worth looking at. */
+  | "brain.document_repair_threw"
   | "microsoft.token_refreshed"
   /* The refresh worked and the write did not. Distinguished from a plain
      refresh because the connection is degrading while requests still succeed:

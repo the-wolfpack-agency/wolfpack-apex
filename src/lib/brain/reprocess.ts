@@ -464,13 +464,21 @@ export async function reprocessFixable(
     try {
       outcomes.push(await reprocessOne(c, fetchBytes, actor));
     } catch (err) {
+      const reason = (err as Error).message.slice(0, 120);
+      /* REPORTED, not only recorded on the outcome. The outcome is returned to
+         whoever called this run; the event is what somebody can query later
+         when the queue stops moving and nobody remembers which run it was. */
+      trackEvent("brain.document_repair_threw", actor.userId, actor.role, {
+        document_id: c.id,
+        reason,
+      });
       outcomes.push({
         id: c.id,
         filename: c.filename,
         before: "failed",
         after: "failed",
         chunks: 0,
-        detail: `threw during repair: ${(err as Error).message.slice(0, 120)}`,
+        detail: `threw during repair: ${reason}`,
       });
     }
   }
