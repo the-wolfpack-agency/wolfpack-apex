@@ -1,10 +1,28 @@
 {
   "measured": "2026-09-02",
-  "note": "First run against a working vector store. Every earlier figure today graded the keyword half only, because the Qdrant key had expired on 2026-08-31 and the eval correctly refused rather than reporting half the product as the whole.",
   "pairs": 28,
-  "found": 0.57,
-  "ranked_first": 0.29,
-  "mrr": 0.387,
-  "never_found": 12,
-  "known_gap": "731 of 5737 vectors (12.7%) carry no content payload and are skipped at read time, so their documents cannot be found by meaning until re-embedded."
+  "found": 0.71,
+  "ranked_first": 0.39,
+  "mrr": 0.483,
+  "never_found": 8,
+  "run_as": "a role that reads the whole corpus",
+  "why_the_number_moved": "Three runs in one afternoon, and only the last measures retrieval. The first two graded as an evp, the arbitrary user the eval happened to pick, which cannot read the 124 admin-audience documents many pairs point at.",
+  "history": [
+    {
+      "found": 0.57,
+      "mrr": 0.387,
+      "note": "First run against a working vector store. Every figure before it that day graded the keyword half only: the Qdrant key expired on 2026-08-31 and the eval refused rather than reporting half the product as the whole."
+    },
+    {
+      "found": 0.57,
+      "mrr": 0.353,
+      "note": "After rebuilding 731 malformed vectors (12.7% of the collection, written without their text by the library repair). Recall did not move and MRR fell slightly. Those points were a real defect that could crash a query, and they were never what blocked these questions."
+    },
+    {
+      "found": 0.71,
+      "mrr": 0.483,
+      "note": "Graded as a role that can read what is being asked about. Questions the earlier runs called 'never found' return the wanted document at rank 1."
+    }
+  ],
+  "what_this_is_not": "A measure of what any given person can find. It grades retrieval, so it runs unrestricted on purpose. What a restricted role can find is a different question and needs its own pairs."
 }
