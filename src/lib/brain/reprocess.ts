@@ -387,11 +387,37 @@ async function reprocessOne(
       const result = await embedBatch(inserted.map((c) => c.content));
       if (result && result.vectors.length === inserted.length) {
         tokensUsed = result.tokensUsed;
+        /* THE WHOLE PAYLOAD, because a point without content is a poison
+           pill for every future search.
+           
+           This wrote three fields. The reader builds a snippet from
+           payload.content, so a repaired chunk that came back as a top hit
+           threw inside queryBrain, the caller caught it and degraded to
+           keyword-only, and nothing said so. One bad point does not spoil one
+           result: it silently removes the semantic half of THAT query.
+           
+           Measured 2026-09-02: 731 of 5,737 points in the collection, 12.7%,
+           had no content and no filename. Every document this repair has ever
+           fixed produced them, so the better the repair worked the more of
+           search it quietly disabled. */
         await upsertBrainPoints(
           inserted.map((c, i) => ({
             id: c.id,
             vector: result.vectors[i],
-            payload: { document_id: doc.id, chunk_id: c.id, chunk_idx: c.chunk_idx },
+            payload: {
+              document_id: doc.id,
+              chunk_id: c.id,
+              chunk_idx: c.chunk_idx,
+              filename: doc.filename,
+              kind: doc.kind,
+              /* Not on the candidate row, and not worth a second query: the
+                 reader uses filename and content, and an absent tag reads the
+                 same as an empty one. What must never be absent is content. */
+              uploaded_by: "",
+              tags: [],
+              content: c.content,
+              created_at: new Date().toISOString(),
+            },
           })) as never,
         );
         await markChunksEmbedded(inserted.map((c) => c.id), inserted.map((c) => c.id));
