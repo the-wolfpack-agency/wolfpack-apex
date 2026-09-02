@@ -1,0 +1,11 @@
+{
+  "window": "7 days to 2026-09-02",
+  "queries": 1749,
+  "found_something": 1282,
+  "semantic_hit": 1035,
+  "keyword_hit": 588,
+  "cited": 111,
+  "avg_hits": "3.52",
+  "avg_latency_ms": "641",
+  "p95_latency_ms": "1218"
+}

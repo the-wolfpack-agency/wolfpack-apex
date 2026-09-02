@@ -35,7 +35,7 @@
  * the type without pretending to be a whole client.
  */
 export interface Queryable {
-  query<T = Record<string, unknown>>(sql: string): Promise<{ rows: T[] }>;
+  query<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<{ rows: T[] }>;
 }
 
 /** A source as configured, with what we can tell about how it is doing. */
@@ -66,17 +66,6 @@ export interface CoverageReport {
 
 /** A sync older than this is not a schedule, it is a stop. */
 export const STALE_AFTER_DAYS = 3;
-
-/**
- * A single-quoted SQL literal.
- *
- * The Queryable shape deliberately takes SQL only, so the workspace id is
- * embedded rather than bound. It is an internal identifier and never user
- * input, and doubling any quote closes the only way that could matter.
- */
-function quote(value: string): string {
-  return `'${value.replace(/'/g, "''")}'`;
-}
 
 /** The site part of a SharePoint URL, or null when it is not one. */
 export function siteOf(url: string | null | undefined): string | null {
@@ -111,13 +100,20 @@ export async function readCoverage(
     /* WORKSPACE-SCOPED. The repo-wide tenant guardrail caught this unscoped and
        was right to: on a multi-tenant deployment an unfiltered read would show
        one client the shape of another's document estate, which is worse than
-       the gap this report exists to find. Interpolated rather than
-       parameterized because the Queryable shape takes SQL only; the value is
-       an internal workspace id, not user input, and is escaped below. */
+       the gap this report exists to find.
+
+       BOUND, not interpolated. The first version built the literal with a
+       hand-rolled quoting helper because Queryable took SQL only, and CodeQL
+       flagged it high severity on the pull request. It was right to: an escape
+       function written once is a thing every future reader has to re-verify,
+       and "the value is internal" is exactly the assumption that stops being
+       true later. Widening the interface by one optional argument costs
+       nothing and removes the question. */
     `SELECT id::text AS id, name, site_url, folder_path, is_active, last_synced_at
        FROM instinct_sharepoint_sources
-      WHERE workspace_id = ${quote(workspaceId)}
+      WHERE workspace_id = $1
       ORDER BY is_active DESC, name`,
+    [workspaceId],
   );
 
   /* Documents are attributed by the site in their web_url, because a document

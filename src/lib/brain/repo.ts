@@ -299,10 +299,26 @@ export async function updateDocumentSummary(
  * which is how a fast search becomes a slow one for information that is the
  * same for every chunk of the same document.
  */
+export interface DocumentDescription {
+  summary: string | null;
+  topics: string[] | null;
+  webUrl: string | null;
+  /**
+   * Whose material the document is, when it came from a connected source.
+   *
+   * HERE RATHER THAN IN THE KEYWORD SQL, because this is the one place both
+   * halves of retrieval pass through. A semantic hit arrives from the vector
+   * store, whose payload carries no estate, so adding it only to the keyword
+   * query would label half the passages and leave the other half blank, which
+   * reads as "no estate" rather than as "not looked up".
+   */
+  estate: string | null;
+}
+
 export async function describeDocuments(
   documentIds: string[],
-): Promise<Map<string, { summary: string | null; topics: string[] | null; webUrl: string | null }>> {
-  const out = new Map<string, { summary: string | null; topics: string[] | null; webUrl: string | null }>();
+): Promise<Map<string, DocumentDescription>> {
+  const out = new Map<string, DocumentDescription>();
   if (documentIds.length === 0 || !process.env.DATABASE_URL) return out;
   try {
     const res = await query<{
@@ -310,12 +326,18 @@ export async function describeDocuments(
       summary: string | null;
       topics: string[] | null;
       web_url: string | null;
+      estate: string | null;
     }>(
-      `SELECT id, summary, topics, web_url FROM brain_documents WHERE id = ANY($1)`,
+      `SELECT id, summary, topics, web_url, estate FROM brain_documents WHERE id = ANY($1)`,
       [documentIds],
     );
     for (const r of res.rows) {
-      out.set(String(r.id), { summary: r.summary, topics: r.topics, webUrl: r.web_url });
+      out.set(String(r.id), {
+        summary: r.summary,
+        topics: r.topics,
+        webUrl: r.web_url,
+        estate: r.estate,
+      });
     }
   } catch {
     /* Decoration, not substance: a hit without a description is still a hit. */
@@ -326,8 +348,8 @@ export async function describeDocuments(
 /**
  * Remove the one character Postgres text cannot hold.
  *
- * A `text` column stores any Unicode EXCEPT U+0000, and a document that
- * contains one fails the whole statement with
+ * A `text` column stores any Unicode EXCEPT U+0000, and a document containing
+ * one fails the whole statement with
  * `invalid byte sequence for encoding "UTF8": 0x00`. Scanned PDFs, OCR output
  * and some exported decks carry them as padding, so this is a property of real
  * files rather than of corrupt ones.
@@ -423,6 +445,21 @@ export interface KeywordHit {
   chunk_idx: number;
   filename: string;
   kind: BrainKind;
+  /**
+   * Whose material this passage is, when the document came from a connected
+   * source.
+   *
+   * CARRIED WITH THE PASSAGE, not looked up later. This tenant holds work for
+   * ten estates and the assistant deliberately searches all of them, because
+   * an internal question about how we structured a launch should be able to
+   * find the answer wherever we did it. What must never happen is an answer
+   * about one client leaning on another's document without saying so: that
+   * reads exactly like a correct answer. The estate travels with the passage
+   * so the citation can state it.
+   *
+   * Null for documents somebody uploaded by hand, which belong to no source.
+   */
+  estate: string | null;
   content: string;
   score: number;
   headline: string;
@@ -535,6 +572,7 @@ export function buildKeywordSearchSql(
              bc.chunk_idx,
              bd.filename,
              bd.kind,
+             bd.estate,
              bc.content,
              /* NAMING A DOCUMENT IS THE MOST EXPLICIT SIGNAL A PERSON CAN
                 GIVE, AND IT WAS LOSING ON A SCALE IT CANNOT WIN.

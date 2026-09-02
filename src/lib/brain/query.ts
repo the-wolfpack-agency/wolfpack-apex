@@ -251,6 +251,7 @@ async function queryBrainOnce(opts: QueryOpts): Promise<QueryExecution> {
       document_summary: meta(k.document_id)?.summary ?? null,
       document_topics: meta(k.document_id)?.topics ?? null,
       web_url: meta(k.document_id)?.webUrl ?? null,
+      estate: meta(k.document_id)?.estate ?? null,
     });
   }
 
@@ -272,6 +273,7 @@ async function queryBrainOnce(opts: QueryOpts): Promise<QueryExecution> {
         document_summary: meta(s.document_id)?.summary ?? null,
         document_topics: meta(s.document_id)?.topics ?? null,
         web_url: meta(s.document_id)?.webUrl ?? null,
+        estate: meta(s.document_id)?.estate ?? null,
       });
     }
   }

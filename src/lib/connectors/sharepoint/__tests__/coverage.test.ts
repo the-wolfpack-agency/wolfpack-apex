@@ -32,9 +32,18 @@ const SITE_B = "https://tenant.sharepoint.com/sites/WolfpackxPCNA";
 
 function client(sources: unknown[], docs: unknown[] = []): Queryable {
   return {
-    query: async <T,>(sql: string) => ({
-      rows: (/instinct_sharepoint_sources/.test(sql) ? sources : docs) as T[],
-    }),
+    query: async <T,>(sql: string, params?: unknown[]) => {
+      /* The workspace filter is BOUND, not built into the string. Asserted
+         here because a query that stops binding it still looks correct, and
+         the first version of this file hand-rolled a quoting helper that
+         CodeQL flagged high severity. */
+      if (/instinct_sharepoint_sources/.test(sql)) {
+        expect(sql).toContain("workspace_id = $1");
+        expect(params).toEqual([WS]);
+        return { rows: sources as T[] };
+      }
+      return { rows: docs as T[] };
+    },
   };
 }
 

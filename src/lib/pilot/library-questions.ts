@@ -6,6 +6,7 @@
  */
 
 import { query } from "@/lib/db";
+import { PILOT_ESTATE } from "./phase-one";
 import { libraryQuestions, type Observation } from "./library-shape";
 import { trackEvent } from "@/lib/analytics";
 
@@ -23,7 +24,13 @@ export interface LibraryQuestions {
 export async function readLibraryQuestions(): Promise<LibraryQuestions> {
   try {
     const { rows } = await query<{ filename: string; chunk_count: number | null }>(
-      `SELECT filename, chunk_count FROM brain_documents WHERE status = 'indexed'`,
+      /* Scoped to the client's estate, like every other figure on this page.
+         These questions are shown to a client about THEIR library; a filename
+         pattern drawn from another client's site would be a question about
+         somebody else's documents. */
+      `SELECT filename, chunk_count FROM brain_documents
+        WHERE status = 'indexed' AND estate = $1`,
+      [PILOT_ESTATE],
     );
     const questions = libraryQuestions(
       rows.map((r) => ({ filename: r.filename, chunks: r.chunk_count ?? 0 })),
