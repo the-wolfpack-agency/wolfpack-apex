@@ -17,10 +17,7 @@ import { requireCapability } from "@/lib/auth/require-capability";
 import { getPhaseOneSnapshot } from "@/lib/pilot/phase-one";
 import { getAdoptionSnapshot } from "@/lib/pilot/adoption";
 import { readCapabilitySnapshot } from "@/lib/insights/capability-snapshot";
-import { getGapsSnapshot } from "@/lib/pilot/gaps";
 import { readLibraryQuestions } from "@/lib/pilot/library-questions";
-import { connectedSystems } from "@/lib/assistant/tools/capability-scope";
-import type { GapSystem } from "@/lib/insights/unanswered";
 import { getTokenUsage } from "@/lib/pilot/token-usage";
 
 const DEFAULT_DAYS = 60;
@@ -49,17 +46,11 @@ export async function GET(req: NextRequest) {
 
      Read here rather than proxied, so this page owns its own figures and does
      not depend on an admin endpoint a client's role cannot call. */
-  /* Which systems could have answered anything at all. Documents count when
-     there is a corpus; the rest come from the same connector state the
-     capability menu reads, so the page and the product never disagree about
-     what is linked. */
-  const linked = await connectedSystems(workspaceId).catch(() => new Set<string>());
-  const answerable = new Set<GapSystem>(["documents"]);
-  if (linked.has("crm")) answerable.add("crm");
-  if (linked.has("dms")) answerable.add("dealer-system");
-  if (linked.has("quickbooks")) answerable.add("finance");
 
-  const [snapshot, adoption, capability, tokenUsage, gaps, libraryQuestions] = await Promise.all([
+  /* getGapsSnapshot was dropped here when the "What we could not answer" panel
+     was removed from the page. It ran a query on every load and its result was
+     no longer rendered, and the connector lookup that fed it went with it. */
+  const [snapshot, adoption, capability, tokenUsage, libraryQuestions] = await Promise.all([
     getPhaseOneSnapshot(workspaceId, days),
     getAdoptionSnapshot(workspaceId, days),
     readCapabilitySnapshot(days).catch(() => null),
@@ -67,14 +58,13 @@ export async function GET(req: NextRequest) {
        on what was actually consumed rather than an estimate from message
        lengths. */
     getTokenUsage(days).catch(() => null),
-    getGapsSnapshot(answerable, days),
     /* WEEK ONE'S MOST USEFUL OUTPUT IS A QUESTION. Reading a client's library
        and telling them what it means is the most expensive mistake available:
        42 per cent of our own turned out to be our tooling writing into it. */
     readLibraryQuestions(),
   ]);
 
-  return NextResponse.json({ ...snapshot, adoption, capability, tokenUsage, gaps, libraryQuestions }, {
+  return NextResponse.json({ ...snapshot, adoption, capability, tokenUsage, libraryQuestions }, {
     status: 200,
     /* Never cached: a dashboard figure that is minutes old invites somebody to
        act on a number that has already moved. */
