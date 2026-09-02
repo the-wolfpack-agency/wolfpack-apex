@@ -93,6 +93,15 @@ jobs:
           PGPASSWORD=postgres psql -h localhost -U postgres -c 'CREATE DATABASE fresh_install;'
           npm run migrate
 
+      # Runs against fresh_install, the database the step above just built.
+      # The contract tests connect to instinct_test, which is NEVER migrated,
+      # so checking the schema from there reads an empty database and reports
+      # every upsert as broken. That cost three CI rounds to notice.
+      - name: Every upsert has a unique index to conflict on
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/fresh_install
+        run: npx tsx scripts/check-upsert-targets.ts
+
       - name: Running them again changes nothing
         # A migration that is not idempotent breaks the next deploy rather than
         # this one, which is the worst time to find out.

@@ -39,7 +39,7 @@
     "test:e2e:deployed": "PROD_URL=${PROD_URL:-https://wolfpack-instinct.vercel.app} playwright test tests/e2e/deployed-url-smoke.spec.ts --config=playwright.config.ts --reporter=line",
     "test:qr-download": "playwright test --config=playwright.qr.config.ts",
     "test:spec-diff": "playwright test --config=playwright.specdiff.config.ts",
-    "vercel-build": "npm run migrate && npm run engineering:seed && next build",
+    "vercel-build": "npm run migrate && npm run check:upserts && npm run engineering:seed && next build",
     "verify": "bash scripts/verify.sh",
     "verify:devices": "npx tsx scripts/verify-devices.ts",
     "verify:prod-env": "bash scripts/verify-prod-env.sh",
@@ -53,7 +53,8 @@
     "gate:exercise": "tsx scripts/gate-exercise.ts",
     "eval:retrieval": "npx tsx scripts/eval-retrieval.ts src/lib/brain/eval/retrieval-pairs.json",
     "capabilities": "npx tsx scripts/capability-check.ts",
-    "ci:check-action-pins": "node scripts/check-action-pins.mjs"
+    "ci:check-action-pins": "node scripts/check-action-pins.mjs",
+    "check:upserts": "npx tsx scripts/check-upsert-targets.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.92.0",

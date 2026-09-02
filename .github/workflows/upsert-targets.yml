@@ -1,0 +1,53 @@
+# Every ON CONFLICT in the source, checked against the LIVE schema.
+#
+# WHY AGAINST PRODUCTION, AND NOT A SCHEMA BUILT FROM THE MIGRATIONS.
+#
+# On 2026-09-02 the Microsoft token store had been failing on 42P10 for at
+# least a week: storeTokens upserts on connected_by, and the live index was not
+# unique. The migrations were RIGHT — 006 created it unique and 044 renamed it,
+# which preserves uniqueness. A check built from the repository would have
+# passed on every day of the outage. Only the database knew.
+#
+# Daily rather than per-push: this catches drift, and drift does not arrive
+# with a commit.
+name: Upsert targets
+on:
+  schedule:
+    - cron: "20 7 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      # REFUSES, RATHER THAN SKIPPING. An earlier version of this job skipped
+      # with a notice when the secret was absent, which is the exact shape of
+      # the defect it was written for: a check that reports nothing and exits
+      # green. Measured 2026-09-02: DATABASE_URL is not a repository secret, so
+      # skipping would have made this job permanently, silently useless.
+      #
+      # The other two layers do not depend on this secret. The db-contract job
+      # runs the same matcher against a schema built from the migrations on
+      # every pull request, and vercel-build runs it against the real database
+      # after migrate, so a broken upsert cannot be deployed. This job exists
+      # to catch DRIFT, which arrives without a commit and so is invisible to
+      # both of those until the next deploy.
+      - name: Check every upsert has a unique index to conflict on
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          if [ -z "${DATABASE_URL:-}" ]; then
+            echo "::error::DATABASE_URL is not set for Actions, so this check cannot read the live schema and would exit green having verified nothing. Add it as a repository secret."
+            exit 1
+          fi
+          npx tsx scripts/check-upsert-targets.ts

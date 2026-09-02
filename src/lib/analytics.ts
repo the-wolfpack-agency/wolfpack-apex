@@ -1456,6 +1456,11 @@ export type InstinctEventType =
   | "microsoft.connected"
   | "microsoft.disconnected"
   | "microsoft.token_refreshed"
+  /* The refresh worked and the write did not. Distinguished from a plain
+     refresh because the connection is degrading while requests still succeed:
+     background jobs read the stored row and see an expired token. */
+  | "microsoft.token_refreshed_not_stored"
+  | "microsoft.token_store_failed"
   | "microsoft.token_refresh_failed"
   | "microsoft.fetch_failed"
   | "microsoft.sync_completed"

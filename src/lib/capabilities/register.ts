@@ -76,6 +76,10 @@ export const FRESH_DAYS = 45;
 export const HOT_CAPABILITIES: ReadonlySet<string> = new Set([
   "semantic_retrieval",
   "relevance_judge",
+  /* Six accounts refresh on a schedule, so a stored token older than two days
+     means the write has stopped. It stopped for a week and the only symptom
+     was background work quietly failing. */
+  "microsoft_token_store",
 ]);
 
 /** Days of grace for something that should run many times a day. */
@@ -88,6 +92,25 @@ export const CAPABILITIES: Capability[] = [
     provenBy: { kind: "event", event: "brain.document_ocred" },
     matters:
       "56 scanned documents in the corpus are unanswerable without it. It was fully built and had run zero times for months.",
+  },
+  {
+    id: "microsoft_token_store",
+    claim: "A refreshed Microsoft token is actually kept, not just fetched.",
+    /* PROVEN BY THE STORED ROW, NOT BY THE REFRESH EVENT.
+     *
+     * This is the exact distinction the outage turned on. storeTokens upserted
+     * with ON CONFLICT (connected_by) against a column whose index was not
+     * unique, so every write raised 42P10; the error was swallowed and
+     * microsoft.token_refreshed fired on the next line regardless. Two
+     * thousand five hundred refresh events a day, and nothing saved since
+     * 2026-08-26.
+     *
+     * So the evidence is a token in the table that is newer than the window.
+     * An event would have read healthy on every day of the outage, which is
+     * what an event named for an outcome and fired on an attempt always does. */
+    provenBy: { kind: "count", label: "accounts whose stored token was refreshed recently", atLeast: 1 },
+    matters:
+      "Interactive requests survive on an in-memory token, so this fails invisibly: only background work reads the stored row. It broke the SharePoint sync and the library repair for a week and neither said why.",
   },
   {
     id: "query_expansion",

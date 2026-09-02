@@ -738,8 +738,20 @@ export async function storeTokens(
   userId: string,
   userEmail?: string,
   displayName?: string,
-): Promise<void> {
-  if (!process.env.DATABASE_URL) return;
+): Promise<boolean> {
+  /* RETURNS WHETHER THE TOKEN WAS ACTUALLY STORED.
+   *
+   * This returned void and swallowed every error, so a write that failed was
+   * indistinguishable from one that succeeded, and the caller went straight on
+   * to emit microsoft.token_refreshed. Production ran that way for at least a
+   * week: the upsert named ON CONFLICT (connected_by) against a column whose
+   * index was not unique, so every call raised 42P10, nothing was ever saved,
+   * and the event said otherwise 2,592 times a day.
+   *
+   * Interactive requests survived on the in-memory token each call refreshed.
+   * Everything reading a STORED token did not, which is why the SharePoint sync
+   * and the library repair both stopped and neither said why. */
+  if (!process.env.DATABASE_URL) return false;
 
   try {
     await query(
@@ -754,8 +766,19 @@ export async function storeTokens(
          updated_at = NOW()`,
       [userEmail || tokens.user_email, displayName || tokens.display_name || null, tokens.access_token, tokens.refresh_token, tokens.expires_at, userId],
     );
+    return true;
   } catch (err) {
-    console.error("[microsoft-graph] Failed to store tokens:", sanitizeForLog((err as Error).message));
+    const e = err as Error & { code?: string };
+    console.error("[microsoft-graph] Failed to store tokens:", sanitizeForLog(e.message), e.code ?? "");
+    /* REPORTED, not just logged. A console line in a serverless function is
+       read by nobody. This is the signal that says the connection is degrading
+       even while requests still appear to work, which is exactly the window
+       this bug lived in. */
+    trackEvent("microsoft.token_store_failed", userId, "system", {
+      user_email: userEmail || tokens.user_email,
+      code: e.code ?? "unknown",
+    });
+    return false;
   }
 }
 
@@ -851,9 +874,27 @@ export async function getValidToken(
   }
 
   refreshed.user_email = row.user_email;
-  await storeTokens(refreshed, userId, row.user_email);
+  /* STORE UNDER THE ROW'S OWN KEY, NOT THE LOOKUP KEY.
+   *
+   * The read above matches `connected_by = $1 OR user_email = $1`, so a caller
+   * may legitimately arrive with an email. The repair does exactly that: it
+   * borrows an identity by address. Writing back under `userId` would then put
+   * an email into connected_by and try to create a SECOND row for the same
+   * mailbox, which the unique index on user_email refuses. The refresh would
+   * fail for precisely the background job that needed it.
+   *
+   * Harmless when the caller passed a user id, because that is what
+   * row.connected_by already holds. */
+  const stored = await storeTokens(refreshed, row.connected_by ?? userId, row.user_email);
 
-  trackEvent("microsoft.token_refreshed", userId, "system", {
+  /* ONLY SAY REFRESHED WHEN IT WAS ALSO KEPT.
+   *
+   * Microsoft did return a token, so this call succeeds and the caller is
+   * handed a working one. But an unstored token is refreshed once per request
+   * forever and is invisible to every background job, which reads the stored
+   * row. Calling that "refreshed" is what made a broken connection look
+   * healthy on every dashboard for a week. */
+  trackEvent(stored ? "microsoft.token_refreshed" : "microsoft.token_refreshed_not_stored", userId, "system", {
     user_email: row.user_email,
   });
 
