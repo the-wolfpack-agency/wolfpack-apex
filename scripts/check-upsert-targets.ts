@@ -105,31 +105,38 @@ export function upsertSitesIn(source: string, file = "<inline>"): UpsertSite[] {
   return sites;
 }
 
-interface LiveIndex { columns: string[]; predicate: string | null }
+export interface LiveIndex { columns: string[]; predicate: string | null }
 
-/** Unique indexes in the live database, as table -> index descriptions. */
-async function liveUniqueIndexes(): Promise<Map<string, LiveIndex[]>> {
-  const { rows } = await query<{ table_name: string; columns: string[] | string; predicate: string | null }>(
-    `SELECT t.relname AS table_name,
-            array_agg(a.attname ORDER BY a.attname) AS columns,
-            /* Kept rather than filtered out. A partial unique index IS a valid
-               conflict target when the statement repeats this predicate, so
-               the check needs to compare them rather than ignore them. */
-            pg_get_expr(i.indpred, i.indrelid) AS predicate
-       FROM pg_index i
-       JOIN pg_class t ON t.oid = i.indrelid
-       JOIN pg_namespace n ON n.oid = t.relnamespace
-       JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = ANY(i.indkey)
-      WHERE i.indisunique
-        AND n.nspname = 'public'
-      GROUP BY t.relname, i.indexrelid, i.indpred, i.indrelid`,
-  );
+/** The SQL that lists unique indexes. Shared so every caller asks the same question. */
+export const UNIQUE_INDEX_SQL = `
+  SELECT t.relname AS table_name,
+         array_agg(a.attname ORDER BY a.attname) AS columns,
+         /* Kept rather than filtered out. A partial unique index IS a valid
+            conflict target when the statement repeats this predicate. */
+         pg_get_expr(i.indpred, i.indrelid) AS predicate
+    FROM pg_index i
+    JOIN pg_class t ON t.oid = i.indrelid
+    JOIN pg_namespace n ON n.oid = t.relnamespace
+    JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = ANY(i.indkey)
+   WHERE i.indisunique AND n.nspname = 'public'
+   GROUP BY t.relname, i.indexrelid, i.indpred, i.indrelid`;
+
+/**
+ * Shape the rows of UNIQUE_INDEX_SQL into the map the matcher reads.
+ *
+ * Exported because writing this twice is how the two callers end up disagreeing
+ * about what a match is. It happened while writing this change: the db test got
+ * its own copy and broke on the array handling immediately.
+ */
+export function indexRowsToMap(
+  rows: Array<{ table_name: string; columns: string[] | string; predicate: string | null }>,
+): Map<string, LiveIndex[]> {
   const byTable = new Map<string, LiveIndex[]>();
   for (const r of rows) {
     const list = byTable.get(r.table_name) ?? [];
-    /* node-postgres hands a text[] back as an array, but a driver or a view
-       can surface it as the raw literal. Normalized so the check does not
-       depend on which. */
+    /* node-postgres hands a text[] back as an array, but a driver or a view can
+       surface it as the raw literal. Normalized so the check does not depend on
+       which. */
     const cols = Array.isArray(r.columns)
       ? r.columns
       : String(r.columns).replace(/^\{|\}$/g, "").split(",").filter(Boolean);
@@ -142,30 +149,29 @@ async function liveUniqueIndexes(): Promise<Map<string, LiveIndex[]>> {
   return byTable;
 }
 
-async function main(): Promise<void> {
-  const asJson = process.argv.includes("--json");
-  const files = ROOTS.flatMap((r) => {
-    try { return walk(r); } catch { return []; }
-  });
-
-  const sites: UpsertSite[] = [];
-  for (const f of files) sites.push(...upsertSitesIn(readFileSync(f, "utf8"), f));
-
-  const unique = await liveUniqueIndexes();
-  const tables = new Set(
-    (await query<{ relname: string }>(
-      /* ORDINARY TABLES ONLY. A view has no indexes of its own, so including
-         them reported every upsert through a view as broken. src/lib/people.ts
-         writes to apex_employees, which is a view: that was a false positive,
-         not a defect. Views are counted as unchecked below. */
-      `SELECT relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-        WHERE n.nspname = 'public' AND c.relkind IN ('r','p')`,
-    )).rows.map((r) => r.relname),
+/** Unique indexes in the live database, as table -> index descriptions. */
+export async function liveUniqueIndexes(): Promise<Map<string, LiveIndex[]>> {
+  const { rows } = await query<{ table_name: string; columns: string[] | string; predicate: string | null }>(
+    UNIQUE_INDEX_SQL,
   );
+  return indexRowsToMap(rows);
+}
 
+/**
+ * Which upserts have no unique index to conflict on.
+ *
+ * Split out from the run so the same rules can be applied to a schema built
+ * from the migrations in CI, and to the live database on a schedule and at
+ * deploy time. Three environments, one definition of "matched": if they used
+ * different rules, the one that mattered would be the one nobody ran.
+ */
+export function matchUpserts(
+  sites: UpsertSite[],
+  unique: Map<string, LiveIndex[]>,
+  tables: Set<string>,
+): { broken: UpsertSite[]; skippedUnknownTable: number } {
   const broken: UpsertSite[] = [];
   let skippedUnknownTable = 0;
-
   for (const s of sites) {
     /* A table this database does not have is not a failure of this check: the
        code may target another tenant's schema, or a view. Counted, not judged. */
@@ -181,6 +187,55 @@ async function main(): Promise<void> {
     });
     if (!has) broken.push(s);
   }
+  return { broken, skippedUnknownTable };
+}
+
+/** Ordinary tables in the connected database (views have no indexes). */
+export async function liveTables(): Promise<Set<string>> {
+  const { rows } = await query<{ relname: string }>(
+    `SELECT relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'public' AND c.relkind IN ('r','p')`,
+  );
+  return new Set(rows.map((r) => r.relname));
+}
+
+/** Every upsert written as a literal anywhere in the source. */
+export function allUpsertSites(): UpsertSite[] {
+  const files = ROOTS.flatMap((r) => {
+    try { return walk(r); } catch { return []; }
+  });
+  const sites: UpsertSite[] = [];
+  for (const f of files) sites.push(...upsertSitesIn(readFileSync(f, "utf8"), f));
+  return sites;
+}
+
+async function main(): Promise<void> {
+  const asJson = process.argv.includes("--json");
+
+  /* NO DATABASE, NOTHING TO COMPARE AGAINST.
+   *
+   * This runs inside vercel-build, right after migrate, so a broken upsert
+   * cannot be deployed. migrate itself no-ops without DATABASE_URL (shadow
+   * mode), and a preview build with no database must keep building exactly as
+   * it did before this check existed: turning those red would be a change to
+   * deployment, not to correctness.
+   *
+   * The scheduled job does the opposite and REFUSES when the variable is
+   * missing, because there its absence means the check verified nothing while
+   * reporting green. Same script, and the difference is deliberate: here the
+   * absence is expected, there it is the failure. */
+  if (!process.env.DATABASE_URL) {
+    console.log("[upsert] DATABASE_URL not set — nothing to check against (shadow mode).");
+    process.exit(0);
+  }
+  const sites = allUpsertSites();
+  const unique = await liveUniqueIndexes();
+  /* ORDINARY TABLES ONLY. A view has no indexes of its own, so including them
+     reported every upsert through a view as broken. src/lib/people.ts writes to
+     apex_employees, which is a view: a false positive, not a defect. */
+  const tables = await liveTables();
+
+  const { broken, skippedUnknownTable } = matchUpserts(sites, unique, tables);
 
   if (asJson) {
     console.log(JSON.stringify({ checked: sites.length, broken, skippedUnknownTable }, null, 2));

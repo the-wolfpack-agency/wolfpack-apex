@@ -71,6 +71,20 @@ const COUNTERS: Record<string, () => Promise<Observation>> = {
     );
     return { count: Number(rows[0]?.n ?? 0), lastSeen: rows[0]?.last ?? null };
   },
+  /* THE STORED ROW IS THE EVIDENCE, not the refresh event.
+     microsoft.token_refreshed fired 2,592 times in the twenty-four hours
+     before this was written, while the newest stored token was six days
+     expired: the write was raising 42P10 and the error was swallowed. Counting
+     the event would have read healthy on every day of that. Counting rows that
+     were actually written cannot. */
+  "accounts whose stored token was refreshed recently": async () => {
+    const { rows } = await query<{ n: string; last: string | null }>(
+      `SELECT count(*)::text AS n, max(updated_at)::text AS last
+         FROM instinct_ms_tokens
+        WHERE updated_at > now() - interval '2 days'`,
+    );
+    return { count: Number(rows[0]?.n ?? 0), lastSeen: rows[0]?.last ?? null };
+  },
   "distinct models used in 30 days": async () => {
     const { rows } = await query<{ n: string; last: string | null }>(
       `SELECT count(DISTINCT model)::text AS n, max(day)::text AS last
