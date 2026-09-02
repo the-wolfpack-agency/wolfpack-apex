@@ -37,6 +37,7 @@ import { readFileSync, existsSync } from "node:fs";
 /** The reviewed set, in the repo, so a reviewer can read what was graded. */
 const DEFAULT_PAIRS = "src/lib/brain/eval/retrieval-pairs.json";
 import { retrieve } from "@/lib/brain/retrieve";
+import { readsEverything } from "@/lib/brain/audience";
 import { judgeRelevance } from "@/lib/brain/relevance";
 import { getAIClient } from "@/lib/ai/router";
 import {
@@ -110,12 +111,32 @@ async function main(): Promise<void> {
     process.exit(2);
   }
 
-  /* Any indexed user, since retrieval is audience-scoped and an eval run needs
-     a role that can see the corpus it is grading. */
+  /* A ROLE THAT CAN READ WHAT IS BEING GRADED.
+   *
+   * This took whichever active user was created first, which is an arbitrary
+   * person: here it resolved to an evp. Retrieval is audience-scoped, and 124
+   * of the indexed documents are restricted to admin, so a quarter of the
+   * labeled pairs pointed at documents that role may not read. Every one
+   * counted as a retrieval failure.
+   *
+   * The measured cost: the eval reported 57% recall with 12 questions "never
+   * found". Asked as a role that reads everything, the same corpus returns the
+   * wanted document at rank 1 for questions the report called misses. Nothing
+   * was wrong with retrieval. The instrument was measuring one person's
+   * permissions and calling it search quality.
+   *
+   * Prefers an unrestricted role and says which it used, because a score that
+   * depends on who ran it has to name them. */
   const u = await query<{ id: string; role: string }>(
-    `SELECT id, role FROM instinct_team_members WHERE is_active = true ORDER BY created_at LIMIT 1`,
+    `SELECT id, role FROM instinct_team_members WHERE is_active = true ORDER BY created_at`,
   );
-  const me = u.rows[0];
+  const me = u.rows.find((r) => readsEverything(r.role)) ?? u.rows[0];
+  if (me && !readsEverything(me.role)) {
+    console.warn(
+      `  No unrestricted role is active, so this runs as "${me.role}".\n` +
+        "  Pairs pointing at documents that role cannot read will score as misses.\n",
+    );
+  }
   if (!me) {
     console.error("No active user to run retrieval as.");
     process.exit(2);

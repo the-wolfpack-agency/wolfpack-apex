@@ -1,10 +1,15 @@
 {
   "measured": "2026-09-02",
-  "note": "First run against a working vector store. Every earlier figure today graded the keyword half only, because the Qdrant key had expired on 2026-08-31 and the eval correctly refused rather than reporting half the product as the whole.",
   "pairs": 28,
-  "found": 0.57,
-  "ranked_first": 0.29,
-  "mrr": 0.387,
-  "never_found": 12,
-  "known_gap": "731 of 5737 vectors (12.7%) carry no content payload and are skipped at read time, so their documents cannot be found by meaning until re-embedded."
+  "found": 0.71,
+  "ranked_first": 0.39,
+  "mrr": 0.483,
+  "never_found": 8,
+  "run_as": "a role that reads the whole corpus",
+  "history": [
+    { "found": 0.57, "mrr": 0.387, "note": "first run against a working vector store; graded as an evp, which cannot read the 124 admin-audience documents many pairs point at" },
+    { "found": 0.57, "mrr": 0.353, "note": "after rebuilding 731 malformed vectors; no change to recall, so the poison vectors were never what blocked these questions" },
+    { "found": 0.71, "mrr": 0.483, "note": "graded as a role that can read what is being asked about" }
+  ],
+  "what_this_is_not": "A measure of what any given person can find. It grades retrieval, so it runs unrestricted on purpose; a role-scoped number is a different question and would need its own pairs."
 }

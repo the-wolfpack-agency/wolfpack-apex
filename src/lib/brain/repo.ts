@@ -617,7 +617,12 @@ export function buildKeywordSearchSql(
     SELECT t.withheld, m.*
       FROM tot t
       LEFT JOIN LATERAL (
-        SELECT chunk_id, document_id, chunk_idx, filename, kind, content, score, headline
+        /* estate travels with the passage. It is selected in the matched CTE above
+           was missing HERE, so every keyword hit arrived without one while the
+           semantic half had it: exactly the half-labeled state the estate work
+           set out to avoid. An inner column no outer projection names is simply
+           invisible, and nothing fails. */
+        SELECT chunk_id, document_id, chunk_idx, filename, kind, estate, content, score, headline
           FROM matched
          WHERE readable
          ORDER BY score DESC
