@@ -669,4 +669,15 @@ describe("what you can ask", () => {
     const panel = await screen.findByTestId("pilot-try-asking");
     expect(panel.textContent || "").not.toMatch(/\bbook\b|\bsend\b|schedule a meeting/i);
   });
+
+  /* NO PROMPT THAT DEAD-ENDS ON A SYSTEM A PILOT DOES NOT HAVE. The first
+     version shipped four that answered "no connected system holds that" in
+     front of a client: contact compare (no CRM), a role lookup (no such role),
+     goals (none recorded), revenue (no QuickBooks). None may reappear. */
+  it("shows no prompt that depends on a system a documents pilot lacks", async () => {
+    respond({ ...base });
+    render(<PilotPage />);
+    const text = (await screen.findByTestId("pilot-try-asking")).textContent || "";
+    expect(text).not.toMatch(/compare contacts|who runs|who leads|revenue|our goals|across systems/i);
+  });
 });

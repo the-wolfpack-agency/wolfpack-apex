@@ -87,31 +87,40 @@ function Figure({
 }
 
 /**
- * The prompts shown to a client, curated from the verified guide.
+ * The prompts shown to a client, and why each one is here.
  *
- * READ-ONLY, by tool name: search, meeting prep, who-is, tasks, schedule
- * health, goals, financials, cross-source compare. No create/send form,
- * because the first thing a client tries should not book a meeting or send a
- * message. Ordered to lead with the library the pilot is about.
+ * EVERY PROMPT MUST RETURN A REAL ANSWER ON A DEPLOYMENT LIKE THIS ONE. The
+ * first version picked phrasings by tool name from the generic guide and
+ * shipped four that dead-end: "compare contacts across systems" needs a CRM,
+ * "who runs engineering" needs an engineering role, "what are our goals" needs
+ * goals recorded, "what was our revenue" needs QuickBooks. A pilot has none of
+ * those on day one, so each answered "no connected system holds that" in front
+ * of a client, which is the exact credibility loss this panel exists to avoid.
  *
- * Drawn from PROMPT_GUIDE rather than retyped, so the routing tests that hold
- * that guide true also hold this list: the page cannot advertise a phrasing
- * the product does not answer.
+ * So this is documents-first, because a documents pilot always has a connected
+ * library, and adds only the surfaces whose worst case is an on-topic empty
+ * ("nothing at 10am"), never "no connected system". Financials, goals, contact
+ * compare and role lookup are deliberately absent until the systems behind them
+ * are connected, at which point they belong on a page that reads the connection
+ * state rather than a fixed list.
+ *
+ * Phrasings taken from PROMPT_GUIDE so the routing tests still hold them true.
  */
 const TRY_ASKING = (() => {
-  const order = [
-    "search",
-    "compare_across_sources",
-    "meeting_prep",
-    "who_is",
-    "task_list_widget",
-    "schedule_health",
-    "get_goals",
-    "get_financials_metric",
-  ];
-  return order
-    .map((tool) => PROMPT_GUIDE.find((g) => g.tool === tool))
-    .filter((g): g is (typeof PROMPT_GUIDE)[number] => Boolean(g && g.say.length > 0));
+  const search = PROMPT_GUIDE.find((g) => g.tool === "search");
+  const meeting = PROMPT_GUIDE.find((g) => g.tool === "meeting_prep");
+  const tasks = PROMPT_GUIDE.find((g) => g.tool === "task_list_widget");
+  const rows: { goal: string; say: string; gives: string }[] = [];
+  /* Three document questions, the pilot's guaranteed strength: about a client,
+     about a document, about a program. */
+  if (search) {
+    for (const say of search.say.slice(0, 3)) rows.push({ goal: say, say, gives: search.gives });
+  }
+  /* Personal surfaces that answer or come back empty-but-on-topic, never
+     "nothing is connected". */
+  if (meeting) rows.push({ goal: "meeting", say: meeting.say[0], gives: meeting.gives });
+  if (tasks) rows.push({ goal: "tasks", say: tasks.say[0], gives: tasks.gives });
+  return rows;
 })();
 
 interface LibraryQuestion {
@@ -354,8 +363,8 @@ export default function PilotPage() {
             </p>
             <ul className="wp-pilot-list">
               {TRY_ASKING.map((g) => (
-                <li key={g.goal}>
-                  <strong>&ldquo;{g.say[0]}&rdquo;</strong>
+                <li key={g.say}>
+                  <strong>&ldquo;{g.say}&rdquo;</strong>
                   <span className="wp-pilot-note"> {g.gives}</span>
                 </li>
               ))}
