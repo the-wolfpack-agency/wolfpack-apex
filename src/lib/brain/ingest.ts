@@ -103,6 +103,9 @@ export async function ingest(req: IngestRequest): Promise<IngestResult> {
     webUrl: req.webUrl,
     /* So a connector sync can tell what it has already taken. */
     msDriveItemId: req.msDriveItemId,
+    /* Whose material this is, so a synced document counts in the right
+       client's figures rather than dropping out with a null estate. */
+    estate: req.estate,
     audienceRoles: req.audienceRoles,
   });
 

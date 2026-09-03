@@ -126,6 +126,8 @@ export interface BrainQueryResult {
 /** Parameters a caller passes to ingest(). */
 export interface IngestRequest {
   filename: string;
+  /** Whose material this is, set by a connector sync and written to the row. */
+  estate?: string;
   contentType: string;
   buffer: Buffer;
   uploadedBy: string;

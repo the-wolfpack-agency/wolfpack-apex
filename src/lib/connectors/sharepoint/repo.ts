@@ -22,6 +22,7 @@ export interface QueryRunner {
 
 interface SourceRow extends Record<string, unknown> {
   id: string;
+  estate?: string | null;
   workspace_id: string;
   name: string;
   site_url: string;
@@ -62,6 +63,9 @@ function rowToSource(r: SourceRow): SharepointSource {
     createdAt: r.created_at,
     lastSyncedAt: r.last_synced_at,
     isActive: r.is_active,
+    /* Fails to 'wolfpack', never null, so an unclassified source stays out of
+       a client's figures rather than leaking into them. */
+    estate: (r.estate as string | null) ?? "wolfpack",
     /* FAILS CLOSED. A row read before migration 239, or one whose column is
        somehow null, is admin-only rather than everyone: the default has to be
        the safe answer, because the unsafe one is invisible until a dealer is

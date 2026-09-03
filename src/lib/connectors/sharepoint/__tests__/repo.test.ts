@@ -71,6 +71,9 @@ describe("createRepo", () => {
          default has to be the safe answer: the unsafe one stays invisible
          until a dealer is quoted an HR file. */
       audienceRoles: ["admin"],
+      /* A row with no estate column maps to 'wolfpack', never null, so
+         unclassified material stays OUT of a client's figures. */
+      estate: "wolfpack",
     });
     expect(fake.calls[0].sql).toMatch(/INSERT INTO instinct_sharepoint_sources/);
   });

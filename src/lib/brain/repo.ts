@@ -40,6 +40,8 @@ export interface CreateDocArgs {
   audienceRoles?: string[] | null;
   msFileLocalId?: string | null;
   webUrl?: string | null;
+  /** Whose material this is; null stays out of client-scoped figures. */
+  estate?: string | null;
 }
 
 export async function findDocumentBySha(sha: string): Promise<BrainDocument | null> {
@@ -193,8 +195,8 @@ export async function createDocument(
     `INSERT INTO brain_documents
         (ms_drive_item_id, ms_file_local_id, web_url,
          filename, content_type, size_bytes, sha256,
-         kind, status, uploaded_by, uploader_role, tags, audience_roles)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'queued', $9, $10, $11, $12)
+         kind, status, uploaded_by, uploader_role, tags, audience_roles, estate)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'queued', $9, $10, $11, $12, $13)
      RETURNING *`,
     [
       args.msDriveItemId ?? null,
@@ -211,6 +213,7 @@ export async function createDocument(
       /* NULL, not an empty array: an empty audience would read as "no role may
          see this", which is not what "unrestricted" means. */
       args.audienceRoles && args.audienceRoles.length > 0 ? args.audienceRoles : null,
+      args.estate ?? null,
     ],
   );
   const doc = res.rows[0];

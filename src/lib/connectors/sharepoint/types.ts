@@ -21,6 +21,15 @@ export interface SharepointSource {
   createdAt: string;
   lastSyncedAt: string | null;
   isActive: boolean;
+  /**
+   * Whose material this library holds, carried onto every document synced from
+   * it. Without this a synced document has a null estate and drops out of every
+   * client-facing figure that filters by estate: a client's own SharePoint,
+   * indexed, would not count as theirs. Defaults to 'wolfpack' when a row
+   * predates the column, which keeps unclassified content OUT of a client's
+   * numbers rather than silently into them.
+   */
+  estate: string;
 }
 
 export type IngestJobStatus = "running" | "succeeded" | "failed" | "partial";
