@@ -34,6 +34,7 @@ const source: SharepointSource = {
   createdAt: "2026-05-16T00:00:00Z",
   lastSyncedAt: null,
   isActive: true,
+  estate: "pcna",
   /* A real source always carries one; admin-only is the database default. */
   audienceRoles: ["admin"],
 };
@@ -90,6 +91,12 @@ describe("syncSource", () => {
         "workspace:ws-1",
       ]),
     );
+    /* Every synced document carries its source's estate, or a PCNA site
+       indexed here would land with a null estate and drop out of the client's
+       own figures. This is the guarantee that makes it safe to index a whole
+       granted SharePoint rather than one hand-picked folder. */
+    expect(ingestFn.mock.calls[0][0].estate).toBe("pcna");
+    expect(ingestFn.mock.calls[1][0].estate).toBe("pcna");
   });
 
   test("partial failure: one file ingest throws, run completes with status=partial", async () => {

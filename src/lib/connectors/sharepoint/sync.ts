@@ -398,6 +398,7 @@ export async function syncSource(
               webUrl: f.webUrl,
               msDriveItemId: f.id,
               audienceRoles: source.audienceRoles,
+              estate: source.estate,
             });
             successCount++;
             bytesIngested += buf.length;
@@ -437,6 +438,7 @@ export async function syncSource(
              audience would publish a manager-only process document to every
              dealer with a login, and nothing downstream could tell. */
           audienceRoles: source.audienceRoles,
+              estate: source.estate,
           uploadedBy: triggeredBy,
           uploaderRole: triggeredByRole,
           tags: [
