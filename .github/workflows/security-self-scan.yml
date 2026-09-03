@@ -113,112 +113,44 @@ jobs:
         id: parse
         if: steps.pat-check.outputs.configured == 'true'
         run: |
+          # ONE source of truth for the table AND the gate:
+          # scripts/security-scan-report.py computes each scanner's Status from
+          # NEW-vs-baseline findings (not raw counts) after dropping the
+          # human-verified false positives in .agenticqa/suppressions.json, and
+          # emits the SAME gating number the gate step below enforces. This ends
+          # the split-brain where the comment shouted "FAIL / risk=critical" on a
+          # PR the gate passed and merged. Unit-tested at
+          # src/__tests__/security-scan-report.test.ts.
+          python3 scripts/security-scan-report.py scan-results.json \
+            --baseline .agenticqa/scan-baseline.json \
+            --suppressions .agenticqa/suppressions.json \
+            --table-out scan-table.md \
+            --github-output "$GITHUB_OUTPUT"
+
+          # Full JSON for the collapsible PR-comment section.
+          cp scan-results.json scan-details.json
+
+          # Regenerate the baseline from today's gate-scanner findings so the
+          # next run compares against current. (Committed only on push to main by
+          # a later step; PR runs read it read-only.)
           python3 << 'PYEOF'
-          import json, os
-
-          with open("scan-results.json") as f:
-              data = json.load(f)
-
-          summary = data.get("summary", {})
-          scanners = data.get("scanners", {})
-
-          total_findings = summary.get("total_findings", 0)
-          total_critical = summary.get("total_critical", 0)
-          risk_level = summary.get("risk_level", "unknown")
-
-          # Check the 6 critical scanner categories
-          CRITICAL_SCANNERS = [
-              "auth_bypass", "idor", "jwt_security",
-              "rate_limit", "error_disclosure", "security_headers"
-          ]
-          critical_in_key_scanners = 0
-          for name in CRITICAL_SCANNERS:
-              scanner = scanners.get(name, {})
-              if scanner.get("status") == "ok":
-                  critical_in_key_scanners += scanner["result"].get("critical", 0)
-
-          # ── Baseline comparison: only fail on NEW findings ──────────
-          # Load baseline (committed to repo). If it doesn't exist, this
-          # is the first run, save current as baseline and pass.
-          baseline_path = ".agenticqa/scan-baseline.json"
-          baseline_hashes = set()
-          try:
-              with open(baseline_path) as bf:
-                  baseline_data = json.load(bf)
-                  baseline_hashes = set(baseline_data.get("finding_hashes", []))
-          except (FileNotFoundError, json.JSONDecodeError):
-              pass
-
-          # Line-independent identity (file|cwe|rule|normalized-snippet).
-          # Codified + unit-tested in the package so routine edits that
-          # shift line numbers don't turn an old finding into a "new" one.
+          import json, os, datetime
           from agenticqa.security.finding_fingerprint import fingerprint
-          current_hashes = set()
-          all_findings_list = []
+          data = json.load(open("scan-results.json"))
+          CRITICAL_SCANNERS = ["auth_bypass", "idor", "jwt_security",
+                               "rate_limit", "error_disclosure", "security_headers"]
+          hashes = set()
           for name in CRITICAL_SCANNERS:
-              scanner = scanners.get(name, {})
-              if scanner.get("status") == "ok":
-                  for f in scanner["result"].get("findings", []):
-                      h = fingerprint(f)
-                      current_hashes.add(h)
-                      all_findings_list.append({**f, "_hash": h})
-
-          new_findings = current_hashes - baseline_hashes
-          new_critical = sum(
-              1 for f in all_findings_list
-              if f["_hash"] in new_findings and f.get("severity") in ("critical", "high")
-          )
-
-          # Save current as baseline for next run
-          os.makedirs(os.path.dirname(baseline_path), exist_ok=True)
-          with open(baseline_path, "w") as bf:
-              json.dump({
-                  "finding_hashes": sorted(current_hashes),
-                  "total": len(current_hashes),
-                  "generated_at": __import__("datetime").datetime.utcnow().isoformat(),
-              }, bf, indent=2)
-
-          # Override: only NEW critical/high findings should fail the pipeline
-          critical_in_key_scanners = new_critical
-
-          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
-              out.write(f"total_findings={total_findings}\n")
-              out.write(f"total_critical={total_critical}\n")
-              out.write(f"risk_level={risk_level}\n")
-              out.write(f"critical_in_key_scanners={critical_in_key_scanners}\n")
-
-          # Build markdown table for PR comment
-          rows = []
-          for name in CRITICAL_SCANNERS:
-              scanner = scanners.get(name, {})
-              if scanner.get("status") == "ok":
-                  r = scanner["result"]
-                  findings = r.get("total_findings", 0)
-                  crit = r.get("critical", 0)
-                  status = "PASS" if crit == 0 else "FAIL"
-              elif scanner.get("status") == "error":
-                  findings = "err"
-                  crit = "err"
-                  status = "ERROR"
-              else:
-                  findings = "-"
-                  crit = "-"
-                  status = "SKIP"
-              display = name.replace("_", " ").title()
-              rows.append(f"| {display} | {findings} | {crit} | {status} |")
-
-          table = "| Scanner | Findings | Critical | Status |\n"
-          table += "|---------|----------|----------|--------|\n"
-          table += "\n".join(rows)
-
-          # Write table to file for the comment step
-          with open("scan-table.md", "w") as f:
-              f.write(table)
-
-          # Write full JSON details for the collapsible section
-          with open("scan-details.json", "w") as f:
-              json.dump(data, f, indent=2, default=str)
-
+              sc = data.get("scanners", {}).get(name, {})
+              if sc.get("status") == "ok":
+                  for f in sc["result"].get("findings", []):
+                      hashes.add(fingerprint(f))
+          os.makedirs(".agenticqa", exist_ok=True)
+          json.dump({
+              "finding_hashes": sorted(hashes),
+              "total": len(hashes),
+              "generated_at": datetime.datetime.utcnow().isoformat(),
+          }, open(".agenticqa/scan-baseline.json", "w"), indent=2)
           PYEOF
 
       - name: Upload scan results
@@ -570,96 +502,59 @@ jobs:
       - name: Generate combined report
         id: report
         run: |
+          # The scanner table + gate verdict come from the SAME script the
+          # static-scan job gates on (scripts/security-scan-report.py), so this
+          # comment can no longer disagree with the enforced result. The script
+          # is self-contained (inline fingerprint fallback) so it needs no tool
+          # install here. Suppressions + baseline are read from the checked-out
+          # repo. --gate is intentionally omitted: this step reports, it does not
+          # enforce (the static-scan gate step does that).
+          SCAN=artifacts/scan-results/scan-results.json
+          if [ -f "$SCAN" ]; then
+            python3 scripts/security-scan-report.py "$SCAN" \
+              --baseline .agenticqa/scan-baseline.json \
+              --suppressions .agenticqa/suppressions.json \
+              --table-out scan-table.md \
+              --github-output "$GITHUB_OUTPUT" || true
+          else
+            echo "_Scan results artifact not found._" > scan-table.md
+          fi
+
           python3 << 'PYEOF'
-          import json, os, datetime
+          import json
 
-          scan_data = {}
-          pentest_data = {}
-          audit_data = {}
+          def load(path):
+              try:
+                  return json.load(open(path))
+              except (FileNotFoundError, json.JSONDecodeError):
+                  return {}
 
-          # Load scan results
+          scan_data = load("artifacts/scan-results/scan-results.json")
+          audit_data = load("artifacts/npm-audit/npm-audit.json")
           try:
-              with open("artifacts/scan-results/scan-results.json") as f:
-                  scan_data = json.load(f)
-          except (FileNotFoundError, json.JSONDecodeError):
-              pass
+              table = open("scan-table.md").read().strip()
+          except FileNotFoundError:
+              table = "_No scan table._"
 
-          # Load pentest results
-          try:
-              with open("artifacts/pentest-results/pentest-results.json") as f:
-                  pentest_data = json.load(f)
-          except (FileNotFoundError, json.JSONDecodeError):
-              pass
-
-          # Load npm audit
-          try:
-              with open("artifacts/npm-audit/npm-audit.json") as f:
-                  audit_data = json.load(f)
-          except (FileNotFoundError, json.JSONDecodeError):
-              pass
-
-          # Build scanners table
-          scanners = scan_data.get("scanners", {})
-          CRITICAL_SCANNERS = [
-              "auth_bypass", "idor", "jwt_security",
-              "rate_limit", "error_disclosure", "security_headers"
-          ]
-          table_rows = []
-          for name in CRITICAL_SCANNERS:
-              scanner = scanners.get(name, {})
-              if scanner.get("status") == "ok":
-                  r = scanner["result"]
-                  findings = r.get("total_findings", 0)
-                  crit = r.get("critical", 0)
-                  status = "PASS" if crit == 0 else "FAIL"
-              else:
-                  findings = "-"
-                  crit = "-"
-                  status = "SKIP"
-              display = name.replace("_", " ").title()
-              table_rows.append(f"| {display} | {findings} | {crit} | {status} |")
-
-          # Dep audit summary
           vulns = audit_data.get("metadata", {}).get("vulnerabilities", {})
           dep_high = vulns.get("high", 0)
           dep_crit = vulns.get("critical", 0)
 
-          summary = scan_data.get("summary", {})
-          total_findings = summary.get("total_findings", 0)
-          total_critical = summary.get("total_critical", 0)
-          risk_level = summary.get("risk_level", "unknown")
-
-          report = f"""## AgenticQA Security Scan
-
-          | Scanner | Findings | Critical | Status |
-          |---------|----------|----------|--------|
-          {chr(10).join(table_rows)}
-
-          **Dependency Audit**: {dep_high} high / {dep_crit} critical CVEs
-
-          **Overall**: {total_findings} findings, {total_critical} critical, risk={risk_level}
-
-          <details>
-          <summary>Full scan details</summary>
-
-          ```json
-          {json.dumps(scan_data, indent=2, default=str)[:50000]}
-          ```
-
-          </details>
-          """
-
-          # De-indent the report (it was indented for readability in the heredoc)
-          import textwrap
-          report = textwrap.dedent(report)
-
+          report = (
+              "## AgenticQA Security Scan\n\n"
+              f"{table}\n\n"
+              f"**Dependency Audit**: {dep_high} high / {dep_crit} critical CVEs\n\n"
+              "Status reflects the enforced gate (new findings vs the committed "
+              "baseline, minus reviewed false positives in "
+              "`.agenticqa/suppressions.json`), not raw counts.\n\n"
+              "<details>\n<summary>Full scan details</summary>\n\n"
+              "```json\n"
+              f"{json.dumps(scan_data, indent=2, default=str)[:50000]}\n"
+              "```\n\n</details>\n"
+          )
           with open("combined-report.md", "w") as f:
               f.write(report)
-
-          # Signal whether to create an issue
-          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
-              out.write(f"total_critical={total_critical}\n")
-              out.write(f"risk_level={risk_level}\n")
+          PYEOF
 
           PYEOF
 

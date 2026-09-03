@@ -1,0 +1,26 @@
+{
+  "_comment": "Documented, reviewed false positives from the AgenticQA security scan. A finding is suppressed ONLY when a human has verified it is not a real vulnerability, with the reason recorded here. The scan-report script drops these before computing Status and the gate, so the table stops reporting verified-safe routes as FAIL. Removing an entry re-arms the finding. This is an allowlist of KNOWN-SAFE findings, never a way to hide unreviewed criticals.",
+  "suppressions": [
+    {
+      "scanner": "auth_bypass",
+      "file": "src/app/api/version/route.ts",
+      "reason": "Intentionally public build-version endpoint. Returns only the git SHA and Vercel deploy metadata so a push can be confirmed to have reached production. No DB, no secrets, no user data. Documented as public in the route header.",
+      "verified_by": "cto",
+      "added": "2026-09-03"
+    },
+    {
+      "scanner": "auth_bypass",
+      "file": "src/app/api/site-analytics/ingest/route.ts",
+      "reason": "Authenticated via an x-ingest-token shared secret with a constant-time compare; returns 503 when the token is unconfigured and 401 on mismatch, rate-limited, accepts no PII. The scanner only recognizes the requireCapability gate as auth and does not model header-token auth.",
+      "verified_by": "cto",
+      "added": "2026-09-03"
+    },
+    {
+      "scanner": "auth_bypass",
+      "file": "src/app/api/agents/token/route.ts",
+      "reason": "This is a login endpoint: it mints an access token from {agent_id, onboarding_secret}. A login route cannot require a pre-existing auth token because the secret IS the credential. Rate-limited, anti-enumeration, audited. Equivalent to flagging /api/auth/login for having no auth check.",
+      "verified_by": "cto",
+      "added": "2026-09-03"
+    }
+  ]
+}
