@@ -556,8 +556,6 @@ jobs:
               f.write(report)
           PYEOF
 
-          PYEOF
-
       - name: Write step summary
         run: cat combined-report.md >> $GITHUB_STEP_SUMMARY
 
