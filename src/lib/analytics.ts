@@ -1409,6 +1409,11 @@ export type InstinctEventType =
      drive item ids are not being recorded and every run starts from nothing. */
   | "connectors.sharepoint.sync_resumed"
   | "connectors.sharepoint.sync_finished"
+  /* One estate-level summary per sync-all invocation: how many connected
+     sources were walked and how many files landed. Lets an admin see the whole
+     granted estate converge over repeated runs, distinct from the per-source
+     sync_finished events. */
+  | "connectors.sharepoint.estate_sync_finished"
   | "connectors.sharepoint.file_ingest_failed"
   | "connectors.sharepoint.placeholder_indexed"
   // Invite was looked up but the expires_at column says it lapsed.
