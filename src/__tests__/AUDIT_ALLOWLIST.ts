@@ -688,6 +688,10 @@ export const AUDIT_ALLOWLIST: ReadonlyArray<AuditAllowlistEntry> = [
     reason: "SharePoint cache-refresh sync: no user-visible state mutation; connectors.source_synced analytics",
   },
   {
+    route: "src/app/api/connectors/sharepoint/sync-all/route.ts",
+    reason: "SharePoint estate cache-refresh: walks every active source and runs the same allowlisted per-source sync; connectors.sharepoint.estate_sync_finished + per-source sync_finished analytics are the trail. Same class as the per-source sync above, capability-gated (settings.manage_team)",
+  },
+  {
     route: "src/app/api/connectors/sharepoint/sources/[id]/clear-stuck/route.ts",
     reason: "operational reset of a stuck sync flag: recovery action, not security-relevant; analytics-tracked",
   },
