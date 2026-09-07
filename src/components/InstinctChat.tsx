@@ -10,7 +10,7 @@ import {
 import { sendAssistantMessageOffline } from "@/lib/assistant-drafts-offline";
 import { RagSnapshotBadge } from "@/components/RagSnapshotBadge";
 
-import { renderMessageContent, stripAppendedSources } from "@/lib/assistant/render-markdown";
+import { renderMessageContent, stripAppendedSources, parseAppendedSources } from "@/lib/assistant/render-markdown";
 import AssistantThinkingIndicator from "@/components/AssistantThinkingIndicator";
 import AssistantSourceCards from "@/components/AssistantSourceCards";
 import {
@@ -163,6 +163,27 @@ const SOURCE_BADGE: Record<string, { label: string; color: string }> = {
    it can be unit-tested + reused. Imported above. */
 
 // ---------------------------------------------------------------------------
+/**
+ * The sources to render as cards for an assistant message.
+ *
+ * Prefers the structured `sources` the server attached. When those are absent
+ * — a cited answer whose document lives only in the `appendCitations` text
+ * footer — it falls back to parsing that footer, so a clean card renders and
+ * the raw percent-encoded URL is stripped from the text regardless of which
+ * answer path produced the citation. Empty when there is nothing to show, which
+ * keeps the raw footer visible only when we genuinely have no cleaner form.
+ */
+export function displaySourcesFor(msg: Message): AssistantSource[] {
+  if (msg.role !== "assistant") return [];
+  if (msg.sources && msg.sources.length > 0) return msg.sources;
+  return parseAppendedSources(msg.content).map((s, i) => ({
+    id: `src-footer-${i}`,
+    title: s.title,
+    url: s.url,
+    type: "document",
+  }));
+}
+
 // Component
 // ---------------------------------------------------------------------------
 
@@ -1778,9 +1799,10 @@ export default function InstinctChat({
                   >
                     {renderMessageContent(
                       /* Strip the appended raw-URL "Sources" footer for display
-                         when we have structured sources to render as cards below.
+                         whenever we have anything cleaner to show it as — either
+                         structured sources OR the footer's own parsed links.
                          Copy still uses the full msg.content. */
-                      msg.role === "assistant" && msg.sources && msg.sources.length > 0
+                      msg.role === "assistant" && displaySourcesFor(msg).length > 0
                         ? stripAppendedSources(msg.content)
                         : msg.content,
                     )}
@@ -1901,10 +1923,9 @@ export default function InstinctChat({
                   ) : null}
 
                   {msg.role === "assistant" &&
-                    msg.sources &&
-                    msg.sources.length > 0 && (
+                    displaySourcesFor(msg).length > 0 && (
                       <AssistantSourceCards
-                        sources={msg.sources}
+                        sources={displaySourcesFor(msg)}
                         onOpen={(s) => {
                           /* Same learning-loop event as before: which answer's
                              source did the reader actually open. */

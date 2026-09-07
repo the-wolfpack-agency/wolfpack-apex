@@ -58,6 +58,38 @@ export function stripAppendedSources(content: string): string {
   return content.replace(/\n*\*\*Sources(?: retrieved)?:\*\*[\s\S]*$/, "").trimEnd();
 }
 
+/**
+ * Pull the appended sources footer back OUT into structured entries.
+ *
+ * WHY THIS EXISTS. The clean source cards only rendered when the message
+ * carried a structured `sources` array — but for a cited answer the document
+ * often lives ONLY in the `appendCitations` text footer (`**Sources:**\n1.
+ * [file](url)`), with the structured array empty or holding just a portal link.
+ * So the strip never fired and the raw percent-encoded URL showed anyway
+ * (observed in production on "what is in the SOW?"). This lets the renderer
+ * fall back to the footer's own links, so a card renders and the raw text is
+ * removed no matter which answer path produced the citation.
+ *
+ * Returns [] when there is no footer, so the caller keeps whatever structured
+ * sources it already had. A footer line with no link yields a title and an
+ * empty url (the card renders non-clickable rather than as a dead link).
+ */
+export function parseAppendedSources(content: string): Array<{ title: string; url: string }> {
+  const m = content.match(/\n*\*\*Sources(?: retrieved)?:\*\*\s*([\s\S]*)$/);
+  if (!m) return [];
+  const out: Array<{ title: string; url: string }> = [];
+  for (const line of m[1].split("\n")) {
+    const linked = line.match(/^\s*\d+\.\s*\[(.+?)\]\((.+?)\)\s*$/);
+    if (linked) {
+      out.push({ title: linked[1].trim(), url: linked[2].trim() });
+      continue;
+    }
+    const bare = line.match(/^\s*\d+\.\s*(\S.*?)\s*$/);
+    if (bare) out.push({ title: bare[1].trim(), url: "" });
+  }
+  return out;
+}
+
 export function isSafeHref(href: string): boolean {
   // Protocol-relative URLs (//host/path) resolve against the current
   // page origin's protocol but the host is attacker-controlled. Reject.
