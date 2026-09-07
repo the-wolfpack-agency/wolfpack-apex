@@ -75,7 +75,7 @@ Non-negotiable, carried from Instinct + one addition you asked for:
 
 ## 9. Gates before Ford's real data goes in
 
-- Human pass on the flagged eval pairs (recall is really 71–83%, not 71%).
+- [DONE, PR #681] Human pass on the flagged eval pairs: 9/10 flags were false positives, 1 real mislabel removed; set is 27 evidence-verified pairs, honest recall 78%.
 - AgenticQA scan: NOT retuned on Instinct (owner decision 2026-09-07 - leave that scanner as-is). For ford, stand up the scan **precision-first from commit one** (vendor/ excluded, provider-signature secrets only, Semgrep for taint classes) so the client security team never sees the 2,113-finding noise. See section 7.
 - [DONE, PR #681] Live-UI assistant user-sim E2E wired into e2e-reality-check.yml (runs post-merge against prod with the smoke user).
 - One clean end-to-end rollout rehearsal on a test tier, mirroring WWP.
