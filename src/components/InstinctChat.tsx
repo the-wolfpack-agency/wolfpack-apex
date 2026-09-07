@@ -173,6 +173,18 @@ const SOURCE_BADGE: Record<string, { label: string; color: string }> = {
  * answer path produced the citation. Empty when there is nothing to show, which
  * keeps the raw footer visible only when we genuinely have no cleaner form.
  */
+/**
+ * Whether to auto-scroll the message list to the bottom.
+ *
+ * Only when a message was actually ADDED (count rose past what we last scrolled
+ * for). A background poll/broadcast refresh re-merges the same messages into a
+ * new array with the SAME count; scrolling then yanked the reader away from
+ * what they were reading ~15-30s in. Same-or-lower count → do not scroll.
+ */
+export function shouldAutoScroll(count: number, alreadyScrolledFor: number): boolean {
+  return count > 0 && count > alreadyScrolledFor;
+}
+
 export function displaySourcesFor(msg: Message): AssistantSource[] {
   if (msg.role !== "assistant") return [];
   if (msg.sources && msg.sources.length > 0) return msg.sources;
@@ -240,6 +252,13 @@ export default function InstinctChat({
   }, [sidebarCollapsed]);
   const [floatingOpen, setFloatingOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  /* How many messages we last auto-scrolled for. The scroll effect fires on
+     the messages array REFERENCE, and the ~15-30s poll/broadcast refresh
+     replaces that array even when no message was added — which scrolled the
+     reader away from what they were reading mid-read. Gating on the count
+     rising means a background refresh never scrolls; only a genuinely new
+     message does. */
+  const scrolledForCountRef = useRef(0);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   /* Stop-button state. When the user clicks Stop mid-send, we flip
@@ -681,7 +700,15 @@ export default function InstinctChat({
   // also keeps the scroll local to the message list instead of moving
   // the whole page.
   useEffect(() => {
-    if (messages.length === 0) return;
+    if (messages.length === 0) {
+      scrolledForCountRef.current = 0;
+      return;
+    }
+    /* Only scroll when a message was actually ADDED. A poll/broadcast refresh
+       that re-merges the same messages (new array, same count) must not yank
+       the reader to the bottom while they are reading. */
+    if (!shouldAutoScroll(messages.length, scrolledForCountRef.current)) return;
+    scrolledForCountRef.current = messages.length;
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [messages]);
 
