@@ -88,6 +88,36 @@ async function main(): Promise<void> {
     console.log(`Mined ${mined.length} safe read-only prompt(s) from ${raw.length} real queries.\n`);
   }
 
+  /* --from-feedback closes the loop: the prompts whose ANSWERS a person gave a
+     thumbs-down (rating <= 2) become the corpus, so the harness re-checks
+     exactly what users disliked and the grader says whether it is still bad.
+     Same PII/action safety as --real. This is how a real miss becomes a
+     regression case instead of a one-off complaint. */
+  if (process.argv.includes("--from-feedback")) {
+    const { rows: raw } = await query<{ query: string }>(
+      /* The user prompt immediately before each low-rated assistant answer,
+         in the same conversation. */
+      `SELECT u.content AS query
+         FROM instinct_messages a
+         JOIN LATERAL (
+           SELECT content, created_at FROM instinct_messages u
+            WHERE u.conversation_id = a.conversation_id
+              AND u.role = 'user'
+              AND u.created_at < a.created_at
+            ORDER BY u.created_at DESC
+            LIMIT 1
+         ) u ON TRUE
+        WHERE a.role = 'assistant' AND a.rating IS NOT NULL AND a.rating <= 2
+        ORDER BY a.created_at DESC
+        LIMIT 200`,
+    );
+    const mined = minePrompts(raw, 40);
+    items = mined.map((prompt) => ({ group: "thumbs-down", prompt }));
+    console.log(
+      `Mined ${mined.length} safe prompt(s) from ${raw.length} thumbs-down answers — replaying what users disliked.\n`,
+    );
+  }
+
   console.log(`Running ${items.length} prompt(s) through chat() as ${me.role}, router and gate live.\n`);
 
   const grading = process.argv.includes("--grade");
