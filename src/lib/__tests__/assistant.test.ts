@@ -1303,7 +1303,10 @@ describe("regression 2026-04-30 — callAI routes through AI router", () => {
        not the Anthropic-specific shape. */
     expect(req).toEqual(
       expect.objectContaining({
-        max_tokens: 2048,
+        /* Lowered from 2048: a backstop, not the lever — concision guidance in
+           the system prompt shortens answers (and the ~7s model time); this
+           only caps a runaway. */
+        max_tokens: 1024,
         model_tier: "standard",
         latency_target: "real_time",
       }),

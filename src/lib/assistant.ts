@@ -3604,7 +3604,11 @@ async function callAI(
     const aiResponse = await client.complete({
       messages: aiMessages,
       system: systemPrompt,
-      max_tokens: 2048,
+      /* Backstop, not the lever: the concision guidance in the system prompt
+         is what shortens answers (and the ~7s model time). This cap only stops
+         a runaway; lowered from 2048 so a pathological answer cannot balloon
+         latency, while staying well above a normal concise answer's length. */
+      max_tokens: 1024,
       model_tier: tierChoice.tier,
       latency_target: "real_time",
       /* CHECK THE ANSWER BEFORE THE PERSON READS IT.
