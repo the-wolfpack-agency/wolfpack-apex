@@ -3247,7 +3247,14 @@ async function tryBrain(
          not anything a reader can act on: there is no chunk 7 to go and look
          at, and naming one in a client-facing answer reads as debug output
          that escaped. The filename is the part somebody can actually open. */
-      lines.push(`**${h.document_filename}**`);
+      /* THE FILENAME IS A LINK TO THE DOCUMENT when we hold a web URL for it,
+         so a reader can click straight out to the file in its own source
+         (SharePoint, etc.) rather than only seeing its name as text. Falls
+         back to bold text when there is no URL. Not wrapped in ** — the inline
+         renderer does not nest a link inside bold, it would print the markup. */
+      lines.push(
+        h.web_url ? `[${h.document_filename}](${h.web_url})` : `**${h.document_filename}**`,
+      );
       /* Ellipses on the sides that were actually trimmed, so an excerpt looks
          like an excerpt and a complete passage does not pretend to be one. */
       lines.push(
@@ -3277,8 +3284,11 @@ async function tryBrain(
       sources.push({
         id: docId,
         title: h.document_filename,
-        url: `/brain?doc=${encodeURIComponent(docId)}`,
-        type: "brain",
+        /* Open the document in its own source when we have its URL, so the
+           card clicks out to the actual file; fall back to the in-app brain
+           view only when no web URL is held. */
+        url: h.web_url ?? `/brain?doc=${encodeURIComponent(docId)}`,
+        type: h.web_url ? "document" : "brain",
       });
     }
     return {
