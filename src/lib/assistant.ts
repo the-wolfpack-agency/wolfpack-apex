@@ -40,7 +40,7 @@ import { trackEvent } from "@/lib/analytics";
 import { safeQuery } from "@/lib/db";
 import { matchPageFacts } from "@/lib/assistant/page-facts-matcher";
 import { detectSensitivePaste } from "@/lib/assistant/sensitive-paste";
-import { whichOneDidYouMean } from "@/lib/assistant/which-one-did-you-mean";
+import { whichOneDidYouMean, readableDocumentName } from "@/lib/assistant/which-one-did-you-mean";
 import { checkPersonalDataQuestion } from "@/lib/assistant/personal-data-without-graph";
 import { getValidToken } from "@/lib/microsoft-graph";
 import { capabilityDenialSql } from "@/lib/assistant/capability-denial";
@@ -3249,12 +3249,16 @@ async function tryBrain(
          that escaped. The filename is the part somebody can actually open. */
       /* THE FILENAME IS A LINK TO THE DOCUMENT when we hold a web URL for it,
          so a reader can click straight out to the file in its own source
-         (SharePoint, etc.) rather than only seeing its name as text. Falls
-         back to bold text when there is no URL. Not wrapped in ** — the inline
-         renderer does not nest a link inside bold, it would print the markup. */
-      lines.push(
-        h.web_url ? `[${h.document_filename}](${h.web_url})` : `**${h.document_filename}**`,
-      );
+         (SharePoint, etc.) rather than only seeing its name as text.
+         THE LABEL MUST BE THE READABLE NAME, NOT THE RAW FILENAME. A real
+         filename like "…5-7-25[36].docx.pdf" contains square brackets, and
+         `[label]` in markdown stops at the first `]`, so the link failed to
+         parse and the whole `[name](huge-url)` printed as literal text — the
+         raw URL was back, worse than before (seen in production). The cleaned
+         name has no brackets, so it both parses AND reads nicely. Not wrapped
+         in ** — the inline renderer does not nest a link inside bold. */
+      const linkLabel = readableDocumentName(h.document_filename);
+      lines.push(h.web_url ? `[${linkLabel}](${h.web_url})` : `**${linkLabel}**`);
       /* Ellipses on the sides that were actually trimmed, so an excerpt looks
          like an excerpt and a complete passage does not pretend to be one. */
       lines.push(
