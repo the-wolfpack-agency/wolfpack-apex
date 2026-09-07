@@ -70,14 +70,38 @@ export interface WhichOne {
  * friendlier refusal. A reader told "which of these did you mean" followed by
  * nothing is worse off than one told plainly that we found nothing.
  */
-export function whichOneDidYouMean(question: string, documents: string[]): WhichOne | null {
+export function whichOneDidYouMean(
+  question: string,
+  documents: Array<string | { name: string; url?: string | null }>,
+): WhichOne | null {
+  /* Accept a bare filename OR a {name, url}. A caller that holds the
+     document's web URL passes it so the name renders as a clickable link to
+     the file — the SAME way every other answer path shows a source. A plain
+     string still works (renders as bold text, no link). */
+  const items = documents.map((d) =>
+    typeof d === "string"
+      ? { name: d, url: null as string | null }
+      : { name: d.name, url: d.url ?? null },
+  );
+
   /* Filtered on real content, not on truthiness: readableDocumentName falls
      back to the original when stripping would empty it, and a whitespace
-     filename is truthy while being unpickable. */
-  const readable = [
-    ...new Set(documents.map(readableDocumentName).filter((n) => n.trim().length > 0)),
-  ].slice(0, MAX_CHOICES);
+     filename is truthy while being unpickable. Dedupe by the readable name,
+     keeping the first URL seen for it. */
+  const readable: Array<{ name: string; url: string | null }> = [];
+  const seen = new Set<string>();
+  for (const it of items) {
+    const name = readableDocumentName(it.name);
+    if (name.trim().length === 0 || seen.has(name)) continue;
+    seen.add(name);
+    readable.push({ name, url: it.url });
+    if (readable.length >= MAX_CHOICES) break;
+  }
   if (readable.length === 0) return null;
+
+  /* The readable name, as a link to the file when we hold its URL. */
+  const fmt = (r: { name: string; url: string | null }) =>
+    r.url ? `[${r.name}](${r.url})` : `**${r.name}**`;
 
   /* One candidate is not a choice. Saying "did you mean X" when X is the only
      thing there is asks a question we already know the answer to; better to
@@ -99,10 +123,10 @@ export function whichOneDidYouMean(question: string, documents: string[]): Which
    * more useful one. */
   const lead =
     readable.length === 1
-      ? `I could not find a clear answer. The closest thing I hold is **${readable[0]}**.`
+      ? `I could not find a clear answer. The closest thing I hold is ${fmt(readable[0])}.`
       : `I could not find a clear answer to that. The closest things I hold are:`;
 
-  const list = readable.length === 1 ? "" : `\n\n${readable.map((r) => `- **${r}**`).join("\n")}`;
+  const list = readable.length === 1 ? "" : `\n\n${readable.map((r) => `- ${fmt(r)}`).join("\n")}`;
 
   return {
     answer:
@@ -111,6 +135,6 @@ export function whichOneDidYouMean(question: string, documents: string[]): Which
          request to guess what we wanted. */
       `If one of those is the one you mean, name it and I will read it. ` +
       `If none of them is, it may not be in the documents I can see.`,
-    choices: readable,
+    choices: readable.map((r) => r.name),
   };
 }
