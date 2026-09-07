@@ -59,6 +59,11 @@ export type InstinctEventType =
      working; flat at zero on a tenant with restricted libraries means it is
      not being applied at all. */
   | "brain.retrieval_audience_filtered"
+  /* A retrieval was narrowed to one or more client estates. Which client
+     scopes people actually search is the demand signal for a future scope
+     selector, and it distinguishes a scoped empty ("nothing in THIS client")
+     from an unscoped one. */
+  | "brain.retrieval_estate_scoped"
   /* An answer the quality gate would not stand behind, so it was not written
      into the knowledge base. Rising says the prompt or the grounding needs
      work; it was invisible while every answer was kept regardless. */

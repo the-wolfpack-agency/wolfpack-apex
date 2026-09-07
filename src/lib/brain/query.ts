@@ -15,6 +15,7 @@
 import { embedBatch, isEmbeddingConfigured } from "./embedder";
 import { keywordSearchWithAudience, logQuery, markQueryCited } from "./repo";
 import { readableDocumentIds } from "./audience";
+import { documentIdsInEstates } from "./estate-scope";
 import { describeDocuments } from "./repo";
 import { searchBrain, SEMANTIC_SCORE_FLOOR } from "./qdrant";
 import { reciprocalRankFusion } from "./fusion";
@@ -41,6 +42,12 @@ export interface QueryOpts {
   uploadedBy?: string;
   kind?: BrainKind;
   conversationId?: string | null;
+  /**
+   * Narrow retrieval to one or more client estates. Undefined/empty means every
+   * estate (today's behavior, unchanged). Applied on BOTH halves: the keyword
+   * side filters in SQL, the semantic side intersects against Postgres below.
+   */
+  estates?: string[];
 }
 
 export interface QueryExecution extends BrainQueryResult {
@@ -140,8 +147,21 @@ async function queryBrainOnce(opts: QueryOpts): Promise<QueryExecution> {
     /* Who is asking. Applied inside the query, so a document this role may not
        read is never ranked, never headlined and never counted. */
     role: opts.userRole,
+    /* Which client's library. Undefined = every estate. */
+    estates: opts.estates,
   });
   const keyword = keywordResult.hits;
+
+  /* Record that this retrieval was scoped to a client, and to which. Fired once
+     per scoped query, before results are assembled, so the demand signal
+     survives even a scoped-empty answer. */
+  if (opts.estates && opts.estates.length > 0) {
+    trackEvent("brain.retrieval_estate_scoped", opts.userId, opts.userRole, {
+      estates: opts.estates.join(","),
+      estate_count: opts.estates.length,
+      query_len: opts.query.length,
+    });
+  }
 
   /* THE AUDIENCE GATE, REPORTED FROM THE PATH THAT ACTUALLY RUNS.
    *
@@ -192,6 +212,16 @@ async function queryBrainOnce(opts: QueryOpts): Promise<QueryExecution> {
           opts.userRole,
         );
         semantic = raw.filter((h) => allowed.has(String(h.document_id)));
+        /* ESTATE SCOPE on the semantic half. The keyword half already filtered
+           in SQL; the vector half filters here because the point payload has no
+           estate. Undefined/empty estates skips this entirely. */
+        if (opts.estates && opts.estates.length > 0) {
+          const inEstate = await documentIdsInEstates(
+            semantic.map((h) => String(h.document_id)),
+            opts.estates,
+          );
+          semantic = semantic.filter((h) => inEstate.has(String(h.document_id)));
+        }
         if (semantic.length < raw.length) {
           trackEvent("brain.retrieval_audience_filtered", opts.userId, opts.userRole, {
             /* How much of the index a role cannot see. Rising is the gate
