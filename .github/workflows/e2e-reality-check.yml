@@ -151,6 +151,7 @@ jobs:
           tests/e2e/sites-upload-reality-check.spec.ts
           tests/e2e/assistant-pilot-status.spec.ts
           tests/e2e/assistant-cross-tool-insights.spec.ts
+          tests/e2e/assistant-user-journey.spec.ts
           tests/e2e/sites-designer-journey.spec.ts
           tests/e2e/feature-requests-data-flow.spec.ts
           tests/e2e/feedback-screenshot-flow.spec.ts
