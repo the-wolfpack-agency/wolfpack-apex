@@ -49,6 +49,23 @@ describe("asking which one", () => {
     expect(r.choices).toHaveLength(3);
   });
 
+  it("renders each document as a clickable link when given a URL", () => {
+    const r = whichOneDidYouMean("when do we have to pay?", [
+      { name: "viaPeople Work Order_Wolfpack Agency.docx.pdf", url: "https://x.sharepoint.com/a%20b.docx.pdf" },
+      { name: "25100_April 2025 1of2.pdf", url: "https://x.sharepoint.com/apr.pdf" },
+    ])!;
+    // Markdown link with the readable name, pointing at the file.
+    expect(r.answer).toContain("[viaPeople Work Order Wolfpack Agency](https://x.sharepoint.com/a%20b.docx.pdf)");
+    // choices stay the readable names (used for matching the user's pick).
+    expect(r.choices).toContain("viaPeople Work Order Wolfpack Agency");
+  });
+
+  it("falls back to bold text when a document has no URL", () => {
+    const r = whichOneDidYouMean("q", [{ name: "handbook.pdf", url: null }])!;
+    expect(r.answer).toContain("**handbook**");
+    expect(r.answer).not.toContain("](");
+  });
+
   /* THE SENTENCE THIS REPLACES. Neither of these may survive. */
   it("does not tell anybody to open a ticket or rephrase", () => {
     const a = whichOneDidYouMean("when do we have to pay?", DOCS)!.answer.toLowerCase();

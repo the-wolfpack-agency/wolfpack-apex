@@ -2850,7 +2850,7 @@ async function tryBrain(
    * "could you rephrase" throws that away and tells somebody to open a ticket
    * about documents we are holding in our hand.
    */
-  nearMisses?: string[];
+  nearMisses?: Array<{ name: string; url: string | null }>;
 }> {
   const emptyContext: BrainContext = { hits: [], topScore: 0, topScoreIsSemantic: false };
   try {
@@ -3131,7 +3131,17 @@ async function tryBrain(
          difference between "I could not answer" and "I found these three, which
          did you mean". Deduplicated, because four chunks of one document is one
          document to the person reading. */
-      const nearMisses = [...new Set(strong.map((h) => h.document_filename))].slice(0, 4);
+      /* Carry each document's web URL alongside its name so the clarify list
+         renders clickable links to the file, like every other answer path.
+         Deduped by filename, first URL wins. */
+      const seenNear = new Set<string>();
+      const nearMisses: Array<{ name: string; url: string | null }> = [];
+      for (const h of strong) {
+        if (seenNear.has(h.document_filename)) continue;
+        seenNear.add(h.document_filename);
+        nearMisses.push({ name: h.document_filename, url: h.web_url ?? null });
+        if (nearMisses.length >= 4) break;
+      }
       return { strong: null, context: emptyContext, nearMisses };
     }
 
@@ -3178,7 +3188,15 @@ async function tryBrain(
         top_score: Number((strong[0]?.score ?? 0).toFixed(4)),
         module: "assistant",
       });
-      return { strong: null, context: emptyContext, nearMisses: ambiguity.candidates };
+      /* Same as above: attach the web URL for each candidate so the clarify
+         list links to the file. detectAmbiguity returns names only, so the
+         URL is looked up from the hits it was given. */
+      const urlByName = new Map(strong.map((h) => [h.document_filename, h.web_url]));
+      return {
+        strong: null,
+        context: emptyContext,
+        nearMisses: ambiguity.candidates.map((name) => ({ name, url: urlByName.get(name) ?? null })),
+      };
     }
 
     /* A SUMMARY IS NOT THREE EXCERPTS.
