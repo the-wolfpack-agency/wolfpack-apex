@@ -37,6 +37,27 @@ const FENCED_CODE_RE = /```([A-Za-z0-9_+-]*)\n([\s\S]*?)```/g;
 // stray backtick in prose doesn't swallow the rest of the message.
 const INLINE_CODE_RE = /`([^`\n]+)`/g;
 
+/**
+ * Strip the appended "Sources" footer from an answer FOR DISPLAY ONLY.
+ *
+ * assistant.ts appends a `**Sources:**` (or `**Sources retrieved:**`) block
+ * followed by a numbered `[filename](url)` list to the answer text, so a reader
+ * still sees provenance even when no dedicated UI renders it. Instinct now
+ * renders that provenance as clean source cards from the structured `sources`
+ * array, which makes the raw-URL text footer redundant and, with SharePoint's
+ * long percent-encoded links, ugly. This removes the trailing footer so sources
+ * show only as cards.
+ *
+ * DISPLAY ONLY: callers pass this to the renderer, never mutate the stored
+ * message. Copy-to-clipboard keeps the full text (URLs and all), which is what
+ * a reader wants when pasting a referenced answer elsewhere. The regex is
+ * anchored to the bold label and consumes to end-of-string, so it only ever
+ * strips the appended footer, never inline prose that mentions sources.
+ */
+export function stripAppendedSources(content: string): string {
+  return content.replace(/\n*\*\*Sources(?: retrieved)?:\*\*[\s\S]*$/, "").trimEnd();
+}
+
 export function isSafeHref(href: string): boolean {
   // Protocol-relative URLs (//host/path) resolve against the current
   // page origin's protocol but the host is attacker-controlled. Reject.
