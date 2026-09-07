@@ -25,7 +25,8 @@ describe("AssistantSourceCards", () => {
       />,
     );
     const card = screen.getByTestId("source-card-s1");
-    expect(card).toHaveTextContent("viaPeople Work Order.docx.pdf");
+    // Shows a readable, cleaned document title (not the raw filename or URL).
+    expect(card).toHaveTextContent("viaPeople Work Order");
     // The giant encoded URL is not rendered as visible text.
     expect(card).not.toHaveTextContent("Shared%20Documents");
     // External link opens in a new tab, in the source system.
@@ -83,5 +84,29 @@ describe("AssistantSourceCards", () => {
   it("renders nothing for an empty source list", () => {
     const { container } = render(<AssistantSourceCards sources={[]} />);
     expect(container).toBeEmptyDOMElement();
+  });
+});
+
+import { cleanDisplayName } from "@/components/AssistantSourceCards";
+
+describe("cleanDisplayName — readable document titles for the client", () => {
+  it("turns the ugly SOW filename into a readable title", () => {
+    expect(
+      cleanDisplayName("viaPeople Work Order_Wolfpack Agency_360 Feedback_5-7-25[36].docx.pdf"),
+    ).toBe("viaPeople Work Order Wolfpack Agency 360 Feedback 5-7-25");
+  });
+
+  it("decodes a percent-encoded URL-derived name and keeps the basename", () => {
+    expect(
+      cleanDisplayName("https://x.sharepoint.com/sites/a/Shared%20Documents/Budget%20Q3.xlsx"),
+    ).toBe("Budget Q3");
+  });
+
+  it("drops a single extension (the badge shows the type)", () => {
+    expect(cleanDisplayName("BA101 Mobile Coach Rules.csv")).toBe("BA101 Mobile Coach Rules");
+  });
+
+  it("leaves an already-clean title alone", () => {
+    expect(cleanDisplayName("Academy Strategy")).toBe("Academy Strategy");
   });
 });

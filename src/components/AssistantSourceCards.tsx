@@ -32,6 +32,28 @@ export interface AssistantSourceCardsProps {
   testIdPrefix?: string;
 }
 
+/**
+ * A readable document name for display — the client should see a title, not a
+ * raw filename or a giant percent-encoded URL. Decodes URL escapes, keeps just
+ * the basename, drops the extension chain (the file-type badge already shows
+ * that) and a trailing export artifact like "[36]", and turns underscores into
+ * spaces. The full original stays in the hover `title` and the real URL drives
+ * the click, so nothing is lost — it just displays nicely.
+ */
+export function cleanDisplayName(title: string): string {
+  let s = title ?? "";
+  try {
+    s = decodeURIComponent(s);
+  } catch {
+    /* keep raw when it is not valid percent-encoding */
+  }
+  s = s.split(/[\\/]/).pop() ?? s; // basename only
+  s = s.replace(/(\.[a-z0-9]{1,5})+$/i, ""); // drop .docx.pdf / .pdf / .csv …
+  s = s.replace(/\s*\[\d+\]\s*$/, ""); // drop a trailing export artifact like [36]
+  s = s.replace(/_/g, " ").replace(/\s+/g, " ").trim();
+  return s || title;
+}
+
 /** A short, colored badge for a file, from its extension (or its type). Kept to
  *  a small known set; anything else falls back to the extension text or the
  *  source type, never a broken icon. */
@@ -89,7 +111,7 @@ export default function AssistantSourceCards({
                   style={{ color: "var(--wp-text, #eee)" }}
                   title={s.title}
                 >
-                  {s.title}
+                  {cleanDisplayName(s.title)}
                 </span>
                 <span className="block text-[11px]" style={{ color: "var(--wp-text-muted, #6b7280)" }}>
                   {s.type}

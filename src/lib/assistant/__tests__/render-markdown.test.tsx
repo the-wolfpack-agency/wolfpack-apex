@@ -169,3 +169,34 @@ describe("stripAppendedSources — display-only sources footer removal", () => {
     expect(stripAppendedSources(content)).toBe(content);
   });
 });
+
+import { parseAppendedSources } from "@/lib/assistant/render-markdown";
+
+describe("parseAppendedSources — footer links back into structured entries", () => {
+  it("extracts a [file](url) footer entry (the SOW production case)", () => {
+    const content =
+      "The SOW covers payment terms. [1]\n\n**Sources:**\n" +
+      "1. [viaPeople Work Order_Wolfpack Agency_360 Feedback_5-7-25[36].docx.pdf]" +
+      "(https://netorg9503444.sharepoint.com/sites/WolfpackxPCNA/Shared%20Documents/x.docx.pdf)";
+    const out = parseAppendedSources(content);
+    expect(out).toHaveLength(1);
+    expect(out[0].title).toContain("viaPeople Work Order");
+    expect(out[0].url).toContain("sharepoint.com");
+  });
+
+  it("handles the 'Sources retrieved:' variant and multiple entries", () => {
+    const content =
+      "answer\n\n**Sources retrieved:**\n1. [a.pdf](https://x/a.pdf)\n2. [b.docx](https://x/b.docx)";
+    const out = parseAppendedSources(content);
+    expect(out.map((s) => s.title)).toEqual(["a.pdf", "b.docx"]);
+  });
+
+  it("keeps a bare (unlinked) footer line with an empty url", () => {
+    const out = parseAppendedSources("answer\n\n**Sources:**\n1. localfile.txt");
+    expect(out).toEqual([{ title: "localfile.txt", url: "" }]);
+  });
+
+  it("returns [] when there is no footer", () => {
+    expect(parseAppendedSources("just an answer, no footer")).toEqual([]);
+  });
+});
