@@ -507,7 +507,7 @@ export interface KeywordSearchResult {
  */
 export function buildKeywordSearchSql(
   limit: number,
-  opts: { uploadedBy?: string; kind?: BrainKind; role?: string } = {},
+  opts: { uploadedBy?: string; kind?: BrainKind; role?: string; estates?: string[] } = {},
 ): { sql: string; args: unknown[] } {
   /* THE FILENAME IS SEARCHABLE TOO.
    *
@@ -555,6 +555,16 @@ export function buildKeywordSearchSql(
   if (opts.kind) {
     args.push(opts.kind);
     where.push(`bd.kind = $${args.length + 1}`);
+  }
+  /* ESTATE SCOPE. When the caller narrows to one client's material, a document
+     outside that estate simply does not match (a hard WHERE), NOT a "withheld"
+     the way an unreadable one is: estate is which client's library to search,
+     not a permission. Empty/undefined means every estate, i.e. today's
+     behavior unchanged. Mirrors the audience filter's applied-in-the-query
+     posture so a scoped-out document is never ranked, headlined or counted. */
+  if (opts.estates && opts.estates.length > 0) {
+    args.push(opts.estates);
+    where.push(`bd.estate = ANY($${args.length + 1})`);
   }
 
   /* THE CORPUS BOUNDARY. 744 of the 795 answerable documents were written by
@@ -688,7 +698,7 @@ export const FILENAME_MATCH_WEIGHT = 9;
 export async function keywordSearchWithAudience(
   queryText: string,
   limit: number,
-  opts: { uploadedBy?: string; kind?: BrainKind; role?: string } = {},
+  opts: { uploadedBy?: string; kind?: BrainKind; role?: string; estates?: string[] } = {},
 ): Promise<KeywordSearchResult> {
   const { sql, args } = buildKeywordSearchSql(limit, opts);
   const res = await query<KeywordHit & { withheld: number }>(sql, [queryText, ...args]);
@@ -698,7 +708,7 @@ export async function keywordSearchWithAudience(
 export async function keywordSearch(
   queryText: string,
   limit: number,
-  opts: { uploadedBy?: string; kind?: BrainKind; role?: string } = {},
+  opts: { uploadedBy?: string; kind?: BrainKind; role?: string; estates?: string[] } = {},
 ): Promise<KeywordHit[]> {
   return (await keywordSearchWithAudience(queryText, limit, opts)).hits;
 }
