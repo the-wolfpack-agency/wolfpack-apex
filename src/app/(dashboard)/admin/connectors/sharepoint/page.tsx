@@ -41,6 +41,18 @@ export default function AdminSharepointPage() {
   >({});
   const [syncErrors, setSyncErrors] = useState<Record<string, string>>({});
   const [syncingId, setSyncingId] = useState<string | null>(null);
+  /* Estate-wide sync: one click walks every active source. Bounded and
+     resumable server-side, so moreRemaining just means "click again to
+     continue" — never an error. */
+  const [estateSyncing, setEstateSyncing] = useState(false);
+  const [estateResult, setEstateResult] = useState<{
+    sourcesProcessed: number;
+    sourcesSucceeded: number;
+    sourcesFailed: number;
+    filesIngested: number;
+    moreRemaining: boolean;
+  } | null>(null);
+  const [estateError, setEstateError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -230,6 +242,58 @@ export default function AdminSharepointPage() {
     }
   }
 
+  /* One click, whole estate. The route walks every active source with the same
+     per-source sync used above and returns a summary. It is bounded per call,
+     so on a large estate the button reports moreRemaining and the operator
+     clicks again to continue — every already-indexed file is skipped. */
+  async function handleSyncAll() {
+    setEstateSyncing(true);
+    setEstateError(null);
+    try {
+      const res = await fetchWithRefresh("/api/connectors/sharepoint/sync-all", {
+        method: "POST",
+        headers: jsonHeaders(),
+      });
+      let data: {
+        result?: {
+          sourcesProcessed?: number;
+          sourcesSucceeded?: number;
+          sourcesFailed?: number;
+          filesIngested?: number;
+          moreRemaining?: boolean;
+        };
+        error?: string;
+      } = {};
+      try {
+        data = await res.json();
+      } catch {
+        setEstateError(
+          `Estate sync timed out (HTTP ${res.status}). Progress is saved — click again to continue.`,
+        );
+        return;
+      }
+      if (!res.ok) {
+        setEstateError(data?.error ?? `Estate sync failed (HTTP ${res.status}).`);
+        return;
+      }
+      if (data.result) {
+        setEstateResult({
+          sourcesProcessed: data.result.sourcesProcessed ?? 0,
+          sourcesSucceeded: data.result.sourcesSucceeded ?? 0,
+          sourcesFailed: data.result.sourcesFailed ?? 0,
+          filesIngested: data.result.filesIngested ?? 0,
+          moreRemaining: Boolean(data.result.moreRemaining),
+        });
+      }
+      /* Refresh so each source's job history reflects the run. */
+      await load();
+    } catch (err) {
+      setEstateError((err as Error)?.message ?? "Estate sync failed.");
+    } finally {
+      setEstateSyncing(false);
+    }
+  }
+
   async function handleClearStuck(id: string) {
     if (!confirm("Force-mark all running syncs for this source as failed? Use this if a sync is hung.")) return;
     try {
@@ -348,6 +412,59 @@ export default function AdminSharepointPage() {
           </div>
         )}
       </form>
+
+      <div
+        data-testid="estate-sync"
+        className="rounded-md p-4 mb-6"
+        style={{
+          background: "var(--wp-dark-surface, #1a1a1a)",
+          border: "1px solid var(--wp-dark-border, #333)",
+        }}
+      >
+        <div className="text-sm font-semibold mb-1" style={{ color: "var(--wp-text-dim, #aaa)" }}>
+          Index the whole estate
+        </div>
+        <p className="text-xs mb-3" style={{ color: "var(--wp-text-muted, #6b7280)" }}>
+          Sync every source above in one pass. Safe to run repeatedly &mdash; files
+          already indexed are skipped. A large estate finishes over a few clicks.
+        </p>
+        <button
+          type="button"
+          data-testid="estate-sync-button"
+          onClick={handleSyncAll}
+          disabled={estateSyncing}
+          className="rounded px-4 py-2 text-sm font-medium disabled:opacity-40"
+          style={{ background: "var(--wp-gold, #eab308)", color: "var(--wp-dark, #111)" }}
+        >
+          {estateSyncing ? "Syncing all sources..." : "Sync entire estate"}
+        </button>
+        {estateResult && (
+          <div
+            data-testid="estate-sync-result"
+            className="mt-3 text-xs"
+            style={{ color: "var(--wp-text-muted, #6b7280)" }}
+          >
+            {estateResult.sourcesSucceeded} of {estateResult.sourcesProcessed} sources synced
+            {" · "}
+            {estateResult.filesIngested.toLocaleString()} files indexed
+            {estateResult.sourcesFailed > 0 ? ` · ${estateResult.sourcesFailed} failed` : ""}
+            {estateResult.moreRemaining ? " · more remaining, click to continue" : ""}
+          </div>
+        )}
+        {estateError && (
+          <div
+            data-testid="estate-sync-error"
+            className="mt-3 rounded p-2 text-xs"
+            style={{
+              background: "rgba(239,68,68,0.10)",
+              border: "1px solid rgba(239,68,68,0.4)",
+              color: "var(--wp-error, #ef4444)",
+            }}
+          >
+            {estateError}
+          </div>
+        )}
+      </div>
 
       <div className="text-sm font-semibold mb-2" style={{ color: "var(--wp-text-dim, #aaa)" }}>
         Configured sources
