@@ -200,3 +200,19 @@ describe("parseAppendedSources — footer links back into structured entries", (
     expect(parseAppendedSources("just an answer, no footer")).toEqual([]);
   });
 });
+
+describe("document-name links survive real filenames (the bracket bug)", () => {
+  it("renders a CLEAN document label as a clickable link", () => {
+    render(
+      <Wrap content={"[viaPeople Work Order Wolfpack Agency 360 Feedback](https://x.sharepoint.com/a%20b.docx.pdf)"} />,
+    );
+    const a = screen.getByRole("link", { name: /viaPeople Work Order Wolfpack Agency 360 Feedback/ });
+    expect(a).toHaveAttribute("href", "https://x.sharepoint.com/a%20b.docx.pdf");
+  });
+
+  it("documents why we must clean: a raw [36]-style filename label does NOT parse as a link", () => {
+    // The `[36]` closes the markdown label early, so this renders as text, not a link.
+    render(<Wrap content={"[viaPeople_360 Feedback_5-7-25[36].docx.pdf](https://x/y.docx.pdf)"} />);
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
+  });
+});
