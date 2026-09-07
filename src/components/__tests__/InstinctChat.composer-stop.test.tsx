@@ -157,10 +157,11 @@ describe("InstinctChat composer — stop button swap", () => {
     });
     expect(screen.queryByTestId("assistant-send-btn")).not.toBeInTheDocument();
 
-    /* Skeleton + typing dots both rendered while in flight. */
+    /* Staged thinking indicator rendered while in flight (phase label +
+       stage progress replaced the old static skeleton rows). */
     expect(screen.getByTestId("assistant-typing-indicator")).toBeInTheDocument();
-    expect(screen.getByTestId("assistant-skeleton-row-1")).toBeInTheDocument();
-    expect(screen.getByTestId("assistant-skeleton-row-2")).toBeInTheDocument();
+    expect(screen.getByTestId("thinking-phase")).toBeInTheDocument();
+    expect(screen.getByTestId("thinking-progress")).toBeInTheDocument();
 
     /* Finish the request so the test cleans up. */
     api.finish({

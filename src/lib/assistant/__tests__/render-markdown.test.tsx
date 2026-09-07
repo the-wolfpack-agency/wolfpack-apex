@@ -141,3 +141,31 @@ describe("renderMessageContent — regression: pre-existing behavior", () => {
     );
   });
 });
+
+import { stripAppendedSources } from "@/lib/assistant/render-markdown";
+
+describe("stripAppendedSources — display-only sources footer removal", () => {
+  it("removes an appended '**Sources retrieved:**' footer and its list", () => {
+    const content =
+      "The SOW covers scope and payment terms.\n\n**Sources retrieved:**\n1. [file.docx.pdf](https://x.sharepoint.com/Shared%20Documents/file.docx.pdf)";
+    const out = stripAppendedSources(content);
+    expect(out).toBe("The SOW covers scope and payment terms.");
+    expect(out).not.toContain("Sources retrieved");
+    expect(out).not.toContain("sharepoint.com");
+  });
+
+  it("removes the '**Sources:**' variant (used when refs were cited)", () => {
+    const content = "Answer with a footnote [1].\n\n**Sources:**\n1. [a.pdf](https://x/a.pdf)";
+    expect(stripAppendedSources(content)).toBe("Answer with a footnote [1].");
+  });
+
+  it("leaves prose that merely mentions the word sources untouched", () => {
+    const content = "Our sources say the budget is fixed.";
+    expect(stripAppendedSources(content)).toBe(content);
+  });
+
+  it("is a no-op when there is no appended footer", () => {
+    const content = "Just an answer, no sources block.";
+    expect(stripAppendedSources(content)).toBe(content);
+  });
+});

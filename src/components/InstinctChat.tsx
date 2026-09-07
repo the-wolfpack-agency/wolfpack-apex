@@ -10,7 +10,9 @@ import {
 import { sendAssistantMessageOffline } from "@/lib/assistant-drafts-offline";
 import { RagSnapshotBadge } from "@/components/RagSnapshotBadge";
 
-import { renderMessageContent } from "@/lib/assistant/render-markdown";
+import { renderMessageContent, stripAppendedSources } from "@/lib/assistant/render-markdown";
+import AssistantThinkingIndicator from "@/components/AssistantThinkingIndicator";
+import AssistantSourceCards from "@/components/AssistantSourceCards";
 import {
   ingestFileFromChat,
   formatIngestSystemMessage,
@@ -231,7 +233,6 @@ export default function InstinctChat({
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const [fileError, setFileError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
-  const [expandedSources, setExpandedSources] = useState<Record<string, boolean>>({});
   /* Which answer was just copied, so the button can say so. Index rather than
      a boolean: two answers must not both read "Copied". */
   const [copiedAnswer, setCopiedAnswer] = useState<number | null>(null);
@@ -1775,7 +1776,14 @@ export default function InstinctChat({
                     className="text-sm whitespace-pre-wrap leading-relaxed [overflow-wrap:anywhere] overflow-hidden min-w-0 max-w-full"
                     data-testid={`assistant-msg-content-${idx}`}
                   >
-                    {renderMessageContent(msg.content)}
+                    {renderMessageContent(
+                      /* Strip the appended raw-URL "Sources" footer for display
+                         when we have structured sources to render as cards below.
+                         Copy still uses the full msg.content. */
+                      msg.role === "assistant" && msg.sources && msg.sources.length > 0
+                        ? stripAppendedSources(msg.content)
+                        : msg.content,
+                    )}
                   </div>
 
                   {/* Chat-action form (create email / message / event /
@@ -1895,87 +1903,26 @@ export default function InstinctChat({
                   {msg.role === "assistant" &&
                     msg.sources &&
                     msg.sources.length > 0 && (
-                      <div className="mt-2" data-testid={`sources-block-${idx}`}>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const key = String(idx);
-                            const nextOpen = !expandedSources[key];
-                            setExpandedSources((prev) => ({ ...prev, [key]: nextOpen }));
-                            if (nextOpen && msg.sources && msg.sources.length > 0) {
-                              void fetchWithRefresh("/api/analytics", {
-                                method: "POST",
-                                headers: canonicalJsonHeaders(),
-                                body: JSON.stringify({
-                                  event: "assistant.source_viewed",
-                                  metadata: {
-                                    source_type: msg.sources[0]?.type ?? "unknown",
-                                    /* JOIN KEYS. This event carried only a
-                                       source_type, so it could say somebody
-                                       looked at a knowledge source and never
-                                       WHICH answer they were reading. That is
-                                       the whole question: did the person who
-                                       got this answer go and check it. */
-                                    action: "expanded",
-                                    source_count: msg.sources.length,
-                                    answer_source: msg.source ?? "unknown",
-                                    ...(msg.workflowId ? { workflow_id: msg.workflowId } : {}),
-                                  },
-                                }),
-                              }).catch(() => {});
-                            }
-                          }}
-                          className="text-xs underline"
-                          style={{ color: "var(--wp-text-muted, #6b7280)" }}
-                          data-testid={`sources-toggle-${idx}`}
-                        >
-                          {expandedSources[String(idx)] ? "Hide" : "Show"}{" "}
-                          {msg.sources.length} source
-                          {msg.sources.length === 1 ? "" : "s"}
-                        </button>
-                        {expandedSources[String(idx)] && (
-                          <ul
-                            className="mt-2 space-y-1"
-                            data-testid={`sources-list-${idx}`}
-                          >
-                            {msg.sources.map((s) => (
-                              <li key={s.id} className="text-xs">
-                                <a
-                                  href={s.url}
-                                  onClick={() => {
-                                    void fetchWithRefresh("/api/analytics", {
-                                      method: "POST",
-                                      headers: canonicalJsonHeaders(),
-                                      body: JSON.stringify({
-                                        event: "assistant.source_viewed",
-                                        metadata: {
-                                          source_type: s.type,
-                                          action: "opened",
-                                          answer_source: msg.source ?? "unknown",
-                                          ...(msg.workflowId
-                                            ? { workflow_id: msg.workflowId }
-                                            : {}),
-                                        },
-                                      }),
-                                    }).catch(() => {});
-                                  }}
-                                  className="underline"
-                                  style={{
-                                    color: "var(--wp-gold, #eab308)",
-                                    textDecoration: "underline",
-                                  }}
-                                  data-testid={`source-link-${s.id}`}
-                                >
-                                  {s.title}
-                                </a>{" "}
-                                <span style={{ color: "var(--wp-text-muted, #6b7280)" }}>
-                                  · {s.type}
-                                </span>
-                              </li>
-                            ))}
-                          </ul>
-                        )}
-                      </div>
+                      <AssistantSourceCards
+                        sources={msg.sources}
+                        onOpen={(s) => {
+                          /* Same learning-loop event as before: which answer's
+                             source did the reader actually open. */
+                          void fetchWithRefresh("/api/analytics", {
+                            method: "POST",
+                            headers: canonicalJsonHeaders(),
+                            body: JSON.stringify({
+                              event: "assistant.source_viewed",
+                              metadata: {
+                                source_type: s.type,
+                                action: "opened",
+                                answer_source: msg.source ?? "unknown",
+                                ...(msg.workflowId ? { workflow_id: msg.workflowId } : {}),
+                              },
+                            }),
+                          }).catch(() => {});
+                        }}
+                      />
                     )}
 
                   {/* Fallback chips — rendered when the server marked
@@ -2144,41 +2091,7 @@ export default function InstinctChat({
                 assistant that often returns widgets/lists than pure
                 LLM chat. The skeleton block is purely cosmetic; it's
                 replaced as soon as the real assistant message renders. */}
-            {loading && (
-              <div className="flex justify-start" data-testid="assistant-typing-indicator">
-                <div
-                  className="rounded-xl px-4 py-3 w-full lg:max-w-[85%] min-w-0"
-                  style={{ background: "var(--wp-dark-surface2, #222)" }}
-                >
-                  <div className="flex items-center gap-1.5 mb-2.5">
-                    <div
-                      className="w-2 h-2 rounded-full animate-bounce"
-                      style={{ background: "var(--wp-gold, #eab308)", animationDelay: "0ms" }}
-                    />
-                    <div
-                      className="w-2 h-2 rounded-full animate-bounce"
-                      style={{ background: "var(--wp-gold, #eab308)", animationDelay: "150ms" }}
-                    />
-                    <div
-                      className="w-2 h-2 rounded-full animate-bounce"
-                      style={{ background: "var(--wp-gold, #eab308)", animationDelay: "300ms" }}
-                    />
-                  </div>
-                  <div
-                    className="wp-skeleton-row h-2.5 rounded mb-1.5"
-                    style={{ width: "85%" }}
-                    data-testid="assistant-skeleton-row-1"
-                    aria-hidden
-                  />
-                  <div
-                    className="wp-skeleton-row h-2.5 rounded"
-                    style={{ width: "60%" }}
-                    data-testid="assistant-skeleton-row-2"
-                    aria-hidden
-                  />
-                </div>
-              </div>
-            )}
+            {loading && <AssistantThinkingIndicator />}
 
             <div ref={messagesEndRef} />
           </div>
