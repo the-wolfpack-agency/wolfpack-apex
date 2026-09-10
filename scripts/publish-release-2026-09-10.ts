@@ -65,6 +65,20 @@ const ENTRIES: ReleaseEntry[] = [
     how_to_use: "Nothing to do; open the menu.",
     area: "Ford", category: "improvement",
   },
+  {
+    title: "Parts health as its own view, fed by a real DMS parts connector",
+    description:
+      "Parts is now a standalone surface: fill rate (whether the parts a customer needs are in stock), obsolescence (capital tied up in stock that has not sold), inventory value, and what to reorder. It reads a dealer's real parts inventory through a DMS parts connector that maps any configurable DMS feed into the same canonical records everything else uses; until a live feed is connected, the page and the assistant say exactly how to turn it on. Book-wide, the same part across dealers rolls up into one line.",
+    how_to_use: "Parts health in the menu, or ask the assistant \"parts health for <dealer>\", \"what parts are obsolete\", or \"which parts should I reorder\".",
+    area: "Ford", category: "feature",
+  },
+  {
+    title: "The workflows explain themselves in the tour",
+    description:
+      "Asking what the tool can do now leads with the agent workflows and states plainly how they behave: each runs several steps in order, stops when it needs you, and nothing is sent, filed or told to anybody without your confirm. Parts and the guidance library joined the tour too, each with a one-line what-to-type and what-happens.",
+    how_to_use: "Ask \"what can FDOS do?\" and start from the Agent workflows group, or tap a starter chip.",
+    area: "Ford", category: "improvement",
+  },
 ];
 
 async function main() {
@@ -72,7 +86,7 @@ async function main() {
     version: "2026.09.10",
     title: "FDOS gains claims, VIN-aware service, a cited guidance library, and its first agent workflows",
     summary:
-      "FDOS picks up the service-and-warranty side of the field job: file and clear warranty, goodwill and incentive claims with the VIN checked against NHTSA, decode a vehicle and pull its recalls and history before the repair, cite a real guidance library, and show leaders what the tool is catching. Two agent workflows then chain those tools end to end behind a single human confirm, so the model does the assembly and a person still decides.",
+      "FDOS picks up the service-and-warranty side of the field job: file and clear warranty, goodwill and incentive claims with the VIN checked against NHTSA, decode a vehicle and pull its recalls and history before the repair, cite a real guidance library, and show leaders what the tool is catching. Two agent workflows then chain those tools end to end behind a single human confirm, so the model does the assembly and a person still decides. Parts becomes its own view fed by a real DMS connector, and the tour now explains the workflows in plain language so a user immediately knows how to run them.",
     released_on: "2026-09-10",
     entries: ENTRIES,
     published: true,
