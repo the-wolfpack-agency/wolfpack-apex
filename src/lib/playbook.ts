@@ -19,7 +19,7 @@
  */
 
 /** Shown on the page so a reader knows how current this is. */
-export const PLAYBOOK_UPDATED = "2026-09-02";
+export const PLAYBOOK_UPDATED = "2026-09-11";
 
 /* A plain template literal, not String.raw: raw strings do not process escape
    sequences, so the escaped backticks this content needs would have rendered
@@ -713,6 +713,88 @@ immutability enforced at the database rather than by convention.
 **What if we want to leave?**
 It is their database. Postgres is the source of truth and everything durable is
 in it, exportable without us.
+
+## How the integration works: access, not code
+
+A recurring question, worth answering before it is asked: we do not take their
+codebase and they do not build into ours. Every system connects the same way,
+through scoped, revocable access their IT grants, and a connector on our side
+that uses it.
+
+- Microsoft 365 and SharePoint. Their IT grants admin consent to a registered
+  application for named read scopes. Nothing is copied by hand: once one account
+  is connected the product enumerates the sites it can reach. Consent is
+  revocable in one place on their side.
+- Azure OpenAI, two shapes. They use ours, or they bring their own: a model they
+  host in Azure AI Foundry, and give us its endpoint and a key. Their key, their
+  resource, their region, plugged into the one router every model call passes
+  through. Bring-your-own is the preferred shape where they have a policy on
+  where inference runs.
+- A DMS or CRM. A connected application or an API user their administrator
+  provisions, scoped to read what the persona needs. The same adapter that reads
+  the reference feed reads the real one; nothing downstream changes.
+
+In practice the access we ask for is a set of grants and secrets, never a
+repository. Each is scoped to read, each is theirs to revoke, and each lives only
+in the environment, never in our code or our database. If a grant is pulled, the
+connector returns nothing rather than breaking, and the rest keeps working.
+
+Settle two things early, because they take longest:
+
+- Who in their IT can grant the tenant consent, and by when.
+- Whether inference runs on our Azure resource or theirs. If theirs, they need a
+  deployed model and a key before phase one can answer.
+
+## Keeping it up while a client is on it
+
+A pilot that answers well but falls over on a real day is not ready. These are
+the operational controls: what holds, what the operator still owns, and what a
+person sees when each thing fails.
+
+### What holds
+
+- A transient dependency blip self-heals. A database that scaled to sleep, or a
+  dropped connection, is retried before it reaches a person. Only a failure to
+  acquire a connection is retried, never a half-run write, so nothing is applied
+  twice.
+- Sign-in and password reset are rate-limited, so guessing is slowed without
+  affecting a real user.
+- One client, one database, so load or an incident on one never reaches another.
+- When a model or a system is unreachable, the answer names what could not be
+  read and says nothing was lost, rather than inventing one. This is the outage
+  promise above, and it is tested before every phase ships.
+
+### What the operator owns, and decides before go-live
+
+- A database that does not sleep. The retry hides a cold start; for a paying
+  client the clean answer is a minimum always-on compute so the first request of
+  the day is not the slow one. This is their infrastructure plan and cost, not
+  something the code sets.
+- An uptime monitor with paging. The platform reports its own health; somebody
+  has to watch it and decide who is paged. Without it, the first to notice an
+  outage is the client.
+- Named on-call and a maintenance window: who answers in the evening, and when a
+  deploy is acceptable.
+
+### Backup plans
+
+- Roll back by shipping the previous commit. Every deploy is one, and the prior
+  one is a step away.
+- Every write path is behind a flag, so a misbehaving feature is turned off
+  without a deploy.
+- A bad connector feed returns nothing rather than breaking a sync, and a
+  migration is run by an owner role because the runtime role cannot change the
+  schema by design.
+
+### Scenarios
+
+| If this happens | What a person sees |
+| --- | --- |
+| The database was asleep | A moment of latency, then the answer. No error. |
+| The database is genuinely down | The health check goes red and on-call is paged; the assistant says what it could not reach |
+| A model provider is unreachable | The answer names what could not be reached and says nothing was lost; most turns never needed it |
+| Someone hammers the login | They are slowed with a try-again-shortly; real users are unaffected |
+| A deploy is bad | Roll back to the previous commit; health confirms recovery |
 
 ## What is verified before every phase ships
 
