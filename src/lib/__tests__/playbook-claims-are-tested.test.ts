@@ -21,6 +21,7 @@ import { CLIENT_DEPLOYMENT_PLAYBOOK, PLAYBOOK_UPDATED } from "@/lib/playbook";
 import { existsSync } from "node:fs";
 import { degradedAnswer } from "@/lib/assistant/degraded-answer";
 import { isRetryableError } from "@/lib/ai/router";
+import { withConnectRetry, isConnectAcquisitionError } from "@/lib/db";
 
 describe("what the playbook promises, the product does", () => {
   /* CLAIM: an outage says what could not be read and that nothing was lost. */
@@ -153,5 +154,21 @@ describe("the calibration promise is the measured one", () => {
      is what makes it a week-one activity rather than a build item. */
   it("says their words become configuration", () => {
     expect(CLIENT_DEPLOYMENT_PLAYBOOK).toMatch(/configuration, not code/i);
+  });
+
+  /* CLAIM: a transient dependency blip self-heals, and only a failed CONNECTION
+     is retried (never a half-run write). Pinned to the retry that does it. */
+  it("the self-heal promise matches what the DB layer actually retries", () => {
+    expect(CLIENT_DEPLOYMENT_PLAYBOOK).toMatch(/transient dependency blip self-heals/i);
+    expect(CLIENT_DEPLOYMENT_PLAYBOOK).toMatch(/never a half-run write/i);
+    // a connection-acquisition failure is retryable; a mid-statement error is not
+    expect(isConnectAcquisitionError(new Error("timeout exceeded when trying to connect"))).toBe(true);
+    expect(isConnectAcquisitionError(new Error("connection terminated unexpectedly"))).toBe(false);
+  });
+
+  it("the retry actually recovers a cold-wake timeout, and gives up on a real error", async () => {
+    let n = 0;
+    await expect(withConnectRetry(async () => { n++; if (n === 1) throw new Error("timeout exceeded when trying to connect"); return "ok"; }, 2, 1)).resolves.toBe("ok");
+    await expect(withConnectRetry(async () => { throw new Error("duplicate key"); }, 2, 1)).rejects.toThrow(/duplicate/);
   });
 });

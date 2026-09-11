@@ -20,7 +20,7 @@ const poolConfig: PoolConfig = {
   connectionString: normalizedUrl,
   max: 10,
   idleTimeoutMillis: 30_000,
-  connectionTimeoutMillis: 5_000,
+  connectionTimeoutMillis: 8_000,
   statement_timeout: 10_000,
   /* Explicit cert verification against the system CA store. Neon's
      certs are issued by public roots (Let's Encrypt / DigiCert) which
@@ -169,7 +169,33 @@ export async function query<T extends Record<string, unknown> = Record<string, u
   // Inside a workspace scope, run on the scoped tx client so RLS sees the GUC.
   // Outside (the default everywhere today), use the pool exactly as before.
   const scope = scopeStore.getStore();
-  return (scope ? scope.client : activePool()).query<T>(text, params);
+  if (scope) return scope.client.query<T>(text, params); // in a tx: never retry
+  return withConnectRetry(() => activePool().query<T>(text, params));
+}
+
+/** True for a failure to ACQUIRE a pooled connection (the query never reached
+ *  the server, so retrying is safe even for writes). Neon scales to zero, so a
+ *  cold wake can exceed the connect timeout. Excludes mid-statement errors like
+ *  "connection terminated unexpectedly", where a write may have partially run. */
+export function isConnectAcquisitionError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : "";
+  return /timeout exceeded when trying to connect|connect ETIMEDOUT|ECONNREFUSED/i.test(msg);
+}
+
+/** Run a pool query, retrying once on a connect-acquisition failure. Bounded so
+ *  a hard-down DB fails fast, not after many long waits. */
+export async function withConnectRetry<T>(run: () => Promise<T>, attempts = 2, backoffMs = 300): Promise<T> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      return await run();
+    } catch (err) {
+      lastErr = err;
+      if (attempt === attempts - 1 || !isConnectAcquisitionError(err)) throw err;
+      await new Promise((r) => setTimeout(r, backoffMs));
+    }
+  }
+  throw lastErr;
 }
 
 export async function safeQuery<T = Record<string, unknown>>(
