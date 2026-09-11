@@ -12,12 +12,14 @@ const mockBroadcast = jest.fn();
 jest.mock("@/lib/auth/require-capability", () => ({
   requireCapability: (...a: unknown[]) => mockRequire(...a),
 }));
+const mockList = jest.fn();
 jest.mock("@/lib/assistant/broadcast", () => ({
   broadcastToAssistants: (...a: unknown[]) => mockBroadcast(...a),
+  listRecipients: (...a: unknown[]) => mockList(...a),
   MAX_BROADCAST_CHARS: 2000,
 }));
 
-import { POST } from "@/app/api/assistant/broadcast/route";
+import { GET, POST } from "@/app/api/assistant/broadcast/route";
 
 function req(body: unknown): never {
   return {
@@ -114,5 +116,45 @@ describe("outcomes", () => {
     });
     const res = await POST(req({ message: "hello" }));
     await expect(res.json()).resolves.toMatchObject({ redacted: ["card_number"] });
+  });
+});
+
+/**
+ * The count the compose surface shows.
+ *
+ * It comes from the same query that does the sending, so "send to 42 people"
+ * describes the set that actually receives it. A count from another source is
+ * a confirmation about a different group.
+ */
+describe("recipient count", () => {
+  beforeEach(() => {
+    mockList.mockResolvedValue({ recipients: [{ id: "a" }, { id: "b" }], readable: true });
+  });
+
+  it("is gated the same way as sending", async () => {
+    const refusal = new Response(null, { status: 403 });
+    mockRequire.mockResolvedValue({ ok: false, response: refusal });
+    expect((await GET(req({}))).status).toBe(403);
+    expect(mockList).not.toHaveBeenCalled();
+  });
+
+  it("reports how many people a broadcast would reach", async () => {
+    const res = await GET(req({}));
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({ recipients: 2, readable: true });
+  });
+
+  it("reads the count for the caller's own workspace", async () => {
+    await GET(req({}));
+    expect(mockList).toHaveBeenCalledWith("ws1");
+  });
+
+  /* Not 200 with zero. The compose surface must not offer to send to nobody
+     as though that were a real answer. */
+  it("says the list was unreadable rather than reporting zero recipients", async () => {
+    mockList.mockResolvedValue({ recipients: [], readable: false });
+    const res = await GET(req({}));
+    expect(res.status).toBe(503);
+    await expect(res.json()).resolves.toMatchObject({ readable: false });
   });
 });
