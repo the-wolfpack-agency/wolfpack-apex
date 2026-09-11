@@ -52,6 +52,7 @@ build does, and starting it late is the single most common way a pilot slips.
 | One connected Microsoft account | Their operations lead | We discover the libraries it can reach; nothing to name by hand |
 | One named role per persona | Their program owner | Scoping is per role, not per person |
 | A test account per persona | Their IT | Verifying what a dealer sees needs a dealer |
+| Identity: do they require SSO, and which provider | Their IT | Login shape, and an app registration if yes |
 | Named escalation contact | Both sides | Somebody has to answer when a scan finds something |
 
 Ask for these in the first meeting, in writing. They are not a formality: the
@@ -733,6 +734,13 @@ that uses it.
 - A DMS or CRM. A connected application or an API user their administrator
   provisions, scoped to read what the persona needs. The same adapter that reads
   the reference feed reads the real one; nothing downstream changes.
+- Login, if they require their own identity. A person can sign in with their
+  Microsoft work account instead of a password. It reuses the same app
+  registration, needs a sign-in redirect and the openid/profile/email scopes
+  consented, and is gated to their email domain. It signs in an existing user
+  and never creates one, so single sign-on cannot provision an account. Off
+  until their domain is set, so it is opt-in, not on by the presence of the app
+  credentials.
 
 In practice the access we ask for is a set of grants and secrets, never a
 repository. Each is scoped to read, each is theirs to revoke, and each lives only
@@ -744,6 +752,11 @@ Settle two things early, because they take longest:
 - Who in their IT can grant the tenant consent, and by when.
 - Whether inference runs on our Azure resource or theirs. If theirs, they need a
   deployed model and a key before phase one can answer.
+- Whether login is a password or their SSO. If SSO, their IT registers the
+  sign-in redirect and consents the sign-in scopes on the app; we set the
+  allowed domain. The connector credentials themselves are just a scheme and a
+  secret (API key, client credentials, or a username grant), set in the
+  environment, so a new system is configuration rather than new code.
 
 ## Keeping it up while a client is on it
 
