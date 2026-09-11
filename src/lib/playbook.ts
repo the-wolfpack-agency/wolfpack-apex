@@ -49,7 +49,8 @@ build does, and starting it late is the single most common way a pilot slips.
 | Needed | From whom | Why it blocks |
 | --- | --- | --- |
 | Microsoft 365 tenant consent | Their IT | Every document and calendar surface |
-| One connected Microsoft account | Their operations lead | We discover the libraries it can reach; nothing to name by hand |
+| One admin to run onboarding | Their program owner | They log in and connect each system themselves; nothing is handed to us |
+| A verification login for us | Their admin | So we confirm every function end to end before go-live |
 | One named role per persona | Their program owner | Scoping is per role, not per person |
 | A test account per persona | Their IT | Verifying what a dealer sees needs a dealer |
 | Named escalation contact | Both sides | Somebody has to answer when a scan finds something |
@@ -717,7 +718,13 @@ in it, exportable without us.
 ## How the integration works: access, not code
 
 A recurring question, worth answering before it is asked: we do not take their
-codebase and they do not build into ours. Every system connects the same way,
+codebase and they do not build into ours. Onboarding is self-serve, their admin
+connects each system from one screen (a consent for Microsoft, a credential or
+OAuth for a DMS or CRM), and the credential is stored encrypted and never sent
+to us. So there is nothing to hand over: no connected app built on our side, no
+secret emailed, no environment variable an operator sets. We keep a verification
+login so we can confirm every function end to end before go-live, but the
+connecting is theirs. Every system connects the same way,
 through scoped, revocable access their IT grants, and a connector on our side
 that uses it.
 
