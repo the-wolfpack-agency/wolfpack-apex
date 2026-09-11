@@ -19,7 +19,7 @@
  */
 
 /** Shown on the page so a reader knows how current this is. */
-export const PLAYBOOK_UPDATED = "2026-09-11";
+export const PLAYBOOK_UPDATED = "2026-09-12";
 
 /* A plain template literal, not String.raw: raw strings do not process escape
    sequences, so the escaped backticks this content needs would have rendered
@@ -795,6 +795,55 @@ person sees when each thing fails.
 | A model provider is unreachable | The answer names what could not be reached and says nothing was lost; most turns never needed it |
 | Someone hammers the login | They are slowed with a try-again-shortly; real users are unaffected |
 | A deploy is bad | Roll back to the previous commit; health confirms recovery |
+
+## Network and egress: what their IT allowlists
+
+The other half of access is the network path. Send this to their security team
+with the grant request, it removes a review round-trip.
+
+### Outbound: hosts we reach
+
+Their firewall or proxy must allow these, all HTTPS. The identity host is always
+needed; the rest are filled in per client from the credentials they provide, and
+nothing else is contacted.
+
+- login.microsoftonline.com and graph.microsoft.com, for documents, profile and
+  sign-in, where Microsoft 365 is used.
+- Each connected system's API host (their DMS, CRM, and so on).
+- The model host, ours or their own Azure AI Foundry endpoint, where a model is
+  used.
+- The application database host.
+
+### Inbound: their systems accepting our calls
+
+Where they build APIs behind a security gateway (42Crunch, Checkmarx are common),
+OAuth is the norm and no source-IP rule is needed, we authenticate per token. If
+a system additionally allowlists caller IPs, decide the shape early, because the
+platform's egress IP is not static: prefer token-only auth; otherwise put a
+fixed-IP proxy in front, or run the connector from a fixed host. This is a
+network-team conversation to have before phase one, not during it.
+
+### Monitoring, with the tool they already run
+
+Point their monitor at \`GET /api/health?deep=1\`. It checks the database, not
+just that the process is alive, and returns 503 when a dependency is down, so an
+outage is a red check they are paged on rather than something the client finds
+first. If they run Dynatrace or similar, this drops into their existing on-call.
+
+### What answers their security review before the meeting
+
+Their toolchain maps directly onto checks we already gate on, so most of the
+review is already done:
+
+| Their tool class | Our gate |
+| --- | --- |
+| Static application security (Checkmarx) | CodeQL + a static security scan in CI |
+| Open-source vulnerability (Fossa) | a dependency audit that fails on high or critical (currently zero) |
+| Static code analysis (SonarQube) | lint, types and the full test suite |
+| API security (42Crunch) | auth on every route, rate-limited sign-in, redaction at one chokepoint |
+
+The grant request itself goes as a one-page email at the first meeting, so the
+long-lead consents start on day one rather than after scoping.
 
 ## What is verified before every phase ships
 
