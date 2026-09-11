@@ -31,6 +31,20 @@ const ENTRIES: ReleaseEntry[] = [
     how_to_use: "Ask \"what can FDOS do?\" and start from the Agent workflows group.",
     area: "Ford", category: "improvement",
   },
+  {
+    title: "The dashboard leads with the agent workflows",
+    description:
+      "The home screen now opens with an Agent workflows section that explains, in one line, what a workflow does (it chains several steps, drafts the result, and stops for your confirm before anything is written or sent) and offers each one as a single tap: prep and file a claim, clear the safe claims, prep a whole visit, run a recall campaign. The automations are the headline of the tool, not buried.",
+    how_to_use: "Open the dashboard; tap a workflow card to run it in the assistant.",
+    area: "Ford", category: "improvement",
+  },
+  {
+    title: "Reliability and security hardening",
+    description:
+      "A round of production hardening so the tool holds up with a client on it: database connections now self-heal through a transient wake instead of erroring, a health check and an always-on heartbeat detect a dependency issue early, sign-in and password-reset are rate-limited against abuse, and if a dependency ever hiccups the app shows a calm 'temporarily unavailable' state rather than a broken screen. Verified under concurrent load with no errors.",
+    how_to_use: "Nothing to do; every request benefits.",
+    area: "Ford", category: "improvement",
+  },
 ];
 
 async function main() {
