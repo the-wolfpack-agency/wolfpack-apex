@@ -80,6 +80,14 @@ export const CLIENT_BUILDS: ClientBuild[] = [
     data: "The method is real and proven (the Brand Ambassador change-management program). This page is the client-neutral generalization; nothing on it is measured, and the Palo Alto build is one worked example of it.",
   },
   {
+    href: "/builds/ai-data-governance",
+    title: "AI data governance",
+    client: "Wolfpack capability, framed for Palo Alto (prospective, not engaged)",
+    stage: "concept",
+    what: "The data-path layer that complements Prisma AIRS: what may reach a model, where inference runs, what is kept, and what comes back. Redaction, residency, retention, response-safety, provenance.",
+    data: "The controls described are REAL and run in our inference router today (redaction, residency, retention, response-safety, per-call audit). What is a concept is the Palo Alto framing: they are not a client, nothing on the page is measured, and no integration with their stack exists.",
+  },
+  {
     href: "/builds/security-plain-language",
     title: "Take the gates down",
     client: "Palo Alto Networks (prospective, not engaged)",
