@@ -21,6 +21,8 @@ import BuildBanner from "@/components/BuildBanner";
 import {
   CERT_PREMISE,
   CERT_TIERS,
+  FDE,
+  GATEKEEPING,
   HEADLINE,
   METHOD,
   PRECISION_NOTE,
@@ -47,6 +49,18 @@ export default function SecurityPlainLanguagePage() {
       <section className="wp-pilot-section" data-testid="spl-premise">
         <h2>Who gets left out</h2>
         <p className="wp-pilot-aside">{CERT_PREMISE}</p>
+      </section>
+
+      {/* THE INSIGHT UNDERNEATH IT. */}
+      <section className="wp-pilot-section" data-testid="spl-gatekeeping">
+        <h2>Why: jargon is gatekeeping</h2>
+        <p className="wp-pilot-aside">{GATEKEEPING.thesis}</p>
+        <ul className="wp-pilot-list">
+          {GATEKEEPING.points.map((p) => (
+            <li key={p}>{p}</li>
+          ))}
+        </ul>
+        <p className="wp-pilot-aside">{GATEKEEPING.cost}</p>
       </section>
 
       {/* THE METHOD. */}
@@ -131,6 +145,38 @@ export default function SecurityPlainLanguagePage() {
                   </td>
                   <td>{t.who}</td>
                   <td>{t.proves}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {/* THE HIGHEST-VALUE AUDIENCE. */}
+      <section className="wp-pilot-section" data-testid="spl-fde">
+        <h2>The groundbreaking one: forward deployed engineers</h2>
+        <p className="wp-pilot-aside">
+          {FDE.why} {FDE.gap}
+        </p>
+        <p className="wp-pilot-aside">
+          Training, support, and coursework for the {FDE.role}, the same method turned into an operating
+          skill for the people sent to the front line:
+        </p>
+        <div className="wp-build-table-wrap">
+          <table className="wp-build-table">
+            <thead>
+              <tr>
+                <th scope="col">What the coursework covers</th>
+                <th scope="col">So that</th>
+              </tr>
+            </thead>
+            <tbody>
+              {FDE.coursework.map((c) => (
+                <tr key={c.covers}>
+                  <td>
+                    <strong>{c.covers}</strong>
+                  </td>
+                  <td>{c.so}</td>
                 </tr>
               ))}
             </tbody>

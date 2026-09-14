@@ -140,6 +140,33 @@ export const PRODUCTS: ProductPlain[] = [
   },
 ];
 
+/** The insight underneath the whole method: jargon is gatekeeping, and the
+ *  gates only ever open inward. This is the reason the program exists. */
+export const GATEKEEPING = {
+  thesis: "Jargon does not just confuse; it gatekeeps, and the gates only ever open inward.",
+  points: [
+    "Specialists guard their knowledge; engineers understate what a change really involves to protect their own schedule.",
+    "Product leaders learn the product only as far as the gatekeeping allows, and are wary of admitting the gaps.",
+    "Even the head of engineering, no longer touching the code, is outside the gate.",
+    "The trap closes from both sides: the moment a specialist clears the gate, they start speaking the same jargon, because that is how expertise gets signaled.",
+  ],
+  cost: "Without real understanding, nobody can compare their tools to a competitor's, improve a process, or fully grasp what the company does and sells. Taking the gates down, precisely and without dumbing anything down, is the whole point.",
+} as const;
+
+/** The highest-value audience: the role where gatekeeping bites hardest, and the
+ *  one nobody trains for yet. */
+export const FDE = {
+  role: "Forward Deployed Engineer",
+  why: "The hottest role in technology right now, and almost nobody trains for it, because it is new and learned entirely on the job. An FDE has cleared every technical gate and now has to open them for a customer, in the customer's own environment, under pressure, in real time.",
+  gap: "Being deeply technical is only half the job. The other half is making that depth legible and valuable to the people at the deployment site, and nobody teaches that half.",
+  coursework: [
+    { covers: "Product depth, told plainly", so: "The engineer can explain what a feature does and why, not just operate it." },
+    { covers: "Translation and the room", so: "Turning deep tech into what the customer's people can understand and act on, under pressure." },
+    { covers: "Mapping to the customer's system", so: "Connecting the capability to the customer's actual environment and the outcome they care about." },
+    { covers: "Driving adoption at the edge", so: "The deployment sticks after the engineer leaves, which is the entire point of the role." },
+  ],
+} as const;
+
 /** Why the team feels the value, which is the point of the engagement. */
 export const WHY_IT_WORKS = [
   "A seller who can say these sentences sounds like they understand what they sell, because they now do.",

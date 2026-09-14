@@ -7,6 +7,8 @@
 import {
   CERT_PREMISE,
   CERT_TIERS,
+  FDE,
+  GATEKEEPING,
   HEADLINE,
   METHOD,
   PRECISION_NOTE,
@@ -51,6 +53,27 @@ describe("the certification", () => {
     for (const t of CERT_TIERS) {
       expect(t.who.trim()).not.toBe("");
       expect(t.proves.trim()).not.toBe("");
+    }
+  });
+});
+
+describe("the gatekeeping thesis", () => {
+  it("names the trap and the cost", () => {
+    expect(GATEKEEPING.thesis.trim().length).toBeGreaterThan(20);
+    expect(GATEKEEPING.points.length).toBeGreaterThanOrEqual(3);
+    for (const p of GATEKEEPING.points) expect(p.trim()).not.toBe("");
+    expect(GATEKEEPING.cost.trim().length).toBeGreaterThan(20);
+  });
+});
+
+describe("the forward-deployed-engineer track", () => {
+  it("names the role, the gap, and what the coursework covers", () => {
+    expect(FDE.role).toMatch(/Forward Deployed Engineer/i);
+    for (const s of [FDE.why, FDE.gap]) expect(s.trim().length).toBeGreaterThan(20);
+    expect(FDE.coursework.length).toBeGreaterThanOrEqual(3);
+    for (const c of FDE.coursework) {
+      expect(c.covers.trim()).not.toBe("");
+      expect(c.so.trim()).not.toBe("");
     }
   });
 });
