@@ -61,7 +61,6 @@ export const REUSES = [
   { have: "The follow-through coaching (the weekly mobile-coach check-ins).", serves: "Becomes the reinforcement that makes the knowledge stick past the training day, so fluency does not fade in a month." },
   { have: "The adoption measurement.", serves: "Becomes the proof the certification changed how people actually sell and speak, not just that they passed a quiz." },
   { have: "The assistant-guided coursework and encouragement, begun in wolfpack-lms.", serves: "Becomes the tutor that walks each person through their tier, encourages them when they are stuck, and reinforces the knowledge over time so fluency sticks instead of fading after the training day." },
-  { have: "What does NOT transfer: the Porsche content itself.", serves: "It is brand-specific. Only the method travels; every product explanation here is written fresh." },
 ];
 
 /** The craft note that makes this different from dumbing-down: simple AND exact.
