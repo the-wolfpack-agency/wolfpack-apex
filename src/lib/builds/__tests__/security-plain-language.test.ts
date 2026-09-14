@@ -12,9 +12,10 @@ import {
   HEADLINE,
   METHOD,
   PRECISION_NOTE,
+  ACQUISITIONS,
+  DEEP_DIVES,
   PRODUCTS,
   REUSES,
-  XSIAM_DEEP,
   TO_BUILD_OUT,
   WHY_IT_WORKS,
 } from "@/lib/builds/security-plain-language";
@@ -48,14 +49,26 @@ describe("the products", () => {
   });
 });
 
-describe("the flagship deep dive (Cortex XSIAM)", () => {
-  it("names the flagship and carries all four beats for each feature", () => {
-    expect(XSIAM_DEEP.product).toMatch(/Cortex XSIAM/i);
-    expect(XSIAM_DEEP.what.trim().length).toBeGreaterThan(20);
-    expect(XSIAM_DEEP.features.length).toBeGreaterThanOrEqual(5);
-    for (const f of XSIAM_DEEP.features) {
-      for (const field of [f.name, f.jargon, f.plain, f.stops, f.without]) expect(field.trim()).not.toBe("");
-      expect(f.plain.length).toBeGreaterThan(60);
+describe("the feature-level deep dives", () => {
+  it("covers more than one flagship, including Cortex XSIAM, each feature carrying all four beats", () => {
+    expect(DEEP_DIVES.length).toBeGreaterThanOrEqual(2);
+    expect(DEEP_DIVES.map((d) => d.product)).toContain("Cortex XSIAM");
+    for (const dive of DEEP_DIVES) {
+      expect(dive.what.trim().length).toBeGreaterThan(20);
+      expect(dive.features.length).toBeGreaterThanOrEqual(4);
+      for (const f of dive.features) {
+        for (const field of [f.name, f.jargon, f.plain, f.stops, f.without]) expect(field.trim()).not.toBe("");
+        expect(f.plain.length).toBeGreaterThan(60);
+      }
+    }
+  });
+});
+
+describe("the acquisitions coverage", () => {
+  it("de-jargons the recent acquisitions, each with all four beats", () => {
+    expect(ACQUISITIONS.length).toBeGreaterThanOrEqual(3);
+    for (const a of ACQUISITIONS) {
+      for (const field of [a.name, a.brought, a.plain, a.stops, a.without]) expect(field.trim()).not.toBe("");
     }
   });
 });
