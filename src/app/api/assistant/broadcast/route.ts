@@ -25,10 +25,36 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth/require-capability";
-import { broadcastToAssistants, MAX_BROADCAST_CHARS } from "@/lib/assistant/broadcast";
+import {
+  broadcastToAssistants,
+  listRecipients,
+  MAX_BROADCAST_CHARS,
+} from "@/lib/assistant/broadcast";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+/**
+ * GET: how many people a broadcast would reach.
+ *
+ * Read from the same query the send uses, so the number in "send to 42 people"
+ * describes the set that will actually receive it. A count from a different
+ * source is a confirmation about a different group.
+ *
+ * Returns readable:false rather than 0 when the list cannot be read, because
+ * the compose surface must not offer to send to nobody as though that were a
+ * real answer.
+ */
+export async function GET(req: NextRequest) {
+  const auth = await requireCapability(req, "settings.manage_team");
+  if (!auth.ok) return auth.response;
+
+  const listed = await listRecipients(auth.user.workspaceId);
+  return NextResponse.json(
+    { recipients: listed.recipients.length, readable: listed.readable },
+    { status: listed.readable ? 200 : 503, headers: { "Cache-Control": "no-store" } },
+  );
+}
 
 export async function POST(req: NextRequest) {
   const auth = await requireCapability(req, "settings.manage_team");

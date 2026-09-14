@@ -70,6 +70,30 @@ export interface BroadcastInput {
 /** Longer than this is a document, not an announcement. */
 export const MAX_BROADCAST_CHARS = 2000;
 
+
+/**
+ * Who a broadcast would reach.
+ *
+ * Shared with the compose surface deliberately. The number shown in "send to
+ * 42 people" has to come from the query that will actually do the sending, or
+ * the confirmation is describing a different set from the one that receives
+ * it, and a sender is agreeing to something that was never true.
+ */
+export async function listRecipients(
+  workspaceId: string,
+): Promise<{ recipients: { id: string }[]; readable: boolean }> {
+  try {
+    const { rows } = await query<{ id: string }>(
+      `SELECT id FROM instinct_team_members
+        WHERE workspace_id = $1 AND COALESCE(is_active, TRUE) = TRUE`,
+      [workspaceId],
+    );
+    return { recipients: rows, readable: true };
+  } catch {
+    return { recipients: [], readable: false };
+  }
+}
+
 export async function broadcastToAssistants(
   input: BroadcastInput,
 ): Promise<BroadcastResult> {
@@ -93,20 +117,14 @@ export async function broadcastToAssistants(
     userRole: input.actorRole,
   });
 
-  let recipients: { id: string }[];
-  try {
-    const { rows } = await query<{ id: string }>(
-      `SELECT id FROM instinct_team_members
-        WHERE workspace_id = $1 AND COALESCE(is_active, TRUE) = TRUE`,
-      [input.workspaceId],
-    );
-    recipients = rows;
-  } catch {
+  const listed = await listRecipients(input.workspaceId);
+  if (!listed.readable) {
     /* An unreadable recipient list is not an empty one, and reporting zero
        delivered as a successful send is how somebody assumes the company was
        told something it was not. */
     return { delivered: 0, failed: 0, readable: false, redacted: gated.removed };
   }
+  const recipients = listed.recipients;
 
   let delivered = 0;
   let failed = 0;
