@@ -72,6 +72,14 @@ export const CLIENT_BUILDS: ClientBuild[] = [
     data: "Read from their own facilitator guides, cohort surveys and coaching scripts in the indexed corpus. Nothing is wired, and the client has not been named.",
   },
   {
+    href: "/builds/plain-language-method",
+    title: "Plain-language method (reusable engine)",
+    client: "Wolfpack (client-neutral, reusable)",
+    stage: "in flight",
+    what: "The change-management engine underneath the Palo Alto build, lifted out of the specifics: the four beats, the certification ladder, the field track, and the recipe for pointing it at any client's products.",
+    data: "The method is real and proven (the Brand Ambassador change-management program). This page is the client-neutral generalization; nothing on it is measured, and the Palo Alto build is one worked example of it.",
+  },
+  {
     href: "/builds/security-plain-language",
     title: "Take the gates down",
     client: "Palo Alto Networks (prospective, not engaged)",
