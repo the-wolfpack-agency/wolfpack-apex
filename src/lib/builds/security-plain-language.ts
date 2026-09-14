@@ -195,6 +195,82 @@ export const XSIAM_DEEP: DeepDive = {
   ],
 };
 
+/** A second feature-level dive, on the AI-security product that sits closest to
+ *  our own data-governance work. Written from public descriptions. */
+export const AIRS_DEEP: DeepDive = {
+  product: "Prisma AIRS",
+  what: "Palo Alto's product for securing the AI a company builds and runs. Here is what its headline features are actually doing.",
+  features: [
+    {
+      name: "Model scanning",
+      jargon: "model scanning, supply-chain risk",
+      plain: "It inspects the AI models themselves for tampering or hidden risks before they go live, the way you would scan a file before opening it.",
+      stops: "A poisoned or backdoored model reaching production.",
+      without: "You are trusting a model you never actually inspected.",
+    },
+    {
+      name: "AI inventory and posture (AI-SPM)",
+      jargon: "AI security posture management, AI-SPM",
+      plain: "It keeps a live map of every AI system in the company and its risks, so nothing is running unseen.",
+      stops: "Shadow AI: capability someone stood up that nobody knew was there.",
+      without: "AI spreads across the company with no inventory and no owner.",
+    },
+    {
+      name: "Runtime protection",
+      jargon: "prompt injection, data leakage, runtime security",
+      plain: "It watches the AI while it runs and blocks attempts to trick it or make it leak data. Prompt injection is just slipping a hidden instruction into what the AI reads so it misbehaves.",
+      stops: "Someone manipulating the live AI into misbehaving or spilling secrets.",
+      without: "The running AI is an open target with no guard.",
+    },
+    {
+      name: "Agent security",
+      jargon: "agentic AI security",
+      plain: "It extends that protection to AI agents that take actions, not just answer questions.",
+      stops: "An action-taking agent being hijacked into doing something harmful.",
+      without: "The agents that can actually do things run unguarded.",
+    },
+  ],
+};
+
+/** Every feature-level dive, rendered in order. XSIAM (the flagship) first, then
+ *  AIRS (the AI-security product nearest our data-governance complement). */
+export const DEEP_DIVES: DeepDive[] = [XSIAM_DEEP, AIRS_DEEP];
+
+/** Recent acquisitions, in plain terms. Their own product line is only half the
+ *  jargon a seller faces; the acquisitions arrive with their own, and nobody has
+ *  had time to translate them. Written from public descriptions of each deal. */
+export interface AcquisitionPlain { name: string; brought: string; plain: string; stops: string; without: string }
+export const ACQUISITIONS: AcquisitionPlain[] = [
+  {
+    name: "Portkey",
+    brought: "An AI gateway",
+    plain: "A single control tower every AI request passes through: it picks the right model, retries if one fails, reuses repeat answers, and tracks the cost, all in one place.",
+    stops: "AI calls sprawling across teams with no control, no visibility, and no cost cap.",
+    without: "Every team wires AI its own way and nobody knows the bill or can enforce a rule.",
+  },
+  {
+    name: "Koi",
+    brought: "Agentic endpoint security",
+    plain: "It watches the AI agents running on people's devices and can stop one that starts misbehaving.",
+    stops: "An AI agent on a laptop being turned against the company.",
+    without: "Agents run on endpoints with nobody watching what they actually do.",
+  },
+  {
+    name: "Console",
+    brought: "Autonomous IT resolution",
+    plain: "An AI that handles routine IT requests on its own, the password resets and access tickets, so people are not waiting on a human for the simple things.",
+    stops: "The IT queue backing up on repetitive requests while people wait.",
+    without: "Staff lose hours waiting on things a system could do instantly.",
+  },
+  {
+    name: "Chronosphere and Embrace",
+    brought: "Observability",
+    plain: "The instrument panel for everything running in the cloud and in the apps, so a problem is visible as it forms rather than after it becomes an outage.",
+    stops: "Learning about a slowdown or failure from angry users instead of your own dashboards.",
+    without: "You are flying blind and hear about problems last.",
+  },
+];
+
 /** The insight underneath the whole method: jargon is gatekeeping, and the
  *  gates only ever open inward. This is the reason the program exists. */
 export const GATEKEEPING = {
