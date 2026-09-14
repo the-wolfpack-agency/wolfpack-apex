@@ -28,6 +28,7 @@ import {
   PRECISION_NOTE,
   PRODUCTS,
   REUSES,
+  XSIAM_DEEP,
   TO_BUILD_OUT,
   WHY_IT_WORKS,
 } from "@/lib/builds/security-plain-language";
@@ -113,6 +114,40 @@ export default function SecurityPlainLanguagePage() {
                   <td>{p.plain}</td>
                   <td>{p.stops}</td>
                   <td>{p.without}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {/* ONE LEVEL DEEPER, ON THE FLAGSHIP. */}
+      <section className="wp-pilot-section" data-testid="spl-deepdive">
+        <h2>One level deeper: {XSIAM_DEEP.product}</h2>
+        <p className="wp-pilot-aside">
+          {XSIAM_DEEP.what} This is where sellers actually get lost, feature by feature, and where the
+          method has to hold up.
+        </p>
+        <div className="wp-build-table-wrap">
+          <table className="wp-build-table">
+            <thead>
+              <tr>
+                <th scope="col">Feature / jargon</th>
+                <th scope="col">What is actually happening</th>
+                <th scope="col">What it stops</th>
+                <th scope="col">Without it</th>
+              </tr>
+            </thead>
+            <tbody>
+              {XSIAM_DEEP.features.map((feat) => (
+                <tr key={feat.name}>
+                  <td>
+                    <strong>{feat.name}</strong>
+                    <span>{feat.jargon}</span>
+                  </td>
+                  <td>{feat.plain}</td>
+                  <td>{feat.stops}</td>
+                  <td>{feat.without}</td>
                 </tr>
               ))}
             </tbody>

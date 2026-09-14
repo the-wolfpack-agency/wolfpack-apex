@@ -140,6 +140,61 @@ export const PRODUCTS: ProductPlain[] = [
   },
 ];
 
+/** One level deeper, inside the product Palo Alto markets most right now: Cortex
+ *  XSIAM, their Precision-AI SOC platform. Sellers get lost feature by feature,
+ *  not at the product line, so this is where the four beats earn their keep.
+ *  Written from public product descriptions; nothing measured. */
+export interface DeepDive { product: string; what: string; features: ProductPlain[] }
+
+export const XSIAM_DEEP: DeepDive = {
+  product: "Cortex XSIAM",
+  what: "Palo Alto's flagship right now: an AI-driven security operations platform marketed as the replacement for the legacy SIEM. Here is what its headline features are actually doing.",
+  features: [
+    {
+      name: "Unified data ingestion",
+      jargon: "data lake, unified ingestion, telemetry",
+      plain: "It vacuums up the security data from everywhere in the company (every device, app, cloud, and log) into one place, so the evidence is not scattered across a dozen tools. 'Telemetry' is just the stream of events those systems constantly emit.",
+      stops: "A threat hiding in a data source nobody was watching.",
+      without: "Your evidence is spread across tools that do not talk, and the attacker lives in the gaps.",
+    },
+    {
+      name: "Stitching alerts into attack stories",
+      jargon: "AI reasoning, correlation, attack story",
+      plain: "The AI reads that firehose of events and connects the related ones into a single story ('this login, then this download, then this server contact are one attack') instead of showing five hundred separate alerts.",
+      stops: "A real attack getting lost as scattered, individually-minor alerts.",
+      without: "Analysts stare at thousands of disconnected alerts and never see they are one incident.",
+    },
+    {
+      name: "Risk scoring (SmartScore, Precision AI)",
+      jargon: "risk-based prioritization, SmartScore, Precision AI",
+      plain: "It ranks what is happening by how dangerous it actually is, using AI plus context, so the team works the real threats first instead of guessing which alert matters.",
+      stops: "The team burning hours on noise while the dangerous thing waits in the queue.",
+      without: "Every alert looks equally urgent, so the worst one waits behind the trivia.",
+    },
+    {
+      name: "Autonomous playbooks",
+      jargon: "SOAR, automated remediation, autonomous playbooks",
+      plain: "A 'playbook' is the set of steps an analyst would take to investigate and shut down a specific kind of threat. It runs those steps automatically for the routine cases, the way a seasoned analyst would, so people only handle the hard ones.",
+      stops: "Slow, manual, repetitive response letting a threat spread while a human works the queue.",
+      without: "A small team hand-handles every alert and cannot keep up.",
+    },
+    {
+      name: "Identity-aware response",
+      jargon: "identity-aware containment, isolation",
+      plain: "When it shuts a threat down, it ties the action to the specific user or machine account involved, so it isolates exactly the compromised thing without knocking the rest of the business offline.",
+      stops: "A blunt response that either misses the real account or takes down half the company to be safe.",
+      without: "Containment is a sledgehammer, so teams hesitate to act at all.",
+    },
+    {
+      name: "Replacing the SIEM",
+      jargon: "next-gen SIEM, SIEM replacement",
+      plain: "A SIEM is the old system that collected logs and made humans read them to find problems. This replaces it: instead of a giant logbook someone has to read, the AI reads it and acts.",
+      stops: "Only learning about an attack after a person finds it in the logs.",
+      without: "You have a filing cabinet of evidence and nobody with time to open it.",
+    },
+  ],
+};
+
 /** The insight underneath the whole method: jargon is gatekeeping, and the
  *  gates only ever open inward. This is the reason the program exists. */
 export const GATEKEEPING = {
@@ -177,7 +232,7 @@ export const WHY_IT_WORKS = [
 /** What turns this drawing into an engagement. Held on the page, last, because a
  *  sample that hides what it does not yet know is a sales trick, not a method. */
 export const TO_BUILD_OUT = [
-  { question: "One level deeper, inside a single product.", why: "Sellers get most lost not at the product line but inside a product, feature by feature. The next sample would take one product and de-jargon its features." },
+  { question: "The rest of the line, and the new acquisitions.", why: "We have taken Cortex XSIAM, the flagship, down to the feature level here. An engagement extends the same treatment across the portfolio and each new acquisition, so the fluency does not decay as the product set grows." },
   { question: "Their words, not ours.", why: "This is written from public knowledge. A real program reads their own decks and calls, so the language matches how their teams already talk and the corrections come from them." },
   { question: "The format the team will actually use.", why: "Whether this lives as a card deck, a one-page-per-product sheet, an onboarding path, or coaching prompts is a change-management decision made with them, not for them." },
 ];

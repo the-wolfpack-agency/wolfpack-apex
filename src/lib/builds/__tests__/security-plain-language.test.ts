@@ -14,6 +14,7 @@ import {
   PRECISION_NOTE,
   PRODUCTS,
   REUSES,
+  XSIAM_DEEP,
   TO_BUILD_OUT,
   WHY_IT_WORKS,
 } from "@/lib/builds/security-plain-language";
@@ -43,6 +44,18 @@ describe("the products", () => {
     for (const p of PRODUCTS) {
       // the plain explanation should be a sentence, not a restatement of the jargon
       expect(p.plain.length).toBeGreaterThan(60);
+    }
+  });
+});
+
+describe("the flagship deep dive (Cortex XSIAM)", () => {
+  it("names the flagship and carries all four beats for each feature", () => {
+    expect(XSIAM_DEEP.product).toMatch(/Cortex XSIAM/i);
+    expect(XSIAM_DEEP.what.trim().length).toBeGreaterThan(20);
+    expect(XSIAM_DEEP.features.length).toBeGreaterThanOrEqual(5);
+    for (const f of XSIAM_DEEP.features) {
+      for (const field of [f.name, f.jargon, f.plain, f.stops, f.without]) expect(field.trim()).not.toBe("");
+      expect(f.plain.length).toBeGreaterThan(60);
     }
   });
 });
