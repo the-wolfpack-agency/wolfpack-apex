@@ -206,7 +206,7 @@ export const AIRS_DEEP: DeepDive = {
       jargon: "model scanning, supply-chain risk",
       plain: "It inspects the AI models themselves for tampering or hidden risks before they go live, the way you would scan a file before opening it.",
       stops: "A poisoned or backdoored model reaching production.",
-      without: "You are trusting a model you never actually inspected.",
+      without: "You're trusting a model you never actually inspected.",
     },
     {
       name: "AI inventory and posture (AI-SPM)",
@@ -267,7 +267,7 @@ export const ACQUISITIONS: AcquisitionPlain[] = [
     brought: "Observability",
     plain: "The instrument panel for everything running in the cloud and in the apps, so a problem is visible as it forms rather than after it becomes an outage.",
     stops: "Learning about a slowdown or failure from angry users instead of your own dashboards.",
-    without: "You are flying blind and hear about problems last.",
+    without: "You're flying blind, and hear about problems last.",
   },
 ];
 
