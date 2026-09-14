@@ -72,6 +72,14 @@ export const CLIENT_BUILDS: ClientBuild[] = [
     data: "Read from their own facilitator guides, cohort surveys and coaching scripts in the indexed corpus. Nothing is wired, and the client has not been named.",
   },
   {
+    href: "/builds/security-plain-language",
+    title: "Take the gates down",
+    client: "Palo Alto Networks (prospective, not engaged)",
+    stage: "concept",
+    what: "A plain-language product certification for everyone Palo Alto's engineer-only training leaves out (sales, success, marketing, ops): what each product does in human terms, built on our proven Brand Ambassador change-management method.",
+    data: "Illustrative. Every product description is written from public knowledge of Palo Alto's products, not from any Palo Alto material, and nothing on the page is measured. Palo Alto is not a client; this is a sample of the method.",
+  },
+  {
     href: "/builds/change-management",
     title: "Change Management Plan",
     client: "Porsche Academy US",
