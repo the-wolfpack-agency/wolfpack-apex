@@ -34,6 +34,27 @@ test("does NOT flag env refs / placeholders as secrets (precision)", () => {
   expect(reviewDiff(diff(`@@ -1,0 +1,1 @@\n+const token = \`\${secretRef}\`;`))).toEqual([]);
 });
 
+test("detects a credential / reset link written to a log (blocks; CWE-532)", () => {
+  // The motivating incident: a raw password reset link logged.
+  const f = reviewDiff(diff("@@ -1,0 +1,1 @@\n+  console.log(`reset link: ${resetUrl}`);"));
+  expect(f).toHaveLength(1);
+  expect(f[0]).toMatchObject({ klass: "logged_credential", severity: "critical", cwe: "CWE-532" });
+});
+
+test("detects a provider-signature secret logged verbatim, and REDACTS the log finding", () => {
+  // This line trips both the hardcoded-secret rule and the logged-secret rule;
+  // assert the log finding specifically and that its snippet is redacted.
+  const f = reviewDiff(diff('@@ -1,0 +1,1 @@\n+  console.error("key", "sk-ant-abcdefghijklmnopqrstuvwx0123");'));
+  const logged = f.find((x) => x.klass === "logged_secret");
+  expect(logged).toBeDefined();
+  expect(logged).toMatchObject({ severity: "critical", cwe: "CWE-532" });
+  expect(String(logged!.evidence.snippet)).not.toContain("sk-ant-abcdefghijklmnopqrstuvwx0123");
+});
+
+test("does NOT flag an ordinary log line as a logged credential (precision)", () => {
+  expect(reviewDiff(diff('@@ -1,0 +1,1 @@\n+  console.log("token count", count);'))).toEqual([]);
+});
+
 test("detects eval/exec, disabled TLS, dangerous HTML, SQL concat", () => {
   const classes = (body: string) => reviewDiff(diff(`@@ -1,0 +1,1 @@\n+${body}`)).map((f) => f.klass);
   expect(classes(`eval(userInput);`)).toContain("eval_exec");
