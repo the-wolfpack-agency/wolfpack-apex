@@ -57,7 +57,8 @@
     "check:upserts": "npx tsx scripts/check-upsert-targets.ts",
     "coverage:sharepoint": "npx tsx scripts/sharepoint-coverage.ts",
     "check:credentials": "npx tsx scripts/check-credentials.ts",
-    "assistant:answers": "npx tsx scripts/answer-audit.ts"
+    "assistant:answers": "npx tsx scripts/answer-audit.ts",
+    "scan:dup-exports": "npx tsx scripts/scan-duplicate-exports.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.92.0",
