@@ -50,4 +50,17 @@ export interface CodeReviewResult {
   findings: AiCodeFinding[];
   verdict: CodeGateVerdict;
   bySeverity: Record<string, number>;
+  /** Independent-family judge verdicts, when a judge ran. Does NOT affect the gate outcome. */
+  judgments?: FindingJudgment[];
+}
+
+export type FindingVerdict = "confirmed" | "false_positive" | "needs_review";
+
+export interface FindingJudgment {
+  finding: AiCodeFinding;
+  /** "unchecked" = no different-family judge was available (fail-loud, never a sibling). */
+  verdict: FindingVerdict | "unchecked";
+  authorLineage: string;
+  judgeLineage: string | null;
+  reason: string;
 }

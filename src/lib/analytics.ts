@@ -667,6 +667,7 @@ export type InstinctEventType =
   // ai_code.finding_detected { class, severity, cwe } - one per code risk, so the
   //   learning loop mines what AI tools keep introducing.
   | "ai_code.finding_detected"
+  | "ai_code.finding_judged"
   // Continuous AI red-team: an adversarial corpus run against the gate.
   // ai_redteam.run_completed { attacks, blocked, vulns, pass_rate, source }
   | "ai_redteam.run_completed"

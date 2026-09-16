@@ -106,3 +106,17 @@ test("GET returns the review history", async () => {
   expect((await res.json()).reviews).toHaveLength(1);
   expect(mockList).toHaveBeenCalledWith("w-1");
 });
+
+test("POST wires the independent judge when body.judge is true", async () => {
+  mockRequireCapability.mockResolvedValue(okAuth());
+  await POST(req("POST", { ref: "PR-9", diff: "diff", judge: true, authorModel: "gpt-4o" }));
+  expect(mockRun).toHaveBeenCalledWith(
+    expect.objectContaining({ judge: expect.objectContaining({ authorModel: "gpt-4o" }) }),
+  );
+});
+
+test("POST does NOT run the judge by default", async () => {
+  mockRequireCapability.mockResolvedValue(okAuth());
+  await POST(req("POST", { ref: "PR-9", diff: "diff" }));
+  expect(mockRun).toHaveBeenCalledWith(expect.not.objectContaining({ judge: expect.anything() }));
+});

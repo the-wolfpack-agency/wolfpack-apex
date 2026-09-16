@@ -79,7 +79,7 @@ import { MODEL_REGISTRY, isModelAvailable } from "@/lib/ai/models/registry";
 import { recordServedVersion } from "@/lib/ai/models/version-store";
 import { ANTHROPIC_TIER_TO_MODEL } from "./anthropic-provider";
 
-interface ProviderRegistry {
+export interface ProviderRegistry {
   anthropic: AIProvider;
   azure: AIProvider;
   /* Providers that speak the OpenAI chat-completions shape, added by
@@ -88,7 +88,7 @@ interface ProviderRegistry {
   compatible: AIProvider[];
 }
 
-function buildRegistry(): ProviderRegistry {
+export function buildRegistry(): ProviderRegistry {
   return {
     anthropic: new AnthropicProvider(),
     azure: new AzureOpenAIProvider(),
@@ -1570,7 +1570,7 @@ export { BudgetExceededError, NoProviderAvailableError };
  * the model: azure-gpt-4o and gpt-4o are the same weights through different
  * doors.
  */
-function judgeCandidates(
+export function judgeCandidates(
   registry: ProviderRegistry,
   tier: AICompleteRequest["model_tier"],
 ): JudgeCandidate[] {
