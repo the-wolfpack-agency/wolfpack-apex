@@ -6,6 +6,7 @@
  * introduced, not the whole file.
  */
 import { KEY_SIGNATURES } from "@/lib/ai-surface/detect";
+import { secretInLogs } from "@/lib/platform-scan/static/detectors";
 import type { AddedLine, AiCodeFinding } from "./types";
 
 /**
@@ -158,6 +159,23 @@ export function detectCodeFindings(added: AddedLine[]): AiCodeFinding[] {
           evidence: { snippet: a.text.trim().slice(0, 200) },
         });
       }
+    }
+    // A credential, token, or single-use link reaching a log. Reuses the ONE
+    // log-secret detector (platform-scan) rather than a second copy, so this
+    // gate and platform-scan share one implementation. Logging a bearer
+    // credential is a leak, so it is critical (blocks the merge); the detector
+    // already redacts a provider-signature secret in its snippet.
+    for (const s of secretInLogs({ path: a.file, content: a.text })) {
+      out.push({
+        file: a.file,
+        line: a.line,
+        klass: s.severity === "critical" ? "logged_secret" : "logged_credential",
+        severity: "critical",
+        cwe: "CWE-532",
+        title: s.title,
+        detail: s.detail,
+        evidence: { snippet: String(s.evidence.snippet).slice(0, 200) },
+      });
     }
   }
   return out;
