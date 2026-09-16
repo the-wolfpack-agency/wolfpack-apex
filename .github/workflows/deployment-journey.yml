@@ -102,6 +102,13 @@ jobs:
           JOURNEY_PASSWORD: ${{ secrets.ADMIN_E2E_PASSWORD }}
         run: npx playwright test tests/e2e/welcome-modal-does-not-block-the-answer.spec.ts --workers=1 --reporter=line
 
+      - name: The code gate blocks a diff that logs a reset link
+        env:
+          PROD_URL: ${{ github.event.inputs.url || 'https://wolfpack-instinct.vercel.app' }}
+          JOURNEY_EMAIL: ${{ secrets.ADMIN_E2E_EMAIL }}
+          JOURNEY_PASSWORD: ${{ secrets.ADMIN_E2E_PASSWORD }}
+        run: npx playwright test tests/e2e/code-gate.spec.ts --workers=1 --reporter=line
+
       - name: Keep the evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
