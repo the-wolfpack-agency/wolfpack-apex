@@ -28,6 +28,7 @@ function LoginContent() {
   const justInvited = searchParams?.get("invited") === "1";
   const [email, setEmail] = useState(initialEmail);
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [msLoading, setMsLoading] = useState(false);
@@ -290,7 +291,7 @@ function LoginContent() {
             <input
               id="password"
               name="password"
-              type="password"
+              type={showPassword ? "text" : "password"}
               autoComplete="current-password"
               data-testid="login-password"
               value={password}
@@ -304,6 +305,24 @@ function LoginContent() {
               }}
               placeholder="Enter password"
             />
+            {/* Let the user confirm what they typed before signing in. Flips the
+                field between password and text; nothing is sent anywhere, it only
+                changes what this browser renders. */}
+            <label
+              className="mt-2 flex items-center gap-2 text-xs cursor-pointer select-none"
+              style={{ color: "var(--wp-text-dim)" }}
+            >
+              <input
+                type="checkbox"
+                checked={showPassword}
+                onChange={(e) => setShowPassword(e.target.checked)}
+                data-testid="login-show-password"
+                aria-controls="password"
+                className="h-3.5 w-3.5"
+                style={{ accentColor: "var(--wp-gold)" }}
+              />
+              Show password
+            </label>
           </div>
 
           {error && (

@@ -89,6 +89,27 @@ describe("LoginPage", () => {
     expect(emailInput).toHaveAttribute("type", "email");
   });
 
+  it("Show password toggle reveals and re-hides the password field", () => {
+    render(<LoginPage />);
+    const pw = screen.getByTestId("login-password") as HTMLInputElement;
+    const toggle = screen.getByTestId("login-show-password") as HTMLInputElement;
+
+    fireEvent.change(pw, { target: { value: "hunter2" } });
+    // Masked by default, toggle off.
+    expect(pw).toHaveAttribute("type", "password");
+    expect(toggle.checked).toBe(false);
+
+    // Reveal: same value now shown in the clear.
+    fireEvent.click(toggle);
+    expect(pw).toHaveAttribute("type", "text");
+    expect(pw.value).toBe("hunter2");
+
+    // Re-hide: back to masked, value preserved.
+    fireEvent.click(toggle);
+    expect(pw).toHaveAttribute("type", "password");
+    expect(pw.value).toBe("hunter2");
+  });
+
   it("signs in via raw fetch, not fetchWithRefresh, so an expired session never blocks login", async () => {
     /* Regression guard for the stuck-grey-button bug: fetchWithRefresh
        pre-refreshes a stale token and, on failure, redirects back to /login,
