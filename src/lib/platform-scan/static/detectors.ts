@@ -423,6 +423,115 @@ export function hardcodedSecret(file: SourceFile): ScanFinding[] {
   return findings;
 }
 
+/**
+ * Log-call method names across the common loggers (console, a winston/pino
+ * instance, a `logger`/`log` object). error/warn are included: a credential is
+ * a credential whatever level it is logged at.
+ */
+const LOG_CALL =
+  /(?:\bconsole|\blog(?:ger)?|\bwinston|\bpino|\.log(?:ger)?)\s*\.\s*(?:log|info|debug|warn|error|trace|fatal|verbose|silly)\s*\(/i;
+
+/**
+ * Identifier names that carry a credential or a single-use link. Matched as
+ * CODE (after string-literal text is stripped by logArgCode), so a log line
+ * that merely mentions "token" in prose does not trip it, while a logged
+ * variable or interpolation named `token`/`resetUrl` does. The reset-link
+ * family is explicit: a reset/verify URL is a bearer credential for one
+ * account, and logging one was the exact defect this detector was written for.
+ */
+const SECRET_NAME =
+  /\b(?:pass(?:word|wd)?|pwd|secret|token|api[_-]?key|apikey|access[_-]?token|refresh[_-]?token|client[_-]?secret|private[_-]?key|priv[_-]?key|session[_-]?id|jwt|bearer|credentials?|otp|(?:reset|verify|verification|invite|confirm|activation|magic)[_-]?(?:link|url|token))\b/i;
+
+/** A log call whose args are already redacted/masked is not a leak. */
+const REDACTED_MARK = /redact|mask|\*{3,}|\[hidden\]|\[redacted\]/i;
+
+/**
+ * Reduce a log call's argument text to the parts that are CODE, not string
+ * prose: drop '…' / "…" contents entirely, and for a template literal keep only
+ * its ${…} interpolations. This is the precision guard — the name test then
+ * sees `resetUrl` in ``console.log(`link ${resetUrl}`)`` but NOT the word
+ * "token" in `console.log("token count", n)`.
+ */
+function logArgCode(args: string): string {
+  const interps = (args.match(/\$\{[^}]*\}/g) ?? []).join(" ");
+  const withoutStrings = args
+    .replace(/`(?:\\.|[^`\\])*`/g, "``")
+    .replace(/'(?:\\.|[^'\\])*'/g, "''")
+    .replace(/"(?:\\.|[^"\\])*"/g, '""');
+  return `${withoutStrings} ${interps}`;
+}
+
+/**
+ * secretInLogs: a credential or single-use link passed to a logging call. Two
+ * shapes, both precision-first:
+ *   (a) a provider-signature secret sitting literally inside the log call —
+ *       critical, and the value is redacted in the evidence.
+ *   (b) a credential- or reset-link-named identifier logged as CODE (variable,
+ *       object shorthand, or ${…} interpolation) — high.
+ *
+ * Logs are retained, shipped to aggregators, and broadly readable, so a secret
+ * in a log is a leaked secret. This is the class that logging a raw password
+ * reset link falls into (the value is a bearer credential for one account).
+ */
+export function secretInLogs(file: SourceFile): ScanFinding[] {
+  const lines = file.content.split("\n");
+  const findings: ScanFinding[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const call = LOG_CALL.exec(line);
+    if (!call) continue;
+
+    // Arguments = from the log call's "(" to end of line. Line-based like the
+    // rest of this module; a value and the call that logs it sit on one line.
+    const argsStart = line.indexOf("(", call.index);
+    const args = argsStart === -1 ? "" : line.slice(argsStart + 1);
+    if (REDACTED_MARK.test(args)) continue;
+
+    // (a) provider-signature secret logged verbatim.
+    let providerHit: { provider: string; match: string } | null = null;
+    for (const { provider, re } of SECRET_PROVIDERS) {
+      const m = re.exec(args);
+      if (m) {
+        providerHit = { provider, match: m[0] };
+        break;
+      }
+    }
+    if (providerHit) {
+      findings.push({
+        route: file.path,
+        severity: "critical",
+        category: "security",
+        title: `Secret written to a log (${providerHit.provider})`,
+        detail:
+          "A live credential is passed to a logging call. Logs are retained, " +
+          "shipped to third-party aggregators, and widely readable, so a secret " +
+          "in a log is a leaked secret. Remove it or log a redacted form.",
+        evidence: { line: i + 1, snippet: redact(line, providerHit.match) },
+      });
+      continue; // one finding per log line is enough
+    }
+
+    // (b) a credential- or reset-link-named identifier logged as code.
+    const nameHit = SECRET_NAME.exec(logArgCode(args));
+    if (nameHit) {
+      findings.push({
+        route: file.path,
+        severity: "high",
+        category: "security",
+        title: `Possible credential written to a log (${nameHit[0]})`,
+        detail:
+          "A value named like a credential or a single-use link is passed to a " +
+          "logging call. A reset/verify link and a token are bearer credentials; " +
+          "logging one leaks it. Log a non-sensitive identifier or a redacted form.",
+        evidence: { line: i + 1, snippet: line.trim() },
+      });
+    }
+  }
+
+  return findings;
+}
+
 /** Compose every detector over one file. */
 export function runDetectors(file: SourceFile): ScanFinding[] {
   return [
@@ -433,5 +542,6 @@ export function runDetectors(file: SourceFile): ScanFinding[] {
     ...dangerousInnerHtml(file),
     ...suppressedTypecheck(file),
     ...hardcodedSecret(file),
+    ...secretInLogs(file),
   ];
 }
