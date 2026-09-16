@@ -1,0 +1,253 @@
+{
+  "formatRelativeTime": [
+    "app/(dashboard)/messages/page.tsx",
+    "app/(dashboard)/support/_components/TicketThread.tsx",
+    "app/(dashboard)/support/analytics/page.tsx"
+  ],
+  "summarize": [
+    "app/api/insights/ai-cost/route.ts",
+    "components/agents/ApprovalList.tsx",
+    "lib/ai-surface/store.ts",
+    "lib/ai/spend-baseline.ts",
+    "lib/insights/recommendations.ts",
+    "lib/pilot/status-shape.ts",
+    "lib/platform-scan/compliance/findings.ts",
+    "lib/spec-diff/compare.ts"
+  ],
+  "createTask": [
+    "lib/agents/tasks/store.ts",
+    "lib/integrations/microsoft-planner.ts",
+    "lib/integrations/microsoft-tasks.ts"
+  ],
+  "getTask": [
+    "lib/agents/tasks/store.ts",
+    "lib/integrations/microsoft-planner.ts"
+  ],
+  "completeTask": [
+    "lib/agents/tasks/store.ts",
+    "lib/integrations/microsoft-planner.ts",
+    "lib/integrations/microsoft-tasks.ts"
+  ],
+  "summarizeDecisions": [
+    "lib/ai/models/insights.ts",
+    "lib/ogiam/queries.ts"
+  ],
+  "decide": [
+    "lib/ai/models/promotion.ts",
+    "lib/ogiam/policy.ts"
+  ],
+  "mayServe": [
+    "lib/ai/models/promotion.ts",
+    "lib/ai/retention.ts"
+  ],
+  "cosineSimilarity": [
+    "lib/ai/semantic-cache.ts",
+    "lib/brain-ann.ts",
+    "lib/knowledge/qa-cache.ts"
+  ],
+  "NotImplementedError": [
+    "lib/ai/types.ts",
+    "lib/crypto/algorithms.ts",
+    "lib/obs/types.ts",
+    "lib/secrets/types.ts"
+  ],
+  "recordRun": [
+    "lib/ai-redteam/store.ts",
+    "lib/assistant/routines/schedule-store.ts"
+  ],
+  "redactPII": [
+    "lib/audit-log.ts",
+    "lib/doc-quality-gate.ts"
+  ],
+  "verifyChain": [
+    "lib/audit-log.ts",
+    "lib/ogiam/checkpoint.ts"
+  ],
+  "verifyToken": [
+    "lib/auth.ts",
+    "lib/crypto/sign.ts"
+  ],
+  "buildUserPrompt": [
+    "lib/automations/meeting-insights/analyzer/index.ts",
+    "lib/support/pattern-library.ts"
+  ],
+  "getMessage": [
+    "lib/automations/meeting-insights/messages-repo.ts",
+    "lib/integrations/microsoft-mail.ts"
+  ],
+  "searchMessages": [
+    "lib/automations/meeting-insights/messages-repo.ts",
+    "lib/integrations/microsoft-mail.ts"
+  ],
+  "htmlToPlainText": [
+    "lib/automations/meeting-insights/parser-email-body.ts",
+    "lib/email-signatures-detect.ts"
+  ],
+  "normalizeLocation": [
+    "lib/automations/porsche-classes/cognito-html.ts",
+    "lib/automations/porsche-classes/normalize.ts"
+  ],
+  "buildClassKey": [
+    "lib/automations/porsche-classes/cognito-html.ts",
+    "lib/automations/porsche-classes/normalize.ts"
+  ],
+  "deleteDocument": [
+    "lib/brain/repo.ts",
+    "lib/doc-generator.ts"
+  ],
+  "stripHtml": [
+    "lib/brief-parser.ts",
+    "lib/ms-graph-chats.ts"
+  ],
+  "saveSnapshot": [
+    "lib/bulletin/snapshots.ts",
+    "lib/invoice-tracker/repo.ts"
+  ],
+  "normalizeGraphDateTime": [
+    "lib/calendar/timezone.ts",
+    "lib/microsoft-graph.ts"
+  ],
+  "describe": [
+    "lib/capabilities/register.ts",
+    "lib/ci/merge-orphans.ts"
+  ],
+  "classify": [
+    "lib/ci/silent-catch.ts",
+    "lib/integrations/probe.ts",
+    "lib/platform-scan/engine.ts",
+    "lib/platform-scan/network/observations.ts"
+  ],
+  "NoTerminalError": [
+    "lib/cli/prompt-secret.ts",
+    "lib/cli/wait-for-enter.ts"
+  ],
+  "recordAssetUpload": [
+    "lib/client-assets.ts",
+    "lib/sites.ts"
+  ],
+  "generateReport": [
+    "lib/compliance/report.ts",
+    "lib/report-templates.ts"
+  ],
+  "readCoverage": [
+    "lib/connectors/sharepoint/coverage.ts",
+    "lib/dms/vendor-coverage.ts"
+  ],
+  "describeCoverage": [
+    "lib/connectors/sharepoint/coverage.ts",
+    "lib/platform-scan/mapping/explore.ts"
+  ],
+  "classifyDocument": [
+    "lib/document-recognition/classifier.ts",
+    "lib/hr-documents.ts"
+  ],
+  "listPages": [
+    "lib/engineering.ts",
+    "lib/integrations/microsoft-onenote.ts"
+  ],
+  "hexToRgb": [
+    "lib/image-palette.ts",
+    "lib/site-theme.ts"
+  ],
+  "listChannelMessages": [
+    "lib/integrations/microsoft-channel-messages.ts",
+    "lib/ms-graph-teams.ts"
+  ],
+  "asScopeMissing": [
+    "lib/integrations/microsoft-channel-messages.ts",
+    "lib/integrations/microsoft-directory.ts",
+    "lib/integrations/microsoft-mailbox.ts",
+    "lib/integrations/microsoft-onenote.ts",
+    "lib/integrations/microsoft-teams-chat.ts"
+  ],
+  "listTasks": [
+    "lib/integrations/microsoft-planner.ts",
+    "lib/integrations/microsoft-tasks.ts"
+  ],
+  "updateTask": [
+    "lib/integrations/microsoft-planner.ts",
+    "lib/integrations/microsoft-tasks.ts"
+  ],
+  "syncAllForUser": [
+    "lib/integrations/microsoft-planner.ts",
+    "lib/integrations/microsoft-tasks.ts",
+    "lib/integrations/microsoft-teams-chat.ts"
+  ],
+  "getOwnPresence": [
+    "lib/integrations/microsoft-presence.ts",
+    "lib/ms-graph-presence.ts"
+  ],
+  "listChats": [
+    "lib/integrations/microsoft-teams-chat.ts",
+    "lib/ms-graph-chats.ts"
+  ],
+  "encodeShareUrl": [
+    "lib/invoice-tracker/sharepoint-source.ts",
+    "lib/job-codes/sharepoint-source.ts"
+  ],
+  "recordFeedback": [
+    "lib/knowledge/qa-cache.ts",
+    "lib/support/repo.ts"
+  ],
+  "clearCache": [
+    "lib/microsoft-graph.ts",
+    "lib/quickbooks.ts",
+    "lib/secrets/index.ts"
+  ],
+  "getAuthUrl": [
+    "lib/microsoft-graph.ts",
+    "lib/quickbooks.ts"
+  ],
+  "exchangeCode": [
+    "lib/microsoft-graph.ts",
+    "lib/quickbooks.ts"
+  ],
+  "storeTokens": [
+    "lib/microsoft-graph.ts",
+    "lib/quickbooks.ts"
+  ],
+  "getValidToken": [
+    "lib/microsoft-graph.ts",
+    "lib/quickbooks.ts"
+  ],
+  "deleteTokens": [
+    "lib/microsoft-graph.ts",
+    "lib/quickbooks.ts"
+  ],
+  "getConnectionStatus": [
+    "lib/microsoft-graph.ts",
+    "lib/plaud.ts",
+    "lib/quickbooks.ts"
+  ],
+  "syncUser": [
+    "lib/ms-graph/sync/contacts.ts",
+    "lib/ms-graph/sync/events.ts",
+    "lib/ms-graph/sync/files.ts",
+    "lib/ms-graph/sync/messages.ts",
+    "lib/ms-graph/sync/tasks.ts"
+  ],
+  "computeInsights": [
+    "lib/ms-insights/insights.ts",
+    "lib/surveys/insights.ts"
+  ],
+  "listTemplates": [
+    "lib/onboarding.ts",
+    "lib/site-templates.ts"
+  ],
+  "extractLinks": [
+    "lib/platform-scan/compliance/collect-static.ts",
+    "lib/platform-scan/discover.ts"
+  ],
+  "hostOf": [
+    "lib/platform-scan/http/polite-fetch.ts",
+    "lib/platform-scan/network/observations.ts"
+  ],
+  "recordScan": [
+    "lib/platform-scan/store.ts",
+    "lib/qr/scans.ts"
+  ],
+  "listScans": [
+    "lib/platform-scan/store.ts",
+    "lib/qr/scans.ts"
+  ]
+}
