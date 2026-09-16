@@ -12,6 +12,7 @@ import {
   dangerousInnerHtml,
   suppressedTypecheck,
   hardcodedSecret,
+  secretInLogs,
   runDetectors,
 } from "@/lib/platform-scan/static/detectors";
 
@@ -448,6 +449,66 @@ describe("hardcodedSecret", () => {
     ]) {
       expect(hardcodedSecret({ path: "lib/x.ts", content })).toHaveLength(0);
     }
+  });
+});
+
+describe("secretInLogs", () => {
+  it("fires when a password reset link is logged via a ${…} interpolation", () => {
+    const content = [
+      "function requestReset(resetUrl: string) {",
+      "  console.log(`password reset link: ${resetUrl}`);",
+      "}",
+    ].join("\n");
+    const f = secretInLogs({ path: "lib/admin/password-reset.ts", content });
+    expect(f).toHaveLength(1);
+    expect(f[0]).toMatchObject({
+      severity: "high",
+      category: "security",
+      route: "lib/admin/password-reset.ts",
+    });
+    expect(f[0].title).toMatch(/credential written to a log/i);
+    expect(f[0].evidence.line).toBe(2);
+  });
+
+  it("fires on a logged reset link passed as object shorthand to a logger", () => {
+    const content = 'logger.info("issued reset", { resetUrl });';
+    const f = secretInLogs({ path: "lib/reset.ts", content });
+    expect(f).toHaveLength(1);
+    expect(f[0].severity).toBe("high");
+  });
+
+  it("fires on a token / password logged at any level, incl. console.error", () => {
+    const content = [
+      "console.error('auth failed for', token);",
+      "console.warn(`pwd=${password}`);",
+    ].join("\n");
+    const f = secretInLogs({ path: "lib/auth.ts", content });
+    expect(f).toHaveLength(2);
+  });
+
+  it("fires CRITICAL and REDACTS when a provider-signature secret is logged verbatim", () => {
+    const content = 'console.log("stripe key", "sk_live_0123456789abcdefABCDEF");';
+    const f = secretInLogs({ path: "lib/pay.ts", content });
+    expect(f).toHaveLength(1);
+    expect(f[0].severity).toBe("critical");
+    // The secret value must never appear in the finding evidence.
+    expect(String(f[0].evidence.snippet)).not.toContain("sk_live_0123456789abcdefABCDEF");
+    expect(String(f[0].evidence.snippet)).toContain("***REDACTED***");
+  });
+
+  it("does NOT fire when the credential word is only string PROSE (token count)", () => {
+    const content = 'console.log("token count", count);';
+    expect(secretInLogs({ path: "lib/x.ts", content })).toHaveLength(0);
+  });
+
+  it("does NOT fire when the logged value is explicitly redacted / masked", () => {
+    const content = "console.log(`reset link: ${maskUrl(resetUrl)}`); // redacted";
+    expect(secretInLogs({ path: "lib/x.ts", content })).toHaveLength(0);
+  });
+
+  it("does NOT fire on an ordinary, non-credential log line", () => {
+    const content = 'console.log("loaded", rows.length, "rows for", workspaceId);';
+    expect(secretInLogs({ path: "lib/x.ts", content })).toHaveLength(0);
   });
 });
 
