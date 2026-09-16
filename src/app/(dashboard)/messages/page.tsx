@@ -53,6 +53,7 @@ import {
   shouldRenderAsPill,
   isNoiseMessage,
 } from "@/lib/messages/system-event-renderer";
+import { isFromSelf, type SelfIdentity } from "@/lib/messages/message-classify";
 import type {
   ChatMessageAttachment,
   ChatMessageEventDetail,
@@ -141,11 +142,23 @@ export function isChatUnread(
     lastMessagePreview?: ChatLastMessagePreview;
   },
   readState: Map<string, string>,
+  self?: SelfIdentity,
 ): boolean {
   const ts = effectiveChatTimestamp(chat);
   if (!ts) return false;
   const last = Date.parse(ts);
   if (Number.isNaN(last)) return false;
+  /* A message the current user SENT is never "unread" for them. Without this,
+     your own outbound message makes the chat's last activity newer than your
+     read cursor, so the row goes bold/dotted for something you just posted
+     (reported 2026: notifications show for your own messages). Mirrors the
+     self-filter the badge count already applies (ms/chats/unread-count via
+     isFromSelf), so the list and the badge agree. Only the object-form preview
+     carries an author; a legacy string preview has none to compare. */
+  const preview = chat.lastMessagePreview;
+  if (self && preview && typeof preview !== "string" && isFromSelf(preview, self)) {
+    return false;
+  }
   const cursor = readState.get(chat.id);
   if (!cursor) return true;
   const cursorMs = Date.parse(cursor);
@@ -2141,7 +2154,10 @@ export default function MessagesPage() {
                  `unreadCount` stays as a fallback signal so chats
                  stay highlighted whether the badge comes from Graph
                  or our own cursor table. */
-              const isUnreadByCursor = isChatUnread(chat, readState);
+              const isUnreadByCursor = isChatUnread(chat, readState, {
+                userId: selfId ?? null,
+                email: selfEmail ?? null,
+              });
               const isUnread =
                 !isSelected && (isUnreadByCursor || (chat.unreadCount ?? 0) > 0);
               return (

@@ -226,6 +226,56 @@ describe("isChatUnread (Bug 2 helper)", () => {
       isChatUnread(chat, new Map([["c1", "not-a-date"]])),
     ).toBe(true);
   });
+
+  test("last message sent by self → read even with no cursor (own outbound is not unread)", () => {
+    const selfChat = {
+      id: "c2",
+      lastUpdatedDateTime: "2026-04-29T10:00:00.000Z",
+      lastMessagePreview: {
+        bodyText: "the latest updates are up",
+        from: { userId: "me-aad-id", email: "me@thewolfpack.agency" },
+        createdDateTime: "2026-04-29T12:00:00.000Z",
+      },
+    };
+    // Newer than any cursor, but it's mine — matches on the Graph user id.
+    expect(
+      isChatUnread(selfChat, new Map(), { userId: "me-aad-id", email: null }),
+    ).toBe(false);
+    // And matches on email when the id is absent (case-insensitive).
+    expect(
+      isChatUnread(selfChat, new Map(), { userId: null, email: "ME@thewolfpack.agency" }),
+    ).toBe(false);
+  });
+
+  test("last message from someone else → still unread", () => {
+    const otherChat = {
+      id: "c3",
+      lastUpdatedDateTime: "2026-04-29T10:00:00.000Z",
+      lastMessagePreview: {
+        bodyText: "ping",
+        from: { userId: "other-aad-id", email: "max@thewolfpack.agency" },
+        createdDateTime: "2026-04-29T12:00:00.000Z",
+      },
+    };
+    expect(
+      isChatUnread(otherChat, new Map(), {
+        userId: "me-aad-id",
+        email: "me@thewolfpack.agency",
+      }),
+    ).toBe(true);
+  });
+
+  test("no self identity passed → unchanged behavior (backward compatible)", () => {
+    const selfChat = {
+      id: "c4",
+      lastUpdatedDateTime: "2026-04-29T10:00:00.000Z",
+      lastMessagePreview: {
+        from: { userId: "me-aad-id" },
+        createdDateTime: "2026-04-29T12:00:00.000Z",
+      },
+    };
+    expect(isChatUnread(selfChat, new Map())).toBe(true);
+  });
 });
 
 describe("cssEscape (Bug 3 helper)", () => {
