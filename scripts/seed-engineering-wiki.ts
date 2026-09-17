@@ -606,6 +606,37 @@ Each item below is marked **live** where it is in production today in A Weekend 
 ## The one rule
 Every tool on the client's side writes into the same store the builder's side reads. There is no separate customer-success database, no export step and no reconciliation, because two systems that describe the same client always end up disagreeing about them.`,
   },
+  {
+    slug: "secure-agent-and-forcefield",
+    parentSlug: "agents",
+    position: 4,
+    title: "Secure Agent and Forcefield",
+    body: `## The idea
+AI should work inside the machine, not operate it. An agent checks in like an employee and plays by the platform's rules, and those rules are enforced by tooling, not trusted to the model to remember. Two products cover the two halves of the problem: **Secure Agent** governs the code an AI writes, and **Forcefield** governs what a running agent is allowed to do.
+
+Because the rules live in the platform rather than the model, they hold no matter which AI is behind the work. That is what lets us say "checked by an independent model" or "any model, same governance" as things you can test, not things we assert.
+
+## Secure Agent: governing the code AI writes
+A model proposes a change. Then, before it can merge:
+
+1. **A deterministic gate decides.** Not another model. It reads the changed lines for secrets, reset links, injection, weak crypto and disabled TLS, classifies each by known weakness type, and fails closed: critical blocks, high goes to a person, clean is allowed. The verdict is a rule you can read in plain words.
+2. **A different model family reviews.** The reviewer is chosen by lineage, so a Claude-authored change is confirmed by an OpenAI, Meta or DeepSeek model and never by another Claude. If no independent family is configured, the check records itself as unchecked rather than pretending.
+3. **A failure repairs itself, without dodging the gate.** The work re-routes to a different model to fix it, and the same gate re-checks every rewrite. An empty or hand-waved fix is rejected; retries are bounded; anything still failing goes to a human.
+4. **A person approves the pull request.** The pipeline captures a pending approval on a pass. It never opens a pull request by itself.
+
+A plain-language trust view shows what was checked and what was caught, for everyone rather than only engineers. Teams can plug in their own model keys, and an adversarial set run through every model in the registry proves the merge decision is identical whoever wrote the code.
+
+## Forcefield: governing what a running agent does
+Forcefield is the boundary an agent operates inside.
+
+- **Decoys.** It plants a fake credential, a decoy route, a honey-row, or a honeypot tool, that nothing legitimate ever touches. The decoy's real value never leaves the store, so it cannot be recognized and avoided.
+- **Automatic containment.** A single touch of a decoy revokes the agent's access through the same audited path an admin would use, and writes a tamper-evident record, both as independent steps so one failing never stops the other. Contain first, triage after. The record carries what tripped and where it was seeded, never the decoy value.
+- **Tool pinning.** The set of tools an agent relies on can be pinned, so a tool whose behavior is silently changed after it was trusted, a supply-chain rug-pull, is caught rather than obeyed.
+- **Triage.** A view lists every trip: which agent was contained, when, and why, read from the platform's own decision ledger.
+
+## Where it is built
+Both live in Instinct today (the Code Gate and Forcefield surfaces in the admin area) and are the two flagship products of [OGIAM](https://ogiam.com), the brand under which Wolfpack takes its AI-governance software to market. They reuse the platform's existing enforced gate, cost-aware model router, and tamper-evident ledger rather than standing up anything new to trust.`,
+  },
 ];
 
 async function main(): Promise<void> {
