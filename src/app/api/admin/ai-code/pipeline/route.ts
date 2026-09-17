@@ -22,10 +22,15 @@ import { runCodeReview } from "@/lib/ai-code/scan";
 import { liveRepairComplete } from "@/lib/ai-code/repair";
 import { runPipeline } from "@/lib/ai-code/pipeline";
 import { DEFAULT_SPEC_QUESTIONS } from "@/lib/ai-code/intake";
+import { createPendingApproval } from "@/lib/agents/approvals/store";
 import type { CodeReviewResult } from "@/lib/ai-code/types";
 
 const MAX_DIFF = 2_000_000; // chars
 const MAX_ATTEMPTS_CAP = 4;
+/** The stable principal the Code Gate captures its PR handoffs under, so they
+ *  surface in the agent-approvals surface. agent_id is a plain TEXT column (no
+ *  FK), so this needs no agent-principal row. */
+const CODE_GATE_AGENT_ID = "ai-code-gate";
 /** The fixed answer-key allowlist. The route always runs the default questions,
  *  so a valid answer names one of these; anything else is dropped, never used as
  *  a property name to write. */
@@ -124,5 +129,28 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     conforms: run.conformance.conforms,
   });
 
-  return NextResponse.json({ run });
+  // Fail-closed handoff. A ready-for-PR run captures a PENDING APPROVAL - it does
+  // NOT open a PR. A human opens the PR by approving this, through the existing
+  // agent-approvals surface. A needs_human run has nothing to hand off. Capturing
+  // is best-effort (null without a database); the run is returned either way.
+  let approvalId: string | null = null;
+  if (run.status === "ready_for_pr") {
+    approvalId = await createPendingApproval({
+      workspaceId,
+      agentId: CODE_GATE_AGENT_ID,
+      ownerUserId: auth.user.id,
+      tool: "ai_code.open_pr",
+      params: {
+        ref,
+        spec_hash: run.spec.hash,
+        conforms: run.conformance.conforms,
+        // The gate ALLOWED this diff, so it carries no secret to store; a human
+        // sees exactly what they are approving.
+        diff: run.diff,
+      },
+      capability: "settings.manage_team",
+    });
+  }
+
+  return NextResponse.json({ run, approvalId });
 }
