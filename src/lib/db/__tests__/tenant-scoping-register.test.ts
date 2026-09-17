@@ -68,6 +68,11 @@ const GLOBAL_BY_DESIGN: readonly string[] = [
      Two tenants disagreeing about what OpenAI shipped is not a disagreement
      that can be true. */
   "ai_model_versions",
+  /* The control-plane tenant registry is keyed BY tenant_id: it is the table
+     that enumerates tenants, so it cannot itself be workspace/tenant-scoped
+     without a chicken-and-egg. It lives in the control-plane DB and holds no
+     tenant business data, only the provisioning record. */
+  "instinct_tenant_registry",
 ];
 
 const NO_WORKSPACE_COLUMN: readonly string[] = [
