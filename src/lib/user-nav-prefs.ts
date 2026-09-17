@@ -70,6 +70,7 @@ export const KNOWN_NAV_HREFS: readonly string[] = [
   "/admin/ai-code",
   "/admin/ai-code/overview",
   "/admin/forcefield",
+  "/admin/self-serve",
   "/admin/ai-router",
   "/admin/compliance-scan",
   "/admin/site-analytics",
