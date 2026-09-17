@@ -39,7 +39,8 @@ export type McpFindingClass =
   | "tool_poisoning" // injection / hidden instructions in a tool description
   | "hidden_unicode" // zero-width / bidi characters hiding instructions
   | "tool_shadowing" // duplicate tool names (one server can shadow another's tool)
-  | "dangerous_capability"; // a tool exposes exec/shell/delete with no constraint
+  | "dangerous_capability" // a tool exposes exec/shell/delete with no constraint
+  | "manifest_drift"; // a pinned server's manifest changed since the known-good pin (rug-pull)
 
 export interface McpFinding {
   server: string;
