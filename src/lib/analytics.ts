@@ -675,6 +675,9 @@ export type InstinctEventType =
   // ai_code.pipeline_run { ref, spec_hash, status, attempts, final_outcome,
   //   open_questions } - one governed run chaining intake -> gate -> repair.
   | "ai_code.pipeline_run"
+  // ai_code.model_key_set { workspace_id, provider } - a workspace stored/rotated
+  //   its own model key (BYO); the key value is never in analytics.
+  | "ai_code.model_key_set"
   // Continuous AI red-team: an adversarial corpus run against the gate.
   // ai_redteam.run_completed { attacks, blocked, vulns, pass_rate, source }
   | "ai_redteam.run_completed"
