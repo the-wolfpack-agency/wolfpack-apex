@@ -678,6 +678,9 @@ export type InstinctEventType =
   // ai_code.model_key_set { workspace_id, provider } - a workspace stored/rotated
   //   its own model key (BYO); the key value is never in analytics.
   | "ai_code.model_key_set"
+  // forcefield.canary_seeded { workspace_id, kind, seeded_in } - a decoy was
+  //   registered; the decoy VALUE is never in analytics.
+  | "forcefield.canary_seeded"
   // Continuous AI red-team: an adversarial corpus run against the gate.
   // ai_redteam.run_completed { attacks, blocked, vulns, pass_rate, source }
   | "ai_redteam.run_completed"
