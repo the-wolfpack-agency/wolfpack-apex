@@ -672,6 +672,9 @@ export type InstinctEventType =
   //   - Stage 2 re-routes a failed diff to a different-family model, then either
   //   hands a human a clean rewrite or the still-failing one. Never auto-merges.
   | "ai_code.remediated"
+  // ai_code.pipeline_run { ref, spec_hash, status, attempts, final_outcome,
+  //   open_questions } - one governed run chaining intake -> gate -> repair.
+  | "ai_code.pipeline_run"
   // Continuous AI red-team: an adversarial corpus run against the gate.
   // ai_redteam.run_completed { attacks, blocked, vulns, pass_rate, source }
   | "ai_redteam.run_completed"
