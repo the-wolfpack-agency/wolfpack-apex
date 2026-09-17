@@ -690,6 +690,9 @@ export type InstinctEventType =
   // tenancy.tenant_provisioned { tenant_id } - a database was attached and the
   //   tenant marked active. Connection string is never in analytics.
   | "tenancy.tenant_provisioned"
+  // tenancy.entitlement_changed { workspace_id, feature, enabled } - an admin
+  //   turned an OGIAM product on/off for a workspace (enabled: true|false|cleared).
+  | "tenancy.entitlement_changed"
   // Continuous AI red-team: an adversarial corpus run against the gate.
   // ai_redteam.run_completed { attacks, blocked, vulns, pass_rate, source }
   | "ai_redteam.run_completed"
