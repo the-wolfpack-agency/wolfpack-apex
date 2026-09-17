@@ -98,6 +98,7 @@ export const NAV_ITEMS: NavItem[] = [
      way a hire is. */
   { label: "Agents", href: "/admin/agents", roles: ["ceo", "cto", "evp", "vp", "cco"], icon: "M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m16-6h2m-2 6h2M7 7h10v10H7V7zm3 3h4v4h-4z" },
   { label: "Code Gate", href: "/admin/ai-code", roles: ["ceo", "cto", "evp", "vp", "cco"], icon: "M9 12l2 2 4-4m6-2a9 9 0 11-18 0 9 9 0 0118 0z" },
+  { label: "Forcefield", href: "/admin/forcefield", roles: ["ceo", "cto", "evp", "vp", "cco"], icon: "M12 2l7 4v6c0 5-3 8-7 10-4-2-7-5-7-10V6l7-4z" },
   // Visible to everyone: the trust surface is for all users, not just engineers.
   { label: "Code Governance", href: "/admin/ai-code/overview", icon: "M15 12a3 3 0 11-6 0 3 3 0 016 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" },
   { label: "Financials", href: "/financials", roles: ["ceo", "cto", "evp"], icon: "M12 6v12m-3-2.818l.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 11-18 0 9 9 0 0118 0z" },
