@@ -31,6 +31,15 @@ interface CanaryDisplay {
   createdAt: string;
 }
 
+interface CanaryTrip {
+  id: string;
+  agent: string;
+  whenIso: string;
+  riskTier: string;
+  reason: string;
+  contained: boolean;
+}
+
 const KINDS: { kind: CanaryKind; label: string; hint: string; placeholder: string }[] = [
   { kind: "token", label: "Token", hint: "A fake credential. Trips if it ever leaves in a payload.", placeholder: "sk-decoy-DO-NOT-USE-..." },
   { kind: "route", label: "Route", hint: "A decoy endpoint no legitimate flow calls.", placeholder: "/admin/export-all" },
@@ -47,6 +56,7 @@ export default function ForcefieldPage() {
   const router = useRouter();
   const [ready, setReady] = useState(false);
   const [canaries, setCanaries] = useState<CanaryDisplay[] | null>(null);
+  const [trips, setTrips] = useState<CanaryTrip[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // Seed form.
@@ -79,9 +89,26 @@ export default function ForcefieldPage() {
     }
   }, []);
 
+  const loadTrips = useCallback(async () => {
+    try {
+      const res = await fetchWithRefresh("/api/admin/forcefield/trips");
+      if (!res.ok) {
+        setTrips([]);
+        return;
+      }
+      const data = (await res.json()) as { trips?: CanaryTrip[] };
+      setTrips(Array.isArray(data.trips) ? data.trips : []);
+    } catch {
+      setTrips([]);
+    }
+  }, []);
+
   useEffect(() => {
-    if (ready) void load();
-  }, [ready, load]);
+    if (ready) {
+      void load();
+      void loadTrips();
+    }
+  }, [ready, load, loadTrips]);
 
   const seed = useCallback(
     async (e: React.FormEvent) => {
@@ -136,6 +163,7 @@ export default function ForcefieldPage() {
   const active = list.filter((c) => c.active);
   const kindsInUse = new Set(active.map((c) => c.kind)).size;
   const activeKind = KINDS.find((k) => k.kind === kind);
+  const tripList = trips ?? [];
 
   return (
     <div style={{ maxWidth: 1040, margin: "0 auto", padding: "1.5rem 1rem 3rem" }} data-testid="forcefield">
@@ -148,6 +176,7 @@ export default function ForcefieldPage() {
         <MetricTile label="Active decoys" display={String(active.length)} accent="var(--wp-success, #30a46c)" testId="metric-active" />
         <MetricTile label="Retired" display={String(list.length - active.length)} testId="metric-retired" />
         <MetricTile label="Decoy types in use" display={`${kindsInUse} / 4`} testId="metric-kinds" />
+        <MetricTile label="Trips" display={String(tripList.length)} accent={tripList.length ? "var(--wp-error, #e5484d)" : undefined} testId="metric-trips" />
       </div>
 
       <GlassPanel style={{ marginBottom: "1.25rem" }}>
@@ -232,6 +261,35 @@ export default function ForcefieldPage() {
                     Retire
                   </button>
                 )}
+              </div>
+            ))}
+          </div>
+        )}
+      </GlassPanel>
+
+      <GlassPanel style={{ marginTop: "1.25rem" }}>
+        <h3 style={{ margin: "0 0 0.25rem", fontSize: "1rem", color: "var(--wp-text, #e6e9ef)" }}>Recent trips</h3>
+        <p style={{ margin: "0 0 0.75rem", fontSize: "0.85rem", color: "var(--wp-text-dim, #b4bcc8)" }}>
+          Each trip is a decoy that was touched. The acting agent was quarantined and the event recorded automatically.
+        </p>
+        {trips === null ? (
+          <p style={{ color: "var(--wp-text-dim, #b4bcc8)" }} data-testid="trips-loading">Loading...</p>
+        ) : tripList.length === 0 ? (
+          <p style={{ color: "var(--wp-text-dim, #b4bcc8)" }} data-testid="trips-empty">
+            No trips. Nothing has touched a decoy - that is the good state.
+          </p>
+        ) : (
+          <div style={{ display: "grid", gap: "0.5rem" }} data-testid="trips-list">
+            {tripList.map((t) => (
+              <div
+                key={t.id}
+                data-testid="trip-row"
+                style={{ display: "flex", alignItems: "center", gap: "0.7rem", padding: "0.55rem 0.7rem", borderRadius: 8, background: "var(--wp-surface, #171a21)" }}
+              >
+                <StatusPill status={t.contained ? "contained" : t.riskTier} tone={t.contained ? "error" : undefined} label={t.contained ? "Contained" : t.riskTier} />
+                <code style={{ color: "var(--wp-text, #e6e9ef)", fontSize: "0.85rem" }}>{t.agent}</code>
+                <span style={{ color: "var(--wp-text-dim, #b4bcc8)", fontSize: "0.85rem", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.reason}</span>
+                <span style={{ color: "var(--wp-text-dim, #b4bcc8)", fontSize: "0.8rem", whiteSpace: "nowrap" }}>{fmtDate(t.whenIso)}</span>
               </div>
             ))}
           </div>

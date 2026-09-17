@@ -21,6 +21,11 @@
  * reaches, that aggressive response carries near-zero false-positive risk.
  */
 
+/** The OGIAM ledger rule id a canary trip is recorded under. Shared so the
+ *  writer (the live containment adapter) and any reader (the triage view) match
+ *  on the same string instead of two drifting literals. */
+export const CANARY_TRIP_RULE_ID = "forcefield.canary_trip";
+
 export type CanaryKind = "token" | "route" | "row" | "tool";
 
 export interface Canary {
