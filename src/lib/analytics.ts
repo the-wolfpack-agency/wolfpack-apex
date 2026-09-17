@@ -684,6 +684,12 @@ export type InstinctEventType =
   // forcefield.canary_retired { workspace_id } - a decoy was soft-disabled so
   //   it no longer trips. No value, no id-to-value linkage.
   | "forcefield.canary_retired"
+  // OGIAM self-serve tenancy. tenant_registered { tenant_id } - a new org signed
+  //   up (admin email is NOT in analytics, only that a tenant was registered).
+  | "tenancy.tenant_registered"
+  // tenancy.tenant_provisioned { tenant_id } - a database was attached and the
+  //   tenant marked active. Connection string is never in analytics.
+  | "tenancy.tenant_provisioned"
   // Continuous AI red-team: an adversarial corpus run against the gate.
   // ai_redteam.run_completed { attacks, blocked, vulns, pass_rate, source }
   | "ai_redteam.run_completed"
