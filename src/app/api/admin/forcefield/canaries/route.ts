@@ -16,6 +16,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth/require-capability";
+import { requireEntitlement } from "@/lib/tenancy/require-entitlement";
 import { trackEvent } from "@/lib/analytics";
 import { recordAudit } from "@/lib/audit-log";
 import {
@@ -31,6 +32,8 @@ const MAX_SEEDED_IN = 512;
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const auth = await requireCapability(req, "settings.manage_team");
   if (!auth.ok) return auth.response;
+  const gate = await requireEntitlement(auth.user.workspaceId, "forcefield");
+  if (gate) return gate;
   const canaries = await listCanariesForDisplay(auth.user.workspaceId ?? "default");
   return NextResponse.json({ canaries });
 }
@@ -38,6 +41,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const auth = await requireCapability(req, "settings.manage_team");
   if (!auth.ok) return auth.response;
+  const gate = await requireEntitlement(auth.user.workspaceId, "forcefield");
+  if (gate) return gate;
 
   let body: unknown;
   try {
@@ -80,6 +85,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 export async function DELETE(req: NextRequest): Promise<NextResponse> {
   const auth = await requireCapability(req, "settings.manage_team");
   if (!auth.ok) return auth.response;
+  const gate = await requireEntitlement(auth.user.workspaceId, "forcefield");
+  if (gate) return gate;
 
   const id = req.nextUrl.searchParams.get("id")?.trim();
   if (!id) return NextResponse.json({ error: "id is required" }, { status: 400 });

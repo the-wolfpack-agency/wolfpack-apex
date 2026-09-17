@@ -10,11 +10,14 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth/require-capability";
+import { requireEntitlement } from "@/lib/tenancy/require-entitlement";
 import { listCanaryTrips } from "@/lib/forcefield/triage";
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const auth = await requireCapability(req, "settings.manage_team");
   if (!auth.ok) return auth.response;
+  const gate = await requireEntitlement(auth.user.workspaceId, "forcefield");
+  if (gate) return gate;
   const trips = await listCanaryTrips(auth.user.workspaceId ?? "default");
   return NextResponse.json({ trips });
 }

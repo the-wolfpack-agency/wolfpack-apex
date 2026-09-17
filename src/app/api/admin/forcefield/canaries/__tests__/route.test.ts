@@ -28,6 +28,8 @@ jest.mock("@/lib/forcefield/canary-store", () => ({
 }));
 jest.mock("@/lib/analytics", () => ({ trackEvent: (...a: unknown[]) => mockTrackEvent(...a) }));
 jest.mock("@/lib/audit-log", () => ({ recordAudit: (...a: unknown[]) => mockRecordAudit(...a) }));
+const mockGate = jest.fn();
+jest.mock("@/lib/tenancy/require-entitlement", () => ({ requireEntitlement: (...a: unknown[]) => mockGate(...a) }));
 
 import { GET, POST, DELETE } from "../route";
 
@@ -47,6 +49,7 @@ function req(method: string, body?: unknown, qs = ""): NextRequest {
 beforeEach(() => {
   jest.clearAllMocks();
   mockRequireCapability.mockResolvedValue(OK_USER);
+  mockGate.mockResolvedValue(null); // entitled by default
   mockList.mockResolvedValue([DISPLAY]);
   mockCreate.mockResolvedValue(DISPLAY);
   mockDeactivate.mockResolvedValue(true);
@@ -113,5 +116,13 @@ describe("DELETE /api/admin/forcefield/canaries", () => {
     expect(mockDeactivate).toHaveBeenCalledWith("w1", "c1");
     expect(mockRecordAudit).toHaveBeenCalledTimes(1);
     expect(mockTrackEvent).toHaveBeenCalledWith("forcefield.canary_retired", "u1", "admin", expect.objectContaining({ workspace_id: "w1" }));
+  });
+});
+
+describe("entitlement gate", () => {
+  it("403 when the forcefield product is not entitled for the workspace", async () => {
+    mockGate.mockResolvedValue(new Response(JSON.stringify({ entitled: false, feature: "forcefield" }), { status: 403 }));
+    expect((await GET(req("GET"))).status).toBe(403);
+    expect(mockList).not.toHaveBeenCalled(); // gated before any store read
   });
 });
