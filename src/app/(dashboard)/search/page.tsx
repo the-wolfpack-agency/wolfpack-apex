@@ -19,8 +19,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { fetchWithRefresh, jsonHeaders } from "@/lib/client-auth";
+import { SEARCH_TYPE_VALUES, type SearchType } from "@/lib/search/search-types";
 
-type ResultType = "chat" | "channel" | "email" | "calendar" | "knowledge";
+/* The result types come from ONE source (search-types.ts), so a new provider
+   (brain, crm, dms, sharepoint, vercel ...) shows up here automatically instead
+   of crashing the page. Keeping a hand-written subset here is exactly what broke
+   /search?q=... : a "brain" result hit a bucket that was never seeded. */
+type ResultType = SearchType;
 
 interface SearchResult {
   type: ResultType;
@@ -37,15 +42,27 @@ interface SearchResponse {
   counts: Record<string, number>;
 }
 
+/* Labels for every search type, matched to the chat SearchResultsWidget so the
+   two surfaces read the same. `labelFor` falls back to the raw type for any
+   future value that lands before its label does, so a new provider degrades to
+   a plain heading rather than a blank or a crash. */
 const TYPE_LABELS: Record<ResultType, string> = {
   chat: "Chats",
   channel: "Channels",
   email: "Emails",
   calendar: "Calendar",
   knowledge: "Knowledge",
+  brain: "Documents",
+  sharepoint: "SharePoint",
+  crm: "CRM",
+  dms: "Inventory",
+  vercel: "Vercel",
 };
+function labelFor(t: ResultType): string {
+  return TYPE_LABELS[t] ?? String(t);
+}
 
-const TYPE_ORDER: ResultType[] = ["chat", "channel", "email", "calendar", "knowledge"];
+const TYPE_ORDER: ResultType[] = [...SEARCH_TYPE_VALUES];
 
 function formatRelative(iso: string): string {
   if (!iso) return "";
@@ -187,14 +204,12 @@ function SearchContents() {
   };
 
   const grouped = useMemo(() => {
-    const g: Record<ResultType, SearchResult[]> = {
-      chat: [],
-      channel: [],
-      email: [],
-      calendar: [],
-      knowledge: [],
-    };
-    for (const r of results) g[r.type].push(r);
+    // Seed a bucket for every known type, then lazy-init for anything else, so a
+    // result whose type is not in the seed can never throw (the bug that took
+    // /search down). Grouping is defensive by construction, not by luck.
+    const g = {} as Record<ResultType, SearchResult[]>;
+    for (const t of TYPE_ORDER) g[t] = [];
+    for (const r of results) (g[r.type] ??= []).push(r);
     return g;
   }, [results]);
 
@@ -296,7 +311,7 @@ function SearchContents() {
                 fontSize: "13px",
               }}
             >
-              {TYPE_LABELS[t]}
+              {labelFor(t)}
             </button>
           );
         })}
@@ -366,7 +381,7 @@ function SearchContents() {
                 marginBottom: "10px",
               }}
             >
-              {TYPE_LABELS[t]} · {group.length}
+              {labelFor(t)} · {group.length}
             </h2>
             <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 8 }}>
               {group.map((r, i) => {

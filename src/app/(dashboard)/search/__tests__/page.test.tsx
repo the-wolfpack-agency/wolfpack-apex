@@ -134,6 +134,31 @@ describe("/search page", () => {
     expect(screen.getByTestId("group-calendar")).toBeInTheDocument();
   });
 
+  it("renders a result type beyond the original five without crashing (regression: /search?q=porsche)", async () => {
+    // A 'brain' (Documents) result used to hit an unseeded bucket and throw
+    // "undefined is not an object (e[t.type].push)", taking the whole page down.
+    mockFetch.mockResolvedValue(
+      jsonResponse({
+        results: [
+          { type: "brain", id: "doc-1", title: "Porsche program brief", snippet: "A Weekend with Porsche", timestamp: new Date().toISOString(), url: "/knowledge?doc=doc-1" },
+          { type: "crm", id: "crm-1", title: "Porsche AG", snippet: "Account", timestamp: new Date().toISOString() },
+        ],
+        took_ms: 5,
+        counts: {},
+      }),
+    );
+    render(<SearchPage />);
+    fireEvent.change(screen.getByTestId("search-input"), { target: { value: "porsche" } });
+    await flushDebounce();
+
+    // The rows render (no crash), grouped under their headings with the shared labels.
+    expect(await screen.findByTestId("result-doc-1")).toBeInTheDocument();
+    expect(screen.getByTestId("result-crm-1")).toBeInTheDocument();
+    expect(screen.getByTestId("group-brain")).toBeInTheDocument();
+    expect(screen.getByText("Documents")).toBeInTheDocument(); // brain -> "Documents"
+    expect(screen.getByTestId("group-crm")).toBeInTheDocument();
+  });
+
   it("filter chips toggle the active set and re-trigger search", async () => {
     render(<SearchPage />);
 
