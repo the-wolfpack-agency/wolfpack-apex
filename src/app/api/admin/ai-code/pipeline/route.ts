@@ -109,6 +109,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       attempts: run.remediation.attempts.length,
       final_outcome: run.review.verdict.outcome,
       open_questions: run.openQuestions.length,
+      conforms: run.conformance.conforms,
       author,
     },
   });
@@ -120,6 +121,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     attempts: run.remediation.attempts.length,
     final_outcome: run.review.verdict.outcome,
     open_questions: run.openQuestions.length,
+    conforms: run.conformance.conforms,
   });
 
   return NextResponse.json({ run });

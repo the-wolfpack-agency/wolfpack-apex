@@ -24,6 +24,7 @@ import { resolveIntake, freezeSpec, DEFAULT_SPEC_QUESTIONS } from "./intake";
 import type { FrozenSpec, SpecQuestion } from "./intake";
 import { remediateDiff, type RepairComplete } from "./repair";
 import type { RemediationResult } from "./repair";
+import { checkConformance, type ConformanceResult } from "./conformance";
 import type { CodeReviewResult } from "./types";
 import type { JudgeCandidate } from "@/lib/ai/judge-selection";
 
@@ -40,6 +41,9 @@ export interface PipelineRun {
   remediation: RemediationResult;
   /** Convenience alias of remediation.review - the FINAL gate review of `diff`. */
   review: CodeReviewResult;
+  /** How the FINAL diff measures against the frozen spec (advisory: it surfaces
+   *  deviations for the human, it does NOT change the gate status). */
+  conformance: ConformanceResult;
   status: PipelineStatus;
   /** The diff a human opens as a PR (gate-passing) or the last one for review. */
   diff: string;
@@ -83,12 +87,19 @@ export async function runPipeline(args: {
   // human's to resolve - the pipeline never merges.
   const status: PipelineStatus = remediation.status === "clean" ? "ready_for_pr" : "needs_human";
 
+  // Measure the FINAL diff against what the spec committed to. Advisory: it
+  // surfaces deviations (missing tests, unwired analytics, an unguarded
+  // migration) for the human; it does not gate the merge - the deterministic
+  // security gate does that.
+  const conformance = checkConformance(spec, remediation.diff);
+
   return {
     ref: args.ref,
     spec,
     openQuestions: open,
     remediation,
     review: remediation.review,
+    conformance,
     status,
     diff: remediation.diff,
     reason: remediation.reason,

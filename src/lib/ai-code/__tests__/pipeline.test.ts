@@ -107,4 +107,19 @@ describe("runPipeline", () => {
       runPipeline({ ...base, diff: CLEAN_INPUT, answers: { tests: "eventually" }, repair: scriptedRepair(["x"]) }),
     ).rejects.toThrow(/unknown option/i);
   });
+
+  it("attaches a conformance measurement of the final diff against the frozen spec", async () => {
+    // A gate-clean code diff with no tests, against a spec that demanded them:
+    // gate passes (security), conformance flags the missing coverage (advisory).
+    const run = await runPipeline({
+      ...base,
+      diff: CLEAN_INPUT,
+      answers: { tests: "all" },
+      repair: scriptedRepair(["x"]),
+    });
+    expect(run.status).toBe("ready_for_pr"); // the SECURITY gate is clean
+    expect(run.conformance.specHash).toBe(run.spec.hash);
+    expect(run.conformance.conforms).toBe(false); // ...but it skipped required tests
+    expect(run.conformance.findings.find((f) => f.requirement === "tests")?.ok).toBe(false);
+  });
 });
