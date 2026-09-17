@@ -34,6 +34,7 @@ const RUN = {
   openQuestions: [],
   remediation: { status: "clean", diff: "d", attempts: [], review: {}, repairerLineage: null, reason: "ok" },
   review: { ref: "pr-1", author: "a", findings: [], verdict: { outcome: "allow", highestSeverity: "none", reason: "", ruleId: "C-CLEAN-ALLOW" }, bySeverity: {} },
+  conformance: { specHash: "spec_abc123", conforms: true, findings: [] },
   status: "ready_for_pr",
   diff: "d",
   reason: "ok",
@@ -99,7 +100,7 @@ describe("POST /api/admin/ai-code/pipeline", () => {
       "ai_code.pipeline_run",
       "u1",
       "admin",
-      expect.objectContaining({ ref: "pr-1", spec_hash: "spec_abc123", status: "ready_for_pr" }),
+      expect.objectContaining({ ref: "pr-1", spec_hash: "spec_abc123", status: "ready_for_pr", conforms: true }),
     );
   });
 
