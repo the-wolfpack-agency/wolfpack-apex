@@ -27,11 +27,40 @@ export type TenantRow = {
   created_at: string;
 }
 
-/** Turn an org name into a valid tenant id slug (letter-led, suffixed to disambiguate). */
+/** Trim leading/trailing dashes without a regex (linear; no ReDoS surface). */
+function trimDashes(s: string): string {
+  let a = 0;
+  let b = s.length;
+  while (a < b && s[a] === "-") a++;
+  while (b > a && s[b - 1] === "-") b--;
+  return s.slice(a, b);
+}
+
+/**
+ * Turn an org name into a valid tenant id slug (letter-led, suffixed to
+ * disambiguate). Deliberately regex-free on the user-provided value: the input
+ * is length-bounded first and the slug is built with a single linear pass, so a
+ * hostile org name cannot drive polynomial backtracking (the ReDoS the code
+ * gate flagged on the original ported version).
+ */
 export function tenantIdFor(orgName: string): string {
-  const base = orgName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 30) || "tenant";
-  const start = /^[a-z]/.test(base) ? base : `t-${base}`;
-  return (start.replace(/-+$/g, "").slice(0, 30) + "-" + Math.abs(hash(orgName)).toString(36).slice(0, 4)).replace(/-+$/g, "");
+  const lower = (orgName ?? "").toLowerCase().slice(0, 64); // bound BEFORE any scan
+  let slug = "";
+  let prevDash = false;
+  for (const ch of lower) {
+    const alnum = (ch >= "a" && ch <= "z") || (ch >= "0" && ch <= "9");
+    if (alnum) {
+      slug += ch;
+      prevDash = false;
+    } else if (!prevDash) {
+      slug += "-";
+      prevDash = true;
+    }
+  }
+  const base = trimDashes(slug).slice(0, 30) || "tenant";
+  const start = base[0] >= "a" && base[0] <= "z" ? base : `t-${base}`;
+  const suffix = Math.abs(hash(orgName ?? "")).toString(36).slice(0, 4);
+  return trimDashes(trimDashes(start).slice(0, 30) + "-" + suffix);
 }
 function hash(s: string): number {
   let h = 0;

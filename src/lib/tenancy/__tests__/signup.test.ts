@@ -45,6 +45,15 @@ it("rejects an invalid admin email", async () => {
   expect(r.error).toBe("admin_email");
 });
 
+it.each(["a@b", "@acme.com", "a b@acme.com", "a@@b.com", "x".repeat(400) + "@a.co"])(
+  "rejects the malformed email %p",
+  async (bad) => {
+    const r = await signupTenant({ orgName: "Acme Inc", adminEmail: bad });
+    expect(r.ok).toBe(false);
+    expect(r.error).toBe("admin_email");
+  },
+);
+
 it("default (no provider): registers the tenant and leaves it pending_provision", async () => {
   const r = await signupTenant({ orgName: "Acme Inc", adminEmail: "Admin@Acme.com" });
   expect(r.ok).toBe(true);
