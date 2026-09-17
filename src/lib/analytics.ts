@@ -681,6 +681,9 @@ export type InstinctEventType =
   // forcefield.canary_seeded { workspace_id, kind, seeded_in } - a decoy was
   //   registered; the decoy VALUE is never in analytics.
   | "forcefield.canary_seeded"
+  // forcefield.canary_retired { workspace_id } - a decoy was soft-disabled so
+  //   it no longer trips. No value, no id-to-value linkage.
+  | "forcefield.canary_retired"
   // Continuous AI red-team: an adversarial corpus run against the gate.
   // ai_redteam.run_completed { attacks, blocked, vulns, pass_rate, source }
   | "ai_redteam.run_completed"
