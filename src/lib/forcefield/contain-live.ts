@@ -25,6 +25,7 @@ import { POLICY_VERSION } from "@/lib/ogiam/policy";
 import type { OgiamDecision, OgiamPrincipal } from "@/lib/ogiam/types";
 import { setAgentState } from "@/lib/agents/store";
 import { listCanariesForMatching } from "./canary-store";
+import { CANARY_TRIP_RULE_ID } from "./tripwire";
 import type { ContainmentDeps, TripRecord } from "./contain";
 
 /** The system actor that owns an automatic containment. Not a human: a decoy
@@ -67,7 +68,7 @@ async function recordTripToLedger(trip: TripRecord): Promise<void> {
     mode: "enforce",
     riskTier: "critical",
     policyVersion: POLICY_VERSION,
-    ruleId: "forcefield.canary_trip",
+    ruleId: CANARY_TRIP_RULE_ID,
     reason: trip.decision.reason,
     wouldBlock: true,
   };

@@ -66,18 +66,25 @@ export function clampDecisionsLimit(raw: number | undefined): number {
  */
 export async function listDecisions(
   workspaceId: string,
-  opts?: { limit?: number; wouldBlockOnly?: boolean; agentId?: string },
+  opts?: { limit?: number; wouldBlockOnly?: boolean; agentId?: string; ruleId?: string },
 ): Promise<OgiamDecisionRow[]> {
   const limit = clampDecisionsLimit(opts?.limit);
   const wouldBlockClause = opts?.wouldBlockOnly ? " AND would_block = true" : "";
 
-  /* The agent filter is always parameterized ($2) so an agent id can never be
-     injected into the SQL. Absent when no agentId is supplied. */
+  /* Every optional filter is parameterized so no value can be injected into the
+     SQL. Each is absent when not supplied. */
   const params: unknown[] = [workspaceId];
   let agentClause = "";
   if (opts?.agentId) {
     params.push(opts.agentId);
     agentClause = ` AND principal_agent = $${params.length}`;
+  }
+  /* ruleId narrows to a single fired rule - e.g. the Forcefield triage view
+     asks only for canary-trip decisions. */
+  let ruleClause = "";
+  if (opts?.ruleId) {
+    params.push(opts.ruleId);
+    ruleClause = ` AND rule_id = $${params.length}`;
   }
 
   const res = await safeQuery<OgiamDecisionRow>(
@@ -99,7 +106,7 @@ export async function listDecisions(
             reason,
             policy_version
        FROM ogiam_decisions
-      WHERE workspace_id = $1${wouldBlockClause}${agentClause}
+      WHERE workspace_id = $1${wouldBlockClause}${agentClause}${ruleClause}
       ORDER BY created_at DESC
       LIMIT ${limit}`,
     params,
