@@ -668,6 +668,10 @@ export type InstinctEventType =
   //   learning loop mines what AI tools keep introducing.
   | "ai_code.finding_detected"
   | "ai_code.finding_judged"
+  // ai_code.remediated { ref, status, attempts, final_outcome, repairer_lineage }
+  //   - Stage 2 re-routes a failed diff to a different-family model, then either
+  //   hands a human a clean rewrite or the still-failing one. Never auto-merges.
+  | "ai_code.remediated"
   // Continuous AI red-team: an adversarial corpus run against the gate.
   // ai_redteam.run_completed { attacks, blocked, vulns, pass_rate, source }
   | "ai_redteam.run_completed"
