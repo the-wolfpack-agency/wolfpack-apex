@@ -13,6 +13,7 @@ const mockRequireCapability = jest.fn();
 const mockRunPipeline = jest.fn();
 const mockTrackEvent = jest.fn();
 const mockRecordAudit = jest.fn();
+const mockCreateApproval = jest.fn();
 
 jest.mock("@/lib/auth/require-capability", () => ({
   requireCapability: (...a: unknown[]) => mockRequireCapability(...a),
@@ -22,6 +23,7 @@ jest.mock("@/lib/ai-code/repair", () => ({ liveRepairComplete: () => async () =>
 jest.mock("@/lib/ai-code/scan", () => ({ runCodeReview: jest.fn() }));
 jest.mock("@/lib/analytics", () => ({ trackEvent: (...a: unknown[]) => mockTrackEvent(...a) }));
 jest.mock("@/lib/audit-log", () => ({ recordAudit: (...a: unknown[]) => mockRecordAudit(...a) }));
+jest.mock("@/lib/agents/approvals/store", () => ({ createPendingApproval: (...a: unknown[]) => mockCreateApproval(...a) }));
 
 import { POST } from "../route";
 
@@ -55,6 +57,7 @@ beforeEach(() => {
   mockRequireCapability.mockResolvedValue(OK_USER);
   mockRunPipeline.mockResolvedValue(RUN);
   mockRecordAudit.mockResolvedValue({ ok: true });
+  mockCreateApproval.mockResolvedValue("appr-1");
 });
 
 describe("POST /api/admin/ai-code/pipeline", () => {
@@ -84,7 +87,7 @@ describe("POST /api/admin/ai-code/pipeline", () => {
   it("200: delegates with the author MODEL and returns the run", async () => {
     const res = await POST(post(VALID));
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ run: RUN });
+    expect(await res.json()).toEqual({ run: RUN, approvalId: "appr-1" });
     const args = mockRunPipeline.mock.calls[0][0];
     expect(args.author).toBe("claude-3-5-sonnet");
     expect(args.prompt).toBe("Add a value");
@@ -113,5 +116,25 @@ describe("POST /api/admin/ai-code/pipeline", () => {
     await POST(post({ ...VALID, answers: { tests: "all", __proto__: "x", constructor: "y", bogus: "z" } }));
     // Only the allowlisted question id survives; injected / unknown names are gone.
     expect(mockRunPipeline.mock.calls[0][0].answers).toEqual({ tests: "all" });
+  });
+
+  it("a ready-for-PR run CAPTURES a pending approval - it does not open a PR", async () => {
+    const res = await POST(post(VALID));
+    expect(mockCreateApproval).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentId: "ai-code-gate",
+        ownerUserId: "u1",
+        tool: "ai_code.open_pr",
+        params: expect.objectContaining({ ref: "pr-1", spec_hash: "spec_abc123" }),
+      }),
+    );
+    expect((await res.json()).approvalId).toBe("appr-1");
+  });
+
+  it("a needs_human run hands off NOTHING (no approval captured, no PR)", async () => {
+    mockRunPipeline.mockResolvedValue({ ...RUN, status: "needs_human" });
+    const res = await POST(post(VALID));
+    expect(mockCreateApproval).not.toHaveBeenCalled();
+    expect((await res.json()).approvalId).toBeNull();
   });
 });
