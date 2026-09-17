@@ -6,6 +6,8 @@
  */
 import { upsertSurfaces } from "../store";
 import { scanServer } from "./detect";
+import { detectManifestDrift } from "./pin";
+import { getPin } from "./pin-store";
 import type { AiSurface, AiSurfaceRisk } from "../types";
 import type { McpScanInput, McpScanResult, McpFinding } from "./types";
 
@@ -24,6 +26,14 @@ export async function runMcpScan(input: McpScanInput): Promise<McpScanResult> {
   for (const s of input.servers) {
     const tools = input.toolsByServer?.[s.name];
     const findings = scanServer(s, tools);
+    // Manifest-pin drift: if this server was pinned known-good and its live tool
+    // set no longer matches the pin, that is a silent rug-pull - surface it as a
+    // critical finding so the server's inventory risk becomes critical too.
+    // Best-effort: getPin no-ops without a DB, and an unpinned server just skips.
+    if (tools) {
+      const pin = await getPin(input.workspaceId, input.target, s.name);
+      if (pin) findings.push(...detectManifestDrift(s.name, pin.fingerprint, tools));
+    }
     allFindings.push(...findings);
     surfaces.push({
       kind: "mcp_server",
