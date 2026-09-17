@@ -20,6 +20,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth/require-capability";
+import { requireEntitlement } from "@/lib/tenancy/require-entitlement";
 import { trackEvent } from "@/lib/analytics";
 import { recordAudit } from "@/lib/audit-log";
 import { runCodeReview } from "@/lib/ai-code/scan";
@@ -32,6 +33,8 @@ const MAX_ATTEMPTS_CAP = 4; // a hard ceiling on model calls per request
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const auth = await requireCapability(req, "settings.manage_team");
   if (!auth.ok) return auth.response;
+  const gate = await requireEntitlement(auth.user.workspaceId, "secure_agent");
+  if (gate) return gate;
 
   let body: unknown;
   try {

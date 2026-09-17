@@ -24,6 +24,8 @@ jest.mock("@/lib/ai-code/scan", () => ({ runCodeReview: jest.fn() }));
 jest.mock("@/lib/analytics", () => ({ trackEvent: (...a: unknown[]) => mockTrackEvent(...a) }));
 jest.mock("@/lib/audit-log", () => ({ recordAudit: (...a: unknown[]) => mockRecordAudit(...a) }));
 jest.mock("@/lib/agents/approvals/store", () => ({ createPendingApproval: (...a: unknown[]) => mockCreateApproval(...a) }));
+const mockGate = jest.fn();
+jest.mock("@/lib/tenancy/require-entitlement", () => ({ requireEntitlement: (...a: unknown[]) => mockGate(...a) }));
 
 import { POST } from "../route";
 
@@ -55,6 +57,7 @@ const VALID = { ref: "pr-1", prompt: "Add a value", author: "claude", authorMode
 beforeEach(() => {
   jest.clearAllMocks();
   mockRequireCapability.mockResolvedValue(OK_USER);
+  mockGate.mockResolvedValue(null); // secure_agent entitled by default
   mockRunPipeline.mockResolvedValue(RUN);
   mockRecordAudit.mockResolvedValue({ ok: true });
   mockCreateApproval.mockResolvedValue("appr-1");
@@ -136,5 +139,13 @@ describe("POST /api/admin/ai-code/pipeline", () => {
     const res = await POST(post(VALID));
     expect(mockCreateApproval).not.toHaveBeenCalled();
     expect((await res.json()).approvalId).toBeNull();
+  });
+});
+
+describe("entitlement gate", () => {
+  it("403 when the secure_agent product is not entitled for the workspace", async () => {
+    mockGate.mockResolvedValue(new Response(JSON.stringify({ entitled: false, feature: "secure_agent" }), { status: 403 }));
+    expect((await POST(post(VALID))).status).toBe(403);
+    expect(mockRunPipeline).not.toHaveBeenCalled(); // gated before the pipeline runs
   });
 });
