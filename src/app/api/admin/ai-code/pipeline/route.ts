@@ -21,10 +21,15 @@ import { recordAudit } from "@/lib/audit-log";
 import { runCodeReview } from "@/lib/ai-code/scan";
 import { liveRepairComplete } from "@/lib/ai-code/repair";
 import { runPipeline } from "@/lib/ai-code/pipeline";
+import { DEFAULT_SPEC_QUESTIONS } from "@/lib/ai-code/intake";
 import type { CodeReviewResult } from "@/lib/ai-code/types";
 
 const MAX_DIFF = 2_000_000; // chars
 const MAX_ATTEMPTS_CAP = 4;
+/** The fixed answer-key allowlist. The route always runs the default questions,
+ *  so a valid answer names one of these; anything else is dropped, never used as
+ *  a property name to write. */
+const SPEC_QUESTION_IDS = new Set(DEFAULT_SPEC_QUESTIONS.map((q) => q.id));
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const auth = await requireCapability(req, "settings.manage_team");
@@ -53,12 +58,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if (!diff.trim()) return NextResponse.json({ error: "diff is required" }, { status: 400 });
   if (diff.length > MAX_DIFF) return NextResponse.json({ error: "diff too large" }, { status: 400 });
 
-  // Answers are a flat questionId -> optionId map; anything else is ignored, and
-  // an off-menu VALUE is rejected below by resolveIntake as a 400.
+  // Answers are a flat questionId -> optionId map. The property NAME is
+  // allowlisted to the fixed question set - never write a user-named property
+  // (remote property injection). The option VALUE is validated by resolveIntake,
+  // which rejects an off-menu value as a 400.
   const answers: Record<string, string> = {};
   if (b.answers && typeof b.answers === "object") {
     for (const [k, v] of Object.entries(b.answers as Record<string, unknown>)) {
-      if (typeof v === "string") answers[k] = v;
+      if (SPEC_QUESTION_IDS.has(k) && typeof v === "string") answers[k] = v;
     }
   }
 

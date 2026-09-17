@@ -107,4 +107,10 @@ describe("POST /api/admin/ai-code/pipeline", () => {
     await POST(post({ ...VALID, maxAttempts: 99 }));
     expect(mockRunPipeline.mock.calls[0][0].maxAttempts).toBe(4);
   });
+
+  it("drops answer keys outside the fixed question set (no remote property injection)", async () => {
+    await POST(post({ ...VALID, answers: { tests: "all", __proto__: "x", constructor: "y", bogus: "z" } }));
+    // Only the allowlisted question id survives; injected / unknown names are gone.
+    expect(mockRunPipeline.mock.calls[0][0].answers).toEqual({ tests: "all" });
+  });
 });
