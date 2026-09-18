@@ -17,8 +17,8 @@ import {
 /**
  * The number of controls not yet enforcing at a live seam. LOWER THIS as gaps
  * are closed; it must never be raised. Today's gaps: forcefield-containment
- * (built, unwired), mcp-drift-inline (admin scan only), agent-conduct (advisory
- * prose), budget-ceiling-unconfigured (fails open when no budget set).
+ * mcp-drift-inline (admin scan only), conduct-truthfulness (inherently
+ * non-deterministic), budget-ceiling-unconfigured (fails open when no budget set).
  */
 const MAX_GAPS = 3;
 
@@ -71,13 +71,15 @@ describe("agent control ladder", () => {
     }
   });
 
-  it("Forcefield containment is now enforcing; agent conduct is still a gap (honesty check)", () => {
+  it("the enforced conduct gate is enforcing; the truthfulness residual is honestly still a gap", () => {
     const gapIds = new Set(gaps().map((e) => e.id));
-    // Wired into the dispatcher chokepoint, so no longer a gap.
+    // Forcefield containment (wired) and the new conduct self-tamper gate enforce.
     expect(gapIds.has("forcefield-containment")).toBe(false);
-    const ff = CONTROL_LADDER.find((e) => e.id === "forcefield-containment")!;
-    expect(isEnforcing(ff)).toBe(true);
-    // Conduct is still advisory prose - the next gap to close.
-    expect(gapIds.has("agent-conduct")).toBe(true);
+    const selfTamper = CONTROL_LADDER.find((e) => e.id === "conduct-self-tamper")!;
+    expect(isEnforcing(selfTamper)).toBe(true);
+    // Truthfulness cannot be a pre-execution gate; it is honestly still advisory.
+    expect(gapIds.has("conduct-truthfulness")).toBe(true);
+    // The old catch-all conduct entry is gone (split into enforced + residual).
+    expect(CONTROL_LADDER.some((e) => e.id === "agent-conduct")).toBe(false);
   });
 });
