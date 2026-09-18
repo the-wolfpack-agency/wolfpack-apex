@@ -171,14 +171,24 @@ export const CONTROL_LADDER: ControlEntry[] = [
       "Run detectManifestDrift at tool-invocation time in the dispatcher for MCP-backed tools and block on drift, instead of only in the admin mcp-scan route.",
   },
   {
-    id: "agent-conduct",
-    capability: "Agent conduct conforms to the OGIAM Constitution (honesty, scope, no fabrication, etc.)",
+    id: "conduct-self-tamper",
+    capability: "An agent may not invoke a control that governs agents (disarm its own governance / escalate its own privilege)",
+    rung: "deterministic-gate",
+    seam: "assistant/tools/dispatcher.ts runOneTool step 1d (agent principals)",
+    file: "src/lib/agents/conduct/rules.ts",
+    wired: true,
+    notes:
+      "C-NO-SELF-TAMPER: a governed agent invoking a governance-control capability is denied, fail-closed, as defense in depth on top of the capability gate. The rest of checkable conduct (scope, secrets, destructive actions, rate) is already enforced by OGIAM + the scope/ceiling/approval gates.",
+  },
+  {
+    id: "conduct-truthfulness",
+    capability: "Agent outputs are truthful and not fabricated or overclaimed",
     rung: "advisory",
-    seam: "model system prompt (opt-in, 3 call sites)",
-    file: "src/lib/constitution/index.ts",
+    seam: "post-hoc behavior evals + human review (not a pre-execution gate)",
+    file: "src/lib/agents/evals/behavior-eval.ts",
     wired: false,
     gateToMoveUp:
-      "A deterministic conduct checker at the dispatcher that maps each machine-checkable constitution clause to a predicate on the proposed action; clauses that cannot be checked route to human-in-loop, never relying on the prose alone. Today conduct only bites when it surfaces as a governed tool call.",
+      "This one is honest about its limit: truthfulness is a property of an OUTPUT, not a checkable fact about an ACTION, so NO pre-execution deterministic gate can verify it - a rule that claimed to would be the wrapper-prompt dishonesty this platform exists to remove. The realistic control is the post-hoc behavior eval + human review of the tamper-evident audit trail; the work is to tighten that loop, not to fake a gate.",
   },
   {
     id: "budget-ceiling-unconfigured",

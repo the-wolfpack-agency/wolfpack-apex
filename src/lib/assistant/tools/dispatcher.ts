@@ -25,6 +25,7 @@ import { ingestAgentAction } from "@/lib/agents/audit/brain-ingest";
 import { createPendingApproval } from "@/lib/agents/approvals/store";
 import { guardAgentAction } from "@/lib/forcefield/contain";
 import { liveContainmentDeps } from "@/lib/forcefield/contain-live";
+import { evaluateConduct } from "@/lib/agents/conduct/rules";
 import { notify } from "@/lib/notifications/in-app";
 import type { OgiamDecision } from "@/lib/ogiam/types";
 import { canInvokeNamedTool } from "./gate";
@@ -349,6 +350,21 @@ async function runOneTool<P, R>(
         `[forcefield] containment check errored for agent ${agent.agentId} on ${tool.name}; degraded open:`,
         (err as Error)?.message ?? "unknown",
       );
+    }
+  }
+
+  /* 1d. Conduct gate (AGENT principals only). The one machine-checkable conduct
+         clause the gates above do not already cover: an agent may not invoke a
+         control that governs agents (entitlements, enforcement posture, canaries,
+         agent lifecycle, roles) - disarming its own governance or escalating its
+         own privilege. Deterministic and fail-closed, defense in depth on top of
+         the capability gate. (Truthfulness conduct is NOT checkable here - it is
+         a property of an output, governed by post-hoc behavior evals + review.) */
+  if (agent) {
+    const conduct = evaluateConduct({ capability: tool.capability, isAgent: true });
+    if (conduct.outcome === "deny") {
+      await alertAgentBlock(agent, tool.name, `Conduct ${conduct.ruleId}: ${conduct.reason}`);
+      return failure("capability", `Conduct ${conduct.ruleId}: ${conduct.reason}`);
     }
   }
 
