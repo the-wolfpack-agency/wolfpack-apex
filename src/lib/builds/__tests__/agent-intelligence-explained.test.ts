@@ -12,15 +12,14 @@ describe("Agent Intelligence explainer content", () => {
     ]);
   });
 
-  it("flags EXACTLY the coming-next section as roadmap, and nothing built", () => {
-    expect(AGENT_INTEL_SECTIONS.filter((s) => s.roadmap).map((s) => s.id)).toEqual(["operators-over-time"]);
-    for (const s of AGENT_INTEL_SECTIONS) if (s.id !== "operators-over-time") expect(s.roadmap).toBeFalsy();
+  it("every section is now a built capability (persistence completed the operators board)", () => {
+    expect(AGENT_INTEL_SECTIONS.filter((s) => s.roadmap)).toEqual([]);
   });
 
-  it("every section has plain-language body and a 'what this means' line (except the roadmap one)", () => {
+  it("every section has plain-language body and a 'what this means' line", () => {
     for (const s of AGENT_INTEL_SECTIONS) {
       expect(s.body.length).toBeGreaterThan(0);
-      if (!s.roadmap) expect(typeof s.meaning).toBe("string");
+      expect(typeof s.meaning).toBe("string");
     }
   });
 

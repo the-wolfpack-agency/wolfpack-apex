@@ -16,6 +16,7 @@ import { randomUUID } from "crypto";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { getAIClient } from "@/lib/ai/router";
 import { runProbeAgainstTarget, ProbeTargetNotAllowedError } from "@/lib/agent-probe-runner";
+import { recordSighting } from "@/lib/agent-operators";
 import type { AIModelTier } from "@/lib/ai/types";
 
 export const runtime = "nodejs";
@@ -77,6 +78,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       workspaceId: auth.user.workspaceId ?? "default",
       maxSteps,
     });
+    // Persist the sighting so it accumulates into the operator history / board.
+    await recordSighting({ workspaceId: auth.user.workspaceId ?? "default", sighting: result.sighting });
     return NextResponse.json({ report: result.report, dossier: result.dossier, targetHost: result.targetHost });
   } catch (err) {
     if (err instanceof ProbeTargetNotAllowedError) {
