@@ -70,7 +70,11 @@ describe("getSiteAnalyticsSummary", () => {
       .mockResolvedValueOnce({ rows: [{ event_type: "site.page_viewed", count: "42" }] }) // byType
       .mockResolvedValueOnce({ rows: [{ page_views: "42", total: "55" }] }) // totals
       .mockResolvedValueOnce({ rows: [{ welcomed: "3", flagged: "5", trapped: "2" }] }) // forcefield counts
-      .mockResolvedValueOnce({ rows: [{ agent: "GPTBot", count: "3" }] }); // forcefield top agents
+      .mockResolvedValueOnce({ rows: [{ agent: "GPTBot", count: "3" }] }) // forcefield top agents
+      .mockResolvedValueOnce({ rows: [ // journey rows (correlated agent events)
+        { event_type: "site.agent_trap_tripped", path: "/_ff/x", created_at: "2026-09-18T10:00:00Z", sig: "fp1", nonce: null, agent: null },
+        { event_type: "site.agent_probed_sensitive", path: "/admin", created_at: "2026-09-18T10:00:05Z", sig: "fp1", nonce: null, agent: null },
+      ] });
 
     const summary = await getSiteAnalyticsSummary(30);
     expect(summary.rangeDays).toBe(30);
@@ -86,6 +90,11 @@ describe("getSiteAnalyticsSummary", () => {
     expect(summary.forcefield).toEqual({
       welcomed: 3, flagged: 5, trapped: 2, topAgents: [{ agent: "GPTBot", count: 3 }],
     });
+    // The two correlated events (same fingerprint) fuse into one classified journey.
+    expect(summary.journeys).toHaveLength(1);
+    expect(summary.journeys[0].behaviorClass).toBe("vuln_scanner"); // probing outranks scraping when both present
+    expect(summary.journeys[0].confidence).toBe("proven"); // tripped_decoy is structurally a bot
+    expect(summary.journeys[0].path).toEqual(["/_ff/x", "/admin"]);
   });
 
   it("clamps the range to a sane window", async () => {

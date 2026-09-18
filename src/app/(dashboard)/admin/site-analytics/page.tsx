@@ -27,7 +27,35 @@ interface Summary {
     trapped: number;
     topAgents: Array<{ agent: string; count: number }>;
   };
+  journeys: Array<{
+    key: string;
+    confidence: "proven" | "inferred";
+    behaviorClass: string;
+    signals: string[];
+    path: string[];
+    eventCount: number;
+    firstAt: string;
+    lastAt: string;
+    summary: string;
+  }>;
 }
+
+const CLASS_LABEL: Record<string, string> = {
+  benign_crawler: "Benign crawler",
+  aggressive_scraper: "Aggressive scraper",
+  vuln_scanner: "Vulnerability scanner",
+  form_spammer: "Form spammer",
+  suspicious: "Suspicious automation",
+  unclassified: "Unclassified",
+};
+const CLASS_COLOR: Record<string, string> = {
+  benign_crawler: "var(--wp-success, #30a46c)",
+  aggressive_scraper: "var(--wp-error, #ef4444)",
+  vuln_scanner: "var(--wp-error, #ef4444)",
+  form_spammer: "var(--wp-warning, #f5a623)",
+  suspicious: "var(--wp-warning, #f5a623)",
+  unclassified: "var(--wp-text-muted, #9ca3af)",
+};
 
 const RANGES = [7, 30, 90] as const;
 
@@ -238,6 +266,56 @@ export default function SiteAnalyticsPage() {
               automation, a weak signal recorded only. Decoy trips = a scraper followed an
               invisible, robots-disallowed honeypot link, near-certainly ignoring the rules.
             </p>
+          </div>
+
+          {/* Agent journeys: correlated sessions, each a behavior class with a
+              proven/inferred confidence. Following the agent's flow across the
+              surface, not just single events. */}
+          <div style={card} data-testid="ff-journeys">
+            <div style={label}>Agent journeys &middot; behavior across the surface</div>
+            <p style={{ margin: "0.5rem 0 0", fontSize: "0.76rem", color: "var(--wp-text-muted, #9ca3af)", lineHeight: 1.5 }}>
+              Correlated sessions with a fused behavior class. <strong style={{ color: "var(--wp-text, #eee)" }}>Proven</strong> =
+              the actor carried a correlation token (engaged a trap or a hidden field only a bot touches). <strong style={{ color: "var(--wp-text, #eee)" }}>Inferred</strong> =
+              grouped by a coarse fingerprint, a likely match, not confirmed.
+            </p>
+            <ul data-testid="ff-journeys-list" style={{ listStyle: "none", margin: "0.9rem 0 0", padding: 0, display: "grid", gap: "0.7rem" }}>
+              {summary.journeys.length === 0 && (
+                <li style={{ fontSize: "0.82rem", color: "var(--wp-text-muted, #9ca3af)" }}>
+                  No correlated agent journeys yet. Sessions appear here as ogiam.com records agent signals.
+                </li>
+              )}
+              {summary.journeys.map((j) => (
+                <li key={j.key} style={{ border: "1px solid var(--wp-dark-border, #333)", borderRadius: 6, padding: "0.7rem 0.8rem" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
+                    <span style={{ fontWeight: 700, fontSize: "0.9rem", color: CLASS_COLOR[j.behaviorClass] ?? "var(--wp-text, #eee)" }}>
+                      {CLASS_LABEL[j.behaviorClass] ?? j.behaviorClass}
+                    </span>
+                    <span
+                      style={{
+                        fontSize: "0.66rem",
+                        fontWeight: 700,
+                        textTransform: "uppercase",
+                        letterSpacing: "0.03em",
+                        padding: "0.1rem 0.4rem",
+                        borderRadius: 999,
+                        background: j.confidence === "proven" ? "var(--wp-gold, #e8b528)" : "var(--wp-dark-surface2, #1a1a1a)",
+                        color: j.confidence === "proven" ? "var(--wp-dark, #0b0d11)" : "var(--wp-text-muted, #9ca3af)",
+                        border: j.confidence === "proven" ? "none" : "1px solid var(--wp-dark-border, #333)",
+                      }}
+                    >
+                      {j.confidence}
+                    </span>
+                    <span style={{ marginLeft: "auto", fontSize: "0.72rem", color: "var(--wp-text-muted, #9ca3af)" }}>{j.eventCount} events</span>
+                  </div>
+                  <p style={{ margin: "0.45rem 0 0", fontSize: "0.8rem", color: "var(--wp-text, #eee)", lineHeight: 1.5 }}>{j.summary}</p>
+                  {j.path.length > 0 && (
+                    <div style={{ marginTop: "0.45rem", fontSize: "0.72rem", color: "var(--wp-text-muted, #9ca3af)", overflowX: "auto", whiteSpace: "nowrap" }}>
+                      {j.path.join("  →  ")}
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ul>
           </div>
         </>
       )}
