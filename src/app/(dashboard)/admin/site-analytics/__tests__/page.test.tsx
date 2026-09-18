@@ -21,6 +21,9 @@ const SUMMARY = {
   byCountry: [{ country: "US", count: 90 }],
   byType: [{ type: "site.page_viewed", count: 128 }],
   forcefield: { welcomed: 6, flagged: 9, trapped: 2, topAgents: [{ agent: "GPTBot", count: 6 }] },
+  journeys: [
+    { key: "fp1", confidence: "proven", behaviorClass: "aggressive_scraper", signals: ["tripped_decoy"], path: ["/_ff/x", "/admin"], eventCount: 2, firstAt: "2026-09-18T10:00:00Z", lastAt: "2026-09-18T10:00:05Z", summary: "Followed an invisible trap link and harvested greedily." },
+  ],
 };
 
 beforeEach(() => {
@@ -48,6 +51,11 @@ test("renders the reused heatmap, totals, and top pages/countries from the summa
   expect(screen.getByTestId("ff-flagged")).toHaveTextContent("9");
   expect(screen.getByTestId("ff-trapped")).toHaveTextContent("2");
   expect(screen.getByTestId("ff-top-agents")).toHaveTextContent("GPTBot");
+  // Agent journeys panel: the correlated session renders with its class + proven badge.
+  const journeys = screen.getByTestId("ff-journeys-list");
+  expect(journeys).toHaveTextContent("Aggressive scraper");
+  expect(journeys).toHaveTextContent("proven");
+  expect(journeys).toHaveTextContent("/_ff/x");
 
   // The data route was queried with the default 30-day window.
   expect(String(mockFetchWithRefresh.mock.calls[0][0])).toContain("days=30");

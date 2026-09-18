@@ -9,6 +9,7 @@
  */
 
 import { query, safeQuery } from "@/lib/db";
+import { buildJourneys, type AgentJourney, type CorrelationKind } from "@/lib/agent-behavior";
 
 /** Closed event vocabulary, mirrored from the marketing site's analytics. A
  *  value outside this set is rejected at the ingest boundary. */
@@ -22,6 +23,13 @@ export const SITE_EVENT_TYPES = [
   "site.agent_welcomed",
   "site.agent_flagged",
   "site.agent_trap_tripped",
+  // Phase 1 "follow the agent" signals: fused into a behavior class per session.
+  "site.agent_read_robots",
+  "site.agent_read_sitemap",
+  "site.agent_probed_sensitive",
+  "site.agent_form_honeypot",
+  "site.agent_form_too_fast",
+  "site.agent_high_rate",
 ] as const;
 export type SiteEventType = (typeof SITE_EVENT_TYPES)[number];
 
@@ -81,6 +89,9 @@ export interface SiteAnalyticsSummary {
     trapped: number;
     topAgents: Array<{ agent: string; count: number }>;
   };
+  /* Reconstructed agent journeys: correlated sessions with a fused behavior
+     class and a proven/inferred confidence. Newest first, capped. */
+  journeys: AgentJourney[];
 }
 
 /** Clamp the requested window to a sane integer day count. */
@@ -98,7 +109,7 @@ export async function getSiteAnalyticsSummary(rangeDays = 30): Promise<SiteAnaly
   const days = clampDays(rangeDays);
   const sinceClause = `created_at > now() - ($1 || ' days')::interval`;
 
-  const [hour, page, country, type, totals, ff, ffAgents] = await Promise.all([
+  const [hour, page, country, type, totals, ff, ffAgents, journeyRows] = await Promise.all([
     safeQuery<{ hour: number; count: string }>(
       `SELECT EXTRACT(HOUR FROM created_at AT TIME ZONE 'UTC')::int AS hour, count(*) AS count
          FROM site_analytics_events
@@ -151,6 +162,16 @@ export async function getSiteAnalyticsSummary(rangeDays = 30): Promise<SiteAnaly
         GROUP BY 1 ORDER BY count(*) DESC LIMIT 10`,
       [String(days)],
     ),
+    safeQuery<{ event_type: string; path: string | null; created_at: string; sig: string | null; nonce: string | null; agent: string | null }>(
+      `SELECT event_type, path, created_at::text AS created_at,
+              props->>'sig' AS sig, props->>'nonce' AS nonce, props->>'agent' AS agent
+         FROM site_analytics_events
+        WHERE ${sinceClause}
+          AND (props->>'sig' IS NOT NULL OR props->>'nonce' IS NOT NULL)
+        ORDER BY created_at
+        LIMIT 2000`,
+      [String(days)],
+    ),
   ]);
 
   const t = totals.rows[0];
@@ -168,5 +189,13 @@ export async function getSiteAnalyticsSummary(rangeDays = 30): Promise<SiteAnaly
       trapped: ff.rows[0] ? Number(ff.rows[0].trapped) : 0,
       topAgents: ffAgents.rows.map((r) => ({ agent: r.agent, count: Number(r.count) })),
     },
+    journeys: buildJourneys(
+      journeyRows.rows.map((r) => {
+        const nonce = r.nonce ?? undefined;
+        const key = nonce ?? r.sig ?? "";
+        const keyKind: CorrelationKind = nonce ? "nonce" : "fingerprint";
+        return { key, keyKind, type: r.event_type, path: r.path ?? "", at: r.created_at, nonceLinked: !!nonce, agent: r.agent ?? undefined };
+      }).filter((r) => r.key !== ""),
+    ).slice(0, 25),
   };
 }
