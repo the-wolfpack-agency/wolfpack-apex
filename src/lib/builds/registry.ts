@@ -103,6 +103,14 @@ export const CLIENT_BUILDS: ClientBuild[] = [
     what: "A replacement for the form-builder change management plan: the same exercise, held as a record that lives past the day it was written.",
     data: "Drawn from their training material and a read-only walk of the current tool. Nothing is wired, and the plan's own fields have not been read yet.",
   },
+  {
+    href: "/builds/ogiam-explained",
+    title: "OGIAM, in plain language",
+    client: "Wolfpack (OGIAM product pre-build, ahead of its own repo)",
+    stage: "in flight",
+    what: "A plain-language explanation of OGIAM's governance features for a non-technical reader: Secure Agent, Forcefield, any-model safety, self-serve, proof it works, and what is coming next.",
+    data: "The capabilities described are built and running in Instinct today; this page stages OGIAM as its own product ahead of standing up a dedicated repo. The 'Forcefield for the Web' section is explicitly marked as coming next, and no metrics are shown on the page.",
+  },
 ];
 
 export function buildFor(pathname: string): ClientBuild | undefined {
