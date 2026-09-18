@@ -13,6 +13,7 @@ jest.mock("@/lib/agent-probe-runner", () => {
   const actual = jest.requireActual("@/lib/agent-probe-runner");
   return { ...actual, runProbeAgainstTarget: (...a: unknown[]) => mockRun(...a) };
 });
+jest.mock("@/lib/agent-operators", () => ({ recordSighting: jest.fn().mockResolvedValue("op_x") }));
 import { ProbeTargetNotAllowedError } from "@/lib/agent-probe-runner";
 
 import { POST } from "../route";
@@ -40,6 +41,7 @@ it("200 returns the behavior report + operator dossier", async () => {
   mockRun.mockResolvedValue({
     report: { journey: { behaviorClass: "vuln_scanner", confidence: "proven" } },
     dossier: { threatLevel: "hostile", confidence: "proven", operatorKey: "op_x" },
+    sighting: { surface: "ogiam.com", at: "t", journey: {}, scaffolding: {}, tools: {} },
     targetHost: "ogiam.com",
   });
   const res = await POST(post({ tier: "standard", goal: "find admin", targetBase: "https://ogiam.com" }));

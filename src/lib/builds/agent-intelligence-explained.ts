@@ -101,11 +101,11 @@ export const AGENT_INTEL_SECTIONS: OgiamFeatureSection[] = [
   },
   {
     id: "operators-over-time",
-    eyebrow: "Coming next, not available today",
-    title: "The operators board over time",
-    roadmap: true,
+    eyebrow: "See the operators over time",
+    title: "The operators board",
     body: [
-      "Today each reading and dossier is produced on demand. The next step is to keep them over time, so the same operator seen across many visits and many sites builds into a persistent profile, and a board shows the operators active against your surfaces, ranked by threat, with their history.",
+      "Readings and dossiers are kept over time, so the same operator seen across many visits and many surfaces builds into a persistent profile. A board shows the operators active against your surfaces, ranked by threat, each with its history and evidence.",
+      "It groups by the durable operator fingerprint, so an operator that swaps models but keeps its tooling stays one entry, not many.",
     ],
     meaning:
       "A living map of the operators targeting you, not just a snapshot of one visit.",

@@ -70,6 +70,7 @@ const LIMIT_INTERPOLATION_OK: readonly string[] = [
   "lib/automations/porsche-classes/assistant-grounding.ts",
   "lib/automations/queries.ts",
   "lib/compliance/store.ts",
+  "lib/agent-operators.ts",
   "lib/finance/invoices.ts",
   "lib/forcefield-web/rollup.ts",
   "lib/hr/scanned-documents.ts",
