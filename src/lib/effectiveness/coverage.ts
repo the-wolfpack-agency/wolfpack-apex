@@ -23,7 +23,7 @@
 import { CONTROL_LADDER, isEnforcing, type ControlEntry } from "@/lib/governance/control-ladder";
 
 /** The evidence-pipeline sources an execution stream can land in. */
-export type CaptureSource = "governance" | "secure_agent" | "forcefield" | "cost";
+export type CaptureSource = "governance" | "secure_agent" | "forcefield" | "cost" | "enforcement";
 
 export interface CaptureClassification {
   /** Matches a ControlEntry.id on the ladder. */
@@ -44,7 +44,10 @@ export interface CaptureClassification {
                        read by listDecisions)
      - secure_agent<- ai-code review store
      - forcefield  <- canary-trip ledger
-     - cost        <- metered AI spend (v_ai_cost_daily) */
+     - cost        <- metered AI spend (v_ai_cost_daily)
+     - enforcement <- workspace-scoped enforcement-denial events in the event
+                      log (capability / connector-scope / ceiling / conduct),
+                      the denials that happen AFTER the authorize decision */
 export const CAPTURE_MAP: CaptureClassification[] = [
   // Captured today.
   { id: "ogiam-authorize-agent", capturedBy: "governance" },
@@ -76,24 +79,13 @@ export const CAPTURE_MAP: CaptureClassification[] = [
       "The token itself is a credential shape; each action that USES it flows through the gate and is already counted under governance.",
   },
 
-  // Enforced, but the execution stream is not yet in the evidence pipeline.
-  // Shrink-only: wire these into a source and delete the gap.
-  {
-    id: "capability-gate",
-    gap: "Route- and tool-level capability denials are enforced and recorded to auth analytics, but not yet aggregated into the effectiveness rollup.",
-  },
-  {
-    id: "connector-scope",
-    gap: "Connector-scope denials are enforced but not yet surfaced as an effectiveness metric.",
-  },
-  {
-    id: "agent-ceiling",
-    gap: "Operations-per-hour ceiling trips are enforced but not yet aggregated into effectiveness.",
-  },
-  {
-    id: "conduct-self-tamper",
-    gap: "Conduct-gate denials are recorded to the audit trail but not yet aggregated into the effectiveness rollup as their own metric.",
-  },
+  // Downstream enforcement: denials that happen AFTER the authorize decision, so
+  // they are not in the governance ledger. Each now emits a workspace-scoped
+  // enforcement-denial event that the rollup counts (see enforcement.ts).
+  { id: "capability-gate", capturedBy: "enforcement" },
+  { id: "connector-scope", capturedBy: "enforcement" },
+  { id: "agent-ceiling", capturedBy: "enforcement" },
+  { id: "conduct-self-tamper", capturedBy: "enforcement" },
 ];
 
 /** The enforcing controls whose execution stream is not yet captured. */

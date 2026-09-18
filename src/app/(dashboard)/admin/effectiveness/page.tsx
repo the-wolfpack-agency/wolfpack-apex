@@ -25,6 +25,7 @@ interface Report {
   forcefield: { decoysActive: number; trips: number; agentsContained: number };
   governance: { actionsGoverned: number; denied: number; escalated: number; transformed: number; allowed: number; wouldBlock: number; agentsActive: number };
   cost: { monthToDateUsd: number; measured: boolean };
+  enforcement: { capabilityDenied: number; connectorScopeDenied: number; ceilingHits: number; conductDenied: number; total: number };
 }
 
 export default function EffectivenessPage() {
@@ -65,6 +66,7 @@ export default function EffectivenessPage() {
   const ff = report?.forcefield;
   const gov = report?.governance;
   const cost = report?.cost;
+  const enf = report?.enforcement;
   // Actual month-to-date spend, or an explicit "not measured" when the cost view
   // could not be read - never a fabricated $0.
   const costDisplay = cost ? (cost.measured ? `$${cost.monthToDateUsd.toFixed(2)}` : "Not measured") : "$0.00";
@@ -134,6 +136,17 @@ export default function EffectivenessPage() {
           </p>
           <div style={gridStyle} data-testid="eff-cost">
             <MetricTile label="AI spend, month to date" display={costDisplay} testId="eff-cost-mtd" />
+          </div>
+
+          <h3 style={{ margin: "1.75rem 0 0.25rem", fontSize: "1rem", color: "var(--wp-text, #e6e9ef)" }}>Downstream enforcement</h3>
+          <p style={{ margin: "0 0 0.75rem", fontSize: "0.85rem", color: "var(--wp-text-dim, #b4bcc8)" }}>
+            Agents actually stopped after the gate authorized them: the capability gate, connector-scope, the hourly ceiling, and the self-tamper gate.
+          </p>
+          <div style={gridStyle} data-testid="eff-enforcement">
+            <MetricTile label="Capability denied" display={String(enf?.capabilityDenied ?? 0)} accent={enf?.capabilityDenied ? "var(--wp-error, #e5484d)" : undefined} testId="eff-cap-denied" />
+            <MetricTile label="Connector-scope denied" display={String(enf?.connectorScopeDenied ?? 0)} accent={enf?.connectorScopeDenied ? "var(--wp-error, #e5484d)" : undefined} testId="eff-scope-denied" />
+            <MetricTile label="Ceiling stops" display={String(enf?.ceilingHits ?? 0)} accent={enf?.ceilingHits ? "var(--wp-warning, #f5a623)" : undefined} testId="eff-ceiling-hits" />
+            <MetricTile label="Self-tamper denied" display={String(enf?.conductDenied ?? 0)} accent={enf?.conductDenied ? "var(--wp-error, #e5484d)" : undefined} testId="eff-conduct-denied" />
           </div>
 
           <GlassPanel style={{ marginTop: "1.75rem" }}>

@@ -23,6 +23,7 @@ const REPORT = {
   forcefield: { decoysActive: 5, trips: 2, agentsContained: 1 },
   governance: { actionsGoverned: 40, denied: 4, escalated: 3, transformed: 1, allowed: 32, wouldBlock: 7, agentsActive: 5 },
   cost: { monthToDateUsd: 18.4, measured: true },
+  enforcement: { capabilityDenied: 5, connectorScopeDenied: 2, ceilingHits: 3, conductDenied: 1, total: 11 },
 };
 
 beforeEach(() => { jest.clearAllMocks(); user = { role: "cto" }; mockFetch.mockResolvedValue(resp(200, { report: REPORT })); });
@@ -47,6 +48,11 @@ test("renders both products' numbers from the report", async () => {
   expect(screen.getByTestId("eff-would-block")).toHaveTextContent("7");
   expect(screen.getByTestId("eff-agents-active")).toHaveTextContent("5");
   expect(screen.getByTestId("eff-cost-mtd")).toHaveTextContent("$18.40");
+  // Downstream enforcement tiles render from the same report.
+  expect(screen.getByTestId("eff-cap-denied")).toHaveTextContent("5");
+  expect(screen.getByTestId("eff-scope-denied")).toHaveTextContent("2");
+  expect(screen.getByTestId("eff-ceiling-hits")).toHaveTextContent("3");
+  expect(screen.getByTestId("eff-conduct-denied")).toHaveTextContent("1");
   expect(screen.queryByTestId("eff-capped")).not.toBeInTheDocument();
 });
 
