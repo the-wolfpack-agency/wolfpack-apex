@@ -20,7 +20,7 @@ import {
  * (built, unwired), mcp-drift-inline (admin scan only), agent-conduct (advisory
  * prose), budget-ceiling-unconfigured (fails open when no budget set).
  */
-const MAX_GAPS = 4;
+const MAX_GAPS = 3;
 
 const RUNGS: ControlRung[] = ["structural", "deterministic-gate", "containment", "human-in-loop", "advisory"];
 
@@ -71,9 +71,13 @@ describe("agent control ladder", () => {
     }
   });
 
-  it("names Forcefield containment and agent conduct as current gaps (honesty check)", () => {
+  it("Forcefield containment is now enforcing; agent conduct is still a gap (honesty check)", () => {
     const gapIds = new Set(gaps().map((e) => e.id));
-    expect(gapIds.has("forcefield-containment")).toBe(true);
+    // Wired into the dispatcher chokepoint, so no longer a gap.
+    expect(gapIds.has("forcefield-containment")).toBe(false);
+    const ff = CONTROL_LADDER.find((e) => e.id === "forcefield-containment")!;
+    expect(isEnforcing(ff)).toBe(true);
+    // Conduct is still advisory prose - the next gap to close.
     expect(gapIds.has("agent-conduct")).toBe(true);
   });
 });
