@@ -68,7 +68,9 @@ describe("getSiteAnalyticsSummary", () => {
       .mockResolvedValueOnce({ rows: [{ path: "/ogiam-iam", count: "40" }] }) // byPage
       .mockResolvedValueOnce({ rows: [{ country: "US", count: "35" }] }) // byCountry
       .mockResolvedValueOnce({ rows: [{ event_type: "site.page_viewed", count: "42" }] }) // byType
-      .mockResolvedValueOnce({ rows: [{ page_views: "42", total: "55" }] }); // totals
+      .mockResolvedValueOnce({ rows: [{ page_views: "42", total: "55" }] }) // totals
+      .mockResolvedValueOnce({ rows: [{ welcomed: "3", flagged: "5", trapped: "2" }] }) // forcefield counts
+      .mockResolvedValueOnce({ rows: [{ agent: "GPTBot", count: "3" }] }); // forcefield top agents
 
     const summary = await getSiteAnalyticsSummary(30);
     expect(summary.rangeDays).toBe(30);
@@ -81,6 +83,9 @@ describe("getSiteAnalyticsSummary", () => {
     expect(summary.byPage).toEqual([{ path: "/ogiam-iam", count: 40 }]);
     expect(summary.byCountry).toEqual([{ country: "US", count: 35 }]);
     expect(summary.byType).toEqual([{ type: "site.page_viewed", count: 42 }]);
+    expect(summary.forcefield).toEqual({
+      welcomed: 3, flagged: 5, trapped: 2, topAgents: [{ agent: "GPTBot", count: 3 }],
+    });
   });
 
   it("clamps the range to a sane window", async () => {
