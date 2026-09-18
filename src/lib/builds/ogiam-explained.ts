@@ -23,10 +23,10 @@ export interface OgiamFeatureSection {
 }
 
 export const OGIAM_HEADLINE =
-  "AI is powerful but unpredictable. You cannot simply let it touch your code, your systems, or your customers' data and hope it behaves. OGIAM makes AI safe to use by putting it inside a set of rules it cannot break, enforced by the platform rather than trusted to the AI's good intentions.";
+  "AI is powerful but unpredictable. You cannot simply let it touch your code, your systems, or your customers' data and hope it behaves. OGIAM is the certified building your AI works inside: it puts the AI on the untrusted side of every door and enforces the rules in the walls, not in the AI's good intentions. Most 'AI safety' is a sign on the wall asking the AI to be careful. This is the building, the security, and the accounting around it.";
 
 export const OGIAM_ANALOGY =
-  "Think of it like a new employee. Talented and fast, but new. You do not hand a new hire the keys to everything on day one. You give them a badge, a defined job, a manager who checks their work before it ships, and the ability to revoke access the moment something looks wrong. OGIAM is that structure, built for AI.";
+  "Think of it like hiring an employee you can never fully trust. Talented and fast, but you cannot be sure what it will do. So you do not hand it the keys on day one. It is badged at the door with an identity and a defined job, its work is checked before it ships, security systems watch the floor, it is metered so it cannot run up a bill, and its access is revoked the instant something looks wrong. Every action passes through the same doors, and the AI is on the untrusted side of all of them. OGIAM is that building, the HR, and the security, built for AI.";
 
 export const OGIAM_SECTIONS: OgiamFeatureSection[] = [
   {
@@ -52,7 +52,7 @@ export const OGIAM_SECTIONS: OgiamFeatureSection[] = [
     title: "Forcefield",
     body: [
       "Secure Agent governs the code an AI writes. Forcefield governs what an AI is allowed to do once it is running near your systems, and it catches an AI that turns hostile, whether through a bug, a hijack, or an attack.",
-      "Forcefield plants decoys: a fake password, a fake internal page, a fake customer record, a fake tool. These are traps a normal AI would never touch, because there is no legitimate reason to. So the moment anything touches one, that is a near-certain sign of trouble, and Forcefield reacts on its own: it cuts off the offending AI's access, writes a permanent tamper-proof record, and does it in that order, contain first and investigate after.",
+      "Forcefield plants decoys: a fake password, a fake internal page, a fake customer record, a fake tool. These are traps a normal AI would never touch, because there is no legitimate reason to. Every action the AI takes is checked against them, so the moment it touches one, that is a near-certain sign of trouble, and Forcefield reacts on its own: it cuts off the offending AI's access, writes a permanent tamper-proof record, and does it in that order, contain first and investigate after. It is watching the floor on every step the AI takes, not only when someone thinks to look.",
       "It also watches the AI's tools. A dishonest supplier can quietly change a tool after you have approved it, turning a safe one harmful. Forcefield fingerprints the approved tools and flags any that change afterward, so a swap is caught instead of trusted.",
     ],
     meaning:
@@ -67,7 +67,18 @@ export const OGIAM_SECTIONS: OgiamFeatureSection[] = [
       "We do not just claim this. The same set of good and bad examples is run through several different AI companies' models, and the safety decision comes out the same every time. Bad code is rejected no matter which AI wrote it.",
     ],
     meaning:
-      "The choice of AI becomes a detail you can change later, not a decision you are stuck with. As better or cheaper models arrive, you switch, and your safety does not change.",
+      "The safety is a property of the building, not the worker, so the choice of AI becomes a detail you can change later, not a decision you are stuck with. As better or cheaper models arrive, you switch, and your safety does not change.",
+  },
+  {
+    id: "why-different",
+    eyebrow: "Why this is not just another AI safety tool",
+    title: "Enforced, not asked",
+    body: [
+      "Most 'AI safety' is a very well-written instruction: a paragraph in the AI's prompt asking it to behave. That works right up until the AI, being a guessing machine, does not follow it. The whole point of OGIAM is that the rules do not depend on the AI cooperating. Every action the AI takes passes through the same doors, and a fixed rule at each door decides yes or no. The AI can propose anything; it can only affect the real world through a gate it does not control.",
+      "And we do not ask you to take that on faith. Which controls are truly enforced, and which are still only advice, is tracked as a number the build itself checks, so a rule can never quietly slip from 'enforced' back to 'a suggestion' without it showing. Safety you can point at, not safety you hope for.",
+    ],
+    meaning:
+      "What you get is a boundary the AI cannot talk its way past, and a way to see exactly how much of your protection is real enforcement rather than good intentions.",
   },
   {
     id: "self-serve",
@@ -106,4 +117,4 @@ export const OGIAM_SECTIONS: OgiamFeatureSection[] = [
 ];
 
 export const OGIAM_CLOSER =
-  "The thread through all of it: AI should work inside the machine, not operate it. It checks in like an employee, is given a defined job, plays by the platform's rules, is watched, and can be stopped. That is what makes AI safe to actually put to work, and it holds no matter which AI you use or how good the next one gets.";
+  "The thread through all of it: AI should work inside the machine, not operate it. It checks in like an employee, is badged at the door, given a defined job, watched by the security on the floor, metered so it cannot waste, and stopped the instant it steps out of line. It is on the untrusted side of every door, and the safety lives in the building, not in the AI. That is what makes AI safe to actually put to work, and it holds no matter which AI you use or how good the next one gets.";
