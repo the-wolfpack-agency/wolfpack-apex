@@ -6,10 +6,17 @@
 import { buildDataset, toJsonl, type DatasetDeps, type DatasetExample } from "../dataset";
 
 function deps(over: Partial<DatasetDeps> = {}): DatasetDeps {
-  return { listReviews: async () => [], listTrips: async () => [], ...over };
+  return { listReviews: async () => [], listTrips: async () => [], listDecisions: async () => [], ...over };
 }
 const review = (outcome: string, over: Record<string, unknown> = {}) => ({ id: "r", ref: "pr-1", author: "gpt-4o-mini", outcome, highestSeverity: "critical", findingCount: 2, createdAt: "2026-09-17", ...over });
 const trip = (contained: boolean) => ({ id: "t1", agent: "agent-x", whenIso: "2026-09-17", riskTier: "critical", reason: "1 canary trip", contained });
+const decision = (effective_outcome: string, over: Record<string, unknown> = {}) => ({
+  id: "d1", created_at: "2026-09-17", principal_agent: "agent-x", on_behalf_user_id: "u", on_behalf_role: "admin",
+  tool: "send_email", capability: "mail.send", is_mutation: true, surface: null, risk_tier: "high",
+  intended_outcome: effective_outcome, effective_outcome, enforced: true,
+  would_block: effective_outcome === "deny" || effective_outcome === "escalate",
+  rule_id: "R-HIGHRISK-MUTATION-ESCALATE", reason: null, policy_version: "1", ...over,
+});
 
 it("builds secure-agent examples labeled by the gate verdict, with safe features only", async () => {
   const out = await buildDataset("w1", deps({ listReviews: async () => [review("block")] }));
@@ -40,7 +47,7 @@ it("counts total across both sources", async () => {
     listReviews: async () => [review("allow"), review("block")],
     listTrips: async () => [trip(true)],
   }));
-  expect(out.counts).toEqual({ secureAgent: 2, forcefield: 1, total: 3 });
+  expect(out.counts).toEqual({ secureAgent: 2, forcefield: 1, governance: 0, total: 3 });
 });
 
 it("toJsonl emits one parseable example per line", () => {
@@ -52,4 +59,29 @@ it("toJsonl emits one parseable example per line", () => {
   expect(lines).toHaveLength(2);
   expect(JSON.parse(lines[0]).label).toBe("block");
   expect(JSON.parse(lines[1]).source).toBe("forcefield");
+});
+
+it("builds governance examples labeled by the gate's effective outcome, safe features only", async () => {
+  const out = await buildDataset("w1", deps({
+    listDecisions: async () => [decision("escalate"), decision("deny"), decision("allow")],
+  }));
+  expect(out.counts.governance).toBe(3);
+  const ex = out.examples.find((e) => e.source === "governance")!;
+  expect(ex.label).toBe("escalate"); // the gate's own deterministic verdict is the label
+  expect(ex.features).toEqual({
+    capability: "mail.send", riskTier: "high", isMutation: 1,
+    ruleId: "R-HIGHRISK-MUTATION-ESCALATE", enforced: 1, wouldBlock: 1,
+  });
+  // No redacted params, raw payload, or secret-bearing field rides along.
+  const serialized = JSON.stringify(ex);
+  expect(serialized).not.toMatch(/diff|payload|param|password|secret|token|reason/i);
+});
+
+it("counts governance alongside the other two sources", async () => {
+  const out = await buildDataset("w1", deps({
+    listReviews: async () => [review("block")],
+    listTrips: async () => [trip(true)],
+    listDecisions: async () => [decision("allow"), decision("deny")],
+  }));
+  expect(out.counts).toEqual({ secureAgent: 1, forcefield: 1, governance: 2, total: 4 });
 });

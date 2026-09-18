@@ -18,9 +18,10 @@
  */
 import { listReviews, type ReviewRecord } from "@/lib/ai-code/store";
 import { listCanaryTrips, type CanaryTrip } from "@/lib/forcefield/triage";
+import { listDecisions, type OgiamDecisionRow } from "@/lib/ogiam/queries";
 
 export interface DatasetExample {
-  source: "secure_agent" | "forcefield";
+  source: "secure_agent" | "forcefield" | "governance";
   /** Ground-truth label: the deterministic decision the platform made. */
   label: string;
   /** Safe, structural features only. Never the raw diff / payload. */
@@ -31,27 +32,30 @@ export interface DatasetExample {
 
 export interface DatasetExport {
   examples: DatasetExample[];
-  counts: { secureAgent: number; forcefield: number; total: number };
+  counts: { secureAgent: number; forcefield: number; governance: number; total: number };
 }
 
 export interface DatasetDeps {
   listReviews: (workspaceId: string, limit?: number) => Promise<ReviewRecord[]>;
   listTrips: (workspaceId: string, limit?: number) => Promise<CanaryTrip[]>;
+  listDecisions: (workspaceId: string, limit: number) => Promise<OgiamDecisionRow[]>;
 }
 
 export function liveDatasetDeps(): DatasetDeps {
   return {
     listReviews: (ws, limit) => listReviews(ws, limit),
     listTrips: (ws, limit) => listCanaryTrips(ws, limit),
+    listDecisions: (ws, limit) => listDecisions(ws, { limit }),
   };
 }
 
 const PAGE = 500;
 
 export async function buildDataset(workspaceId: string, deps: DatasetDeps): Promise<DatasetExport> {
-  const [reviews, trips] = await Promise.all([
+  const [reviews, trips, decisions] = await Promise.all([
     deps.listReviews(workspaceId, PAGE),
     deps.listTrips(workspaceId, PAGE),
+    deps.listDecisions(workspaceId, PAGE),
   ]);
 
   const secureAgent: DatasetExample[] = reviews.map((r) => ({
@@ -77,10 +81,34 @@ export async function buildDataset(workspaceId: string, deps: DatasetDeps): Prom
     at: t.whenIso,
   }));
 
-  const examples = [...secureAgent, ...forcefield];
+  /* Per-action governance decisions: the gate's own deterministic verdict is the
+     ground-truth label. Features are safe and structural only - risk tier,
+     mutation flag, capability, the rule that fired, whether it was enforced -
+     never the redacted params or any raw payload, so no secret can ride along. */
+  const governance: DatasetExample[] = decisions.map((d) => ({
+    source: "governance",
+    label: d.effective_outcome, // allow | deny | transform | escalate
+    features: {
+      capability: d.capability,
+      riskTier: d.risk_tier,
+      isMutation: d.is_mutation ? 1 : 0,
+      ruleId: d.rule_id,
+      enforced: d.enforced ? 1 : 0,
+      wouldBlock: d.would_block ? 1 : 0,
+    },
+    ref: d.id,
+    at: d.created_at,
+  }));
+
+  const examples = [...secureAgent, ...forcefield, ...governance];
   return {
     examples,
-    counts: { secureAgent: secureAgent.length, forcefield: forcefield.length, total: examples.length },
+    counts: {
+      secureAgent: secureAgent.length,
+      forcefield: forcefield.length,
+      governance: governance.length,
+      total: examples.length,
+    },
   };
 }
 

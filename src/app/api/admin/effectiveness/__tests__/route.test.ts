@@ -21,7 +21,7 @@ const req = () => new NextRequest("http://localhost/api/admin/effectiveness");
 beforeEach(() => {
   jest.clearAllMocks();
   mockCap.mockResolvedValue(OK);
-  mockCompute.mockResolvedValue({ sampleCapped: false, secureAgent: { changesGoverned: 2, blocked: 1, sentToHuman: 0, allowed: 1, risksCaught: 3 }, forcefield: { decoysActive: 4, trips: 1, agentsContained: 1 } });
+  mockCompute.mockResolvedValue({ sampleCapped: false, secureAgent: { changesGoverned: 2, blocked: 1, sentToHuman: 0, allowed: 1, risksCaught: 3 }, forcefield: { decoysActive: 4, trips: 1, agentsContained: 1 }, governance: { actionsGoverned: 9, denied: 2, escalated: 1, transformed: 0, allowed: 6, wouldBlock: 3, agentsActive: 2 }, cost: { monthToDateUsd: 12.5, measured: true } });
 });
 
 it("401/403 gate", async () => {
@@ -37,4 +37,7 @@ it("200 returns the workspace-scoped report", async () => {
   const body = await res.json();
   expect(body.report.secureAgent.blocked).toBe(1);
   expect(body.report.forcefield.decoysActive).toBe(4);
+  expect(body.report.governance.actionsGoverned).toBe(9);
+  expect(body.report.governance.wouldBlock).toBe(3);
+  expect(body.report.cost).toEqual({ monthToDateUsd: 12.5, measured: true });
 });
