@@ -18,7 +18,7 @@ import { GET } from "../route";
 const OK = { ok: true, user: { id: "u1", role: "admin", workspaceId: "w1" } };
 const deny = (s: number) => ({ ok: false, response: new Response("{}", { status: s }) });
 const req = (qs = "") => new NextRequest(`http://localhost/api/admin/effectiveness/dataset${qs}`);
-const DATA = { examples: [{ source: "secure_agent", label: "block", features: {}, ref: "pr", at: "t" }], counts: { secureAgent: 1, forcefield: 0, total: 1 } };
+const DATA = { examples: [{ source: "secure_agent", label: "block", features: {}, ref: "pr", at: "t" }], counts: { secureAgent: 1, forcefield: 0, governance: 0, total: 1 } };
 
 beforeEach(() => { jest.clearAllMocks(); mockCap.mockResolvedValue(OK); mockBuild.mockResolvedValue(DATA); });
 

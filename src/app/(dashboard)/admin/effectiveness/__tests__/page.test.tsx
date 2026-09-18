@@ -21,6 +21,8 @@ const REPORT = {
   sampleCapped: false,
   secureAgent: { changesGoverned: 12, blocked: 3, sentToHuman: 2, allowed: 7, risksCaught: 9 },
   forcefield: { decoysActive: 5, trips: 2, agentsContained: 1 },
+  governance: { actionsGoverned: 40, denied: 4, escalated: 3, transformed: 1, allowed: 32, wouldBlock: 7, agentsActive: 5 },
+  cost: { monthToDateUsd: 18.4, measured: true },
 };
 
 beforeEach(() => { jest.clearAllMocks(); user = { role: "cto" }; mockFetch.mockResolvedValue(resp(200, { report: REPORT })); });
@@ -40,7 +42,19 @@ test("renders both products' numbers from the report", async () => {
   expect(screen.getByTestId("eff-risks")).toHaveTextContent("9");
   expect(screen.getByTestId("eff-decoys")).toHaveTextContent("5");
   expect(screen.getByTestId("eff-contained")).toHaveTextContent("1");
+  // Per-action governance + COGS render from the same report.
+  expect(screen.getByTestId("eff-actions-governed")).toHaveTextContent("40");
+  expect(screen.getByTestId("eff-would-block")).toHaveTextContent("7");
+  expect(screen.getByTestId("eff-agents-active")).toHaveTextContent("5");
+  expect(screen.getByTestId("eff-cost-mtd")).toHaveTextContent("$18.40");
   expect(screen.queryByTestId("eff-capped")).not.toBeInTheDocument();
+});
+
+test("shows 'Not measured' for cost when the cost view could not be read", async () => {
+  mockFetch.mockResolvedValue(resp(200, { report: { ...REPORT, cost: { monthToDateUsd: 0, measured: false } } }));
+  render(<EffectivenessPage />);
+  await waitFor(() => expect(screen.getByTestId("eff-cost-mtd")).toBeInTheDocument());
+  expect(screen.getByTestId("eff-cost-mtd")).toHaveTextContent("Not measured");
 });
 
 test("shows the 'at least' lower-bound wording only when the sample is capped", async () => {

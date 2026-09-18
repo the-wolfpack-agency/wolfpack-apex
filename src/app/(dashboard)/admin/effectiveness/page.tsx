@@ -23,6 +23,8 @@ interface Report {
   sampleCapped: boolean;
   secureAgent: { changesGoverned: number; blocked: number; sentToHuman: number; allowed: number; risksCaught: number };
   forcefield: { decoysActive: number; trips: number; agentsContained: number };
+  governance: { actionsGoverned: number; denied: number; escalated: number; transformed: number; allowed: number; wouldBlock: number; agentsActive: number };
+  cost: { monthToDateUsd: number; measured: boolean };
 }
 
 export default function EffectivenessPage() {
@@ -61,6 +63,11 @@ export default function EffectivenessPage() {
 
   const sa = report?.secureAgent;
   const ff = report?.forcefield;
+  const gov = report?.governance;
+  const cost = report?.cost;
+  // Actual month-to-date spend, or an explicit "not measured" when the cost view
+  // could not be read - never a fabricated $0.
+  const costDisplay = cost ? (cost.measured ? `$${cost.monthToDateUsd.toFixed(2)}` : "Not measured") : "$0.00";
   // A lower-bound prefix, only when the sample was capped (never overclaim a total).
   const atLeast = report?.sampleCapped ? "at least " : "";
   const gridStyle: React.CSSProperties = {
@@ -106,6 +113,27 @@ export default function EffectivenessPage() {
             <MetricTile label="Active decoys" display={String(ff?.decoysActive ?? 0)} accent="var(--wp-success, #30a46c)" testId="eff-decoys" />
             <MetricTile label="Trips" display={`${atLeast}${ff?.trips ?? 0}`} accent={ff?.trips ? "var(--wp-error, #e5484d)" : undefined} testId="eff-trips" />
             <MetricTile label="Agents contained" display={String(ff?.agentsContained ?? 0)} accent={ff?.agentsContained ? "var(--wp-error, #e5484d)" : undefined} testId="eff-contained" />
+          </div>
+
+          <h3 style={{ margin: "1.75rem 0 0.25rem", fontSize: "1rem", color: "var(--wp-text, #e6e9ef)" }}>Per-action governance</h3>
+          <p style={{ margin: "0 0 0.75rem", fontSize: "0.85rem", color: "var(--wp-text-dim, #b4bcc8)" }}>
+            Every agent action runs the gate before it happens. The gate decides allow, deny, transform, or escalate.
+          </p>
+          <div style={gridStyle} data-testid="eff-governance">
+            <MetricTile label="Actions governed" display={`${atLeast}${gov?.actionsGoverned ?? 0}`} testId="eff-actions-governed" />
+            <MetricTile label="Denied" display={String(gov?.denied ?? 0)} accent={gov?.denied ? "var(--wp-error, #e5484d)" : undefined} testId="eff-denied" />
+            <MetricTile label="Escalated to human" display={String(gov?.escalated ?? 0)} accent={gov?.escalated ? "var(--wp-warning, #f5a623)" : undefined} testId="eff-escalated" />
+            <MetricTile label="Transformed" display={String(gov?.transformed ?? 0)} testId="eff-transformed" />
+            <MetricTile label="Would block (monitor)" display={String(gov?.wouldBlock ?? 0)} accent={gov?.wouldBlock ? "var(--wp-warning, #f5a623)" : undefined} testId="eff-would-block" />
+            <MetricTile label="Agents active" display={String(gov?.agentsActive ?? 0)} testId="eff-agents-active" />
+          </div>
+
+          <h3 style={{ margin: "1.75rem 0 0.25rem", fontSize: "1rem", color: "var(--wp-text, #e6e9ef)" }}>Cost</h3>
+          <p style={{ margin: "0 0 0.75rem", fontSize: "0.85rem", color: "var(--wp-text-dim, #b4bcc8)" }}>
+            What the governed AI actually cost this month, read from the metered spend. Month-to-date, actual spend, no projection.
+          </p>
+          <div style={gridStyle} data-testid="eff-cost">
+            <MetricTile label="AI spend, month to date" display={costDisplay} testId="eff-cost-mtd" />
           </div>
 
           <GlassPanel style={{ marginTop: "1.75rem" }}>
