@@ -27,6 +27,11 @@ export interface AuditAllowlistEntry {
 }
 
 export const AUDIT_ALLOWLIST: ReadonlyArray<AuditAllowlistEntry> = [
+  // High-volume observability sink
+  {
+    route: "src/app/api/forcefield-web/inspect/route.ts",
+    reason: "Forcefield-for-the-Web watch-and-report ingest: one inspection per inbound web request is a high-volume observability event, recorded via trackEvent (forcefield_web.request_inspected) for the protection rollup, not a durable state mutation. A per-request hash-chained audit row would flood the ledger without compliance value; the classification is deterministic and reconstructable from the recorded event",
+  },
   // Delegated auditing
   {
     route: "src/app/api/gate/complete/route.ts",
