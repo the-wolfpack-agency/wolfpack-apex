@@ -13,6 +13,7 @@ describe("OGIAM explainer content", () => {
       "secure-agent",
       "forcefield",
       "any-model",
+      "why-different",
       "self-serve",
       "proof",
       "forcefield-web",
