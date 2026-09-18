@@ -112,6 +112,14 @@ export const CLIENT_BUILDS: ClientBuild[] = [
     data: "The capabilities described are built and running in Instinct today; this page stages OGIAM as its own product ahead of standing up a dedicated repo. The 'Forcefield for the Web' section is explicitly marked as coming next, and no metrics are shown on the page.",
   },
   {
+    href: "/builds/agent-intelligence",
+    title: "Agent Intelligence, in plain language",
+    client: "Wolfpack (Agent-intelligence pre-build, ahead of its own repo)",
+    stage: "in flight",
+    what: "A plain-language explanation of the agent behavioral-intelligence capability: welcome the good agents, trap the bad, follow the whole visit, fingerprint the scaffolding not the model, read intent from the toolset, and fuse it into an operator dossier - plus the model test-bench.",
+    data: "Every capability described is built and running in Instinct today (honeypot, classifier, journeys, scaffolding harness, tool-composition, operator dossier, and the live model-probe runner + console). The 'operators board over time' section is marked coming next. Secret-safe: no trap paths, probe lists, or fingerprint mechanics; no metrics.",
+  },
+  {
     href: "/builds/governance-posture",
     title: "Governance posture",
     client: "Wolfpack (OGIAM, client-presentable)",
