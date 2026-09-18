@@ -869,6 +869,7 @@ export type InstinctEventType =
   | "agent.connector_scope_denied"
   | "agent.capability_denied"
   | "agent.conduct_denied"
+  | "forcefield_web.request_inspected"
   // Containment. Deliberately anchored in the agent block rather than beside
   // the site events, so this and the egress-blocked event added in the
   // enforce-egress-allowlist branch do not edit the same lines and conflict.

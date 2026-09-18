@@ -71,6 +71,7 @@ const LIMIT_INTERPOLATION_OK: readonly string[] = [
   "lib/automations/queries.ts",
   "lib/compliance/store.ts",
   "lib/finance/invoices.ts",
+  "lib/forcefield-web/rollup.ts",
   "lib/hr/scanned-documents.ts",
   "lib/integrations/microsoft-directory.ts",
   "lib/ogiam/queries.ts",
