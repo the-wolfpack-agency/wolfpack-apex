@@ -422,6 +422,20 @@ function defaultBudgetDeps(): BudgetDeps {
  * analytics store hiccupping can never take down all AI traffic. resolvePolicy
  * continues to own tier clamping; this gate only owns the absolute ceiling.
  */
+/** Platform-wide default monthly AI budget (USD) applied to a workspace with NO
+ *  configured budget, so an unconfigured account is still bounded. Env-overridable
+ *  via OGIAM_DEFAULT_MONTHLY_BUDGET_USD; the hard default is deliberately generous
+ *  - a runaway backstop, not a day-to-day cap. Returns null only if an operator
+ *  explicitly sets the env to a non-numeric / negative value to opt out. */
+export function platformDefaultBudgetUsd(env: NodeJS.ProcessEnv = process.env): number | null {
+  const raw = env.OGIAM_DEFAULT_MONTHLY_BUDGET_USD;
+  if (raw !== undefined) {
+    const n = Number(raw);
+    return Number.isFinite(n) && n >= 0 ? n : null;
+  }
+  return 25_000;
+}
+
 async function checkBudget(
   req: AICompleteRequest,
   deps: BudgetDeps,
@@ -444,10 +458,32 @@ async function checkBudget(
   if (!workspaceId || workspaceId.trim() === "") return passthrough;
 
   const policy = preloaded;
-  // No policy or no budget set -> no enforcement, no regression.
-  if (!policy || policy.monthly_budget_usd === null) return passthrough;
+  /* A per-workspace budget wins; otherwise a platform-wide DEFAULT still bounds
+     the workspace, so an UNCONFIGURED account is never uncapped - the runaway
+     backstop this used to lack (a compromised or looping agent could spend
+     without limit). The default is generous (it catches egregious runaway, not
+     normal use) and env-overridable; only when neither a workspace budget nor a
+     platform default exists is there truly no cap. */
+  const capUsd =
+    policy && policy.monthly_budget_usd !== null
+      ? policy.monthly_budget_usd
+      : platformDefaultBudgetUsd();
+  if (capUsd === null) return passthrough;
 
-  const spend = await deps.monthSpend(workspaceId);
+  /* A read error must fail OPEN: the analytics store hiccupping can never take
+     down all AI traffic. Only a CONFIRMED over-spend blocks. */
+  let spend: number;
+  try {
+    spend = await deps.monthSpend(workspaceId);
+  } catch (err) {
+    // Degrade OPEN, but say so: a spend-read failure must not silently disable
+    // the budget backstop without leaving a trace someone can find.
+    console.warn(
+      `[router] budget check degraded open for workspace ${workspaceId}: monthSpend read failed`,
+      err,
+    );
+    return passthrough;
+  }
 
   /* A GOVERNOR, NOT A WALL.
    *
@@ -464,7 +500,7 @@ async function checkBudget(
    * malfunction rather than a budget. See lib/ai/budget.ts. */
   const decision = governTier({
     spentUsd: spend,
-    capUsd: policy.monthly_budget_usd,
+    capUsd,
     requestedTier: req.model_tier,
   });
 
@@ -481,7 +517,7 @@ async function checkBudget(
       {
         workspace_id: workspaceId,
         month_spend_usd: spend,
-        budget_usd: policy.monthly_budget_usd,
+        budget_usd: capUsd,
         requested_tier: req.model_tier,
         served_tier: decision.tier,
         state: decision.state,
@@ -501,17 +537,17 @@ async function checkBudget(
     {
       workspace_id: workspaceId,
       month_spend_usd: spend,
-      budget_usd: policy.monthly_budget_usd,
+      budget_usd: capUsd,
       feature,
     },
   );
 
   throw new BudgetExceededError(
-    `Workspace ${workspaceId} has reached ${CEILING_MULTIPLE} times its monthly AI budget ($${spend.toFixed(2)} of $${policy.monthly_budget_usd}) and is paused.`,
+    `Workspace ${workspaceId} has reached ${CEILING_MULTIPLE} times its monthly AI budget ($${spend.toFixed(2)} of ${capUsd}) and is paused.`,
     {
       workspace_id: workspaceId,
       month_spend_usd: spend,
-      budget_usd: policy.monthly_budget_usd,
+      budget_usd: capUsd,
       feature,
     },
   );
