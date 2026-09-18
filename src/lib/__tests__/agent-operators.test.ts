@@ -3,7 +3,7 @@ const mockQuery = jest.fn();
 const mockSafeQuery = jest.fn();
 jest.mock("@/lib/db", () => ({ query: (...a: unknown[]) => mockQuery(...a), safeQuery: (...a: unknown[]) => mockSafeQuery(...a) }));
 
-import { recordSighting, listSightings, getOperators } from "@/lib/agent-operators";
+import { recordSighting, listSightings, getOperators, blockOperator, unblockOperator, listBlockedOperatorKeys } from "@/lib/agent-operators";
 import { operatorKeyFor, type Sighting } from "@/lib/agent-dossier";
 
 const journey = (behaviorClass: string, confidence: "proven" | "inferred") => ({ key: "k", confidence, behaviorClass, signals: [], path: ["/", "/admin"], eventCount: 2, firstAt: "t", lastAt: "t", summary: "s" }) as never;
@@ -78,4 +78,28 @@ it("END TO END (stateful in-memory table): 3 sightings, 2 operators, board group
   expect(a.surfaces.slice().sort()).toEqual(["client.com", "ogiam.com"]); // one operator, two surfaces
   expect(a.confidence).toBe("proven");
   expect(operators.some((o) => o.threatLevel === "benign")).toBe(true); // operator B distinct
+});
+
+it("block/unblock write the blocklist; getOperators annotates blocked", async () => {
+  const bl = new Set<string>();
+  mockQuery.mockImplementation(async (sql: string, params: unknown[]) => {
+    if (/INSERT INTO instinct_agent_operator_blocklist/.test(sql)) bl.add(params[1] as string);
+    else if (/DELETE FROM instinct_agent_operator_blocklist/.test(sql)) bl.delete(params[1] as string);
+    return { rows: [] };
+  });
+  mockSafeQuery.mockImplementation(async (sql: string) => {
+    if (/instinct_agent_operator_blocklist/.test(sql)) return { rows: [...bl].map((k) => ({ operator_key: k })), fromCache: false };
+    // sightings: one hostile operator
+    const sg = sighting("ogiam.com", "2026-09-18T10:00:00Z");
+    return { rows: [{ surface: sg.surface, seen_at: sg.at, journey: sg.journey, scaffolding: sg.scaffolding, tools: sg.tools }], fromCache: false };
+  });
+
+  const before = await getOperators("w1", 30);
+  expect(before[0].blocked).toBe(false);
+  await blockOperator({ workspaceId: "w1", operatorKey: before[0].operatorKey, reason: "hostile" });
+  expect(await listBlockedOperatorKeys("w1")).toContain(before[0].operatorKey);
+  const after = await getOperators("w1", 30);
+  expect(after[0].blocked).toBe(true);
+  await unblockOperator("w1", before[0].operatorKey);
+  expect((await getOperators("w1", 30))[0].blocked).toBe(false);
 });

@@ -70,9 +70,56 @@ export async function listSightings(workspaceId: string, rangeDays = 30, limit =
   return rows.map((r) => ({ surface: r.surface, at: r.seen_at, journey: r.journey, scaffolding: r.scaffolding, tools: r.tools }));
 }
 
-/** The operators board: stored sightings, grouped into per-operator dossiers,
- *  most-recent activity first (buildDossiers already sorts that way). */
-export async function getOperators(workspaceId: string, rangeDays = 30): Promise<AttributionDossier[]> {
-  const sightings = await listSightings(workspaceId, rangeDays);
-  return buildDossiers(sightings);
+export type OperatorEntry = AttributionDossier & { blocked: boolean };
+
+/** The operators board: stored sightings, grouped into per-operator dossiers
+ *  (most-recent first), each annotated with whether it is on the blocklist. */
+export async function getOperators(workspaceId: string, rangeDays = 30): Promise<OperatorEntry[]> {
+  const [sightings, blocked] = await Promise.all([
+    listSightings(workspaceId, rangeDays),
+    listBlockedOperatorKeys(workspaceId),
+  ]);
+  return buildDossiers(sightings).map((d) => ({ ...d, blocked: blocked.has(d.operatorKey) }));
+}
+
+/** Block an operator by its durable fingerprint. Idempotent (upsert). No-op
+ *  without a DB. */
+export async function blockOperator(input: { workspaceId: string; operatorKey: string; reason?: string; blockedBy?: string }): Promise<void> {
+  if (!process.env.DATABASE_URL) return;
+  try {
+    await query(
+      `INSERT INTO instinct_agent_operator_blocklist (workspace_id, operator_key, reason, blocked_by)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (workspace_id, operator_key)
+       DO UPDATE SET reason = EXCLUDED.reason, blocked_by = EXCLUDED.blocked_by, blocked_at = now()`,
+      [input.workspaceId, input.operatorKey, input.reason ?? null, input.blockedBy ?? null],
+    );
+  } catch (err) {
+    console.warn("[agent-operators] blockOperator failed:", (err as Error).message);
+  }
+}
+
+/** Remove an operator from the blocklist. */
+export async function unblockOperator(workspaceId: string, operatorKey: string): Promise<void> {
+  if (!process.env.DATABASE_URL) return;
+  try {
+    await query(`DELETE FROM instinct_agent_operator_blocklist WHERE workspace_id = $1 AND operator_key = $2`, [workspaceId, operatorKey]);
+  } catch (err) {
+    console.warn("[agent-operators] unblockOperator failed:", (err as Error).message);
+  }
+}
+
+/** The set of blocked operator keys for a workspace. Fail-open (empty). */
+export async function listBlockedOperatorKeys(workspaceId: string): Promise<Set<string>> {
+  const { rows } = await safeQuery<{ operator_key: string }>(
+    `SELECT operator_key FROM instinct_agent_operator_blocklist WHERE workspace_id = $1`,
+    [workspaceId],
+  );
+  return new Set(rows.map((r) => r.operator_key));
+}
+
+/** True when an operator is blocked - the hook a probe run / edge integration
+ *  uses to deny a known-hostile operator on sight. */
+export async function isOperatorBlocked(workspaceId: string, operatorKey: string): Promise<boolean> {
+  return (await listBlockedOperatorKeys(workspaceId)).has(operatorKey);
 }

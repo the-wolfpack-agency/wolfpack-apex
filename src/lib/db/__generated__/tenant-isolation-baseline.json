@@ -16,6 +16,7 @@
     "instinct_agent_memory",
     "instinct_agent_model_regressions",
     "instinct_agent_operations",
+    "instinct_agent_operator_blocklist",
     "instinct_agent_pending_approvals",
     "instinct_agent_run_spend",
     "instinct_agent_scans",
