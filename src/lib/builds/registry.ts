@@ -111,6 +111,14 @@ export const CLIENT_BUILDS: ClientBuild[] = [
     what: "A plain-language explanation of OGIAM's governance features for a non-technical reader: Secure Agent, Forcefield, any-model safety, self-serve, proof it works, and what is coming next.",
     data: "The capabilities described are built and running in Instinct today; this page stages OGIAM as its own product ahead of standing up a dedicated repo. The 'Forcefield for the Web' section is explicitly marked as coming next, and no metrics are shown on the page.",
   },
+  {
+    href: "/builds/governance-posture",
+    title: "Governance posture",
+    client: "Wolfpack (OGIAM, client-presentable)",
+    stage: "live",
+    what: "The client-facing 'how governed is your AI' surface: which controls are enforced automatically, which need a person, and which are human-reviewed, plus the proofs.",
+    data: "The control lists are read LIVE from the platform's own control registry (the same one CI ratchets), so the page cannot claim more than is actually enforced. The real usage numbers live on the linked Effectiveness view; none are shown here.",
+  },
 ];
 
 export function buildFor(pathname: string): ClientBuild | undefined {
