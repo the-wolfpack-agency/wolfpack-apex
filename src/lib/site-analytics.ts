@@ -18,6 +18,10 @@ export const SITE_EVENT_TYPES = [
   "site.cta_clicked",
   "site.contact_submitted",
   "site.contact_failed",
+  // Forcefield for the Web: agent traffic on ogiam.com (watch-first).
+  "site.agent_welcomed",
+  "site.agent_flagged",
+  "site.agent_trap_tripped",
 ] as const;
 export type SiteEventType = (typeof SITE_EVENT_TYPES)[number];
 
@@ -67,6 +71,16 @@ export interface SiteAnalyticsSummary {
   byPage: Array<{ path: string; count: number }>;
   byCountry: Array<{ country: string; count: number }>;
   byType: Array<{ type: string; count: number }>;
+  /* Forcefield for the Web: how ogiam.com handled agent traffic. welcomed =
+     identified good agents given the welcome lane; flagged = unidentified
+     automation; trapped = scrapers that tripped the honeypot. Watch-first, so
+     these are observed, not blocked. */
+  forcefield: {
+    welcomed: number;
+    flagged: number;
+    trapped: number;
+    topAgents: Array<{ agent: string; count: number }>;
+  };
 }
 
 /** Clamp the requested window to a sane integer day count. */
@@ -84,7 +98,7 @@ export async function getSiteAnalyticsSummary(rangeDays = 30): Promise<SiteAnaly
   const days = clampDays(rangeDays);
   const sinceClause = `created_at > now() - ($1 || ' days')::interval`;
 
-  const [hour, page, country, type, totals] = await Promise.all([
+  const [hour, page, country, type, totals, ff, ffAgents] = await Promise.all([
     safeQuery<{ hour: number; count: string }>(
       `SELECT EXTRACT(HOUR FROM created_at AT TIME ZONE 'UTC')::int AS hour, count(*) AS count
          FROM site_analytics_events
@@ -121,6 +135,22 @@ export async function getSiteAnalyticsSummary(rangeDays = 30): Promise<SiteAnaly
         WHERE ${sinceClause}`,
       [String(days)],
     ),
+    safeQuery<{ welcomed: string; flagged: string; trapped: string }>(
+      `SELECT
+         count(*) FILTER (WHERE event_type = 'site.agent_welcomed')     AS welcomed,
+         count(*) FILTER (WHERE event_type = 'site.agent_flagged')      AS flagged,
+         count(*) FILTER (WHERE event_type = 'site.agent_trap_tripped') AS trapped
+         FROM site_analytics_events
+        WHERE ${sinceClause}`,
+      [String(days)],
+    ),
+    safeQuery<{ agent: string; count: string }>(
+      `SELECT coalesce(props->>'agent', '(unidentified)') AS agent, count(*) AS count
+         FROM site_analytics_events
+        WHERE ${sinceClause} AND event_type = 'site.agent_welcomed'
+        GROUP BY 1 ORDER BY count(*) DESC LIMIT 10`,
+      [String(days)],
+    ),
   ]);
 
   const t = totals.rows[0];
@@ -132,5 +162,11 @@ export async function getSiteAnalyticsSummary(rangeDays = 30): Promise<SiteAnaly
     byPage: page.rows.map((r) => ({ path: r.path, count: Number(r.count) })),
     byCountry: country.rows.map((r) => ({ country: r.country, count: Number(r.count) })),
     byType: type.rows.map((r) => ({ type: r.event_type, count: Number(r.count) })),
+    forcefield: {
+      welcomed: ff.rows[0] ? Number(ff.rows[0].welcomed) : 0,
+      flagged: ff.rows[0] ? Number(ff.rows[0].flagged) : 0,
+      trapped: ff.rows[0] ? Number(ff.rows[0].trapped) : 0,
+      topAgents: ffAgents.rows.map((r) => ({ agent: r.agent, count: Number(r.count) })),
+    },
   };
 }

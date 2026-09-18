@@ -53,6 +53,13 @@ describe("POST /api/site-analytics/ingest", () => {
     expect(mockRecordSiteEvent).not.toHaveBeenCalled();
   });
 
+  it("200 accepts the Forcefield agent events (welcomed / flagged / trap_tripped)", async () => {
+    for (const t of ["site.agent_welcomed", "site.agent_flagged", "site.agent_trap_tripped"]) {
+      const res = await POST(mkReq({ type: t }, "secret-token"));
+      expect(res.status).toBe(200);
+    }
+  });
+
   it("400 on an unknown event type (closed vocabulary)", async () => {
     const res = await POST(mkReq({ type: "site.evil_event" }, "secret-token"));
     expect(res.status).toBe(400);

@@ -21,6 +21,12 @@ interface Summary {
   byPage: Array<{ path: string; count: number }>;
   byCountry: Array<{ country: string; count: number }>;
   byType: Array<{ type: string; count: number }>;
+  forcefield: {
+    welcomed: number;
+    flagged: number;
+    trapped: number;
+    topAgents: Array<{ agent: string; count: number }>;
+  };
 }
 
 const RANGES = [7, 30, 90] as const;
@@ -67,11 +73,26 @@ export default function SiteAnalyticsPage() {
     <div data-testid="site-analytics-page" style={{ display: "grid", gap: "1.25rem", maxWidth: 920 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "1rem", flexWrap: "wrap" }}>
         <div>
-          <h1 style={{ margin: 0, fontSize: "1.35rem", fontWeight: 700, color: "var(--wp-text, #eee)" }}>
+          <h1 style={{ margin: 0, fontSize: "1.35rem", fontWeight: 700, color: "var(--wp-text, #eee)", display: "flex", alignItems: "center", gap: "0.55rem", flexWrap: "wrap" }}>
             Site Analytics
+            <span
+              data-testid="site-analytics-scope"
+              style={{
+                fontSize: "0.7rem",
+                fontWeight: 700,
+                letterSpacing: "0.02em",
+                padding: "0.15rem 0.5rem",
+                borderRadius: 999,
+                background: "var(--wp-gold, #e8b528)",
+                color: "var(--wp-dark, #0b0d11)",
+              }}
+            >
+              ogiam.com
+            </span>
           </h1>
           <p style={{ margin: "0.35rem 0 0", fontSize: "0.85rem", color: "var(--wp-text-muted, #9ca3af)" }}>
-            Where and when ogiam.com is used. Our own data, no third-party analytics.
+            This tab covers ogiam.com only: where and when it is used, and how Forcefield
+            handled agent traffic. Our own data, no third-party analytics.
           </p>
         </div>
         <div style={{ display: "flex", gap: "0.4rem" }}>
@@ -172,6 +193,51 @@ export default function SiteAnalyticsPage() {
                 ))}
               </ul>
             </div>
+          </div>
+
+          {/* Forcefield for the Web: agent traffic on ogiam.com. Watch-first, so
+              these are observed, not blocked. */}
+          <div style={card} data-testid="ff-agent-traffic">
+            <div style={label}>Forcefield &middot; agent traffic (watch-first, nothing blocked)</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "1rem", marginTop: "0.8rem" }}>
+              <div>
+                <div style={{ ...label, color: "var(--wp-success, #30a46c)" }}>Agents welcomed</div>
+                <div data-testid="ff-welcomed" style={{ marginTop: "0.25rem", fontSize: "1.5rem", fontWeight: 700, color: "var(--wp-text, #eee)" }}>
+                  {summary.forcefield.welcomed.toLocaleString()}
+                </div>
+              </div>
+              <div>
+                <div style={{ ...label, color: "var(--wp-warning, #f5a623)" }}>Automation flagged</div>
+                <div data-testid="ff-flagged" style={{ marginTop: "0.25rem", fontSize: "1.5rem", fontWeight: 700, color: "var(--wp-text, #eee)" }}>
+                  {summary.forcefield.flagged.toLocaleString()}
+                </div>
+              </div>
+              <div>
+                <div style={{ ...label, color: "var(--wp-error, #ef4444)" }}>Decoy trips</div>
+                <div data-testid="ff-trapped" style={{ marginTop: "0.25rem", fontSize: "1.5rem", fontWeight: 700, color: "var(--wp-text, #eee)" }}>
+                  {summary.forcefield.trapped.toLocaleString()}
+                </div>
+              </div>
+            </div>
+            <div style={{ marginTop: "1rem" }}>
+              <div style={label}>Top identified agents (welcome lane)</div>
+              <ul data-testid="ff-top-agents" style={{ listStyle: "none", margin: "0.5rem 0 0", padding: 0, display: "grid", gap: "0.35rem" }}>
+                {summary.forcefield.topAgents.length === 0 && (
+                  <li style={{ fontSize: "0.82rem", color: "var(--wp-text-muted, #9ca3af)" }}>No agent traffic recorded yet.</li>
+                )}
+                {summary.forcefield.topAgents.map((a) => (
+                  <li key={a.agent} style={{ display: "flex", justifyContent: "space-between", gap: "0.6rem", fontSize: "0.85rem", color: "var(--wp-text, #eee)" }}>
+                    <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.agent}</span>
+                    <span style={{ flexShrink: 0, color: "var(--wp-text-muted, #9ca3af)" }}>{a.count.toLocaleString()}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <p style={{ marginTop: "0.9rem", fontSize: "0.76rem", color: "var(--wp-text-muted, #9ca3af)", lineHeight: 1.5 }}>
+              Welcomed = identified good agents (search + AI crawlers). Flagged = unidentified
+              automation, a weak signal recorded only. Decoy trips = a scraper followed an
+              invisible, robots-disallowed honeypot link, near-certainly ignoring the rules.
+            </p>
           </div>
         </>
       )}
