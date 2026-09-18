@@ -154,11 +154,11 @@ export const CONTROL_LADDER: ControlEntry[] = [
     id: "forcefield-containment",
     capability: "Touching a decoy contains the agent (revoke + record) in real time",
     rung: "containment",
-    seam: "(intended) the agent tool chokepoint",
+    seam: "assistant/tools/dispatcher.ts runOneTool step 1c (agent principals)",
     file: "src/lib/forcefield/contain.ts, src/lib/forcefield/contain-live.ts",
-    wired: false,
-    gateToMoveUp:
-      "Call guardAgentAction(action, liveContainmentDeps()) inside runOneTool, after OGIAM authorize, so a decoy touch in a live agent action contains before the tool executes. The engine is built and tested; it has zero non-test callers today.",
+    wired: true,
+    notes:
+      "Wired into the tool chokepoint after OGIAM authorize: a decoy touch quarantines the agent (scope revoked + ledger record) and the tool call is refused. Pure passthrough when no decoys are seeded.",
   },
   {
     id: "mcp-drift-inline",

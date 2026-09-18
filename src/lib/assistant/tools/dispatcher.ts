@@ -23,6 +23,8 @@ import { resolveEnforcementMode } from "@/lib/ogiam/enforcement-policy";
 import { recordActionOutcome } from "@/lib/ogiam/ledger";
 import { ingestAgentAction } from "@/lib/agents/audit/brain-ingest";
 import { createPendingApproval } from "@/lib/agents/approvals/store";
+import { guardAgentAction } from "@/lib/forcefield/contain";
+import { liveContainmentDeps } from "@/lib/forcefield/contain-live";
 import { notify } from "@/lib/notifications/in-app";
 import type { OgiamDecision } from "@/lib/ogiam/types";
 import { canInvokeNamedTool } from "./gate";
@@ -303,6 +305,51 @@ async function runOneTool<P, R>(
     /* Human (monitor) dispatch must never break on a gate error. An agent
        (enforce) must fail closed: no authorization, no action. */
     if (agent) return failure("internal", "authorization gate unavailable");
+  }
+
+  /* 1c. Forcefield containment (AGENT principals only). A decoy is something no
+         legitimate action ever touches, so a hit is high-confidence malicious:
+         guardAgentAction contains it (revokes the agent's scope + records the
+         trip to the OGIAM ledger) and we refuse the tool call, fail-closed like
+         the OGIAM block above.
+
+         With no decoys seeded this is a pure passthrough - loadCanaries returns
+         empty, so it CANNOT change existing behavior; it only adds a stop that
+         fires on a real decoy touch. guardAgentAction never throws by contract;
+         the try/guard is belt-and-suspenders, and because Forcefield is a
+         secondary control the OGIAM gate above already backs, an unexpected
+         error degrades OPEN rather than breaking the governed hot path. */
+  if (agent) {
+    try {
+      const contained = await guardAgentAction(
+        {
+          workspaceId: agent.workspaceId,
+          agentId: agent.agentId,
+          kind: "tool_call",
+          tool: tool.name,
+          payload: JSON.stringify(parsed.data),
+        },
+        liveContainmentDeps(),
+      );
+      if (contained.decision.action === "quarantine") {
+        /* The revoke + tamper-evident record already happened inside
+           guardAgentAction. Alert the owner and refuse the action. */
+        await alertAgentBlock(agent, tool.name, `Forcefield: ${contained.decision.reason}`);
+        return failure(
+          "capability",
+          `Forcefield: decoy touched; agent quarantined and its scope revoked (${contained.decision.reason})`,
+        );
+      }
+    } catch (err) {
+      /* Secondary control; do not break the governed hot path on an unexpected
+         error (the OGIAM gate above already authorized this action). But do NOT
+         swallow it silently: a containment check that errors is a degraded
+         security control the operator must be able to see, not an absence. */
+      console.warn(
+        `[forcefield] containment check errored for agent ${agent.agentId} on ${tool.name}; degraded open:`,
+        (err as Error)?.message ?? "unknown",
+      );
+    }
   }
 
   /* 2. Role gate (shared with the agent self-onboarding scan, see ./gate).
