@@ -11,6 +11,7 @@ function deps(over: Partial<EffectivenessDeps> = {}): EffectivenessDeps {
     listCanaries: async () => [],
     listDecisions: async () => [],
     monthSpend: async () => null,
+    listEnforcement: async () => ({ capabilityDenied: 0, connectorScopeDenied: 0, ceilingHits: 0, conductDenied: 0, total: 0 }),
     ...over,
   };
 }
@@ -31,6 +32,7 @@ it("empty state is all zeros and NOT sample-capped (no fabricated totals)", asyn
   expect(r.forcefield).toEqual({ decoysActive: 0, trips: 0, agentsContained: 0 });
   expect(r.governance).toEqual({ actionsGoverned: 0, denied: 0, escalated: 0, transformed: 0, allowed: 0, wouldBlock: 0, agentsActive: 0 });
   expect(r.cost).toEqual({ monthToDateUsd: 0, measured: false }); // null spend -> not measured, never a fabricated 0
+  expect(r.enforcement).toEqual({ capabilityDenied: 0, connectorScopeDenied: 0, ceilingHits: 0, conductDenied: 0, total: 0 });
   expect(r.sampleCapped).toBe(false);
 });
 
@@ -88,4 +90,11 @@ it("flags sampleCapped when the decisions reader returns a full page", async () 
   const many = Array.from({ length: 200 }, () => decision("allow"));
   const r = await computeEffectiveness("w1", deps({ listDecisions: async () => many }));
   expect(r.sampleCapped).toBe(true);
+});
+
+it("surfaces downstream enforcement denials from the enforcement reader", async () => {
+  const r = await computeEffectiveness("w1", deps({
+    listEnforcement: async () => ({ capabilityDenied: 3, connectorScopeDenied: 1, ceilingHits: 2, conductDenied: 1, total: 7 }),
+  }));
+  expect(r.enforcement).toEqual({ capabilityDenied: 3, connectorScopeDenied: 1, ceilingHits: 2, conductDenied: 1, total: 7 });
 });

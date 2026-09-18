@@ -9,7 +9,7 @@
 import { CAPTURE_MAP, captureGaps, enforcingLadderIds } from "../coverage";
 
 // Ratchet: this may only ever go DOWN. Lower it when a gap is wired to a source.
-const MAX_CAPTURE_GAPS = 4;
+const MAX_CAPTURE_GAPS = 0;
 
 it("classifies every enforcing ladder control exactly once", () => {
   const ids = CAPTURE_MAP.map((c) => c.id);

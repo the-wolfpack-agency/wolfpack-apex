@@ -22,6 +22,7 @@ import { listCanaryTrips, type CanaryTrip } from "@/lib/forcefield/triage";
 import { listCanariesForDisplay, type CanaryDisplay } from "@/lib/forcefield/canary-store";
 import { listDecisions, type OgiamDecisionRow } from "@/lib/ogiam/queries";
 import { monthSpendUsd } from "@/lib/ai/workspace-policy";
+import { listEnforcementDenials, emptyEnforcementDenials, type EnforcementDenials } from "./enforcement";
 
 const REVIEW_PAGE = 100;
 const TRIP_PAGE = 100;
@@ -70,6 +71,11 @@ export interface EffectivenessReport {
      *  "no spend" when it might be "not measured". */
     measured: boolean;
   };
+  /* Downstream enforcement: agent actions actually STOPPED after the gate
+     authorized them - the capability gate, connector-scope, the ops/hour
+     ceiling, and the conduct self-tamper gate. These live in the event log, not
+     the ogiam_decisions ledger, so they are counted separately here. */
+  enforcement: EnforcementDenials;
 }
 
 export interface EffectivenessDeps {
@@ -80,6 +86,7 @@ export interface EffectivenessDeps {
   /** Month-to-date AI spend for the workspace, or null when the cost view is
    *  unreadable (so the report can say "not measured" rather than "$0"). */
   monthSpend: (workspaceId: string) => Promise<number | null>;
+  listEnforcement: (workspaceId: string) => Promise<EnforcementDenials>;
 }
 
 export function liveEffectivenessDeps(): EffectivenessDeps {
@@ -97,6 +104,7 @@ export function liveEffectivenessDeps(): EffectivenessDeps {
         return null;
       }
     },
+    listEnforcement: (ws) => listEnforcementDenials(ws),
   };
 }
 
@@ -104,12 +112,13 @@ export async function computeEffectiveness(
   workspaceId: string,
   deps: EffectivenessDeps,
 ): Promise<EffectivenessReport> {
-  const [reviews, trips, canaries, decisions, monthSpend] = await Promise.all([
+  const [reviews, trips, canaries, decisions, monthSpend, enforcement] = await Promise.all([
     deps.listReviews(workspaceId, REVIEW_PAGE),
     deps.listTrips(workspaceId, TRIP_PAGE),
     deps.listCanaries(workspaceId),
     deps.listDecisions(workspaceId, DECISION_PAGE),
     deps.monthSpend(workspaceId),
+    deps.listEnforcement(workspaceId),
   ]);
 
   const blocked = reviews.filter((r) => r.outcome === "block").length;
@@ -162,5 +171,6 @@ export async function computeEffectiveness(
       monthToDateUsd: monthSpend ?? 0,
       measured: monthSpend !== null,
     },
+    enforcement: enforcement ?? emptyEnforcementDenials(),
   };
 }

@@ -269,6 +269,7 @@ async function ceilingRefusal(
   });
   if (verdict.allowed) return null;
   trackEvent("agent.operation_ceiling_hit", task.ownerUserId, task.role, {
+    workspace_id: task.workspaceId,
     agent_id: task.agentId,
     operation: operationName,
     outcome: verdict.outcome,

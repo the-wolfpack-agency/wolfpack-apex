@@ -21,6 +21,7 @@ jest.mock("@/lib/analytics", () => ({ trackEvent: jest.fn() }));
 jest.mock("@/lib/notifications/in-app", () => ({ notify: () => Promise.resolve({ id: "n" }) }));
 
 import { z } from "zod";
+import { trackEvent } from "@/lib/analytics";
 import { tryDispatchTool } from "@/lib/assistant/tools/dispatcher";
 import { registerTool, __resetRegistryForTests } from "@/lib/assistant/tools/registry";
 import type { ToolContext } from "@/lib/assistant/tools/types";
@@ -34,6 +35,7 @@ const agentCtx: ToolContext = {
 const humanCtx: ToolContext = { userId: "u1", userRole: "cto", workspaceId: "ws-1" };
 
 beforeEach(() => {
+  (trackEvent as jest.Mock).mockClear();
   __resetRegistryForTests();
   registerTool({
     name: "manage_governance",
@@ -62,6 +64,14 @@ it("refuses an AGENT invoking a governance-control capability (C-NO-SELF-TAMPER)
     expect(res.result.code).toBe("capability");
     expect(res.result.message).toMatch(/C-NO-SELF-TAMPER/);
   }
+  // The denial emits a workspace-scoped enforcement signal so it is counted in
+  // the effectiveness rollup (closes the conduct-self-tamper capture gap).
+  expect(trackEvent).toHaveBeenCalledWith(
+    "agent.conduct_denied",
+    "agent-1",
+    "ops",
+    expect.objectContaining({ workspace_id: "ws-1", capability: "settings.manage_team", rule_id: "C-NO-SELF-TAMPER" }),
+  );
 });
 
 it("allows an agent invoking a benign, non-governance capability", async () => {

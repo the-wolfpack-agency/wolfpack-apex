@@ -363,6 +363,14 @@ async function runOneTool<P, R>(
   if (agent) {
     const conduct = evaluateConduct({ capability: tool.capability, isAgent: true });
     if (conduct.outcome === "deny") {
+      /* Workspace-scoped enforcement signal so a self-tamper denial is counted
+         as downstream enforcement in the effectiveness rollup, not lost. */
+      trackEvent("agent.conduct_denied", agent.agentId, agent.role, {
+        workspace_id: agent.workspaceId,
+        capability: tool.capability,
+        tool: tool.name,
+        rule_id: conduct.ruleId ?? "unknown",
+      });
       await alertAgentBlock(agent, tool.name, `Conduct ${conduct.ruleId}: ${conduct.reason}`);
       return failure("capability", `Conduct ${conduct.ruleId}: ${conduct.reason}`);
     }
@@ -371,6 +379,17 @@ async function runOneTool<P, R>(
   /* 2. Role gate (shared with the agent self-onboarding scan, see ./gate).
         "*" = any authenticated principal. */
   if (!canInvokeNamedTool(ctx.userRole, tool.name, tool.capability)) {
+    /* For a governed AGENT, a capability-gate refusal is downstream enforcement
+       that stopped the agent; emit a workspace-scoped signal so it is counted in
+       the effectiveness rollup rather than lost (humans are not counted here -
+       this is the agent-execution capture stream). */
+    if (agent) {
+      trackEvent("agent.capability_denied", agent.agentId, agent.role, {
+        workspace_id: agent.workspaceId,
+        capability: tool.capability,
+        tool: tool.name,
+      });
+    }
     /* The MESSAGE is for the log and for a routine's step summary, both of
        which a person can end up reading: a routine reported "This stopped at
        'Reading today's calendar': tool good_morning_widget requires role *
