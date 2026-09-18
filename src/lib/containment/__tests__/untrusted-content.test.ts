@@ -79,6 +79,8 @@ const AUDITED: Readonly<Record<string, string>> = {
   "lib/favicon-generator.ts":
     "SAFE, verified by running it: resolveMonogram strips to alphanumerics before it reaches the SVG, and a color that is not a color is replaced with a default rather than interpolated into the fill attribute.",
   "lib/html-sanitize.ts": "SAFE: this IS the sanitizer. Its template wraps input for DOMPurify to parse, which is the point.",
+  "lib/forcefield-web/decoy.ts":
+    "SAFE, verified by reading it: the only interpolated value in the anchor is the trap PATH, which is TRAP_PATH_PREFIX + stableHash(seed) - a fixed prefix plus an unsigned 32-bit FNV hash rendered as [0-9a-f] hex. No model output and no external/request text ever reaches the template; the seed is a server-chosen page id or salt, and even it is never emitted raw (only its hex hash is). There is no attribute or tag a hex string can break out of.",
 };
 
 function walk(dir: string, prefix = ""): string[] {
