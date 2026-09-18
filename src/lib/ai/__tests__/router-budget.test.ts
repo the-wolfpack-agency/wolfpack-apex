@@ -238,9 +238,9 @@ describe("router - workspace budget enforcement", () => {
     expect(names).not.toContain("ai.request_blocked_over_budget");
   });
 
-  it("PROCEEDS when policy exists but monthly_budget_usd is null (no enforcement)", async () => {
+  it("bounds an unconfigured workspace by the platform default: a normal call still PROCEEDS, but spend IS now checked", async () => {
     mockMessagesCreate.mockResolvedValueOnce(fakeOk("ok"));
-    const monthSpend = jest.fn();
+    const monthSpend = jest.fn().mockResolvedValue(10); // well under the generous default backstop
     const client = _buildAIClientWithBudgetDepsForTests({
       loadPolicy: jest.fn().mockResolvedValue(policy({ monthly_budget_usd: null })),
       monthSpend,
@@ -254,16 +254,31 @@ describe("router - workspace budget enforcement", () => {
     });
 
     expect(out.provider_used).toBe("anthropic");
-    // spend was never even queried - no budget means no need to read cost
-    expect(monthSpend).not.toHaveBeenCalled();
+    // The gap this closed: an unconfigured workspace is now bounded, so spend IS read.
+    expect(monthSpend).toHaveBeenCalled();
     expect(mockMessagesCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("BACKSTOP: an unconfigured workspace over 2x the platform default is REFUSED", async () => {
+    const client = _buildAIClientWithBudgetDepsForTests({
+      loadPolicy: jest.fn().mockResolvedValue(policy({ monthly_budget_usd: null })),
+      monthSpend: jest.fn().mockResolvedValue(60_000), // > 2 x the 25k default backstop
+    });
+    await expect(
+      client.complete({
+        messages: [{ role: "user", content: "x" }],
+        max_tokens: 10,
+        model_tier: "standard",
+        metadata: { feature: "budget.runaway", workspace_id: "ws_client" },
+      }),
+    ).rejects.toBeInstanceOf(BudgetExceededError);
   });
 
   it("PROCEEDS when there is no policy row for the workspace", async () => {
     mockMessagesCreate.mockResolvedValueOnce(fakeOk("ok"));
     const client = _buildAIClientWithBudgetDepsForTests({
       loadPolicy: jest.fn().mockResolvedValue(null),
-      monthSpend: jest.fn(),
+      monthSpend: jest.fn().mockResolvedValue(10), // low spend, under the default backstop
     });
 
     const out = await client.complete({

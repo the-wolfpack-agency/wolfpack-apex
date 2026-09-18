@@ -17,10 +17,10 @@ import {
 /**
  * The number of controls not yet enforcing at a live seam. LOWER THIS as gaps
  * are closed; it must never be raised. Today's gaps: forcefield-containment
- * mcp-drift-inline (admin scan only), conduct-truthfulness (inherently
+ * mcp-drift-inline (no live MCP seam in this deployment; roadmap), conduct-truthfulness (inherently
  * non-deterministic), budget-ceiling-unconfigured (fails open when no budget set).
  */
-const MAX_GAPS = 3;
+const MAX_GAPS = 2;
 
 const RUNGS: ControlRung[] = ["structural", "deterministic-gate", "containment", "human-in-loop", "advisory"];
 
@@ -77,6 +77,9 @@ describe("agent control ladder", () => {
     expect(gapIds.has("forcefield-containment")).toBe(false);
     const selfTamper = CONTROL_LADDER.find((e) => e.id === "conduct-self-tamper")!;
     expect(isEnforcing(selfTamper)).toBe(true);
+    // Budget is now bounded even for an unconfigured workspace (platform default).
+    const budget = CONTROL_LADDER.find((e) => e.id === "budget-ceiling-unconfigured")!;
+    expect(isEnforcing(budget)).toBe(true);
     // Truthfulness cannot be a pre-execution gate; it is honestly still advisory.
     expect(gapIds.has("conduct-truthfulness")).toBe(true);
     // The old catch-all conduct entry is gone (split into enforced + residual).

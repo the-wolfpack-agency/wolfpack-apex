@@ -164,11 +164,11 @@ export const CONTROL_LADDER: ControlEntry[] = [
     id: "mcp-drift-inline",
     capability: "A tool whose manifest changed after approval (rug-pull) is refused at call time",
     rung: "deterministic-gate",
-    seam: "(current) on-demand admin scan only, not inline",
+    seam: "detected in the admin MCP scan; no live MCP tool-call seam in this deployment",
     file: "src/lib/ai-surface/mcp/pin.ts, src/lib/ai-surface/mcp/scan.ts",
     wired: false,
     gateToMoveUp:
-      "Run detectManifestDrift at tool-invocation time in the dispatcher for MCP-backed tools and block on drift, instead of only in the admin mcp-scan route.",
+      "Honest scope: manifest drift IS detected deterministically (fingerprint compare) and surfaced as a CRITICAL finding by the scan today. But this deployment's MCP scanner is STATIC by design - the platform never connects to or invokes MCP tools - so there is no live tool-call seam to block inline. Inline pre-invocation blocking only has a home once the platform PROXIES MCP calls (the Forcefield-for-the-Web / MCP-gateway roadmap); it is a not-yet-applicable control here, not a wiring failure being hidden.",
   },
   {
     id: "conduct-self-tamper",
@@ -192,13 +192,13 @@ export const CONTROL_LADDER: ControlEntry[] = [
   },
   {
     id: "budget-ceiling-unconfigured",
-    capability: "AI spend is bounded for every workspace",
+    capability: "AI spend is bounded for every workspace, even an unconfigured one",
     rung: "deterministic-gate",
     seam: "RouterClient.complete checkBudget",
     file: "src/lib/ai/router.ts",
-    wired: false,
-    gateToMoveUp:
-      "checkBudget fails OPEN when no monthly_budget_usd is configured, unlike the fail-closed ceiling/scope gates. Set a platform default budget (or fail closed to a conservative cap) so an unconfigured workspace is still bounded.",
+    wired: true,
+    notes:
+      "A per-workspace budget wins; otherwise a platform-wide default (platformDefaultBudgetUsd, env-overridable, a generous runaway backstop) bounds an unconfigured workspace, so spend is never truly uncapped. A spend-read error fails OPEN (an analytics hiccup cannot take down AI traffic); only a confirmed over-spend blocks.",
   },
 ];
 
