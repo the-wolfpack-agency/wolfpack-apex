@@ -27,6 +27,11 @@ export interface AuditAllowlistEntry {
 }
 
 export const AUDIT_ALLOWLIST: ReadonlyArray<AuditAllowlistEntry> = [
+  // Read-only-by-effect (analysis, returns data; no durable state change)
+  {
+    route: "src/app/api/admin/agent-probe/run/route.ts",
+    reason: "Runs a model against an allowlisted target and RETURNS a behavior report + dossier; it writes no durable state of ours. The model call is metered and recorded by the router's own hash-chained AI ledger (recordRouterCall), which is where the model/provider/cost are known, so a second thinner audit row would duplicate it",
+  },
   // High-volume observability sink
   {
     route: "src/app/api/forcefield-web/inspect/route.ts",
