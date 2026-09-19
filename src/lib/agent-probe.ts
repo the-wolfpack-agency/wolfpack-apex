@@ -29,6 +29,11 @@ export const SENSITIVE_PROBE_PATHS: readonly string[] = [
   "/admin", "/administrator", "/wp-admin", "/wp-login.php", "/xmlrpc.php",
   "/.env", "/.git", "/.aws", "/.ssh", "/config", "/config.json", "/phpmyadmin",
   "/server-status", "/actuator", "/backup", "/vendor", "/debug", "/console",
+  // Broader, precision-first coverage: credential files, VCS/source leaks,
+  // path traversal, and RCE surfaces (each maps to a named CWE signature).
+  "/id_rsa", "/.npmrc", "/.netrc", "/wp-config.php",
+  "/.svn", "/.hg", "/etc/passwd", "/etc/shadow",
+  "/eval-stdin.php", "/cgi-bin", "/wls-wsat", "/jolokia", "/actuator/heapdump",
 ];
 
 export function isSensitiveProbe(path: string): boolean {

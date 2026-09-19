@@ -19,6 +19,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getInstinctUser, fetchWithRefresh, jsonHeaders } from "@/lib/client-auth";
 import { GlassPanel, MetricTile, StatusPill, SectionHeader } from "@/components/console";
+import { assessDeceptionCoverage } from "@/lib/forcefield/deception-coverage";
 
 type CanaryKind = "token" | "route" | "row" | "tool";
 
@@ -64,6 +65,7 @@ export default function ForcefieldPage() {
   const [value, setValue] = useState("");
   const [seededIn, setSeededIn] = useState("");
   const [saving, setSaving] = useState(false);
+  const [seedingGrid, setSeedingGrid] = useState(false);
 
   useEffect(() => {
     if (!getInstinctUser<{ role: string }>()) {
@@ -109,6 +111,22 @@ export default function ForcefieldPage() {
       void loadTrips();
     }
   }, [ready, load, loadTrips]);
+
+  // Seed a diverse grid: ensure one active decoy of EACH kind exists so
+  // coverage is never accidentally thin. Idempotent server-side.
+  const seedGrid = useCallback(async () => {
+    if (seedingGrid) return;
+    setSeedingGrid(true);
+    try {
+      const res = await fetchWithRefresh("/api/admin/forcefield/grid", { method: "POST", headers: jsonHeaders() });
+      if (res.ok) await load();
+      else setError("Could not seed the deception grid.");
+    } catch {
+      setError("Could not seed the deception grid.");
+    } finally {
+      setSeedingGrid(false);
+    }
+  }, [seedingGrid, load]);
 
   const seed = useCallback(
     async (e: React.FormEvent) => {
@@ -178,6 +196,55 @@ export default function ForcefieldPage() {
         <MetricTile label="Decoy types in use" display={`${kindsInUse} / 4`} testId="metric-kinds" />
         <MetricTile label="Trips" display={String(tripList.length)} accent={tripList.length ? "var(--wp-error, #e5484d)" : undefined} testId="metric-trips" />
       </div>
+
+      {(() => {
+        const cov = assessDeceptionCoverage(list, tripList.length);
+        return (
+          <GlassPanel style={{ marginBottom: "1.25rem" }}>
+            <div data-testid="deception-coverage" style={{ display: "grid", gap: "0.6rem" }}>
+              <div style={{ display: "flex", alignItems: "baseline", gap: "0.6rem", flexWrap: "wrap" }}>
+                <h3 style={{ margin: 0, fontSize: "1rem", color: "var(--wp-text, #e6e9ef)" }}>Deception coverage</h3>
+                <span data-testid="coverage-kinds" style={{ fontSize: "0.82rem", fontWeight: 700, color: cov.gaps.length ? "var(--wp-warning, #f5a623)" : "var(--wp-success, #30a46c)" }}>
+                  {cov.kindsSeeded} / {cov.totalKinds} decoy kinds seeded
+                </span>
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem" }}>
+                {cov.byKind.map((k) => (
+                  <span
+                    key={k.kind}
+                    data-testid={`coverage-kind-${k.kind}`}
+                    style={{
+                      fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.02em",
+                      borderRadius: 999, padding: "0.12rem 0.5rem",
+                      color: k.seeded ? "var(--wp-success, #30a46c)" : "var(--wp-warning, #f5a623)",
+                      border: `1px solid ${k.seeded ? "var(--wp-success, #30a46c)" : "var(--wp-warning, #f5a623)"}`,
+                    }}
+                  >
+                    {k.kind} {k.seeded ? `✓ ${k.active}` : "- gap"}
+                  </span>
+                ))}
+              </div>
+              <p data-testid="coverage-assessment" style={{ margin: 0, fontSize: "0.82rem", lineHeight: 1.55, color: "var(--wp-text-muted, #929cad)", maxWidth: "78ch" }}>
+                {cov.assessment}
+              </p>
+              {cov.gaps.length > 0 && (
+                <button
+                  type="button"
+                  data-testid="coverage-seed-grid"
+                  onClick={seedGrid}
+                  disabled={seedingGrid}
+                  style={{
+                    justifySelf: "start", padding: "0.35rem 0.8rem", borderRadius: 6, fontSize: "0.8rem", fontWeight: 600,
+                    cursor: seedingGrid ? "default" : "pointer", background: "var(--wp-gold, #c9a227)", color: "#0b0d11", border: "none",
+                  }}
+                >
+                  {seedingGrid ? "Seeding..." : "Seed missing decoy kinds"}
+                </button>
+              )}
+            </div>
+          </GlassPanel>
+        );
+      })()}
 
       <GlassPanel style={{ marginBottom: "1.25rem" }}>
         <h3 style={{ margin: "0 0 0.75rem", fontSize: "1rem", color: "var(--wp-text, #e6e9ef)" }}>Seed a decoy</h3>

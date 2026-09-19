@@ -12,8 +12,9 @@
 import { query, safeQuery } from "@/lib/db";
 import { trackEvent } from "@/lib/analytics";
 import type { Canary, CanaryKind } from "./tripwire";
+import { CANARY_KINDS } from "./tripwire";
 
-export const CANARY_KINDS: readonly CanaryKind[] = ["token", "route", "row", "tool"];
+export { CANARY_KINDS };
 
 export function isCanaryKind(v: unknown): v is CanaryKind {
   return typeof v === "string" && (CANARY_KINDS as readonly string[]).includes(v);

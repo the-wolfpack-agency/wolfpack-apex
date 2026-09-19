@@ -15,7 +15,18 @@
  */
 
 export type ProbeSeverity = "low" | "medium" | "high" | "critical";
-export type ProbeCategory = "secrets-exposure" | "debug-exposure" | "admin-surface" | "api-surface" | "ssrf" | "config-exposure" | "recon";
+export type ProbeCategory =
+  | "secrets-exposure"
+  | "debug-exposure"
+  | "admin-surface"
+  | "api-surface"
+  | "ssrf"
+  | "config-exposure"
+  | "recon"
+  // Added for broader, precision-first CWE coverage:
+  | "source-exposure" // VCS / source-tree leaks (CWE-527 / CWE-200)
+  | "path-traversal" // absolute-path / traversal file reads (CWE-22)
+  | "rce"; // remote code execution surfaces (CWE-94 / CWE-78 / CWE-502)
 
 export interface ProbeSignature {
   /** Path prefix that identifies the probe (matched case-insensitively, as an
@@ -36,9 +47,32 @@ export const PROBE_SIGNATURES: readonly ProbeSignature[] = [
   { prefix: "/.git", label: "Git repository exposure (source + secrets)", cwe: "CWE-200", severity: "critical", category: "secrets-exposure" },
   { prefix: "/.aws", label: "AWS credentials directory probe", cwe: "CWE-200", severity: "critical", category: "secrets-exposure" },
   { prefix: "/.ssh", label: "SSH key directory probe", cwe: "CWE-200", severity: "critical", category: "secrets-exposure" },
+  // Credential files (CWE-522: insufficiently protected credentials).
+  { prefix: "/.npmrc", label: "npm credentials file probe", cwe: "CWE-522", severity: "high", category: "secrets-exposure" },
+  { prefix: "/.netrc", label: "netrc credentials file probe", cwe: "CWE-522", severity: "high", category: "secrets-exposure" },
+  { prefix: "/.dockercfg", label: "Docker registry credentials probe", cwe: "CWE-522", severity: "high", category: "secrets-exposure" },
+  { prefix: "/.docker/config.json", label: "Docker config credentials probe", cwe: "CWE-522", severity: "high", category: "secrets-exposure" },
+  { prefix: "/id_rsa", label: "Private SSH key file probe", cwe: "CWE-522", severity: "critical", category: "secrets-exposure" },
+  { prefix: "/wp-config.php", label: "WordPress config (DB credentials) probe", cwe: "CWE-200", severity: "critical", category: "secrets-exposure" },
+  // Source / VCS exposure (CWE-527: exposure of version-control directory).
+  { prefix: "/.svn", label: "Subversion directory exposure (source + secrets)", cwe: "CWE-527", severity: "critical", category: "source-exposure" },
+  { prefix: "/.hg", label: "Mercurial directory exposure", cwe: "CWE-527", severity: "high", category: "source-exposure" },
+  { prefix: "/.bzr", label: "Bazaar directory exposure", cwe: "CWE-527", severity: "high", category: "source-exposure" },
+  { prefix: "/WEB-INF/web.xml", label: "Java WEB-INF descriptor exposure", cwe: "CWE-200", severity: "high", category: "source-exposure" },
+  { prefix: "/.DS_Store", label: "macOS directory listing leak (recon)", cwe: "CWE-200", severity: "low", category: "source-exposure" },
+  // Path traversal (CWE-22): absolute-path file reads.
+  { prefix: "/etc/passwd", label: "Path-traversal to /etc/passwd", cwe: "CWE-22", severity: "critical", category: "path-traversal" },
+  { prefix: "/etc/shadow", label: "Path-traversal to /etc/shadow", cwe: "CWE-22", severity: "critical", category: "path-traversal" },
+  // Remote code execution surfaces.
+  { prefix: "/eval-stdin.php", label: "PHPUnit eval-stdin RCE probe", cwe: "CWE-94", severity: "critical", category: "rce" },
+  { prefix: "/cgi-bin", label: "CGI directory probe (Shellshock surface)", cwe: "CWE-78", severity: "high", category: "rce" },
+  { prefix: "/invoker/JMXInvokerServlet", label: "JBoss JMXInvoker deserialization RCE probe", cwe: "CWE-502", severity: "critical", category: "rce" },
+  { prefix: "/wls-wsat", label: "WebLogic WLS-WSAT deserialization RCE probe", cwe: "CWE-502", severity: "critical", category: "rce" },
   // Framework debug / actuator exposure.
+  { prefix: "/actuator/heapdump", label: "Spring Actuator heap dump (memory secrets) exposed", cwe: "CWE-200", severity: "critical", category: "debug-exposure" },
   { prefix: "/actuator/env", label: "Spring Actuator environment variables exposed", cwe: "CWE-200", severity: "critical", category: "debug-exposure" },
   { prefix: "/actuator", label: "Spring Boot Actuator exposed", cwe: "CWE-200", severity: "high", category: "debug-exposure" },
+  { prefix: "/jolokia", label: "Jolokia JMX-over-HTTP probe", cwe: "CWE-200", severity: "high", category: "admin-surface" },
   { prefix: "/phpinfo.php", label: "PHP info page exposure", cwe: "CWE-200", severity: "high", category: "debug-exposure" },
   { prefix: "/elmah.axd", label: "ELMAH error log exposed (ASP.NET)", cwe: "CWE-200", severity: "high", category: "debug-exposure" },
   { prefix: "/server-status", label: "Apache server-status exposed", cwe: "CWE-200", severity: "medium", category: "debug-exposure" },

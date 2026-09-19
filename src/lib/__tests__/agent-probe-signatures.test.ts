@@ -14,6 +14,21 @@ describe("probe signatures (reused AgenticQA knowledge)", () => {
     expect(matchProbePath("/WP-LOGIN.PHP?redirect=1")?.category).toBe("admin-surface");
   });
 
+  it("covers the broadened CWE set precisely (credentials / source / traversal / rce)", () => {
+    expect(matchProbePath("/id_rsa")?.cwe).toBe("CWE-522"); // credential file
+    expect(matchProbePath("/.svn/entries")?.category).toBe("source-exposure");
+    expect(matchProbePath("/.svn")?.cwe).toBe("CWE-527");
+    expect(matchProbePath("/etc/passwd")?.category).toBe("path-traversal");
+    expect(matchProbePath("/etc/passwd")?.cwe).toBe("CWE-22");
+    expect(matchProbePath("/eval-stdin.php")?.category).toBe("rce");
+    expect(matchProbePath("/cgi-bin/test.sh")?.cwe).toBe("CWE-78");
+    expect(matchProbePath("/wls-wsat/CoordinatorPortType")?.cwe).toBe("CWE-502");
+    // most-specific-first still holds after the additions
+    expect(matchProbePath("/actuator/heapdump")?.severity).toBe("critical");
+    expect(matchProbePath("/actuator/env")?.severity).toBe("critical");
+    expect(matchProbePath("/actuator")?.severity).toBe("high");
+  });
+
   it("returns null for a benign path", () => {
     expect(matchProbePath("/pricing")).toBeNull();
     expect(matchProbePath("/")).toBeNull();

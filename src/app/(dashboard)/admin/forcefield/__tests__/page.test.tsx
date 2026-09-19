@@ -28,6 +28,13 @@ let trips: unknown[] = [];
 function routedFetch() {
   mockFetch.mockImplementation(async (url: string, opts?: { method?: string }) => {
     const method = opts?.method ?? "GET";
+    if (url.includes("/forcefield/grid")) {
+      canaries = [
+        { ...CANARY, id: "a", kind: "token" }, { ...CANARY, id: "b", kind: "route" },
+        { ...CANARY, id: "c", kind: "row" }, { ...CANARY, id: "d", kind: "tool" },
+      ];
+      return resp(200, { result: { seeded: [{ kind: "row", placement: "x" }, { kind: "tool", placement: "x" }], alreadyPresent: ["token", "route"], pendingPlacement: [] } });
+    }
     if (url.includes("/forcefield/trips")) return resp(200, { trips });
     if (url.includes("/forcefield/canaries")) {
       if (method === "POST") { canaries = [CANARY]; return resp(201, { canary: CANARY }); }
@@ -106,4 +113,44 @@ test("shows recent trips: the contained agent, the reason, and a Trips metric", 
 test("trips empty state reads as the good state", async () => {
   render(<ForcefieldPage />);
   await waitFor(() => expect(screen.getByTestId("trips-empty")).toBeInTheDocument());
+});
+
+test("deception coverage panel: shows kind gaps and reads thin coverage honestly", async () => {
+  canaries = [CANARY]; // only a 'token' decoy -> 3 kinds are gaps
+  render(<ForcefieldPage />);
+  await waitFor(() => expect(screen.getByTestId("deception-coverage")).toBeInTheDocument());
+  expect(screen.getByTestId("coverage-kinds")).toHaveTextContent("1 / 4");
+  expect(screen.getByTestId("coverage-kind-token")).toHaveTextContent(/✓/);
+  expect(screen.getByTestId("coverage-kind-route")).toHaveTextContent(/gap/i);
+  expect(screen.getByTestId("coverage-kind-row")).toHaveTextContent(/gap/i);
+  expect(screen.getByTestId("coverage-kind-tool")).toHaveTextContent(/gap/i);
+  // The whole point: a thin grid is not reassurance.
+  expect(screen.getByTestId("coverage-assessment")).toHaveTextContent(/few traps/i);
+});
+
+test("deception coverage panel: full grid reads low trips as expected-by-design", async () => {
+  canaries = [
+    { ...CANARY, id: "a", kind: "token" },
+    { ...CANARY, id: "b", kind: "route" },
+    { ...CANARY, id: "c", kind: "row" },
+    { ...CANARY, id: "d", kind: "tool" },
+  ];
+  trips = [TRIP];
+  render(<ForcefieldPage />);
+  await waitFor(() => expect(screen.getByTestId("deception-coverage")).toBeInTheDocument());
+  expect(screen.getByTestId("coverage-kinds")).toHaveTextContent("4 / 4");
+  expect(screen.getByTestId("coverage-assessment")).toHaveTextContent(/expected to be low by design/i);
+});
+
+test("seed-grid button appears only on gaps, POSTs to the grid route, and fills coverage", async () => {
+  canaries = [{ ...CANARY, id: "a", kind: "token" }]; // 3 gaps -> button shows
+  render(<ForcefieldPage />);
+  await waitFor(() => expect(screen.getByTestId("coverage-seed-grid")).toBeInTheDocument());
+  await act(async () => { fireEvent.click(screen.getByTestId("coverage-seed-grid")); });
+  // POSTed to the grid route...
+  const call = mockFetch.mock.calls.find((c) => String(c[0]).includes("/forcefield/grid") && (c[1] as { method?: string })?.method === "POST");
+  expect(call).toBeTruthy();
+  // ...and after reload the grid is full, so the button (gaps-only) is gone.
+  await waitFor(() => expect(screen.getByTestId("coverage-kinds")).toHaveTextContent("4 / 4"));
+  expect(screen.queryByTestId("coverage-seed-grid")).not.toBeInTheDocument();
 });

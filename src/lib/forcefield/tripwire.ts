@@ -28,6 +28,11 @@ export const CANARY_TRIP_RULE_ID = "forcefield.canary_trip";
 
 export type CanaryKind = "token" | "route" | "row" | "tool";
 
+/** The canonical decoy kinds, in display order. Lives here (the pure tripwire
+ *  core, no DB) so read-only consumers can import it without pulling in the
+ *  store's database dependencies. */
+export const CANARY_KINDS: readonly CanaryKind[] = ["token", "route", "row", "tool"];
+
 export interface Canary {
   id: string;
   kind: CanaryKind;
