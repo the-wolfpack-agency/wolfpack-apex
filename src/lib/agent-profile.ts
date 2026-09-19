@@ -17,7 +17,7 @@
 
 import type { AgentJourney, AgentSignal, JourneyInsight } from "@/lib/agent-behavior";
 import { analyzeToolComposition, type ToolCompositionReport, type PolicyCategory } from "@/lib/agent-tool-composition";
-import { operatorKeyFor, DISCLAIMER } from "@/lib/agent-dossier";
+import { operatorKeyFor, DISCLAIMER, type Sighting } from "@/lib/agent-dossier";
 import type { ScaffoldingSignature } from "@/lib/agent-probe";
 
 /** One observed behavior, explained for a non-expert. `hostile` marks the ones
@@ -160,4 +160,25 @@ export function buildAgentProfile(journey: AgentJourney): AgentProfile {
     disclaimer: DISCLAIMER,
     insights: journey.insights,
   };
+}
+
+/**
+ * Build a persistable Sighting from a live journey, reusing the SAME scaffolding
+ * + tool derivation as the profile, so a promoted live-traffic sighting shares
+ * the operator fingerprint space with probe/harness sightings. Used to promote an
+ * escalated operator into the persistent operators board.
+ */
+export function liveSightingFor(journey: AgentJourney, surface: string): Sighting {
+  const scaffoldingLite = deriveScaffolding(journey);
+  const tools = analyzeToolComposition(observedTools(journey.signals));
+  const scaffolding: ScaffoldingSignature = {
+    stepCount: journey.eventCount,
+    readsRobotsFirst: scaffoldingLite.readsRobotsFirst,
+    followedLinks: journey.signals.includes("tripped_decoy") ? 1 : 0,
+    guessedPaths: scaffoldingLite.probedSensitive ? 1 : 0,
+    pathDiscovery: scaffoldingLite.pathDiscovery,
+    retries: false,
+    probedSensitive: scaffoldingLite.probedSensitive,
+  };
+  return { surface, at: journey.lastAt || journey.firstAt || "", journey, scaffolding, tools };
 }

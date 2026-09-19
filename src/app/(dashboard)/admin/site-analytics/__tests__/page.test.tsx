@@ -223,3 +223,17 @@ test("blocking an operator POSTs to the block route and shows a blocked badge", 
   expect(call).toBeTruthy();
   expect(JSON.parse(call![1].body)).toEqual({ operatorKey: "op_abc12345", block: true });
 });
+
+test("promoting an operator POSTs to the promote route and shows an on-board state", async () => {
+  mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: SUMMARY }) });
+  render(<SiteAnalyticsPage />);
+  await waitFor(() => expect(screen.getByTestId("ff-journeys-triage")).toBeInTheDocument());
+  fireEvent.click(screen.getByTestId("journey-view-operator"));
+  await screen.findByTestId("ff-operators-view");
+
+  fireEvent.click(screen.getByTestId("operator-promote-op_abc12345"));
+  await waitFor(() => expect(screen.getByTestId("operator-promote-op_abc12345")).toHaveTextContent(/on board/i));
+  const call = mockFetchWithRefresh.mock.calls.find((c) => String(c[0]).includes("/operator/promote"));
+  expect(call).toBeTruthy();
+  expect(JSON.parse(call![1].body)).toEqual({ operatorKey: "op_abc12345" });
+});

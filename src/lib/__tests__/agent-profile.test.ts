@@ -69,3 +69,18 @@ describe("buildAgentProfile (honest, engine-reused)", () => {
     expect(buildAgentProfile(j).operatorKey).toBe(buildAgentProfile(j).operatorKey);
   });
 });
+
+describe("liveSightingFor", () => {
+  it("builds a persistable sighting from a live journey, reusing the scaffolding + tools", () => {
+    const { liveSightingFor } = require("@/lib/agent-profile");
+    const sighting = liveSightingFor(
+      journey({ behaviorClass: "vuln_scanner", signals: ["probed_sensitive"], path: ["/admin"], eventCount: 1, lastAt: "2026-09-19T00:00:05Z" }),
+      "ogiam.com",
+    );
+    expect(sighting.surface).toBe("ogiam.com");
+    expect(sighting.at).toBe("2026-09-19T00:00:05Z");
+    expect(sighting.scaffolding.probedSensitive).toBe(true);
+    expect(sighting.tools.usedTools).toContain("fetch");
+    expect(sighting.journey.behaviorClass).toBe("vuln_scanner");
+  });
+});

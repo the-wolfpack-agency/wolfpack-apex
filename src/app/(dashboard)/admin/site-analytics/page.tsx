@@ -114,6 +114,7 @@ export default function SiteAnalyticsPage() {
   const [journeyView, setJourneyView] = useState<"severity" | "operator">("severity");
   const [operatorTriageOverride, setOperatorTriageOverride] = useState<Record<string, TriageStatus>>({});
   const [blockedOverride, setBlockedOverride] = useState<Record<string, boolean>>({});
+  const [promotedOps, setPromotedOps] = useState<Record<string, boolean>>({});
 
   const toggleProfile = useCallback((key: string) => {
     setExpanded((prev) => {
@@ -164,11 +165,26 @@ export default function SiteAnalyticsPage() {
     }
   }, []);
 
+  const promoteOperator = useCallback(async (opKey: string) => {
+    setPromotedOps((prev) => ({ ...prev, [opKey]: true })); // optimistic
+    try {
+      const res = await fetchWithRefresh("/api/admin/site-analytics/operator/promote", {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: JSON.stringify({ operatorKey: opKey }),
+      });
+      if (!res.ok) setPromotedOps((prev) => ({ ...prev, [opKey]: false }));
+    } catch {
+      setPromotedOps((prev) => ({ ...prev, [opKey]: false }));
+    }
+  }, []);
+
   const load = useCallback(async (range: number) => {
     setState("loading");
     setTriageOverride({});
     setOperatorTriageOverride({});
     setBlockedOverride({});
+    setPromotedOps({});
     try {
       const res = await fetchWithRefresh(`/api/admin/site-analytics?days=${range}`);
       if (!res.ok) {
@@ -633,6 +649,21 @@ export default function SiteAnalyticsPage() {
                           }}
                         >
                           {isBlocked(g.operatorKey) ? "Unblock" : "Block"}
+                        </button>
+                        <button
+                          type="button"
+                          data-testid={`operator-promote-${g.operatorKey}`}
+                          onClick={() => promoteOperator(g.operatorKey)}
+                          disabled={promotedOps[g.operatorKey]}
+                          title="Record this operator's findings to the persistent operators board so its dossier builds across visits."
+                          style={{
+                            padding: "0.12rem 0.55rem", borderRadius: 999, fontSize: "0.68rem", fontWeight: 600, cursor: promotedOps[g.operatorKey] ? "default" : "pointer",
+                            background: "transparent",
+                            color: promotedOps[g.operatorKey] ? "var(--wp-success, #30a46c)" : "var(--wp-gold, #e8b528)",
+                            border: `1px solid ${promotedOps[g.operatorKey] ? "var(--wp-success, #30a46c)" : "var(--wp-gold, #e8b528)"}`,
+                          }}
+                        >
+                          {promotedOps[g.operatorKey] ? "\u2713 On board" : "Promote to board"}
                         </button>
                       </div>
                       <ul style={{ listStyle: "none", margin: "0.2rem 0 0", padding: 0, display: "grid", gap: "0.5rem" }}>
