@@ -196,6 +196,8 @@ test("by-operator view consolidates findings under one operator with operator-le
   // fp1's operator (op_abc12345) shows as one consolidated card with a grouping label.
   expect(screen.getByTestId("operator-op_abc12345")).toBeInTheDocument();
   expect(screen.getByTestId("operator-grouping-op_abc12345")).toBeInTheDocument();
+  // Targeting signature (A): the /admin path is classified as an admin-surface target.
+  expect(screen.getByTestId("operator-targeting-op_abc12345")).toHaveTextContent(/admin-surface/i);
   expect(opView).toHaveTextContent(/1 finding/i);
 
   // Operator-level escalate POSTs under the "op:" key (acts on the whole operator).
@@ -236,4 +238,35 @@ test("promoting an operator POSTs to the promote route and shows an on-board sta
   const call = mockFetchWithRefresh.mock.calls.find((c) => String(c[0]).includes("/operator/promote"));
   expect(call).toBeTruthy();
   expect(JSON.parse(call![1].body)).toEqual({ operatorKey: "op_abc12345" });
+});
+
+
+test("sub-actors (B): a coarse operator with two distinct targeting profiles shows both, anchored to the coarse key", async () => {
+  const j = (key: string, path: string[]) => ({
+    key, confidence: "inferred" as const, behaviorClass: "vuln_scanner", signals: [], path,
+    eventCount: 1, firstAt: "2026-09-18T10:00:00Z", lastAt: "2026-09-18T10:00:05Z", summary: "probe", triage: "new" as const,
+    profile: {
+      operatorKey: "op_multi", correlationKey: key,
+      verdict: { confidence: "inferred" as const, why: "" },
+      processes: [],
+      scaffolding: { readsRobotsFirst: false, probedSensitive: true, pathDiscovery: "none", requestCount: 1, spanSeconds: 0, observability: "" },
+      toolComposition: { usedTools: ["fetch"], novelTools: [], policies: [], riskTier: "benign" as const, intent: "benign", confidence: "none" as const, summary: "" },
+      policies: [], timeline: { firstAt: "2026-09-18T10:00:00Z", lastAt: "2026-09-18T10:00:05Z", spanSeconds: 0, eventCount: 1 },
+      disclaimer: "d", insights: [],
+    },
+  });
+  const summary = { ...SUMMARY, journeys: [j("s1", ["/.env"]), j("s2", ["/.git"]), j("s3", ["/wp-login.php"])] };
+  mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary }) });
+  render(<SiteAnalyticsPage />);
+  await waitFor(() => expect(screen.getByTestId("ff-journeys-triage")).toBeInTheDocument());
+  fireEvent.click(screen.getByTestId("journey-view-operator"));
+  await screen.findByTestId("ff-operators-view");
+
+  const sub = await screen.findByTestId("operator-subactors-op_multi");
+  // two distinguishable profiles: secrets-exposure (/.env + /.git) and admin-surface (/wp-login.php)
+  expect(sub).toHaveTextContent(/2 distinguishable profiles/i);
+  expect(sub).toHaveTextContent(/secrets-exposure/i);
+  expect(sub).toHaveTextContent(/admin-surface/i);
+  // honesty rail: the coarse fingerprint stays the anchor, not a claim of separate identities
+  expect(sub).toHaveTextContent(/not separate identities/i);
 });
