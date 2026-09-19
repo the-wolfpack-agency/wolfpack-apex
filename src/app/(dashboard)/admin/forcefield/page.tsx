@@ -15,11 +15,12 @@
  *
  * Auth: unauthenticated users are redirected, never shown an empty shell.
  */
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getInstinctUser, fetchWithRefresh, jsonHeaders } from "@/lib/client-auth";
 import { GlassPanel, MetricTile, StatusPill, SectionHeader } from "@/components/console";
 import { assessDeceptionCoverage } from "@/lib/forcefield/deception-coverage";
+import { THREAT_COVERAGE, coverageSummary, type CoverageStatus } from "@/lib/forcefield/threat-coverage";
 
 type CanaryKind = "token" | "route" | "row" | "tool";
 
@@ -241,6 +242,71 @@ export default function ForcefieldPage() {
                   {seedingGrid ? "Seeding..." : "Seed missing decoy kinds"}
                 </button>
               )}
+            </div>
+          </GlassPanel>
+        );
+      })()}
+
+      {(() => {
+        const sum = coverageSummary();
+        const STATUS_COLOR: Record<CoverageStatus, string> = {
+          covered: "var(--wp-success, #30a46c)",
+          partial: "var(--wp-gold, #c9a227)",
+          gap: "var(--wp-error, #e5484d)",
+          "not-agent-observable": "var(--wp-text-muted, #929cad)",
+        };
+        const FAMILY_LABEL: Record<string, string> = {
+          "cwe-top-25": "CWE Top 25",
+          "exposure-recon": "Exposure / recon",
+          "agent-llm": "Agent / LLM-specific",
+        };
+        const families = ["cwe-top-25", "exposure-recon", "agent-llm"] as const;
+        return (
+          <GlassPanel style={{ marginBottom: "1.25rem" }}>
+            <div data-testid="threat-coverage" style={{ display: "grid", gap: "0.7rem" }}>
+              <div style={{ display: "flex", alignItems: "baseline", gap: "0.6rem", flexWrap: "wrap" }}>
+                <h3 style={{ margin: 0, fontSize: "1rem", color: "var(--wp-text, #e6e9ef)" }}>Threat coverage</h3>
+                <span data-testid="coverage-headline" style={{ fontSize: "0.82rem", fontWeight: 700, color: "var(--wp-success, #30a46c)" }}>
+                  {sum.observableDetected} / {sum.observableTotal} agent-observable threats detected
+                </span>
+                <span style={{ fontSize: "0.75rem", color: "var(--wp-text-muted, #929cad)" }}>
+                  {sum.notAgentObservable} code-level (out of scope for agent traffic)
+                </span>
+              </div>
+
+              {sum.gaps.length > 0 && (
+                <div data-testid="coverage-gaps" style={{ display: "grid", gap: "0.3rem", padding: "0.5rem 0.7rem", borderRadius: 6, border: "1px solid var(--wp-error, #e5484d)" }}>
+                  <span style={{ fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em", color: "var(--wp-error, #e5484d)" }}>
+                    {sum.gaps.length} gaps to close (not caught off guard)
+                  </span>
+                  {sum.gaps.map((g) => (
+                    <span key={g.id} style={{ fontSize: "0.78rem", color: "var(--wp-text, #e6e9ef)" }}>
+                      <strong>{g.id}</strong> {g.name} - <span style={{ color: "var(--wp-text-muted, #929cad)" }}>{g.note}</span>
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.78rem" }}>
+                  <tbody>
+                    {families.map((fam) => (
+                      <Fragment key={fam}>
+                        <tr><td colSpan={3} style={{ padding: "0.5rem 0 0.2rem", fontSize: "0.7rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em", color: "var(--wp-text-muted, #929cad)" }}>{FAMILY_LABEL[fam]}</td></tr>
+                        {THREAT_COVERAGE.filter((e) => e.family === fam).map((e) => (
+                          <tr key={e.id} data-testid={`coverage-row-${e.id}`} style={{ borderTop: "1px solid var(--wp-border, #262b34)" }}>
+                            <td style={{ padding: "0.25rem 0.5rem 0.25rem 0", whiteSpace: "nowrap", fontFamily: "var(--wp-mono, ui-monospace, monospace)", color: "var(--wp-text-muted, #929cad)" }}>{e.id}</td>
+                            <td style={{ padding: "0.25rem 0.5rem", color: "var(--wp-text, #e6e9ef)" }}>{e.name}</td>
+                            <td style={{ padding: "0.25rem 0", whiteSpace: "nowrap", textAlign: "right" }}>
+                              <span style={{ fontSize: "0.68rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.02em", color: STATUS_COLOR[e.status] }}>{e.status.replace(/-/g, " ")}</span>
+                            </td>
+                          </tr>
+                        ))}
+                      </Fragment>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </GlassPanel>
         );
