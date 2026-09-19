@@ -19,7 +19,7 @@ export type Severity = "hostile" | "elevated" | "benign";
 export const SEVERITY_ORDER: Record<Severity, number> = { hostile: 0, elevated: 1, benign: 2 };
 
 /** Behavior classes that are an actual attack pattern (not just automation). */
-export const HOSTILE_CLASSES: ReadonlySet<string> = new Set(["aggressive_scraper", "vuln_scanner", "form_spammer"]);
+export const HOSTILE_CLASSES: ReadonlySet<string> = new Set(["exploit_attempt", "aggressive_scraper", "vuln_scanner", "form_spammer"]);
 
 export interface TriageShape {
   behaviorClass: string;

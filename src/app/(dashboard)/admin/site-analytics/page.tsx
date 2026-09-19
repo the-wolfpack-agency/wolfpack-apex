@@ -44,6 +44,7 @@ interface Summary {
   }>;
   agentOrigins: Array<{ country: string; total: number; welcomed: number; flagged: number; hostile: number }>;
   probeIntel: Array<{ label: string; cwe: string; severity: "low" | "medium" | "high" | "critical"; category: string; count: number }>;
+  payloadIntel: Array<{ attack: string; count: number }>;
 }
 
 interface AgentProfile {
@@ -71,12 +72,13 @@ interface AgentProfile {
   policies: string[];
   timeline: { firstAt: string; lastAt: string; spanSeconds: number; eventCount: number };
   disclaimer: string;
-  insights: Array<{ kind: "impersonation"; claimedAgent: string; detail: string } | { kind: "deliberate_violation"; detail: string }>;
+  insights: Array<{ kind: "impersonation"; claimedAgent: string; detail: string } | { kind: "deliberate_violation"; detail: string } | { kind: "payload_attack"; attack: string; detail: string }>;
 }
 
 const CLASS_LABEL: Record<string, string> = {
   benign_crawler: "Benign crawler",
   aggressive_scraper: "Aggressive scraper",
+  exploit_attempt: "Exploit attempt",
   vuln_scanner: "Vulnerability scanner",
   form_spammer: "Form spammer",
   suspicious: "Suspicious automation",
@@ -85,6 +87,7 @@ const CLASS_LABEL: Record<string, string> = {
 const CLASS_COLOR: Record<string, string> = {
   benign_crawler: "var(--wp-success, #30a46c)",
   aggressive_scraper: "var(--wp-error, #ef4444)",
+  exploit_attempt: "var(--wp-error, #ef4444)",
   vuln_scanner: "var(--wp-error, #ef4444)",
   form_spammer: "var(--wp-warning, #f5a623)",
   suspicious: "var(--wp-warning, #f5a623)",
@@ -210,11 +213,11 @@ export default function SiteAnalyticsPage() {
             style={{
               fontSize: "0.6rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em",
               padding: "0.1rem 0.4rem", borderRadius: 999,
-              background: ins.kind === "impersonation" ? "var(--wp-error, #ef4444)" : "var(--wp-warning, #f5a623)",
+              background: ins.kind === "deliberate_violation" ? "var(--wp-warning, #f5a623)" : "var(--wp-error, #ef4444)",
               color: "var(--wp-dark, #0b0d11)",
             }}
           >
-            {ins.kind === "impersonation" ? "impersonation" : "deliberate"}
+            {ins.kind === "impersonation" ? "impersonation" : ins.kind === "payload_attack" ? "exploit" : "deliberate"}
           </span>
         ))}
         {currentStatus(j) !== "new" && (
@@ -428,6 +431,24 @@ export default function SiteAnalyticsPage() {
                     </li>
                   );
                 })}
+              </ul>
+            </div>
+          )}
+
+          {/* Payload attacks: active exploitation attempts caught at the edge. */}
+          {(summary.payloadIntel ?? []).length > 0 && (
+            <div style={card} data-testid="ff-payload-intel">
+              <div style={{ ...label, color: "var(--wp-error, #ef4444)" }}>Payload attacks &middot; active exploitation attempts</div>
+              <p style={{ margin: "0.5rem 0 0", fontSize: "0.76rem", color: "var(--wp-text-muted, #9ca3af)", lineHeight: 1.5 }}>
+                Injection payloads agents sent in a request (not just a probe for a path), detected at the edge with our own red-team evasion knowledge. Only the attack kind is kept, never the raw payload.
+              </p>
+              <ul data-testid="payload-intel-list" style={{ listStyle: "none", margin: "0.9rem 0 0", padding: 0, display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
+                {(summary.payloadIntel ?? []).map((pa) => (
+                  <li key={pa.attack} style={{ display: "flex", alignItems: "center", gap: "0.4rem", border: "1px solid var(--wp-error, #ef4444)", borderRadius: 999, padding: "0.2rem 0.6rem" }}>
+                    <span style={{ fontSize: "0.8rem", fontWeight: 600, color: "var(--wp-text, #eee)" }}>{pa.attack.replace(/_/g, " ")}</span>
+                    <span style={{ fontSize: "0.75rem", color: "var(--wp-error, #ef4444)", fontWeight: 700 }}>{pa.count}&times;</span>
+                  </li>
+                ))}
               </ul>
             </div>
           )}
@@ -652,8 +673,8 @@ function AgentProfilePanel({ profile, testKey }: { profile: AgentProfile; testKe
           <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: "0.4rem" }}>
             {profile.insights.map((ins) => (
               <li key={ins.kind} style={{ fontSize: "0.78rem", color: "var(--wp-text, #eee)", lineHeight: 1.5 }}>
-                <strong style={{ color: ins.kind === "impersonation" ? "var(--wp-error, #ef4444)" : "var(--wp-warning, #f5a623)" }}>
-                  {ins.kind === "impersonation" ? `Impersonation of ${ins.claimedAgent}: ` : "Deliberate rule violation: "}
+                <strong style={{ color: ins.kind === "deliberate_violation" ? "var(--wp-warning, #f5a623)" : "var(--wp-error, #ef4444)" }}>
+                  {ins.kind === "impersonation" ? `Impersonation of ${ins.claimedAgent}: ` : ins.kind === "payload_attack" ? `Active ${ins.attack.replace(/_/g, " ")} payload: ` : "Deliberate rule violation: "}
                 </strong>
                 {ins.detail}
               </li>

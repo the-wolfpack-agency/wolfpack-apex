@@ -29,11 +29,13 @@ export type AgentSignal =
   | "form_too_fast" // submitted a form faster than a human could type
   | "probed_sensitive" // requested /admin, /.env, /wp-login, /api, etc.
   | "high_rate" // many requests in a short window
+  | "payload_attack" // sent an active injection payload (SQLi/XSS/traversal/...)
   | "identified_agent"; // matched the known-agent allowlist (welcome lane)
 
 export type BehaviorClass =
   | "benign_crawler" // identified and rule-respecting; not our concern, just observed
   | "aggressive_scraper" // ignores the rules, harvests greedily, trips decoys
+  | "exploit_attempt" // sent a live injection payload - active exploitation, not just recon
   | "vuln_scanner" // probes sensitive paths, recon
   | "form_spammer" // targets forms, trips the form honeypot / too-fast submits
   | "suspicious" // automation with weak signals, not enough to classify
@@ -46,7 +48,8 @@ export type Confidence = "proven" | "inferred";
  *  one that read the rules and then broke them on purpose. */
 export type JourneyInsight =
   | { kind: "impersonation"; claimedAgent: string; detail: string }
-  | { kind: "deliberate_violation"; detail: string };
+  | { kind: "deliberate_violation"; detail: string }
+  | { kind: "payload_attack"; attack: string; detail: string };
 
 /** How a session's events were tied together. A nonce is deterministic (the
  *  actor carried it); a fingerprint is a probabilistic grouping. */
@@ -64,6 +67,8 @@ export interface SessionEvent {
   nonceLinked?: boolean;
   /** The identified agent id, when the event carried one. */
   agent?: string;
+  /** The attack kind, when this is a payload-attack event (props.attack). */
+  attack?: string;
 }
 
 export interface AgentSessionInput {
@@ -108,6 +113,8 @@ function signalOf(ev: SessionEvent): AgentSignal | null {
       return "form_too_fast";
     case "site.agent_high_rate":
       return "high_rate";
+    case "site.agent_payload_attack":
+      return "payload_attack";
     case "site.agent_welcomed":
       return "identified_agent";
     default:
@@ -115,7 +122,7 @@ function signalOf(ev: SessionEvent): AgentSignal | null {
   }
 }
 
-const HOSTILE: ReadonlySet<AgentSignal> = new Set(["tripped_decoy", "form_honeypot", "probed_sensitive"]);
+const HOSTILE: ReadonlySet<AgentSignal> = new Set(["tripped_decoy", "form_honeypot", "probed_sensitive", "payload_attack"]);
 
 /**
  * Higher-order conclusions from the ORDERED events, beyond the behavior class.
@@ -139,6 +146,15 @@ function deriveInsights(
       kind: "impersonation",
       claimedAgent: claimed,
       detail: `Presented the identity of ${claimed} (a known good agent) but then behaved hostilely. The real crawler does not do this, so this is a spoofed good bot wearing its uniform to evade filters.`,
+    });
+  }
+
+  if (has("payload_attack")) {
+    const attack = events.find((e) => signalOf(e) === "payload_attack" && e.attack)?.attack ?? "injection";
+    out.push({
+      kind: "payload_attack",
+      attack,
+      detail: `Sent a live ${attack.replace(/_/g, " ")} payload in a request. This is active exploitation attempted against the surface, not just a probe for an exposed path.`,
     });
   }
 
@@ -194,6 +210,9 @@ export function classifySession(input: AgentSessionInput): AgentJourney {
 }
 
 function classify(signals: readonly AgentSignal[], has: (s: AgentSignal) => boolean): BehaviorClass {
+  // Active exploitation: a live injection payload outranks everything - it is an
+  // attack in flight, not recon.
+  if (has("payload_attack")) return "exploit_attempt";
   // Form-targeted abuse: the form honeypot / too-fast submit is a bright line.
   if (has("form_honeypot") || has("form_too_fast")) return "form_spammer";
   // Recon: probing sensitive paths, especially several.
@@ -211,6 +230,8 @@ function summarize(cls: BehaviorClass, conf: Confidence, signals: readonly Agent
   const proven = conf === "proven";
   const tail = proven ? "This is confirmed automation." : "Grouped by a coarse fingerprint, so this is a likely match, not confirmed.";
   switch (cls) {
+    case "exploit_attempt":
+      return `Sent a live injection payload - active exploitation, not just recon. ${tail}`;
     case "aggressive_scraper":
       return `Followed an invisible trap link and harvested greedily, ignoring the site's rules. ${tail}`;
     case "vuln_scanner":
@@ -232,7 +253,7 @@ function summarize(cls: BehaviorClass, conf: Confidence, signals: readonly Agent
  * otherwise a fingerprint (inferred). Returns journeys newest-activity first.
  */
 export function buildJourneys(
-  rows: ReadonlyArray<{ key: string; keyKind: CorrelationKind; type: string; path: string; at: string; nonceLinked?: boolean; agent?: string }>,
+  rows: ReadonlyArray<{ key: string; keyKind: CorrelationKind; type: string; path: string; at: string; nonceLinked?: boolean; agent?: string; attack?: string }>,
 ): AgentJourney[] {
   const byKey = new Map<string, AgentSessionInput>();
   for (const r of rows) {
@@ -243,7 +264,7 @@ export function buildJourneys(
     }
     // A nonce grouping always wins over a fingerprint grouping for the same key.
     if (r.keyKind === "nonce") (s as { keyKind: CorrelationKind }).keyKind = "nonce";
-    (s.events as SessionEvent[]).push({ type: r.type, path: r.path, at: r.at, nonceLinked: r.nonceLinked, agent: r.agent });
+    (s.events as SessionEvent[]).push({ type: r.type, path: r.path, at: r.at, nonceLinked: r.nonceLinked, agent: r.agent, attack: r.attack });
   }
   return Array.from(byKey.values())
     .map(classifySession)
