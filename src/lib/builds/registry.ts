@@ -91,9 +91,9 @@ export const CLIENT_BUILDS: ClientBuild[] = [
     href: "/builds/security-plain-language",
     title: "Take the gates down",
     client: "Palo Alto Networks (prospective, not engaged)",
-    stage: "concept",
-    what: "A plain-language product certification for everyone Palo Alto's engineer-only training leaves out (sales, success, marketing, ops): what each product does in human terms, built on our proven Brand Ambassador change-management method.",
-    data: "Illustrative. Every product description is written from public knowledge of Palo Alto's products, not from any Palo Alto material, and nothing on the page is measured. Palo Alto is not a client; this is a sample of the method.",
+    stage: "in flight",
+    what: "A plain-language product certification for everyone Palo Alto's engineer-only training leaves out (sales, success, marketing, ops): what each product does in human terms, now a navigable course with tracked progress, built on our proven Brand Ambassador change-management method.",
+    data: "The course MECHANICS are real: the content is seeded into the LMS tables and a signed-in learner's own progress (lessons completed, self-checks) is persisted and measured. The product descriptions themselves are written from public knowledge, not from any Palo Alto material; Palo Alto is not a client; and the tutor is not built yet.",
   },
   {
     href: "/builds/change-management",

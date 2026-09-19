@@ -55,6 +55,9 @@ const SELF_SERVICE: readonly Capability[] = [
   // analytics.triage / settings.manage_team, so a viewer sees the board but not
   // the controls.
   "analytics.view",
+  // Courses are org-wide: any seat can take a course and record its own
+  // progress. Authoring stays with privileged roles (a later concern).
+  "course.view",
   // The engineering wiki is org-wide reading: it explains how the systems work
   // to every team member. Authoring (engineering.manage) stays with CTO/CEO.
   "engineering.view",

@@ -1036,6 +1036,10 @@ export const AUDIT_ALLOWLIST: ReadonlyArray<AuditAllowlistEntry> = [
     route: "src/app/api/admin/prompt-review/route.ts",
     reason: "pure function over the request body; nothing is written and the brief is deliberately never stored. It is a POST only because a brief belongs in a body rather than a query string, which lands in access logs and referrer headers. An audit entry here would either record nothing useful or record the brief itself, which is the one thing the surface promises not to keep",
   },
+  {
+    route: "src/app/api/lms/progress/route.ts",
+    reason: "A learner marking their OWN lesson viewed/completed (or self-checking) on their own enrollment. High-volume, low-stakes, self-scoped learning progress, not a security-relevant or cross-tenant decision the way triage/block are. The behavioral signal that matters for the learning loop is already captured as course.* analytics events (enrolled / lesson_viewed / lesson_completed / self_checked / completed), so a per-click hash-chained audit row would flood the log without compliance value.",
+  },
 ];
 
 export const AUDIT_ALLOWLIST_ROUTES: ReadonlySet<string> = new Set(

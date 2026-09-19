@@ -49,7 +49,7 @@ test.describe("client builds", () => {
 
   /* THE MECHANISM, ASSERTED. Every build page carries the marker, including
      when the link is shared without the register around it. */
-  for (const path of ["/pilot", "/builds/change-management", "/builds/course-program", "/builds/insight-scan"]) {
+  for (const path of ["/pilot", "/builds/change-management", "/builds/course-program", "/builds/insight-scan", "/builds/security-plain-language"]) {
     test(`${path} carries the client-build marker`, async ({ page }) => {
       await page.goto(`${target.baseUrl}${path}`, { waitUntil: "domcontentloaded" });
       const banner = page.getByTestId("build-banner");
@@ -118,6 +118,27 @@ test.describe("client builds", () => {
     } else {
       await expect(unreadable).toContainText(/not the same as it having nothing in it/i);
     }
+  });
+
+  /* THE COURSE MECHANICS HAVE TO SURVIVE A DEPLOY. The security build is now an
+     interactive course. On a stubbed session the course API 401s (no real
+     credentials), so the page must show its graceful unavailable state, never a
+     blank shell, the same contract as the scan page. The banner + progress
+     ladder are asserted in the marker loop and here. */
+  test("the security course renders its scaffold, not an empty shell", async ({ page }) => {
+    const failures = collectConsoleAndNetworkFailures(page);
+    await page.goto(`${target.baseUrl}/builds/security-plain-language`, { waitUntil: "domcontentloaded" });
+
+    const course = page.getByTestId("spl-course");
+    await expect(course).toBeVisible({ timeout: 20_000 });
+
+    /* Either the ladder (real session) or the graceful unavailable message
+       (stubbed session), never neither, since neither is a blank page. */
+    const ladder = page.getByTestId("spl-ladder");
+    const unavailable = page.getByTestId("spl-unavailable");
+    await expect(ladder.or(unavailable).first()).toBeVisible({ timeout: 20_000 });
+
+    expect(failures().filter((f) => f.detail.startsWith("CSP:"))).toEqual([]);
   });
 
   /* A wide table is the classic way a document page starts scrolling
