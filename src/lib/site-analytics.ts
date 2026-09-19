@@ -13,6 +13,7 @@ import { buildJourneys, type AgentJourney, type CorrelationKind } from "@/lib/ag
 import { buildAgentProfile, type AgentProfile } from "@/lib/agent-profile";
 import { summarizeProbeIntel, type ProbeIntelEntry } from "@/lib/agent-probe-signatures";
 import { getFindingTriage, type TriageStatus } from "@/lib/site-finding-triage";
+import { listBlockedOperatorKeys } from "@/lib/agent-operators";
 
 /** Closed event vocabulary, mirrored from the marketing site's analytics. A
  *  value outside this set is rejected at the ingest boundary. */
@@ -112,6 +113,9 @@ export interface SiteAnalyticsSummary {
   /* Operator-level triage state, keyed by operatorKey, so escalating/dismissing
      an operator persists across its findings and across reloads. */
   operatorTriage: Record<string, TriageStatus>;
+  /* Operator keys currently on the blocklist, so the consolidation view can show
+     which actors are already blocked. */
+  blockedOperators: string[];
 }
 
 /** Clamp the requested window to a sane integer day count. */
@@ -257,6 +261,7 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
     workspaceId,
   );
   const operatorTriage = await operatorTriageStates(journeys, workspaceId);
+  const blockedOperators = workspaceId ? Array.from(await listBlockedOperatorKeys(workspaceId)) : [];
   return {
     rangeDays: days,
     totalPageViews: t ? Number(t.page_views) : 0,
@@ -273,6 +278,7 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
     },
     journeys,
     operatorTriage,
+    blockedOperators,
     agentOrigins: agentOriginRows.rows.map((r) => ({
       country: r.country,
       total: Number(r.total),
