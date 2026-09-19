@@ -1,4 +1,5 @@
 /**
+ * PUBLIC: developer tool - mints an anonymous, ephemeral, unguessable harness session; no user or tenant exists by design.
  * PUBLIC (unauthenticated) - start a harness session. Returns an unguessable
  * sandbox URL a developer points their agent at, plus the reading URL to poll.
  * No requireCapability: this is a deliberately public developer tool. No PII is

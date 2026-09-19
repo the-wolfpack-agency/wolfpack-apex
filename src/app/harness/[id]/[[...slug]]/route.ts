@@ -1,4 +1,5 @@
 /**
+ * PUBLIC: developer tool - the instrumented decoy sandbox an external agent crawls; anonymous by design, hardened via an unguessable, format-validated session id + short TTL + hard hit cap.
  * PUBLIC (unauthenticated) - the instrumented sandbox. An external agent crawls
  * these paths; each request is recorded (relative path + method + status + the
  * structural event it maps to) and the sandbox serves its own decoy HTML. There

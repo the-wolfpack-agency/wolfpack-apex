@@ -1,4 +1,5 @@
 /**
+ * PUBLIC: developer tool - returns the caller's own anonymous harness reading; no PII, no tenant, no durable state.
  * PUBLIC (unauthenticated) - the behavioral reading for a session, rebuilt from
  * recorded hits via the shared engine (journey + scaffolding + operator dossier,
  * with the proven-vs-inferred rail and the not-a-real-identity disclaimer). No
