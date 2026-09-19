@@ -116,6 +116,9 @@ test("expanding a journey reveals its agent profile: verdict, processes, tooling
 
   const panel = await screen.findByTestId("ff-journey-profile-fp1");
   expect(panel).toHaveTextContent("Why this verdict");
+  // A hostile finding whose only observable tool is fetch must NOT show a green
+  // "benign" verdict; it shows the not-a-verdict caveat instead.
+  expect(screen.getByTestId("tooling-caveat")).toHaveTextContent(/not a verdict on the agent/i);
   expect(panel).toHaveTextContent("Tripped the decoy");
   expect(panel).toHaveTextContent("Scaffolding");
   expect(panel).toHaveTextContent("fetch");

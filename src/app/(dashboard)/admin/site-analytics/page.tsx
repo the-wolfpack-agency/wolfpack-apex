@@ -751,12 +751,23 @@ function AgentProfilePanel({ profile, testKey }: { profile: AgentProfile; testKe
               </span>
             ))}
           </div>
-          <p style={{ margin: 0, fontSize: "0.74rem", color: "var(--wp-text, #eee)", lineHeight: 1.45 }}>
-            <span style={{ color: RISK_COLOR[profile.toolComposition.riskTier] ?? "var(--wp-text, #eee)", fontWeight: 700 }}>
-              {profile.toolComposition.riskTier}
-            </span>{" "}
-            &middot; {profile.toolComposition.summary}
-          </p>
+          {profile.toolComposition.riskTier === "benign" ? (
+            // Not a verdict on the agent: only a benign tool (fetch) is provable
+            // over passive HTTP. A green "benign" next to a hostile finding reads
+            // as a contradiction, so state plainly that the finding comes from
+            // behavior, not from this thin observable toolset.
+            <p data-testid="tooling-caveat" style={{ margin: 0, fontSize: "0.72rem", color: "var(--wp-text-muted, #9ca3af)", lineHeight: 1.45, fontStyle: "italic" }}>
+              No dangerous tool is visible over HTTP (an agent&rsquo;s internal tools are not observable from the outside), so this is not a verdict on the agent. The verdict comes from the behavior above, not the toolset.
+            </p>
+          ) : (
+            // Elevated / dangerous tooling IS meaningful - surface it.
+            <p style={{ margin: 0, fontSize: "0.74rem", color: "var(--wp-text, #eee)", lineHeight: 1.45 }}>
+              <span style={{ color: RISK_COLOR[profile.toolComposition.riskTier] ?? "var(--wp-text, #eee)", fontWeight: 700 }}>
+                {profile.toolComposition.riskTier}
+              </span>{" "}
+              &middot; {profile.toolComposition.summary}
+            </p>
+          )}
           {profile.policies.length > 0 && (
             <p style={{ margin: "0.4rem 0 0", fontSize: "0.7rem", color: "var(--wp-error, #ef4444)" }}>
               Policy: {profile.policies.join(", ")}
