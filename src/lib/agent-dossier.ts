@@ -64,15 +64,19 @@ const HOSTILE_CLASSES: ReadonlySet<string> = new Set(["aggressive_scraper", "vul
  *  model, not any PII - just the tooling posture an operator carries between
  *  jobs. Same non-crypto stable hash used elsewhere; it is a bucket, not a
  *  secret. */
-export function operatorKeyFor(scaffolding: ScaffoldingSignature, tools: ToolCompositionReport): string {
-  const toolSig = [...tools.usedTools].sort().join(",");
-  const input = `${scaffolding.pathDiscovery}|robotsFirst:${scaffolding.readsRobotsFirst}|${toolSig}`;
+export function stableHash(input: string): string {
   let h = 0x811c9dc5;
   for (let i = 0; i < input.length; i++) {
     h ^= input.charCodeAt(i);
     h = Math.imul(h, 0x01000193);
   }
-  return `op_${(h >>> 0).toString(16).padStart(8, "0")}`;
+  return (h >>> 0).toString(16).padStart(8, "0");
+}
+
+export function operatorKeyFor(scaffolding: ScaffoldingSignature, tools: ToolCompositionReport): string {
+  const toolSig = [...tools.usedTools].sort().join(",");
+  const input = `${scaffolding.pathDiscovery}|robotsFirst:${scaffolding.readsRobotsFirst}|${toolSig}`;
+  return `op_${stableHash(input)}`;
 }
 
 /**

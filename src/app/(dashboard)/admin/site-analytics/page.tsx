@@ -587,6 +587,7 @@ export default function SiteAnalyticsPage() {
                   const opStatus = (k: string): TriageStatus => operatorTriageOverride[k] ?? summary.operatorTriage?.[k] ?? "new";
                   const isBlocked = (k: string): boolean => blockedOverride[k] ?? (summary.blockedOperators ?? []).includes(k);
                   const sevColor = (sv: string) => (sv === "hostile" ? "var(--wp-error, #ef4444)" : sv === "elevated" ? "var(--wp-warning, #f5a623)" : "var(--wp-success, #30a46c)");
+                  const probeSevColor = (sv: string) => (sv === "critical" || sv === "high" ? "var(--wp-error, #ef4444)" : sv === "medium" ? "var(--wp-gold, #e8b528)" : "var(--wp-text-muted, #9ca3af)");
                   const opBtn = (opKey: string, status: TriageStatus, text: string, color: string) => (
                     <button
                       type="button"
@@ -632,6 +633,38 @@ export default function SiteAnalyticsPage() {
                         )}
                       </p>
                       <p style={{ margin: 0, fontSize: "0.7rem", color: "var(--wp-text-muted, #9ca3af)", fontStyle: "italic", lineHeight: 1.4 }}>{g.groupingReason}</p>
+                      <div data-testid={`operator-targeting-${g.operatorKey}`} style={{ display: "flex", flexWrap: "wrap", gap: "0.3rem", alignItems: "center" }}>
+                        {g.targeting.categories.map((c) => (
+                          <span key={c.category} title={`${c.count} path${c.count === 1 ? "" : "s"} in this category, worst severity ${c.severity}`} style={{ fontSize: "0.62rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.02em", borderRadius: 999, padding: "0.08rem 0.4rem", color: probeSevColor(c.severity), border: `1px solid ${probeSevColor(c.severity)}` }}>
+                            {c.category} {c.count > 1 ? `×${c.count}` : ""}
+                          </span>
+                        ))}
+                        {g.targeting.payloadTypes.map((p) => (
+                          <span key={p} style={{ fontSize: "0.62rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.02em", borderRadius: 999, padding: "0.08rem 0.4rem", color: "var(--wp-error, #ef4444)", border: "1px solid var(--wp-error, #ef4444)" }}>
+                            payload: {p}
+                          </span>
+                        ))}
+                        <span style={{ fontSize: "0.66rem", color: "var(--wp-text-muted, #9ca3af)", fontStyle: "italic" }}>
+                          {g.targeting.cadence.spanHours >= 24 ? `~${g.targeting.cadence.perDay}/day` : "within a day"}
+                        </span>
+                      </div>
+                      {g.subActors.length > 1 && (
+                        <div data-testid={`operator-subactors-${g.operatorKey}`} style={{ display: "grid", gap: "0.25rem", padding: "0.4rem 0.5rem", borderRadius: 6, background: "var(--wp-dark-2, rgba(255,255,255,0.03))", border: "1px solid var(--wp-dark-border, #333)" }}>
+                          <span style={{ fontSize: "0.64rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em", color: "var(--wp-text-muted, #9ca3af)" }}>
+                            {g.subActors.length} distinguishable profiles under this fingerprint
+                          </span>
+                          {g.subActors.map((sa) => (
+                            <div key={sa.fingerprint} style={{ display: "flex", flexWrap: "wrap", gap: "0.35rem", alignItems: "center", fontSize: "0.68rem" }}>
+                              <span style={{ fontFamily: "var(--wp-mono, ui-monospace, monospace)", color: "var(--wp-text-muted, #9ca3af)" }}>{sa.fingerprint.split(".")[1]}</span>
+                              <span style={{ color: "var(--wp-text, #eee)" }}>{[...sa.categories, ...sa.payloadTypes.map((p) => `payload:${p}`)].join(", ") || sa.pathDiscovery}</span>
+                              <span style={{ marginLeft: "auto", color: "var(--wp-text-muted, #6b7280)" }}>{sa.findingCount} finding{sa.findingCount === 1 ? "" : "s"}</span>
+                            </div>
+                          ))}
+                          <span style={{ fontSize: "0.6rem", color: "var(--wp-text-muted, #6b7280)", fontStyle: "italic" }}>
+                            The coarse fingerprint stays the anchor for blocking + history; these are targeting profiles inside it, not separate identities.
+                          </span>
+                        </div>
+                      )}
                       <div style={{ display: "flex", flexWrap: "wrap", gap: "0.35rem", alignItems: "center" }}>
                         <span style={{ fontSize: "0.66rem", textTransform: "uppercase", letterSpacing: "0.03em", color: "var(--wp-text-muted, #6b7280)", marginRight: "0.15rem" }}>Operator</span>
                         {opBtn(g.operatorKey, "acknowledged", "Acknowledge", "var(--wp-text-muted, #9ca3af)")}
