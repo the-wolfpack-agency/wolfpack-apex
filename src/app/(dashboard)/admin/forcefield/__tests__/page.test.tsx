@@ -154,3 +154,19 @@ test("seed-grid button appears only on gaps, POSTs to the grid route, and fills 
   await waitFor(() => expect(screen.getByTestId("coverage-kinds")).toHaveTextContent("4 / 4"));
   expect(screen.queryByTestId("coverage-seed-grid")).not.toBeInTheDocument();
 });
+
+test("threat coverage panel: shows the honest headline, gaps, and per-threat status", async () => {
+  render(<ForcefieldPage />);
+  await waitFor(() => expect(screen.getByTestId("threat-coverage")).toBeInTheDocument());
+  // Honest headline: detected / observable (excludes code-level CWEs).
+  expect(screen.getByTestId("coverage-headline")).toHaveTextContent(/\d+ \/ \d+ agent-observable threats detected/i);
+  // The gaps callout names prompt injection - the "not caught off guard" part.
+  const gaps = screen.getByTestId("coverage-gaps");
+  expect(gaps).toHaveTextContent(/CWE-1427/);
+  expect(gaps).toHaveTextContent(/gaps to close/i);
+  // A covered injection CWE reads "covered"; a code-level CWE reads out-of-scope.
+  expect(screen.getByTestId("coverage-row-CWE-89")).toHaveTextContent(/covered/i);
+  expect(screen.getByTestId("coverage-row-CWE-352")).toHaveTextContent(/not agent observable/i);
+  // The agent-specific OWASP-LLM classes are present.
+  expect(screen.getByTestId("coverage-row-LLM08")).toHaveTextContent(/covered/i);
+});
