@@ -74,6 +74,10 @@ describe("getSiteAnalyticsSummary", () => {
       .mockResolvedValueOnce({ rows: [ // journey rows (correlated agent events)
         { event_type: "site.agent_trap_tripped", path: "/_ff/x", created_at: "2026-09-18T10:00:00Z", sig: "fp1", nonce: null, agent: null },
         { event_type: "site.agent_probed_sensitive", path: "/admin", created_at: "2026-09-18T10:00:05Z", sig: "fp1", nonce: null, agent: null },
+      ] })
+      .mockResolvedValueOnce({ rows: [ // agent origins by country
+        { country: "US", total: "12", welcomed: "2", flagged: "6", hostile: "4" },
+        { country: "DE", total: "3", welcomed: "0", flagged: "3", hostile: "0" },
       ] });
 
     const summary = await getSiteAnalyticsSummary(30);
@@ -103,6 +107,12 @@ describe("getSiteAnalyticsSummary", () => {
     expect(profile.verdict.why).toMatch(/decoy|honeypot|nonce/i);
     expect(profile.processes.some((p) => p.hostile)).toBe(true);
     expect(profile.disclaimer).toMatch(/does not establish a real-world identity/i);
+
+    // Agent provenance by network-origin country, split by how Forcefield handled it.
+    expect(summary.agentOrigins).toEqual([
+      { country: "US", total: 12, welcomed: 2, flagged: 6, hostile: 4 },
+      { country: "DE", total: 3, welcomed: 0, flagged: 3, hostile: 0 },
+    ]);
   });
 
   it("clamps the range to a sane window", async () => {
