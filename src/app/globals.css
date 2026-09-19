@@ -1462,6 +1462,10 @@ a:hover { color: var(--wp-gold-hover); }
 .wp-build-selfcheck { border-left: 2px solid var(--wp-gold, #c9a227); padding: 0.2rem 0 0.2rem 0.8rem; }
 .wp-build-selfcheck ol { margin: 0.3rem 0 0; padding-left: 1.1rem; line-height: 1.55; }
 .wp-build-lesson-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.3rem; }
+.wp-build-brief-summary { cursor: pointer; font-weight: 650; color: var(--wp-gold, #c9a227); font-size: 0.92rem; padding: 0.2rem 0; }
+.wp-build-brief-body { margin-top: 0.6rem; display: grid; gap: 0.35rem; }
+.wp-build-brief-body h3 { margin: 0.8rem 0 0.1rem; font-size: 0.98rem; color: var(--wp-text, #e6e9ef); }
+.wp-build-brief-body h3:first-of-type { margin-top: 0.3rem; }
 .wp-build-btn { padding: 0.3rem 0.8rem; border-radius: 6px; font-size: 0.8rem; font-weight: 600; cursor: pointer; border: 1px solid var(--wp-gold, #c9a227); background: var(--wp-gold, #c9a227); color: #0b0d11; }
 .wp-build-btn:disabled { opacity: 0.55; cursor: default; }
 .wp-build-btn-ghost { background: transparent; color: var(--wp-text, #e6e9ef); border-color: var(--wp-border, #262b34); }

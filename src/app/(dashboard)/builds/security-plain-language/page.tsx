@@ -21,7 +21,7 @@ import { fetchWithRefresh, getInstinctToken, jsonHeaders } from "@/lib/client-au
 import { CLIENT_BUILDS } from "@/lib/builds/registry";
 import BuildBanner from "@/components/BuildBanner";
 import { Stepper, type StepperStep } from "@/components/console";
-import { METHOD } from "@/lib/builds/security-plain-language";
+import { METHOD, HEADLINE, CERT_PREMISE, PRECISION_NOTE, GATEKEEPING, FDE, REUSES, WHY_IT_WORKS, TO_BUILD_OUT } from "@/lib/builds/security-plain-language";
 import type { LmsCourse, LessonBlock } from "@/lib/lms/content";
 import type { CourseProgress, LessonStatus } from "@/lib/lms/progress";
 
@@ -149,6 +149,58 @@ export default function SecurityPlainLanguagePage() {
         <h1>{course.title}</h1>
         {course.headline && <p className="wp-pilot-sub">{course.headline}</p>}
       </header>
+
+      {/* THE ENGAGEMENT BRIEF. The course is the interactive product; this is the
+          argument BEHIND it, restored for the team to understand the engagement.
+          Collapsible so it does not clutter the learner's path, but one click
+          away. Everything here comes from lib/builds/security-plain-language.ts,
+          where a test pins the shape. */}
+      <details className="wp-pilot-section" data-testid="spl-brief">
+        <summary className="wp-build-brief-summary" data-testid="spl-brief-summary">
+          Engagement brief: the argument behind this course
+        </summary>
+        <div className="wp-build-brief-body">
+          <p className="wp-pilot-sub">{HEADLINE}</p>
+
+          <h3>Who gets left out</h3>
+          <p className="wp-pilot-aside">{CERT_PREMISE}</p>
+
+          <h3>Why: jargon is gatekeeping</h3>
+          <p className="wp-pilot-aside">{GATEKEEPING.thesis}</p>
+          <ul className="wp-pilot-list">
+            {GATEKEEPING.points.map((pt) => (<li key={pt}>{pt}</li>))}
+          </ul>
+          <p className="wp-pilot-aside">{GATEKEEPING.cost}</p>
+
+          <h3>The method: four beats</h3>
+          <ol className="wp-pilot-list">
+            {METHOD.map((m) => (<li key={m.beat}><strong>{m.beat}.</strong> {m.does}</li>))}
+          </ol>
+          <p className="wp-pilot-aside">{PRECISION_NOTE}</p>
+
+          <h3>The highest-value audience: the {FDE.role}</h3>
+          <p className="wp-pilot-aside">{FDE.why}</p>
+          <p className="wp-pilot-aside">{FDE.gap}</p>
+          <ul className="wp-pilot-list">
+            {FDE.coursework.map((c) => (<li key={c.covers}><strong>{c.covers}</strong> - {c.so}</li>))}
+          </ul>
+
+          <h3>What it reuses from the proven program</h3>
+          <ul className="wp-pilot-list">
+            {REUSES.map((r) => (<li key={r.have}><strong>{r.have}</strong> {r.serves}</li>))}
+          </ul>
+
+          <h3>Why the team feels the value</h3>
+          <ul className="wp-pilot-list">
+            {WHY_IT_WORKS.map((w) => (<li key={w}>{w}</li>))}
+          </ul>
+
+          <h3>What turns this into an engagement</h3>
+          <ul className="wp-pilot-list">
+            {TO_BUILD_OUT.map((t) => (<li key={t.question}><strong>{t.question}</strong> {t.why}</li>))}
+          </ul>
+        </div>
+      </details>
 
       {/* THE LADDER, as the progression spine. */}
       <section className="wp-pilot-section" data-testid="spl-tiers">
