@@ -97,3 +97,18 @@ test("does not fetch or render the course when signed out (auth gate holds)", as
   expect(fetchWithRefresh).not.toHaveBeenCalled();
   expect(screen.queryByTestId("spl-ladder")).not.toBeInTheDocument();
 });
+
+test("restores the engagement brief for the team: the argument behind the course", async () => {
+  mockGet();
+  render(<SecurityPlainLanguagePage />);
+  await waitFor(() => expect(screen.getByTestId("spl-ladder")).toBeInTheDocument());
+  const brief = screen.getByTestId("spl-brief");
+  expect(brief).toBeInTheDocument();
+  expect(screen.getByTestId("spl-brief-summary")).toHaveTextContent(/argument behind this course/i);
+  // The strategic content is present (from the source of truth), so the team can
+  // understand the engagement without the old static page.
+  expect(brief).toHaveTextContent(/gatekeeping/i); // the "why"
+  expect(brief).toHaveTextContent(/Forward Deployed Engineer/i); // the FDE audience
+  expect(brief).toHaveTextContent(/Name the jargon/i); // the four-beat method
+  expect(brief).toHaveTextContent(/commitment ladder/i); // what it reuses
+});
