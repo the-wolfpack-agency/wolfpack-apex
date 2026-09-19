@@ -14,7 +14,7 @@ import { fetchWithRefresh, jsonHeaders } from "@/lib/client-auth";
 import { HourHeatmap } from "@/components/HourHeatmap";
 import { AgentOriginMap } from "@/components/AgentOriginMap";
 import { triageJourneys, type Severity } from "@/lib/agent-triage";
-import { consolidateByOperator } from "@/lib/agent-operators-view";
+import { consolidateByOperator, deriveOperatorInsight } from "@/lib/agent-operators-view";
 
 interface Summary {
   rangeDays: number;
@@ -630,6 +630,25 @@ export default function SiteAnalyticsPage() {
                         )}
                         <span style={{ marginLeft: "auto", fontSize: "0.72rem", color: "var(--wp-text-muted, #9ca3af)" }}>{g.findingCount} finding{g.findingCount === 1 ? "" : "s"}</span>
                       </div>
+                      {(() => {
+                        const insight = deriveOperatorInsight(g);
+                        const actionColor: Record<string, string> = { block: "var(--wp-error, #ef4444)", escalate: "var(--wp-warning, #f5a623)", watch: "var(--wp-gold, #e8b528)", acknowledge: "var(--wp-text-muted, #9ca3af)" };
+                        return (
+                          <div data-testid={`operator-insight-${g.operatorKey}`} style={{ display: "grid", gap: "0.3rem", padding: "0.5rem 0.6rem", borderRadius: 6, background: "var(--wp-dark-2, rgba(255,255,255,0.03))", border: "1px solid var(--wp-dark-border, #333)" }}>
+                            <div style={{ display: "flex", alignItems: "baseline", gap: "0.5rem", flexWrap: "wrap" }}>
+                              <span data-testid={`operator-verdict-${g.operatorKey}`} style={{ fontSize: "0.82rem", fontWeight: 700, color: sevColor(g.severity) }}>{insight.verdict}</span>
+                              <span data-testid={`operator-recommend-${g.operatorKey}`} title={insight.actionRationale} style={{ marginLeft: "auto", fontSize: "0.62rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em", borderRadius: 999, padding: "0.1rem 0.5rem", color: "var(--wp-dark, #0b0d11)", background: actionColor[insight.recommendedAction] }}>Recommend: {insight.recommendedAction}</span>
+                            </div>
+                            <span style={{ fontSize: "0.74rem", color: "var(--wp-text-muted, #9ca3af)" }}>{insight.targeting}</span>
+                            {insight.tells.length > 0 && (
+                              <ul style={{ margin: 0, paddingLeft: "1rem", display: "grid", gap: "0.12rem" }}>
+                                {insight.tells.map((t, i) => (<li key={i} style={{ fontSize: "0.74rem", color: "var(--wp-text, #eee)" }}>{t}</li>))}
+                              </ul>
+                            )}
+                            <span style={{ fontSize: "0.68rem", color: "var(--wp-text-muted, #6b7280)", fontStyle: "italic" }}>{insight.actionRationale}</span>
+                          </div>
+                        );
+                      })()}
                       <p style={{ margin: 0, fontSize: "0.79rem", color: "var(--wp-text, #eee)", lineHeight: 1.5 }}>
                         {g.behaviorClasses.map((c) => CLASS_LABEL[c] ?? c).join(", ")}
                         {(g.paths.length > 0 || g.attacks.length > 0) && (
@@ -716,9 +735,14 @@ export default function SiteAnalyticsPage() {
                         )}
                       </div>
                       )}
-                      <ul style={{ listStyle: "none", margin: "0.2rem 0 0", padding: 0, display: "grid", gap: "0.5rem" }}>
-                        {g.journeys.map(renderJourneyCard)}
-                      </ul>
+                      <details data-testid={`operator-findings-${g.operatorKey}`}>
+                        <summary style={{ cursor: "pointer", fontSize: "0.72rem", color: "var(--wp-gold, #e8b528)", fontWeight: 600, listStyle: "revert" }}>
+                          Show {g.findingCount} finding{g.findingCount === 1 ? "" : "s"}
+                        </summary>
+                        <ul style={{ listStyle: "none", margin: "0.4rem 0 0", padding: 0, display: "grid", gap: "0.5rem" }}>
+                          {g.journeys.map(renderJourneyCard)}
+                        </ul>
+                      </details>
                     </div>
                   ));
                 })()}

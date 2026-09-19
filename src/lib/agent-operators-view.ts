@@ -237,3 +237,90 @@ export function consolidateByOperator<T extends OperatorViewJourney>(journeys: r
       b.lastSeen.localeCompare(a.lastSeen),
   );
 }
+
+// ── Codified operator insight ───────────────────────────────────────────────
+// A deterministic, zero-token synthesis of an operator group into a decision-
+// ready brief: verdict, what it targets, the key tells, and a recommended
+// action. The data is already structured, so a codified summary beats an LLM on
+// every axis that matters here (free, instant, auditable, reproducible, cannot
+// hallucinate) - and OGIAM's posture is that a security VERDICT is deterministic,
+// models only advise. Pure; the UI renders it at the top of the operator card.
+
+export type RecommendedAction = "block" | "escalate" | "watch" | "acknowledge";
+
+export interface OperatorInsight {
+  verdict: string;
+  targeting: string;
+  tells: string[];
+  recommendedAction: RecommendedAction;
+  actionRationale: string;
+  confidence: "proven" | "inferred";
+}
+
+const CLASS_INTENT: Record<string, string> = {
+  exploit_attempt: "active exploitation attempt",
+  vuln_scanner: "vulnerability scanner",
+  aggressive_scraper: "aggressive scraper",
+  form_spammer: "form spammer",
+  suspicious: "suspicious automation",
+  benign_crawler: "benign crawler",
+  unclassified: "unclassified automation",
+};
+// Worst-first, so the verdict names the most severe class the operator showed.
+const CLASS_RANK: Record<string, number> = {
+  exploit_attempt: 6, vuln_scanner: 5, aggressive_scraper: 4, form_spammer: 3, suspicious: 2, unclassified: 1, benign_crawler: 0,
+};
+const SEVERITY_WORD: Record<Severity, string> = { hostile: "hostile", elevated: "elevated-risk", benign: "benign" };
+
+/** Synthesize one operator group into a decision-ready brief. Deterministic. */
+export function deriveOperatorInsight<T extends OperatorViewJourney>(g: OperatorGroup<T>): OperatorInsight {
+  const confidence: "proven" | "inferred" = g.proven ? "proven" : "inferred";
+  const primaryClass = [...g.behaviorClasses].sort((a, b) => (CLASS_RANK[b] ?? 0) - (CLASS_RANK[a] ?? 0))[0] ?? "unclassified";
+  const intent = CLASS_INTENT[primaryClass] ?? primaryClass.replace(/_/g, " ");
+  const verdict = `${confidence === "proven" ? "Proven" : "Likely"} ${SEVERITY_WORD[g.severity]} ${intent}`;
+
+  // What it targets, in the reused probe-signature vocabulary.
+  const cats = g.targeting.categories.map((c) => (c.count > 1 ? `${c.category} (${c.count})` : c.category));
+  const parts: string[] = [];
+  if (cats.length) parts.push(`targets ${cats.join(", ")}`);
+  if (g.targeting.payloadTypes.length) parts.push(`sends ${g.targeting.payloadTypes.join(", ")}`);
+  if (g.paths.length) parts.push(`hit ${g.paths.slice(0, 4).join(", ")}${g.paths.length > 4 ? "..." : ""}`);
+  const targeting = parts.join("; ") || "no distinctive targeting yet";
+
+  // The higher-order tells, deduped across the group's journeys.
+  const kinds = new Set(g.journeys.flatMap((j) => j.profile.insights.map((i) => i.kind)));
+  const tells: string[] = [];
+  if (kinds.has("impersonation")) tells.push("Wears a known good-bot's identity while behaving hostilely (impersonation)");
+  if (kinds.has("deliberate_violation")) tells.push("Read robots.txt, then broke the rules on purpose (deliberate)");
+  if (kinds.has("payload_attack")) {
+    const a = Array.from(new Set(g.attacks));
+    tells.push(`Sent live ${a.length ? a.join(" / ") : "injection"} payloads`);
+  }
+  if (kinds.has("id_enumeration")) tells.push("Walked sequential object IDs (IDOR enumeration)");
+  if (kinds.has("runaway_loop")) tells.push("Hammered one endpoint in a loop (resource exhaustion)");
+  if (g.subActors.length > 1) tells.push(`${g.subActors.length} distinguishable targeting profiles under this fingerprint`);
+  if (g.grouping === "coarse") tells.push("Coarse fingerprint: grouping is likely, not proven");
+
+  // Recommended action: deterministic from severity + proof. A block is only
+  // recommended on PROVEN-hostile behavior; hostile-but-inferred escalates first.
+  let recommendedAction: RecommendedAction;
+  let actionRationale: string;
+  if (g.severity === "hostile" && g.proven) {
+    recommendedAction = "block";
+    actionRationale = "Proven-hostile behavior a legitimate client never shows. Block the operator fingerprint.";
+  } else if (g.severity === "hostile") {
+    recommendedAction = "escalate";
+    actionRationale = "Hostile behavior, but the grouping is inferred. Escalate to confirm before blocking.";
+  } else if (g.severity === "elevated") {
+    recommendedAction = "escalate";
+    actionRationale = "Elevated-risk signals worth a human look.";
+  } else if (primaryClass === "benign_crawler") {
+    recommendedAction = "acknowledge";
+    actionRationale = "Identified, rule-respecting crawler. Acknowledge and move on.";
+  } else {
+    recommendedAction = "watch";
+    actionRationale = "Weak signals only. Keep watching for escalation.";
+  }
+
+  return { verdict, targeting, tells, recommendedAction, actionRationale, confidence };
+}
