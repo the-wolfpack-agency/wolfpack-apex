@@ -129,7 +129,10 @@ export const NAV_ITEMS: NavItem[] = [
   { label: "Compliance Scan", href: "/admin/compliance-scan", roles: ["ceo", "cto", "evp", "vp", "cco"], icon: "M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" },
   /* Site Analytics: ogiam.com usage (where + when), ingested into our own
      platform and rendered with the reused HourHeatmap. Admin-scoped. */
-  { label: "Site Analytics", href: "/admin/site-analytics", roles: ["ceo", "cto", "evp"], icon: "M3 3v18h18M7 14l3-3 3 3 5-5" },
+  // No role gate: Site Analytics (the Forcefield agent-traffic report) is
+  // org-wide reading for every seat (capability analytics.view is in
+  // SELF_SERVICE). The write actions on the page stay capability-gated.
+  { label: "Site Analytics", href: "/admin/site-analytics", icon: "M3 3v18h18M7 14l3-3 3 3 5-5" },
   { label: "QR Codes", href: "/qr", icon: "M3.75 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 013.75 9.375v-4.5zM3.75 14.625c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5a1.125 1.125 0 01-1.125-1.125v-4.5zM13.5 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0113.5 9.375v-4.5z M6.75 6.75h.75v.75h-.75v-.75zM6.75 16.5h.75v.75h-.75v-.75zM16.5 6.75h.75v.75h-.75v-.75zM13.5 13.5h.75v.75h-.75v-.75zM13.5 19.5h.75v.75h-.75v-.75zM19.5 13.5h.75v.75h-.75v-.75zM19.5 19.5h.75v.75h-.75v-.75zM16.5 16.5h.75v.75h-.75v-.75z" },
   { label: "Surveys", href: "/surveys", icon: "M9 12h6m-6 4h6m-7-9h.01M9 7h6m-9 13h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" },
   { label: "Job Codes", href: "/job-codes", icon: "M3.75 6h16.5M3.75 12h16.5m-16.5 6h16.5" },

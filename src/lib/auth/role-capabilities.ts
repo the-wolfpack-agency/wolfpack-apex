@@ -48,6 +48,13 @@ const SELF_SERVICE: readonly Capability[] = [
   // The product catalog is org-wide reading too: every seat should understand
   // what the team has built and what is in flight.
   "products.view",
+  // Site Analytics (the Forcefield agent-traffic report) is org-wide reading:
+  // every seat should be able to see how the site's automated traffic is being
+  // handled. It gates ONLY the read of /api/admin/site-analytics; the write
+  // actions on that page (triage, operator block, promote-to-board) stay behind
+  // analytics.triage / settings.manage_team, so a viewer sees the board but not
+  // the controls.
+  "analytics.view",
   // The engineering wiki is org-wide reading: it explains how the systems work
   // to every team member. Authoring (engineering.manage) stays with CTO/CEO.
   "engineering.view",

@@ -115,6 +115,10 @@ export default function SiteAnalyticsPage() {
   const [operatorTriageOverride, setOperatorTriageOverride] = useState<Record<string, TriageStatus>>({});
   const [blockedOverride, setBlockedOverride] = useState<Record<string, boolean>>({});
   const [promotedOps, setPromotedOps] = useState<Record<string, boolean>>({});
+  // The page is org-wide readable; write controls render only for callers who
+  // hold the capability, so a viewer never sees a button that would 403. Least
+  // privilege until the server tells us otherwise.
+  const [permissions, setPermissions] = useState<{ triage: boolean; manageOperators: boolean }>({ triage: false, manageOperators: false });
 
   const toggleProfile = useCallback((key: string) => {
     setExpanded((prev) => {
@@ -191,8 +195,9 @@ export default function SiteAnalyticsPage() {
         setState("error");
         return;
       }
-      const body = (await res.json()) as { summary: Summary };
+      const body = (await res.json()) as { summary: Summary; permissions?: { triage: boolean; manageOperators: boolean } };
       setSummary(body.summary);
+      if (body.permissions) setPermissions(body.permissions);
       setState("ready");
     } catch {
       setState("error");
@@ -301,12 +306,14 @@ export default function SiteAnalyticsPage() {
         {expanded.has(j.key) ? "▾ Hide agent profile" : "▸ View agent profile"}
       </button>
       {expanded.has(j.key) && <AgentProfilePanel profile={j.profile} testKey={j.key} />}
-      <div style={{ marginTop: "0.55rem", display: "flex", flexWrap: "wrap", gap: "0.35rem", alignItems: "center" }}>
-        <span style={{ fontSize: "0.66rem", textTransform: "uppercase", letterSpacing: "0.03em", color: "var(--wp-text-muted, #6b7280)", marginRight: "0.15rem" }}>Triage</span>
-        {triageBtn(j, "acknowledged", "Acknowledge", "var(--wp-text-muted, #9ca3af)")}
-        {triageBtn(j, "escalated", "Escalate", "var(--wp-error, #ef4444)")}
-        {triageBtn(j, "dismissed", "Dismiss", "var(--wp-text-muted, #6b7280)")}
-      </div>
+      {permissions.triage && (
+        <div style={{ marginTop: "0.55rem", display: "flex", flexWrap: "wrap", gap: "0.35rem", alignItems: "center" }}>
+          <span style={{ fontSize: "0.66rem", textTransform: "uppercase", letterSpacing: "0.03em", color: "var(--wp-text-muted, #6b7280)", marginRight: "0.15rem" }}>Triage</span>
+          {triageBtn(j, "acknowledged", "Acknowledge", "var(--wp-text-muted, #9ca3af)")}
+          {triageBtn(j, "escalated", "Escalate", "var(--wp-error, #ef4444)")}
+          {triageBtn(j, "dismissed", "Dismiss", "var(--wp-text-muted, #6b7280)")}
+        </div>
+      )}
     </li>
   );
 
@@ -665,11 +672,17 @@ export default function SiteAnalyticsPage() {
                           </span>
                         </div>
                       )}
+                      {(permissions.triage || permissions.manageOperators) && (
                       <div style={{ display: "flex", flexWrap: "wrap", gap: "0.35rem", alignItems: "center" }}>
                         <span style={{ fontSize: "0.66rem", textTransform: "uppercase", letterSpacing: "0.03em", color: "var(--wp-text-muted, #6b7280)", marginRight: "0.15rem" }}>Operator</span>
-                        {opBtn(g.operatorKey, "acknowledged", "Acknowledge", "var(--wp-text-muted, #9ca3af)")}
-                        {opBtn(g.operatorKey, "escalated", "Escalate", "var(--wp-error, #ef4444)")}
-                        {opBtn(g.operatorKey, "dismissed", "Dismiss", "var(--wp-text-muted, #6b7280)")}
+                        {permissions.triage && (
+                          <>
+                            {opBtn(g.operatorKey, "acknowledged", "Acknowledge", "var(--wp-text-muted, #9ca3af)")}
+                            {opBtn(g.operatorKey, "escalated", "Escalate", "var(--wp-error, #ef4444)")}
+                            {opBtn(g.operatorKey, "dismissed", "Dismiss", "var(--wp-text-muted, #6b7280)")}
+                          </>
+                        )}
+                        {permissions.manageOperators && (
                         <button
                           type="button"
                           data-testid={`operator-block-${g.operatorKey}`}
@@ -683,6 +696,8 @@ export default function SiteAnalyticsPage() {
                         >
                           {isBlocked(g.operatorKey) ? "Unblock" : "Block"}
                         </button>
+                        )}
+                        {permissions.triage && (
                         <button
                           type="button"
                           data-testid={`operator-promote-${g.operatorKey}`}
@@ -698,7 +713,9 @@ export default function SiteAnalyticsPage() {
                         >
                           {promotedOps[g.operatorKey] ? "\u2713 On board" : "Promote to board"}
                         </button>
+                        )}
                       </div>
+                      )}
                       <ul style={{ listStyle: "none", margin: "0.2rem 0 0", padding: 0, display: "grid", gap: "0.5rem" }}>
                         {g.journeys.map(renderJourneyCard)}
                       </ul>

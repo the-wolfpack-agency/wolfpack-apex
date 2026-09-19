@@ -28,6 +28,20 @@ describe("role-capabilities — universal read-only grants", () => {
     }
   });
 
+  test("analytics.view is granted to every role (Site Analytics is org-wide reading)", () => {
+    for (const role of ALL_ROLES) {
+      expect(capabilitiesForRole(role).has("analytics.view")).toBe(true);
+    }
+  });
+
+  test("but the Site Analytics WRITE scopes stay privileged (viewers can't triage/block)", () => {
+    // sales is a plain seat: it can view, but must NOT hold the write scopes.
+    const sales = capabilitiesForRole("sales");
+    expect(sales.has("analytics.view")).toBe(true);
+    expect(sales.has("analytics.triage")).toBe(false);
+    expect(sales.has("settings.manage_team")).toBe(false);
+  });
+
   test("roleCapabilityTable() returns a row for every TeamRole", () => {
     const table = roleCapabilityTable();
     for (const role of ALL_ROLES) {
