@@ -656,6 +656,23 @@ export default function SiteAnalyticsPage() {
                           </div>
                         );
                       })()}
+                      {(() => {
+                        // The operator's PATH across the surface: every finding's
+                        // ordered steps, merged and time-sorted, so the whole
+                        // agent journey chains in one place (not buried per finding).
+                        const opSteps = g.journeys
+                          .flatMap((j) => j.steps ?? [])
+                          .slice()
+                          .sort((a, b) => a.at.localeCompare(b.at))
+                          .slice(0, 40);
+                        if (opSteps.length === 0) return null;
+                        return (
+                          <div data-testid={`operator-path-${g.operatorKey}`} style={{ display: "grid", gap: "0.15rem" }}>
+                            <span style={{ fontSize: "0.62rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em", color: "var(--wp-text-muted, #6b7280)" }}>Path across the surface</span>
+                            <AgentJourneyTimeline steps={opSteps} testId={`operator-timeline-${g.operatorKey}`} />
+                          </div>
+                        );
+                      })()}
                       <p style={{ margin: 0, fontSize: "0.79rem", color: "var(--wp-text, #eee)", lineHeight: 1.5 }}>
                         {g.behaviorClasses.map((c) => CLASS_LABEL[c] ?? c).join(", ")}
                         {(g.paths.length > 0 || g.attacks.length > 0) && (
@@ -742,8 +759,9 @@ export default function SiteAnalyticsPage() {
                         )}
                       </div>
                       )}
-                      <details data-testid={`operator-findings-${g.operatorKey}`}>
-                        <summary style={{ cursor: "pointer", fontSize: "0.72rem", color: "var(--wp-gold, #e8b528)", fontWeight: 600, listStyle: "revert" }}>
+                      <details className="ff-op-findings" data-testid={`operator-findings-${g.operatorKey}`}>
+                        <summary style={{ cursor: "pointer", fontSize: "0.72rem", color: "var(--wp-gold, #e8b528)", fontWeight: 600 }}>
+                          <span className="ff-chev" aria-hidden>&#9656;</span>
                           Show {g.findingCount} finding{g.findingCount === 1 ? "" : "s"}
                         </summary>
                         <ul style={{ listStyle: "none", margin: "0.4rem 0 0", padding: 0, display: "grid", gap: "0.5rem" }}>

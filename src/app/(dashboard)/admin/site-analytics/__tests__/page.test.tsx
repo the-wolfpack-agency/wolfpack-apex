@@ -351,3 +351,28 @@ test("journey card renders the agent-path timeline, honeypot trip highlighted", 
   expect(decoy).toHaveAttribute("data-signal", "tripped_decoy");
   expect(decoy).toHaveTextContent(/TRIPPED DECOY/i);
 });
+
+test("operator card surfaces the consolidated path timeline (agent path, prominent)", async () => {
+  const withSteps = {
+    ...SUMMARY,
+    journeys: [
+      {
+        ...SUMMARY.journeys[0],
+        steps: [
+          { at: "2026-09-18T10:00:00Z", path: "/", signal: null },
+          { at: "2026-09-18T10:00:03Z", path: "/_ff/x", signal: "tripped_decoy" },
+        ],
+      },
+    ],
+  };
+  mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: withSteps, permissions: PERMS }) });
+  render(<SiteAnalyticsPage />);
+  await waitFor(() => expect(screen.getByTestId("ff-journeys-triage")).toBeInTheDocument());
+  fireEvent.click(screen.getByTestId("journey-view-operator"));
+  await screen.findByTestId("ff-operators-view");
+  // The operator's whole path chains at the top of the card, not just per finding.
+  expect(screen.getByTestId("operator-path-op_abc12345")).toBeInTheDocument();
+  const opTl = screen.getByTestId("operator-timeline-op_abc12345");
+  expect(opTl).toBeInTheDocument();
+  expect(opTl).toHaveTextContent(/TRIPPED DECOY/i);
+});
