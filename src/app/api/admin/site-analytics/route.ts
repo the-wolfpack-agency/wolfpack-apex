@@ -21,5 +21,12 @@ export async function GET(req: NextRequest) {
   const days = daysRaw ? Number(daysRaw) : 30;
 
   const summary = await getSiteAnalyticsSummary(days, auth.user.workspaceId);
-  return NextResponse.json({ summary });
+  // The read is now org-wide (analytics.view is in SELF_SERVICE), but the write
+  // actions on the page stay gated. Tell the client which controls the caller
+  // may use so a viewer never sees a button that would 403 (a UI defect).
+  const permissions = {
+    triage: auth.capabilities.has("analytics.triage"),
+    manageOperators: auth.capabilities.has("settings.manage_team"),
+  };
+  return NextResponse.json({ summary, permissions });
 }

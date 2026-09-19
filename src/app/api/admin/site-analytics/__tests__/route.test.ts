@@ -32,12 +32,25 @@ describe("GET /api/admin/site-analytics", () => {
   });
 
   it("200 with the summary, honoring the days param", async () => {
-    mockRequireCapability.mockResolvedValue({ ok: true, user: { id: "u1", role: "cto", workspaceId: "w1" } });
+    mockRequireCapability.mockResolvedValue({ ok: true, user: { id: "u1", role: "cto", workspaceId: "w1" }, capabilities: new Set(["analytics.view", "analytics.triage", "settings.manage_team"]) });
     mockGetSummary.mockResolvedValue({ rangeDays: 7, totalPageViews: 5, totalEvents: 9, byHour: [], byPage: [], byCountry: [], byType: [] });
     const res = await GET(mkReq("?days=7"));
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.summary.rangeDays).toBe(7);
     expect(mockGetSummary).toHaveBeenCalledWith(7, "w1");
+  });
+
+  it("reports the caller's write permissions so the UI hides controls it can't use", async () => {
+    // A privileged caller: both write scopes true.
+    mockRequireCapability.mockResolvedValueOnce({ ok: true, user: { id: "u1", role: "cto", workspaceId: "w1" }, capabilities: new Set(["analytics.view", "analytics.triage", "settings.manage_team"]) });
+    mockGetSummary.mockResolvedValue({ rangeDays: 30, totalPageViews: 0, totalEvents: 0, byHour: [], byPage: [], byCountry: [], byType: [] });
+    let body = await (await GET(mkReq())).json();
+    expect(body.permissions).toEqual({ triage: true, manageOperators: true });
+
+    // A read-only viewer (has analytics.view via SELF_SERVICE, no write scopes).
+    mockRequireCapability.mockResolvedValueOnce({ ok: true, user: { id: "u2", role: "sales", workspaceId: "w1" }, capabilities: new Set(["analytics.view"]) });
+    body = await (await GET(mkReq())).json();
+    expect(body.permissions).toEqual({ triage: false, manageOperators: false });
   });
 });

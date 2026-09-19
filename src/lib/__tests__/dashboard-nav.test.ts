@@ -25,3 +25,20 @@ describe("Tools is hidden from the rail but not removed from the product", () =>
     expect(source).toMatch(/Tools is intentionally hidden/);
   });
 });
+
+import { NAV_ITEMS as NAV, canSeeNavItem } from "@/lib/dashboard-nav";
+
+describe("Site Analytics is org-wide, not admin-only", () => {
+  const item = NAV.find((i) => i.href === "/admin/site-analytics");
+
+  it("is in the nav", () => {
+    expect(item).toBeTruthy();
+  });
+
+  it("carries no role gate, so every seat (not just ceo/cto/evp) sees it", () => {
+    expect(item!.roles).toBeUndefined();
+    for (const role of ["sales", "ops", "hr", "designer", "dev", "vp", "cco", "evp", "cto", "ceo"]) {
+      expect(canSeeNavItem(item!, role, null)).toBe(true);
+    }
+  });
+});

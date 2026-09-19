@@ -50,6 +50,8 @@ const SUMMARY = {
   blockedOperators: [],
 };
 
+const PERMS = { triage: true, manageOperators: true };
+
 beforeEach(() => {
   mockFetchWithRefresh.mockReset();
 });
@@ -57,7 +59,7 @@ beforeEach(() => {
 test("renders the reused heatmap, totals, and top pages/countries from the summary", async () => {
   mockFetchWithRefresh.mockResolvedValue({
     ok: true,
-    json: async () => ({ summary: SUMMARY }),
+    json: async () => ({ summary: SUMMARY, permissions: PERMS }),
   });
 
   render(<SiteAnalyticsPage />);
@@ -107,7 +109,7 @@ test("shows an error state when the data route fails", async () => {
 });
 
 test("expanding a journey reveals its agent profile: verdict, processes, tooling, operator fingerprint", async () => {
-  mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: SUMMARY }) });
+  mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: SUMMARY, permissions: PERMS }) });
   render(<SiteAnalyticsPage />);
   await waitFor(() => expect(screen.getByTestId("ff-journeys-triage")).toBeInTheDocument());
 
@@ -135,7 +137,7 @@ test("expanding a journey reveals its agent profile: verdict, processes, tooling
 
 
 test("triage actions: acknowledge shows a badge + POSTs, dismiss hides the finding behind a toggle", async () => {
-  mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: SUMMARY }) });
+  mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: SUMMARY, permissions: PERMS }) });
   render(<SiteAnalyticsPage />);
   await waitFor(() => expect(screen.getByTestId("ff-journeys-triage")).toBeInTheDocument());
 
@@ -170,7 +172,7 @@ test("surfaces a novel impersonation conclusion as a badge and in the profile pa
       },
     ],
   };
-  mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: impersonated }) });
+  mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: impersonated, permissions: PERMS }) });
   render(<SiteAnalyticsPage />);
   await waitFor(() => expect(screen.getByTestId("ff-journeys-triage")).toBeInTheDocument());
 
@@ -186,7 +188,7 @@ test("surfaces a novel impersonation conclusion as a badge and in the profile pa
 
 
 test("by-operator view consolidates findings under one operator with operator-level triage", async () => {
-  mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: SUMMARY }) });
+  mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: SUMMARY, permissions: PERMS }) });
   render(<SiteAnalyticsPage />);
   await waitFor(() => expect(screen.getByTestId("ff-journeys-triage")).toBeInTheDocument());
 
@@ -210,7 +212,7 @@ test("by-operator view consolidates findings under one operator with operator-le
 
 
 test("blocking an operator POSTs to the block route and shows a blocked badge", async () => {
-  mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: SUMMARY }) });
+  mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: SUMMARY, permissions: PERMS }) });
   render(<SiteAnalyticsPage />);
   await waitFor(() => expect(screen.getByTestId("ff-journeys-triage")).toBeInTheDocument());
   fireEvent.click(screen.getByTestId("journey-view-operator"));
@@ -227,7 +229,7 @@ test("blocking an operator POSTs to the block route and shows a blocked badge", 
 });
 
 test("promoting an operator POSTs to the promote route and shows an on-board state", async () => {
-  mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: SUMMARY }) });
+  mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: SUMMARY, permissions: PERMS }) });
   render(<SiteAnalyticsPage />);
   await waitFor(() => expect(screen.getByTestId("ff-journeys-triage")).toBeInTheDocument());
   fireEvent.click(screen.getByTestId("journey-view-operator"));
@@ -256,7 +258,7 @@ test("sub-actors (B): a coarse operator with two distinct targeting profiles sho
     },
   });
   const summary = { ...SUMMARY, journeys: [j("s1", ["/.env"]), j("s2", ["/.git"]), j("s3", ["/wp-login.php"])] };
-  mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary }) });
+  mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary, permissions: PERMS }) });
   render(<SiteAnalyticsPage />);
   await waitFor(() => expect(screen.getByTestId("ff-journeys-triage")).toBeInTheDocument());
   fireEvent.click(screen.getByTestId("journey-view-operator"));
@@ -269,4 +271,40 @@ test("sub-actors (B): a coarse operator with two distinct targeting profiles sho
   expect(sub).toHaveTextContent(/admin-surface/i);
   // honesty rail: the coarse fingerprint stays the anchor, not a claim of separate identities
   expect(sub).toHaveTextContent(/not separate identities/i);
+});
+
+test("a read-only viewer sees the triage board but no journey triage controls", async () => {
+  mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: SUMMARY, permissions: { triage: false, manageOperators: false } }) });
+  render(<SiteAnalyticsPage />);
+  await waitFor(() => expect(screen.getByTestId("ff-journeys-triage")).toBeInTheDocument());
+  // The read-only content still renders.
+  expect(screen.getByTestId("triage-summary")).toBeInTheDocument();
+  // But the write controls do not.
+  expect(screen.queryByTestId("triage-acknowledged-fp1")).not.toBeInTheDocument();
+  expect(screen.queryByTestId("triage-escalated-fp1")).not.toBeInTheDocument();
+});
+
+test("a read-only viewer sees the operator board but no operator controls", async () => {
+  mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: SUMMARY, permissions: { triage: false, manageOperators: false } }) });
+  render(<SiteAnalyticsPage />);
+  await waitFor(() => expect(screen.getByTestId("ff-journeys-triage")).toBeInTheDocument());
+  fireEvent.click(screen.getByTestId("journey-view-operator"));
+  await screen.findByTestId("ff-operators-view");
+  // The operator dossier renders (read-only intelligence)...
+  expect(screen.getByTestId("operator-op_abc12345")).toBeInTheDocument();
+  // ...but none of the write controls do.
+  expect(screen.queryByTestId("operator-triage-escalated-op_abc12345")).not.toBeInTheDocument();
+  expect(screen.queryByTestId("operator-block-op_abc12345")).not.toBeInTheDocument();
+  expect(screen.queryByTestId("operator-promote-op_abc12345")).not.toBeInTheDocument();
+});
+
+test("a triage-capable but non-manager sees triage + promote, but not block", async () => {
+  mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: SUMMARY, permissions: { triage: true, manageOperators: false } }) });
+  render(<SiteAnalyticsPage />);
+  await waitFor(() => expect(screen.getByTestId("ff-journeys-triage")).toBeInTheDocument());
+  fireEvent.click(screen.getByTestId("journey-view-operator"));
+  await screen.findByTestId("ff-operators-view");
+  expect(screen.getByTestId("operator-triage-escalated-op_abc12345")).toBeInTheDocument();
+  expect(screen.getByTestId("operator-promote-op_abc12345")).toBeInTheDocument();
+  expect(screen.queryByTestId("operator-block-op_abc12345")).not.toBeInTheDocument();
 });
