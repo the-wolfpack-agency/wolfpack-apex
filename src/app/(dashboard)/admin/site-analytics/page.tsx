@@ -14,6 +14,7 @@ import { fetchWithRefresh, jsonHeaders } from "@/lib/client-auth";
 import { HourHeatmap } from "@/components/HourHeatmap";
 import { AgentOriginMap } from "@/components/AgentOriginMap";
 import { triageJourneys, type Severity } from "@/lib/agent-triage";
+import { consolidateByOperator } from "@/lib/agent-operators-view";
 
 interface Summary {
   rangeDays: number;
@@ -45,6 +46,7 @@ interface Summary {
   agentOrigins: Array<{ country: string; total: number; welcomed: number; flagged: number; hostile: number }>;
   probeIntel: Array<{ label: string; cwe: string; severity: "low" | "medium" | "high" | "critical"; category: string; count: number }>;
   payloadIntel: Array<{ attack: string; count: number }>;
+  operatorTriage: Record<string, TriageStatus>;
 }
 
 interface AgentProfile {
@@ -108,6 +110,8 @@ export default function SiteAnalyticsPage() {
   const [showBenign, setShowBenign] = useState(false);
   const [showDismissed, setShowDismissed] = useState(false);
   const [triageOverride, setTriageOverride] = useState<Record<string, TriageStatus>>({});
+  const [journeyView, setJourneyView] = useState<"severity" | "operator">("severity");
+  const [operatorTriageOverride, setOperatorTriageOverride] = useState<Record<string, TriageStatus>>({});
 
   const toggleProfile = useCallback((key: string) => {
     setExpanded((prev) => {
@@ -131,9 +135,23 @@ export default function SiteAnalyticsPage() {
     }
   }, []);
 
+  const setOperatorTriage = useCallback(async (opKey: string, status: TriageStatus) => {
+    setOperatorTriageOverride((prev) => ({ ...prev, [opKey]: status }));
+    try {
+      await fetchWithRefresh("/api/admin/site-analytics/triage", {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: JSON.stringify({ findingKey: `op:${opKey}`, status }),
+      });
+    } catch {
+      /* optimistic; a reload reconciles */
+    }
+  }, []);
+
   const load = useCallback(async (range: number) => {
     setState("loading");
     setTriageOverride({});
+    setOperatorTriageOverride({});
     try {
       const res = await fetchWithRefresh(`/api/admin/site-analytics?days=${range}`);
       if (!res.ok) {
@@ -508,7 +526,91 @@ export default function SiteAnalyticsPage() {
               the actor carried a correlation token (engaged a trap or a hidden field only a bot touches). <strong style={{ color: "var(--wp-text, #eee)" }}>Inferred</strong> =
               grouped by a coarse fingerprint, a likely match, not confirmed.
             </p>
-            <div data-testid="ff-journeys-triage" style={{ marginTop: "0.9rem", display: "grid", gap: "0.8rem" }}>
+            {/* View toggle: triage findings by severity, or consolidate them by operator. */}
+            <div style={{ display: "flex", gap: "0.4rem", marginTop: "0.8rem" }}>
+              {(["severity", "operator"] as const).map((v) => (
+                <button
+                  key={v}
+                  type="button"
+                  data-testid={`journey-view-${v}`}
+                  onClick={() => setJourneyView(v)}
+                  style={{
+                    padding: "0.2rem 0.7rem", borderRadius: 999, fontSize: "0.72rem", fontWeight: 600, cursor: "pointer",
+                    background: journeyView === v ? "var(--wp-gold, #e8b528)" : "transparent",
+                    color: journeyView === v ? "var(--wp-dark, #0b0d11)" : "var(--wp-text-muted, #9ca3af)",
+                    border: "1px solid var(--wp-dark-border, #333)",
+                  }}
+                >
+                  {v === "severity" ? "By severity" : "By operator"}
+                </button>
+              ))}
+            </div>
+
+            {journeyView === "operator" && (
+              <div data-testid="ff-operators-view" style={{ marginTop: "0.9rem", display: "grid", gap: "0.7rem" }}>
+                {(() => {
+                  const groups = consolidateByOperator(summary.journeys);
+                  if (groups.length === 0) return <p style={{ fontSize: "0.82rem", color: "var(--wp-text-muted, #9ca3af)" }}>No operators yet.</p>;
+                  const opStatus = (k: string): TriageStatus => operatorTriageOverride[k] ?? summary.operatorTriage?.[k] ?? "new";
+                  const sevColor = (sv: string) => (sv === "hostile" ? "var(--wp-error, #ef4444)" : sv === "elevated" ? "var(--wp-warning, #f5a623)" : "var(--wp-success, #30a46c)");
+                  const opBtn = (opKey: string, status: TriageStatus, text: string, color: string) => (
+                    <button
+                      type="button"
+                      data-testid={`operator-triage-${status}-${opKey}`}
+                      onClick={() => setOperatorTriage(opKey, opStatus(opKey) === status ? "new" : status)}
+                      style={{
+                        padding: "0.12rem 0.5rem", borderRadius: 999, fontSize: "0.68rem", fontWeight: 600, cursor: "pointer",
+                        background: opStatus(opKey) === status ? color : "transparent",
+                        color: opStatus(opKey) === status ? "var(--wp-dark, #0b0d11)" : "var(--wp-text-muted, #9ca3af)",
+                        border: `1px solid ${color}`,
+                      }}
+                    >
+                      {text}
+                    </button>
+                  );
+                  return groups.map((g) => (
+                    <div key={g.operatorKey} data-testid={`operator-${g.operatorKey}`} style={{ border: `1px solid ${sevColor(g.severity)}`, borderRadius: 8, padding: "0.8rem 0.9rem", display: "grid", gap: "0.5rem" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
+                        <span style={{ fontFamily: "var(--wp-mono, ui-monospace, monospace)", fontSize: "0.85rem", fontWeight: 700, color: "var(--wp-gold, #e8b528)" }}>{g.operatorKey}</span>
+                        <span style={{ fontSize: "0.62rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em", color: "var(--wp-dark, #0b0d11)", background: sevColor(g.severity), borderRadius: 999, padding: "0.1rem 0.45rem" }}>{g.severity}</span>
+                        <span
+                          data-testid={`operator-grouping-${g.operatorKey}`}
+                          title={g.groupingReason}
+                          style={{ fontSize: "0.62rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em", borderRadius: 999, padding: "0.1rem 0.45rem", color: g.grouping === "coarse" ? "var(--wp-warning, #f5a623)" : "var(--wp-success, #30a46c)", border: `1px solid ${g.grouping === "coarse" ? "var(--wp-warning, #f5a623)" : "var(--wp-success, #30a46c)"}` }}
+                        >
+                          {g.grouping === "coarse" ? "coarse grouping" : "distinctive"}
+                        </span>
+                        {opStatus(g.operatorKey) !== "new" && (
+                          <span data-testid={`operator-status-${g.operatorKey}`} style={{ fontSize: "0.6rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em", color: "var(--wp-text-muted, #9ca3af)", border: "1px solid var(--wp-dark-border, #333)", borderRadius: 999, padding: "0.1rem 0.4rem" }}>{opStatus(g.operatorKey)}</span>
+                        )}
+                        <span style={{ marginLeft: "auto", fontSize: "0.72rem", color: "var(--wp-text-muted, #9ca3af)" }}>{g.findingCount} finding{g.findingCount === 1 ? "" : "s"}</span>
+                      </div>
+                      <p style={{ margin: 0, fontSize: "0.79rem", color: "var(--wp-text, #eee)", lineHeight: 1.5 }}>
+                        {g.behaviorClasses.map((c) => CLASS_LABEL[c] ?? c).join(", ")}
+                        {(g.paths.length > 0 || g.attacks.length > 0) && (
+                          <>
+                            {" · targets: "}
+                            <span style={{ color: "var(--wp-text-muted, #9ca3af)" }}>{[...g.attacks, ...g.paths].slice(0, 6).join(", ")}</span>
+                          </>
+                        )}
+                      </p>
+                      <p style={{ margin: 0, fontSize: "0.7rem", color: "var(--wp-text-muted, #9ca3af)", fontStyle: "italic", lineHeight: 1.4 }}>{g.groupingReason}</p>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: "0.35rem", alignItems: "center" }}>
+                        <span style={{ fontSize: "0.66rem", textTransform: "uppercase", letterSpacing: "0.03em", color: "var(--wp-text-muted, #6b7280)", marginRight: "0.15rem" }}>Operator</span>
+                        {opBtn(g.operatorKey, "acknowledged", "Acknowledge", "var(--wp-text-muted, #9ca3af)")}
+                        {opBtn(g.operatorKey, "escalated", "Escalate", "var(--wp-error, #ef4444)")}
+                        {opBtn(g.operatorKey, "dismissed", "Dismiss", "var(--wp-text-muted, #6b7280)")}
+                      </div>
+                      <ul style={{ listStyle: "none", margin: "0.2rem 0 0", padding: 0, display: "grid", gap: "0.5rem" }}>
+                        {g.journeys.map(renderJourneyCard)}
+                      </ul>
+                    </div>
+                  ));
+                })()}
+              </div>
+            )}
+
+            <div data-testid="ff-journeys-triage" style={{ marginTop: "0.9rem", display: journeyView === "severity" ? "grid" : "none", gap: "0.8rem" }}>
               {(() => {
                 const dismissedCount = summary.journeys.filter((x) => currentStatus(x) === "dismissed").length;
                 const visibleJourneys = summary.journeys.filter((x) => showDismissed || currentStatus(x) !== "dismissed");

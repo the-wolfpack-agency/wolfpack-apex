@@ -109,6 +109,9 @@ export interface SiteAnalyticsSummary {
   /* Payload attacks: active exploitation attempts (injection payloads) agents
      sent, aggregated by attack kind. From the edge payload detector. */
   payloadIntel: Array<{ attack: string; count: number }>;
+  /* Operator-level triage state, keyed by operatorKey, so escalating/dismissing
+     an operator persists across its findings and across reloads. */
+  operatorTriage: Record<string, TriageStatus>;
 }
 
 /** Clamp the requested window to a sane integer day count. */
@@ -126,6 +129,23 @@ async function attachTriage<T extends { key: string; profile: AgentProfile }>(
   if (!workspaceId || journeys.length === 0) return journeys.map((j) => ({ ...j, triage: "new" as TriageStatus }));
   const states = await getFindingTriage(workspaceId, journeys.map((j) => j.key));
   return journeys.map((j) => ({ ...j, triage: states[j.key]?.status ?? "new" }));
+}
+
+/** Operator-level triage, keyed by operatorKey (stored under an "op:" prefix in
+ *  the same triage table). Lets an analyst act on a bad actor once. */
+async function operatorTriageStates(
+  journeys: ReadonlyArray<{ profile: AgentProfile }>,
+  workspaceId?: string,
+): Promise<Record<string, TriageStatus>> {
+  if (!workspaceId || journeys.length === 0) return {};
+  const opKeys = Array.from(new Set(journeys.map((j) => j.profile.operatorKey)));
+  const states = await getFindingTriage(workspaceId, opKeys.map((k) => `op:${k}`));
+  const out: Record<string, TriageStatus> = {};
+  for (const k of opKeys) {
+    const st = states[`op:${k}`]?.status;
+    if (st) out[k] = st;
+  }
+  return out;
 }
 
 /**
@@ -224,6 +244,18 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
   ]);
 
   const t = totals.rows[0];
+  const journeys = await attachTriage(
+    buildJourneys(
+      journeyRows.rows.map((r) => {
+        const nonce = r.nonce ?? undefined;
+        const key = nonce ?? r.sig ?? "";
+        const keyKind: CorrelationKind = nonce ? "nonce" : "fingerprint";
+        return { key, keyKind, type: r.event_type, path: r.path ?? "", at: r.created_at, nonceLinked: !!nonce, agent: r.agent ?? undefined, attack: r.attack ?? undefined };
+      }).filter((r) => r.key !== ""),
+    ).slice(0, 25).map((j) => ({ ...j, profile: buildAgentProfile(j) })),
+    workspaceId,
+  );
+  const operatorTriage = await operatorTriageStates(journeys, workspaceId);
   return {
     rangeDays: days,
     totalPageViews: t ? Number(t.page_views) : 0,
@@ -238,17 +270,8 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
       trapped: ff.rows[0] ? Number(ff.rows[0].trapped) : 0,
       topAgents: ffAgents.rows.map((r) => ({ agent: r.agent, count: Number(r.count) })),
     },
-    journeys: await attachTriage(
-      buildJourneys(
-        journeyRows.rows.map((r) => {
-          const nonce = r.nonce ?? undefined;
-          const key = nonce ?? r.sig ?? "";
-          const keyKind: CorrelationKind = nonce ? "nonce" : "fingerprint";
-          return { key, keyKind, type: r.event_type, path: r.path ?? "", at: r.created_at, nonceLinked: !!nonce, agent: r.agent ?? undefined, attack: r.attack ?? undefined };
-        }).filter((r) => r.key !== ""),
-      ).slice(0, 25).map((j) => ({ ...j, profile: buildAgentProfile(j) })),
-      workspaceId,
-    ),
+    journeys,
+    operatorTriage,
     agentOrigins: agentOriginRows.rows.map((r) => ({
       country: r.country,
       total: Number(r.total),
