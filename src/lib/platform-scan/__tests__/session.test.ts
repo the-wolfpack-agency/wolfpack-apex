@@ -7,6 +7,21 @@
  * paths assert the function never throws.
  */
 
+/*
+ * Hermetic DNS. establishSession() runs the SSRF guard (assertScannableUrl),
+ * which does a real `lookup()` on the target host BEFORE the mocked fetch. With
+ * a real public hostname (target.example.com) that live resolution intermittently
+ * exceeded the 5s jest timeout under CI load and flaked this suite - the fetch was
+ * mocked but the DNS was not. Mocking node:dns/promises to resolve to a fixed
+ * PUBLIC ip keeps the guard's logic exercised (host is allowed) while removing all
+ * real network I/O, so these unit tests are deterministic. SSRF BLOCKING is proven
+ * separately in session-ssrf.test.ts (IP-literal / private-host cases), which does
+ * not mock DNS.
+ */
+jest.mock("node:dns/promises", () => ({
+  lookup: jest.fn(async () => [{ address: "93.184.216.34", family: 4 }]),
+}));
+
 import {
   establishSession,
   establishOAuthPasswordSession,
