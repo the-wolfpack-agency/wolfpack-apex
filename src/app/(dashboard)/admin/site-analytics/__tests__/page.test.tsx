@@ -328,3 +328,26 @@ test("operator card: codified insight panel (verdict + recommendation) and the j
   expect(findings).not.toHaveAttribute("open");
   expect(findings).toHaveTextContent(/Show 1 finding/i);
 });
+
+test("journey card renders the agent-path timeline, honeypot trip highlighted", async () => {
+  const withSteps = {
+    ...SUMMARY,
+    journeys: [
+      {
+        ...SUMMARY.journeys[0],
+        steps: [
+          { at: "2026-09-18T10:00:00Z", path: "/", signal: null },
+          { at: "2026-09-18T10:00:03Z", path: "/_ff/x", signal: "tripped_decoy" },
+          { at: "2026-09-18T10:00:05Z", path: "/.env", signal: "probed_sensitive" },
+        ],
+      },
+    ],
+  };
+  mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: withSteps, permissions: PERMS }) });
+  render(<SiteAnalyticsPage />);
+  await waitFor(() => expect(screen.getByTestId("ff-journeys-triage")).toBeInTheDocument());
+  expect(screen.getByTestId("journey-timeline-fp1")).toBeInTheDocument();
+  const decoy = screen.getByTestId("journey-timeline-fp1-step-1");
+  expect(decoy).toHaveAttribute("data-signal", "tripped_decoy");
+  expect(decoy).toHaveTextContent(/TRIPPED DECOY/i);
+});

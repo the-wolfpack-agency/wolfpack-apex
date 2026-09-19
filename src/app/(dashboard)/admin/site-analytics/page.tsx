@@ -13,6 +13,8 @@ import { useCallback, useEffect, useState } from "react";
 import { fetchWithRefresh, jsonHeaders } from "@/lib/client-auth";
 import { HourHeatmap } from "@/components/HourHeatmap";
 import { AgentOriginMap } from "@/components/AgentOriginMap";
+import { AgentJourneyTimeline } from "@/components/AgentJourneyTimeline";
+import type { JourneyStep } from "@/lib/agent-behavior";
 import { triageJourneys, type Severity } from "@/lib/agent-triage";
 import { consolidateByOperator, deriveOperatorInsight } from "@/lib/agent-operators-view";
 
@@ -36,6 +38,7 @@ interface Summary {
     behaviorClass: string;
     signals: string[];
     path: string[];
+    steps: JourneyStep[];
     eventCount: number;
     firstAt: string;
     lastAt: string;
@@ -291,10 +294,14 @@ export default function SiteAnalyticsPage() {
         <span style={{ marginLeft: "auto", fontSize: "0.72rem", color: "var(--wp-text-muted, #9ca3af)" }}>{j.eventCount} events</span>
       </div>
       <p style={{ margin: "0.45rem 0 0", fontSize: "0.8rem", color: "var(--wp-text, #eee)", lineHeight: 1.5 }}>{j.summary}</p>
-      {j.path.length > 0 && (
-        <div style={{ marginTop: "0.45rem", fontSize: "0.72rem", color: "var(--wp-text-muted, #9ca3af)", overflowX: "auto", whiteSpace: "nowrap" }}>
-          {j.path.join("  →  ")}
-        </div>
+      {j.steps && j.steps.length > 0 ? (
+        <AgentJourneyTimeline steps={j.steps} testId={`journey-timeline-${j.key}`} />
+      ) : (
+        j.path.length > 0 && (
+          <div style={{ marginTop: "0.45rem", fontSize: "0.72rem", color: "var(--wp-text-muted, #9ca3af)", overflowX: "auto", whiteSpace: "nowrap" }}>
+            {j.path.join("  →  ")}
+          </div>
+        )
       )}
       <button
         type="button"

@@ -9,7 +9,7 @@ import type { ScaffoldingSignature } from "@/lib/agent-probe";
 import type { ToolCompositionReport } from "@/lib/agent-tool-composition";
 
 const journey = (behaviorClass: string, confidence: "proven" | "inferred", path: string[] = []): AgentJourney => ({
-  key: "k", confidence, behaviorClass: behaviorClass as AgentJourney["behaviorClass"], signals: [], path,
+  key: "k", confidence, behaviorClass: behaviorClass as AgentJourney["behaviorClass"], signals: [], path, steps: [],
   eventCount: path.length, firstAt: "t", lastAt: "t", summary: "s", insights: [],
 });
 const scaff = (over: Partial<ScaffoldingSignature> = {}): ScaffoldingSignature => ({

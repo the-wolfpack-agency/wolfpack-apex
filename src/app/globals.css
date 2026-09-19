@@ -1595,3 +1595,15 @@ a:hover { color: var(--wp-gold-hover); }
 .wp-build-travel--strong { background: rgba(111, 158, 120, 0.18); color: #8fc39a; }
 .wp-build-travel--limited { background: rgba(201, 162, 39, 0.16); color: #d8bc63; }
 .wp-build-travel--insufficient { background: rgba(201, 138, 60, 0.18); color: #dd9f5c; }
+
+/* Agent journey timeline - the agent's path across the surface, chained. */
+.wp-jt { list-style: none; margin: 0.3rem 0 0; padding: 0.2rem 0; display: flex; flex-wrap: nowrap; align-items: center; gap: 0.15rem; overflow-x: auto; }
+.wp-jt-item { display: flex; align-items: center; gap: 0.15rem; flex: 0 0 auto; }
+.wp-jt-arrow { color: var(--wp-text-muted, #555); font-size: 0.8rem; padding: 0 0.1rem; }
+.wp-jt-node { display: inline-flex; align-items: baseline; gap: 0.3rem; padding: 0.12rem 0.45rem; border: 1px solid; border-radius: 999px; background: var(--wp-dark-2, rgba(255,255,255,0.03)); font-size: 0.68rem; white-space: nowrap; }
+.wp-jt-glyph { font-size: 0.8rem; line-height: 1; }
+.wp-jt-label { font-weight: 700; text-transform: uppercase; letter-spacing: 0.02em; font-size: 0.6rem; }
+.wp-jt-path { color: var(--wp-text-muted, #9ca3af); font-family: var(--wp-mono, ui-monospace, monospace); }
+.wp-jt-node--bad { box-shadow: 0 0 0 0 currentColor; animation: wp-jt-pulse 1.8s ease-out infinite; }
+@keyframes wp-jt-pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 55%, transparent); } 70% { box-shadow: 0 0 0 6px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
+@media (prefers-reduced-motion: reduce) { .wp-jt-node--bad { animation: none; } }
