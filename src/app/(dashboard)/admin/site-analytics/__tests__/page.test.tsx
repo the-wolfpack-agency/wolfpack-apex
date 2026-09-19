@@ -37,9 +37,9 @@ const SUMMARY = {
     } },
   ],
   agentOrigins: [
-    { country: "US", total: 40, welcomed: 6, flagged: 20, hostile: 14 },
-    { country: "DE", total: 12, welcomed: 2, flagged: 10, hostile: 0 },
-    { country: "ZZ", total: 3, welcomed: 0, flagged: 0, hostile: 3 },
+    { country: "US", total: 40, welcomed: 6, welcomedVerified: 0, flagged: 20, hostile: 14 },
+    { country: "DE", total: 12, welcomed: 2, welcomedVerified: 2, flagged: 10, hostile: 0 },
+    { country: "ZZ", total: 3, welcomed: 0, welcomedVerified: 0, flagged: 0, hostile: 3 },
   ],
   probeIntel: [
     { label: "Cloud metadata endpoint (SSRF / credential theft)", cwe: "CWE-918", severity: "critical" as const, category: "ssrf", count: 2 },

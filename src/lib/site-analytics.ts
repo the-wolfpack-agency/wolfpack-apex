@@ -101,7 +101,7 @@ export interface SiteAnalyticsSummary {
      cloud region or proxy just as often as a person's country - so it is a
      coarse origin signal, never a confirmed operator location. Broken down by
      how Forcefield handled it so a hostile cluster from one origin stands out. */
-  agentOrigins: Array<{ country: string; total: number; welcomed: number; flagged: number; hostile: number }>;
+  agentOrigins: Array<{ country: string; total: number; welcomed: number; welcomedVerified: number; flagged: number; hostile: number }>;
   /* Probe intelligence: the named attacks/CWEs agents are scanning our surface
      for, aggregated from the paths in the reconstructed journeys. Reuses the
      AgenticQA probe-signature knowledge (see agent-probe-signatures). */
@@ -223,10 +223,11 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
     /* Agent provenance by edge country. Only AGENT-signal events (not page
        views), split by how Forcefield handled each, so a hostile cluster from
        one network origin is visible. */
-    safeQuery<{ country: string; total: string; welcomed: string; flagged: string; hostile: string }>(
+    safeQuery<{ country: string; total: string; welcomed: string; welcomed_verified: string; flagged: string; hostile: string }>(
       `SELECT country,
               count(*) AS total,
               count(*) FILTER (WHERE event_type = 'site.agent_welcomed') AS welcomed,
+              count(*) FILTER (WHERE event_type = 'site.agent_welcomed' AND props->>'verified' = 'true') AS welcomed_verified,
               count(*) FILTER (WHERE event_type = 'site.agent_flagged')  AS flagged,
               count(*) FILTER (WHERE event_type IN ('site.agent_trap_tripped', 'site.agent_probed_sensitive', 'site.agent_form_honeypot', 'site.agent_form_too_fast')) AS hostile
          FROM site_analytics_events
@@ -276,6 +277,7 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
       country: r.country,
       total: Number(r.total),
       welcomed: Number(r.welcomed),
+      welcomedVerified: Number(r.welcomed_verified),
       flagged: Number(r.flagged),
       hostile: Number(r.hostile),
     })),
