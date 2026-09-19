@@ -7,6 +7,7 @@ describe("world outline", () => {
     for (const d of paths) {
       expect(d.startsWith("M")).toBe(true);
       expect(d.endsWith("Z")).toBe(true);
+      expect(d).toContain("C"); // smoothed with cubic beziers, not jagged L segments
     }
     const nums = paths.join(" ").match(/-?\d+\.\d+/g)!.map(Number);
     expect(Math.max(...nums)).toBeLessThanOrEqual(720);
