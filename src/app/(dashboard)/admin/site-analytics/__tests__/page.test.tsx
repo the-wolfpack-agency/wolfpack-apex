@@ -4,6 +4,7 @@ import "@testing-library/jest-dom";
 const mockFetchWithRefresh = jest.fn();
 jest.mock("@/lib/client-auth", () => ({
   fetchWithRefresh: (...a: any[]) => mockFetchWithRefresh(...a),
+  jsonHeaders: () => ({ "Content-Type": "application/json" }),
 }));
 
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
@@ -22,7 +23,7 @@ const SUMMARY = {
   byType: [{ type: "site.page_viewed", count: 128 }],
   forcefield: { welcomed: 6, flagged: 9, trapped: 2, topAgents: [{ agent: "GPTBot", count: 6 }] },
   journeys: [
-    { key: "fp1", confidence: "proven", behaviorClass: "aggressive_scraper", signals: ["tripped_decoy"], path: ["/_ff/x", "/admin"], eventCount: 2, firstAt: "2026-09-18T10:00:00Z", lastAt: "2026-09-18T10:00:05Z", summary: "Followed an invisible trap link and harvested greedily.", profile: {
+    { key: "fp1", confidence: "proven", behaviorClass: "aggressive_scraper", signals: ["tripped_decoy"], path: ["/_ff/x", "/admin"], eventCount: 2, firstAt: "2026-09-18T10:00:00Z", lastAt: "2026-09-18T10:00:05Z", summary: "Followed an invisible trap link and harvested greedily.", triage: "new", profile: {
       operatorKey: "op_abc12345",
       correlationKey: "fp1",
       verdict: { confidence: "proven", why: "Proven: it followed an invisible, robots-disallowed decoy link that a human cannot see." },
@@ -113,4 +114,28 @@ test("expanding a journey reveals its agent profile: verdict, processes, tooling
   // Collapses again on a second click.
   fireEvent.click(screen.getByTestId("ff-journey-profile-toggle-fp1"));
   expect(screen.queryByTestId("ff-journey-profile-fp1")).not.toBeInTheDocument();
+});
+
+
+test("triage actions: acknowledge shows a badge + POSTs, dismiss hides the finding behind a toggle", async () => {
+  mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: SUMMARY }) });
+  render(<SiteAnalyticsPage />);
+  await waitFor(() => expect(screen.getByTestId("ff-journeys-triage")).toBeInTheDocument());
+
+  // Acknowledge the fp1 finding -> a status badge appears and a POST is sent.
+  fireEvent.click(screen.getByTestId("triage-acknowledged-fp1"));
+  await waitFor(() => expect(screen.getByTestId("triage-badge-fp1")).toHaveTextContent(/acknowledged/i));
+  const call = mockFetchWithRefresh.mock.calls.find((c) => String(c[0]).includes("/api/admin/site-analytics/triage"));
+  expect(call).toBeTruthy();
+  expect(JSON.parse(call![1].body)).toEqual({ findingKey: "fp1", status: "acknowledged" });
+
+  // Dismiss it -> the card leaves the board, and a "show dismissed" toggle appears.
+  fireEvent.click(screen.getByTestId("triage-dismissed-fp1"));
+  await waitFor(() => expect(screen.queryByTestId("ff-journey-fp1")).not.toBeInTheDocument());
+  const toggle = screen.getByTestId("triage-show-dismissed");
+  expect(toggle).toHaveTextContent(/show 1 dismissed/i);
+
+  // Revealing dismissed brings it back.
+  fireEvent.click(toggle);
+  await waitFor(() => expect(screen.getByTestId("ff-journey-fp1")).toBeInTheDocument());
 });

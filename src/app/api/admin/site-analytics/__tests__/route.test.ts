@@ -32,12 +32,12 @@ describe("GET /api/admin/site-analytics", () => {
   });
 
   it("200 with the summary, honoring the days param", async () => {
-    mockRequireCapability.mockResolvedValue({ ok: true, user: { id: "u1", role: "cto" } });
+    mockRequireCapability.mockResolvedValue({ ok: true, user: { id: "u1", role: "cto", workspaceId: "w1" } });
     mockGetSummary.mockResolvedValue({ rangeDays: 7, totalPageViews: 5, totalEvents: 9, byHour: [], byPage: [], byCountry: [], byType: [] });
     const res = await GET(mkReq("?days=7"));
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.summary.rangeDays).toBe(7);
-    expect(mockGetSummary).toHaveBeenCalledWith(7);
+    expect(mockGetSummary).toHaveBeenCalledWith(7, "w1");
   });
 });
