@@ -28,11 +28,19 @@ describe("threat-coverage matrix", () => {
     }
   });
 
-  // HONESTY: the biggest agent gap must be present and NOT claimed as covered.
-  it("names prompt injection (CWE-1427) as a live-traffic gap, not covered", () => {
+  // Prompt injection now has LIVE inbound detection (OGIAM payload lens).
+  it("covers prompt injection (CWE-1427) on the live payload lens", () => {
     const pi = THREAT_COVERAGE.find((e) => e.id === "CWE-1427")!;
-    expect(pi.status).toBe("gap");
-    expect(pi.note).toMatch(/no live inbound/i);
+    expect(pi.status).toBe("covered");
+    expect(pi.lenses).toContain("payload");
+  });
+
+  it("covers the payload-lens agent-pivot classes (SSRF-param, open redirect, XXE, upload)", () => {
+    for (const id of ["CWE-918", "CWE-601", "CWE-611", "CWE-434"]) {
+      const e = THREAT_COVERAGE.find((x) => x.id === id)!;
+      expect(e.status).toBe("covered");
+      expect(e.lenses).toContain("payload");
+    }
   });
 
   it("marks memory-safety CWEs as not-agent-observable (static-scan domain), not gaps", () => {
