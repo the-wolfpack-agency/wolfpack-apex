@@ -14,6 +14,7 @@
  */
 
 import { centroidFor, project } from "@/lib/geo/country-centroids";
+import { worldOutlinePaths } from "@/lib/geo/world-outline";
 
 export interface AgentOrigin {
   country: string;
@@ -58,6 +59,11 @@ export function AgentOriginMap({ origins }: { origins: readonly AgentOrigin[] })
       `}</style>
       <div style={{ position: "relative", width: "100%", borderRadius: 8, overflow: "hidden", background: "radial-gradient(120% 120% at 50% 30%, #0e1626 0%, #0b0d11 70%)" }}>
         <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label="Agent traffic origins by country" style={{ display: "block" }}>
+          {/* world landmass outline: a subtle backdrop so the nodes read as
+              geography, not floating dots. Low-poly + low-opacity on purpose. */}
+          {worldOutlinePaths(W, H).map((d, i) => (
+            <path key={`land${i}`} d={d} fill="rgba(120,150,200,0.06)" stroke="rgba(120,150,200,0.16)" strokeWidth={0.75} />
+          ))}
           {/* graticule */}
           {meridians.map((lon) => {
             const x = ((lon + 180) / 360) * W;
