@@ -10,7 +10,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { fetchWithRefresh } from "@/lib/client-auth";
+import { fetchWithRefresh, jsonHeaders } from "@/lib/client-auth";
 import { HourHeatmap } from "@/components/HourHeatmap";
 import { AgentOriginMap } from "@/components/AgentOriginMap";
 import { triageJourneys, type Severity } from "@/lib/agent-triage";
@@ -40,6 +40,7 @@ interface Summary {
     lastAt: string;
     summary: string;
     profile: AgentProfile;
+    triage: TriageStatus;
   }>;
   agentOrigins: Array<{ country: string; total: number; welcomed: number; flagged: number; hostile: number }>;
 }
@@ -88,6 +89,8 @@ const CLASS_COLOR: Record<string, string> = {
   unclassified: "var(--wp-text-muted, #9ca3af)",
 };
 
+type TriageStatus = "new" | "acknowledged" | "escalated" | "dismissed";
+
 const RANGES = [7, 30, 90] as const;
 
 export default function SiteAnalyticsPage() {
@@ -98,6 +101,8 @@ export default function SiteAnalyticsPage() {
   const [sevFilter, setSevFilter] = useState<Severity | "all">("all");
   const [provenOnly, setProvenOnly] = useState(false);
   const [showBenign, setShowBenign] = useState(false);
+  const [showDismissed, setShowDismissed] = useState(false);
+  const [triageOverride, setTriageOverride] = useState<Record<string, TriageStatus>>({});
 
   const toggleProfile = useCallback((key: string) => {
     setExpanded((prev) => {
@@ -108,8 +113,22 @@ export default function SiteAnalyticsPage() {
     });
   }, []);
 
+  const setTriage = useCallback(async (key: string, status: TriageStatus) => {
+    setTriageOverride((prev) => ({ ...prev, [key]: status })); // optimistic
+    try {
+      await fetchWithRefresh("/api/admin/site-analytics/triage", {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: JSON.stringify({ findingKey: key, status }),
+      });
+    } catch {
+      /* optimistic value stays; a reload reconciles with the server */
+    }
+  }, []);
+
   const load = useCallback(async (range: number) => {
     setState("loading");
+    setTriageOverride({});
     try {
       const res = await fetchWithRefresh(`/api/admin/site-analytics?days=${range}`);
       if (!res.ok) {
@@ -142,6 +161,28 @@ export default function SiteAnalyticsPage() {
   };
 
   type Journey = Summary["journeys"][number];
+  const currentStatus = (j: Journey): TriageStatus => triageOverride[j.key] ?? j.triage;
+  const TRIAGE_META: Record<Exclude<TriageStatus, "new">, { label: string; color: string }> = {
+    acknowledged: { label: "acknowledged", color: "var(--wp-text-muted, #9ca3af)" },
+    escalated: { label: "escalated", color: "var(--wp-error, #ef4444)" },
+    dismissed: { label: "dismissed", color: "var(--wp-text-muted, #6b7280)" },
+  };
+  const triageBtn = (j: Journey, status: TriageStatus, text: string, color: string) => (
+    <button
+      type="button"
+      data-testid={`triage-${status}-${j.key}`}
+      onClick={() => setTriage(j.key, currentStatus(j) === status ? "new" : status)}
+      aria-pressed={currentStatus(j) === status}
+      style={{
+        padding: "0.12rem 0.5rem", borderRadius: 999, fontSize: "0.68rem", fontWeight: 600, cursor: "pointer",
+        background: currentStatus(j) === status ? color : "transparent",
+        color: currentStatus(j) === status ? "var(--wp-dark, #0b0d11)" : "var(--wp-text-muted, #9ca3af)",
+        border: `1px solid ${color}`,
+      }}
+    >
+      {text}
+    </button>
+  );
   const renderJourneyCard = (j: Journey) => (
     <li key={j.key} data-testid={`ff-journey-${j.key}`} style={{ border: "1px solid var(--wp-dark-border, #333)", borderRadius: 6, padding: "0.7rem 0.8rem" }}>
       <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
@@ -159,6 +200,18 @@ export default function SiteAnalyticsPage() {
         >
           {j.confidence}
         </span>
+        {currentStatus(j) !== "new" && (
+          <span
+            data-testid={`triage-badge-${j.key}`}
+            style={{
+              fontSize: "0.6rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em",
+              padding: "0.1rem 0.4rem", borderRadius: 999, color: TRIAGE_META[currentStatus(j) as Exclude<TriageStatus, "new">].color,
+              border: `1px solid ${TRIAGE_META[currentStatus(j) as Exclude<TriageStatus, "new">].color}`,
+            }}
+          >
+            {TRIAGE_META[currentStatus(j) as Exclude<TriageStatus, "new">].label}
+          </span>
+        )}
         <span style={{ marginLeft: "auto", fontSize: "0.72rem", color: "var(--wp-text-muted, #9ca3af)" }}>{j.eventCount} events</span>
       </div>
       <p style={{ margin: "0.45rem 0 0", fontSize: "0.8rem", color: "var(--wp-text, #eee)", lineHeight: 1.5 }}>{j.summary}</p>
@@ -177,6 +230,12 @@ export default function SiteAnalyticsPage() {
         {expanded.has(j.key) ? "▾ Hide agent profile" : "▸ View agent profile"}
       </button>
       {expanded.has(j.key) && <AgentProfilePanel profile={j.profile} testKey={j.key} />}
+      <div style={{ marginTop: "0.55rem", display: "flex", flexWrap: "wrap", gap: "0.35rem", alignItems: "center" }}>
+        <span style={{ fontSize: "0.66rem", textTransform: "uppercase", letterSpacing: "0.03em", color: "var(--wp-text-muted, #6b7280)", marginRight: "0.15rem" }}>Triage</span>
+        {triageBtn(j, "acknowledged", "Acknowledge", "var(--wp-text-muted, #9ca3af)")}
+        {triageBtn(j, "escalated", "Escalate", "var(--wp-error, #ef4444)")}
+        {triageBtn(j, "dismissed", "Dismiss", "var(--wp-text-muted, #6b7280)")}
+      </div>
     </li>
   );
 
@@ -388,9 +447,11 @@ export default function SiteAnalyticsPage() {
             </p>
             <div data-testid="ff-journeys-triage" style={{ marginTop: "0.9rem", display: "grid", gap: "0.8rem" }}>
               {(() => {
-                const buckets = triageJourneys(summary.journeys);
+                const dismissedCount = summary.journeys.filter((x) => currentStatus(x) === "dismissed").length;
+                const visibleJourneys = summary.journeys.filter((x) => showDismissed || currentStatus(x) !== "dismissed");
+                const buckets = triageJourneys(visibleJourneys);
                 const c = buckets.counts;
-                if (c.total === 0) {
+                if (summary.journeys.length === 0) {
                   return (
                     <p style={{ fontSize: "0.82rem", color: "var(--wp-text-muted, #9ca3af)" }}>
                       No correlated agent journeys yet. Sessions appear here as ogiam.com records agent signals.
@@ -452,6 +513,16 @@ export default function SiteAnalyticsPage() {
                         <input type="checkbox" data-testid="triage-proven-only" checked={provenOnly} onChange={(e) => setProvenOnly(e.target.checked)} />
                         Proven only
                       </label>
+                      {dismissedCount > 0 && (
+                        <button
+                          type="button"
+                          data-testid="triage-show-dismissed"
+                          onClick={() => setShowDismissed((v) => !v)}
+                          style={{ marginLeft: "auto", background: "transparent", border: "none", color: "var(--wp-text-muted, #9ca3af)", fontSize: "0.72rem", fontWeight: 600, cursor: "pointer", padding: 0 }}
+                        >
+                          {showDismissed ? "Hide" : "Show"} {dismissedCount} dismissed
+                        </button>
+                      )}
                     </div>
 
                     {show("hostile") && hostile.length > 0 && (

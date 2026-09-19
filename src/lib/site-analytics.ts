@@ -11,6 +11,7 @@
 import { query, safeQuery } from "@/lib/db";
 import { buildJourneys, type AgentJourney, type CorrelationKind } from "@/lib/agent-behavior";
 import { buildAgentProfile, type AgentProfile } from "@/lib/agent-profile";
+import { getFindingTriage, type TriageStatus } from "@/lib/site-finding-triage";
 
 /** Closed event vocabulary, mirrored from the marketing site's analytics. A
  *  value outside this set is rejected at the ingest boundary. */
@@ -92,7 +93,7 @@ export interface SiteAnalyticsSummary {
   };
   /* Reconstructed agent journeys: correlated sessions with a fused behavior
      class and a proven/inferred confidence. Newest first, capped. */
-  journeys: Array<AgentJourney & { profile: AgentProfile }>;
+  journeys: Array<AgentJourney & { profile: AgentProfile; triage: TriageStatus }>;
   /* Agent provenance: where AGENT traffic (not page views) reached us from, by
      the request's edge country. This is the NETWORK ORIGIN of the traffic - a
      cloud region or proxy just as often as a person's country - so it is a
@@ -107,12 +108,23 @@ function clampDays(days: number): number {
   return Math.max(1, Math.min(365, Math.trunc(days)));
 }
 
+/** Attach persisted triage status to each journey (default "new"). Workspace
+ *  required; without one (or on a DB hiccup) every finding reads as "new". */
+async function attachTriage<T extends { key: string; profile: AgentProfile }>(
+  journeys: T[],
+  workspaceId?: string,
+): Promise<Array<T & { triage: TriageStatus }>> {
+  if (!workspaceId || journeys.length === 0) return journeys.map((j) => ({ ...j, triage: "new" as TriageStatus }));
+  const states = await getFindingTriage(workspaceId, journeys.map((j) => j.key));
+  return journeys.map((j) => ({ ...j, triage: states[j.key]?.status ?? "new" }));
+}
+
 /**
  * Aggregate the last `rangeDays` of site telemetry into the shapes the admin
  * page renders. Pure SQL aggregation; reads only. Degrades to empty arrays when
  * the DB is unavailable (safeQuery), never throws.
  */
-export async function getSiteAnalyticsSummary(rangeDays = 30): Promise<SiteAnalyticsSummary> {
+export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: string): Promise<SiteAnalyticsSummary> {
   const days = clampDays(rangeDays);
   const sinceClause = `created_at > now() - ($1 || ' days')::interval`;
 
@@ -210,14 +222,17 @@ export async function getSiteAnalyticsSummary(rangeDays = 30): Promise<SiteAnaly
       trapped: ff.rows[0] ? Number(ff.rows[0].trapped) : 0,
       topAgents: ffAgents.rows.map((r) => ({ agent: r.agent, count: Number(r.count) })),
     },
-    journeys: buildJourneys(
-      journeyRows.rows.map((r) => {
-        const nonce = r.nonce ?? undefined;
-        const key = nonce ?? r.sig ?? "";
-        const keyKind: CorrelationKind = nonce ? "nonce" : "fingerprint";
-        return { key, keyKind, type: r.event_type, path: r.path ?? "", at: r.created_at, nonceLinked: !!nonce, agent: r.agent ?? undefined };
-      }).filter((r) => r.key !== ""),
-    ).slice(0, 25).map((j) => ({ ...j, profile: buildAgentProfile(j) })),
+    journeys: await attachTriage(
+      buildJourneys(
+        journeyRows.rows.map((r) => {
+          const nonce = r.nonce ?? undefined;
+          const key = nonce ?? r.sig ?? "";
+          const keyKind: CorrelationKind = nonce ? "nonce" : "fingerprint";
+          return { key, keyKind, type: r.event_type, path: r.path ?? "", at: r.created_at, nonceLinked: !!nonce, agent: r.agent ?? undefined };
+        }).filter((r) => r.key !== ""),
+      ).slice(0, 25).map((j) => ({ ...j, profile: buildAgentProfile(j) })),
+      workspaceId,
+    ),
     agentOrigins: agentOriginRows.rows.map((r) => ({
       country: r.country,
       total: Number(r.total),

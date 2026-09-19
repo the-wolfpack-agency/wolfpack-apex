@@ -20,6 +20,6 @@ export async function GET(req: NextRequest) {
   const daysRaw = new URL(req.url).searchParams.get("days");
   const days = daysRaw ? Number(daysRaw) : 30;
 
-  const summary = await getSiteAnalyticsSummary(days);
+  const summary = await getSiteAnalyticsSummary(days, auth.user.workspaceId);
   return NextResponse.json({ summary });
 }

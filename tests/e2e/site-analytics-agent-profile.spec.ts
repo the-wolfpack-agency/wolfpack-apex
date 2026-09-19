@@ -33,7 +33,7 @@ test.describe("Site Analytics agent profile reality check", () => {
 
     // The page's own surface must render.
     await expect(page.getByTestId("site-analytics-page")).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByTestId("ff-journeys-list")).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId("ff-journeys-triage")).toBeVisible({ timeout: 15_000 });
 
     // If a journey exists, expanding it must reveal the profile; otherwise the
     // list must state its empty case rather than render nothing.
@@ -45,8 +45,11 @@ test.describe("Site Analytics agent profile reality check", () => {
       await expect(panel).toContainText(/why this verdict/i);
       await expect(panel).toContainText(/operator fingerprint/i);
       await expect(panel).toContainText(/does not establish a real-world identity/i);
+      // Triage controls are present on the finding (read-only assertion; we do
+      // not mutate prod triage state from the smoke test).
+      await expect(page.getByRole("button", { name: /^Acknowledge$/ }).first()).toBeVisible();
     } else {
-      await expect(page.getByTestId("ff-journeys-list")).toContainText(/no correlated agent journeys yet/i);
+      await expect(page.getByTestId("ff-journeys-triage")).toContainText(/no correlated agent journeys yet/i);
     }
 
     await page.waitForTimeout(1_500);

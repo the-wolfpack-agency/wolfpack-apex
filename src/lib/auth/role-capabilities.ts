@@ -254,6 +254,7 @@ const DEV: readonly Capability[] = [
   "dashboard.view",
   "emails.view",
   "analytics.view",
+  "analytics.triage",
   "tasks.view",
   "tasks.view_team",
   "tasks.edit",
