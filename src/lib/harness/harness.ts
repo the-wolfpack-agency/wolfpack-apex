@@ -121,7 +121,7 @@ async function loadHits(sessionId: string): Promise<HarnessHit[]> {
 
 export type ReadingResult =
   | { ok: true; reading: HarnessReading; expired: boolean }
-  | { ok: false; reason: "unknown" };
+  | { ok: false; reason: "unknown" | "unavailable" };
 
 /**
  * Compute the reading for a session. On the first read of a session that has
@@ -129,9 +129,20 @@ export type ReadingResult =
  * sighting_recorded), so the run is not lost to learning.
  */
 export async function getHarnessReading(sessionId: string, surface: string): Promise<ReadingResult> {
-  const session = await loadSession(sessionId);
-  if (!session) return { ok: false, reason: "unknown" };
-  const hits = await loadHits(sessionId);
+  // The reading is polled repeatedly and shares the app's Postgres pool with the
+  // write-heavy sandbox. A transient connection hiccup on either read must
+  // degrade to a retryable "unavailable", never an unhandled 500 - the client
+  // just polls again. (recordSighting below is already best-effort.)
+  let session: SessionRow | null;
+  let hits: HarnessHit[];
+  try {
+    session = await loadSession(sessionId);
+    if (!session) return { ok: false, reason: "unknown" };
+    hits = await loadHits(sessionId);
+  } catch (err) {
+    console.warn("[harness] reading read failed (transient):", (err as Error).message);
+    return { ok: false, reason: "unavailable" };
+  }
   const reading = buildHarnessReading({
     sessionId,
     agentLabel: session.agent_label ?? "unlabeled agent",

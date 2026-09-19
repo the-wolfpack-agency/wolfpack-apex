@@ -23,7 +23,8 @@ describe("POST /api/harness/session (public)", () => {
     expect(res.status).toBe(200);
     const j = await res.json();
     expect(j.sessionId).toBe("hs_test123");
-    expect(j.targetUrl).toBe("https://apex.test/harness/hs_test123/");
+    expect(j.targetUrl).toBe("https://apex.test/harness/hs_test123"); // no trailing slash: the slashed form 308-redirects
+    expect(j.targetUrl.endsWith("/")).toBe(false);
     expect(j.readingUrl).toBe("https://apex.test/api/harness/hs_test123/reading");
     expect(j.robotsUrl).toContain("/robots.txt");
     expect(typeof j.instructions).toBe("string");

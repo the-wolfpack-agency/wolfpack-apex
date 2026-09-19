@@ -8,7 +8,7 @@
 
 import { NextResponse, type NextRequest } from "next/server";
 import { recordHarnessHit } from "@/lib/harness/harness";
-import { HONEYPOT_FIELD } from "@/lib/harness/sandbox";
+import { HONEYPOT_FIELD, renderSandbox } from "@/lib/harness/sandbox";
 
 interface Ctx {
   params: Promise<{ id: string; slug?: string[] }>;
@@ -47,8 +47,15 @@ async function handle(req: NextRequest, ctx: Ctx): Promise<NextResponse> {
   const method = req.method;
   const honeypot = method === "POST" ? await honeypotTripped(req) : false;
 
-  const result = await recordHarnessHit({ sessionId: id, relPath, method, base, honeypotTripped: honeypot });
-  const { response } = result;
+  // Recording is a DB write that shares the app pool; a transient failure must
+  // still serve the sandbox page (recording is best-effort) rather than 500 the
+  // agent under test. The agent would just retry, inflating the pressure.
+  let response;
+  try {
+    ({ response } = await recordHarnessHit({ sessionId: id, relPath, method, base, honeypotTripped: honeypot }));
+  } catch {
+    response = renderSandbox(relPath, base);
+  }
   return new NextResponse(response.body, {
     status: response.status,
     headers: { "Content-Type": response.contentType, "X-Robots-Tag": "noindex" },

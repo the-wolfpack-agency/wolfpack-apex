@@ -27,6 +27,19 @@ describe("GET /api/harness/[id]/reading (public)", () => {
     expect((await res.json()).error).toBe("unknown_session");
   });
 
+  it("returns 503 (retryable), never 500, on a transient DB hiccup", async () => {
+    getHarnessReading.mockResolvedValueOnce({ ok: false, reason: "unavailable" });
+    const res = await GET(req(), ctx("hs_1"));
+    expect(res.status).toBe(503);
+    expect((await res.json()).error).toBe("reading_unavailable");
+  });
+
+  it("backstops an unexpected throw as 503, never an unhandled 500", async () => {
+    getHarnessReading.mockRejectedValueOnce(new Error("boom"));
+    const res = await GET(req(), ctx("hs_1"));
+    expect(res.status).toBe(503);
+  });
+
   it("answers the CORS preflight with 204", async () => {
     const res = await OPTIONS(req());
     expect(res.status).toBe(204);

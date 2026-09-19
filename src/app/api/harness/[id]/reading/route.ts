@@ -21,10 +21,20 @@ export async function OPTIONS(req: NextRequest) {
 
 export async function GET(req: NextRequest, ctx: Ctx) {
   const cors = corsHeaders(req.headers.get("origin"));
-  const { id } = await ctx.params;
-  const result = await getHarnessReading(id, HARNESS_WORKSPACE);
-  if (!result.ok) {
-    return NextResponse.json({ error: "unknown_session" }, { status: 404, headers: cors });
+  try {
+    const { id } = await ctx.params;
+    const result = await getHarnessReading(id, HARNESS_WORKSPACE);
+    if (!result.ok) {
+      // A transient DB hiccup is retryable (the client polls again); an unknown
+      // session is a real 404. Neither is ever an unhandled 500.
+      if (result.reason === "unavailable") {
+        return NextResponse.json({ error: "reading_unavailable" }, { status: 503, headers: cors });
+      }
+      return NextResponse.json({ error: "unknown_session" }, { status: 404, headers: cors });
+    }
+    return NextResponse.json({ reading: result.reading, expired: result.expired }, { headers: cors });
+  } catch {
+    // Backstop: nothing here may ever surface an unhandled 500 to a poller.
+    return NextResponse.json({ error: "reading_unavailable" }, { status: 503, headers: cors });
   }
-  return NextResponse.json({ reading: result.reading, expired: result.expired }, { headers: cors });
 }
