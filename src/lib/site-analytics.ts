@@ -32,6 +32,7 @@ export const SITE_EVENT_TYPES = [
   "site.agent_probed_sensitive",
   "site.agent_form_honeypot",
   "site.agent_form_too_fast",
+  "site.agent_payload_attack",
   "site.agent_high_rate",
 ] as const;
 export type SiteEventType = (typeof SITE_EVENT_TYPES)[number];
@@ -105,6 +106,9 @@ export interface SiteAnalyticsSummary {
      for, aggregated from the paths in the reconstructed journeys. Reuses the
      AgenticQA probe-signature knowledge (see agent-probe-signatures). */
   probeIntel: ProbeIntelEntry[];
+  /* Payload attacks: active exploitation attempts (injection payloads) agents
+     sent, aggregated by attack kind. From the edge payload detector. */
+  payloadIntel: Array<{ attack: string; count: number }>;
 }
 
 /** Clamp the requested window to a sane integer day count. */
@@ -133,7 +137,7 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
   const days = clampDays(rangeDays);
   const sinceClause = `created_at > now() - ($1 || ' days')::interval`;
 
-  const [hour, page, country, type, totals, ff, ffAgents, journeyRows, agentOriginRows] = await Promise.all([
+  const [hour, page, country, type, totals, ff, ffAgents, journeyRows, agentOriginRows, payloadRows] = await Promise.all([
     safeQuery<{ hour: number; count: string }>(
       `SELECT EXTRACT(HOUR FROM created_at AT TIME ZONE 'UTC')::int AS hour, count(*) AS count
          FROM site_analytics_events
@@ -186,9 +190,9 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
         GROUP BY 1 ORDER BY count(*) DESC LIMIT 10`,
       [String(days)],
     ),
-    safeQuery<{ event_type: string; path: string | null; created_at: string; sig: string | null; nonce: string | null; agent: string | null }>(
+    safeQuery<{ event_type: string; path: string | null; created_at: string; sig: string | null; nonce: string | null; agent: string | null; attack: string | null }>(
       `SELECT event_type, path, created_at::text AS created_at,
-              props->>'sig' AS sig, props->>'nonce' AS nonce, props->>'agent' AS agent
+              props->>'sig' AS sig, props->>'nonce' AS nonce, props->>'agent' AS agent, props->>'attack' AS attack
          FROM site_analytics_events
         WHERE ${sinceClause}
           AND (props->>'sig' IS NOT NULL OR props->>'nonce' IS NOT NULL)
@@ -208,6 +212,13 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
          FROM site_analytics_events
         WHERE ${sinceClause} AND event_type LIKE 'site.agent_%' AND country IS NOT NULL AND country <> ''
         GROUP BY country ORDER BY count(*) DESC LIMIT 100`,
+      [String(days)],
+    ),
+    safeQuery<{ attack: string; count: string }>(
+      `SELECT coalesce(props->>'attack', 'unknown') AS attack, count(*) AS count
+         FROM site_analytics_events
+        WHERE ${sinceClause} AND event_type = 'site.agent_payload_attack'
+        GROUP BY 1 ORDER BY count(*) DESC LIMIT 20`,
       [String(days)],
     ),
   ]);
@@ -233,7 +244,7 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
           const nonce = r.nonce ?? undefined;
           const key = nonce ?? r.sig ?? "";
           const keyKind: CorrelationKind = nonce ? "nonce" : "fingerprint";
-          return { key, keyKind, type: r.event_type, path: r.path ?? "", at: r.created_at, nonceLinked: !!nonce, agent: r.agent ?? undefined };
+          return { key, keyKind, type: r.event_type, path: r.path ?? "", at: r.created_at, nonceLinked: !!nonce, agent: r.agent ?? undefined, attack: r.attack ?? undefined };
         }).filter((r) => r.key !== ""),
       ).slice(0, 25).map((j) => ({ ...j, profile: buildAgentProfile(j) })),
       workspaceId,
@@ -246,5 +257,6 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
       hostile: Number(r.hostile),
     })),
     probeIntel: summarizeProbeIntel(journeyRows.rows.map((r) => r.path ?? "")),
+    payloadIntel: payloadRows.rows.map((r) => ({ attack: r.attack, count: Number(r.count) })),
   };
 }

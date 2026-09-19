@@ -78,6 +78,10 @@ describe("getSiteAnalyticsSummary", () => {
       .mockResolvedValueOnce({ rows: [ // agent origins by country
         { country: "US", total: "12", welcomed: "2", flagged: "6", hostile: "4" },
         { country: "DE", total: "3", welcomed: "0", flagged: "3", hostile: "0" },
+      ] })
+      .mockResolvedValueOnce({ rows: [ // payload attacks by kind
+        { attack: "sql_injection", count: "3" },
+        { attack: "xss", count: "1" },
       ] });
 
     const summary = await getSiteAnalyticsSummary(30);
@@ -111,6 +115,12 @@ describe("getSiteAnalyticsSummary", () => {
     // Agent provenance by network-origin country, split by how Forcefield handled it.
     // Probe intelligence: /admin (a probed path in the journey) is named with its CWE.
     expect(summary.probeIntel.some((e) => /admin surface/i.test(e.label) && e.cwe === "CWE-200")).toBe(true);
+
+    // Payload attacks aggregated by kind (from the edge detector).
+    expect(summary.payloadIntel).toEqual([
+      { attack: "sql_injection", count: 3 },
+      { attack: "xss", count: 1 },
+    ]);
 
     expect(summary.agentOrigins).toEqual([
       { country: "US", total: 12, welcomed: 2, flagged: 6, hostile: 4 },

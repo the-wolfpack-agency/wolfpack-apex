@@ -46,3 +46,11 @@ describe("agent triage", () => {
     expect(b.hostile).toEqual([]);
   });
 });
+
+describe("exploit_attempt severity", () => {
+  it("ranks exploit_attempt as hostile (top severity)", () => {
+    const { severityOf, HOSTILE_CLASSES } = require("@/lib/agent-triage");
+    expect(HOSTILE_CLASSES.has("exploit_attempt")).toBe(true);
+    expect(severityOf({ behaviorClass: "exploit_attempt", confidence: "proven", lastAt: "t" })).toBe("hostile");
+  });
+});

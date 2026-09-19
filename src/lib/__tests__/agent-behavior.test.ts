@@ -142,3 +142,19 @@ describe("novel insights (classifySession)", () => {
     expect(j.insights.some((i) => i.kind === "deliberate_violation")).toBe(false);
   });
 });
+
+describe("payload-attack classification", () => {
+  it("classifies a live injection payload as exploit_attempt (the most severe class) with a named insight", () => {
+    const j = classifySession({
+      key: "fp5",
+      keyKind: "fingerprint",
+      events: [{ type: "site.agent_payload_attack", path: "/search", at: "2026-09-19T00:00:00Z", attack: "sql_injection" }],
+    });
+    expect(j.behaviorClass).toBe("exploit_attempt");
+    expect(j.signals).toContain("payload_attack");
+    const ins = j.insights.find((i) => i.kind === "payload_attack");
+    expect(ins).toBeTruthy();
+    expect(ins && "attack" in ins && ins.attack).toBe("sql_injection");
+    expect(j.summary).toMatch(/active exploitation/i);
+  });
+});
