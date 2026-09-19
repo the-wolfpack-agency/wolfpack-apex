@@ -46,6 +46,7 @@ const SUMMARY = {
     { label: "Admin surface probe", cwe: "CWE-200", severity: "medium" as const, category: "admin-surface", count: 5 },
   ],
   payloadIntel: [{ attack: "sql_injection", count: 3 }],
+  operatorTriage: {},
 };
 
 beforeEach(() => {
@@ -180,4 +181,26 @@ test("surfaces a novel impersonation conclusion as a badge and in the profile pa
   const insights = await screen.findByTestId("insights-fp1");
   expect(insights).toHaveTextContent(/novel conclusions/i);
   expect(insights).toHaveTextContent(/impersonation of gptbot/i);
+});
+
+
+test("by-operator view consolidates findings under one operator with operator-level triage", async () => {
+  mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: SUMMARY }) });
+  render(<SiteAnalyticsPage />);
+  await waitFor(() => expect(screen.getByTestId("ff-journeys-triage")).toBeInTheDocument());
+
+  // Switch to the operator view.
+  fireEvent.click(screen.getByTestId("journey-view-operator"));
+  const opView = await screen.findByTestId("ff-operators-view");
+  // fp1's operator (op_abc12345) shows as one consolidated card with a grouping label.
+  expect(screen.getByTestId("operator-op_abc12345")).toBeInTheDocument();
+  expect(screen.getByTestId("operator-grouping-op_abc12345")).toBeInTheDocument();
+  expect(opView).toHaveTextContent(/1 finding/i);
+
+  // Operator-level escalate POSTs under the "op:" key (acts on the whole operator).
+  fireEvent.click(screen.getByTestId("operator-triage-escalated-op_abc12345"));
+  await waitFor(() => expect(screen.getByTestId("operator-status-op_abc12345")).toHaveTextContent(/escalated/i));
+  const call = mockFetchWithRefresh.mock.calls.find((c) => String(c[0]).includes("/triage") && String(c[1]?.body).includes("op:op_abc12345"));
+  expect(call).toBeTruthy();
+  expect(JSON.parse(call![1].body)).toEqual({ findingKey: "op:op_abc12345", status: "escalated" });
 });
