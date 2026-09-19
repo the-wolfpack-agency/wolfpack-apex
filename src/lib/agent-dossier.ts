@@ -54,7 +54,7 @@ export interface AttributionDossier {
   disclaimer: string;
 }
 
-const DISCLAIMER =
+export const DISCLAIMER =
   "Attributes behavior to a consistent operator profile across surfaces. Does NOT establish a real-world identity, which requires legal process (subpoena / ISP records). This is attribution-grade evidence for a security team or investigator, not an identification.";
 
 const HOSTILE_CLASSES: ReadonlySet<string> = new Set(["aggressive_scraper", "vuln_scanner", "form_spammer"]);

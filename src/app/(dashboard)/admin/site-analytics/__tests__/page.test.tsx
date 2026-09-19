@@ -6,7 +6,7 @@ jest.mock("@/lib/client-auth", () => ({
   fetchWithRefresh: (...a: any[]) => mockFetchWithRefresh(...a),
 }));
 
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import SiteAnalyticsPage from "@/app/(dashboard)/admin/site-analytics/page";
 
 const SUMMARY = {
@@ -22,7 +22,17 @@ const SUMMARY = {
   byType: [{ type: "site.page_viewed", count: 128 }],
   forcefield: { welcomed: 6, flagged: 9, trapped: 2, topAgents: [{ agent: "GPTBot", count: 6 }] },
   journeys: [
-    { key: "fp1", confidence: "proven", behaviorClass: "aggressive_scraper", signals: ["tripped_decoy"], path: ["/_ff/x", "/admin"], eventCount: 2, firstAt: "2026-09-18T10:00:00Z", lastAt: "2026-09-18T10:00:05Z", summary: "Followed an invisible trap link and harvested greedily." },
+    { key: "fp1", confidence: "proven", behaviorClass: "aggressive_scraper", signals: ["tripped_decoy"], path: ["/_ff/x", "/admin"], eventCount: 2, firstAt: "2026-09-18T10:00:00Z", lastAt: "2026-09-18T10:00:05Z", summary: "Followed an invisible trap link and harvested greedily.", profile: {
+      operatorKey: "op_abc12345",
+      correlationKey: "fp1",
+      verdict: { confidence: "proven", why: "Proven: it followed an invisible, robots-disallowed decoy link that a human cannot see." },
+      processes: [{ signal: "tripped_decoy", label: "Tripped the decoy", meaning: "Followed an invisible, robots-disallowed link a person cannot see.", hostile: true }],
+      scaffolding: { readsRobotsFirst: false, probedSensitive: false, pathDiscovery: "link-following", requestCount: 2, spanSeconds: 5, observability: "Derived from observed HTTP behavior." },
+      toolComposition: { usedTools: ["fetch"], novelTools: [], policies: [], riskTier: "benign", intent: "benign", confidence: "none", summary: "Benign toolset." },
+      policies: [],
+      timeline: { firstAt: "2026-09-18T10:00:00Z", lastAt: "2026-09-18T10:00:05Z", spanSeconds: 5, eventCount: 2 },
+      disclaimer: "Attributes behavior to a consistent operator profile across surfaces. Does NOT establish a real-world identity, which requires legal process.",
+    } },
   ],
 };
 
@@ -65,4 +75,28 @@ test("shows an error state when the data route fails", async () => {
   mockFetchWithRefresh.mockResolvedValue({ ok: false, json: async () => ({}) });
   render(<SiteAnalyticsPage />);
   await waitFor(() => expect(screen.getByTestId("site-analytics-error")).toBeInTheDocument());
+});
+
+test("expanding a journey reveals its agent profile: verdict, processes, tooling, operator fingerprint", async () => {
+  mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: SUMMARY }) });
+  render(<SiteAnalyticsPage />);
+  await waitFor(() => expect(screen.getByTestId("ff-journeys-list")).toBeInTheDocument());
+
+  // Profile is collapsed by default.
+  expect(screen.queryByTestId("ff-journey-profile-fp1")).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByTestId("ff-journey-profile-toggle-fp1"));
+
+  const panel = await screen.findByTestId("ff-journey-profile-fp1");
+  expect(panel).toHaveTextContent("Why this verdict");
+  expect(panel).toHaveTextContent("Tripped the decoy");
+  expect(panel).toHaveTextContent("Scaffolding");
+  expect(panel).toHaveTextContent("fetch");
+  expect(panel).toHaveTextContent("Operator fingerprint");
+  expect(screen.getByTestId("ff-operator-key-fp1")).toHaveTextContent("op_abc12345");
+  expect(panel).toHaveTextContent(/does not establish a real-world identity/i);
+
+  // Collapses again on a second click.
+  fireEvent.click(screen.getByTestId("ff-journey-profile-toggle-fp1"));
+  expect(screen.queryByTestId("ff-journey-profile-fp1")).not.toBeInTheDocument();
 });
