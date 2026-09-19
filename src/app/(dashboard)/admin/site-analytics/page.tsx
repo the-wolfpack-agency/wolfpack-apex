@@ -12,6 +12,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { fetchWithRefresh } from "@/lib/client-auth";
 import { HourHeatmap } from "@/components/HourHeatmap";
+import { AgentOriginMap } from "@/components/AgentOriginMap";
+import { triageJourneys, type Severity } from "@/lib/agent-triage";
 
 interface Summary {
   rangeDays: number;
@@ -39,6 +41,7 @@ interface Summary {
     summary: string;
     profile: AgentProfile;
   }>;
+  agentOrigins: Array<{ country: string; total: number; welcomed: number; flagged: number; hostile: number }>;
 }
 
 interface AgentProfile {
@@ -92,6 +95,9 @@ export default function SiteAnalyticsPage() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [sevFilter, setSevFilter] = useState<Severity | "all">("all");
+  const [provenOnly, setProvenOnly] = useState(false);
+  const [showBenign, setShowBenign] = useState(false);
 
   const toggleProfile = useCallback((key: string) => {
     setExpanded((prev) => {
@@ -134,6 +140,45 @@ export default function SiteAnalyticsPage() {
     letterSpacing: "0.03em",
     color: "var(--wp-text-muted, #9ca3af)",
   };
+
+  type Journey = Summary["journeys"][number];
+  const renderJourneyCard = (j: Journey) => (
+    <li key={j.key} data-testid={`ff-journey-${j.key}`} style={{ border: "1px solid var(--wp-dark-border, #333)", borderRadius: 6, padding: "0.7rem 0.8rem" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
+        <span style={{ fontWeight: 700, fontSize: "0.9rem", color: CLASS_COLOR[j.behaviorClass] ?? "var(--wp-text, #eee)" }}>
+          {CLASS_LABEL[j.behaviorClass] ?? j.behaviorClass}
+        </span>
+        <span
+          style={{
+            fontSize: "0.66rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em",
+            padding: "0.1rem 0.4rem", borderRadius: 999,
+            background: j.confidence === "proven" ? "var(--wp-gold, #e8b528)" : "var(--wp-dark-surface2, #1a1a1a)",
+            color: j.confidence === "proven" ? "var(--wp-dark, #0b0d11)" : "var(--wp-text-muted, #9ca3af)",
+            border: j.confidence === "proven" ? "none" : "1px solid var(--wp-dark-border, #333)",
+          }}
+        >
+          {j.confidence}
+        </span>
+        <span style={{ marginLeft: "auto", fontSize: "0.72rem", color: "var(--wp-text-muted, #9ca3af)" }}>{j.eventCount} events</span>
+      </div>
+      <p style={{ margin: "0.45rem 0 0", fontSize: "0.8rem", color: "var(--wp-text, #eee)", lineHeight: 1.5 }}>{j.summary}</p>
+      {j.path.length > 0 && (
+        <div style={{ marginTop: "0.45rem", fontSize: "0.72rem", color: "var(--wp-text-muted, #9ca3af)", overflowX: "auto", whiteSpace: "nowrap" }}>
+          {j.path.join("  →  ")}
+        </div>
+      )}
+      <button
+        type="button"
+        onClick={() => toggleProfile(j.key)}
+        aria-expanded={expanded.has(j.key)}
+        data-testid={`ff-journey-profile-toggle-${j.key}`}
+        style={{ marginTop: "0.55rem", background: "transparent", border: "none", color: "var(--wp-gold, #e8b528)", fontSize: "0.74rem", fontWeight: 600, cursor: "pointer", padding: 0 }}
+      >
+        {expanded.has(j.key) ? "▾ Hide agent profile" : "▸ View agent profile"}
+      </button>
+      {expanded.has(j.key) && <AgentProfilePanel profile={j.profile} testKey={j.key} />}
+    </li>
+  );
 
   return (
     <div data-testid="site-analytics-page" style={{ display: "grid", gap: "1.25rem", maxWidth: 920 }}>
@@ -227,13 +272,25 @@ export default function SiteAnalyticsPage() {
             )}
           </div>
 
-          {/* Top pages + countries. auto-fit collapses to a single column on
-              narrow screens (phones) so long paths get the full width instead
-              of overflowing the card and colliding with the next column. */}
+          {/* Top pages + countries. Collapsed by default (native <details>) so
+              they reclaim the real estate; the summary shows the count and the
+              content stays in the DOM. auto-fit collapses to one column on
+              narrow screens. */}
+          <style>{`
+            details.ff-collapse > summary { list-style: none; cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; }
+            details.ff-collapse > summary::-webkit-details-marker { display: none; }
+            details.ff-collapse .ff-chev { transition: transform 0.15s ease; color: var(--wp-text-muted, #9ca3af); font-size: 0.8rem; }
+            details.ff-collapse[open] .ff-chev { transform: rotate(90deg); }
+          `}</style>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "1rem" }}>
-            <div style={card}>
-              <div style={label}>Top pages</div>
-              <ul data-testid="top-pages" style={{ listStyle: "none", margin: "0.6rem 0 0", padding: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: "0.35rem" }}>
+            <details className="ff-collapse" style={card} data-testid="top-pages-collapse">
+              <summary>
+                <span style={label}>Top pages</span>
+                <span style={{ ...label, display: "flex", alignItems: "center", gap: "0.4rem" }}>
+                  {summary.byPage.length} <span className="ff-chev">&#9656;</span>
+                </span>
+              </summary>
+              <ul data-testid="top-pages" style={{ listStyle: "none", margin: "0.7rem 0 0", padding: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: "0.35rem" }}>
                 {summary.byPage.length === 0 && (
                   <li style={{ fontSize: "0.82rem", color: "var(--wp-text-muted, #9ca3af)" }}>No data</li>
                 )}
@@ -244,10 +301,15 @@ export default function SiteAnalyticsPage() {
                   </li>
                 ))}
               </ul>
-            </div>
-            <div style={card}>
-              <div style={label}>Top countries</div>
-              <ul data-testid="top-countries" style={{ listStyle: "none", margin: "0.6rem 0 0", padding: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: "0.35rem" }}>
+            </details>
+            <details className="ff-collapse" style={card} data-testid="top-countries-collapse">
+              <summary>
+                <span style={label}>Top countries</span>
+                <span style={{ ...label, display: "flex", alignItems: "center", gap: "0.4rem" }}>
+                  {summary.byCountry.length} <span className="ff-chev">&#9656;</span>
+                </span>
+              </summary>
+              <ul data-testid="top-countries" style={{ listStyle: "none", margin: "0.7rem 0 0", padding: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: "0.35rem" }}>
                 {summary.byCountry.length === 0 && (
                   <li style={{ fontSize: "0.82rem", color: "var(--wp-text-muted, #9ca3af)" }}>No data</li>
                 )}
@@ -258,6 +320,14 @@ export default function SiteAnalyticsPage() {
                   </li>
                 ))}
               </ul>
+            </details>
+          </div>
+
+          {/* Agent origin map: where agent traffic reached us from. */}
+          <div style={card} data-testid="ff-origin-map">
+            <div style={label}>Agent origins &middot; where agent traffic reaches us from</div>
+            <div style={{ marginTop: "0.9rem" }}>
+              <AgentOriginMap origins={summary.agentOrigins ?? []} />
             </div>
           </div>
 
@@ -316,63 +386,109 @@ export default function SiteAnalyticsPage() {
               the actor carried a correlation token (engaged a trap or a hidden field only a bot touches). <strong style={{ color: "var(--wp-text, #eee)" }}>Inferred</strong> =
               grouped by a coarse fingerprint, a likely match, not confirmed.
             </p>
-            <ul data-testid="ff-journeys-list" style={{ listStyle: "none", margin: "0.9rem 0 0", padding: 0, display: "grid", gap: "0.7rem" }}>
-              {summary.journeys.length === 0 && (
-                <li style={{ fontSize: "0.82rem", color: "var(--wp-text-muted, #9ca3af)" }}>
-                  No correlated agent journeys yet. Sessions appear here as ogiam.com records agent signals.
-                </li>
-              )}
-              {summary.journeys.map((j) => (
-                <li key={j.key} style={{ border: "1px solid var(--wp-dark-border, #333)", borderRadius: 6, padding: "0.7rem 0.8rem" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
-                    <span style={{ fontWeight: 700, fontSize: "0.9rem", color: CLASS_COLOR[j.behaviorClass] ?? "var(--wp-text, #eee)" }}>
-                      {CLASS_LABEL[j.behaviorClass] ?? j.behaviorClass}
-                    </span>
-                    <span
-                      style={{
-                        fontSize: "0.66rem",
-                        fontWeight: 700,
-                        textTransform: "uppercase",
-                        letterSpacing: "0.03em",
-                        padding: "0.1rem 0.4rem",
-                        borderRadius: 999,
-                        background: j.confidence === "proven" ? "var(--wp-gold, #e8b528)" : "var(--wp-dark-surface2, #1a1a1a)",
-                        color: j.confidence === "proven" ? "var(--wp-dark, #0b0d11)" : "var(--wp-text-muted, #9ca3af)",
-                        border: j.confidence === "proven" ? "none" : "1px solid var(--wp-dark-border, #333)",
-                      }}
-                    >
-                      {j.confidence}
-                    </span>
-                    <span style={{ marginLeft: "auto", fontSize: "0.72rem", color: "var(--wp-text-muted, #9ca3af)" }}>{j.eventCount} events</span>
-                  </div>
-                  <p style={{ margin: "0.45rem 0 0", fontSize: "0.8rem", color: "var(--wp-text, #eee)", lineHeight: 1.5 }}>{j.summary}</p>
-                  {j.path.length > 0 && (
-                    <div style={{ marginTop: "0.45rem", fontSize: "0.72rem", color: "var(--wp-text-muted, #9ca3af)", overflowX: "auto", whiteSpace: "nowrap" }}>
-                      {j.path.join("  →  ")}
-                    </div>
-                  )}
+            <div data-testid="ff-journeys-triage" style={{ marginTop: "0.9rem", display: "grid", gap: "0.8rem" }}>
+              {(() => {
+                const buckets = triageJourneys(summary.journeys);
+                const c = buckets.counts;
+                if (c.total === 0) {
+                  return (
+                    <p style={{ fontSize: "0.82rem", color: "var(--wp-text-muted, #9ca3af)" }}>
+                      No correlated agent journeys yet. Sessions appear here as ogiam.com records agent signals.
+                    </p>
+                  );
+                }
+                const sevMeta: Record<Severity, { label: string; color: string }> = {
+                  hostile: { label: "Threats", color: "var(--wp-error, #ef4444)" },
+                  elevated: { label: "Elevated", color: "var(--wp-warning, #f5a623)" },
+                  benign: { label: "Benign / neutral", color: "var(--wp-success, #30a46c)" },
+                };
+                const passProven = (x: Journey) => !provenOnly || x.confidence === "proven";
+                const show = (sev: Severity) => sevFilter === "all" || sevFilter === sev;
+                const hostile = buckets.hostile.filter(passProven);
+                const elevated = buckets.elevated.filter(passProven);
+                const benign = buckets.benign.filter(passProven);
+                const chip = (color: string, n: number, text: string) => (
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: "0.35rem", fontSize: "0.78rem", color: "var(--wp-text, #eee)" }}>
+                    <span style={{ width: 9, height: 9, borderRadius: 999, background: color }} />
+                    <strong>{n}</strong> <span style={{ color: "var(--wp-text-muted, #9ca3af)" }}>{text}</span>
+                  </span>
+                );
+                const filterBtn = (val: Severity | "all", text: string) => (
                   <button
                     type="button"
-                    onClick={() => toggleProfile(j.key)}
-                    aria-expanded={expanded.has(j.key)}
-                    data-testid={`ff-journey-profile-toggle-${j.key}`}
+                    data-testid={`triage-filter-${val}`}
+                    onClick={() => setSevFilter(val)}
                     style={{
-                      marginTop: "0.55rem",
-                      background: "transparent",
-                      border: "none",
-                      color: "var(--wp-gold, #e8b528)",
-                      fontSize: "0.74rem",
-                      fontWeight: 600,
-                      cursor: "pointer",
-                      padding: 0,
+                      padding: "0.2rem 0.6rem", borderRadius: 999, fontSize: "0.72rem", fontWeight: 600, cursor: "pointer",
+                      background: sevFilter === val ? "var(--wp-gold, #e8b528)" : "transparent",
+                      color: sevFilter === val ? "var(--wp-dark, #0b0d11)" : "var(--wp-text-muted, #9ca3af)",
+                      border: "1px solid var(--wp-dark-border, #333)",
                     }}
                   >
-                    {expanded.has(j.key) ? "▾ Hide agent profile" : "▸ View agent profile"}
+                    {text}
                   </button>
-                  {expanded.has(j.key) && <AgentProfilePanel profile={j.profile} testKey={j.key} />}
-                </li>
-              ))}
-            </ul>
+                );
+                const groupHeading = (sev: Severity, n: number) => (
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.45rem", margin: "0.2rem 0 0.1rem" }}>
+                    <span style={{ width: 9, height: 9, borderRadius: 999, background: sevMeta[sev].color }} />
+                    <span style={{ ...label, color: sevMeta[sev].color }}>{sevMeta[sev].label}</span>
+                    <span style={{ fontSize: "0.72rem", color: "var(--wp-text-muted, #9ca3af)" }}>{n}</span>
+                  </div>
+                );
+                return (
+                  <>
+                    <div data-testid="triage-summary" style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem 1.1rem", alignItems: "center" }}>
+                      {chip("var(--wp-error, #ef4444)", c.hostile, "hostile")}
+                      {chip("var(--wp-warning, #f5a623)", c.elevated, "elevated")}
+                      {chip("var(--wp-success, #30a46c)", c.benign, "benign / neutral")}
+                      <span style={{ fontSize: "0.72rem", color: "var(--wp-text-muted, #9ca3af)" }}>{c.proven} proven &middot; {c.inferred} inferred</span>
+                    </div>
+                    <div data-testid="triage-filter" style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem", alignItems: "center" }}>
+                      {filterBtn("all", "All")}
+                      {filterBtn("hostile", "Threats")}
+                      {filterBtn("elevated", "Elevated")}
+                      {filterBtn("benign", "Benign")}
+                      <label style={{ display: "inline-flex", alignItems: "center", gap: "0.3rem", fontSize: "0.72rem", color: "var(--wp-text-muted, #9ca3af)", cursor: "pointer", marginLeft: "0.3rem" }}>
+                        <input type="checkbox" data-testid="triage-proven-only" checked={provenOnly} onChange={(e) => setProvenOnly(e.target.checked)} />
+                        Proven only
+                      </label>
+                    </div>
+
+                    {show("hostile") && hostile.length > 0 && (
+                      <div data-testid="triage-group-hostile">
+                        {groupHeading("hostile", hostile.length)}
+                        <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: "0.6rem" }}>{hostile.map(renderJourneyCard)}</ul>
+                      </div>
+                    )}
+                    {show("elevated") && elevated.length > 0 && (
+                      <div data-testid="triage-group-elevated">
+                        {groupHeading("elevated", elevated.length)}
+                        <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: "0.6rem" }}>{elevated.map(renderJourneyCard)}</ul>
+                      </div>
+                    )}
+                    {show("benign") && benign.length > 0 && (
+                      <div data-testid="triage-group-benign">
+                        {sevFilter === "benign" ? (
+                          groupHeading("benign", benign.length)
+                        ) : (
+                          <button
+                            type="button"
+                            data-testid="triage-benign-toggle"
+                            onClick={() => setShowBenign((v) => !v)}
+                            style={{ background: "transparent", border: "none", color: "var(--wp-text-muted, #9ca3af)", fontSize: "0.76rem", fontWeight: 600, cursor: "pointer", padding: "0.2rem 0" }}
+                          >
+                            {showBenign ? "\u25be Hide" : "\u25b8 Show"} {benign.length} benign / neutral
+                          </button>
+                        )}
+                        {(sevFilter === "benign" || showBenign) && (
+                          <ul data-testid="triage-benign-list" style={{ listStyle: "none", margin: "0.3rem 0 0", padding: 0, display: "grid", gap: "0.6rem" }}>{benign.map(renderJourneyCard)}</ul>
+                        )}
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
+            </div>
           </div>
         </>
       )}

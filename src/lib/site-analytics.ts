@@ -93,6 +93,12 @@ export interface SiteAnalyticsSummary {
   /* Reconstructed agent journeys: correlated sessions with a fused behavior
      class and a proven/inferred confidence. Newest first, capped. */
   journeys: Array<AgentJourney & { profile: AgentProfile }>;
+  /* Agent provenance: where AGENT traffic (not page views) reached us from, by
+     the request's edge country. This is the NETWORK ORIGIN of the traffic - a
+     cloud region or proxy just as often as a person's country - so it is a
+     coarse origin signal, never a confirmed operator location. Broken down by
+     how Forcefield handled it so a hostile cluster from one origin stands out. */
+  agentOrigins: Array<{ country: string; total: number; welcomed: number; flagged: number; hostile: number }>;
 }
 
 /** Clamp the requested window to a sane integer day count. */
@@ -110,7 +116,7 @@ export async function getSiteAnalyticsSummary(rangeDays = 30): Promise<SiteAnaly
   const days = clampDays(rangeDays);
   const sinceClause = `created_at > now() - ($1 || ' days')::interval`;
 
-  const [hour, page, country, type, totals, ff, ffAgents, journeyRows] = await Promise.all([
+  const [hour, page, country, type, totals, ff, ffAgents, journeyRows, agentOriginRows] = await Promise.all([
     safeQuery<{ hour: number; count: string }>(
       `SELECT EXTRACT(HOUR FROM created_at AT TIME ZONE 'UTC')::int AS hour, count(*) AS count
          FROM site_analytics_events
@@ -173,6 +179,20 @@ export async function getSiteAnalyticsSummary(rangeDays = 30): Promise<SiteAnaly
         LIMIT 2000`,
       [String(days)],
     ),
+    /* Agent provenance by edge country. Only AGENT-signal events (not page
+       views), split by how Forcefield handled each, so a hostile cluster from
+       one network origin is visible. */
+    safeQuery<{ country: string; total: string; welcomed: string; flagged: string; hostile: string }>(
+      `SELECT country,
+              count(*) AS total,
+              count(*) FILTER (WHERE event_type = 'site.agent_welcomed') AS welcomed,
+              count(*) FILTER (WHERE event_type = 'site.agent_flagged')  AS flagged,
+              count(*) FILTER (WHERE event_type IN ('site.agent_trap_tripped', 'site.agent_probed_sensitive', 'site.agent_form_honeypot', 'site.agent_form_too_fast')) AS hostile
+         FROM site_analytics_events
+        WHERE ${sinceClause} AND event_type LIKE 'site.agent_%' AND country IS NOT NULL AND country <> ''
+        GROUP BY country ORDER BY count(*) DESC LIMIT 100`,
+      [String(days)],
+    ),
   ]);
 
   const t = totals.rows[0];
@@ -198,5 +218,12 @@ export async function getSiteAnalyticsSummary(rangeDays = 30): Promise<SiteAnaly
         return { key, keyKind, type: r.event_type, path: r.path ?? "", at: r.created_at, nonceLinked: !!nonce, agent: r.agent ?? undefined };
       }).filter((r) => r.key !== ""),
     ).slice(0, 25).map((j) => ({ ...j, profile: buildAgentProfile(j) })),
+    agentOrigins: agentOriginRows.rows.map((r) => ({
+      country: r.country,
+      total: Number(r.total),
+      welcomed: Number(r.welcomed),
+      flagged: Number(r.flagged),
+      hostile: Number(r.hostile),
+    })),
   };
 }

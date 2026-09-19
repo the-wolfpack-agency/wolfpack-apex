@@ -34,6 +34,11 @@ const SUMMARY = {
       disclaimer: "Attributes behavior to a consistent operator profile across surfaces. Does NOT establish a real-world identity, which requires legal process.",
     } },
   ],
+  agentOrigins: [
+    { country: "US", total: 40, welcomed: 6, flagged: 20, hostile: 14 },
+    { country: "DE", total: 12, welcomed: 2, flagged: 10, hostile: 0 },
+    { country: "ZZ", total: 3, welcomed: 0, flagged: 0, hostile: 3 },
+  ],
 };
 
 beforeEach(() => {
@@ -62,10 +67,19 @@ test("renders the reused heatmap, totals, and top pages/countries from the summa
   expect(screen.getByTestId("ff-trapped")).toHaveTextContent("2");
   expect(screen.getByTestId("ff-top-agents")).toHaveTextContent("GPTBot");
   // Agent journeys panel: the correlated session renders with its class + proven badge.
-  const journeys = screen.getByTestId("ff-journeys-list");
+  const journeys = screen.getByTestId("ff-journeys-triage");
   expect(journeys).toHaveTextContent("Aggressive scraper");
   expect(journeys).toHaveTextContent("proven");
   expect(journeys).toHaveTextContent("/_ff/x");
+  // Triage: the summary counts render and the hostile group is shown (aggressive
+  // scraper is a threat, so it is surfaced, not collapsed with the benign noise).
+  expect(screen.getByTestId("triage-summary")).toHaveTextContent("proven");
+  expect(screen.getByTestId("triage-group-hostile")).toHaveTextContent("Aggressive scraper");
+  // The agent origin map renders a node for a country with a centroid (US).
+  expect(screen.getByTestId("agent-origin-map")).toBeInTheDocument();
+  expect(screen.getByTestId("origin-node-US")).toBeInTheDocument();
+  // Top pages / countries are collapsed by default (native details, closed).
+  expect(screen.getByTestId("top-pages-collapse")).not.toHaveAttribute("open");
 
   // The data route was queried with the default 30-day window.
   expect(String(mockFetchWithRefresh.mock.calls[0][0])).toContain("days=30");
@@ -80,7 +94,7 @@ test("shows an error state when the data route fails", async () => {
 test("expanding a journey reveals its agent profile: verdict, processes, tooling, operator fingerprint", async () => {
   mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: SUMMARY }) });
   render(<SiteAnalyticsPage />);
-  await waitFor(() => expect(screen.getByTestId("ff-journeys-list")).toBeInTheDocument());
+  await waitFor(() => expect(screen.getByTestId("ff-journeys-triage")).toBeInTheDocument());
 
   // Profile is collapsed by default.
   expect(screen.queryByTestId("ff-journey-profile-fp1")).not.toBeInTheDocument();
