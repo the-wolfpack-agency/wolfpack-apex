@@ -70,6 +70,7 @@ interface AgentProfile {
   policies: string[];
   timeline: { firstAt: string; lastAt: string; spanSeconds: number; eventCount: number };
   disclaimer: string;
+  insights: Array<{ kind: "impersonation"; claimedAgent: string; detail: string } | { kind: "deliberate_violation"; detail: string }>;
 }
 
 const CLASS_LABEL: Record<string, string> = {
@@ -200,6 +201,21 @@ export default function SiteAnalyticsPage() {
         >
           {j.confidence}
         </span>
+        {j.profile.insights.map((ins) => (
+          <span
+            key={ins.kind}
+            data-testid={`insight-badge-${ins.kind}-${j.key}`}
+            title={ins.detail}
+            style={{
+              fontSize: "0.6rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em",
+              padding: "0.1rem 0.4rem", borderRadius: 999,
+              background: ins.kind === "impersonation" ? "var(--wp-error, #ef4444)" : "var(--wp-warning, #f5a623)",
+              color: "var(--wp-dark, #0b0d11)",
+            }}
+          >
+            {ins.kind === "impersonation" ? "impersonation" : "deliberate"}
+          </span>
+        ))}
         {currentStatus(j) !== "new" && (
           <span
             data-testid={`triage-badge-${j.key}`}
@@ -603,6 +619,23 @@ function AgentProfilePanel({ profile, testKey }: { profile: AgentProfile; testKe
       data-testid={`ff-journey-profile-${testKey}`}
       style={{ marginTop: "0.7rem", display: "grid", gap: "0.7rem", borderTop: "1px solid var(--wp-dark-border, #333)", paddingTop: "0.7rem" }}
     >
+      {/* Novel conclusions (impersonation, deliberate violation) - the higher-order tells */}
+      {profile.insights.length > 0 && (
+        <div style={{ ...box, borderColor: "var(--wp-error, #ef4444)" }} data-testid={`insights-${testKey}`}>
+          <p style={{ ...sectionLabel, color: "var(--wp-error, #ef4444)" }}>Novel conclusions</p>
+          <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: "0.4rem" }}>
+            {profile.insights.map((ins) => (
+              <li key={ins.kind} style={{ fontSize: "0.78rem", color: "var(--wp-text, #eee)", lineHeight: 1.5 }}>
+                <strong style={{ color: ins.kind === "impersonation" ? "var(--wp-error, #ef4444)" : "var(--wp-warning, #f5a623)" }}>
+                  {ins.kind === "impersonation" ? `Impersonation of ${ins.claimedAgent}: ` : "Deliberate rule violation: "}
+                </strong>
+                {ins.detail}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {/* Why the verdict */}
       <div style={box}>
         <p style={sectionLabel}>Why this verdict</p>

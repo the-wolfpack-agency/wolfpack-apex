@@ -10,7 +10,7 @@ import type { ToolCompositionReport } from "@/lib/agent-tool-composition";
 
 const journey = (behaviorClass: string, confidence: "proven" | "inferred", path: string[] = []): AgentJourney => ({
   key: "k", confidence, behaviorClass: behaviorClass as AgentJourney["behaviorClass"], signals: [], path,
-  eventCount: path.length, firstAt: "t", lastAt: "t", summary: "s",
+  eventCount: path.length, firstAt: "t", lastAt: "t", summary: "s", insights: [],
 });
 const scaff = (over: Partial<ScaffoldingSignature> = {}): ScaffoldingSignature => ({
   stepCount: 3, readsRobotsFirst: false, followedLinks: 0, guessedPaths: 2, pathDiscovery: "path-guessing",
