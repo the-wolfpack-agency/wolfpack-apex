@@ -41,6 +41,13 @@ export type BehaviorClass =
 
 export type Confidence = "proven" | "inferred";
 
+/** A novel conclusion drawn from a session that goes beyond the behavior class.
+ *  These are the higher-order tells: an agent wearing a good-bot's identity, or
+ *  one that read the rules and then broke them on purpose. */
+export type JourneyInsight =
+  | { kind: "impersonation"; claimedAgent: string; detail: string }
+  | { kind: "deliberate_violation"; detail: string };
+
 /** How a session's events were tied together. A nonce is deterministic (the
  *  actor carried it); a fingerprint is a probabilistic grouping. */
 export type CorrelationKind = "nonce" | "fingerprint";
@@ -78,6 +85,9 @@ export interface AgentJourney {
   lastAt: string;
   /** One plain sentence a non-expert can read. */
   summary: string;
+  /** Novel conclusions beyond the behavior class (impersonation, deliberate
+   *  rule violation). Empty when none apply. */
+  insights: JourneyInsight[];
 }
 
 /** Map an event type to the structural signal it represents. Unknown/benign
@@ -107,6 +117,45 @@ function signalOf(ev: SessionEvent): AgentSignal | null {
 
 const HOSTILE: ReadonlySet<AgentSignal> = new Set(["tripped_decoy", "form_honeypot", "probed_sensitive"]);
 
+/**
+ * Higher-order conclusions from the ORDERED events, beyond the behavior class.
+ *  - impersonation: presented a known good-agent identity (welcome lane) AND
+ *    behaved hostilely. The real crawler does not probe /admin or trip a decoy,
+ *    so this is a spoofed good bot wearing its uniform to evade.
+ *  - deliberate_violation: read robots.txt BEFORE it violated the rules (tripped
+ *    the decoy / probed). It knew the rules and broke them; ignorance is out.
+ */
+function deriveInsights(
+  events: readonly SessionEvent[],
+  signals: readonly AgentSignal[],
+  has: (s: AgentSignal) => boolean,
+): JourneyInsight[] {
+  const out: JourneyInsight[] = [];
+  const hostilePresent = signals.some((s) => HOSTILE.has(s));
+
+  if (has("identified_agent") && hostilePresent) {
+    const claimed = events.find((e) => signalOf(e) === "identified_agent" && e.agent)?.agent ?? "a known crawler";
+    out.push({
+      kind: "impersonation",
+      claimedAgent: claimed,
+      detail: `Presented the identity of ${claimed} (a known good agent) but then behaved hostilely. The real crawler does not do this, so this is a spoofed good bot wearing its uniform to evade filters.`,
+    });
+  }
+
+  if (has("read_robots")) {
+    const robotsAt = events.find((e) => e.type === "site.agent_read_robots")?.at;
+    const firstHostileAt = events.find((e) => { const g = signalOf(e); return g !== null && HOSTILE.has(g); })?.at;
+    if (robotsAt && firstHostileAt && robotsAt <= firstHostileAt) {
+      out.push({
+        kind: "deliberate_violation",
+        detail: "Read the site's rules (robots.txt) first, then violated them. It knew what was disallowed and did it anyway; ignorance is not the explanation.",
+      });
+    }
+  }
+
+  return out;
+}
+
 /** Classify one correlated session into a behavior signature. Deterministic. */
 export function classifySession(input: AgentSessionInput): AgentJourney {
   const events = [...input.events].sort((a, b) => a.at.localeCompare(b.at));
@@ -125,6 +174,7 @@ export function classifySession(input: AgentSessionInput): AgentJourney {
   const confidence: Confidence = nonceProven || structurallyBot ? "proven" : "inferred";
 
   const behaviorClass = classify(signals, has);
+  const insights = deriveInsights(events, signals, has);
   const eventCount = events.length;
   const firstAt = events[0]?.at ?? "";
   const lastAt = events[events.length - 1]?.at ?? "";
@@ -139,6 +189,7 @@ export function classifySession(input: AgentSessionInput): AgentJourney {
     firstAt,
     lastAt,
     summary: summarize(behaviorClass, confidence, signals),
+    insights,
   };
 }
 

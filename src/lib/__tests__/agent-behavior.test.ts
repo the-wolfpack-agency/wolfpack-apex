@@ -95,3 +95,50 @@ describe("buildJourneys", () => {
     expect(journeys[0].confidence).toBe("proven");
   });
 });
+
+describe("novel insights (classifySession)", () => {
+  function ev(type: string, at: string, agent?: string) {
+    return { type, path: "/x", at, agent };
+  }
+
+  it("flags impersonation: a welcomed known agent that then behaves hostilely", () => {
+    const j = classifySession({
+      key: "fp1",
+      keyKind: "fingerprint",
+      events: [
+        ev("site.agent_welcomed", "2026-09-19T00:00:00Z", "GPTBot"),
+        ev("site.agent_probed_sensitive", "2026-09-19T00:00:05Z"),
+      ],
+    });
+    const imp = j.insights.find((i) => i.kind === "impersonation");
+    expect(imp).toBeTruthy();
+    expect(imp && "claimedAgent" in imp && imp.claimedAgent).toBe("GPTBot");
+  });
+
+  it("does NOT flag impersonation for a welcomed agent that stays benign", () => {
+    const j = classifySession({
+      key: "fp2",
+      keyKind: "fingerprint",
+      events: [ev("site.agent_welcomed", "2026-09-19T00:00:00Z", "Googlebot"), ev("site.agent_read_robots", "2026-09-19T00:00:01Z")],
+    });
+    expect(j.insights.some((i) => i.kind === "impersonation")).toBe(false);
+  });
+
+  it("flags deliberate_violation: read robots FIRST, then tripped the decoy", () => {
+    const j = classifySession({
+      key: "fp3",
+      keyKind: "fingerprint",
+      events: [ev("site.agent_read_robots", "2026-09-19T00:00:00Z"), ev("site.agent_trap_tripped", "2026-09-19T00:00:05Z")],
+    });
+    expect(j.insights.some((i) => i.kind === "deliberate_violation")).toBe(true);
+  });
+
+  it("does NOT flag deliberate_violation when the decoy trip came before reading robots", () => {
+    const j = classifySession({
+      key: "fp4",
+      keyKind: "fingerprint",
+      events: [ev("site.agent_trap_tripped", "2026-09-19T00:00:00Z"), ev("site.agent_read_robots", "2026-09-19T00:00:05Z")],
+    });
+    expect(j.insights.some((i) => i.kind === "deliberate_violation")).toBe(false);
+  });
+});

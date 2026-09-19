@@ -33,6 +33,7 @@ const SUMMARY = {
       policies: [],
       timeline: { firstAt: "2026-09-18T10:00:00Z", lastAt: "2026-09-18T10:00:05Z", spanSeconds: 5, eventCount: 2 },
       disclaimer: "Attributes behavior to a consistent operator profile across surfaces. Does NOT establish a real-world identity, which requires legal process.",
+      insights: [],
     } },
   ],
   agentOrigins: [
@@ -138,4 +139,31 @@ test("triage actions: acknowledge shows a badge + POSTs, dismiss hides the findi
   // Revealing dismissed brings it back.
   fireEvent.click(toggle);
   await waitFor(() => expect(screen.getByTestId("ff-journey-fp1")).toBeInTheDocument());
+});
+
+test("surfaces a novel impersonation conclusion as a badge and in the profile panel", async () => {
+  const impersonated = {
+    ...SUMMARY,
+    journeys: [
+      {
+        ...SUMMARY.journeys[0],
+        profile: {
+          ...SUMMARY.journeys[0].profile,
+          insights: [{ kind: "impersonation" as const, claimedAgent: "GPTBot", detail: "Presented the identity of GPTBot but behaved hostilely." }],
+        },
+      },
+    ],
+  };
+  mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: impersonated }) });
+  render(<SiteAnalyticsPage />);
+  await waitFor(() => expect(screen.getByTestId("ff-journeys-triage")).toBeInTheDocument());
+
+  // The impersonation badge rides on the card header.
+  expect(screen.getByTestId("insight-badge-impersonation-fp1")).toHaveTextContent(/impersonation/i);
+
+  // Expanding the profile shows the novel-conclusions section with the claimed identity.
+  fireEvent.click(screen.getByTestId("ff-journey-profile-toggle-fp1"));
+  const insights = await screen.findByTestId("insights-fp1");
+  expect(insights).toHaveTextContent(/novel conclusions/i);
+  expect(insights).toHaveTextContent(/impersonation of gptbot/i);
 });

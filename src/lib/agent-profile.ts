@@ -15,7 +15,7 @@
  * identity" disclaimer carry through unchanged. Nothing is invented.
  */
 
-import type { AgentJourney, AgentSignal } from "@/lib/agent-behavior";
+import type { AgentJourney, AgentSignal, JourneyInsight } from "@/lib/agent-behavior";
 import { analyzeToolComposition, type ToolCompositionReport, type PolicyCategory } from "@/lib/agent-tool-composition";
 import { operatorKeyFor, DISCLAIMER } from "@/lib/agent-dossier";
 import type { ScaffoldingSignature } from "@/lib/agent-probe";
@@ -71,6 +71,8 @@ export interface AgentProfile {
   policies: PolicyCategory[];
   timeline: { firstAt: string; lastAt: string; spanSeconds: number; eventCount: number };
   disclaimer: string;
+  /** Novel conclusions carried from the journey (impersonation, deliberate rule violation). */
+  insights: JourneyInsight[];
 }
 
 function spanSeconds(firstAt: string, lastAt: string): number {
@@ -155,5 +157,6 @@ export function buildAgentProfile(journey: AgentJourney): AgentProfile {
     policies: toolComposition.policies,
     timeline: { firstAt: journey.firstAt, lastAt: journey.lastAt, spanSeconds: scaffoldingLite.spanSeconds, eventCount: journey.eventCount },
     disclaimer: DISCLAIMER,
+    insights: journey.insights,
   };
 }
