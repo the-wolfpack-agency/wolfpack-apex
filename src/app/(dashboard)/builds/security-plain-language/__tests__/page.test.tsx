@@ -108,7 +108,6 @@ test("restores the engagement brief for the team: the argument behind the course
   // The strategic content is present (from the source of truth), so the team can
   // understand the engagement without the old static page.
   expect(brief).toHaveTextContent(/gatekeeping/i); // the "why"
-  expect(brief).toHaveTextContent(/Forward Deployed Engineer/i); // the FDE audience
   expect(brief).toHaveTextContent(/Name the jargon/i); // the four-beat method
   expect(brief).toHaveTextContent(/commitment ladder/i); // what it reuses
 });

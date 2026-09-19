@@ -21,7 +21,7 @@ import { fetchWithRefresh, getInstinctToken, jsonHeaders } from "@/lib/client-au
 import { CLIENT_BUILDS } from "@/lib/builds/registry";
 import BuildBanner from "@/components/BuildBanner";
 import { Stepper, type StepperStep } from "@/components/console";
-import { METHOD, HEADLINE, CERT_PREMISE, PRECISION_NOTE, GATEKEEPING, FDE, REUSES, WHY_IT_WORKS, TO_BUILD_OUT } from "@/lib/builds/security-plain-language";
+import { METHOD, HEADLINE, CERT_PREMISE, PRECISION_NOTE, GATEKEEPING, REUSES, WHY_IT_WORKS, TO_BUILD_OUT } from "@/lib/builds/security-plain-language";
 import type { LmsCourse, LessonBlock } from "@/lib/lms/content";
 import type { CourseProgress, LessonStatus } from "@/lib/lms/progress";
 
@@ -177,13 +177,6 @@ export default function SecurityPlainLanguagePage() {
             {METHOD.map((m) => (<li key={m.beat}><strong>{m.beat}.</strong> {m.does}</li>))}
           </ol>
           <p className="wp-pilot-aside">{PRECISION_NOTE}</p>
-
-          <h3>The highest-value audience: the {FDE.role}</h3>
-          <p className="wp-pilot-aside">{FDE.why}</p>
-          <p className="wp-pilot-aside">{FDE.gap}</p>
-          <ul className="wp-pilot-list">
-            {FDE.coursework.map((c) => (<li key={c.covers}><strong>{c.covers}</strong> - {c.so}</li>))}
-          </ul>
 
           <h3>What it reuses from the proven program</h3>
           <ul className="wp-pilot-list">
