@@ -109,6 +109,9 @@ describe("getSiteAnalyticsSummary", () => {
     expect(profile.disclaimer).toMatch(/does not establish a real-world identity/i);
 
     // Agent provenance by network-origin country, split by how Forcefield handled it.
+    // Probe intelligence: /admin (a probed path in the journey) is named with its CWE.
+    expect(summary.probeIntel.some((e) => /admin surface/i.test(e.label) && e.cwe === "CWE-200")).toBe(true);
+
     expect(summary.agentOrigins).toEqual([
       { country: "US", total: 12, welcomed: 2, flagged: 6, hostile: 4 },
       { country: "DE", total: 3, welcomed: 0, flagged: 3, hostile: 0 },

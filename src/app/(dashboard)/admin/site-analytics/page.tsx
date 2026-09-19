@@ -43,6 +43,7 @@ interface Summary {
     triage: TriageStatus;
   }>;
   agentOrigins: Array<{ country: string; total: number; welcomed: number; flagged: number; hostile: number }>;
+  probeIntel: Array<{ label: string; cwe: string; severity: "low" | "medium" | "high" | "critical"; category: string; count: number }>;
 }
 
 interface AgentProfile {
@@ -405,6 +406,31 @@ export default function SiteAnalyticsPage() {
               <AgentOriginMap origins={summary.agentOrigins ?? []} />
             </div>
           </div>
+
+          {/* Probe intelligence: the named attacks/CWEs agents are scanning for. */}
+          {(summary.probeIntel ?? []).length > 0 && (
+            <div style={card} data-testid="ff-probe-intel">
+              <div style={label}>Probe intelligence &middot; what agents are scanning us for</div>
+              <p style={{ margin: "0.5rem 0 0", fontSize: "0.76rem", color: "var(--wp-text-muted, #9ca3af)", lineHeight: 1.5 }}>
+                Each sensitive path an agent probed, matched to the specific exposure it targets and its CWE. Same signature knowledge our own scanner uses to find these, inverted to name what inbound traffic is hunting.
+              </p>
+              <ul data-testid="probe-intel-list" style={{ listStyle: "none", margin: "0.9rem 0 0", padding: 0, display: "grid", gap: "0.45rem" }}>
+                {(summary.probeIntel ?? []).map((pi) => {
+                  const sevColor = pi.severity === "critical" ? "var(--wp-error, #ef4444)" : pi.severity === "high" ? "var(--wp-warning, #f5a623)" : pi.severity === "medium" ? "var(--wp-gold, #e8b528)" : "var(--wp-text-muted, #9ca3af)";
+                  return (
+                    <li key={pi.label} style={{ display: "flex", alignItems: "center", gap: "0.6rem", flexWrap: "wrap", border: "1px solid var(--wp-dark-border, #333)", borderRadius: 6, padding: "0.5rem 0.7rem" }}>
+                      <span style={{ fontSize: "0.6rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em", color: "var(--wp-dark, #0b0d11)", background: sevColor, borderRadius: 999, padding: "0.1rem 0.45rem" }}>
+                        {pi.severity}
+                      </span>
+                      <span style={{ fontSize: "0.83rem", color: "var(--wp-text, #eee)" }}>{pi.label}</span>
+                      <span style={{ fontFamily: "var(--wp-mono, ui-monospace, monospace)", fontSize: "0.7rem", color: "var(--wp-text-muted, #9ca3af)" }}>{pi.cwe}</span>
+                      <span style={{ marginLeft: "auto", fontSize: "0.75rem", color: "var(--wp-text-muted, #9ca3af)" }}>{pi.count}&times;</span>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
 
           {/* Forcefield for the Web: agent traffic on ogiam.com. Watch-first, so
               these are observed, not blocked. */}
