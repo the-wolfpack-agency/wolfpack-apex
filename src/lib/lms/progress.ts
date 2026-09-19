@@ -7,7 +7,7 @@
  * (returns empty) so a storage hiccup never breaks the course view. A lesson
  * with no row is simply "not started" - doing nothing is visible.
  */
-import { query, safeQuery } from "@/lib/db";
+import { query, safeQuery, hasDatabase } from "@/lib/db";
 import { trackEvent } from "@/lib/analytics";
 
 export type LessonStatus = "viewed" | "completed";
@@ -27,7 +27,7 @@ export async function ensureEnrollment(
   courseId: string,
   actor: Actor,
 ): Promise<string | null> {
-  if (!process.env.DATABASE_URL) return null;
+  if (!hasDatabase()) return null;
   const { rows } = await safeQuery<{ id: string; created: boolean }>(
     `INSERT INTO lms_enrollments (workspace_id, course_id, user_id)
        VALUES ($1, $2, $3)
@@ -53,7 +53,7 @@ export async function getCourseProgress(
   userId: string,
 ): Promise<CourseProgress> {
   const empty: CourseProgress = { enrolled: false, lessons: {}, completed: false };
-  if (!process.env.DATABASE_URL) return empty;
+  if (!hasDatabase()) return empty;
   const { rows: enr } = await safeQuery<{ id: string; status: string }>(
     `SELECT id, status FROM lms_enrollments WHERE workspace_id = $1 AND course_id = $2 AND user_id = $3 LIMIT 1`,
     [workspaceId, courseId, userId],
@@ -85,7 +85,7 @@ export async function setLessonProgress(input: {
   actor: Actor;
 }): Promise<CourseProgress> {
   const { workspaceId, courseId, lessonId, status, allLessonIds, actor } = input;
-  if (!process.env.DATABASE_URL) return { enrolled: false, lessons: {}, completed: false };
+  if (!hasDatabase()) return { enrolled: false, lessons: {}, completed: false };
 
   const enrollmentId = await ensureEnrollment(workspaceId, courseId, actor);
   if (!enrollmentId) return { enrolled: false, lessons: {}, completed: false };

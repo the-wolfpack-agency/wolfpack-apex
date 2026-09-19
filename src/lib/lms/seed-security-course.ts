@@ -8,7 +8,7 @@
  * reseeding never deletes lessons (and thus never orphans learner progress,
  * which references lesson ids). Content revisions are a later, versioned concern.
  */
-import { query, safeQuery } from "@/lib/db";
+import { query, safeQuery, hasDatabase } from "@/lib/db";
 import {
   HEADLINE, CERT_PREMISE, PRECISION_NOTE, CERT_TIERS, PRODUCTS, DEEP_DIVES, ACQUISITIONS,
   type ProductPlain, type AcquisitionPlain,
@@ -68,7 +68,7 @@ export function buildSecurityCourseSpec() {
 /** Idempotently ensure the security course exists for a workspace. Returns the
  *  course id (null without a DB). Seed-once: skips if modules already exist. */
 export async function seedSecurityCourse(workspaceId: string): Promise<string | null> {
-  if (!process.env.DATABASE_URL) return null;
+  if (!hasDatabase()) return null;
   const spec = buildSecurityCourseSpec();
 
   // Upsert the course row, get its id.
