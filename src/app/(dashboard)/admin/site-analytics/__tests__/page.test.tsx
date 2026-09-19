@@ -47,6 +47,7 @@ const SUMMARY = {
   ],
   payloadIntel: [{ attack: "sql_injection", count: 3 }],
   operatorTriage: {},
+  blockedOperators: [],
 };
 
 beforeEach(() => {
@@ -203,4 +204,22 @@ test("by-operator view consolidates findings under one operator with operator-le
   const call = mockFetchWithRefresh.mock.calls.find((c) => String(c[0]).includes("/triage") && String(c[1]?.body).includes("op:op_abc12345"));
   expect(call).toBeTruthy();
   expect(JSON.parse(call![1].body)).toEqual({ findingKey: "op:op_abc12345", status: "escalated" });
+});
+
+
+test("blocking an operator POSTs to the block route and shows a blocked badge", async () => {
+  mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: SUMMARY }) });
+  render(<SiteAnalyticsPage />);
+  await waitFor(() => expect(screen.getByTestId("ff-journeys-triage")).toBeInTheDocument());
+  fireEvent.click(screen.getByTestId("journey-view-operator"));
+  await screen.findByTestId("ff-operators-view");
+
+  // Not blocked initially.
+  expect(screen.queryByTestId("operator-blocked-op_abc12345")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByTestId("operator-block-op_abc12345"));
+
+  await waitFor(() => expect(screen.getByTestId("operator-blocked-op_abc12345")).toBeInTheDocument());
+  const call = mockFetchWithRefresh.mock.calls.find((c) => String(c[0]).includes("/api/admin/operators/block"));
+  expect(call).toBeTruthy();
+  expect(JSON.parse(call![1].body)).toEqual({ operatorKey: "op_abc12345", block: true });
 });

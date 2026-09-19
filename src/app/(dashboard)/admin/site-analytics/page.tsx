@@ -47,6 +47,7 @@ interface Summary {
   probeIntel: Array<{ label: string; cwe: string; severity: "low" | "medium" | "high" | "critical"; category: string; count: number }>;
   payloadIntel: Array<{ attack: string; count: number }>;
   operatorTriage: Record<string, TriageStatus>;
+  blockedOperators: string[];
 }
 
 interface AgentProfile {
@@ -112,6 +113,7 @@ export default function SiteAnalyticsPage() {
   const [triageOverride, setTriageOverride] = useState<Record<string, TriageStatus>>({});
   const [journeyView, setJourneyView] = useState<"severity" | "operator">("severity");
   const [operatorTriageOverride, setOperatorTriageOverride] = useState<Record<string, TriageStatus>>({});
+  const [blockedOverride, setBlockedOverride] = useState<Record<string, boolean>>({});
 
   const toggleProfile = useCallback((key: string) => {
     setExpanded((prev) => {
@@ -148,10 +150,25 @@ export default function SiteAnalyticsPage() {
     }
   }, []);
 
+  const setOperatorBlocked = useCallback(async (opKey: string, block: boolean) => {
+    setBlockedOverride((prev) => ({ ...prev, [opKey]: block }));
+    try {
+      const res = await fetchWithRefresh("/api/admin/operators/block", {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: JSON.stringify({ operatorKey: opKey, block }),
+      });
+      if (!res.ok) setBlockedOverride((prev) => ({ ...prev, [opKey]: !block })); // revert (e.g. 403: needs admin)
+    } catch {
+      setBlockedOverride((prev) => ({ ...prev, [opKey]: !block }));
+    }
+  }, []);
+
   const load = useCallback(async (range: number) => {
     setState("loading");
     setTriageOverride({});
     setOperatorTriageOverride({});
+    setBlockedOverride({});
     try {
       const res = await fetchWithRefresh(`/api/admin/site-analytics?days=${range}`);
       if (!res.ok) {
@@ -552,6 +569,7 @@ export default function SiteAnalyticsPage() {
                   const groups = consolidateByOperator(summary.journeys);
                   if (groups.length === 0) return <p style={{ fontSize: "0.82rem", color: "var(--wp-text-muted, #9ca3af)" }}>No operators yet.</p>;
                   const opStatus = (k: string): TriageStatus => operatorTriageOverride[k] ?? summary.operatorTriage?.[k] ?? "new";
+                  const isBlocked = (k: string): boolean => blockedOverride[k] ?? (summary.blockedOperators ?? []).includes(k);
                   const sevColor = (sv: string) => (sv === "hostile" ? "var(--wp-error, #ef4444)" : sv === "elevated" ? "var(--wp-warning, #f5a623)" : "var(--wp-success, #30a46c)");
                   const opBtn = (opKey: string, status: TriageStatus, text: string, color: string) => (
                     <button
@@ -583,6 +601,9 @@ export default function SiteAnalyticsPage() {
                         {opStatus(g.operatorKey) !== "new" && (
                           <span data-testid={`operator-status-${g.operatorKey}`} style={{ fontSize: "0.6rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em", color: "var(--wp-text-muted, #9ca3af)", border: "1px solid var(--wp-dark-border, #333)", borderRadius: 999, padding: "0.1rem 0.4rem" }}>{opStatus(g.operatorKey)}</span>
                         )}
+                        {isBlocked(g.operatorKey) && (
+                          <span data-testid={`operator-blocked-${g.operatorKey}`} style={{ fontSize: "0.6rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em", color: "var(--wp-dark, #0b0d11)", background: "var(--wp-error, #ef4444)", borderRadius: 999, padding: "0.1rem 0.45rem" }}>blocked</span>
+                        )}
                         <span style={{ marginLeft: "auto", fontSize: "0.72rem", color: "var(--wp-text-muted, #9ca3af)" }}>{g.findingCount} finding{g.findingCount === 1 ? "" : "s"}</span>
                       </div>
                       <p style={{ margin: 0, fontSize: "0.79rem", color: "var(--wp-text, #eee)", lineHeight: 1.5 }}>
@@ -600,6 +621,19 @@ export default function SiteAnalyticsPage() {
                         {opBtn(g.operatorKey, "acknowledged", "Acknowledge", "var(--wp-text-muted, #9ca3af)")}
                         {opBtn(g.operatorKey, "escalated", "Escalate", "var(--wp-error, #ef4444)")}
                         {opBtn(g.operatorKey, "dismissed", "Dismiss", "var(--wp-text-muted, #6b7280)")}
+                        <button
+                          type="button"
+                          data-testid={`operator-block-${g.operatorKey}`}
+                          onClick={() => setOperatorBlocked(g.operatorKey, !isBlocked(g.operatorKey))}
+                          style={{
+                            marginLeft: "0.3rem", padding: "0.12rem 0.55rem", borderRadius: 999, fontSize: "0.68rem", fontWeight: 700, cursor: "pointer",
+                            background: isBlocked(g.operatorKey) ? "var(--wp-error, #ef4444)" : "transparent",
+                            color: isBlocked(g.operatorKey) ? "var(--wp-dark, #0b0d11)" : "var(--wp-error, #ef4444)",
+                            border: "1px solid var(--wp-error, #ef4444)",
+                          }}
+                        >
+                          {isBlocked(g.operatorKey) ? "Unblock" : "Block"}
+                        </button>
                       </div>
                       <ul style={{ listStyle: "none", margin: "0.2rem 0 0", padding: 0, display: "grid", gap: "0.5rem" }}>
                         {g.journeys.map(renderJourneyCard)}
