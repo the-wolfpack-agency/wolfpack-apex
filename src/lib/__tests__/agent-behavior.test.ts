@@ -70,6 +70,39 @@ describe("classifySession", () => {
   });
 });
 
+describe("classifySession - IDOR enumeration + runaway loop", () => {
+  const pv = (path: string, at: string): SessionEvent => ({ type: "site.page_viewed", path, at });
+
+  it("walking sequential object IDs is IDOR enumeration -> vuln_scanner + insight (CWE-639)", () => {
+    const j = classifySession({
+      key: "e", keyKind: "fingerprint",
+      events: [pv("/api/users/1", "2026-09-18T10:00:00Z"), pv("/api/users/2", "2026-09-18T10:00:01Z"), pv("/api/users/3", "2026-09-18T10:00:02Z")],
+    });
+    expect(j.signals).toContain("id_enumeration");
+    expect(j.behaviorClass).toBe("vuln_scanner");
+    expect(j.insights.some((i) => i.kind === "id_enumeration")).toBe(true);
+  });
+
+  it("two IDs under one template is NOT enumeration (precision: needs >=3)", () => {
+    const j = classifySession({ key: "e2", keyKind: "fingerprint", events: [pv("/api/users/1", "2026-09-18T10:00:00Z"), pv("/api/users/2", "2026-09-18T10:00:01Z")] });
+    expect(j.signals).not.toContain("id_enumeration");
+  });
+
+  it("hammering one endpoint many times is a runaway loop -> aggressive_scraper + insight (CWE-770)", () => {
+    const events = Array.from({ length: 8 }, (_, i) => pv("/search", `2026-09-18T10:00:0${i}Z`));
+    const j = classifySession({ key: "l", keyKind: "fingerprint", events });
+    expect(j.signals).toContain("runaway_loop");
+    expect(j.behaviorClass).toBe("aggressive_scraper");
+    expect(j.insights.some((i) => i.kind === "runaway_loop")).toBe(true);
+  });
+
+  it("a handful of hits on one path is not a loop (precision: needs >=8)", () => {
+    const events = Array.from({ length: 4 }, (_, i) => pv("/search", `2026-09-18T10:00:0${i}Z`));
+    const j = classifySession({ key: "l2", keyKind: "fingerprint", events });
+    expect(j.signals).not.toContain("runaway_loop");
+  });
+});
+
 describe("buildJourneys", () => {
   it("groups events by correlation key and classifies each session, newest first", () => {
     const journeys = buildJourneys([

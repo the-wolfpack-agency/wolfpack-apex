@@ -96,9 +96,9 @@ export const THREAT_COVERAGE: readonly ThreatEntry[] = [
   { id: "CWE-290", name: "Authentication bypass by spoofing (impersonation)", family: "agent-llm", status: "covered", lenses: ["agent-behavior", "web-classifier"], note: "identified_agent + forged good-bot badge detection." },
   { id: "CWE-693", name: "Protection mechanism failure (evasion)", family: "agent-llm", status: "covered", lenses: ["agent-behavior", "tool-composition"], note: "deliberate_violation (reads robots then violates) + evasion tool intent." },
   { id: "CWE-799", name: "Improper control of interaction frequency", family: "agent-llm", status: "covered", lenses: ["agent-behavior"], note: "form_too_fast / high_rate / form_spammer signals." },
-  { id: "CWE-770", name: "Resource exhaustion", family: "agent-llm", status: "partial", lenses: ["agent-behavior"], note: "high_rate is the proxy; no runaway-loop / recursion detection yet." },
+  { id: "CWE-770", name: "Resource exhaustion", family: "agent-llm", status: "covered", lenses: ["agent-behavior"], note: "high_rate plus runaway-loop repetition detection (one endpoint hammered in a session -> the runaway_loop signal)." },
   { id: "CWE-601", name: "Open redirect", family: "agent-llm", status: "gap", lenses: [], note: "Only a server-side returnTo guard; not an inbound detection signal." },
-  { id: "CWE-639", name: "Insecure direct object reference (IDOR)", family: "agent-llm", status: "gap", lenses: [], note: "Outbound pentest only; no inbound agent-IDOR signal." },
+  { id: "CWE-639", name: "Insecure direct object reference (IDOR)", family: "agent-llm", status: "covered", lenses: ["agent-behavior"], note: "Sequential-ID enumeration (walking /users/1, /2, /3) is detected inbound as the id_enumeration behavior signal." },
 ];
 
 export interface CoverageSummary {

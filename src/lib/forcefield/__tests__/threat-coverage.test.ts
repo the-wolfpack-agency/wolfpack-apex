@@ -46,6 +46,15 @@ describe("threat-coverage matrix", () => {
     expect(THREAT_COVERAGE.find((e) => e.id === "LLM08")!.status).toBe("covered");
     expect(THREAT_COVERAGE.find((e) => e.id === "LLM02")!.status).toBe("gap");
   });
+
+  it("the behavior-lens gaps are now covered (IDOR enumeration, runaway-loop exhaustion)", () => {
+    const idor = THREAT_COVERAGE.find((e) => e.id === "CWE-639")!;
+    expect(idor.status).toBe("covered");
+    expect(idor.lenses).toContain("agent-behavior");
+    const dos = THREAT_COVERAGE.find((e) => e.id === "CWE-770")!;
+    expect(dos.status).toBe("covered");
+    expect(dos.lenses).toContain("agent-behavior");
+  });
 });
 
 describe("coverageSummary", () => {
