@@ -11,6 +11,13 @@
  */
 
 export const CAPABILITY_ALLOWLIST: readonly string[] = [
+  // Public agent harness: a deliberately PUBLIC, unauthenticated developer tool
+  // (point your own agent at a sandbox and get a behavioral reading). No JWT and
+  // no tenant context by design; hardened via unguessable session tokens, a short
+  // TTL, and a hard per-session hit cap. See src/lib/harness/.
+  "src/app/api/harness/session/route.ts",
+  "src/app/api/harness/[id]/reading/route.ts",
+
   // Public auth endpoints — login issues the JWT, refresh validates it.
   "src/app/api/auth/login/route.ts",
   "src/app/api/auth/refresh/route.ts",

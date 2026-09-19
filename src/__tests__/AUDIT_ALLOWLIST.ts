@@ -27,6 +27,10 @@ export interface AuditAllowlistEntry {
 }
 
 export const AUDIT_ALLOWLIST: ReadonlyArray<AuditAllowlistEntry> = [
+  {
+    route: "src/app/api/harness/session/route.ts",
+    reason: "Public, unauthenticated harness: POST mints an anonymous, ephemeral, unguessable session token for a developer to point their own agent at a decoy sandbox. There is no user, no tenant, and no durable business state - the row is short-TTL and holds only a goal/label the caller typed. It is read-only-by-effect the same class as agent-probe/run: the behavioral observation that DOES matter for learning is captured as a non-PII SIGHTING when the reading is computed, not here. A per-session-start audit row would carry no compliance value.",
+  },
   // Read-only-by-effect (analysis, returns data; no durable state change)
   {
     route: "src/app/api/admin/agent-probe/run/route.ts",
