@@ -286,6 +286,15 @@ export type InstinctEventType =
   | "goal.commitment_queued_offline"
   | "goal.north_star_ui_updated"
   | "goal.digest_sent"
+  // LMS: a learner enrolls in, works through, self-checks, and completes a
+  // course. Feeds the learning loop with { course, lesson, tier } so we can
+  // see which lessons stall and where fluency is actually reached (never PII
+  // beyond the learner's own user_id, which every event already carries).
+  | "course.enrolled"
+  | "course.lesson_viewed"
+  | "course.lesson_completed"
+  | "course.self_checked"
+  | "course.completed"
   // Team fanout when an admin (ceo|cto) creates/edits a company goal.
   // Feeds the learning loop with { goal_type, action, recipient_count,
   // actor_role } so we can see which admins drive the most team

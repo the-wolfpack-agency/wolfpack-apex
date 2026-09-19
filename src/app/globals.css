@@ -1439,6 +1439,33 @@ a:hover { color: var(--wp-gold-hover); }
 .wp-build-card-what { margin: 0 0 0.4rem; line-height: 1.6; max-width: 78ch; }
 .wp-build-card-data { margin: 0; font-size: 0.84rem; color: var(--wp-text-muted, #929cad); line-height: 1.55; max-width: 78ch; }
 
+/* LMS course view (security-plain-language). */
+.wp-build-complete { color: var(--wp-success, #30a46c); font-weight: 700; }
+.wp-build-progress-track { height: 6px; border-radius: 999px; background: var(--wp-border, #262b34); overflow: hidden; margin-top: 0.5rem; max-width: 40rem; }
+.wp-build-progress-fill { height: 100%; background: var(--wp-gold, #c9a227); border-radius: 999px; transition: width 0.3s ease; }
+.wp-build-lessons { list-style: none; padding: 0; margin: 0.75rem 0 0; display: grid; gap: 0.6rem; }
+.wp-build-lesson { border: 1px solid var(--wp-border, #262b34); border-radius: 8px; background: var(--wp-panel, #171a20); }
+.wp-build-lesson > details > summary { cursor: pointer; }
+.wp-build-lesson-summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.6rem; padding: 0.8rem 1rem; list-style: none; }
+.wp-build-lesson-summary::-webkit-details-marker { display: none; }
+.wp-build-lesson-title { font-weight: 650; color: var(--wp-text, #e6e9ef); }
+.wp-build-lesson-sub { font-size: 0.78rem; color: var(--wp-text-muted, #929cad); font-family: var(--wp-mono, ui-monospace, monospace); }
+.wp-build-lesson-check { margin-left: auto; font-size: 0.72rem; font-weight: 700; color: var(--wp-success, #30a46c); }
+.wp-build-lesson-body { padding: 0.2rem 1rem 1rem; display: grid; gap: 0.55rem; }
+.wp-build-lesson-h { margin: 0.3rem 0 0; font-size: 0.95rem; }
+.wp-build-lesson-plain { margin: 0; line-height: 1.6; max-width: 78ch; color: var(--wp-text, #e6e9ef); }
+.wp-build-lesson-jargon { margin: 0; font-size: 0.82rem; color: var(--wp-text-muted, #929cad); }
+.wp-build-lesson-beat { text-transform: uppercase; letter-spacing: 0.03em; font-size: 0.72rem; font-weight: 700; color: var(--wp-gold, #c9a227); }
+.wp-build-lesson-beat-row { margin: 0; line-height: 1.55; max-width: 78ch; }
+.wp-build-lesson-stops .wp-build-lesson-beat { color: var(--wp-warning, #f5a623); }
+.wp-build-lesson-without .wp-build-lesson-beat { color: var(--wp-error, #ef4444); }
+.wp-build-selfcheck { border-left: 2px solid var(--wp-gold, #c9a227); padding: 0.2rem 0 0.2rem 0.8rem; }
+.wp-build-selfcheck ol { margin: 0.3rem 0 0; padding-left: 1.1rem; line-height: 1.55; }
+.wp-build-lesson-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.3rem; }
+.wp-build-btn { padding: 0.3rem 0.8rem; border-radius: 6px; font-size: 0.8rem; font-weight: 600; cursor: pointer; border: 1px solid var(--wp-gold, #c9a227); background: var(--wp-gold, #c9a227); color: #0b0d11; }
+.wp-build-btn:disabled { opacity: 0.55; cursor: default; }
+.wp-build-btn-ghost { background: transparent; color: var(--wp-text, #e6e9ef); border-color: var(--wp-border, #262b34); }
+
 .wp-build-quote {
   margin: 1rem 0 0;
   padding: 0.9rem 1.1rem;
