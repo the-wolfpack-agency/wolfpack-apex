@@ -308,3 +308,23 @@ test("a triage-capable but non-manager sees triage + promote, but not block", as
   expect(screen.getByTestId("operator-promote-op_abc12345")).toBeInTheDocument();
   expect(screen.queryByTestId("operator-block-op_abc12345")).not.toBeInTheDocument();
 });
+
+test("operator card: codified insight panel (verdict + recommendation) and the journey list is collapsed", async () => {
+  mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: SUMMARY, permissions: PERMS }) });
+  render(<SiteAnalyticsPage />);
+  await waitFor(() => expect(screen.getByTestId("ff-journeys-triage")).toBeInTheDocument());
+  fireEvent.click(screen.getByTestId("journey-view-operator"));
+  await screen.findByTestId("ff-operators-view");
+
+  // The codified insight leads the card: a verdict + a recommended action.
+  expect(screen.getByTestId("operator-insight-op_abc12345")).toBeInTheDocument();
+  expect(screen.getByTestId("operator-verdict-op_abc12345")).toHaveTextContent(/proven|likely/i);
+  expect(screen.getByTestId("operator-recommend-op_abc12345")).toHaveTextContent(/Recommend:/i);
+
+  // The heavy per-journey list is collapsed behind a "Show N findings" details.
+  const findings = screen.getByTestId("operator-findings-op_abc12345");
+  expect(findings).toBeInTheDocument();
+  expect(findings.tagName.toLowerCase()).toBe("details");
+  expect(findings).not.toHaveAttribute("open");
+  expect(findings).toHaveTextContent(/Show 1 finding/i);
+});
