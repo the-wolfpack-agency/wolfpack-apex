@@ -11,6 +11,7 @@
 import { query, safeQuery } from "@/lib/db";
 import { buildJourneys, type AgentJourney, type CorrelationKind } from "@/lib/agent-behavior";
 import { buildAgentProfile, type AgentProfile } from "@/lib/agent-profile";
+import { summarizeProbeIntel, type ProbeIntelEntry } from "@/lib/agent-probe-signatures";
 import { getFindingTriage, type TriageStatus } from "@/lib/site-finding-triage";
 
 /** Closed event vocabulary, mirrored from the marketing site's analytics. A
@@ -100,6 +101,10 @@ export interface SiteAnalyticsSummary {
      coarse origin signal, never a confirmed operator location. Broken down by
      how Forcefield handled it so a hostile cluster from one origin stands out. */
   agentOrigins: Array<{ country: string; total: number; welcomed: number; flagged: number; hostile: number }>;
+  /* Probe intelligence: the named attacks/CWEs agents are scanning our surface
+     for, aggregated from the paths in the reconstructed journeys. Reuses the
+     AgenticQA probe-signature knowledge (see agent-probe-signatures). */
+  probeIntel: ProbeIntelEntry[];
 }
 
 /** Clamp the requested window to a sane integer day count. */
@@ -240,5 +245,6 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
       flagged: Number(r.flagged),
       hostile: Number(r.hostile),
     })),
+    probeIntel: summarizeProbeIntel(journeyRows.rows.map((r) => r.path ?? "")),
   };
 }

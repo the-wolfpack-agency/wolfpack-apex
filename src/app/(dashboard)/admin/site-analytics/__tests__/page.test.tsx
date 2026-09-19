@@ -41,6 +41,10 @@ const SUMMARY = {
     { country: "DE", total: 12, welcomed: 2, flagged: 10, hostile: 0 },
     { country: "ZZ", total: 3, welcomed: 0, flagged: 0, hostile: 3 },
   ],
+  probeIntel: [
+    { label: "Cloud metadata endpoint (SSRF / credential theft)", cwe: "CWE-918", severity: "critical" as const, category: "ssrf", count: 2 },
+    { label: "Admin surface probe", cwe: "CWE-200", severity: "medium" as const, category: "admin-surface", count: 5 },
+  ],
 };
 
 beforeEach(() => {
@@ -80,6 +84,10 @@ test("renders the reused heatmap, totals, and top pages/countries from the summa
   // The agent origin map renders a node for a country with a centroid (US).
   expect(screen.getByTestId("agent-origin-map")).toBeInTheDocument();
   expect(screen.getByTestId("origin-node-US")).toBeInTheDocument();
+  // Probe intelligence names the specific attack + CWE agents are scanning for.
+  const intel = screen.getByTestId("ff-probe-intel");
+  expect(intel).toHaveTextContent(/cloud metadata endpoint/i);
+  expect(intel).toHaveTextContent("CWE-918");
   // Top pages / countries are collapsed by default (native details, closed).
   expect(screen.getByTestId("top-pages-collapse")).not.toHaveAttribute("open");
 
