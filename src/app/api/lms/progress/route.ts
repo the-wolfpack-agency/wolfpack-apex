@@ -12,7 +12,7 @@
  *   404 unknown course
  */
 import { NextRequest, NextResponse } from "next/server";
-import { requireSession } from "@/lib/auth/require-capability";
+import { requireCapability } from "@/lib/auth/require-capability";
 import { getCourseBySlug } from "@/lib/lms/content";
 import { setLessonProgress, getCourseProgress } from "@/lib/lms/progress";
 import { trackEvent } from "@/lib/analytics";
@@ -21,7 +21,7 @@ type Action = "view" | "complete" | "self_check";
 const ACTIONS: readonly Action[] = ["view", "complete", "self_check"];
 
 export async function POST(req: NextRequest) {
-  const auth = await requireSession(req);
+  const auth = await requireCapability(req, "course.view");
   if (!auth.ok) return auth.response;
 
   let body: { slug?: unknown; lessonId?: unknown; action?: unknown };

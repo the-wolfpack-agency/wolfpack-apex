@@ -117,29 +117,6 @@ async function userFromCookie(): Promise<TeamMember | null> {
   }
 }
 
-export type RequireSessionResult =
-  | { ok: true; user: TeamMember }
-  | { ok: false; response: NextResponse };
-
-/**
- * Learner-level guard: any authenticated user, no specific capability. Reuses
- * the exact same resolvers as requireCapability (Bearer header, cookie
- * fallback) so there is one token path, not two. For surfaces every signed-in
- * person may use (e.g. taking a course), where capability gating would be wrong.
- */
-export async function requireSession(request: Request): Promise<RequireSessionResult> {
-  const user =
-    getUserFromRequest(request.headers.get("authorization")) ??
-    (await userFromCookie());
-  if (!user) {
-    return {
-      ok: false,
-      response: NextResponse.json({ error: "unauthorized" }, { status: 401 }),
-    };
-  }
-  return { ok: true, user };
-}
-
 export async function requireCapability(
   request: Request,
   capability: Capability,

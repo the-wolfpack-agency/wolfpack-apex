@@ -10,13 +10,13 @@
  *   404 unknown course
  */
 import { NextRequest, NextResponse } from "next/server";
-import { requireSession } from "@/lib/auth/require-capability";
+import { requireCapability } from "@/lib/auth/require-capability";
 import { getCourseBySlug } from "@/lib/lms/content";
 import { getCourseProgress } from "@/lib/lms/progress";
 import { seedSecurityCourse, SECURITY_COURSE_SLUG } from "@/lib/lms/seed-security-course";
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ slug: string }> }) {
-  const auth = await requireSession(req);
+  const auth = await requireCapability(req, "course.view");
   if (!auth.ok) return auth.response;
   const { slug } = await ctx.params;
 
