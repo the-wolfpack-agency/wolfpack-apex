@@ -1607,3 +1607,13 @@ a:hover { color: var(--wp-gold-hover); }
 .wp-jt-node--bad { box-shadow: 0 0 0 0 currentColor; animation: wp-jt-pulse 1.8s ease-out infinite; }
 @keyframes wp-jt-pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 55%, transparent); } 70% { box-shadow: 0 0 0 6px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
 @media (prefers-reduced-motion: reduce) { .wp-jt-node--bad { animation: none; } }
+
+/* Operator-findings collapse: suppress the native disclosure marker (which
+   escapes the tight grid card and breaks the container) and use an inline,
+   rotating chevron that stays inside the content box. */
+.ff-op-findings > summary { list-style: none; display: inline-flex; align-items: center; gap: 0.35rem; }
+.ff-op-findings > summary::-webkit-details-marker { display: none; }
+.ff-op-findings > summary::marker { content: ""; }
+.ff-op-findings > summary .ff-chev { display: inline-block; transition: transform 0.15s ease; font-size: 0.7rem; }
+.ff-op-findings[open] > summary .ff-chev { transform: rotate(90deg); }
+@media (prefers-reduced-motion: reduce) { .ff-op-findings > summary .ff-chev { transition: none; } }
