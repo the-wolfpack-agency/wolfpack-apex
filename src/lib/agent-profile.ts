@@ -39,6 +39,8 @@ const PROCESS_GLOSSARY: Record<AgentSignal, { label: string; meaning: string; ho
   form_honeypot: { label: "Filled a hidden field", meaning: "Submitted a form with a honeypot field only a bot fills. Structural proof of automation.", hostile: true },
   form_too_fast: { label: "Submitted inhumanly fast", meaning: "Completed a form faster than a human could type it.", hostile: true },
   payload_attack: { label: "Sent an injection payload", meaning: "Sent a live injection payload (SQLi / XSS / traversal / ...) in a request. Active exploitation, not just a probe.", hostile: true },
+  id_enumeration: { label: "Walked sequential IDs", meaning: "Requested a run of sequential object IDs (e.g. /users/1, /2, /3). IDOR enumeration: probing for records it should not reach by stepping identifiers.", hostile: true },
+  runaway_loop: { label: "Hammered one endpoint", meaning: "Hit one endpoint many times in a single session, the signature of a runaway loop / resource-exhaustion pattern rather than normal use.", hostile: true },
 };
 
 export interface AgentProfileScaffolding {

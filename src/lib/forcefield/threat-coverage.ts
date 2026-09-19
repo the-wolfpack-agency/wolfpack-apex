@@ -58,10 +58,11 @@ export const THREAT_COVERAGE: readonly ThreatEntry[] = [
   { id: "CWE-78", name: "OS command injection", family: "cwe-top-25", status: "covered", lenses: ["payload", "probe-path"], note: "Command-injection payloads + /cgi-bin Shellshock probes." },
   { id: "CWE-77", name: "Command injection", family: "cwe-top-25", status: "covered", lenses: ["payload"], note: "Same detector family as CWE-78." },
   { id: "CWE-22", name: "Path traversal", family: "cwe-top-25", status: "covered", lenses: ["probe-path", "payload"], note: "/etc/passwd probes + traversal payloads." },
-  { id: "CWE-918", name: "Server-side request forgery (SSRF)", family: "cwe-top-25", status: "partial", lenses: ["probe-path"], note: "Cloud-metadata path probe is caught; SSRF via request params is not yet inspected at the payload layer (gap tracked)." },
+  { id: "CWE-918", name: "Server-side request forgery (SSRF)", family: "cwe-top-25", status: "covered", lenses: ["probe-path", "payload"], note: "Cloud-metadata path probes + internal/metadata targets in request params (127.0.0.1, 169.254.169.254, file://, gopher://) at the payload layer." },
+  { id: "CWE-611", name: "XML external entity (XXE)", family: "cwe-top-25", status: "covered", lenses: ["payload"], note: "XML external-entity declarations (<!ENTITY / <!DOCTYPE[ ... SYSTEM) detected by the payload inspector." },
   { id: "CWE-502", name: "Deserialization of untrusted data", family: "cwe-top-25", status: "covered", lenses: ["probe-path"], note: "JBoss JMXInvoker / WebLogic WLS-WSAT RCE-deserialization probes." },
   { id: "CWE-94", name: "Code injection", family: "cwe-top-25", status: "covered", lenses: ["probe-path"], note: "PHPUnit eval-stdin RCE probe." },
-  { id: "CWE-434", name: "Unrestricted file upload", family: "cwe-top-25", status: "gap", lenses: [], note: "No inbound upload-abuse detector yet." },
+  { id: "CWE-434", name: "Unrestricted file upload", family: "cwe-top-25", status: "covered", lenses: ["payload"], note: "A filename with an executable/script extension (php/jsp/exe/sh/...) detected by the payload inspector." },
   { id: "CWE-862", name: "Missing authorization", family: "cwe-top-25", status: "gap", lenses: [], note: "Detected only outbound (pentest scanner); no inbound agent-authz signal." },
   { id: "CWE-863", name: "Incorrect authorization", family: "cwe-top-25", status: "gap", lenses: [], note: "Outbound-scan only; no inbound signal." },
   { id: "CWE-306", name: "Missing authentication for critical function", family: "cwe-top-25", status: "gap", lenses: [], note: "Outbound-scan only; no inbound signal." },
@@ -88,7 +89,7 @@ export const THREAT_COVERAGE: readonly ThreatEntry[] = [
   { id: "CWE-215", name: "Insertion of sensitive info into debug output", family: "exposure-recon", status: "covered", lenses: ["probe-path"], note: "/debug and /console probes." },
 
   // ── Agent / LLM-specific classes ─────────────────────────────────────────
-  { id: "CWE-1427", name: "Prompt injection (OWASP LLM01)", family: "agent-llm", status: "gap", lenses: ["red-team-offline"], note: "Exercised offline against the gate (LLM01); NO live inbound prompt-injection detector yet. Highest-priority agent gap." },
+  { id: "CWE-1427", name: "Prompt injection (OWASP LLM01)", family: "agent-llm", status: "covered", lenses: ["payload", "red-team-offline"], note: "Live inbound detection: instruction-override verbs + prompt/rule targets, jailbreak tokens, and chat-template delimiter injection, plus the offline red-team." },
   { id: "LLM02", name: "Insecure output handling", family: "agent-llm", status: "gap", lenses: [], note: "Not detected; no model-output scanning." },
   { id: "LLM06", name: "Sensitive information disclosure", family: "agent-llm", status: "partial", lenses: ["tool-composition", "probe-path"], note: "data-exfil tool intent + secrets-exposure probing; no output scanning." },
   { id: "LLM07", name: "Insecure tool / plugin design", family: "agent-llm", status: "covered", lenses: ["tool-composition"], note: "unauthorized-access / credential-abuse tool intents from the toolset." },
@@ -96,9 +97,9 @@ export const THREAT_COVERAGE: readonly ThreatEntry[] = [
   { id: "CWE-290", name: "Authentication bypass by spoofing (impersonation)", family: "agent-llm", status: "covered", lenses: ["agent-behavior", "web-classifier"], note: "identified_agent + forged good-bot badge detection." },
   { id: "CWE-693", name: "Protection mechanism failure (evasion)", family: "agent-llm", status: "covered", lenses: ["agent-behavior", "tool-composition"], note: "deliberate_violation (reads robots then violates) + evasion tool intent." },
   { id: "CWE-799", name: "Improper control of interaction frequency", family: "agent-llm", status: "covered", lenses: ["agent-behavior"], note: "form_too_fast / high_rate / form_spammer signals." },
-  { id: "CWE-770", name: "Resource exhaustion", family: "agent-llm", status: "partial", lenses: ["agent-behavior"], note: "high_rate is the proxy; no runaway-loop / recursion detection yet." },
-  { id: "CWE-601", name: "Open redirect", family: "agent-llm", status: "gap", lenses: [], note: "Only a server-side returnTo guard; not an inbound detection signal." },
-  { id: "CWE-639", name: "Insecure direct object reference (IDOR)", family: "agent-llm", status: "gap", lenses: [], note: "Outbound pentest only; no inbound agent-IDOR signal." },
+  { id: "CWE-770", name: "Resource exhaustion", family: "agent-llm", status: "covered", lenses: ["agent-behavior"], note: "high_rate plus runaway-loop repetition detection (one endpoint hammered in a session -> the runaway_loop signal)." },
+  { id: "CWE-601", name: "Open redirect", family: "agent-llm", status: "covered", lenses: ["payload"], note: "A redirect-ish param pointing off-site (absolute or protocol-relative URL) detected by the payload inspector." },
+  { id: "CWE-639", name: "Insecure direct object reference (IDOR)", family: "agent-llm", status: "covered", lenses: ["agent-behavior"], note: "Sequential-ID enumeration (walking /users/1, /2, /3) is detected inbound as the id_enumeration behavior signal." },
 ];
 
 export interface CoverageSummary {

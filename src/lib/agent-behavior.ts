@@ -30,6 +30,8 @@ export type AgentSignal =
   | "probed_sensitive" // requested /admin, /.env, /wp-login, /api, etc.
   | "high_rate" // many requests in a short window
   | "payload_attack" // sent an active injection payload (SQLi/XSS/traversal/...)
+  | "id_enumeration" // walked sequential object IDs (IDOR enumeration)
+  | "runaway_loop" // hammered one endpoint many times (resource-exhaustion loop)
   | "identified_agent"; // matched the known-agent allowlist (welcome lane)
 
 export type BehaviorClass =
@@ -49,7 +51,9 @@ export type Confidence = "proven" | "inferred";
 export type JourneyInsight =
   | { kind: "impersonation"; claimedAgent: string; detail: string }
   | { kind: "deliberate_violation"; detail: string }
-  | { kind: "payload_attack"; attack: string; detail: string };
+  | { kind: "payload_attack"; attack: string; detail: string }
+  | { kind: "id_enumeration"; detail: string }
+  | { kind: "runaway_loop"; detail: string };
 
 /** How a session's events were tied together. A nonce is deterministic (the
  *  actor carried it); a fingerprint is a probabilistic grouping. */
@@ -158,6 +162,20 @@ function deriveInsights(
     });
   }
 
+  if (has("id_enumeration")) {
+    out.push({
+      kind: "id_enumeration",
+      detail: "Walked a run of sequential object IDs (e.g. /users/1, /2, /3), the signature of IDOR enumeration: probing for records it should not reach by stepping through identifiers.",
+    });
+  }
+
+  if (has("runaway_loop")) {
+    out.push({
+      kind: "runaway_loop",
+      detail: "Hit one endpoint many times in a single session, the signature of a runaway loop / resource-exhaustion pattern rather than normal use.",
+    });
+  }
+
   if (has("read_robots")) {
     const robotsAt = events.find((e) => e.type === "site.agent_read_robots")?.at;
     const firstHostileAt = events.find((e) => { const g = signalOf(e); return g !== null && HOSTILE.has(g); })?.at;
@@ -172,6 +190,43 @@ function deriveInsights(
   return out;
 }
 
+/** IDOR enumeration: >=3 distinct sequential object IDs under one path template
+ *  (e.g. /users/1, /users/2, /users/3). Deterministic + pure. */
+const ENUM_MIN_IDS = 3;
+/** Runaway loop / resource exhaustion: one exact path hit >= this many times. */
+const LOOP_MIN_HITS = 8;
+
+function pathTemplate(p: string): { template: string; num: number } | null {
+  const m = p.split("?")[0].match(/^(.*?)(\d+)(\D*)$/);
+  if (!m) return null;
+  return { template: `${m[1]}{n}${m[3]}`, num: Number(m[2]) };
+}
+
+/** True when the paths walk >=3 distinct IDs under a shared template. */
+export function detectIdEnumeration(paths: readonly string[]): boolean {
+  const byTemplate = new Map<string, Set<number>>();
+  for (const p of paths) {
+    const t = pathTemplate(p);
+    if (!t) continue;
+    const set = byTemplate.get(t.template) ?? new Set<number>();
+    set.add(t.num);
+    byTemplate.set(t.template, set);
+  }
+  for (const ids of byTemplate.values()) if (ids.size >= ENUM_MIN_IDS) return true;
+  return false;
+}
+
+/** True when one exact path is hit >= LOOP_MIN_HITS times (a runaway loop). */
+export function detectRunawayLoop(rawPaths: readonly string[]): boolean {
+  const counts = new Map<string, number>();
+  for (const p of rawPaths) {
+    const n = (counts.get(p) ?? 0) + 1;
+    if (n >= LOOP_MIN_HITS) return true;
+    counts.set(p, n);
+  }
+  return false;
+}
+
 /** Classify one correlated session into a behavior signature. Deterministic. */
 export function classifySession(input: AgentSessionInput): AgentJourney {
   const events = [...input.events].sort((a, b) => a.at.localeCompare(b.at));
@@ -181,6 +236,13 @@ export function classifySession(input: AgentSessionInput): AgentJourney {
   // Path: ordered, consecutive-duplicate-collapsed list of paths touched.
   const path: string[] = [];
   for (const ev of events) if (ev.path && ev.path !== path[path.length - 1]) path.push(ev.path);
+
+  // Derived signals from the request SEQUENCE (not single events): IDOR
+  // enumeration walks distinct IDs (visible in the deduped path); a runaway loop
+  // repeats one exact path (needs the raw, non-deduped paths).
+  const rawPaths = events.map((e) => e.path).filter((p): p is string => !!p);
+  if (detectIdEnumeration(path) && !signals.includes("id_enumeration")) signals.push("id_enumeration");
+  if (detectRunawayLoop(rawPaths) && !signals.includes("runaway_loop")) signals.push("runaway_loop");
 
   // Confidence: proven only when the actor itself carried a correlation nonce
   // OR tripped a signal that a human structurally cannot (a hidden field / an
@@ -215,10 +277,10 @@ function classify(signals: readonly AgentSignal[], has: (s: AgentSignal) => bool
   if (has("payload_attack")) return "exploit_attempt";
   // Form-targeted abuse: the form honeypot / too-fast submit is a bright line.
   if (has("form_honeypot") || has("form_too_fast")) return "form_spammer";
-  // Recon: probing sensitive paths, especially several.
-  if (has("probed_sensitive")) return "vuln_scanner";
-  // Greedy harvest: tripped the invisible decoy (ignored the rules).
-  if (has("tripped_decoy")) return "aggressive_scraper";
+  // Recon: probing sensitive paths, or walking sequential IDs (IDOR enumeration).
+  if (has("probed_sensitive") || has("id_enumeration")) return "vuln_scanner";
+  // Greedy harvest: tripped the invisible decoy, or hammered one endpoint in a loop.
+  if (has("tripped_decoy") || has("runaway_loop")) return "aggressive_scraper";
   // Identified + rule-respecting: observed, not our concern.
   if (has("identified_agent") && !signals.some((s) => HOSTILE.has(s))) return "benign_crawler";
   // Some automation signal but nothing decisive.
