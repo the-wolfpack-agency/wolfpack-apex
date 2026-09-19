@@ -4,8 +4,8 @@
  * Agent origin map: where AGENT traffic reached our surface from, by the
  * request's edge country, on a dark equirectangular world grid with glowing
  * nodes sized by volume and colored by how Forcefield handled them (red =
- * hostile-leaning, amber = unidentified automation, green = welcomed known
- * agents). A cluster of hostile nodes over one region is the signal.
+ * hostile-leaning, amber = unidentified automation, green = verified good
+ * agents, Web Bot Auth). A UA-only claim is spoofable and stays amber.. A cluster of hostile nodes over one region is the signal.
  *
  * HONEST BY CONSTRUCTION. This is the NETWORK ORIGIN of the traffic - a cloud
  * region or proxy just as often as a person's country - so it is a coarse
@@ -20,6 +20,9 @@ export interface AgentOrigin {
   country: string;
   total: number;
   welcomed: number;
+  /** Welcomes we actually VERIFIED (Web Bot Auth), not just UA-claimed. Only
+   *  these earn the trusted-green tone; a UA-only claim is spoofable. */
+  welcomedVerified: number;
   flagged: number;
   hostile: number;
 }
@@ -28,9 +31,13 @@ const W = 720;
 const H = 360;
 
 function tone(o: AgentOrigin): string {
-  if (o.hostile > 0 && o.hostile >= o.welcomed) return "#ef4444"; // hostile-leaning
-  if (o.welcomed > 0 && o.welcomed >= o.flagged && o.welcomed >= o.hostile) return "#30a46c"; // welcomed
-  return "#f5a623"; // unidentified automation
+  // A UA-claimed "known bot" is spoofable (a Googlebot UA from an unexpected
+  // network is a classic tell), so only WEB-BOT-AUTH-VERIFIED welcomes earn the
+  // trusted green. UA-only claims count as unverified automation, like flagged.
+  const unverified = o.flagged + Math.max(0, o.welcomed - o.welcomedVerified);
+  if (o.hostile > 0 && o.hostile >= o.welcomedVerified) return "#ef4444"; // hostile-leaning
+  if (o.welcomedVerified > 0 && o.welcomedVerified >= unverified && o.welcomedVerified >= o.hostile) return "#30a46c"; // verified good agent
+  return "#f5a623"; // unidentified / unverified automation
 }
 
 export function AgentOriginMap({ origins }: { origins: readonly AgentOrigin[] }) {
@@ -85,7 +92,7 @@ export function AgentOriginMap({ origins }: { origins: readonly AgentOrigin[] })
               <g key={o.country} data-testid={`origin-node-${o.country}`}>
                 <circle className="ff-origin-halo" cx={x} cy={y} r={r} fill={color} opacity={0.3} />
                 <circle cx={x} cy={y} r={Math.max(2, r * 0.42)} fill={color}>
-                  <title>{`${c.name} (${o.country}) · ${o.total} agent requests · ${o.hostile} hostile · ${o.flagged} flagged · ${o.welcomed} welcomed`}</title>
+                  <title>{`${c.name} (${o.country}) · ${o.total} agent requests · ${o.hostile} hostile · ${o.flagged} flagged · ${o.welcomedVerified} verified good, ${Math.max(0, o.welcomed - o.welcomedVerified)} UA-claimed (unverified)`}</title>
                 </circle>
               </g>
             );
@@ -96,8 +103,8 @@ export function AgentOriginMap({ origins }: { origins: readonly AgentOrigin[] })
       {/* legend + honest caption */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem 1rem", fontSize: "0.7rem", color: "var(--wp-text-muted, #9ca3af)" }}>
         <Legend color="#ef4444" label="hostile-leaning" />
-        <Legend color="#f5a623" label="unidentified automation" />
-        <Legend color="#30a46c" label="welcomed" />
+        <Legend color="#f5a623" label="unverified / unidentified" />
+        <Legend color="#30a46c" label="verified good agent" />
         <span style={{ marginLeft: "auto", fontStyle: "italic" }}>Network origin (edge IP country) - a cloud region or proxy, not a confirmed operator location.</span>
       </div>
 

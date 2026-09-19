@@ -76,8 +76,8 @@ describe("getSiteAnalyticsSummary", () => {
         { event_type: "site.agent_probed_sensitive", path: "/admin", created_at: "2026-09-18T10:00:05Z", sig: "fp1", nonce: null, agent: null },
       ] })
       .mockResolvedValueOnce({ rows: [ // agent origins by country
-        { country: "US", total: "12", welcomed: "2", flagged: "6", hostile: "4" },
-        { country: "DE", total: "3", welcomed: "0", flagged: "3", hostile: "0" },
+        { country: "US", total: "12", welcomed: "2", welcomed_verified: "1", flagged: "6", hostile: "4" },
+        { country: "DE", total: "3", welcomed: "0", welcomed_verified: "0", flagged: "3", hostile: "0" },
       ] })
       .mockResolvedValueOnce({ rows: [ // payload attacks by kind
         { attack: "sql_injection", count: "3" },
@@ -123,8 +123,8 @@ describe("getSiteAnalyticsSummary", () => {
     ]);
 
     expect(summary.agentOrigins).toEqual([
-      { country: "US", total: 12, welcomed: 2, flagged: 6, hostile: 4 },
-      { country: "DE", total: 3, welcomed: 0, flagged: 3, hostile: 0 },
+      { country: "US", total: 12, welcomed: 2, welcomedVerified: 1, flagged: 6, hostile: 4 },
+      { country: "DE", total: 3, welcomed: 0, welcomedVerified: 0, flagged: 3, hostile: 0 },
     ]);
   });
 

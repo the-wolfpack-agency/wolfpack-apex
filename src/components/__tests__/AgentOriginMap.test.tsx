@@ -4,9 +4,9 @@ import { render, screen } from "@testing-library/react";
 import { AgentOriginMap } from "@/components/AgentOriginMap";
 
 const origins = [
-  { country: "US", total: 40, welcomed: 6, flagged: 20, hostile: 14 },
-  { country: "DE", total: 12, welcomed: 2, flagged: 10, hostile: 0 },
-  { country: "ZZ", total: 3, welcomed: 0, flagged: 0, hostile: 3 }, // no centroid
+  { country: "US", total: 40, welcomed: 6, welcomedVerified: 0, flagged: 20, hostile: 14 },
+  { country: "DE", total: 12, welcomed: 2, welcomedVerified: 2, flagged: 10, hostile: 0 },
+  { country: "ZZ", total: 3, welcomed: 0, welcomedVerified: 0, flagged: 0, hostile: 3 }, // no centroid
 ];
 
 describe("AgentOriginMap", () => {
@@ -32,5 +32,22 @@ describe("AgentOriginMap", () => {
   it("renders an explicit empty state with no origins", () => {
     render(<AgentOriginMap origins={[]} />);
     expect(screen.getByTestId("agent-origin-map-empty")).toBeInTheDocument();
+  });
+
+  it("does not grant trusted-green to a UA-claimed but unverified welcome (only Web-Bot-Auth-verified)", () => {
+    render(<AgentOriginMap origins={[{ country: "CN", total: 18, welcomed: 18, welcomedVerified: 0, flagged: 0, hostile: 0 }]} />);
+    // CN is welcomed-by-UA but 0 verified -> its node is the unverified amber, not green.
+    const node = screen.getByTestId("origin-node-CN");
+    const dot = node.querySelector("circle:last-of-type") as SVGCircleElement;
+    expect(dot.getAttribute("fill")).toBe("#f5a623"); // amber, not #30a46c green
+    // legend now names the honest categories.
+    expect(screen.getByTestId("agent-origin-map")).toHaveTextContent(/verified good agent/i);
+    expect(screen.getByTestId("agent-origin-map")).toHaveTextContent(/unverified/i);
+  });
+
+  it("grants green only when verified welcomes dominate", () => {
+    render(<AgentOriginMap origins={[{ country: "US", total: 10, welcomed: 8, welcomedVerified: 8, flagged: 1, hostile: 0 }]} />);
+    const dot = screen.getByTestId("origin-node-US").querySelector("circle:last-of-type") as SVGCircleElement;
+    expect(dot.getAttribute("fill")).toBe("#30a46c"); // verified-dominant -> green
   });
 });

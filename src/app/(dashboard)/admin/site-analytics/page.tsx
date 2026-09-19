@@ -43,7 +43,7 @@ interface Summary {
     profile: AgentProfile;
     triage: TriageStatus;
   }>;
-  agentOrigins: Array<{ country: string; total: number; welcomed: number; flagged: number; hostile: number }>;
+  agentOrigins: Array<{ country: string; total: number; welcomed: number; welcomedVerified: number; flagged: number; hostile: number }>;
   probeIntel: Array<{ label: string; cwe: string; severity: "low" | "medium" | "high" | "critical"; category: string; count: number }>;
   payloadIntel: Array<{ attack: string; count: number }>;
   operatorTriage: Record<string, TriageStatus>;
