@@ -37,7 +37,35 @@ interface Summary {
     firstAt: string;
     lastAt: string;
     summary: string;
+    profile: AgentProfile;
   }>;
+}
+
+interface AgentProfile {
+  operatorKey: string;
+  correlationKey: string;
+  verdict: { confidence: "proven" | "inferred"; why: string };
+  processes: Array<{ signal: string; label: string; meaning: string; hostile: boolean }>;
+  scaffolding: {
+    readsRobotsFirst: boolean;
+    probedSensitive: boolean;
+    pathDiscovery: string;
+    requestCount: number;
+    spanSeconds: number;
+    observability: string;
+  };
+  toolComposition: {
+    usedTools: string[];
+    novelTools: string[];
+    policies: string[];
+    riskTier: string;
+    intent: string;
+    confidence: string;
+    summary: string;
+  };
+  policies: string[];
+  timeline: { firstAt: string; lastAt: string; spanSeconds: number; eventCount: number };
+  disclaimer: string;
 }
 
 const CLASS_LABEL: Record<string, string> = {
@@ -63,6 +91,16 @@ export default function SiteAnalyticsPage() {
   const [days, setDays] = useState<number>(30);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+
+  const toggleProfile = useCallback((key: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
 
   const load = useCallback(async (range: number) => {
     setState("loading");
@@ -313,12 +351,166 @@ export default function SiteAnalyticsPage() {
                       {j.path.join("  →  ")}
                     </div>
                   )}
+                  <button
+                    type="button"
+                    onClick={() => toggleProfile(j.key)}
+                    aria-expanded={expanded.has(j.key)}
+                    data-testid={`ff-journey-profile-toggle-${j.key}`}
+                    style={{
+                      marginTop: "0.55rem",
+                      background: "transparent",
+                      border: "none",
+                      color: "var(--wp-gold, #e8b528)",
+                      fontSize: "0.74rem",
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      padding: 0,
+                    }}
+                  >
+                    {expanded.has(j.key) ? "▾ Hide agent profile" : "▸ View agent profile"}
+                  </button>
+                  {expanded.has(j.key) && <AgentProfilePanel profile={j.profile} testKey={j.key} />}
                 </li>
               ))}
             </ul>
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+const RISK_COLOR: Record<string, string> = {
+  benign: "var(--wp-success, #30a46c)",
+  elevated: "var(--wp-warning, #f5a623)",
+  dangerous: "var(--wp-error, #ef4444)",
+};
+
+/**
+ * Agent profile panel: the granular, honest evidence card for one journey.
+ * Everything shown is derived server-side from the same engine that builds a
+ * probe/harness dossier, so it never overclaims. It surfaces WHY the verdict,
+ * the observed processes (with what each means), the scaffolding read (with its
+ * observability caveat), the honestly-limited tool read, the durable operator
+ * fingerprint, and the not-a-real-identity disclaimer.
+ */
+function AgentProfilePanel({ profile, testKey }: { profile: AgentProfile; testKey: string }) {
+  const sectionLabel: React.CSSProperties = {
+    fontSize: "0.66rem",
+    textTransform: "uppercase",
+    letterSpacing: "0.04em",
+    color: "var(--wp-text-muted, #9ca3af)",
+    fontWeight: 700,
+    margin: "0 0 0.35rem",
+  };
+  const box: React.CSSProperties = {
+    background: "var(--wp-dark, #0b0d11)",
+    border: "1px solid var(--wp-dark-border, #333)",
+    borderRadius: 6,
+    padding: "0.65rem 0.75rem",
+  };
+  const mono: React.CSSProperties = { fontFamily: "var(--wp-mono, ui-monospace, monospace)", fontSize: "0.74rem" };
+
+  return (
+    <div
+      data-testid={`ff-journey-profile-${testKey}`}
+      style={{ marginTop: "0.7rem", display: "grid", gap: "0.7rem", borderTop: "1px solid var(--wp-dark-border, #333)", paddingTop: "0.7rem" }}
+    >
+      {/* Why the verdict */}
+      <div style={box}>
+        <p style={sectionLabel}>Why this verdict</p>
+        <p style={{ margin: 0, fontSize: "0.78rem", color: "var(--wp-text, #eee)", lineHeight: 1.5 }}>{profile.verdict.why}</p>
+      </div>
+
+      {/* Observed processes */}
+      <div style={box}>
+        <p style={sectionLabel}>Observed processes</p>
+        {profile.processes.length === 0 ? (
+          <p style={{ margin: 0, fontSize: "0.76rem", color: "var(--wp-text-muted, #9ca3af)" }}>No distinctive processes observed yet.</p>
+        ) : (
+          <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: "0.4rem" }}>
+            {profile.processes.map((p) => (
+              <li key={p.signal} style={{ display: "grid", gap: "0.1rem" }}>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: "0.4rem" }}>
+                  <span
+                    style={{
+                      fontSize: "0.72rem",
+                      fontWeight: 700,
+                      color: p.hostile ? "var(--wp-error, #ef4444)" : "var(--wp-text, #eee)",
+                    }}
+                  >
+                    {p.label}
+                  </span>
+                  {p.hostile && (
+                    <span style={{ fontSize: "0.58rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em", color: "var(--wp-error, #ef4444)", border: "1px solid var(--wp-error, #ef4444)", borderRadius: 999, padding: "0 0.35rem" }}>
+                      hostile
+                    </span>
+                  )}
+                </span>
+                <span style={{ fontSize: "0.72rem", color: "var(--wp-text-muted, #9ca3af)", lineHeight: 1.45 }}>{p.meaning}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      {/* Scaffolding read + tooling side by side on wide screens */}
+      <div style={{ display: "grid", gap: "0.7rem", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
+        <div style={box}>
+          <p style={sectionLabel}>Scaffolding (how it is built)</p>
+          <dl style={{ margin: 0, display: "grid", gridTemplateColumns: "auto 1fr", gap: "0.15rem 0.6rem", fontSize: "0.74rem" }}>
+            <dt style={{ color: "var(--wp-text-muted, #9ca3af)" }}>Path discovery</dt>
+            <dd style={{ margin: 0, color: "var(--wp-text, #eee)" }}>{profile.scaffolding.pathDiscovery}</dd>
+            <dt style={{ color: "var(--wp-text-muted, #9ca3af)" }}>Reads robots first</dt>
+            <dd style={{ margin: 0, color: "var(--wp-text, #eee)" }}>{profile.scaffolding.readsRobotsFirst ? "yes" : "no"}</dd>
+            <dt style={{ color: "var(--wp-text-muted, #9ca3af)" }}>Probed sensitive</dt>
+            <dd style={{ margin: 0, color: "var(--wp-text, #eee)" }}>{profile.scaffolding.probedSensitive ? "yes" : "no"}</dd>
+            <dt style={{ color: "var(--wp-text-muted, #9ca3af)" }}>Requests</dt>
+            <dd style={{ margin: 0, color: "var(--wp-text, #eee)" }}>{profile.scaffolding.requestCount}</dd>
+            <dt style={{ color: "var(--wp-text-muted, #9ca3af)" }}>Span</dt>
+            <dd style={{ margin: 0, color: "var(--wp-text, #eee)" }}>{profile.scaffolding.spanSeconds}s</dd>
+          </dl>
+          <p style={{ margin: "0.5rem 0 0", fontSize: "0.68rem", color: "var(--wp-text-muted, #9ca3af)", lineHeight: 1.4, fontStyle: "italic" }}>
+            {profile.scaffolding.observability}
+          </p>
+        </div>
+
+        <div style={box}>
+          <p style={sectionLabel}>Tooling (what an HTTP exchange proves)</p>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "0.3rem", marginBottom: "0.4rem" }}>
+            {profile.toolComposition.usedTools.map((t) => (
+              <span key={t} style={{ ...mono, background: "var(--wp-dark-surface2, #1a1a1a)", border: "1px solid var(--wp-dark-border, #333)", borderRadius: 4, padding: "0.05rem 0.35rem", color: "var(--wp-text, #eee)" }}>
+                {t}
+              </span>
+            ))}
+          </div>
+          <p style={{ margin: 0, fontSize: "0.74rem", color: "var(--wp-text, #eee)", lineHeight: 1.45 }}>
+            <span style={{ color: RISK_COLOR[profile.toolComposition.riskTier] ?? "var(--wp-text, #eee)", fontWeight: 700 }}>
+              {profile.toolComposition.riskTier}
+            </span>{" "}
+            &middot; {profile.toolComposition.summary}
+          </p>
+          {profile.policies.length > 0 && (
+            <p style={{ margin: "0.4rem 0 0", fontSize: "0.7rem", color: "var(--wp-error, #ef4444)" }}>
+              Policy: {profile.policies.join(", ")}
+            </p>
+          )}
+        </div>
+      </div>
+
+      {/* Operator fingerprint + disclaimer */}
+      <div style={box}>
+        <p style={sectionLabel}>Operator fingerprint</p>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem 1.2rem", alignItems: "baseline" }}>
+          <span style={{ ...mono, color: "var(--wp-gold, #e8b528)", fontWeight: 700 }} data-testid={`ff-operator-key-${testKey}`}>
+            {profile.operatorKey}
+          </span>
+          <span style={{ fontSize: "0.68rem", color: "var(--wp-text-muted, #9ca3af)" }}>
+            durable behavioral bucket (scaffolding + observed toolset)
+          </span>
+        </div>
+        <p style={{ margin: "0.5rem 0 0", fontSize: "0.68rem", color: "var(--wp-text-muted, #9ca3af)", lineHeight: 1.45 }}>{profile.disclaimer}</p>
+      </div>
     </div>
   );
 }

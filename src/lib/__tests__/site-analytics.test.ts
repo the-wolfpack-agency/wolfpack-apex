@@ -95,6 +95,14 @@ describe("getSiteAnalyticsSummary", () => {
     expect(summary.journeys[0].behaviorClass).toBe("vuln_scanner"); // probing outranks scraping when both present
     expect(summary.journeys[0].confidence).toBe("proven"); // tripped_decoy is structurally a bot
     expect(summary.journeys[0].path).toEqual(["/_ff/x", "/admin"]);
+
+    // Each journey carries a granular agent profile for the UI (engine-reused).
+    const profile = summary.journeys[0].profile;
+    expect(profile.operatorKey).toMatch(/^op_/);
+    expect(profile.verdict.confidence).toBe("proven");
+    expect(profile.verdict.why).toMatch(/decoy|honeypot|nonce/i);
+    expect(profile.processes.some((p) => p.hostile)).toBe(true);
+    expect(profile.disclaimer).toMatch(/does not establish a real-world identity/i);
   });
 
   it("clamps the range to a sane window", async () => {

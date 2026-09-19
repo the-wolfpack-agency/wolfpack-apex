@@ -10,6 +10,7 @@
 
 import { query, safeQuery } from "@/lib/db";
 import { buildJourneys, type AgentJourney, type CorrelationKind } from "@/lib/agent-behavior";
+import { buildAgentProfile, type AgentProfile } from "@/lib/agent-profile";
 
 /** Closed event vocabulary, mirrored from the marketing site's analytics. A
  *  value outside this set is rejected at the ingest boundary. */
@@ -91,7 +92,7 @@ export interface SiteAnalyticsSummary {
   };
   /* Reconstructed agent journeys: correlated sessions with a fused behavior
      class and a proven/inferred confidence. Newest first, capped. */
-  journeys: AgentJourney[];
+  journeys: Array<AgentJourney & { profile: AgentProfile }>;
 }
 
 /** Clamp the requested window to a sane integer day count. */
@@ -196,6 +197,6 @@ export async function getSiteAnalyticsSummary(rangeDays = 30): Promise<SiteAnaly
         const keyKind: CorrelationKind = nonce ? "nonce" : "fingerprint";
         return { key, keyKind, type: r.event_type, path: r.path ?? "", at: r.created_at, nonceLinked: !!nonce, agent: r.agent ?? undefined };
       }).filter((r) => r.key !== ""),
-    ).slice(0, 25),
+    ).slice(0, 25).map((j) => ({ ...j, profile: buildAgentProfile(j) })),
   };
 }
