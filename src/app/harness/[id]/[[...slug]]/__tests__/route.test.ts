@@ -3,7 +3,10 @@ import { NextRequest } from "next/server";
 
 const recordHarnessHit = jest.fn();
 jest.mock("@/lib/harness/harness", () => ({ recordHarnessHit: (...a: unknown[]) => recordHarnessHit(...a) }));
-jest.mock("@/lib/harness/sandbox", () => ({ HONEYPOT_FIELD: "contact_email_confirm" }));
+jest.mock("@/lib/harness/sandbox", () => ({
+  HONEYPOT_FIELD: "contact_email_confirm",
+  renderSandbox: () => ({ status: 200, contentType: "text/html", body: "<h1>served best-effort</h1>" }),
+}));
 
 import { GET, POST } from "@/app/harness/[id]/[[...slug]]/route";
 
@@ -40,6 +43,13 @@ describe("GET/POST /harness/[id]/[[...slug]] (instrumented sandbox)", () => {
     recordHarnessHit.mockResolvedValueOnce({ ok: false, reason: "unknown", response: { status: 404, contentType: "text/html", body: "404" } });
     const res = await GET(get(`/harness/${VALID}`), ctx(VALID, undefined));
     expect(res.status).toBe(404);
+  });
+
+  it("serves the sandbox best-effort (never 500) when recording throws transiently", async () => {
+    recordHarnessHit.mockRejectedValueOnce(new Error("Connection terminated"));
+    const res = await GET(get(`/harness/${VALID}`), ctx(VALID, undefined));
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain("served best-effort");
   });
 
   it("handles a POST (form submit) path", async () => {

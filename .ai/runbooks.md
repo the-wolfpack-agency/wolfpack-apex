@@ -59,3 +59,25 @@ The page is a standalone route under `src/app/security-posture/`. If the deploy 
 The wizard derives its step from `/api/workspace/status` → `nextStep`. If the status endpoint says the user hasn't completed Step 1 but they clearly have, check:
 - `PUT /api/workspace` didn't fire — Step 1 is still client-state-only (regression of the fix shipped 2026-04-15).
 - `instinct_setup_events` migration 016 didn't run — server has no memory of events.
+
+## Public harness reading returns 500 (intermittent) / target URL 308s
+
+Two issues found by live verification of the public agent harness on the deployed URL:
+
+1. **Intermittent 500 on `/api/harness/[id]/reading`.** The reading is polled every
+   few seconds and shares the app's Postgres pool with the write-heavy sandbox
+   (each sandbox hit is loadSession + INSERT + UPDATE). Under a burst, a transient
+   pool/connection hiccup on the reading's `loadSession`/`loadHits` SELECTs threw,
+   and those calls were not wrapped, so the throw surfaced as an unhandled 500.
+   The read-only path itself is fine (15 concurrent reads all 200); the 500s only
+   appear when reads compete with the sandbox writes. Fix: `getHarnessReading`
+   catches read errors and returns `{ ok:false, reason:"unavailable" }`; the route
+   maps that to **503 (retryable)** and has a try/catch backstop, so a poller
+   never sees a 500. The sandbox route likewise serves the page best-effort if
+   recording throws. If 500s ever return here, the cause is the shared pool, not
+   the harness logic; look at Neon connection limits under load.
+
+2. **Sandbox target URL 308-redirected.** The session route handed out
+   `…/harness/{id}/` (trailing slash), which Next 308-redirects to the no-slash
+   form. Agents that follow redirects were fine; strict ones were not. Fix: hand
+   out `…/harness/{id}` (no trailing slash), which serves 200 directly.

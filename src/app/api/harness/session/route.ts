@@ -33,7 +33,7 @@ export async function POST(req: NextRequest) {
   return NextResponse.json(
     {
       sessionId: session.id,
-      targetUrl: `${base}/`,
+      targetUrl: `${base}`,
       robotsUrl: `${base}/robots.txt`,
       readingUrl: `${req.nextUrl.origin}/api/harness/${session.id}/reading`,
       goal: session.goal,

@@ -91,6 +91,16 @@ describe("harness lifecycle (DB-orchestration, mocked store)", () => {
     expect(mockRecordSighting).not.toHaveBeenCalled();
   });
 
+  it("degrades to 'unavailable' (never throws) when a read query fails transiently", async () => {
+    const s = await createHarnessSession({});
+    await recordHarnessHit({ sessionId: s.id, relPath: "/", method: "GET", base: BASE });
+    // Force the NEXT loadSession SELECT to reject, as a pool hiccup would.
+    const db = jest.requireMock("@/lib/db") as { query: jest.Mock };
+    db.query.mockRejectedValueOnce(new Error("Connection terminated"));
+    const r = await getHarnessReading(s.id, "public-harness");
+    expect(r).toEqual({ ok: false, reason: "unavailable" });
+  });
+
   it("rejects an unknown session (404 sandbox response), records nothing", async () => {
     const r = await recordHarnessHit({ sessionId: "hs_nope", relPath: "/", method: "GET", base: BASE });
     expect(r.ok).toBe(false);
