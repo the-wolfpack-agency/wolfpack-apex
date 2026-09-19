@@ -103,6 +103,27 @@ describe("classifySession - IDOR enumeration + runaway loop", () => {
   });
 });
 
+describe("classifySession - ordered steps for the timeline", () => {
+  it("emits ordered steps, collapsing consecutive plain repeat-visits, keeping each signal", () => {
+    const j = classifySession({
+      key: "t", keyKind: "fingerprint",
+      events: [
+        ev("site.page_viewed", "/", "2026-09-19T10:00:00Z"),
+        ev("site.page_viewed", "/", "2026-09-19T10:00:01Z"),
+        ev("site.agent_trap_tripped", "/_ff", "2026-09-19T10:00:02Z"),
+        ev("site.agent_probed_sensitive", "/.env", "2026-09-19T10:00:03Z"),
+      ],
+    });
+    expect(j.steps.map((s) => s.path)).toEqual(["/", "/_ff", "/.env"]); // two plain "/" collapsed to one
+    expect(j.steps.map((s) => s.signal)).toEqual([null, "tripped_decoy", "probed_sensitive"]);
+  });
+
+  it("carries the attack kind onto a payload step", () => {
+    const j = classifySession({ key: "p", keyKind: "fingerprint", events: [ev("site.agent_payload_attack", "/login", "2026-09-19T10:00:00Z", { attack: "sql_injection" })] });
+    expect(j.steps[0]).toMatchObject({ path: "/login", signal: "payload_attack", attack: "sql_injection" });
+  });
+});
+
 describe("buildJourneys", () => {
   it("groups events by correlation key and classifies each session, newest first", () => {
     const journeys = buildJourneys([

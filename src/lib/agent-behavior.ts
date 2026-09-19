@@ -55,6 +55,16 @@ export type JourneyInsight =
   | { kind: "id_enumeration"; detail: string }
   | { kind: "runaway_loop"; detail: string };
 
+/** One ordered step in the agent's path across the surface: a timestamped visit,
+ *  annotated with the structural signal it represents (null = a plain visit).
+ *  This is the raw, ordered trace the timeline visual chains together. */
+export interface JourneyStep {
+  at: string;
+  path: string;
+  signal: AgentSignal | null;
+  attack?: string;
+}
+
 /** How a session's events were tied together. A nonce is deterministic (the
  *  actor carried it); a fingerprint is a probabilistic grouping. */
 export type CorrelationKind = "nonce" | "fingerprint";
@@ -89,6 +99,9 @@ export interface AgentJourney {
   signals: AgentSignal[];
   /** Ordered, de-duplicated path the actor took across the surface. */
   path: string[];
+  /** The ordered, signal-annotated trace for the timeline (plain repeat-visits
+   *  collapsed; each trap / probe / payload kept as its own step). Capped. */
+  steps: JourneyStep[];
   eventCount: number;
   firstAt: string;
   lastAt: string;
@@ -244,6 +257,19 @@ export function classifySession(input: AgentSessionInput): AgentJourney {
   if (detectIdEnumeration(path) && !signals.includes("id_enumeration")) signals.push("id_enumeration");
   if (detectRunawayLoop(rawPaths) && !signals.includes("runaway_loop")) signals.push("runaway_loop");
 
+  // Ordered trace for the timeline: keep every signal-bearing event; collapse
+  // consecutive plain visits to the same path so the chain stays legible. Capped.
+  const STEP_CAP = 40;
+  const steps: JourneyStep[] = [];
+  for (const e of events) {
+    if (!e.path) continue;
+    const sig = signalOf(e);
+    const prev = steps[steps.length - 1];
+    if (prev && !sig && !prev.signal && prev.path === e.path) continue;
+    steps.push({ at: e.at, path: e.path, signal: sig, ...(e.attack ? { attack: e.attack } : {}) });
+    if (steps.length >= STEP_CAP) break;
+  }
+
   // Confidence: proven only when the actor itself carried a correlation nonce
   // OR tripped a signal that a human structurally cannot (a hidden field / an
   // invisible decoy). Everything else is a fingerprint-grouped hypothesis.
@@ -263,6 +289,7 @@ export function classifySession(input: AgentSessionInput): AgentJourney {
     behaviorClass,
     signals,
     path,
+    steps,
     eventCount,
     firstAt,
     lastAt,
