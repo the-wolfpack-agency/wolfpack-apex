@@ -64,6 +64,8 @@ const UNAUDITED_GENERATORS: readonly string[] = [
  * each records the evidence rather than a verdict.
  */
 const AUDITED: Readonly<Record<string, string>> = {
+  "lib/harness/sandbox.ts":
+    "SAFE, verified by reading it: every interpolated value is server-authored. The page title/intro/links/form-action all come from the static SANDBOX_PAGES constant and the fixed HONEYPOT_FIELD; the only value derived from a request is the sandbox base, built as `${origin}/harness/${id}`. That id is a server-generated session token, is validated to ^hs_[A-Za-z0-9_-]{8,64}$ at the route before the renderer runs, and every interpolated value (including the base) is additionally HTML-escaped via esc() (XML-escaped via xmlEsc() in the sitemap). No model output and no free request text ever reaches the template; a breakout is closed twice (format-validate + escape).",
   "lib/ai/provenance.ts":
     "SAFE, and the interpolation is the point: this file EXISTS to wrap untrusted text in a fence, so it necessarily builds markup around text from outside. Two breakouts are possible and both are closed and tested. The body has every <untrusted> tag replaced before it is placed, so content cannot close its own fence and write outside it; the test counts the closing tags and asserts one. The label is stripped of < > and \" and truncated, so it cannot end its attribute; the test feeds it a label crafted to open a second tag and asserts only one exists. Emitting as a JSON string literal is not available here: the model has to READ this, so it has to be text.",
   "lib/markdown.ts":

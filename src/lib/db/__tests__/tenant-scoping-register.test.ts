@@ -64,6 +64,14 @@ const MIGRATIONS = join(__dirname, "..", "..", "..", "db", "migrations");
  * same external fact.
  */
 const GLOBAL_BY_DESIGN: readonly string[] = [
+  /* The public agent harness is unauthenticated and has NO tenant: a session is
+     an anonymous developer run against a decoy sandbox. Per-workspace rows would
+     be WRONG, not merely unnecessary - there is no workspace to attribute a
+     public run to. Harness observations that DO feed learning are written to the
+     workspace-scoped instinct_agent_sightings under a reserved non-tenant
+     workspace, not to these tables. */
+  "instinct_harness_sessions",
+  "instinct_harness_hits",
   /* A model version is a fact about the PROVIDER, identical for every tenant.
      Two tenants disagreeing about what OpenAI shipped is not a disagreement
      that can be true. */

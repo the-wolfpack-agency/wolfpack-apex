@@ -3176,7 +3176,10 @@ export type InstinctEventType =
   | "platform.github_installation_removed"
   // Client offboarding: full data purge across Postgres + Qdrant + Neo4j.
   // { workspace_id, purged_findings, purged_scans, purged_targets, purged_credentials }
-  | "platform.workspace_offboarded";
+  | "platform.workspace_offboarded"
+
+  // Public agent harness: a developer started a "point your agent at our test site" run.
+  | "harness.session_started";
 
 export interface InstinctEvent {
   event_type: InstinctEventType;
