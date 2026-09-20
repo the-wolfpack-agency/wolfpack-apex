@@ -39,4 +39,8 @@ it("returns the assurance report + the adversarial self-test results, all defend
   // the real self-attack suite must fully defend
   expect(body.adversarial.allDefended).toBe(true);
   expect(body.adversarial.total).toBeGreaterThan(5);
+  // the famous-breach corpus rides along, honest coverage counts included
+  expect(body.breaches.total).toBe(10);
+  expect(body.breaches.prevented).toBeGreaterThan(0);
+  expect(body.breaches.outOfScope).toBeGreaterThan(0);
 });

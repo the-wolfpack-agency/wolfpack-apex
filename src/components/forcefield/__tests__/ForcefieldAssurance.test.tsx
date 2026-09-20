@@ -17,6 +17,13 @@ const DATA = {
     results: [{ id: "replay", attack: "An agent replays a captured delegation.", control: "Replay defense (jti)", defended: true, detail: "first: verified, replay: claimed" }],
     defendedCount: 1, total: 1, allDefended: true,
   },
+  breaches: {
+    results: [
+      { id: "token-replay", attack: "An attacker replays a stolen token.", realWorld: "OAuth token theft + replay.", coverage: "prevented", control: "Replay defense (jti).", detail: "" },
+      { id: "supply-chain", attack: "Build-pipeline compromise.", realWorld: "SolarWinds class.", coverage: "out_of_scope", control: "Out of scope.", detail: "" },
+    ],
+    prevented: 1, detected: 0, outOfScope: 1, total: 2,
+  },
 };
 
 beforeEach(() => mockFetchWithRefresh.mockReset());
@@ -31,6 +38,9 @@ it("runs on open and shows the posture score, controls, and self-attack results"
   expect(screen.getByTestId("assurance-control-enforce.inline")).toHaveTextContent(/gap/i);
   expect(screen.getByTestId("assurance-selftest")).toHaveTextContent("1/1 defended");
   expect(screen.getByTestId("assurance-scenario-replay")).toHaveTextContent(/replays a captured delegation/i);
+  // known-attack coverage renders, honestly including an out-of-scope class
+  expect(screen.getByTestId("assurance-breach-token-replay")).toHaveTextContent(/prevented/i);
+  expect(screen.getByTestId("assurance-breach-supply-chain")).toHaveTextContent(/out of scope/i);
 });
 
 it("surfaces an error without crashing", async () => {

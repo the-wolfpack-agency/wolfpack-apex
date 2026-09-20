@@ -14,6 +14,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { buildAssuranceReport } from "@/lib/forcefield/assurance";
 import { runAdversarialSuite } from "@/lib/forcefield/adversarial";
+import { runBreachCorpus } from "@/lib/forcefield/breach-corpus";
 import { getEdgePolicy } from "@/lib/forcefield/edge-policy";
 import { listDelegationIssuers } from "@/lib/forcefield/principal";
 import { getReputationOptIn } from "@/lib/forcefield/operator-reputation";
@@ -46,7 +47,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     ingestSourceSigned: !!process.env.SITE_ANALYTICS_INGEST_SIGNING,
   });
 
-  const adversarial = await runAdversarialSuite();
+  const [adversarial, breaches] = await Promise.all([runAdversarialSuite(), runBreachCorpus()]);
 
-  return NextResponse.json({ assurance, adversarial });
+  return NextResponse.json({ assurance, adversarial, breaches });
 }

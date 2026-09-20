@@ -12,10 +12,14 @@ import { GlowNode } from "@/components/forcefield/intel-visuals";
 
 type Control = { id: string; title: string; status: "active" | "partial" | "gap"; detail: string };
 type Scenario = { id: string; attack: string; control: string; defended: boolean; detail: string };
+type Breach = { id: string; attack: string; realWorld: string; coverage: "prevented" | "detected" | "out_of_scope"; control: string; detail: string };
 type Data = {
   assurance: { controls: Control[]; activeCount: number; partialCount: number; gapCount: number; total: number; score: number };
   adversarial: { results: Scenario[]; defendedCount: number; total: number; allDefended: boolean };
+  breaches: { results: Breach[]; prevented: number; detected: number; outOfScope: number; total: number };
 };
+const COVERAGE_COLOR = { prevented: "#30a46c", detected: "#f5a623", out_of_scope: "#9ca3af" } as const;
+const COVERAGE_LABEL = { prevented: "prevented", detected: "detected", out_of_scope: "out of scope" } as const;
 
 const STATUS_COLOR = { active: "#30a46c", partial: "#f5a623", gap: "#ef4444" } as const;
 
@@ -83,6 +87,26 @@ export function ForcefieldAssurance() {
                     <div style={{ minWidth: 0 }}>
                       <div style={{ fontSize: "0.76rem", color: "var(--wp-text, #eee)" }}>{r.attack}</div>
                       <div style={{ fontSize: "0.66rem", color: "var(--wp-text-muted, #9ca3af)" }}>Stopped by: {r.control} &middot; {r.detail}</div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+            {/* known-attack coverage (famous-breach corpus) - honest by design */}
+            <div>
+              <div style={{ fontSize: "0.62rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--wp-text-muted, #9ca3af)", marginBottom: "0.5rem" }}>
+                Known-attack coverage &middot; {data.breaches.prevented} prevented &middot; {data.breaches.detected} detected &middot; {data.breaches.outOfScope} honestly out of scope
+              </div>
+              <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: "0.35rem" }}>
+                {data.breaches.results.map((b) => (
+                  <li key={b.id} data-testid={`assurance-breach-${b.id}`} style={{ display: "flex", alignItems: "flex-start", gap: "0.55rem" }}>
+                    <span style={{ marginTop: "0.15rem" }}><GlowNode color={COVERAGE_COLOR[b.coverage]} size={10} /></span>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ display: "flex", alignItems: "baseline", gap: "0.4rem", flexWrap: "wrap" }}>
+                        <span style={{ fontSize: "0.76rem", color: "var(--wp-text, #eee)" }}>{b.attack}</span>
+                        <span style={{ fontSize: "0.58rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: COVERAGE_COLOR[b.coverage] }}>{COVERAGE_LABEL[b.coverage]}</span>
+                      </div>
+                      <div style={{ fontSize: "0.66rem", color: "var(--wp-text-muted, #9ca3af)" }}>{b.realWorld} &middot; {b.control}</div>
                     </div>
                   </li>
                 ))}
