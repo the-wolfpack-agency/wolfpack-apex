@@ -21,15 +21,15 @@ export const dynamic = "force-dynamic";
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const auth = await requireCapability(req, "settings.manage_team");
   if (!auth.ok) return auth.response;
-  const { mode } = await getEdgePolicy(auth.user.workspaceId ?? "default");
-  return NextResponse.json({ mode });
+  const { mode, autoBlock } = await getEdgePolicy(auth.user.workspaceId ?? "default");
+  return NextResponse.json({ mode, autoBlock });
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const auth = await requireCapability(req, "settings.manage_team");
   if (!auth.ok) return auth.response;
 
-  let body: { mode?: unknown };
+  let body: { mode?: unknown; autoBlock?: unknown };
   try {
     body = await req.json();
   } catch {
@@ -39,15 +39,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "invalid_input", detail: "mode must be monitor or enforce" }, { status: 400 });
   }
   const workspaceId = auth.user.workspaceId ?? "default";
-  await setEdgePolicy(workspaceId, body.mode, auth.user.id);
+  const autoBlock = body.autoBlock === true;
+  await setEdgePolicy(workspaceId, { mode: body.mode, autoBlock }, auth.user.id);
 
   await recordAudit({
     actor: { user_id: auth.user.id, role: auth.user.role },
     action: "forcefield.edge_policy_set",
     resourceType: "edge_policy",
     resourceId: workspaceId,
-    afterState: { mode: body.mode },
+    afterState: { mode: body.mode, auto_block: autoBlock },
   }).catch(() => {});
 
-  return NextResponse.json({ ok: true, mode: body.mode });
+  return NextResponse.json({ ok: true, mode: body.mode, autoBlock });
 }

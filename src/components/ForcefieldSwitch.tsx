@@ -25,6 +25,8 @@ export function ForcefieldSwitch({
   onToggle,
   standbyAgents,
   onAgentClick,
+  autoBlock = false,
+  onAutoBlockToggle,
 }: {
   mode: EdgeMode;
   canManage: boolean;
@@ -35,6 +37,10 @@ export function ForcefieldSwitch({
   /** Jump to this operator's full card (case file, trust, principal). When set,
    *  each named agent chip becomes a link into the operator view. */
   onAgentClick?: (operatorKey: string) => void;
+  /** Whether proven-hostile actors are auto-added to the blocklist. Only
+   *  meaningful when protecting. */
+  autoBlock?: boolean;
+  onAutoBlockToggle?: (next: boolean) => void;
 }) {
   const on = mode === "enforce";
   const wouldActCount = standbyAgents.length;
@@ -132,6 +138,14 @@ export function ForcefieldSwitch({
           </div>
         )}
       </div>
+
+      {/* auto-block: only when protecting, and only a control if the viewer can manage */}
+      {on && onAutoBlockToggle && (
+        <label data-testid="forcefield-autoblock" style={{ display: "flex", alignItems: "center", gap: "0.4rem", flex: "1 1 100%", order: 3, marginTop: "0.1rem", fontSize: "0.72rem", color: "var(--wp-text-muted, #b8bcc4)", cursor: canManage ? "pointer" : "not-allowed" }}>
+          <input type="checkbox" data-testid="forcefield-autoblock-toggle" checked={autoBlock} disabled={!canManage} onChange={(e) => canManage && onAutoBlockToggle(e.target.checked)} />
+          <span><strong style={{ color: autoBlock ? "var(--wp-success, #30a46c)" : "var(--wp-text, #eee)" }}>Auto-block proven threats</strong>{" "}{autoBlock ? "on - a proven-hostile agent is blocked on sight" : "off - proven-hostile agents are flagged, not blocked, until you enable this"}. Never fires on an unconfirmed guess or a verified good agent.</span>
+        </label>
+      )}
 
       {/* the switch */}
       <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "0.3rem", flex: "0 0 auto" }}>

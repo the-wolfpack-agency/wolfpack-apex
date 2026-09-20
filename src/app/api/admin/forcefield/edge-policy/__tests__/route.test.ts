@@ -28,9 +28,17 @@ it("POST sets enforce + audits", async () => {
   requireCapability.mockResolvedValue(OK);
   const res = await POST(req({ mode: "enforce" }));
   expect(res.status).toBe(200);
-  expect(setEdgePolicy).toHaveBeenCalledWith("w1", "enforce", "u1");
+  expect(setEdgePolicy).toHaveBeenCalledWith("w1", { mode: "enforce", autoBlock: false }, "u1");
   expect(recordAudit).toHaveBeenCalledWith(expect.objectContaining({ action: "forcefield.edge_policy_set" }));
 });
+it("POST persists auto-block when asked and audits it", async () => {
+  requireCapability.mockResolvedValue(OK);
+  const res = await POST(req({ mode: "enforce", autoBlock: true }));
+  expect(res.status).toBe(200);
+  expect(setEdgePolicy).toHaveBeenCalledWith("w1", { mode: "enforce", autoBlock: true }, "u1");
+  expect(recordAudit).toHaveBeenCalledWith(expect.objectContaining({ action: "forcefield.edge_policy_set", afterState: expect.objectContaining({ auto_block: true }) }));
+});
+
 it("POST 400s an invalid mode", async () => {
   requireCapability.mockResolvedValue(OK);
   expect((await POST(req({ mode: "yolo" }))).status).toBe(400);

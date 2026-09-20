@@ -697,6 +697,9 @@ export type InstinctEventType =
   //   - an inline edge decision was made for one operator. Opaque operator key
   //   only; never PII. Feeds the enforcement learning loop.
   | "forcefield.edge_decision"
+  // forcefield.operator_auto_blocked { operator, rule, proven } - an operator was
+  //   AUTO-added to the blocklist on a proven-hostile verdict. Opaque key only.
+  | "forcefield.operator_auto_blocked"
   // OGIAM self-serve tenancy. tenant_registered { tenant_id } - a new org signed
   //   up (admin email is NOT in analytics, only that a tenant was registered).
   | "tenancy.tenant_registered"
