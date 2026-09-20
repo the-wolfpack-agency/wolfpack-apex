@@ -17,7 +17,7 @@ import { AgentJourneyTimeline } from "@/components/AgentJourneyTimeline";
 import { AgentActionLog } from "@/components/AgentActionLog";
 import type { JourneyStep } from "@/lib/agent-behavior";
 import { triageJourneys, type Severity } from "@/lib/agent-triage";
-import { consolidateByOperator, deriveOperatorInsight, deriveTrustProfile } from "@/lib/agent-operators-view";
+import { consolidateByOperator, deriveOperatorInsight, deriveTrustProfile, aggregateTradecraft } from "@/lib/agent-operators-view";
 import { decideEdgeAction, type EdgeMode } from "@/lib/forcefield/edge-enforcement";
 import { ForcefieldSwitch } from "@/components/ForcefieldSwitch";
 import { ForcefieldAssurance } from "@/components/forcefield/ForcefieldAssurance";
@@ -57,7 +57,7 @@ interface Summary {
   payloadIntel: Array<{ attack: string; count: number }>;
   operatorTriage: Record<string, TriageStatus>;
   blockedOperators: string[];
-  networkReputation?: Record<string, { operatorKey: string; otherWorkspaces: number; severity: "hostile" | "elevated" | "benign" }>;
+  networkReputation?: Record<string, { operatorKey: string; otherWorkspaces: number; severity: "hostile" | "elevated" | "benign"; ttps?: string[] }>;
   principalByOperator?: Record<string, { status: "verified" | "claimed"; principal?: string; issuer?: string; scopes: string[]; mandateExceeded: boolean; violations: string[] }>;
 }
 
@@ -710,7 +710,25 @@ export default function SiteAnalyticsPage() {
                       {text}
                     </button>
                   );
-                  return groups.map((g) => (
+                  const tradecraft = aggregateTradecraft(groups).slice(0, 8);
+                  return (
+                  <>
+                  {groups.length > 1 && tradecraft.length > 0 && (
+                    <div data-testid="tradecraft-corpus" style={{ border: "1px solid var(--wp-dark-border, #262a33)", borderRadius: 8, padding: "0.7rem 0.9rem", display: "grid", gap: "0.45rem", background: "radial-gradient(120% 120% at 20% 0%, #0e1626 0%, #0b0d11 72%)" }}>
+                      <div style={{ display: "flex", alignItems: "baseline", gap: "0.5rem", flexWrap: "wrap" }}>
+                        <span style={{ fontSize: "0.62rem", fontWeight: 800, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--wp-gold, #e8b528)" }}>Tradecraft across all operators</span>
+                        <span style={{ fontSize: "0.66rem", color: "var(--wp-text-muted, #8b90a0)" }}>the most common methods over the {groups.length} operators seen, by distinct operator</span>
+                      </div>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: "0.35rem" }}>
+                        {tradecraft.map((t) => (
+                          <span key={t.tag} data-testid={`tradecraft-${t.tag}`} style={{ display: "inline-flex", alignItems: "center", gap: "0.3rem", fontSize: "0.66rem", fontFamily: "var(--wp-mono, ui-monospace, monospace)", color: "var(--wp-text, #d8dbe0)", border: "1px solid var(--wp-dark-border, #333)", borderRadius: 999, padding: "0.12rem 0.5rem" }}>
+                            {t.tag.replace(/^attack:/, "\u2191 ")}<span style={{ color: "var(--wp-gold, #e8b528)", fontWeight: 700 }}>{t.operators}</span>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {groups.map((g) => (
                     <div key={g.operatorKey} data-testid={`operator-${g.operatorKey}`} data-focused={highlightOp === g.operatorKey ? "true" : undefined} style={{ border: `1px solid ${highlightOp === g.operatorKey ? "var(--wp-gold, #e8b528)" : sevColor(g.severity)}`, borderRadius: 8, padding: "0.8rem 0.9rem", display: "grid", gap: "0.5rem", scrollMarginTop: "1rem", boxShadow: highlightOp === g.operatorKey ? "0 0 0 2px var(--wp-gold, #e8b528), 0 0 18px rgba(232,181,40,0.35)" : "none", transition: "box-shadow 220ms ease, border-color 220ms ease" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
                         <span style={{ fontFamily: "var(--wp-mono, ui-monospace, monospace)", fontSize: "0.85rem", fontWeight: 700, color: "var(--wp-gold, #e8b528)" }}>{g.operatorKey}</span>
@@ -734,10 +752,10 @@ export default function SiteAnalyticsPage() {
                           return (
                             <span
                               data-testid={`operator-network-${g.operatorKey}`}
-                              title={`Flagged as ${net.severity} by ${net.otherWorkspaces} other workspace${net.otherWorkspaces === 1 ? "" : "s"} on the reputation network - known bad beyond you`}
+                              title={`Flagged as ${net.severity} by ${net.otherWorkspaces} other workspace${net.otherWorkspaces === 1 ? "" : "s"} on the reputation network - known bad beyond you${net.ttps && net.ttps.length ? `. Shared tradecraft: ${net.ttps.join(", ")}` : ""}`}
                               style={{ display: "inline-flex", alignItems: "center", gap: "0.25rem", fontSize: "0.6rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em", color: c, border: `1px solid ${c}`, borderRadius: 999, padding: "0.1rem 0.45rem" }}
                             >
-                              network: {net.severity} · {net.otherWorkspaces}
+                              network: {net.severity} · {net.otherWorkspaces}{net.ttps && net.ttps.length ? ` · ${net.ttps.length} TTP${net.ttps.length === 1 ? "" : "s"}` : ""}
                             </span>
                           );
                         })()}
@@ -939,7 +957,9 @@ export default function SiteAnalyticsPage() {
                         </ul>
                       </details>
                     </div>
-                  ));
+                  ))}
+                  </>
+                  );
                 })()}
               </div>
             )}

@@ -6,7 +6,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth/require-capability";
-import { blockOperator, unblockOperator } from "@/lib/agent-operators";
+import { blockOperator, unblockOperator, getOperators } from "@/lib/agent-operators";
 import { contributeHostileOperator } from "@/lib/forcefield/operator-reputation";
 import { recordAudit } from "@/lib/audit-log";
 
@@ -31,9 +31,21 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if (block) {
     await blockOperator({ workspaceId, operatorKey, reason: typeof body.reason === "string" ? body.reason.slice(0, 300) : undefined, blockedBy: auth.user.id });
     // A block is a human-confirmed hostile signal. If this workspace opted in to
-    // the reputation network, contribute the opaque fingerprint so the rest of the
-    // network can pre-flag this operator. Gated + fail-safe inside the helper.
-    await contributeHostileOperator({ workspaceId, operatorKey, severity: "hostile" }).catch(() => {});
+    // the reputation network, contribute the opaque fingerprint AND this actor's
+    // behavioral signature (behavior classes + the finer tradecraft tells) so the
+    // rest of the network recognizes its METHODS, not just its fingerprint. All
+    // non-PII: class/signal names only. Derived server-side from what we observed -
+    // never trusted from the request. Gated + fail-safe inside the helper.
+    const signature = await getOperators(workspaceId)
+      .then((ops) => ops.find((o) => o.operatorKey === operatorKey))
+      .catch(() => undefined);
+    await contributeHostileOperator({
+      workspaceId,
+      operatorKey,
+      severity: "hostile",
+      behaviorClasses: signature?.behaviorClasses ?? [],
+      tells: signature?.tells ?? [],
+    }).catch(() => {});
   } else {
     await unblockOperator(workspaceId, operatorKey);
   }

@@ -28,6 +28,17 @@ it("every dossier carries the honest not-an-identity disclaimer", () => {
   expect(d.disclaimer).toMatch(/does not establish a real-world identity/i);
 });
 
+it("aggregates the tradecraft tells (signals + insight kinds) across sightings", () => {
+  const j1 = { ...journey("vuln_scanner", "proven", ["/", "/admin"]), signals: ["probed_sensitive", "tripped_decoy"] as AgentJourney["signals"] };
+  const j2 = { ...journey("exploit_attempt", "proven", ["/api"]), signals: ["payload_attack"] as AgentJourney["signals"], insights: [{ kind: "payload_attack", attack: "sqli", detail: "d" }] as AgentJourney["insights"] };
+  const d = buildDossier([
+    sighting("ogiam.com", "t1", j1, scaff(), tools()),
+    sighting("ogiam.com", "t2", j2, scaff(), tools()),
+  ]);
+  // deduped + sorted union of every signal and insight kind observed
+  expect(d.tells).toEqual(["payload_attack", "probed_sensitive", "tripped_decoy"]);
+});
+
 it("a proven hostile behavior makes the dossier proven-hostile", () => {
   const d = buildDossier([sighting("ogiam.com", "t1", journey("vuln_scanner", "proven", ["/", "/admin"]), scaff(), tools())]);
   expect(d.threatLevel).toBe("hostile");

@@ -615,3 +615,37 @@ test("clicking a named agent chip in the hero jumps to that operator's card (vie
   await screen.findByTestId("ff-operators-view");
   await waitFor(() => expect(screen.getByTestId("operator-op_abc12345")).toHaveAttribute("data-focused", "true"));
 });
+
+test("shows the corpus-wide tradecraft ranking across all operators (insights over the whole dataset)", async () => {
+  // A second operator with a distinct exploit signature, so there is more than
+  // one operator and the corpus strip renders.
+  const j2 = {
+    key: "fp2", confidence: "proven", behaviorClass: "exploit_attempt",
+    signals: ["payload_attack"], path: ["/api/users"], eventCount: 1,
+    firstAt: "2026-09-18T11:00:00Z", lastAt: "2026-09-18T11:00:01Z",
+    summary: "Sent a live injection payload.", triage: "new",
+    profile: {
+      operatorKey: "op_def67890", correlationKey: "fp2",
+      verdict: { confidence: "proven", why: "Proven: live injection payload." },
+      processes: [],
+      scaffolding: { readsRobotsFirst: false, probedSensitive: true, pathDiscovery: "none", requestCount: 1, spanSeconds: 1, observability: "Observed." },
+      toolComposition: { usedTools: ["fetch"], novelTools: [], policies: [], riskTier: "dangerous", intent: "exploitation", confidence: "proven", summary: "Injection." },
+      policies: [], timeline: { firstAt: "2026-09-18T11:00:00Z", lastAt: "2026-09-18T11:00:01Z", spanSeconds: 1, eventCount: 1 },
+      disclaimer: "d", insights: [{ kind: "payload_attack", attack: "sqli" }],
+    },
+  };
+  const twoOps = { ...SUMMARY, journeys: [...SUMMARY.journeys, j2] };
+  mockFetchWithRefresh.mockImplementation((url: string) => {
+    if (String(url).includes("/edge-policy")) return Promise.resolve({ ok: true, json: async () => ({ mode: "monitor" }) });
+    return Promise.resolve({ ok: true, json: async () => ({ summary: twoOps, permissions: PERMS }) });
+  });
+  render(<SiteAnalyticsPage />);
+  await waitFor(() => expect(screen.getByTestId("ff-journeys-triage")).toBeInTheDocument());
+  fireEvent.click(screen.getByText("By operator"));
+  const corpus = await screen.findByTestId("tradecraft-corpus");
+  // both operators' behavior classes appear in the ranking...
+  expect(corpus).toHaveTextContent("aggressive_scraper");
+  expect(corpus).toHaveTextContent("exploit_attempt");
+  // ...and the finer tells (insight kind + trap signal) surface as their own tags
+  expect(screen.getByTestId("tradecraft-payload_attack")).toBeInTheDocument();
+});

@@ -44,6 +44,12 @@ export interface AttributionDossier {
   intent: string;
   confidence: "proven" | "inferred";
   behaviorClasses: string[];
+  /** The finer tradecraft tells this operator gave off across sightings: the
+   *  structural signals (tripped_decoy, payload_attack, id_enumeration, ...) plus
+   *  the higher-order insight kinds (impersonation, mandate_exceeded, ...). This is
+   *  the durable behavioral signature - richer than the class - that lets us
+   *  recognize the same actor's METHODS over time and share them on the network. */
+  tells: string[];
   policies: PolicyCategory[];
   /** Plain, checkable statements of what was observed. */
   evidence: string[];
@@ -92,6 +98,16 @@ export function buildDossier(sightings: readonly Sighting[]): AttributionDossier
 
   const surfaces = Array.from(new Set(sorted.map((s) => s.surface)));
   const behaviorClasses = Array.from(new Set(sorted.map((s) => s.journey.behaviorClass)));
+  // The tradecraft tells: every structural signal the actor emitted plus every
+  // higher-order insight kind, deduped and ordered. This is the behavioral
+  // signature we persist and share - not just "aggressive_scraper", but exactly
+  // how it operates (tripped_decoy + id_enumeration + payload_attack + ...).
+  const tells = Array.from(
+    new Set([
+      ...sorted.flatMap((s) => s.journey.signals ?? []),
+      ...sorted.flatMap((s) => (s.journey.insights ?? []).map((i) => i.kind)),
+    ]),
+  ).sort();
   const policies = Array.from(new Set(sorted.flatMap((s) => s.tools.policies)));
 
   // Proven wins: a single proven-hostile behavior or an exercised malicious tool
@@ -133,6 +149,7 @@ export function buildDossier(sightings: readonly Sighting[]): AttributionDossier
     intent,
     confidence,
     behaviorClasses,
+    tells,
     policies,
     evidence,
     firstSeen: sorted[0].at,
