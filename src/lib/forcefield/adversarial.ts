@@ -133,6 +133,26 @@ export async function runAdversarialSuite(): Promise<AdversarialReport> {
     record("injection-as-data", "An agent embeds prompt-injection instructions in its request paths to hijack the gate's reasoning.", "Deterministic gate: no LLM in the decision path, so injected text is inert data.", clean.behaviorClass === injected.behaviorClass, `clean: ${clean.behaviorClass}, injected: ${injected.behaviorClass} (unchanged)`);
   }
 
+  // 11. Expired credential: an attacker presents a real-but-EXPIRED delegation.
+  {
+    const v = await verifyPresentedDelegation(mint({ principal: "p", issuer: "known", scopes: ["/x"], jti: "exp-1", exp: NOW - 1 }), { resolveIssuer: resolveKnown, nowSeconds: NOW });
+    record("expired-credential", "An agent presents a delegation that was valid yesterday but has since expired.", "Expiry enforcement (fail-closed)", v.status === "claimed", `verdict: ${v.status}`);
+  }
+
+  // 12. Unverifiable principal: a delegation is presented but cannot be verified;
+  //     it must be CHALLENGED, never waved through as trusted.
+  {
+    const claimed = decideEdgeAction(baseSignals({ principalStatus: "claimed", trustBand: "caution" }), { mode: "enforce" });
+    record("unverifiable-principal", "An agent presents a credential that does not verify, hoping to be treated as authorized anyway.", "Verified-vs-claimed rail: a claimed principal is challenged, never trusted.", claimed.intended === "challenge", `edge: ${claimed.intended} (${claimed.ruleId})`);
+  }
+
+  // 13. Shadow mode honesty: in monitor mode a would-be block is RECORDED, not
+  //     enforced - so the operator sees the truth before turning protection on.
+  {
+    const shadow = decideEdgeAction(baseSignals({ trustBand: "hostile" }), { mode: "monitor" });
+    record("shadow-mode-honest", "Before protection is turned on, the operator must be able to trust what the edge WOULD do.", "Monitor mode: decides + records the would-be action, never blocks.", shadow.intended === "block" && shadow.action === "monitor" && shadow.enforced === false, `intended: ${shadow.intended}, action: ${shadow.action}, enforced: ${shadow.enforced}`);
+  }
+
   const defendedCount = results.filter((r) => r.defended).length;
   return { results, defendedCount, total: results.length, allDefended: defendedCount === results.length };
 }

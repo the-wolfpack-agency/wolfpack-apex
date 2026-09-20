@@ -15,6 +15,8 @@ export interface SecurityControl {
   status: ControlStatus;
   /** Honest, one-line state for this deployment. */
   detail: string;
+  /** When not fully active, how to close the gap (the self-service checklist). */
+  enablement?: string;
 }
 
 /** The deployment state the report is computed from. Gathered server-side. */
@@ -132,6 +134,22 @@ export function buildAssuranceReport(input: AssuranceInput): AssuranceReport {
         : `Crypto-agility registry with a precise PQ inventory: ${input.pqQuantumVulnerable} asymmetric algorithm(s) are the migration targets, symmetric HMAC is PQ-resilient, and the ML-DSA-65 slot is reserved (fails closed) until a compliant lib lands. Quantum-migration-ready, not quantum-safe today.`,
     },
   ];
+
+  const ENABLEMENT: Record<string, string> = {
+    "detect.decoys": "Seed a decoy grid from the Forcefield board. Deception is passive and safe to leave on.",
+    "verify.principal": "Register your agent fleet's delegation issuer (Admin -> Forcefield -> delegation issuers).",
+    "verify.asymmetric": "Register an issuer with an ES256 public key instead of a shared secret (no secret to leak, PQ on-ramp).",
+    "enforce.inline": "Turn protection on (enforce) with the Forcefield hero switch.",
+    "enforce.auto_block": "Enable 'Auto-block proven threats' on the Forcefield hero (enforce must be on).",
+    "network.reputation": "Opt in to consume the reputation network from the operator view.",
+    "audit.external_anchor": "Set FORCEFIELD_AUDIT_ANCHOR_URL, then publish the chain head (Admin -> Forcefield -> audit anchor).",
+    "ingest.source_signed": "Set SITE_ANALYTICS_INGEST_SIGNING=on and register a source key (Admin -> Forcefield -> ingest sources).",
+    "crypto.pq_transport": "Set PROD_DOMAIN to activate the hybrid-TLS assertion in CI.",
+    "crypto.pq_signatures": "Reserved: implement the ML-DSA-65 slot when a compliant FIPS-204 library lands, then dual-sign the audit head and delegations.",
+  };
+  for (const c of controls) {
+    if (c.status !== "active" && ENABLEMENT[c.id]) c.enablement = ENABLEMENT[c.id];
+  }
 
   const activeCount = controls.filter((c) => c.status === "active").length;
   const partialCount = controls.filter((c) => c.status === "partial").length;

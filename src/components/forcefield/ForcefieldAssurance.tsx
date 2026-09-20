@@ -10,7 +10,7 @@ import { useCallback, useState } from "react";
 import { fetchWithRefresh } from "@/lib/client-auth";
 import { GlowNode } from "@/components/forcefield/intel-visuals";
 
-type Control = { id: string; title: string; status: "active" | "partial" | "gap"; detail: string };
+type Control = { id: string; title: string; status: "active" | "partial" | "gap"; detail: string; enablement?: string };
 type Scenario = { id: string; attack: string; control: string; defended: boolean; detail: string };
 type Breach = { id: string; attack: string; realWorld: string; coverage: "prevented" | "detected" | "out_of_scope"; control: string; detail: string };
 type Data = {
@@ -73,6 +73,11 @@ export function ForcefieldAssurance() {
                       <span style={{ fontSize: "0.78rem", fontWeight: 600, color: "var(--wp-text, #eee)" }}>{c.title}</span>
                       <span style={{ fontSize: "0.6rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: STATUS_COLOR[c.status], marginLeft: "0.4rem" }}>{c.status}</span>
                       <div style={{ fontSize: "0.72rem", color: "var(--wp-text-muted, #9ca3af)", lineHeight: 1.4 }}>{c.detail}</div>
+                      {c.enablement && (
+                        <div data-testid={`assurance-enable-${c.id}`} style={{ fontSize: "0.68rem", color: "var(--wp-gold, #e8b528)", lineHeight: 1.4, marginTop: "0.15rem" }}>
+                          &rarr; To enable: {c.enablement}
+                        </div>
+                      )}
                     </div>
                   </li>
                 ))}

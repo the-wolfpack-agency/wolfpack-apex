@@ -8,7 +8,7 @@ import { ForcefieldAssurance } from "@/components/forcefield/ForcefieldAssurance
 const DATA = {
   assurance: {
     controls: [
-      { id: "enforce.inline", title: "Inline edge enforcement", status: "gap", detail: "Monitor mode." },
+      { id: "enforce.inline", title: "Inline edge enforcement", status: "gap", detail: "Monitor mode.", enablement: "Turn protection on with the hero switch." },
       { id: "verify.replay", title: "Delegation replay defense (jti)", status: "active", detail: "Accepted once." },
     ],
     activeCount: 1, partialCount: 0, gapCount: 1, total: 2, score: 50,
@@ -43,6 +43,7 @@ it("runs on open and shows the posture score, controls, and self-attack results"
   fireEvent.click(screen.getByText(/Assurance & self-test/i));
   await waitFor(() => expect(screen.getByTestId("assurance-score")).toHaveTextContent("50%"));
   expect(screen.getByTestId("assurance-control-enforce.inline")).toHaveTextContent(/gap/i);
+  expect(screen.getByTestId("assurance-enable-enforce.inline")).toHaveTextContent(/To enable/i);
   expect(screen.getByTestId("assurance-selftest")).toHaveTextContent("1/1 defended");
   expect(screen.getByTestId("assurance-scenario-replay")).toHaveTextContent(/replays a captured delegation/i);
   // known-attack coverage renders, honestly including an out-of-scope class

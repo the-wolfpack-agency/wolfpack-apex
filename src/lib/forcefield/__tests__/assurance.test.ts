@@ -28,6 +28,9 @@ describe("buildAssuranceReport", () => {
     expect(byId(r, "audit.external_anchor").status).toBe("gap");
     expect(r.gapCount).toBeGreaterThan(0);
     expect(r.score).toBeLessThan(50);
+    // every gap tells you how to close it (actionable checklist)
+    expect(byId(r, "enforce.inline").enablement).toMatch(/enforce|protection/i);
+    expect(byId(r, "detect.decoys").enablement).toMatch(/decoy/i);
   });
 
   it("reflects an armed deployment, but never claims 100 while any control is only partial", () => {
