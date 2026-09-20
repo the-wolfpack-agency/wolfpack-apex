@@ -390,3 +390,57 @@ test("operator card shows the agent trust score (0-100 + band) and explicit inte
   // An explicit intent (what it is trying to do).
   expect(screen.getByTestId("operator-intent-op_abc12345")).toBeInTheDocument();
 });
+
+test("operator card shows a 'known on the network' badge when the reputation network flags it", async () => {
+  const withRep = {
+    ...SUMMARY,
+    networkReputation: { op_abc12345: { operatorKey: "op_abc12345", otherWorkspaces: 3, severity: "hostile" as const } },
+  };
+  mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: withRep, permissions: PERMS }) });
+  render(<SiteAnalyticsPage />);
+  await waitFor(() => expect(screen.getByTestId("ff-journeys-triage")).toBeInTheDocument());
+  fireEvent.click(screen.getByTestId("journey-view-operator"));
+  await screen.findByTestId("ff-operators-view");
+  const badge = screen.getByTestId("operator-network-op_abc12345");
+  expect(badge).toHaveTextContent(/hostile/i);
+  expect(badge).toHaveTextContent("3"); // count of OTHER workspaces
+  expect(badge).toHaveAttribute("title", expect.stringContaining("other workspace"));
+});
+
+test("no network badge when the operator is unknown to the network", async () => {
+  mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: SUMMARY, permissions: PERMS }) });
+  render(<SiteAnalyticsPage />);
+  await waitFor(() => expect(screen.getByTestId("ff-journeys-triage")).toBeInTheDocument());
+  fireEvent.click(screen.getByTestId("journey-view-operator"));
+  await screen.findByTestId("ff-operators-view");
+  expect(screen.queryByTestId("operator-network-op_abc12345")).not.toBeInTheDocument();
+});
+
+test("reputation opt-in toggle reflects saved state and POSTs the change", async () => {
+  const posted: any[] = [];
+  mockFetchWithRefresh.mockImplementation((url: string, opts?: any) => {
+    if (String(url).includes("/reputation-optin")) {
+      if (opts?.method === "POST") { posted.push(JSON.parse(opts.body)); return Promise.resolve({ ok: true, json: async () => ({ ok: true }) }); }
+      return Promise.resolve({ ok: true, json: async () => ({ optIn: { contribute: false, consume: false } }) });
+    }
+    return Promise.resolve({ ok: true, json: async () => ({ summary: SUMMARY, permissions: PERMS }) });
+  });
+  render(<SiteAnalyticsPage />);
+  await waitFor(() => expect(screen.getByTestId("ff-journeys-triage")).toBeInTheDocument());
+  fireEvent.click(screen.getByTestId("journey-view-operator"));
+  await screen.findByTestId("reputation-optin");
+  const consume = screen.getByTestId("reputation-optin-consume") as HTMLInputElement;
+  await waitFor(() => expect(consume.checked).toBe(false));
+  fireEvent.click(consume);
+  await waitFor(() => expect(posted).toContainEqual({ contribute: false, consume: true }));
+  expect(consume.checked).toBe(true); // optimistic
+});
+
+test("reputation opt-in panel is hidden for a viewer who cannot manage operators", async () => {
+  mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: SUMMARY, permissions: { triage: true, manageOperators: false } }) });
+  render(<SiteAnalyticsPage />);
+  await waitFor(() => expect(screen.getByTestId("ff-journeys-triage")).toBeInTheDocument());
+  fireEvent.click(screen.getByTestId("journey-view-operator"));
+  await screen.findByTestId("ff-operators-view");
+  expect(screen.queryByTestId("reputation-optin")).not.toBeInTheDocument();
+});
