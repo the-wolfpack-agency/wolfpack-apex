@@ -51,6 +51,7 @@ interface Summary {
   payloadIntel: Array<{ attack: string; count: number }>;
   operatorTriage: Record<string, TriageStatus>;
   blockedOperators: string[];
+  networkReputation?: Record<string, { operatorKey: string; otherWorkspaces: number; severity: "hostile" | "elevated" | "benign" }>;
 }
 
 interface AgentProfile {
@@ -122,6 +123,7 @@ export default function SiteAnalyticsPage() {
   // hold the capability, so a viewer never sees a button that would 403. Least
   // privilege until the server tells us otherwise.
   const [permissions, setPermissions] = useState<{ triage: boolean; manageOperators: boolean }>({ triage: false, manageOperators: false });
+  const [repOptIn, setRepOptIn] = useState<{ contribute: boolean; consume: boolean } | null>(null);
 
   const toggleProfile = useCallback((key: string) => {
     setExpanded((prev) => {
@@ -186,6 +188,21 @@ export default function SiteAnalyticsPage() {
     }
   }, []);
 
+  const saveReputationOptIn = useCallback(async (next: { contribute: boolean; consume: boolean }) => {
+    let prev: { contribute: boolean; consume: boolean } | null = null;
+    setRepOptIn((p) => { prev = p; return next; }); // optimistic
+    try {
+      const res = await fetchWithRefresh("/api/admin/forcefield/reputation-optin", {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: JSON.stringify(next),
+      });
+      if (!res.ok) setRepOptIn(prev); // revert on rejection
+    } catch {
+      setRepOptIn(prev);
+    }
+  }, []);
+
   const load = useCallback(async (range: number) => {
     setState("loading");
     setTriageOverride({});
@@ -201,6 +218,12 @@ export default function SiteAnalyticsPage() {
       const body = (await res.json()) as { summary: Summary; permissions?: { triage: boolean; manageOperators: boolean } };
       setSummary(body.summary);
       if (body.permissions) setPermissions(body.permissions);
+      // The reputation-network opt-in lives behind a manage capability; a 403 just
+      // means this viewer can't toggle it, which is fine - leave it null.
+      void fetchWithRefresh("/api/admin/forcefield/reputation-optin")
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => { if (d?.optIn) setRepOptIn(d.optIn); })
+        .catch(() => {});
       setState("ready");
     } catch {
       setState("error");
@@ -595,6 +618,22 @@ export default function SiteAnalyticsPage() {
 
             {journeyView === "operator" && (
               <div data-testid="ff-operators-view" style={{ marginTop: "0.9rem", display: "grid", gap: "0.7rem" }}>
+                {permissions.manageOperators && (
+                  <div data-testid="reputation-optin" style={{ display: "grid", gap: "0.35rem", padding: "0.55rem 0.7rem", borderRadius: 8, background: "var(--wp-dark-2, rgba(255,255,255,0.03))", border: "1px solid var(--wp-dark-border, #333)" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", flexWrap: "wrap" }}>
+                      <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--wp-text, #eee)" }}>Reputation network</span>
+                      <span style={{ fontSize: "0.62rem", color: "var(--wp-text-muted, #9ca3af)" }}>opt-in · shares only an opaque fingerprint, never who reported it</span>
+                    </div>
+                    <label style={{ display: "flex", alignItems: "center", gap: "0.4rem", fontSize: "0.72rem", color: "var(--wp-text-muted, #b8bcc4)", cursor: "pointer" }}>
+                      <input type="checkbox" data-testid="reputation-optin-contribute" checked={!!repOptIn?.contribute} onChange={(e) => void saveReputationOptIn({ contribute: e.target.checked, consume: !!repOptIn?.consume })} />
+                      Contribute this workspace&rsquo;s confirmed-hostile blocks
+                    </label>
+                    <label style={{ display: "flex", alignItems: "center", gap: "0.4rem", fontSize: "0.72rem", color: "var(--wp-text-muted, #b8bcc4)", cursor: "pointer" }}>
+                      <input type="checkbox" data-testid="reputation-optin-consume" checked={!!repOptIn?.consume} onChange={(e) => void saveReputationOptIn({ contribute: !!repOptIn?.contribute, consume: e.target.checked })} />
+                      Flag operators already known hostile to other workspaces
+                    </label>
+                  </div>
+                )}
                 {(() => {
                   const groups = consolidateByOperator(summary.journeys);
                   if (groups.length === 0) return <p style={{ fontSize: "0.82rem", color: "var(--wp-text-muted, #9ca3af)" }}>No operators yet.</p>;
@@ -635,6 +674,19 @@ export default function SiteAnalyticsPage() {
                         {isBlocked(g.operatorKey) && (
                           <span data-testid={`operator-blocked-${g.operatorKey}`} style={{ fontSize: "0.6rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em", color: "var(--wp-dark, #0b0d11)", background: "var(--wp-error, #ef4444)", borderRadius: 999, padding: "0.1rem 0.45rem" }}>blocked</span>
                         )}
+                        {summary.networkReputation?.[g.operatorKey] && (() => {
+                          const net = summary.networkReputation![g.operatorKey];
+                          const c = net.severity === "hostile" ? "var(--wp-error, #ef4444)" : net.severity === "elevated" ? "var(--wp-warning, #f5a623)" : "var(--wp-text-muted, #9ca3af)";
+                          return (
+                            <span
+                              data-testid={`operator-network-${g.operatorKey}`}
+                              title={`Flagged as ${net.severity} by ${net.otherWorkspaces} other workspace${net.otherWorkspaces === 1 ? "" : "s"} on the reputation network - known bad beyond you`}
+                              style={{ display: "inline-flex", alignItems: "center", gap: "0.25rem", fontSize: "0.6rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em", color: c, border: `1px solid ${c}`, borderRadius: 999, padding: "0.1rem 0.45rem" }}
+                            >
+                              network: {net.severity} · {net.otherWorkspaces}
+                            </span>
+                          );
+                        })()}
                         <span style={{ marginLeft: "auto", fontSize: "0.72rem", color: "var(--wp-text-muted, #9ca3af)" }}>{g.findingCount} finding{g.findingCount === 1 ? "" : "s"}</span>
                       </div>
                       {(() => {
