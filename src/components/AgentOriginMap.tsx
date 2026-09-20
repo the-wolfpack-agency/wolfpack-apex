@@ -113,10 +113,13 @@ export function AgentOriginMap({ origins }: { origins: readonly AgentOrigin[] })
         {origins.slice(0, 12).map((o) => (
           <li key={o.country} style={{ display: "flex", alignItems: "center", gap: "0.6rem", fontSize: "0.76rem" }}>
             <span style={{ width: 8, height: 8, borderRadius: 999, background: tone(o), flex: "0 0 auto" }} />
-            <span style={{ width: 28, color: "var(--wp-text, #eee)", fontWeight: 600 }}>{o.country}</span>
-            <span style={{ color: "var(--wp-text-muted, #9ca3af)" }}>{centroidFor(o.country)?.name ?? "unknown region"}</span>
-            <span style={{ marginLeft: "auto", color: "var(--wp-text, #eee)" }}>{o.total}</span>
-            {o.hostile > 0 && <span style={{ color: "#ef4444", width: 64, textAlign: "right" }}>{o.hostile} hostile</span>}
+            <span style={{ width: 28, color: "var(--wp-text, #eee)", fontWeight: 600, flex: "0 0 auto" }}>{o.country}</span>
+            <span style={{ flex: "1 1 auto", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--wp-text-muted, #9ca3af)" }}>{centroidFor(o.country)?.name ?? "unknown region"}</span>
+            {/* Two fixed, right-aligned columns so totals line up whether or not a
+                row has a hostile tag. The hostile column is always reserved (empty
+                when zero) so the total never slides into it. */}
+            <span style={{ width: 44, flex: "0 0 auto", textAlign: "right", color: "var(--wp-text, #eee)", fontVariantNumeric: "tabular-nums" }}>{o.total}</span>
+            <span data-testid={`origin-hostile-${o.country}`} style={{ width: 68, flex: "0 0 auto", textAlign: "right", color: "#ef4444", fontVariantNumeric: "tabular-nums" }}>{o.hostile > 0 ? `${o.hostile} hostile` : ""}</span>
           </li>
         ))}
       </ul>

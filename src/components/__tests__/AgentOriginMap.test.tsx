@@ -29,6 +29,19 @@ describe("AgentOriginMap", () => {
     expect(screen.getByTestId("agent-origin-map")).toHaveTextContent(/not a confirmed operator location/i);
   });
 
+  it("reserves the hostile column on every row so totals line up (empty when zero)", () => {
+    render(<AgentOriginMap origins={origins} />);
+    // A row WITHOUT hostiles still renders the hostile column, just empty, so its
+    // total sits in the same column as a row that has a hostile tag.
+    const noHostile = screen.getByTestId("origin-hostile-DE");
+    expect(noHostile).toHaveTextContent("");
+    const withHostile = screen.getByTestId("origin-hostile-US");
+    expect(withHostile).toHaveTextContent("14 hostile");
+    // Same reserved width -> the columns align.
+    expect(noHostile).toHaveStyle({ width: "68px" });
+    expect(withHostile).toHaveStyle({ width: "68px" });
+  });
+
   it("renders an explicit empty state with no origins", () => {
     render(<AgentOriginMap origins={[]} />);
     expect(screen.getByTestId("agent-origin-map-empty")).toBeInTheDocument();
