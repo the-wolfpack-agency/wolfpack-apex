@@ -29,7 +29,7 @@ export function ProbeIntelPanel({ intel }: { intel: readonly ProbeIntelEntry[] }
       testId="ff-probe-intel"
       accent="#e8b528"
       title="Probe intelligence · what agents are scanning us for"
-      subtitle="Each sensitive path an agent probed, matched to the exposure it targets and its CWE - the same signature knowledge our own scanner uses, inverted to name what inbound traffic is hunting."
+      subtitle="Each sensitive path an agent probed, matched to the exposure it targets and its CWE. It is the same signature knowledge our own scanner uses, inverted to name what inbound traffic is hunting."
     >
       <ul data-testid="probe-intel-list" style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: "0.45rem" }}>
         {intel.map((pi) => {
