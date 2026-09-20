@@ -43,4 +43,7 @@ it("returns the assurance report + the adversarial self-test results, all defend
   expect(body.breaches.total).toBe(10);
   expect(body.breaches.prevented).toBeGreaterThan(0);
   expect(body.breaches.outOfScope).toBeGreaterThan(0);
+  // low-and-slow benchmark rides along, honestly reporting evasive misses
+  expect(body.lowAndSlow.total).toBeGreaterThan(0);
+  expect(body.lowAndSlow.evasiveRate).toBeLessThan(100);
 });
