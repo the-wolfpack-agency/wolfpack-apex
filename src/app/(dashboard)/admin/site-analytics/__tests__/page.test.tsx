@@ -376,3 +376,17 @@ test("operator card surfaces the consolidated path timeline (agent path, promine
   expect(opTl).toBeInTheDocument();
   expect(opTl).toHaveTextContent(/TRIPPED DECOY/i);
 });
+
+test("operator card shows the agent trust score (0-100 + band) and explicit intent", async () => {
+  mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: SUMMARY, permissions: PERMS }) });
+  render(<SiteAnalyticsPage />);
+  await waitFor(() => expect(screen.getByTestId("ff-journeys-triage")).toBeInTheDocument());
+  fireEvent.click(screen.getByTestId("journey-view-operator"));
+  await screen.findByTestId("ff-operators-view");
+  // A numeric trust score with a band.
+  const trust = screen.getByTestId("operator-trust-op_abc12345");
+  expect(trust).toHaveTextContent(/\/100/);
+  expect(trust).toHaveTextContent(/trusted|caution|untrusted|hostile/i);
+  // An explicit intent (what it is trying to do).
+  expect(screen.getByTestId("operator-intent-op_abc12345")).toBeInTheDocument();
+});
