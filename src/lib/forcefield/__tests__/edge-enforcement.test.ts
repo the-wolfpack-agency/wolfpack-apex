@@ -13,7 +13,7 @@ describe("decideEdgeAction - intended action precedence (enforce mode)", () => {
   it.each<[string, Partial<EdgeSignals>, "allow" | "challenge" | "block", string]>([
     ["blocklist beats everything", { blocked: true, trustBand: "trusted" }, "block", "operator_blocklisted"],
     ["mandate violation blocks", { mandateExceeded: true, trustBand: "trusted" }, "block", "mandate_exceeded"],
-    ["network hostile blocks", { networkHostile: true, trustBand: "caution" }, "block", "network_hostile"],
+    ["network hostile CHALLENGES (external signal, Sybil-resistant, never a hard block alone)", { networkHostile: true, trustBand: "caution" }, "challenge", "network_hostile"],
     ["hostile band blocks", { trustBand: "hostile" }, "block", "trust_hostile"],
     ["untrusted band challenges", { trustBand: "untrusted" }, "challenge", "trust_untrusted"],
     ["claimed principal challenges", { trustBand: "caution", principalStatus: "claimed" }, "challenge", "principal_unverifiable"],
@@ -29,6 +29,16 @@ describe("decideEdgeAction - intended action precedence (enforce mode)", () => {
 
   it("blocklist takes precedence even over a mandate violation", () => {
     expect(decideEdgeAction({ ...base, blocked: true, mandateExceeded: true }, enforce).ruleId).toBe("operator_blocklisted");
+  });
+
+  it("LOCAL proven-hostile still blocks even when a network signal is present", () => {
+    // a poisoned network signal cannot DOWNGRADE a real local block
+    expect(decideEdgeAction({ ...base, trustBand: "hostile", networkHostile: true }, enforce).intended).toBe("block");
+  });
+
+  it("a network-only signal never auto-blocks (poisoning cannot force a durable block)", () => {
+    // qualifiesForAutoBlock ignores networkHostile entirely
+    expect(qualifiesForAutoBlock({ ...base, networkHostile: true, trustBand: "caution" }, { proven: true }).auto).toBe(false);
   });
 });
 
