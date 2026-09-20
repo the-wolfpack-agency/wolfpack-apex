@@ -114,6 +114,14 @@ export async function runAdversarialSuite(): Promise<AdversarialReport> {
     record("blocklist-enforced", "An operator a human already blocked tries again from a fresh session.", "Blocklist enforcement", d.intended === "block" && d.ruleId === "operator_blocklisted", `edge: ${d.intended} (${d.ruleId})`);
   }
 
+  // 9. Reputation poisoning: a hostile workspace floods a network signal against a
+  //    legitimate operator, hoping to force a block elsewhere.
+  {
+    const decision = decideEdgeAction(baseSignals({ networkHostile: true, trustBand: "caution" }), { mode: "enforce" });
+    const auto = qualifiesForAutoBlock(baseSignals({ networkHostile: true, trustBand: "caution" }), { proven: true }).auto;
+    record("reputation-poisoning", "A hostile workspace floods the reputation network against a legitimate operator to force a wrongful block.", "Sybil resistance (network challenges, never hard-blocks alone; corroboration required)", decision.intended === "challenge" && auto === false, `edge: ${decision.intended}, auto-block: ${auto}`);
+  }
+
   const defendedCount = results.filter((r) => r.defended).length;
   return { results, defendedCount, total: results.length, allDefended: defendedCount === results.length };
 }

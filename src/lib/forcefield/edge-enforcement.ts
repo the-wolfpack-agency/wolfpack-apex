@@ -65,12 +65,15 @@ export function decideEdgeAction(signals: EdgeSignals, policy: { mode: EdgeMode 
   } else if (signals.mandateExceeded) {
     intended = "block"; ruleId = "mandate_exceeded";
     reason = "A verified principal stepped outside its granted mandate - authorized access, abused.";
-  } else if (signals.networkHostile) {
-    intended = "block"; ruleId = "network_hostile";
-    reason = "Operator is known hostile to other workspaces on the reputation network.";
   } else if (signals.trustBand === "hostile") {
     intended = "block"; ruleId = "trust_hostile";
     reason = "Trust band is hostile.";
+  } else if (signals.networkHostile) {
+    // A network signal is EXTERNAL and could be poisoned by a hostile workspace,
+    // so it never hard-blocks on its own - it challenges. Local proven-hostile
+    // behavior (above) still blocks. Sybil-resistant by construction.
+    intended = "challenge"; ruleId = "network_hostile";
+    reason = "Known hostile to other workspaces on the reputation network; challenge (external signal, never a hard block alone).";
   } else if (signals.trustBand === "untrusted") {
     intended = "challenge"; ruleId = "trust_untrusted";
     reason = "Trust band is untrusted; challenge before serving.";

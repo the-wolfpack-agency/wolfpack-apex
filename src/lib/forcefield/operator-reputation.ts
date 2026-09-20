@@ -79,6 +79,11 @@ export interface NetworkReputation {
 }
 
 const SEV_BY_RANK: Record<number, Severity> = { 3: "hostile", 2: "elevated", 1: "benign" };
+// Sybil resistance: a SINGLE workspace (or a Sybil of one) cannot manufacture a
+// "hostile" network verdict. Hostile requires at least this many DISTINCT other
+// workspaces to have reported it hostile; a lone hostile report is downgraded to
+// "elevated" (a challenge, never a hard block).
+const HOSTILE_CORROBORATION_MIN = 2;
 
 /**
  * Look up network reputation for a set of operators, EXCLUDING the caller's own
@@ -95,9 +100,10 @@ export async function getNetworkReputation(
   // Cross-workspace by design: aggregate reports from workspaces OTHER than the
   // caller. Selects workspace_id (the count) but is intentionally not workspace-
   // scoped - this is the network signal.
-  const { rows } = await safeQuery<{ operator_key: string; other_workspaces: string; sev_rank: number }>(
+  const { rows } = await safeQuery<{ operator_key: string; other_workspaces: string; hostile_reporters: string; sev_rank: number }>(
     `SELECT operator_key,
             count(DISTINCT workspace_id) AS other_workspaces,
+            count(DISTINCT workspace_id) FILTER (WHERE severity = 'hostile') AS hostile_reporters,
             max(CASE severity WHEN 'hostile' THEN 3 WHEN 'elevated' THEN 2 ELSE 1 END) AS sev_rank
        FROM instinct_operator_reputation
       WHERE operator_key = ANY($1) AND workspace_id <> $2
@@ -107,7 +113,13 @@ export async function getNetworkReputation(
   const out: Record<string, NetworkReputation> = {};
   for (const r of rows) {
     const n = Number(r.other_workspaces);
-    if (n > 0) out[r.operator_key] = { operatorKey: r.operator_key, otherWorkspaces: n, severity: SEV_BY_RANK[r.sev_rank] ?? "hostile" };
+    if (n <= 0) continue;
+    const hostileReporters = Number(r.hostile_reporters);
+    let severity: Severity;
+    if (hostileReporters >= HOSTILE_CORROBORATION_MIN) severity = "hostile"; // corroborated
+    else if (hostileReporters >= 1) severity = "elevated";                   // uncorroborated hostile -> challenge, not block
+    else severity = SEV_BY_RANK[r.sev_rank] ?? "elevated";                   // elevated/benign as reported
+    out[r.operator_key] = { operatorKey: r.operator_key, otherWorkspaces: n, severity };
   }
   return out;
 }
