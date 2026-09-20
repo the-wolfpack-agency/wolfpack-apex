@@ -14,6 +14,7 @@ import { fetchWithRefresh, jsonHeaders } from "@/lib/client-auth";
 import { HourHeatmap } from "@/components/HourHeatmap";
 import { AgentOriginMap } from "@/components/AgentOriginMap";
 import { AgentJourneyTimeline } from "@/components/AgentJourneyTimeline";
+import { AgentActionLog } from "@/components/AgentActionLog";
 import type { JourneyStep } from "@/lib/agent-behavior";
 import { triageJourneys, type Severity } from "@/lib/agent-triage";
 import { consolidateByOperator, deriveOperatorInsight, deriveTrustProfile } from "@/lib/agent-operators-view";
@@ -814,9 +815,15 @@ export default function SiteAnalyticsPage() {
                           .slice(0, 40);
                         if (opSteps.length === 0) return null;
                         return (
-                          <div data-testid={`operator-path-${g.operatorKey}`} style={{ display: "grid", gap: "0.15rem", minWidth: 0 }}>
-                            <span style={{ fontSize: "0.62rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em", color: "var(--wp-text-muted, #6b7280)" }}>Path across the surface</span>
+                          <div data-testid={`operator-path-${g.operatorKey}`} style={{ display: "grid", gap: "0.55rem", minWidth: 0 }}>
+                            <div style={{ display: "flex", alignItems: "baseline", gap: "0.5rem", flexWrap: "wrap" }}>
+                              <span style={{ fontSize: "0.76rem", fontWeight: 800, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--wp-gold, #e8b528)" }}>Path across the surface</span>
+                              <span style={{ fontSize: "0.68rem", color: "var(--wp-text-muted, #9ca3af)" }}>the full journey - every step this agent took, in order</span>
+                            </div>
+                            {/* quick-glance visual chain (the constellation) */}
                             <AgentJourneyTimeline steps={opSteps} testId={`operator-timeline-${g.operatorKey}`} />
+                            {/* the readable case file: timestamps + plain language + before/during/after */}
+                            <AgentActionLog steps={opSteps} testId={`operator-casefile-${g.operatorKey}`} />
                           </div>
                         );
                       })()}
