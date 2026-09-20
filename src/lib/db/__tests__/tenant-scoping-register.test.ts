@@ -233,6 +233,9 @@ const NO_WORKSPACE_COLUMN: readonly string[] = [
   "knowledge_qa_entries",
   "mailbox_poll_cursors",
   "site_analytics_events",
+  // Global by design: a system-wide registry of TRUSTED telemetry forwarders
+  // (their public keys), not per-tenant data. Signed-ingest verification (gap #1).
+  "instinct_ingest_sources",
 ];
 
 /** Read every table and its columns out of the migrations. */
@@ -291,7 +294,7 @@ describe("every table declares whether it is tenant-scoped", () => {
     // Instinct is ready to be run by someone else. Tables that are global by
     // design are counted separately, so this number only ever moves for the
     // reason it was created to track.
-    expect(NO_WORKSPACE_COLUMN.length).toBe(149);
+    expect(NO_WORKSPACE_COLUMN.length).toBe(150);
   });
 
   it("does not let the by-design list become a second backlog", () => {
