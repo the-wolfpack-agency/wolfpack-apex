@@ -444,3 +444,42 @@ test("reputation opt-in panel is hidden for a viewer who cannot manage operators
   await screen.findByTestId("ff-operators-view");
   expect(screen.queryByTestId("reputation-optin")).not.toBeInTheDocument();
 });
+
+test("operator card shows a VERIFIED principal badge when a delegation was cryptographically verified", async () => {
+  const withPrincipal = {
+    ...SUMMARY,
+    principalByOperator: { op_abc12345: { status: "verified" as const, principal: "person:42", issuer: "acme-fleet", scopes: ["/catalog"], mandateExceeded: false, violations: [] } },
+  };
+  mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: withPrincipal, permissions: PERMS }) });
+  render(<SiteAnalyticsPage />);
+  await waitFor(() => expect(screen.getByTestId("ff-journeys-triage")).toBeInTheDocument());
+  fireEvent.click(screen.getByTestId("journey-view-operator"));
+  await screen.findByTestId("ff-operators-view");
+  const badge = screen.getByTestId("operator-principal-op_abc12345");
+  expect(badge).toHaveTextContent(/principal verified/i);
+  expect(badge).toHaveAttribute("title", expect.stringContaining("acme-fleet"));
+});
+
+test("operator card shows a MANDATE EXCEEDED badge when a verified agent stepped outside its scope", async () => {
+  const exceeded = {
+    ...SUMMARY,
+    principalByOperator: { op_abc12345: { status: "verified" as const, principal: "person:42", issuer: "acme-fleet", scopes: ["/catalog"], mandateExceeded: true, violations: ["/admin", "/.env"] } },
+  };
+  mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: exceeded, permissions: PERMS }) });
+  render(<SiteAnalyticsPage />);
+  await waitFor(() => expect(screen.getByTestId("ff-journeys-triage")).toBeInTheDocument());
+  fireEvent.click(screen.getByTestId("journey-view-operator"));
+  await screen.findByTestId("ff-operators-view");
+  const badge = screen.getByTestId("operator-principal-op_abc12345");
+  expect(badge).toHaveTextContent(/mandate exceeded/i);
+  expect(badge).toHaveAttribute("title", expect.stringContaining("/admin"));
+});
+
+test("no principal badge when the operator presented no delegation", async () => {
+  mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: SUMMARY, permissions: PERMS }) });
+  render(<SiteAnalyticsPage />);
+  await waitFor(() => expect(screen.getByTestId("ff-journeys-triage")).toBeInTheDocument());
+  fireEvent.click(screen.getByTestId("journey-view-operator"));
+  await screen.findByTestId("ff-operators-view");
+  expect(screen.queryByTestId("operator-principal-op_abc12345")).not.toBeInTheDocument();
+});

@@ -18,6 +18,7 @@
  * No PII in, no PII out: keys are opaque nonces/fingerprints, features are
  * structural. The classifier is deterministic - same session, same verdict.
  */
+import { checkMandate, type PrincipalVerdict, type MandateCheck } from "@/lib/forcefield/principal-types";
 
 /** A structural signal observed during a session. Each maps from one or more
  *  recorded events; none carries PII. */
@@ -53,7 +54,10 @@ export type JourneyInsight =
   | { kind: "deliberate_violation"; detail: string }
   | { kind: "payload_attack"; attack: string; detail: string }
   | { kind: "id_enumeration"; detail: string }
-  | { kind: "runaway_loop"; detail: string };
+  | { kind: "runaway_loop"; detail: string }
+  | { kind: "principal_verified"; principal: string; issuer: string; detail: string }
+  | { kind: "principal_unverifiable"; detail: string }
+  | { kind: "mandate_exceeded"; violations: string[]; detail: string };
 
 /** One ordered step in the agent's path across the surface: a timestamped visit,
  *  annotated with the structural signal it represents (null = a plain visit).
@@ -83,6 +87,13 @@ export interface SessionEvent {
   agent?: string;
   /** The attack kind, when this is a payload-attack event (props.attack). */
   attack?: string;
+  /** Principal verdict fields, verified at the ingest boundary and carried on
+   *  the event props. "verified" here is already cryptographically proven; this
+   *  module never re-verifies, it only reasons about behavior vs the mandate. */
+  principalStatus?: PrincipalVerdict["status"];
+  principal?: string;
+  principalIssuer?: string;
+  principalScopes?: string[];
 }
 
 export interface AgentSessionInput {
@@ -110,6 +121,12 @@ export interface AgentJourney {
   /** Novel conclusions beyond the behavior class (impersonation, deliberate
    *  rule violation). Empty when none apply. */
   insights: JourneyInsight[];
+  /** The verified principal behind this agent (Know the Principal). "absent"
+   *  when no delegation was presented. */
+  principal?: PrincipalVerdict;
+  /** Whether the agent stayed inside the mandate it presented. Only meaningful
+   *  for a verified principal. */
+  mandate?: MandateCheck;
 }
 
 /** Map an event type to the structural signal it represents. Unknown/benign
@@ -241,6 +258,26 @@ export function detectRunawayLoop(rawPaths: readonly string[]): boolean {
 }
 
 /** Classify one correlated session into a behavior signature. Deterministic. */
+/** Reconstruct the session-level principal verdict from the (already
+ *  ingest-verified) props carried on the events. A session presents one
+ *  delegation; take the first event that carried a status. */
+function sessionPrincipal(events: readonly SessionEvent[]): PrincipalVerdict {
+  const carrier = events.find((e) => e.principalStatus);
+  if (!carrier || !carrier.principalStatus) {
+    return { status: "absent", scopes: [], reason: "No delegation credential presented." };
+  }
+  return {
+    status: carrier.principalStatus,
+    principal: carrier.principal,
+    issuer: carrier.principalIssuer,
+    scopes: carrier.principalScopes ?? [],
+    reason:
+      carrier.principalStatus === "verified"
+        ? "Signature verified against a registered issuer at ingest."
+        : "Credential presented but did not verify at ingest.",
+  };
+}
+
 export function classifySession(input: AgentSessionInput): AgentJourney {
   const events = [...input.events].sort((a, b) => a.at.localeCompare(b.at));
   const signals = Array.from(new Set(events.map(signalOf).filter((s): s is AgentSignal => s !== null)));
@@ -279,6 +316,36 @@ export function classifySession(input: AgentSessionInput): AgentJourney {
 
   const behaviorClass = classify(signals, has);
   const insights = deriveInsights(events, signals, has);
+
+  // Know the Principal: reason about the (already-verified) principal vs the
+  // agent's actual behavior. A verified principal that stayed in-scope is the
+  // strongest GOOD signal; one that stepped outside its granted mandate
+  // (mandate_exceeded) is the strongest HOSTILE signal - it had authorization
+  // and abused it. A "claimed" (unverifiable) credential is a red flag on its
+  // own: it asserted a right it cannot prove.
+  const principal = sessionPrincipal(events);
+  const mandate = checkMandate(principal, path);
+  if (principal.status === "verified") {
+    if (!mandate.withinScope) {
+      insights.push({
+        kind: "mandate_exceeded",
+        violations: mandate.violations.slice(0, 20),
+        detail: `Presented a valid delegation from ${principal.issuer} scoped to [${principal.scopes.join(", ")}], then accessed ${mandate.violations.length} path(s) outside that mandate (${mandate.violations.slice(0, 3).join(", ")}${mandate.violations.length > 3 ? ", ..." : ""}). It had authorization and exceeded it.`,
+      });
+    } else {
+      insights.push({
+        kind: "principal_verified",
+        principal: principal.principal ?? "unknown",
+        issuer: principal.issuer ?? "unknown",
+        detail: `Presented a cryptographically valid delegation from ${principal.issuer}: the accountable principal (${principal.principal}) and mandate are proven, and every path stayed within the granted scope.`,
+      });
+    }
+  } else if (principal.status === "claimed") {
+    insights.push({
+      kind: "principal_unverifiable",
+      detail: "Presented a delegation credential that did not verify against any registered issuer. It claimed an authorized principal it cannot prove; treated as unauthenticated.",
+    });
+  }
   const eventCount = events.length;
   const firstAt = events[0]?.at ?? "";
   const lastAt = events[events.length - 1]?.at ?? "";
@@ -295,6 +362,8 @@ export function classifySession(input: AgentSessionInput): AgentJourney {
     lastAt,
     summary: summarize(behaviorClass, confidence, signals),
     insights,
+    principal,
+    mandate,
   };
 }
 

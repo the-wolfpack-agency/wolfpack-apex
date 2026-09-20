@@ -121,6 +121,23 @@ export interface SiteAnalyticsSummary {
      this workspace has opted in to consume the network. Only counts + severity from
      OTHER workspaces - never which ones. Empty when not opted in. */
   networkReputation: Record<string, NetworkReputation>;
+  /* Know the Principal: per-operator verdict on the human/mandate behind the
+     agent. Only operators that presented a delegation appear here. A verified
+     principal that stepped outside its granted scope is flagged mandateExceeded -
+     the strongest hostile signal, an authorized agent abusing its grant. */
+  principalByOperator: Record<string, PrincipalSummary>;
+}
+
+/** Per-operator principal verdict surfaced to the board. "verified" = the
+ *  delegation signature checked out against a registered issuer; "claimed" =
+ *  presented but unverifiable. Absent principals are omitted. */
+export interface PrincipalSummary {
+  status: "verified" | "claimed";
+  principal?: string;
+  issuer?: string;
+  scopes: string[];
+  mandateExceeded: boolean;
+  violations: string[];
 }
 
 /** Clamp the requested window to a sane integer day count. */
@@ -219,9 +236,11 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
         GROUP BY 1 ORDER BY count(*) DESC LIMIT 10`,
       [String(days)],
     ),
-    safeQuery<{ event_type: string; path: string | null; created_at: string; sig: string | null; nonce: string | null; agent: string | null; attack: string | null }>(
+    safeQuery<{ event_type: string; path: string | null; created_at: string; sig: string | null; nonce: string | null; agent: string | null; attack: string | null; principal_status: string | null; principal: string | null; principal_issuer: string | null; principal_scopes: string | null }>(
       `SELECT event_type, path, created_at::text AS created_at,
-              props->>'sig' AS sig, props->>'nonce' AS nonce, props->>'agent' AS agent, props->>'attack' AS attack
+              props->>'sig' AS sig, props->>'nonce' AS nonce, props->>'agent' AS agent, props->>'attack' AS attack,
+              props->>'principal_status' AS principal_status, props->>'principal' AS principal,
+              props->>'principal_issuer' AS principal_issuer, props->>'principal_scopes' AS principal_scopes
          FROM site_analytics_events
         WHERE ${sinceClause}
           AND (props->>'sig' IS NOT NULL OR props->>'nonce' IS NOT NULL)
@@ -260,7 +279,12 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
         const nonce = r.nonce ?? undefined;
         const key = nonce ?? r.sig ?? "";
         const keyKind: CorrelationKind = nonce ? "nonce" : "fingerprint";
-        return { key, keyKind, type: r.event_type, path: r.path ?? "", at: r.created_at, nonceLinked: !!nonce, agent: r.agent ?? undefined, attack: r.attack ?? undefined };
+        let principalScopes: string[] | undefined;
+        if (r.principal_scopes) {
+          try { const parsed = JSON.parse(r.principal_scopes); if (Array.isArray(parsed)) principalScopes = parsed.filter((x): x is string => typeof x === "string"); } catch { /* ignore malformed */ }
+        }
+        const principalStatus = r.principal_status === "verified" || r.principal_status === "claimed" || r.principal_status === "absent" ? r.principal_status : undefined;
+        return { key, keyKind, type: r.event_type, path: r.path ?? "", at: r.created_at, nonceLinked: !!nonce, agent: r.agent ?? undefined, attack: r.attack ?? undefined, principalStatus, principal: r.principal ?? undefined, principalIssuer: r.principal_issuer ?? undefined, principalScopes };
       }).filter((r) => r.key !== ""),
     ).slice(0, 25).map((j) => ({ ...j, profile: buildAgentProfile(j) })),
     workspaceId,
@@ -270,6 +294,28 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
   const networkReputation = workspaceId
     ? await getNetworkReputation(workspaceId, Array.from(new Set(journeys.map((j) => j.profile.operatorKey))))
     : {};
+  // Aggregate the per-session principal verdicts up to the operator. When an
+  // operator has multiple sessions, the most security-relevant wins: a mandate
+  // violation outranks a bare claimed credential, which outranks a clean verify.
+  const principalRank = (e: PrincipalSummary): number => (e.mandateExceeded ? 3 : e.status === "claimed" ? 2 : 1);
+  const principalByOperator: Record<string, PrincipalSummary> = {};
+  for (const j of journeys) {
+    const pv = j.principal;
+    if (!pv || pv.status === "absent") continue;
+    const exceeded = pv.status === "verified" && j.mandate ? !j.mandate.withinScope : false;
+    const entry: PrincipalSummary = {
+      status: pv.status === "verified" ? "verified" : "claimed",
+      principal: pv.principal,
+      issuer: pv.issuer,
+      scopes: pv.scopes,
+      mandateExceeded: exceeded,
+      violations: exceeded ? (j.mandate?.violations ?? []) : [],
+    };
+    const key = j.profile.operatorKey;
+    const cur = principalByOperator[key];
+    if (!cur || principalRank(entry) > principalRank(cur)) principalByOperator[key] = entry;
+  }
+
   return {
     rangeDays: days,
     totalPageViews: t ? Number(t.page_views) : 0,
@@ -288,6 +334,7 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
     operatorTriage,
     blockedOperators,
     networkReputation,
+    principalByOperator,
     agentOrigins: agentOriginRows.rows.map((r) => ({
       country: r.country,
       total: Number(r.total),
