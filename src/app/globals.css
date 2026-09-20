@@ -1620,3 +1620,13 @@ a:hover { color: var(--wp-gold-hover); }
 .ff-op-findings > summary .ff-chev { display: inline-block; transition: transform 0.15s ease; font-size: 0.7rem; }
 .ff-op-findings[open] > summary .ff-chev { transform: rotate(90deg); }
 @media (prefers-reduced-motion: reduce) { .ff-op-findings > summary .ff-chev { transition: none; } }
+
+/* Forcefield shared visual language: a glowing severity node (echoes the
+   agent-origin map dots + the case-file / hero core) reused across intel
+   panels. Hostile nodes pulse; reduced-motion stills them. */
+@keyframes ff-glow-pulse { 0%, 100% { opacity: 0.9; transform: scale(1); } 50% { opacity: 0.35; transform: scale(1.4); } }
+.ff-glow-node { position: relative; display: inline-block; flex: 0 0 auto; }
+.ff-glow-node .ff-glow-halo { position: absolute; inset: 0; border-radius: 999px; }
+.ff-glow-node .ff-glow-core { position: absolute; border-radius: 999px; }
+.ff-glow-node--pulse .ff-glow-halo { animation: ff-glow-pulse 2.2s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .ff-glow-node--pulse .ff-glow-halo { animation: none; } }
