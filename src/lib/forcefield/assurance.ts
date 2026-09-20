@@ -79,6 +79,12 @@ export function buildAssuranceReport(input: AssuranceInput): AssuranceReport {
       detail: input.autoBlockEnabled && input.enforceMode === "enforce" ? "Proven-hostile actors are blocked on sight; never on inference or a good agent." : "Off: proven-hostile actors are flagged, not auto-blocked.",
     },
     {
+      id: "defense.deterministic_gate",
+      title: "Deterministic gate (no prompt-injection surface)",
+      status: "active",
+      detail: "The inbound-agent decision is fully deterministic: agent-controlled text (paths, payloads) is treated as DATA, never as instructions, and never reaches an LLM that could be hijacked to flip a verdict.",
+    },
+    {
       id: "enforce.never_blinds",
       title: "Enforcement never blinds observation",
       status: "active",

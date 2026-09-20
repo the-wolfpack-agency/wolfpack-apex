@@ -17,7 +17,7 @@ describe("adversarial self-attack suite", () => {
 
   it("covers the core bypass classes (forged/tampered/replay/mandate/auto-block/good-bot/blocklist)", async () => {
     const ids = (await runAdversarialSuite()).results.map((r) => r.id);
-    for (const id of ["forged-principal", "tampered-credential", "replay", "mandate-abuse", "auto-block-fires", "auto-block-spares-client", "good-bot-spared", "blocklist-enforced"]) {
+    for (const id of ["forged-principal", "tampered-credential", "replay", "mandate-abuse", "auto-block-fires", "auto-block-spares-client", "good-bot-spared", "blocklist-enforced", "injection-as-data"]) {
       expect(ids).toContain(id);
     }
   });
