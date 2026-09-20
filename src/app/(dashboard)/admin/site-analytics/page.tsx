@@ -17,7 +17,7 @@ import { AgentJourneyTimeline } from "@/components/AgentJourneyTimeline";
 import { AgentActionLog } from "@/components/AgentActionLog";
 import type { JourneyStep } from "@/lib/agent-behavior";
 import { triageJourneys, type Severity } from "@/lib/agent-triage";
-import { consolidateByOperator, deriveOperatorInsight, deriveTrustProfile, aggregateTradecraft, clusterByTradecraft } from "@/lib/agent-operators-view";
+import { consolidateByOperator, deriveOperatorInsight, deriveTrustProfile, aggregateTradecraft, clusterByTradecraft, detectCampaigns, tradecraftTrend } from "@/lib/agent-operators-view";
 import { decideEdgeAction, type EdgeMode } from "@/lib/forcefield/edge-enforcement";
 import { ForcefieldSwitch } from "@/components/ForcefieldSwitch";
 import { ForcefieldAssurance } from "@/components/forcefield/ForcefieldAssurance";
@@ -712,6 +712,8 @@ export default function SiteAnalyticsPage() {
                   );
                   const tradecraft = aggregateTradecraft(groups).slice(0, 8);
                   const methodClusters = clusterByTradecraft(groups).slice(0, 6);
+                  const campaigns = detectCampaigns(groups).slice(0, 4);
+                  const rising = tradecraftTrend(groups, new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()).filter((r) => r.delta > 0).slice(0, 6);
                   return (
                   <>
                   {groups.length > 1 && tradecraft.length > 0 && (
@@ -727,6 +729,40 @@ export default function SiteAnalyticsPage() {
                           </span>
                         ))}
                       </div>
+                      {rising.length > 0 && (
+                        <div data-testid="tradecraft-rising" style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: "0.35rem", paddingTop: "0.15rem", borderTop: "1px solid var(--wp-dark-border, #262a33)" }}>
+                          <span style={{ fontSize: "0.58rem", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--wp-warning, #f5a623)" }}>Rising 7d</span>
+                          {rising.map((r) => (
+                            <span key={r.tag} data-testid={`rising-${r.tag}`} style={{ display: "inline-flex", alignItems: "center", gap: "0.25rem", fontSize: "0.64rem", fontFamily: "var(--wp-mono, ui-monospace, monospace)", color: "var(--wp-text, #d8dbe0)", border: "1px solid var(--wp-warning, #f5a623)", borderRadius: 999, padding: "0.1rem 0.45rem" }}>
+                              {r.isNew && <span style={{ color: "var(--wp-warning, #f5a623)", fontWeight: 800 }}>NEW</span>}
+                              {r.tag.replace(/^attack:/, "\u2191 ")}<span style={{ color: "var(--wp-warning, #f5a623)", fontWeight: 700 }}>+{r.delta}</span>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {campaigns.length > 0 && (
+                    <div data-testid="campaigns" style={{ border: "1px solid var(--wp-error, #ef4444)", borderRadius: 8, padding: "0.7rem 0.9rem", display: "grid", gap: "0.5rem", background: "radial-gradient(120% 120% at 20% 0%, #1a0e12 0%, #0b0d11 72%)" }}>
+                      <div style={{ display: "flex", alignItems: "baseline", gap: "0.5rem", flexWrap: "wrap" }}>
+                        <span style={{ fontSize: "0.62rem", fontWeight: 800, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--wp-error, #ef4444)" }}>Coordinated campaigns</span>
+                        <span style={{ fontSize: "0.66rem", color: "var(--wp-text-muted, #8b90a0)" }}>look-alike operators active at the same time, hitting the same targets - coordination, not coincidence</span>
+                      </div>
+                      {campaigns.map((c, i) => (
+                        <div key={i} data-testid={`campaign-${i}`} style={{ display: "grid", gap: "0.3rem", padding: "0.4rem 0.55rem", borderRadius: 6, border: `1px solid ${sevColor(c.severity)}` }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", flexWrap: "wrap" }}>
+                            <span style={{ fontSize: "0.64rem", fontWeight: 700, color: sevColor(c.severity), textTransform: "uppercase", letterSpacing: "0.04em" }}>{c.operatorKeys.length} operators</span>
+                            <span style={{ fontSize: "0.6rem", fontWeight: 700, color: "var(--wp-dark, #0b0d11)", background: sevColor(c.severity), borderRadius: 999, padding: "0.05rem 0.4rem" }}>{c.concurrency} concurrent</span>
+                            {c.proven && <span style={{ fontSize: "0.58rem", fontWeight: 700, color: "var(--wp-dark, #0b0d11)", background: "var(--wp-error, #ef4444)", borderRadius: 999, padding: "0.05rem 0.4rem" }}>proven</span>}
+                          </div>
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: "0.3rem" }}>
+                            {c.operatorKeys.map((k) => (
+                              <button key={k} type="button" onClick={() => focusOperator(k)} style={{ fontFamily: "var(--wp-mono, ui-monospace, monospace)", fontSize: "0.62rem", color: "var(--wp-gold, #e8b528)", background: "transparent", border: "1px solid var(--wp-dark-border, #333)", borderRadius: 999, padding: "0.05rem 0.45rem", cursor: "pointer" }}>{k}</button>
+                            ))}
+                          </div>
+                          <div style={{ fontSize: "0.62rem", color: "var(--wp-text-muted, #b8bcc4)" }}>shared targets: {c.sharedTargets.slice(0, 6).join(", ")}</div>
+                        </div>
+                      ))}
                     </div>
                   )}
                   {methodClusters.length > 0 && (

@@ -1,4 +1,4 @@
-import { consolidateByOperator, aggregateTradecraft, clusterByTradecraft, type OperatorViewJourney } from "@/lib/agent-operators-view";
+import { consolidateByOperator, aggregateTradecraft, clusterByTradecraft, detectCampaigns, tradecraftTrend, type OperatorViewJourney } from "@/lib/agent-operators-view";
 
 function j(over: Partial<OperatorViewJourney> & { operatorKey: string }): OperatorViewJourney {
   const { operatorKey, ...rest } = over;
@@ -227,5 +227,78 @@ describe("clusterByTradecraft - operator similarity graph", () => {
   it("is deterministic and returns [] for a single operator", () => {
     const groups = consolidateByOperator([op("op_solo", "exploit_attempt", ["payload_attack"])]);
     expect(clusterByTradecraft(groups)).toEqual([]);
+  });
+});
+
+
+describe("detectCampaigns - coordinated activity", () => {
+  // op with shared tradecraft + a chosen active window + target paths
+  const camp = (operatorKey: string, at: string, paths: string[], kinds: string[]) =>
+    j({ operatorKey, behaviorClass: "exploit_attempt", confidence: "proven", key: operatorKey,
+        firstAt: at, lastAt: at, path: paths,
+        profile: {
+          operatorKey,
+          scaffolding: { pathDiscovery: "link-following", readsRobotsFirst: true },
+          toolComposition: { usedTools: ["fetch", "submit_form"] },
+          insights: kinds.map((k) => ({ kind: k })),
+        } });
+
+  it("reports a campaign when look-alike operators are concurrent AND share targets", () => {
+    const groups = consolidateByOperator([
+      camp("op_a", "2026-09-19T10:00:00Z", ["/api/users", "/login"], ["payload_attack", "id_enumeration"]),
+      camp("op_b", "2026-09-19T10:20:00Z", ["/api/users", "/admin"], ["payload_attack", "id_enumeration"]),
+    ]);
+    const camps = detectCampaigns(groups);
+    expect(camps).toHaveLength(1);
+    expect(camps[0].operatorKeys).toEqual(["op_a", "op_b"]);
+    expect(camps[0].sharedTargets).toEqual(["/api/users"]);
+    expect(camps[0].concurrency).toBe(2);
+    expect(camps[0].proven).toBe(true);
+  });
+
+  it("does NOT call it a campaign when methods match but they share no target", () => {
+    const groups = consolidateByOperator([
+      camp("op_a", "2026-09-19T10:00:00Z", ["/api/users"], ["payload_attack", "id_enumeration"]),
+      camp("op_b", "2026-09-19T10:10:00Z", ["/different"], ["payload_attack", "id_enumeration"]),
+    ]);
+    expect(detectCampaigns(groups)).toEqual([]);
+  });
+
+  it("does NOT call it a campaign when methods + targets match but activity never overlaps", () => {
+    const groups = consolidateByOperator([
+      camp("op_a", "2026-01-01T10:00:00Z", ["/api/users"], ["payload_attack", "id_enumeration"]),
+      camp("op_b", "2026-09-19T10:00:00Z", ["/api/users"], ["payload_attack", "id_enumeration"]),
+    ]);
+    // months apart, far beyond the hour of slack
+    expect(detectCampaigns(groups)).toEqual([]);
+  });
+});
+
+describe("tradecraftTrend - what is rising", () => {
+  const at = (operatorKey: string, lastAt: string, kinds: string[], behaviorClass = "exploit_attempt") =>
+    j({ operatorKey, behaviorClass, key: operatorKey, firstAt: lastAt, lastAt,
+        profile: { operatorKey, scaffolding: { pathDiscovery: "none", readsRobotsFirst: false }, toolComposition: { usedTools: ["fetch"] }, insights: kinds.map((k) => ({ kind: k })) } });
+
+  it("flags a brand-new tell (present only after the split) as isNew with a positive delta", () => {
+    const groups = consolidateByOperator([
+      at("op_old", "2026-09-01T00:00:00Z", ["id_enumeration"]),
+      at("op_new", "2026-09-19T00:00:00Z", ["payload_attack"]),
+    ]);
+    const rows = tradecraftTrend(groups, "2026-09-10T00:00:00Z");
+    const payload = rows.find((r) => r.tag === "payload_attack")!;
+    expect(payload).toMatchObject({ recent: 1, prior: 0, delta: 1, isNew: true });
+    const idenum = rows.find((r) => r.tag === "id_enumeration")!;
+    expect(idenum).toMatchObject({ recent: 0, prior: 1, delta: -1, isNew: false });
+  });
+
+  it("ranks rising tradecraft first", () => {
+    const groups = consolidateByOperator([
+      at("op_1", "2026-09-19T00:00:00Z", ["payload_attack"]),
+      at("op_2", "2026-09-19T00:00:00Z", ["payload_attack"]),
+      at("op_3", "2026-09-01T00:00:00Z", ["runaway_loop"]),
+    ]);
+    const rows = tradecraftTrend(groups, "2026-09-10T00:00:00Z");
+    expect(rows[0].tag).toBe("payload_attack");
+    expect(rows[0].delta).toBe(2);
   });
 });

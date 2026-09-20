@@ -415,6 +415,132 @@ export function clusterByTradecraft<T extends OperatorViewJourney>(
   );
 }
 
+// ---------------------------------------------------------------------------
+// Campaign detection (coordinated activity)
+// ---------------------------------------------------------------------------
+//
+// A tradecraft cluster says "these operators use the same methods." A CAMPAIGN
+// says more: those look-alike operators were also active at the SAME TIME and hit
+// the SAME TARGETS - the corroboration that turns "similar" into "coordinated."
+// Method-similarity alone can be coincidence (two off-the-shelf scanners); method
+// + concurrency + shared targets is a campaign. Pure + deterministic.
+
+export interface Campaign {
+  /** The operators acting in concert (>= 2). */
+  operatorKeys: string[];
+  /** The span the campaign was active across, from the members' sightings. */
+  window: { start: string; end: string };
+  /** Targets hit by at least two members - the shared objective. */
+  sharedTargets: string[];
+  /** The tradecraft the members share (from the underlying cluster). */
+  sharedTells: string[];
+  /** Worst severity among the members. */
+  severity: Severity;
+  /** True when any member is proven-hostile. */
+  proven: boolean;
+  /** Peak number of members active simultaneously - the strength of coordination. */
+  concurrency: number;
+}
+
+/**
+ * Find campaigns: tradecraft clusters whose members ALSO overlap in time (within
+ * `slackMs`) and share at least one target. A cluster with no shared target, or no
+ * concurrent activity, is method-similar but NOT reported as a campaign - we do not
+ * overclaim coordination. Deterministic; ties broken by first operator key.
+ */
+export function detectCampaigns<T extends OperatorViewJourney>(
+  groups: readonly OperatorGroup<T>[],
+  opts: { minShared?: number; minJaccard?: number; slackMs?: number } = {},
+): Campaign[] {
+  const slackMs = opts.slackMs ?? 60 * 60 * 1000; // an hour of slack around each window
+  const clusters = clusterByTradecraft(groups, opts);
+  const byKey = new Map(groups.map((g) => [g.operatorKey, g]));
+  const campaigns: Campaign[] = [];
+
+  for (const c of clusters) {
+    const members = c.operatorKeys.map((k) => byKey.get(k)).filter((m): m is OperatorGroup<T> => !!m);
+
+    // Shared targets: a path touched by >= 2 members is a shared objective.
+    const pathCount = new Map<string, number>();
+    for (const m of members) for (const path of new Set(m.paths)) pathCount.set(path, (pathCount.get(path) ?? 0) + 1);
+    const sharedTargets = Array.from(pathCount.entries()).filter(([, n]) => n >= 2).map(([p]) => p).sort();
+    if (sharedTargets.length === 0) continue; // similar methods, but no common objective
+
+    // Concurrency: peak number of members whose active windows overlap (with slack).
+    const iv = members
+      .map((m) => ({ s: Date.parse(m.firstSeen), e: Date.parse(m.lastSeen) }))
+      .filter((x) => Number.isFinite(x.s) && Number.isFinite(x.e));
+    const marks: Array<[number, number]> = [];
+    for (const x of iv) { marks.push([x.s - slackMs, 1]); marks.push([x.e + slackMs, -1]); }
+    // Sort by time; on a tie, process opens (+1) before closes (-1) so a boundary
+    // touch counts as overlap.
+    marks.sort((a, b) => a[0] - b[0] || b[1] - a[1]);
+    let cur = 0, concurrency = 0;
+    for (const [, d] of marks) { cur += d; if (cur > concurrency) concurrency = cur; }
+    if (concurrency < 2) continue; // similar + same targets, but never active together
+
+    const starts = members.map((m) => m.firstSeen).sort();
+    const ends = members.map((m) => m.lastSeen).sort();
+    campaigns.push({
+      operatorKeys: c.operatorKeys,
+      window: { start: starts[0], end: ends[ends.length - 1] },
+      sharedTargets,
+      sharedTells: c.sharedTells,
+      severity: c.severity,
+      proven: c.proven,
+      concurrency,
+    });
+  }
+  return campaigns.sort(
+    (a, b) => b.concurrency - a.concurrency || b.operatorKeys.length - a.operatorKeys.length || a.operatorKeys[0].localeCompare(b.operatorKeys[0]),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Emerging tradecraft (what is rising)
+// ---------------------------------------------------------------------------
+
+export interface TradecraftTrendRow {
+  tag: string;
+  /** Distinct operators showing this tag whose last activity is in the recent window. */
+  recent: number;
+  /** Distinct operators showing it whose last activity is before the split. */
+  prior: number;
+  /** recent - prior: positive = rising. */
+  delta: number;
+  /** True when it appears only in the recent window (brand-new tradecraft). */
+  isNew: boolean;
+}
+
+/**
+ * What tradecraft is RISING. Operators are bucketed by whether their last activity
+ * falls on or after `splitIso` (recent) or before it (prior); each tag is counted
+ * by distinct operators in each bucket. As the corpus grows this is the early-
+ * warning signal: a tell that is new or climbing among recently-active operators.
+ * Pure + deterministic; the caller supplies the split so this stays testable.
+ */
+export function tradecraftTrend<T extends OperatorViewJourney>(
+  groups: readonly OperatorGroup<T>[],
+  splitIso: string,
+): TradecraftTrendRow[] {
+  const split = Date.parse(splitIso);
+  const recent = new Map<string, number>();
+  const prior = new Map<string, number>();
+  for (const g of groups) {
+    const t = Date.parse(g.lastSeen);
+    const bucket = Number.isFinite(t) && Number.isFinite(split) && t >= split ? recent : prior;
+    for (const tag of tellSetOf(g)) bucket.set(tag, (bucket.get(tag) ?? 0) + 1);
+  }
+  const tags = new Set([...recent.keys(), ...prior.keys()]);
+  return Array.from(tags)
+    .map((tag) => {
+      const r = recent.get(tag) ?? 0;
+      const p = prior.get(tag) ?? 0;
+      return { tag, recent: r, prior: p, delta: r - p, isNew: p === 0 && r > 0 };
+    })
+    .sort((a, b) => b.delta - a.delta || a.tag.localeCompare(b.tag));
+}
+
 /** Synthesize one operator group into a decision-ready brief. Deterministic. */
 export function deriveOperatorInsight<T extends OperatorViewJourney>(g: OperatorGroup<T>): OperatorInsight {
   const confidence: "proven" | "inferred" = g.proven ? "proven" : "inferred";
