@@ -28,6 +28,10 @@ export interface AuditAllowlistEntry {
 
 export const AUDIT_ALLOWLIST: ReadonlyArray<AuditAllowlistEntry> = [
   {
+    route: "src/app/api/forcefield/edge/decide/route.ts",
+    reason: "Inline edge enforcement decision: one call per inbound agent request is a high-volume observability event, recorded via trackEvent (forcefield.edge_decision) for the enforcement learning loop, not a durable state mutation. A per-request hash-chained audit row would flood the ledger without compliance value; the decision is deterministic and reconstructable from the recorded signals. The mode CHANGE that governs it IS audited, at /api/admin/forcefield/edge-policy.",
+  },
+  {
     route: "src/app/api/harness/session/route.ts",
     reason: "Public, unauthenticated harness: POST mints an anonymous, ephemeral, unguessable session token for a developer to point their own agent at a decoy sandbox. There is no user, no tenant, and no durable business state - the row is short-TTL and holds only a goal/label the caller typed. It is read-only-by-effect the same class as agent-probe/run: the behavioral observation that DOES matter for learning is captured as a non-PII SIGHTING when the reading is computed, not here. A per-session-start audit row would carry no compliance value.",
   },

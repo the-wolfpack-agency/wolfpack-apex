@@ -17,6 +17,7 @@ import { AgentJourneyTimeline } from "@/components/AgentJourneyTimeline";
 import type { JourneyStep } from "@/lib/agent-behavior";
 import { triageJourneys, type Severity } from "@/lib/agent-triage";
 import { consolidateByOperator, deriveOperatorInsight, deriveTrustProfile } from "@/lib/agent-operators-view";
+import { decideEdgeAction, type EdgeMode } from "@/lib/forcefield/edge-enforcement";
 
 interface Summary {
   rangeDays: number;
@@ -125,6 +126,7 @@ export default function SiteAnalyticsPage() {
   // privilege until the server tells us otherwise.
   const [permissions, setPermissions] = useState<{ triage: boolean; manageOperators: boolean }>({ triage: false, manageOperators: false });
   const [repOptIn, setRepOptIn] = useState<{ contribute: boolean; consume: boolean } | null>(null);
+  const [edgeMode, setEdgeMode] = useState<EdgeMode>("monitor");
 
   const toggleProfile = useCallback((key: string) => {
     setExpanded((prev) => {
@@ -189,6 +191,21 @@ export default function SiteAnalyticsPage() {
     }
   }, []);
 
+  const saveEdgeMode = useCallback(async (mode: EdgeMode) => {
+    const prev = mode === "enforce" ? "monitor" : "enforce";
+    setEdgeMode(mode); // optimistic
+    try {
+      const res = await fetchWithRefresh("/api/admin/forcefield/edge-policy", {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: JSON.stringify({ mode }),
+      });
+      if (!res.ok) setEdgeMode(prev as EdgeMode);
+    } catch {
+      setEdgeMode(prev as EdgeMode);
+    }
+  }, []);
+
   const saveReputationOptIn = useCallback(async (next: { contribute: boolean; consume: boolean }) => {
     let prev: { contribute: boolean; consume: boolean } | null = null;
     setRepOptIn((p) => { prev = p; return next; }); // optimistic
@@ -224,6 +241,10 @@ export default function SiteAnalyticsPage() {
       void fetchWithRefresh("/api/admin/forcefield/reputation-optin")
         .then((r) => (r.ok ? r.json() : null))
         .then((d) => { if (d?.optIn) setRepOptIn(d.optIn); })
+        .catch(() => {});
+      void fetchWithRefresh("/api/admin/forcefield/edge-policy")
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => { if (d?.mode === "enforce" || d?.mode === "monitor") setEdgeMode(d.mode); })
         .catch(() => {});
       setState("ready");
     } catch {
@@ -635,6 +656,21 @@ export default function SiteAnalyticsPage() {
                     </label>
                   </div>
                 )}
+                {permissions.manageOperators && (
+                  <div data-testid="edge-policy" style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap", padding: "0.55rem 0.7rem", borderRadius: 8, background: "var(--wp-dark-2, rgba(255,255,255,0.03))", border: `1px solid ${edgeMode === "enforce" ? "var(--wp-warning, #f5a623)" : "var(--wp-dark-border, #333)"}` }}>
+                    <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--wp-text, #eee)" }}>Inline edge enforcement</span>
+                    <span data-testid="edge-policy-mode" style={{ fontSize: "0.62rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em", borderRadius: 999, padding: "0.1rem 0.5rem", color: "var(--wp-dark, #0b0d11)", background: edgeMode === "enforce" ? "var(--wp-warning, #f5a623)" : "var(--wp-text-muted, #9ca3af)" }}>{edgeMode === "enforce" ? "enforcing" : "monitor (shadow)"}</span>
+                    <span style={{ fontSize: "0.62rem", color: "var(--wp-text-muted, #9ca3af)" }}>{edgeMode === "enforce" ? "the edge blocks/challenges in real time" : "decisions are recorded but nothing is blocked"}</span>
+                    <button
+                      type="button"
+                      data-testid="edge-policy-toggle"
+                      onClick={() => void saveEdgeMode(edgeMode === "enforce" ? "monitor" : "enforce")}
+                      style={{ marginLeft: "auto", padding: "0.12rem 0.6rem", borderRadius: 999, fontSize: "0.68rem", fontWeight: 600, cursor: "pointer", background: "transparent", color: edgeMode === "enforce" ? "var(--wp-text-muted, #9ca3af)" : "var(--wp-warning, #f5a623)", border: `1px solid ${edgeMode === "enforce" ? "var(--wp-text-muted, #9ca3af)" : "var(--wp-warning, #f5a623)"}` }}
+                    >
+                      {edgeMode === "enforce" ? "Switch to monitor" : "Switch to enforce"}
+                    </button>
+                  </div>
+                )}
                 {(() => {
                   const groups = consolidateByOperator(summary.journeys);
                   if (groups.length === 0) return <p style={{ fontSize: "0.82rem", color: "var(--wp-text-muted, #9ca3af)" }}>No operators yet.</p>;
@@ -710,6 +746,32 @@ export default function SiteAnalyticsPage() {
                           );
                         })()}
                         <span style={{ marginLeft: "auto", fontSize: "0.72rem", color: "var(--wp-text-muted, #9ca3af)" }}>{g.findingCount} finding{g.findingCount === 1 ? "" : "s"}</span>
+                        {(() => {
+                          const pr = summary.principalByOperator?.[g.operatorKey];
+                          const decision = decideEdgeAction(
+                            {
+                              blocked: isBlocked(g.operatorKey),
+                              trustBand: deriveTrustProfile(g).band,
+                              mandateExceeded: pr?.mandateExceeded ?? false,
+                              principalStatus: pr?.status ?? "absent",
+                              networkHostile: summary.networkReputation?.[g.operatorKey]?.severity === "hostile",
+                            },
+                            { mode: edgeMode },
+                          );
+                          const c = decision.intended === "block" ? "var(--wp-error, #ef4444)" : decision.intended === "challenge" ? "var(--wp-warning, #f5a623)" : "var(--wp-success, #30a46c)";
+                          const verb = edgeMode === "enforce"
+                            ? (decision.intended === "allow" ? "allowing" : decision.intended === "block" ? "blocking" : "challenging")
+                            : `would ${decision.intended}`;
+                          return (
+                            <span
+                              data-testid={`operator-edge-${g.operatorKey}`}
+                              title={`${edgeMode === "enforce" ? "Enforcing" : "Monitor (shadow)"}: ${decision.reason} [rule: ${decision.ruleId}]`}
+                              style={{ fontSize: "0.6rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em", color: c, border: `1px solid ${c}`, borderRadius: 999, padding: "0.1rem 0.45rem" }}
+                            >
+                              edge: {verb}
+                            </span>
+                          );
+                        })()}
                       </div>
                       {(() => {
                         const insight = deriveOperatorInsight(g);
