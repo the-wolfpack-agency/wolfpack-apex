@@ -649,3 +649,50 @@ test("shows the corpus-wide tradecraft ranking across all operators (insights ov
   // ...and the finer tells (insight kind + trap signal) surface as their own tags
   expect(screen.getByTestId("tradecraft-payload_attack")).toBeInTheDocument();
 });
+
+test("jumping to an agent lands at the TOP of its card, not the middle (scrollIntoView block:start)", async () => {
+  const scrollSpy = jest.fn();
+  // jsdom does not implement scrollIntoView; install a spy so we can assert alignment.
+  (Element.prototype as unknown as { scrollIntoView: unknown }).scrollIntoView = scrollSpy;
+  const blocked = { ...SUMMARY, blockedOperators: ["op_abc12345"] };
+  mockFetchWithRefresh.mockImplementation((url: string) => {
+    if (String(url).includes("/edge-policy")) return Promise.resolve({ ok: true, json: async () => ({ mode: "monitor" }) });
+    return Promise.resolve({ ok: true, json: async () => ({ summary: blocked, permissions: PERMS }) });
+  });
+  render(<SiteAnalyticsPage />);
+  fireEvent.click(await screen.findByTestId("forcefield-agent-op_abc12345"));
+  await waitFor(() => expect(scrollSpy).toHaveBeenCalled());
+  // lands at the top of the module (block:start), never centered mid-breakdown
+  expect(scrollSpy.mock.calls[0][0]).toMatchObject({ block: "start" });
+});
+
+test("shows method clusters: operators that share tradecraft, linked across fingerprints", async () => {
+  // two DISTINCT operators with the same signature (class + two shared insight kinds)
+  const mk = (opKey: string, fpKey: string) => ({
+    key: fpKey, confidence: "proven", behaviorClass: "exploit_attempt",
+    signals: ["payload_attack"], path: ["/api/users"], eventCount: 3,
+    firstAt: "2026-09-18T11:00:00Z", lastAt: "2026-09-18T11:00:03Z",
+    summary: "Injection + IDOR.", triage: "new",
+    profile: {
+      operatorKey: opKey, correlationKey: fpKey,
+      verdict: { confidence: "proven", why: "Proven." }, processes: [],
+      scaffolding: { readsRobotsFirst: true, probedSensitive: true, pathDiscovery: "link-following", requestCount: 3, spanSeconds: 3, observability: "Observed." },
+      toolComposition: { usedTools: ["fetch", "submit_form"], novelTools: [], policies: [], riskTier: "dangerous", intent: "exploitation", confidence: "proven", summary: "Injection." },
+      policies: [], timeline: { firstAt: "2026-09-18T11:00:00Z", lastAt: "2026-09-18T11:00:03Z", spanSeconds: 3, eventCount: 3 },
+      disclaimer: "d", insights: [{ kind: "payload_attack", attack: "sqli" }, { kind: "id_enumeration" }],
+    },
+  });
+  const twoOps = { ...SUMMARY, journeys: [mk("op_alpha", "fpA"), mk("op_beta", "fpB")] };
+  mockFetchWithRefresh.mockImplementation((url: string) => {
+    if (String(url).includes("/edge-policy")) return Promise.resolve({ ok: true, json: async () => ({ mode: "monitor" }) });
+    return Promise.resolve({ ok: true, json: async () => ({ summary: twoOps, permissions: PERMS }) });
+  });
+  render(<SiteAnalyticsPage />);
+  await waitFor(() => expect(screen.getByTestId("ff-journeys-triage")).toBeInTheDocument());
+  fireEvent.click(screen.getByText("By operator"));
+  const cluster = await screen.findByTestId("method-cluster-0");
+  expect(cluster).toHaveTextContent("2 operators");
+  expect(cluster).toHaveTextContent("op_alpha");
+  expect(cluster).toHaveTextContent("op_beta");
+  expect(cluster).toHaveTextContent(/payload_attack|id_enumeration|exploit_attempt/);
+});
