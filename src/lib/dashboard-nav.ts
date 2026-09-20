@@ -104,7 +104,7 @@ export const NAV_ITEMS: NavItem[] = [
   // Visible to everyone: the trust surface is for all users, not just engineers.
   { label: "Code Governance", href: "/admin/ai-code/overview", icon: "M15 12a3 3 0 11-6 0 3 3 0 016 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" },
   { label: "Financials", href: "/financials", roles: ["ceo", "cto", "evp"], icon: "M12 6v12m-3-2.818l.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 11-18 0 9 9 0 0118 0z" },
-  { label: "Analytics", href: "/analytics", icon: "M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" },
+  { label: "Instinct Analytics", href: "/analytics", icon: "M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" },
   /* Tools is intentionally hidden from the left nav (2026-08-02, operator
      request), following the same pattern as /emails above: the route still
      exists and is reachable by direct link, it just does not take a slot in
@@ -132,7 +132,7 @@ export const NAV_ITEMS: NavItem[] = [
   // No role gate: Site Analytics (the Forcefield agent-traffic report) is
   // org-wide reading for every seat (capability analytics.view is in
   // SELF_SERVICE). The write actions on the page stay capability-gated.
-  { label: "Site Analytics", href: "/admin/site-analytics", icon: "M3 3v18h18M7 14l3-3 3 3 5-5" },
+  { label: "Forcefield", href: "/admin/site-analytics", icon: "M3 3v18h18M7 14l3-3 3 3 5-5" },
   { label: "QR Codes", href: "/qr", icon: "M3.75 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 013.75 9.375v-4.5zM3.75 14.625c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5a1.125 1.125 0 01-1.125-1.125v-4.5zM13.5 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0113.5 9.375v-4.5z M6.75 6.75h.75v.75h-.75v-.75zM6.75 16.5h.75v.75h-.75v-.75zM16.5 6.75h.75v.75h-.75v-.75zM13.5 13.5h.75v.75h-.75v-.75zM13.5 19.5h.75v.75h-.75v-.75zM19.5 13.5h.75v.75h-.75v-.75zM19.5 19.5h.75v.75h-.75v-.75zM16.5 16.5h.75v.75h-.75v-.75z" },
   { label: "Surveys", href: "/surveys", icon: "M9 12h6m-6 4h6m-7-9h.01M9 7h6m-9 13h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" },
   { label: "Job Codes", href: "/job-codes", icon: "M3.75 6h16.5M3.75 12h16.5m-16.5 6h16.5" },

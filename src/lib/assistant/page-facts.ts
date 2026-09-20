@@ -681,7 +681,7 @@ export const PAGE_FACTS: Record<string, PageFact> = {
     ],
     how_to: [
       "Make sure your role is admin (non-admins can't see this page).",
-      "Open /admin/audit directly. There is no single Admin entry in the left nav; Agents, Model Router, Compliance Scan and Site Analytics each have their own.",
+      "Open /admin/audit directly. There is no single Admin entry in the left nav; Agents, Model Router, Compliance Scan and Forcefield each have their own.",
       "Pick the tab you need: Audit, Users, or Policies.",
     ],
     related_pages: ["settings", "directory", "analytics"],

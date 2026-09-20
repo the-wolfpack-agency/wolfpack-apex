@@ -28,7 +28,7 @@ describe("Tools is hidden from the rail but not removed from the product", () =>
 
 import { NAV_ITEMS as NAV, canSeeNavItem } from "@/lib/dashboard-nav";
 
-describe("Site Analytics is org-wide, not admin-only", () => {
+describe("Forcefield (site analytics) is org-wide, not admin-only", () => {
   const item = NAV.find((i) => i.href === "/admin/site-analytics");
 
   it("is in the nav", () => {
