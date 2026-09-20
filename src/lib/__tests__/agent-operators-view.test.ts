@@ -1,4 +1,4 @@
-import { consolidateByOperator, aggregateTradecraft, type OperatorViewJourney } from "@/lib/agent-operators-view";
+import { consolidateByOperator, aggregateTradecraft, clusterByTradecraft, type OperatorViewJourney } from "@/lib/agent-operators-view";
 
 function j(over: Partial<OperatorViewJourney> & { operatorKey: string }): OperatorViewJourney {
   const { operatorKey, ...rest } = over;
@@ -169,5 +169,63 @@ describe("aggregateTradecraft - insights over ALL operators", () => {
 
   it("returns [] for no operators", () => {
     expect(aggregateTradecraft([])).toEqual([]);
+  });
+});
+
+
+describe("clusterByTradecraft - operator similarity graph", () => {
+  // helper: an operator with a chosen behavior class + insight kinds (its tells)
+  const op = (operatorKey: string, behaviorClass: string, kinds: string[], key = operatorKey) =>
+    j({ operatorKey, behaviorClass, key, confidence: "proven", profile: {
+      operatorKey,
+      scaffolding: { pathDiscovery: "link-following", readsRobotsFirst: true },
+      toolComposition: { usedTools: ["fetch", "submit_form"] },
+      insights: kinds.map((k) => ({ kind: k })),
+    } });
+
+  it("links two operators that share enough tradecraft into one cluster", () => {
+    const groups = consolidateByOperator([
+      op("op_a", "exploit_attempt", ["payload_attack", "id_enumeration"]),
+      op("op_b", "exploit_attempt", ["payload_attack", "id_enumeration"]),
+    ]);
+    const clusters = clusterByTradecraft(groups);
+    expect(clusters).toHaveLength(1);
+    expect(clusters[0].operatorKeys).toEqual(["op_a", "op_b"]);
+    expect(clusters[0].sharedTells).toEqual(expect.arrayContaining(["exploit_attempt", "id_enumeration", "payload_attack"]));
+    expect(clusters[0].cohesion).toBeGreaterThan(0.9); // identical tell-sets
+    expect(clusters[0].proven).toBe(true);
+  });
+
+  it("does NOT link operators that merely share one ubiquitous tag", () => {
+    const groups = consolidateByOperator([
+      op("op_x", "vuln_scanner", []),
+      op("op_y", "vuln_scanner", []),
+    ]);
+    // one shared tag (the class) is below minShared=2 -> no cluster
+    expect(clusterByTradecraft(groups)).toEqual([]);
+  });
+
+  it("merges a chain transitively (A~B, B~C) into a single cluster", () => {
+    const groups = consolidateByOperator([
+      op("op_a", "exploit_attempt", ["payload_attack", "id_enumeration"]),
+      op("op_b", "exploit_attempt", ["payload_attack", "id_enumeration", "tripped_decoy"]),
+      op("op_c", "exploit_attempt", ["id_enumeration", "tripped_decoy"]),
+    ]);
+    const clusters = clusterByTradecraft(groups);
+    expect(clusters).toHaveLength(1);
+    expect(clusters[0].operatorKeys).toEqual(["op_a", "op_b", "op_c"]);
+  });
+
+  it("keeps genuinely distinct operators in separate (here: no) clusters", () => {
+    const groups = consolidateByOperator([
+      op("op_a", "exploit_attempt", ["payload_attack", "id_enumeration"]),
+      op("op_z", "form_spammer", ["form_honeypot"]),
+    ]);
+    expect(clusterByTradecraft(groups)).toEqual([]); // nothing shared
+  });
+
+  it("is deterministic and returns [] for a single operator", () => {
+    const groups = consolidateByOperator([op("op_solo", "exploit_attempt", ["payload_attack"])]);
+    expect(clusterByTradecraft(groups)).toEqual([]);
   });
 });

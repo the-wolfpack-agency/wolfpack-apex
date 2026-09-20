@@ -17,7 +17,7 @@ import { AgentJourneyTimeline } from "@/components/AgentJourneyTimeline";
 import { AgentActionLog } from "@/components/AgentActionLog";
 import type { JourneyStep } from "@/lib/agent-behavior";
 import { triageJourneys, type Severity } from "@/lib/agent-triage";
-import { consolidateByOperator, deriveOperatorInsight, deriveTrustProfile, aggregateTradecraft } from "@/lib/agent-operators-view";
+import { consolidateByOperator, deriveOperatorInsight, deriveTrustProfile, aggregateTradecraft, clusterByTradecraft } from "@/lib/agent-operators-view";
 import { decideEdgeAction, type EdgeMode } from "@/lib/forcefield/edge-enforcement";
 import { ForcefieldSwitch } from "@/components/ForcefieldSwitch";
 import { ForcefieldAssurance } from "@/components/forcefield/ForcefieldAssurance";
@@ -207,7 +207,7 @@ export default function SiteAnalyticsPage() {
     if (typeof window !== "undefined") {
       window.setTimeout(() => {
         const el = document.querySelector(`[data-testid="operator-${operatorKey}"]`);
-        if (el && typeof (el as HTMLElement).scrollIntoView === "function") (el as HTMLElement).scrollIntoView({ behavior: "smooth", block: "center" });
+        if (el && typeof (el as HTMLElement).scrollIntoView === "function") (el as HTMLElement).scrollIntoView({ behavior: "smooth", block: "start" });
       }, 60);
       window.setTimeout(() => setHighlightOp((k) => (k === operatorKey ? null : k)), 2600);
     }
@@ -711,6 +711,7 @@ export default function SiteAnalyticsPage() {
                     </button>
                   );
                   const tradecraft = aggregateTradecraft(groups).slice(0, 8);
+                  const methodClusters = clusterByTradecraft(groups).slice(0, 6);
                   return (
                   <>
                   {groups.length > 1 && tradecraft.length > 0 && (
@@ -728,8 +729,31 @@ export default function SiteAnalyticsPage() {
                       </div>
                     </div>
                   )}
+                  {methodClusters.length > 0 && (
+                    <div data-testid="method-clusters" style={{ border: "1px solid var(--wp-dark-border, #262a33)", borderRadius: 8, padding: "0.7rem 0.9rem", display: "grid", gap: "0.5rem", background: "radial-gradient(120% 120% at 20% 0%, #0e1626 0%, #0b0d11 72%)" }}>
+                      <div style={{ display: "flex", alignItems: "baseline", gap: "0.5rem", flexWrap: "wrap" }}>
+                        <span style={{ fontSize: "0.62rem", fontWeight: 800, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--wp-gold, #e8b528)" }}>Method clusters</span>
+                        <span style={{ fontSize: "0.66rem", color: "var(--wp-text-muted, #8b90a0)" }}>operators that share tradecraft - likely the same actor or a coordinated campaign, even across fingerprints</span>
+                      </div>
+                      {methodClusters.map((c, i) => (
+                        <div key={i} data-testid={`method-cluster-${i}`} style={{ display: "grid", gap: "0.3rem", padding: "0.4rem 0.55rem", borderRadius: 6, border: `1px solid ${sevColor(c.severity)}` }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", flexWrap: "wrap" }}>
+                            <span style={{ fontSize: "0.64rem", fontWeight: 700, color: sevColor(c.severity), textTransform: "uppercase", letterSpacing: "0.04em" }}>{c.operatorKeys.length} operators</span>
+                            {c.proven && <span style={{ fontSize: "0.58rem", fontWeight: 700, color: "var(--wp-dark, #0b0d11)", background: "var(--wp-error, #ef4444)", borderRadius: 999, padding: "0.05rem 0.4rem" }}>proven core</span>}
+                            <span style={{ fontSize: "0.62rem", color: "var(--wp-text-muted, #9ca3af)", fontVariantNumeric: "tabular-nums" }}>cohesion {Math.round(c.cohesion * 100)}%</span>
+                          </div>
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: "0.3rem" }}>
+                            {c.operatorKeys.map((k) => (
+                              <button key={k} type="button" onClick={() => focusOperator(k)} style={{ fontFamily: "var(--wp-mono, ui-monospace, monospace)", fontSize: "0.62rem", color: "var(--wp-gold, #e8b528)", background: "transparent", border: "1px solid var(--wp-dark-border, #333)", borderRadius: 999, padding: "0.05rem 0.45rem", cursor: "pointer" }}>{k}</button>
+                            ))}
+                          </div>
+                          <div style={{ fontSize: "0.62rem", color: "var(--wp-text-muted, #b8bcc4)" }}>shared: {c.sharedTells.map((t) => t.replace(/^attack:/, "↑")).join(", ")}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   {groups.map((g) => (
-                    <div key={g.operatorKey} data-testid={`operator-${g.operatorKey}`} data-focused={highlightOp === g.operatorKey ? "true" : undefined} style={{ border: `1px solid ${highlightOp === g.operatorKey ? "var(--wp-gold, #e8b528)" : sevColor(g.severity)}`, borderRadius: 8, padding: "0.8rem 0.9rem", display: "grid", gap: "0.5rem", scrollMarginTop: "1rem", boxShadow: highlightOp === g.operatorKey ? "0 0 0 2px var(--wp-gold, #e8b528), 0 0 18px rgba(232,181,40,0.35)" : "none", transition: "box-shadow 220ms ease, border-color 220ms ease" }}>
+                    <div key={g.operatorKey} data-testid={`operator-${g.operatorKey}`} data-focused={highlightOp === g.operatorKey ? "true" : undefined} style={{ border: `1px solid ${highlightOp === g.operatorKey ? "var(--wp-gold, #e8b528)" : sevColor(g.severity)}`, borderRadius: 8, padding: "0.8rem 0.9rem", display: "grid", gap: "0.5rem", scrollMarginTop: "6rem", boxShadow: highlightOp === g.operatorKey ? "0 0 0 2px var(--wp-gold, #e8b528), 0 0 18px rgba(232,181,40,0.35)" : "none", transition: "box-shadow 220ms ease, border-color 220ms ease" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
                         <span style={{ fontFamily: "var(--wp-mono, ui-monospace, monospace)", fontSize: "0.85rem", fontWeight: 700, color: "var(--wp-gold, #e8b528)" }}>{g.operatorKey}</span>
                         <span style={{ fontSize: "0.62rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em", color: "var(--wp-dark, #0b0d11)", background: sevColor(g.severity), borderRadius: 999, padding: "0.1rem 0.45rem" }}>{g.severity}</span>
@@ -816,9 +840,11 @@ export default function SiteAnalyticsPage() {
                         return (
                           <div data-testid={`operator-insight-${g.operatorKey}`} style={{ display: "grid", gap: "0.4rem", padding: "0.5rem 0.6rem", borderRadius: 6, background: "var(--wp-dark-2, rgba(255,255,255,0.03))", border: "1px solid var(--wp-dark-border, #333)" }}>
                             <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", flexWrap: "wrap" }}>
-                              <span data-testid={`operator-trust-${g.operatorKey}`} title={trust.rationale} style={{ display: "inline-flex", alignItems: "baseline", gap: "0.25rem", padding: "0.15rem 0.55rem", borderRadius: 8, border: `1px solid ${bandColor[trust.band]}`, background: `color-mix(in srgb, ${bandColor[trust.band]} 12%, transparent)` }}>
+                              <span data-testid={`operator-trust-${g.operatorKey}`} title={`Trust score ${trust.score} of 100 (0 = hostile, 100 = fully trusted) - band: ${trust.band}. ${trust.rationale}`} style={{ display: "inline-flex", alignItems: "baseline", gap: "0.3rem", padding: "0.15rem 0.55rem", borderRadius: 8, border: `1px solid ${bandColor[trust.band]}`, background: `color-mix(in srgb, ${bandColor[trust.band]} 12%, transparent)` }}>
+                                <span style={{ fontSize: "0.54rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--wp-text-muted, #9ca3af)", alignSelf: "center" }}>Trust</span>
                                 <span style={{ fontSize: "1.15rem", fontWeight: 800, lineHeight: 1, color: bandColor[trust.band] }}>{trust.score}</span>
-                                <span style={{ fontSize: "0.58rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em", color: bandColor[trust.band] }}>/100 {trust.band}</span>
+                                <span style={{ fontSize: "0.58rem", fontWeight: 700, color: bandColor[trust.band] }}>/100</span>
+                                <span style={{ fontSize: "0.58rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em", color: bandColor[trust.band] }}>· {trust.band}</span>
                               </span>
                               <span style={{ fontSize: "0.6rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em", color: "var(--wp-text-muted, #6b7280)" }}>Intent</span>
                               <span data-testid={`operator-intent-${g.operatorKey}`} style={{ fontSize: "0.78rem", fontWeight: 600, color: "var(--wp-text, #eee)" }}>{trust.intentLabel}</span>
