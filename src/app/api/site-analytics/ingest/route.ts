@@ -22,7 +22,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { timingSafeEqual } from "crypto";
 import { isSiteEventType, recordSiteEvent } from "@/lib/site-analytics";
-import { verifyPresentedDelegation, getDelegationIssuer } from "@/lib/forcefield/principal";
+import { verifyPresentedDelegation, getDelegationIssuer, consumeDelegationJti } from "@/lib/forcefield/principal";
 
 const WINDOW_MS = 60 * 1000;
 const MAX_PER_WINDOW = 600; // generous for a marketing site; bounds abuse.
@@ -116,6 +116,10 @@ export async function POST(req: NextRequest) {
     resolveIssuer: (iss) => getDelegationIssuer(SITE_WORKSPACE_ID, iss),
     nowSeconds: Math.floor(Date.now() / 1000),
     audience: process.env.SITE_ANALYTICS_AUDIENCE,
+    // Reject a credential signed more than 10 minutes ago, and accept each jti
+    // only once - a captured credential cannot be replayed.
+    maxAgeSeconds: 600,
+    consumeJti: (jti, exp) => consumeDelegationJti(SITE_WORKSPACE_ID, jti, exp),
   });
   if (verdict.status !== "absent") {
     props.principal_status = verdict.status;

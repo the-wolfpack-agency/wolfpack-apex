@@ -140,3 +140,78 @@ describe("checkMandate - behavior vs the presented mandate", () => {
     expect(checkMandate({ status: "absent", scopes: [], reason: "x" }, ["/admin"]).withinScope).toBe(true);
   });
 });
+
+// ── Hardening: replay defense + asymmetric (PQ-ready) verification ────────────
+import { createSign, generateKeyPairSync } from "node:crypto";
+import type { DelegationIssuer as DI } from "@/lib/forcefield/principal-types";
+
+function mintJti(body: Record<string, unknown>, jti: string): string {
+  return mint({ ...body, jti });
+}
+
+describe("replay defense (jti consumed once)", () => {
+  it("verifies the first presentation and rejects the second as a replay", async () => {
+    const raw = mintJti({ principal: "p", issuer: "acme-fleet", scopes: ["/x"], exp: NOW + 60 }, "jti-123");
+    const seen = new Set<string>();
+    const consumeJti = async (jti: string) => { if (seen.has(jti)) return false; seen.add(jti); return true; };
+    const first = await verifyPresentedDelegation(raw, { resolveIssuer: resolve, nowSeconds: NOW, consumeJti });
+    const second = await verifyPresentedDelegation(raw, { resolveIssuer: resolve, nowSeconds: NOW, consumeJti });
+    expect(first.status).toBe("verified");
+    expect(second.status).toBe("claimed");
+    expect(second.reason).toMatch(/already been used|replay/i);
+  });
+
+  it("claims a credential with no jti when replay protection is required", async () => {
+    const raw = mint({ principal: "p", issuer: "acme-fleet", scopes: ["/x"], exp: NOW + 60 });
+    const v = await verifyPresentedDelegation(raw, { resolveIssuer: resolve, nowSeconds: NOW, consumeJti: async () => true });
+    expect(v.status).toBe("claimed");
+    expect(v.reason).toMatch(/jti/i);
+  });
+
+  it("claims a credential signed longer ago than the max age", async () => {
+    const raw = mintJti({ principal: "p", issuer: "acme-fleet", scopes: ["/x"], exp: NOW + 3600 }, "jti-old");
+    // signed at NOW, but we evaluate 20 minutes later with a 10-minute window
+    const v = await verifyPresentedDelegation(raw, { resolveIssuer: resolve, nowSeconds: NOW + 1200, maxAgeSeconds: 600 });
+    expect(v.status).toBe("claimed");
+    expect(v.reason).toMatch(/stale|older/i);
+  });
+});
+
+describe("asymmetric (es256) verification - no shared secret to leak", () => {
+  const { privateKey, publicKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
+  const jwk = publicKey.export({ format: "jwk" }) as Record<string, unknown>;
+  const es256Issuer: DI = { issuer: "asym-fleet", algorithm: "es256", publicKey: jwk, allowedScopes: [] };
+
+  function mintEs256(body: Record<string, unknown>): string {
+    const json = JSON.stringify(body);
+    const b64 = Buffer.from(json, "utf8").toString("base64url");
+    const ts = NOW;
+    const sig = createSign("sha256").update(`${ts}.${json}`).end().sign({ key: privateKey, dsaEncoding: "ieee-p1363" }).toString("base64url");
+    return `${b64}.${ts}.${sig}`;
+  }
+  const resolveAsym = (i: string) => (i === "asym-fleet" ? es256Issuer : null);
+
+  it("verifies a correctly ES256-signed delegation against the registered public key", async () => {
+    const v = await verifyPresentedDelegation(mintEs256({ principal: "person:9", issuer: "asym-fleet", scopes: ["/catalog"], exp: NOW + 60 }), { resolveIssuer: resolveAsym, nowSeconds: NOW });
+    expect(v.status).toBe("verified");
+    expect(v.principal).toBe("person:9");
+  });
+
+  it("claims an ES256 credential signed by the WRONG key", async () => {
+    const other = generateKeyPairSync("ec", { namedCurve: "P-256" }).privateKey;
+    const json = JSON.stringify({ principal: "p", issuer: "asym-fleet", scopes: ["/"] });
+    const sig = createSign("sha256").update(`${NOW}.${json}`).end().sign({ key: other, dsaEncoding: "ieee-p1363" }).toString("base64url");
+    const raw = `${Buffer.from(json, "utf8").toString("base64url")}.${NOW}.${sig}`;
+    expect((await verifyPresentedDelegation(raw, { resolveIssuer: resolveAsym, nowSeconds: NOW })).status).toBe("claimed");
+  });
+});
+
+describe("post-quantum slot fails closed until enabled", () => {
+  it("claims (never verifies) a credential whose issuer uses the ml-dsa slot", async () => {
+    const pqIssuer: DI = { issuer: "pq-fleet", algorithm: "ml-dsa-65-hybrid", publicKey: { kty: "OKP" }, allowedScopes: [] };
+    const raw = mint({ principal: "p", issuer: "pq-fleet", scopes: ["/"], exp: NOW + 60 });
+    const v = await verifyPresentedDelegation(raw, { resolveIssuer: (i) => (i === "pq-fleet" ? pqIssuer : null), nowSeconds: NOW });
+    expect(v.status).toBe("claimed");
+    expect(v.reason).toMatch(/post-quantum|not yet enabled/i);
+  });
+});

@@ -26,6 +26,8 @@ describeIfDb("delegation issuer registry (migration 261)", () => {
     const sql = readFileSync(MIGRATION, "utf8");
     await db.query(sql);
     await db.query(sql); // idempotent
+    const asym = readFileSync(join(__dirname, "..", "migrations", "265_delegation_issuer_asymmetric.sql"), "utf8");
+    await db.query(asym); await db.query(asym); // idempotent
   });
   afterAll(async () => { await db?.end(); });
   beforeEach(async () => { await db.query("TRUNCATE instinct_delegation_issuers"); });
@@ -45,6 +47,18 @@ describeIfDb("delegation issuer registry (migration 261)", () => {
     await db.query(UPSERT, ["w2", "acme", "secret-w2-value-16!!", [], "u2"]);
     const r = await db.query("SELECT workspace_id, secret FROM instinct_delegation_issuers WHERE issuer='acme' ORDER BY workspace_id");
     expect(r.rows.map((x) => x.workspace_id)).toEqual(["w1", "w2"]);
+  });
+
+  it("registers an ES256 issuer with a public key and no secret (asymmetric)", async () => {
+    await db.query("INSERT INTO instinct_delegation_issuers (workspace_id, issuer, algorithm, public_key) VALUES ('w1','asym','es256','{\"kty\":\"EC\"}'::jsonb)");
+    const r = await db.query("SELECT algorithm, secret, public_key FROM instinct_delegation_issuers WHERE workspace_id='w1' AND issuer='asym'");
+    expect(r.rows[0].algorithm).toBe("es256");
+    expect(r.rows[0].secret).toBeNull();
+    expect(r.rows[0].public_key).toEqual({ kty: "EC" });
+  });
+
+  it("accepts the ml-dsa-65-hybrid PQ algorithm in the vocabulary", async () => {
+    await expect(db.query("INSERT INTO instinct_delegation_issuers (workspace_id, issuer, algorithm, public_key) VALUES ('w1','pq','ml-dsa-65-hybrid','{}'::jsonb)")).resolves.toBeDefined();
   });
 
   it("rejects an out-of-vocabulary algorithm via CHECK", async () => {

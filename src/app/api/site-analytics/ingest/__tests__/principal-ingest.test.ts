@@ -9,6 +9,7 @@ import { delegationSignature } from "@/lib/ogiam/delegate";
 
 const recordSiteEvent = jest.fn();
 const getDelegationIssuer = jest.fn();
+const consumeDelegationJti = jest.fn();
 jest.mock("@/lib/site-analytics", () => ({
   recordSiteEvent: (...a: unknown[]) => recordSiteEvent(...a),
   isSiteEventType: (t: unknown) => t === "site.agent_welcomed",
@@ -16,13 +17,17 @@ jest.mock("@/lib/site-analytics", () => ({
 jest.mock("@/lib/forcefield/principal", () => ({
   ...jest.requireActual("@/lib/forcefield/principal"),
   getDelegationIssuer: (...a: unknown[]) => getDelegationIssuer(...a),
+  consumeDelegationJti: (...a: unknown[]) => consumeDelegationJti(...a),
 }));
 
 import { POST, _resetIngestRateLimit } from "@/app/api/site-analytics/ingest/route";
 
 const SECRET = "issuer-secret-key-abcdef";
+let jtiSeq = 0;
 function mint(body: Record<string, unknown>, secret = SECRET): string {
-  const json = JSON.stringify(body);
+  jtiSeq += 1;
+  const withJti = { jti: `jti-${jtiSeq}`, ...body };
+  const json = JSON.stringify(withJti);
   const ts = Math.floor(Date.now() / 1000);
   return `${Buffer.from(json, "utf8").toString("base64url")}.${ts}.${delegationSignature(secret, json, ts)}`;
 }
@@ -38,6 +43,8 @@ beforeEach(() => {
   recordSiteEvent.mockReset();
   getDelegationIssuer.mockReset();
   getDelegationIssuer.mockResolvedValue({ issuer: "acme-fleet", algorithm: "hs256", secret: SECRET, allowedScopes: [] });
+  consumeDelegationJti.mockReset();
+  consumeDelegationJti.mockResolvedValue(true); // fresh by default
   _resetIngestRateLimit();
 });
 
@@ -78,4 +85,13 @@ it("records normally with no principal fields when no delegation is presented", 
   await POST(req({ type: "site.agent_welcomed", path: "/about" }));
   const props = recordSiteEvent.mock.calls[0][0].props;
   expect(props.principal_status).toBeUndefined();
+});
+
+it("stores CLAIMED for a replayed credential (same jti presented twice)", async () => {
+  consumeDelegationJti.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+  const delegation = mint({ principal: "person:42", issuer: "acme-fleet", scopes: ["/catalog"] });
+  await POST(req({ type: "site.agent_welcomed", path: "/catalog", delegation }));
+  await POST(req({ type: "site.agent_welcomed", path: "/catalog", delegation }));
+  expect(recordSiteEvent.mock.calls[0][0].props.principal_status).toBe("verified");
+  expect(recordSiteEvent.mock.calls[1][0].props.principal_status).toBe("claimed");
 });

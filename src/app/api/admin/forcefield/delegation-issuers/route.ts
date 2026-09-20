@@ -30,7 +30,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const auth = await requireCapability(req, "settings.manage_team");
   if (!auth.ok) return auth.response;
 
-  let body: { issuer?: unknown; secret?: unknown; allowedScopes?: unknown };
+  let body: { issuer?: unknown; secret?: unknown; publicKey?: unknown; allowedScopes?: unknown };
   try {
     body = await req.json();
   } catch {
@@ -38,14 +38,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
   const issuer = typeof body.issuer === "string" ? body.issuer.trim() : "";
   const secret = typeof body.secret === "string" ? body.secret : "";
+  const publicKey = body.publicKey && typeof body.publicKey === "object" && !Array.isArray(body.publicKey) ? (body.publicKey as Record<string, unknown>) : null;
   if (!issuer || issuer.length > 200) return NextResponse.json({ error: "invalid_input", detail: "issuer required" }, { status: 400 });
-  if (secret.length < 16) return NextResponse.json({ error: "invalid_input", detail: "secret must be at least 16 characters" }, { status: 400 });
+  // An issuer registers EITHER an es256 public key (preferred: no shared secret to
+  // leak) OR an hs256 secret of at least 16 chars.
+  if (!publicKey && secret.length < 16) return NextResponse.json({ error: "invalid_input", detail: "provide an es256 publicKey (JWK) or an hs256 secret of at least 16 characters" }, { status: 400 });
   const allowedScopes = Array.isArray(body.allowedScopes)
     ? body.allowedScopes.filter((x): x is string => typeof x === "string").slice(0, 50)
     : [];
 
   const workspaceId = auth.user.workspaceId ?? "default";
-  await registerDelegationIssuer({ workspaceId, issuer, secret, allowedScopes, createdBy: auth.user.id });
+  await registerDelegationIssuer({ workspaceId, issuer, ...(publicKey ? { publicKey } : { secret }), allowedScopes, createdBy: auth.user.id });
 
   // The secret is never logged or echoed; only that an issuer was registered.
   await recordAudit({
@@ -53,7 +56,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     action: "forcefield.delegation_issuer_registered",
     resourceType: "delegation_issuer",
     resourceId: issuer,
-    afterState: { workspace_id: workspaceId, allowed_scopes: allowedScopes },
+    afterState: { workspace_id: workspaceId, algorithm: publicKey ? "es256" : "hs256", allowed_scopes: allowedScopes },
   }).catch(() => {});
 
   return NextResponse.json({ ok: true, issuer });
