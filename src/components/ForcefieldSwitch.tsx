@@ -23,15 +23,19 @@ export function ForcefieldSwitch({
   mode,
   canManage,
   onToggle,
-  wouldActCount,
+  standbyAgents,
 }: {
   mode: EdgeMode;
   canManage: boolean;
   onToggle: (next: EdgeMode) => void;
-  /** How many operators in view the edge would block or challenge if enforcing. */
-  wouldActCount: number;
+  /** The operators in view the edge would block or challenge if enforcing -
+   *  named, not just counted, so protection reads as concrete. */
+  standbyAgents: ReadonlyArray<{ operatorKey: string; action: "block" | "challenge" }>;
 }) {
   const on = mode === "enforce";
+  const wouldActCount = standbyAgents.length;
+  const shown = standbyAgents.slice(0, 4);
+  const extra = standbyAgents.length - shown.length;
   const accent = on ? "#30a46c" : "#f5a623";
 
   return (
@@ -83,9 +87,29 @@ export function ForcefieldSwitch({
           {wouldActCount === 0
             ? on ? "No hostile agents in range right now - all clear." : "No hostile agents in range right now."
             : on
-              ? `Guarding against ${wouldActCount} hostile agent${wouldActCount === 1 ? "" : "s"} in range.`
-              : `${wouldActCount} hostile agent${wouldActCount === 1 ? "" : "s"} in range would be stopped the moment you turn this on.`}
+              ? `Guarding against ${wouldActCount} hostile agent${wouldActCount === 1 ? "" : "s"} in range:`
+              : `${wouldActCount} hostile agent${wouldActCount === 1 ? "" : "s"} in range would be stopped the moment you turn this on:`}
         </div>
+        {wouldActCount > 0 && (
+          <div data-testid="forcefield-standby-agents" style={{ display: "flex", flexWrap: "wrap", gap: "0.35rem", marginTop: "0.4rem" }}>
+            {shown.map((a) => {
+              const c = a.action === "block" ? "var(--wp-error, #ef4444)" : "var(--wp-warning, #f5a623)";
+              return (
+                <span
+                  key={a.operatorKey}
+                  data-testid={`forcefield-agent-${a.operatorKey}`}
+                  title={`${a.operatorKey} would be ${a.action === "block" ? "blocked" : "challenged"}`}
+                  style={{ display: "inline-flex", alignItems: "center", gap: "0.3rem", fontFamily: "var(--wp-mono, ui-monospace, monospace)", fontSize: "0.68rem", fontWeight: 600, color: "var(--wp-text, #e8ebf0)", border: `1px solid ${c}`, borderRadius: 999, padding: "0.08rem 0.5rem", background: `${a.action === "block" ? "rgba(239,68,68,0.12)" : "rgba(245,166,35,0.12)"}` }}
+                >
+                  <span aria-hidden style={{ width: 6, height: 6, borderRadius: 999, background: c, boxShadow: `0 0 5px ${c}` }} />
+                  {a.operatorKey}
+                  <span style={{ color: c, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em", fontSize: "0.58rem" }}>{a.action}</span>
+                </span>
+              );
+            })}
+            {extra > 0 && <span style={{ fontSize: "0.68rem", color: "var(--wp-text-muted, #9ca3af)", alignSelf: "center" }}>+{extra} more</span>}
+          </div>
+        )}
       </div>
 
       {/* the switch */}

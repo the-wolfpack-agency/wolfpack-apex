@@ -20,6 +20,8 @@ import { triageJourneys, type Severity } from "@/lib/agent-triage";
 import { consolidateByOperator, deriveOperatorInsight, deriveTrustProfile } from "@/lib/agent-operators-view";
 import { decideEdgeAction, type EdgeMode } from "@/lib/forcefield/edge-enforcement";
 import { ForcefieldSwitch } from "@/components/ForcefieldSwitch";
+import { ProbeIntelPanel } from "@/components/forcefield/ProbeIntelPanel";
+import { PayloadIntelPanel } from "@/components/forcefield/PayloadIntelPanel";
 
 interface Summary {
   rangeDays: number;
@@ -437,27 +439,32 @@ export default function SiteAnalyticsPage() {
           {/* Forcefield hero: the prominent auto-block on/off. The count is how many
               operators in view the edge would block or challenge if protection were on. */}
           {permissions.manageOperators && (() => {
-            const groups = consolidateByOperator(summary.journeys);
-            const wouldActCount = groups.filter((g) => {
-              const pr = summary.principalByOperator?.[g.operatorKey];
-              const d = decideEdgeAction(
-                {
-                  blocked: blockedOverride[g.operatorKey] ?? (summary.blockedOperators ?? []).includes(g.operatorKey),
-                  trustBand: deriveTrustProfile(g).band,
-                  mandateExceeded: pr?.mandateExceeded ?? false,
-                  principalStatus: pr?.status ?? "absent",
-                  networkHostile: summary.networkReputation?.[g.operatorKey]?.severity === "hostile",
-                },
-                { mode: "enforce" },
-              );
-              return d.intended !== "allow";
-            }).length;
+            // The specific operators the edge would act on, named (not just
+            // counted) so protection reads as concrete. Worst-first, block above
+            // challenge, computed with the same pure policy the edge enforces.
+            const standbyAgents = consolidateByOperator(summary.journeys)
+              .map((g) => {
+                const pr = summary.principalByOperator?.[g.operatorKey];
+                const d = decideEdgeAction(
+                  {
+                    blocked: blockedOverride[g.operatorKey] ?? (summary.blockedOperators ?? []).includes(g.operatorKey),
+                    trustBand: deriveTrustProfile(g).band,
+                    mandateExceeded: pr?.mandateExceeded ?? false,
+                    principalStatus: pr?.status ?? "absent",
+                    networkHostile: summary.networkReputation?.[g.operatorKey]?.severity === "hostile",
+                  },
+                  { mode: "enforce" },
+                );
+                return { operatorKey: g.operatorKey, action: d.intended };
+              })
+              .filter((a): a is { operatorKey: string; action: "block" | "challenge" } => a.action !== "allow")
+              .sort((a, b) => (a.action === b.action ? 0 : a.action === "block" ? -1 : 1));
             return (
               <ForcefieldSwitch
                 mode={edgeMode}
                 canManage={permissions.manageOperators}
                 onToggle={(next) => void saveEdgeMode(next)}
-                wouldActCount={wouldActCount}
+                standbyAgents={standbyAgents}
               />
             );
           })()}
@@ -550,48 +557,9 @@ export default function SiteAnalyticsPage() {
             </div>
           </div>
 
-          {/* Probe intelligence: the named attacks/CWEs agents are scanning for. */}
-          {(summary.probeIntel ?? []).length > 0 && (
-            <div style={card} data-testid="ff-probe-intel">
-              <div style={label}>Probe intelligence &middot; what agents are scanning us for</div>
-              <p style={{ margin: "0.5rem 0 0", fontSize: "0.76rem", color: "var(--wp-text-muted, #9ca3af)", lineHeight: 1.5 }}>
-                Each sensitive path an agent probed, matched to the specific exposure it targets and its CWE. Same signature knowledge our own scanner uses to find these, inverted to name what inbound traffic is hunting.
-              </p>
-              <ul data-testid="probe-intel-list" style={{ listStyle: "none", margin: "0.9rem 0 0", padding: 0, display: "grid", gap: "0.45rem" }}>
-                {(summary.probeIntel ?? []).map((pi) => {
-                  const sevColor = pi.severity === "critical" ? "var(--wp-error, #ef4444)" : pi.severity === "high" ? "var(--wp-warning, #f5a623)" : pi.severity === "medium" ? "var(--wp-gold, #e8b528)" : "var(--wp-text-muted, #9ca3af)";
-                  return (
-                    <li key={pi.label} style={{ display: "flex", alignItems: "center", gap: "0.6rem", flexWrap: "wrap", border: "1px solid var(--wp-dark-border, #333)", borderRadius: 6, padding: "0.5rem 0.7rem" }}>
-                      <span style={{ fontSize: "0.6rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em", color: "var(--wp-dark, #0b0d11)", background: sevColor, borderRadius: 999, padding: "0.1rem 0.45rem" }}>
-                        {pi.severity}
-                      </span>
-                      <span style={{ fontSize: "0.83rem", color: "var(--wp-text, #eee)" }}>{pi.label}</span>
-                      <span style={{ fontFamily: "var(--wp-mono, ui-monospace, monospace)", fontSize: "0.7rem", color: "var(--wp-text-muted, #9ca3af)" }}>{pi.cwe}</span>
-                      <span style={{ marginLeft: "auto", fontSize: "0.75rem", color: "var(--wp-text-muted, #9ca3af)" }}>{pi.count}&times;</span>
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-          )}
-
-          {/* Payload attacks: active exploitation attempts caught at the edge. */}
-          {(summary.payloadIntel ?? []).length > 0 && (
-            <div style={card} data-testid="ff-payload-intel">
-              <div style={{ ...label, color: "var(--wp-error, #ef4444)" }}>Payload attacks &middot; active exploitation attempts</div>
-              <p style={{ margin: "0.5rem 0 0", fontSize: "0.76rem", color: "var(--wp-text-muted, #9ca3af)", lineHeight: 1.5 }}>
-                Injection payloads agents sent in a request (not just a probe for a path), detected at the edge with our own red-team evasion knowledge. Only the attack kind is kept, never the raw payload.
-              </p>
-              <ul data-testid="payload-intel-list" style={{ listStyle: "none", margin: "0.9rem 0 0", padding: 0, display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
-                {(summary.payloadIntel ?? []).map((pa) => (
-                  <li key={pa.attack} style={{ display: "flex", alignItems: "center", gap: "0.4rem", border: "1px solid var(--wp-error, #ef4444)", borderRadius: 999, padding: "0.2rem 0.6rem" }}>
-                    <span style={{ fontSize: "0.8rem", fontWeight: 600, color: "var(--wp-text, #eee)" }}>{pa.attack.replace(/_/g, " ")}</span>
-                    <span style={{ fontSize: "0.75rem", color: "var(--wp-error, #ef4444)", fontWeight: 700 }}>{pa.count}&times;</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
+          {/* Probe intelligence + payload attacks, in the shared Forcefield visual language. */}
+          <ProbeIntelPanel intel={summary.probeIntel ?? []} />
+          <PayloadIntelPanel intel={summary.payloadIntel ?? []} />
 
           {/* Forcefield for the Web: agent traffic on ogiam.com. Watch-first, so
               these are observed, not blocked. */}
