@@ -10,9 +10,12 @@
  * signals it alone can resolve - the operator blocklist and the cross-workspace
  * reputation network - then decides under the workspace's enforcement mode.
  *
- * Security: shared-secret header `x-edge-token` == FORCEFIELD_EDGE_TOKEN
- * (constant-time). Unset -> 503 (disabled), never open. No PII: opaque operator
- * key only. Returns 200 with the decision even in monitor mode.
+ * PUBLIC: unauthenticated by design - an edge calls this before any user
+ * session exists, so it is NOT capability-gated. It is locked down by a
+ * shared-secret header `x-edge-token` == FORCEFIELD_EDGE_TOKEN (constant-time
+ * compare); unset -> 503 (disabled), never open. No PII: opaque operator key
+ * only. Returns 200 with the decision even in monitor mode. Same posture as the
+ * site-analytics ingest endpoint.
  */
 import { NextRequest, NextResponse } from "next/server";
 import { timingSafeEqual } from "crypto";
