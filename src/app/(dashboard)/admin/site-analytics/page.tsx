@@ -119,7 +119,7 @@ export default function SiteAnalyticsPage() {
   const [showBenign, setShowBenign] = useState(false);
   const [showDismissed, setShowDismissed] = useState(false);
   const [triageOverride, setTriageOverride] = useState<Record<string, TriageStatus>>({});
-  const [journeyView, setJourneyView] = useState<"severity" | "operator">("severity");
+  const [journeyView, setJourneyView] = useState<"severity" | "operator">("operator");
   const [operatorTriageOverride, setOperatorTriageOverride] = useState<Record<string, TriageStatus>>({});
   const [blockedOverride, setBlockedOverride] = useState<Record<string, boolean>>({});
   const [promotedOps, setPromotedOps] = useState<Record<string, boolean>>({});
@@ -340,26 +340,40 @@ export default function SiteAnalyticsPage() {
         )}
         <span style={{ marginLeft: "auto", fontSize: "0.72rem", color: "var(--wp-text-muted, #9ca3af)" }}>{j.eventCount} events</span>
       </div>
-      <p style={{ margin: "0.45rem 0 0", fontSize: "0.8rem", color: "var(--wp-text, #eee)", lineHeight: 1.5 }}>{j.summary}</p>
-      {j.steps && j.steps.length > 0 ? (
-        <AgentJourneyTimeline steps={j.steps} testId={`journey-timeline-${j.key}`} />
-      ) : (
-        j.path.length > 0 && (
-          <div style={{ marginTop: "0.45rem", fontSize: "0.72rem", color: "var(--wp-text-muted, #9ca3af)", overflowX: "auto", whiteSpace: "nowrap" }}>
-            {j.path.join("  →  ")}
-          </div>
-        )
+      {/* Collapsed: one compact line (the key path) so the triage queue scans
+          fast without heavy scroll. Summary, full path timeline, and the profile
+          all live behind Details. */}
+      {!expanded.has(j.key) && j.path.length > 0 && (
+        <div data-testid={`ff-journey-preview-${j.key}`} style={{ marginTop: "0.35rem", display: "flex", alignItems: "center", gap: "0.4rem", minWidth: 0 }}>
+          <span style={{ fontFamily: "var(--wp-mono, ui-monospace, monospace)", fontSize: "0.7rem", color: "var(--wp-text-muted, #9ca3af)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {j.path[0]}{j.path.length > 1 ? `  +${j.path.length - 1} more` : ""}
+          </span>
+        </div>
       )}
       <button
         type="button"
         onClick={() => toggleProfile(j.key)}
         aria-expanded={expanded.has(j.key)}
         data-testid={`ff-journey-profile-toggle-${j.key}`}
-        style={{ marginTop: "0.55rem", background: "transparent", border: "none", color: "var(--wp-gold, #e8b528)", fontSize: "0.74rem", fontWeight: 600, cursor: "pointer", padding: 0 }}
+        style={{ marginTop: "0.4rem", background: "transparent", border: "none", color: "var(--wp-gold, #e8b528)", fontSize: "0.74rem", fontWeight: 600, cursor: "pointer", padding: 0 }}
       >
-        {expanded.has(j.key) ? "▾ Hide agent profile" : "▸ View agent profile"}
+        {expanded.has(j.key) ? "▾ Hide details" : "▸ View details"}
       </button>
-      {expanded.has(j.key) && <AgentProfilePanel profile={j.profile} testKey={j.key} />}
+      {expanded.has(j.key) && (
+        <>
+          <p style={{ margin: "0.45rem 0 0", fontSize: "0.8rem", color: "var(--wp-text, #eee)", lineHeight: 1.5 }}>{j.summary}</p>
+          {j.steps && j.steps.length > 0 ? (
+            <AgentJourneyTimeline steps={j.steps} testId={`journey-timeline-${j.key}`} />
+          ) : (
+            j.path.length > 0 && (
+              <div style={{ marginTop: "0.45rem", fontSize: "0.72rem", color: "var(--wp-text-muted, #9ca3af)", overflowX: "auto", whiteSpace: "nowrap" }}>
+                {j.path.join("  →  ")}
+              </div>
+            )
+          )}
+          <AgentProfilePanel profile={j.profile} testKey={j.key} />
+        </>
+      )}
       {permissions.triage && (
         <div style={{ marginTop: "0.55rem", display: "flex", flexWrap: "wrap", gap: "0.35rem", alignItems: "center" }}>
           <span style={{ fontSize: "0.66rem", textTransform: "uppercase", letterSpacing: "0.03em", color: "var(--wp-text-muted, #6b7280)", marginRight: "0.15rem" }}>Triage</span>
@@ -943,7 +957,7 @@ export default function SiteAnalyticsPage() {
             )}
 
             <div data-testid="ff-journeys-triage" style={{ marginTop: "0.9rem", display: journeyView === "severity" ? "grid" : "none", gap: "0.8rem" }}>
-              {(() => {
+              {journeyView === "severity" && (() => {
                 const dismissedCount = summary.journeys.filter((x) => currentStatus(x) === "dismissed").length;
                 const visibleJourneys = summary.journeys.filter((x) => showDismissed || currentStatus(x) !== "dismissed");
                 const buckets = triageJourneys(visibleJourneys);

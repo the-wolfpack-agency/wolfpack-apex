@@ -77,7 +77,8 @@ test("renders the reused heatmap, totals, and top pages/countries from the summa
   expect(screen.getByTestId("ff-flagged")).toHaveTextContent("9");
   expect(screen.getByTestId("ff-trapped")).toHaveTextContent("2");
   expect(screen.getByTestId("ff-top-agents")).toHaveTextContent("GPTBot");
-  // Agent journeys panel: the correlated session renders with its class + proven badge.
+  // Agent journeys panel (severity view): select it, then the correlated session renders.
+  fireEvent.click(screen.getByTestId("journey-view-severity"));
   const journeys = screen.getByTestId("ff-journeys-triage");
   expect(journeys).toHaveTextContent("Aggressive scraper");
   expect(journeys).toHaveTextContent("proven");
@@ -112,6 +113,7 @@ test("expanding a journey reveals its agent profile: verdict, processes, tooling
   mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: SUMMARY, permissions: PERMS }) });
   render(<SiteAnalyticsPage />);
   await waitFor(() => expect(screen.getByTestId("ff-journeys-triage")).toBeInTheDocument());
+  fireEvent.click(screen.getByTestId("journey-view-severity"));
 
   // Profile is collapsed by default.
   expect(screen.queryByTestId("ff-journey-profile-fp1")).not.toBeInTheDocument();
@@ -140,6 +142,7 @@ test("triage actions: acknowledge shows a badge + POSTs, dismiss hides the findi
   mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: SUMMARY, permissions: PERMS }) });
   render(<SiteAnalyticsPage />);
   await waitFor(() => expect(screen.getByTestId("ff-journeys-triage")).toBeInTheDocument());
+  fireEvent.click(screen.getByTestId("journey-view-severity"));
 
   // Acknowledge the fp1 finding -> a status badge appears and a POST is sent.
   fireEvent.click(screen.getByTestId("triage-acknowledged-fp1"));
@@ -175,6 +178,7 @@ test("surfaces a novel impersonation conclusion as a badge and in the profile pa
   mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: impersonated, permissions: PERMS }) });
   render(<SiteAnalyticsPage />);
   await waitFor(() => expect(screen.getByTestId("ff-journeys-triage")).toBeInTheDocument());
+  fireEvent.click(screen.getByTestId("journey-view-severity"));
 
   // The impersonation badge rides on the card header.
   expect(screen.getByTestId("insight-badge-impersonation-fp1")).toHaveTextContent(/impersonation/i);
@@ -191,6 +195,7 @@ test("by-operator view consolidates findings under one operator with operator-le
   mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: SUMMARY, permissions: PERMS }) });
   render(<SiteAnalyticsPage />);
   await waitFor(() => expect(screen.getByTestId("ff-journeys-triage")).toBeInTheDocument());
+  fireEvent.click(screen.getByTestId("journey-view-severity"));
 
   // Switch to the operator view.
   fireEvent.click(screen.getByTestId("journey-view-operator"));
@@ -215,6 +220,7 @@ test("blocking an operator POSTs to the block route and shows a blocked badge", 
   mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: SUMMARY, permissions: PERMS }) });
   render(<SiteAnalyticsPage />);
   await waitFor(() => expect(screen.getByTestId("ff-journeys-triage")).toBeInTheDocument());
+  fireEvent.click(screen.getByTestId("journey-view-severity"));
   fireEvent.click(screen.getByTestId("journey-view-operator"));
   await screen.findByTestId("ff-operators-view");
 
@@ -232,6 +238,7 @@ test("promoting an operator POSTs to the promote route and shows an on-board sta
   mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: SUMMARY, permissions: PERMS }) });
   render(<SiteAnalyticsPage />);
   await waitFor(() => expect(screen.getByTestId("ff-journeys-triage")).toBeInTheDocument());
+  fireEvent.click(screen.getByTestId("journey-view-severity"));
   fireEvent.click(screen.getByTestId("journey-view-operator"));
   await screen.findByTestId("ff-operators-view");
 
@@ -261,6 +268,7 @@ test("sub-actors (B): a coarse operator with two distinct targeting profiles sho
   mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary, permissions: PERMS }) });
   render(<SiteAnalyticsPage />);
   await waitFor(() => expect(screen.getByTestId("ff-journeys-triage")).toBeInTheDocument());
+  fireEvent.click(screen.getByTestId("journey-view-severity"));
   fireEvent.click(screen.getByTestId("journey-view-operator"));
   await screen.findByTestId("ff-operators-view");
 
@@ -277,6 +285,7 @@ test("a read-only viewer sees the triage board but no journey triage controls", 
   mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: SUMMARY, permissions: { triage: false, manageOperators: false } }) });
   render(<SiteAnalyticsPage />);
   await waitFor(() => expect(screen.getByTestId("ff-journeys-triage")).toBeInTheDocument());
+  fireEvent.click(screen.getByTestId("journey-view-severity"));
   // The read-only content still renders.
   expect(screen.getByTestId("triage-summary")).toBeInTheDocument();
   // But the write controls do not.
@@ -288,6 +297,7 @@ test("a read-only viewer sees the operator board but no operator controls", asyn
   mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: SUMMARY, permissions: { triage: false, manageOperators: false } }) });
   render(<SiteAnalyticsPage />);
   await waitFor(() => expect(screen.getByTestId("ff-journeys-triage")).toBeInTheDocument());
+  fireEvent.click(screen.getByTestId("journey-view-severity"));
   fireEvent.click(screen.getByTestId("journey-view-operator"));
   await screen.findByTestId("ff-operators-view");
   // The operator dossier renders (read-only intelligence)...
@@ -302,6 +312,7 @@ test("a triage-capable but non-manager sees triage + promote, but not block", as
   mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: SUMMARY, permissions: { triage: true, manageOperators: false } }) });
   render(<SiteAnalyticsPage />);
   await waitFor(() => expect(screen.getByTestId("ff-journeys-triage")).toBeInTheDocument());
+  fireEvent.click(screen.getByTestId("journey-view-severity"));
   fireEvent.click(screen.getByTestId("journey-view-operator"));
   await screen.findByTestId("ff-operators-view");
   expect(screen.getByTestId("operator-triage-escalated-op_abc12345")).toBeInTheDocument();
@@ -313,6 +324,7 @@ test("operator card: codified insight panel (verdict + recommendation) and the j
   mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: SUMMARY, permissions: PERMS }) });
   render(<SiteAnalyticsPage />);
   await waitFor(() => expect(screen.getByTestId("ff-journeys-triage")).toBeInTheDocument());
+  fireEvent.click(screen.getByTestId("journey-view-severity"));
   fireEvent.click(screen.getByTestId("journey-view-operator"));
   await screen.findByTestId("ff-operators-view");
 
@@ -346,6 +358,8 @@ test("journey card renders the agent-path timeline, honeypot trip highlighted", 
   mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: withSteps, permissions: PERMS }) });
   render(<SiteAnalyticsPage />);
   await waitFor(() => expect(screen.getByTestId("ff-journeys-triage")).toBeInTheDocument());
+  fireEvent.click(screen.getByTestId("journey-view-severity"));
+  fireEvent.click(screen.getByTestId("ff-journey-profile-toggle-fp1")); // timeline lives behind Details
   expect(screen.getByTestId("journey-timeline-fp1")).toBeInTheDocument();
   const decoy = screen.getByTestId("journey-timeline-fp1-step-1");
   expect(decoy).toHaveAttribute("data-signal", "tripped_decoy");
@@ -368,6 +382,7 @@ test("operator card surfaces the consolidated path timeline (agent path, promine
   mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: withSteps, permissions: PERMS }) });
   render(<SiteAnalyticsPage />);
   await waitFor(() => expect(screen.getByTestId("ff-journeys-triage")).toBeInTheDocument());
+  fireEvent.click(screen.getByTestId("journey-view-severity"));
   fireEvent.click(screen.getByTestId("journey-view-operator"));
   await screen.findByTestId("ff-operators-view");
   // The operator's whole path chains at the top of the card, not just per finding.
@@ -381,6 +396,7 @@ test("operator card shows the agent trust score (0-100 + band) and explicit inte
   mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: SUMMARY, permissions: PERMS }) });
   render(<SiteAnalyticsPage />);
   await waitFor(() => expect(screen.getByTestId("ff-journeys-triage")).toBeInTheDocument());
+  fireEvent.click(screen.getByTestId("journey-view-severity"));
   fireEvent.click(screen.getByTestId("journey-view-operator"));
   await screen.findByTestId("ff-operators-view");
   // A numeric trust score with a band.
@@ -399,6 +415,7 @@ test("operator card shows a 'known on the network' badge when the reputation net
   mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: withRep, permissions: PERMS }) });
   render(<SiteAnalyticsPage />);
   await waitFor(() => expect(screen.getByTestId("ff-journeys-triage")).toBeInTheDocument());
+  fireEvent.click(screen.getByTestId("journey-view-severity"));
   fireEvent.click(screen.getByTestId("journey-view-operator"));
   await screen.findByTestId("ff-operators-view");
   const badge = screen.getByTestId("operator-network-op_abc12345");
@@ -411,6 +428,7 @@ test("no network badge when the operator is unknown to the network", async () =>
   mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: SUMMARY, permissions: PERMS }) });
   render(<SiteAnalyticsPage />);
   await waitFor(() => expect(screen.getByTestId("ff-journeys-triage")).toBeInTheDocument());
+  fireEvent.click(screen.getByTestId("journey-view-severity"));
   fireEvent.click(screen.getByTestId("journey-view-operator"));
   await screen.findByTestId("ff-operators-view");
   expect(screen.queryByTestId("operator-network-op_abc12345")).not.toBeInTheDocument();
@@ -427,6 +445,7 @@ test("reputation opt-in toggle reflects saved state and POSTs the change", async
   });
   render(<SiteAnalyticsPage />);
   await waitFor(() => expect(screen.getByTestId("ff-journeys-triage")).toBeInTheDocument());
+  fireEvent.click(screen.getByTestId("journey-view-severity"));
   fireEvent.click(screen.getByTestId("journey-view-operator"));
   await screen.findByTestId("reputation-optin");
   const consume = screen.getByTestId("reputation-optin-consume") as HTMLInputElement;
@@ -440,6 +459,7 @@ test("reputation opt-in panel is hidden for a viewer who cannot manage operators
   mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: SUMMARY, permissions: { triage: true, manageOperators: false } }) });
   render(<SiteAnalyticsPage />);
   await waitFor(() => expect(screen.getByTestId("ff-journeys-triage")).toBeInTheDocument());
+  fireEvent.click(screen.getByTestId("journey-view-severity"));
   fireEvent.click(screen.getByTestId("journey-view-operator"));
   await screen.findByTestId("ff-operators-view");
   expect(screen.queryByTestId("reputation-optin")).not.toBeInTheDocument();
@@ -454,6 +474,7 @@ test("operator card shows a VERIFIED principal badge when a delegation was crypt
   mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: withPrincipal, permissions: PERMS }) });
   render(<SiteAnalyticsPage />);
   await waitFor(() => expect(screen.getByTestId("ff-journeys-triage")).toBeInTheDocument());
+  fireEvent.click(screen.getByTestId("journey-view-severity"));
   fireEvent.click(screen.getByTestId("journey-view-operator"));
   await screen.findByTestId("ff-operators-view");
   const badge = screen.getByTestId("operator-principal-op_abc12345");
@@ -469,6 +490,7 @@ test("operator card shows a MANDATE EXCEEDED badge when a verified agent stepped
   mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: exceeded, permissions: PERMS }) });
   render(<SiteAnalyticsPage />);
   await waitFor(() => expect(screen.getByTestId("ff-journeys-triage")).toBeInTheDocument());
+  fireEvent.click(screen.getByTestId("journey-view-severity"));
   fireEvent.click(screen.getByTestId("journey-view-operator"));
   await screen.findByTestId("ff-operators-view");
   const badge = screen.getByTestId("operator-principal-op_abc12345");
@@ -480,6 +502,7 @@ test("no principal badge when the operator presented no delegation", async () =>
   mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: SUMMARY, permissions: PERMS }) });
   render(<SiteAnalyticsPage />);
   await waitFor(() => expect(screen.getByTestId("ff-journeys-triage")).toBeInTheDocument());
+  fireEvent.click(screen.getByTestId("journey-view-severity"));
   fireEvent.click(screen.getByTestId("journey-view-operator"));
   await screen.findByTestId("ff-operators-view");
   expect(screen.queryByTestId("operator-principal-op_abc12345")).not.toBeInTheDocument();
@@ -496,6 +519,7 @@ test("edge-policy panel reflects the loaded mode and the toggle POSTs the change
   });
   render(<SiteAnalyticsPage />);
   await waitFor(() => expect(screen.getByTestId("ff-journeys-triage")).toBeInTheDocument());
+  fireEvent.click(screen.getByTestId("journey-view-severity"));
   fireEvent.click(screen.getByTestId("journey-view-operator"));
   await screen.findByTestId("edge-policy");
   await waitFor(() => expect(screen.getByTestId("edge-policy-mode")).toHaveTextContent(/monitor/i));
@@ -511,6 +535,7 @@ test("operator edge chip shows 'would block' for a blocklisted operator in monit
   });
   render(<SiteAnalyticsPage />);
   await waitFor(() => expect(screen.getByTestId("ff-journeys-triage")).toBeInTheDocument());
+  fireEvent.click(screen.getByTestId("journey-view-severity"));
   fireEvent.click(screen.getByTestId("journey-view-operator"));
   await screen.findByTestId("ff-operators-view");
   const chip = screen.getByTestId("operator-edge-op_abc12345");
@@ -526,6 +551,7 @@ test("operator edge chip reads 'blocking' (not 'would block') once enforcement i
   });
   render(<SiteAnalyticsPage />);
   await waitFor(() => expect(screen.getByTestId("ff-journeys-triage")).toBeInTheDocument());
+  fireEvent.click(screen.getByTestId("journey-view-severity"));
   fireEvent.click(screen.getByTestId("journey-view-operator"));
   await screen.findByTestId("ff-operators-view");
   await waitFor(() => expect(screen.getByTestId("operator-edge-op_abc12345")).toHaveTextContent(/^edge: blocking$/i));
@@ -541,4 +567,36 @@ test("the Forcefield hero switch is prominent - it renders at the top without sw
   await screen.findByTestId("edge-policy");
   expect(screen.getByTestId("edge-policy-mode")).toHaveTextContent(/monitoring/i);
   expect(screen.getByTestId("forcefield-standby-count")).toBeInTheDocument();
+});
+
+test("defaults to the By-operator view (the client's actor-centric focus), not the flat severity list", async () => {
+  mockFetchWithRefresh.mockImplementation((url: string) => {
+    if (String(url).includes("/edge-policy")) return Promise.resolve({ ok: true, json: async () => ({ mode: "monitor" }) });
+    return Promise.resolve({ ok: true, json: async () => ({ summary: SUMMARY, permissions: PERMS }) });
+  });
+  render(<SiteAnalyticsPage />);
+  // the operator view is shown on load, without any interaction
+  await screen.findByTestId("ff-operators-view");
+  // and the flat severity list (its grouped triage summary) is NOT rendered by
+  // default, so the client lands on the actor view, not a long scroll
+  expect(screen.queryByTestId("triage-summary")).not.toBeInTheDocument();
+  expect(screen.queryByTestId("triage-group-hostile")).not.toBeInTheDocument();
+});
+
+test("severity view is compact: the finding's summary + timeline are collapsed behind Details", async () => {
+  const withSteps = {
+    ...SUMMARY,
+    journeys: [{ ...SUMMARY.journeys[0], steps: [{ at: "2026-09-18T10:00:03Z", path: "/_ff/x", signal: "tripped_decoy" }] }],
+  };
+  mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: withSteps, permissions: PERMS }) });
+  render(<SiteAnalyticsPage />);
+  await waitFor(() => expect(screen.getByTestId("ff-journeys-triage")).toBeInTheDocument());
+  fireEvent.click(screen.getByTestId("journey-view-severity"));
+  // collapsed: a compact path preview stands in for the full timeline
+  expect(screen.getByTestId("ff-journey-preview-fp1")).toBeInTheDocument();
+  expect(screen.queryByTestId("journey-timeline-fp1")).not.toBeInTheDocument();
+  // expanding reveals the full timeline
+  fireEvent.click(screen.getByTestId("ff-journey-profile-toggle-fp1"));
+  expect(screen.getByTestId("journey-timeline-fp1")).toBeInTheDocument();
+  expect(screen.queryByTestId("ff-journey-preview-fp1")).not.toBeInTheDocument();
 });
