@@ -248,7 +248,7 @@ export default function SiteAnalyticsPage() {
     </button>
   );
   const renderJourneyCard = (j: Journey) => (
-    <li key={j.key} data-testid={`ff-journey-${j.key}`} style={{ border: "1px solid var(--wp-dark-border, #333)", borderRadius: 6, padding: "0.7rem 0.8rem" }}>
+    <li key={j.key} data-testid={`ff-journey-${j.key}`} style={{ border: "1px solid var(--wp-dark-border, #333)", borderRadius: 6, padding: "0.7rem 0.8rem", minWidth: 0 }}>
       <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
         <span style={{ fontWeight: 700, fontSize: "0.9rem", color: CLASS_COLOR[j.behaviorClass] ?? "var(--wp-text, #eee)" }}>
           {CLASS_LABEL[j.behaviorClass] ?? j.behaviorClass}
@@ -678,7 +678,7 @@ export default function SiteAnalyticsPage() {
                           .slice(0, 40);
                         if (opSteps.length === 0) return null;
                         return (
-                          <div data-testid={`operator-path-${g.operatorKey}`} style={{ display: "grid", gap: "0.15rem" }}>
+                          <div data-testid={`operator-path-${g.operatorKey}`} style={{ display: "grid", gap: "0.15rem", minWidth: 0 }}>
                             <span style={{ fontSize: "0.62rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em", color: "var(--wp-text-muted, #6b7280)" }}>Path across the surface</span>
                             <AgentJourneyTimeline steps={opSteps} testId={`operator-timeline-${g.operatorKey}`} />
                           </div>
