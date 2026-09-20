@@ -131,6 +131,7 @@ export default function SiteAnalyticsPage() {
   const [permissions, setPermissions] = useState<{ triage: boolean; manageOperators: boolean }>({ triage: false, manageOperators: false });
   const [repOptIn, setRepOptIn] = useState<{ contribute: boolean; consume: boolean } | null>(null);
   const [edgeMode, setEdgeMode] = useState<EdgeMode>("monitor");
+  const [highlightOp, setHighlightOp] = useState<string | null>(null);
 
   const toggleProfile = useCallback((key: string) => {
     setExpanded((prev) => {
@@ -192,6 +193,21 @@ export default function SiteAnalyticsPage() {
       if (!res.ok) setPromotedOps((prev) => ({ ...prev, [opKey]: false }));
     } catch {
       setPromotedOps((prev) => ({ ...prev, [opKey]: false }));
+    }
+  }, []);
+
+  // Jump from a named agent chip (in the Forcefield hero) to that operator's full
+  // card: switch to the operator view, scroll it into view, and flash a ring so
+  // the eye lands on the right actor.
+  const focusOperator = useCallback((operatorKey: string) => {
+    setJourneyView("operator");
+    setHighlightOp(operatorKey);
+    if (typeof window !== "undefined") {
+      window.setTimeout(() => {
+        const el = document.querySelector(`[data-testid="operator-${operatorKey}"]`);
+        if (el && typeof (el as HTMLElement).scrollIntoView === "function") (el as HTMLElement).scrollIntoView({ behavior: "smooth", block: "center" });
+      }, 60);
+      window.setTimeout(() => setHighlightOp((k) => (k === operatorKey ? null : k)), 2600);
     }
   }, []);
 
@@ -479,6 +495,7 @@ export default function SiteAnalyticsPage() {
                 canManage={permissions.manageOperators}
                 onToggle={(next) => void saveEdgeMode(next)}
                 standbyAgents={standbyAgents}
+                onAgentClick={focusOperator}
               />
             );
           })()}
@@ -691,7 +708,7 @@ export default function SiteAnalyticsPage() {
                     </button>
                   );
                   return groups.map((g) => (
-                    <div key={g.operatorKey} data-testid={`operator-${g.operatorKey}`} style={{ border: `1px solid ${sevColor(g.severity)}`, borderRadius: 8, padding: "0.8rem 0.9rem", display: "grid", gap: "0.5rem" }}>
+                    <div key={g.operatorKey} data-testid={`operator-${g.operatorKey}`} data-focused={highlightOp === g.operatorKey ? "true" : undefined} style={{ border: `1px solid ${highlightOp === g.operatorKey ? "var(--wp-gold, #e8b528)" : sevColor(g.severity)}`, borderRadius: 8, padding: "0.8rem 0.9rem", display: "grid", gap: "0.5rem", scrollMarginTop: "1rem", boxShadow: highlightOp === g.operatorKey ? "0 0 0 2px var(--wp-gold, #e8b528), 0 0 18px rgba(232,181,40,0.35)" : "none", transition: "box-shadow 220ms ease, border-color 220ms ease" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
                         <span style={{ fontFamily: "var(--wp-mono, ui-monospace, monospace)", fontSize: "0.85rem", fontWeight: 700, color: "var(--wp-gold, #e8b528)" }}>{g.operatorKey}</span>
                         <span style={{ fontSize: "0.62rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em", color: "var(--wp-dark, #0b0d11)", background: sevColor(g.severity), borderRadius: 999, padding: "0.1rem 0.45rem" }}>{g.severity}</span>

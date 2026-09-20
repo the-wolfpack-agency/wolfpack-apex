@@ -24,6 +24,7 @@ export function ForcefieldSwitch({
   canManage,
   onToggle,
   standbyAgents,
+  onAgentClick,
 }: {
   mode: EdgeMode;
   canManage: boolean;
@@ -31,6 +32,9 @@ export function ForcefieldSwitch({
   /** The operators in view the edge would block or challenge if enforcing -
    *  named, not just counted, so protection reads as concrete. */
   standbyAgents: ReadonlyArray<{ operatorKey: string; action: "block" | "challenge" }>;
+  /** Jump to this operator's full card (case file, trust, principal). When set,
+   *  each named agent chip becomes a link into the operator view. */
+  onAgentClick?: (operatorKey: string) => void;
 }) {
   const on = mode === "enforce";
   const wouldActCount = standbyAgents.length;
@@ -94,16 +98,33 @@ export function ForcefieldSwitch({
           <div data-testid="forcefield-standby-agents" style={{ display: "flex", flexWrap: "wrap", gap: "0.35rem", marginTop: "0.4rem" }}>
             {shown.map((a) => {
               const c = a.action === "block" ? "var(--wp-error, #ef4444)" : "var(--wp-warning, #f5a623)";
-              return (
+              const chipStyle = { display: "inline-flex", alignItems: "center", gap: "0.3rem", fontFamily: "var(--wp-mono, ui-monospace, monospace)", fontSize: "0.68rem", fontWeight: 600, color: "var(--wp-text, #e8ebf0)", border: `1px solid ${c}`, borderRadius: 999, padding: "0.08rem 0.5rem", background: a.action === "block" ? "rgba(239,68,68,0.12)" : "rgba(245,166,35,0.12)" } as const;
+              const inner = (
+                <>
+                  <span aria-hidden style={{ width: 6, height: 6, borderRadius: 999, background: c, boxShadow: `0 0 5px ${c}` }} />
+                  {a.operatorKey}
+                  <span style={{ color: c, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em", fontSize: "0.58rem" }}>{a.action}</span>
+                </>
+              );
+              return onAgentClick ? (
+                <button
+                  key={a.operatorKey}
+                  type="button"
+                  data-testid={`forcefield-agent-${a.operatorKey}`}
+                  title={`${a.operatorKey} would be ${a.action === "block" ? "blocked" : "challenged"} - view this agent`}
+                  onClick={() => onAgentClick(a.operatorKey)}
+                  style={{ ...chipStyle, cursor: "pointer" }}
+                >
+                  {inner}
+                </button>
+              ) : (
                 <span
                   key={a.operatorKey}
                   data-testid={`forcefield-agent-${a.operatorKey}`}
                   title={`${a.operatorKey} would be ${a.action === "block" ? "blocked" : "challenged"}`}
-                  style={{ display: "inline-flex", alignItems: "center", gap: "0.3rem", fontFamily: "var(--wp-mono, ui-monospace, monospace)", fontSize: "0.68rem", fontWeight: 600, color: "var(--wp-text, #e8ebf0)", border: `1px solid ${c}`, borderRadius: 999, padding: "0.08rem 0.5rem", background: `${a.action === "block" ? "rgba(239,68,68,0.12)" : "rgba(245,166,35,0.12)"}` }}
+                  style={chipStyle}
                 >
-                  <span aria-hidden style={{ width: 6, height: 6, borderRadius: 999, background: c, boxShadow: `0 0 5px ${c}` }} />
-                  {a.operatorKey}
-                  <span style={{ color: c, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em", fontSize: "0.58rem" }}>{a.action}</span>
+                  {inner}
                 </span>
               );
             })}

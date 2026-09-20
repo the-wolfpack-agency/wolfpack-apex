@@ -600,3 +600,18 @@ test("severity view is compact: the finding's summary + timeline are collapsed b
   expect(screen.getByTestId("journey-timeline-fp1")).toBeInTheDocument();
   expect(screen.queryByTestId("ff-journey-preview-fp1")).not.toBeInTheDocument();
 });
+
+test("clicking a named agent chip in the hero jumps to that operator's card (view switch + highlight)", async () => {
+  // make op_abc12345 a would-block agent so it appears as a chip in the hero
+  const blocked = { ...SUMMARY, blockedOperators: ["op_abc12345"] };
+  mockFetchWithRefresh.mockImplementation((url: string) => {
+    if (String(url).includes("/edge-policy")) return Promise.resolve({ ok: true, json: async () => ({ mode: "monitor" }) });
+    return Promise.resolve({ ok: true, json: async () => ({ summary: blocked, permissions: PERMS }) });
+  });
+  render(<SiteAnalyticsPage />);
+  const chip = await screen.findByTestId("forcefield-agent-op_abc12345");
+  fireEvent.click(chip);
+  // it lands on the operator view with that operator's card focused
+  await screen.findByTestId("ff-operators-view");
+  await waitFor(() => expect(screen.getByTestId("operator-op_abc12345")).toHaveAttribute("data-focused", "true"));
+});
