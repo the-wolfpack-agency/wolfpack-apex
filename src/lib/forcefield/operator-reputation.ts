@@ -135,3 +135,53 @@ export async function getNetworkReputation(
   }
   return out;
 }
+
+/** A known-hostile actor as the NETWORK sees it: its tradecraft signature and how
+ *  many distinct workspaces corroborated it. Deliberately carries no operator key
+ *  and never names a workspace - you match your operators against its METHODS. */
+export interface NetworkTradecraftActor {
+  /** Union of behavior classes + tells this actor showed across workspaces. */
+  tells: string[];
+  /** Distinct OTHER workspaces that reported it (corroboration/breadth). */
+  workspaceCount: number;
+  severity: Severity;
+}
+
+/**
+ * The network's known-hostile actors and their tradecraft, for matching operators
+ * you have never seen against actors the rest of the network already knows. Only
+ * corroborated actors are returned (>= HOSTILE_CORROBORATION_MIN distinct other
+ * workspaces), so a lone report or a Sybil cannot plant a phantom actor, and each
+ * must carry enough signature (>= 2 tells) to match on. No-op ([]) unless the
+ * caller opted in to consume. Never reveals which workspaces or the operator key.
+ */
+export async function getNetworkTradecraft(
+  callerWorkspaceId: string,
+  opts: { limit?: number } = {},
+): Promise<NetworkTradecraftActor[]> {
+  const { consume } = await getReputationOptIn(callerWorkspaceId);
+  if (!consume) return [];
+  const limit = Math.max(1, Math.min(opts.limit ?? 200, 1000));
+  // Bind the corroboration floor and the row cap as parameters (never string-
+  // interpolated) so this stays clear of the no-SQL-injection ratchet.
+  const { rows } = await safeQuery<{ workspaces: string; sev_rank: number; tells: string[] | null }>(
+    `SELECT count(DISTINCT r.workspace_id) AS workspaces,
+            max(CASE r.severity WHEN 'hostile' THEN 3 WHEN 'elevated' THEN 2 ELSE 1 END) AS sev_rank,
+            array_remove(array_agg(DISTINCT sig.tag), NULL) AS tells
+       FROM instinct_operator_reputation r
+       LEFT JOIN LATERAL unnest(r.behavior_classes || r.tells) AS sig(tag) ON true
+      WHERE r.workspace_id <> $1
+      GROUP BY r.operator_key
+     HAVING count(DISTINCT r.workspace_id) FILTER (WHERE r.severity = 'hostile') >= $2
+      ORDER BY workspaces DESC
+      LIMIT $3`,
+    [callerWorkspaceId, HOSTILE_CORROBORATION_MIN, limit],
+  );
+  const actors: NetworkTradecraftActor[] = [];
+  for (const r of rows) {
+    const tells = (Array.isArray(r.tells) ? r.tells.filter((t): t is string => typeof t === "string" && t.length > 0) : []);
+    if (tells.length < 2) continue; // not enough signature to match on
+    actors.push({ tells: tells.slice(0, 16), workspaceCount: Number(r.workspaces), severity: SEV_BY_RANK[r.sev_rank] ?? "hostile" });
+  }
+  return actors;
+}

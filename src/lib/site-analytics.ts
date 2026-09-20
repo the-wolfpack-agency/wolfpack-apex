@@ -11,7 +11,7 @@
 import { query, safeQuery } from "@/lib/db";
 import { buildJourneys, type AgentJourney, type CorrelationKind } from "@/lib/agent-behavior";
 import { buildAgentProfile, type AgentProfile } from "@/lib/agent-profile";
-import { getNetworkReputation, type NetworkReputation } from "@/lib/forcefield/operator-reputation";
+import { getNetworkReputation, getNetworkTradecraft, type NetworkReputation, type NetworkTradecraftActor } from "@/lib/forcefield/operator-reputation";
 import { summarizeProbeIntel, type ProbeIntelEntry } from "@/lib/agent-probe-signatures";
 import { getFindingTriage, type TriageStatus } from "@/lib/site-finding-triage";
 import { listBlockedOperatorKeys } from "@/lib/agent-operators";
@@ -121,6 +121,11 @@ export interface SiteAnalyticsSummary {
      this workspace has opted in to consume the network. Only counts + severity from
      OTHER workspaces - never which ones. Empty when not opted in. */
   networkReputation: Record<string, NetworkReputation>;
+  /* The network's corroborated known-hostile actors and their tradecraft, for
+     matching operators we have never seen against actors the rest of the network
+     already knows. Empty when not opted in to consume. Carries no operator key or
+     workspace identity - behavior only. */
+  networkTradecraft: NetworkTradecraftActor[];
   /* Know the Principal: per-operator verdict on the human/mandate behind the
      agent. Only operators that presented a delegation appear here. A verified
      principal that stepped outside its granted scope is flagged mandateExceeded -
@@ -294,6 +299,7 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
   const networkReputation = workspaceId
     ? await getNetworkReputation(workspaceId, Array.from(new Set(journeys.map((j) => j.profile.operatorKey))))
     : {};
+  const networkTradecraft = workspaceId ? await getNetworkTradecraft(workspaceId) : [];
   // Aggregate the per-session principal verdicts up to the operator. When an
   // operator has multiple sessions, the most security-relevant wins: a mandate
   // violation outranks a bare claimed credential, which outranks a clean verify.
@@ -334,6 +340,7 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
     operatorTriage,
     blockedOperators,
     networkReputation,
+    networkTradecraft,
     principalByOperator,
     agentOrigins: agentOriginRows.rows.map((r) => ({
       country: r.country,

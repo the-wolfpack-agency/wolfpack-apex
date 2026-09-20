@@ -1,4 +1,4 @@
-import { consolidateByOperator, aggregateTradecraft, clusterByTradecraft, detectCampaigns, tradecraftTrend, type OperatorViewJourney } from "@/lib/agent-operators-view";
+import { consolidateByOperator, aggregateTradecraft, clusterByTradecraft, detectCampaigns, tradecraftTrend, matchOperatorsToNetwork, type OperatorViewJourney } from "@/lib/agent-operators-view";
 
 function j(over: Partial<OperatorViewJourney> & { operatorKey: string }): OperatorViewJourney {
   const { operatorKey, ...rest } = over;
@@ -300,5 +300,46 @@ describe("tradecraftTrend - what is rising", () => {
     const rows = tradecraftTrend(groups, "2026-09-10T00:00:00Z");
     expect(rows[0].tag).toBe("payload_attack");
     expect(rows[0].delta).toBe(2);
+  });
+});
+
+
+describe("matchOperatorsToNetwork - recognize a network actor on first contact", () => {
+  const mine = (operatorKey: string, kinds: string[], behaviorClass = "exploit_attempt") =>
+    j({ operatorKey, behaviorClass, key: operatorKey,
+        profile: { operatorKey, scaffolding: { pathDiscovery: "none", readsRobotsFirst: false }, toolComposition: { usedTools: ["fetch"] }, insights: kinds.map((k) => ({ kind: k })) } });
+
+  it("flags a brand-new operator whose tradecraft matches a known network actor", () => {
+    const groups = consolidateByOperator([mine("op_local", ["payload_attack", "id_enumeration"])]);
+    const network = [{ tells: ["exploit_attempt", "payload_attack", "id_enumeration"], workspaceCount: 4, severity: "hostile" as const }];
+    const matches = matchOperatorsToNetwork(groups, network);
+    expect(matches).toHaveLength(1);
+    expect(matches[0].operatorKey).toBe("op_local");
+    expect(matches[0].networkWorkspaces).toBe(4);
+    expect(matches[0].sharedTells).toEqual(["exploit_attempt", "id_enumeration", "payload_attack"]);
+    expect(matches[0].similarity).toBeGreaterThan(0.9);
+    expect(matches[0].severity).toBe("hostile");
+  });
+
+  it("does not match on a single shared tag (below minShared)", () => {
+    const groups = consolidateByOperator([mine("op_local", [], "vuln_scanner")]);
+    const network = [{ tells: ["vuln_scanner", "payload_attack", "id_enumeration"], workspaceCount: 3, severity: "hostile" as const }];
+    expect(matchOperatorsToNetwork(groups, network)).toEqual([]);
+  });
+
+  it("keeps only the best match per operator and sorts by similarity", () => {
+    const groups = consolidateByOperator([mine("op_local", ["payload_attack", "id_enumeration"])]);
+    const network = [
+      { tells: ["payload_attack", "id_enumeration", "exploit_attempt", "runaway_loop", "form_honeypot"], workspaceCount: 9, severity: "hostile" as const }, // lower jaccard
+      { tells: ["exploit_attempt", "payload_attack", "id_enumeration"], workspaceCount: 2, severity: "hostile" as const }, // higher jaccard
+    ];
+    const matches = matchOperatorsToNetwork(groups, network);
+    expect(matches).toHaveLength(1);
+    expect(matches[0].networkWorkspaces).toBe(2); // the tighter match wins over the more-corroborated looser one
+  });
+
+  it("returns [] when there is no network corpus to match against", () => {
+    const groups = consolidateByOperator([mine("op_local", ["payload_attack", "id_enumeration"])]);
+    expect(matchOperatorsToNetwork(groups, [])).toEqual([]);
   });
 });
