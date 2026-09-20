@@ -66,8 +66,11 @@ export function AgentActionLog({ steps, testId = "agent-case-file" }: { steps: r
                 </div>
               )}
               <div data-testid={`${testId}-entry-${i}`} style={{ display: "grid", gridTemplateColumns: "3.1rem 1.1rem 1fr", alignItems: "start", gap: "0.5rem", padding: "0.28rem 0" }}>
-                {/* clock + delta */}
+                {/* date (on first row + at each day change) + clock + delta */}
                 <div style={{ textAlign: "right", lineHeight: 1.15, paddingTop: "0.05rem" }}>
+                  {(i === 0 || e.dayKey !== entries[i - 1].dayKey) && (
+                    <div data-testid={`${testId}-date-${i}`} style={{ fontSize: "0.56rem", fontWeight: 700, color: "var(--wp-gold, #e8b528)", letterSpacing: "0.02em", whiteSpace: "nowrap" }}>{e.date}</div>
+                  )}
                   <div style={{ fontFamily: "var(--wp-mono, ui-monospace, monospace)", fontSize: "0.66rem", color: "var(--wp-text, #d8dbe0)", fontVariantNumeric: "tabular-nums" }}>{e.clock}</div>
                   <div style={{ fontSize: "0.56rem", color: "var(--wp-text-muted, #6b7280)", fontVariantNumeric: "tabular-nums" }}>{e.delta}</div>
                 </div>
