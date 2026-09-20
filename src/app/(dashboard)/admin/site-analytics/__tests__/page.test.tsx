@@ -445,6 +445,7 @@ test("reputation opt-in panel is hidden for a viewer who cannot manage operators
   expect(screen.queryByTestId("reputation-optin")).not.toBeInTheDocument();
 });
 
+
 test("operator card shows a VERIFIED principal badge when a delegation was cryptographically verified", async () => {
   const withPrincipal = {
     ...SUMMARY,
@@ -482,4 +483,50 @@ test("no principal badge when the operator presented no delegation", async () =>
   fireEvent.click(screen.getByTestId("journey-view-operator"));
   await screen.findByTestId("ff-operators-view");
   expect(screen.queryByTestId("operator-principal-op_abc12345")).not.toBeInTheDocument();
+});
+
+test("edge-policy panel reflects the loaded mode and the toggle POSTs the change", async () => {
+  const posted: any[] = [];
+  mockFetchWithRefresh.mockImplementation((url: string, opts?: any) => {
+    if (String(url).includes("/edge-policy")) {
+      if (opts?.method === "POST") { posted.push(JSON.parse(opts.body)); return Promise.resolve({ ok: true, json: async () => ({ ok: true, mode: "enforce" }) }); }
+      return Promise.resolve({ ok: true, json: async () => ({ mode: "monitor" }) });
+    }
+    return Promise.resolve({ ok: true, json: async () => ({ summary: SUMMARY, permissions: PERMS }) });
+  });
+  render(<SiteAnalyticsPage />);
+  await waitFor(() => expect(screen.getByTestId("ff-journeys-triage")).toBeInTheDocument());
+  fireEvent.click(screen.getByTestId("journey-view-operator"));
+  await screen.findByTestId("edge-policy");
+  await waitFor(() => expect(screen.getByTestId("edge-policy-mode")).toHaveTextContent(/monitor/i));
+  fireEvent.click(screen.getByTestId("edge-policy-toggle"));
+  await waitFor(() => expect(posted).toContainEqual({ mode: "enforce" }));
+});
+
+test("operator edge chip shows 'would block' for a blocklisted operator in monitor mode", async () => {
+  const blocked = { ...SUMMARY, blockedOperators: ["op_abc12345"] };
+  mockFetchWithRefresh.mockImplementation((url: string) => {
+    if (String(url).includes("/edge-policy")) return Promise.resolve({ ok: true, json: async () => ({ mode: "monitor" }) });
+    return Promise.resolve({ ok: true, json: async () => ({ summary: blocked, permissions: PERMS }) });
+  });
+  render(<SiteAnalyticsPage />);
+  await waitFor(() => expect(screen.getByTestId("ff-journeys-triage")).toBeInTheDocument());
+  fireEvent.click(screen.getByTestId("journey-view-operator"));
+  await screen.findByTestId("ff-operators-view");
+  const chip = screen.getByTestId("operator-edge-op_abc12345");
+  expect(chip).toHaveTextContent(/would block/i);
+  expect(chip).toHaveAttribute("title", expect.stringContaining("blocklist"));
+});
+
+test("operator edge chip reads 'blocking' (not 'would block') once enforcement is on", async () => {
+  const blocked = { ...SUMMARY, blockedOperators: ["op_abc12345"] };
+  mockFetchWithRefresh.mockImplementation((url: string) => {
+    if (String(url).includes("/edge-policy")) return Promise.resolve({ ok: true, json: async () => ({ mode: "enforce" }) });
+    return Promise.resolve({ ok: true, json: async () => ({ summary: blocked, permissions: PERMS }) });
+  });
+  render(<SiteAnalyticsPage />);
+  await waitFor(() => expect(screen.getByTestId("ff-journeys-triage")).toBeInTheDocument());
+  fireEvent.click(screen.getByTestId("journey-view-operator"));
+  await screen.findByTestId("ff-operators-view");
+  await waitFor(() => expect(screen.getByTestId("operator-edge-op_abc12345")).toHaveTextContent(/^edge: blocking$/i));
 });

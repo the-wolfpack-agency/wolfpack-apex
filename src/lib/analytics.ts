@@ -693,6 +693,10 @@ export type InstinctEventType =
   // forcefield.canary_retired { workspace_id } - a decoy was soft-disabled so
   //   it no longer trips. No value, no id-to-value linkage.
   | "forcefield.canary_retired"
+  // forcefield.edge_decision { operator, action, intended, rule, mode, enforced }
+  //   - an inline edge decision was made for one operator. Opaque operator key
+  //   only; never PII. Feeds the enforcement learning loop.
+  | "forcefield.edge_decision"
   // OGIAM self-serve tenancy. tenant_registered { tenant_id } - a new org signed
   //   up (admin email is NOT in analytics, only that a tenant was registered).
   | "tenancy.tenant_registered"
