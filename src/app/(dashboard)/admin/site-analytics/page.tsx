@@ -131,6 +131,7 @@ export default function SiteAnalyticsPage() {
   const [permissions, setPermissions] = useState<{ triage: boolean; manageOperators: boolean }>({ triage: false, manageOperators: false });
   const [repOptIn, setRepOptIn] = useState<{ contribute: boolean; consume: boolean } | null>(null);
   const [edgeMode, setEdgeMode] = useState<EdgeMode>("monitor");
+  const [edgeAutoBlock, setEdgeAutoBlock] = useState(false);
   const [highlightOp, setHighlightOp] = useState<string | null>(null);
 
   const toggleProfile = useCallback((key: string) => {
@@ -211,19 +212,12 @@ export default function SiteAnalyticsPage() {
     }
   }, []);
 
-  const saveEdgeMode = useCallback(async (mode: EdgeMode) => {
-    const prev = mode === "enforce" ? "monitor" : "enforce";
-    setEdgeMode(mode); // optimistic
+  const savePolicy = useCallback(async (next: { mode: EdgeMode; autoBlock: boolean }, prev: { mode: EdgeMode; autoBlock: boolean }) => {
+    setEdgeMode(next.mode); setEdgeAutoBlock(next.autoBlock); // optimistic
     try {
-      const res = await fetchWithRefresh("/api/admin/forcefield/edge-policy", {
-        method: "POST",
-        headers: jsonHeaders(),
-        body: JSON.stringify({ mode }),
-      });
-      if (!res.ok) setEdgeMode(prev as EdgeMode);
-    } catch {
-      setEdgeMode(prev as EdgeMode);
-    }
+      const res = await fetchWithRefresh("/api/admin/forcefield/edge-policy", { method: "POST", headers: jsonHeaders(), body: JSON.stringify(next) });
+      if (!res.ok) { setEdgeMode(prev.mode); setEdgeAutoBlock(prev.autoBlock); }
+    } catch { setEdgeMode(prev.mode); setEdgeAutoBlock(prev.autoBlock); }
   }, []);
 
   const saveReputationOptIn = useCallback(async (next: { contribute: boolean; consume: boolean }) => {
@@ -264,7 +258,7 @@ export default function SiteAnalyticsPage() {
         .catch(() => {});
       void fetchWithRefresh("/api/admin/forcefield/edge-policy")
         .then((r) => (r.ok ? r.json() : null))
-        .then((d) => { if (d?.mode === "enforce" || d?.mode === "monitor") setEdgeMode(d.mode); })
+        .then((d) => { if (d?.mode === "enforce" || d?.mode === "monitor") { setEdgeMode(d.mode); setEdgeAutoBlock(d.autoBlock === true); } })
         .catch(() => {});
       setState("ready");
     } catch {
@@ -493,7 +487,9 @@ export default function SiteAnalyticsPage() {
               <ForcefieldSwitch
                 mode={edgeMode}
                 canManage={permissions.manageOperators}
-                onToggle={(next) => void saveEdgeMode(next)}
+                onToggle={(next) => void savePolicy({ mode: next, autoBlock: edgeAutoBlock }, { mode: edgeMode, autoBlock: edgeAutoBlock })}
+                autoBlock={edgeAutoBlock}
+                onAutoBlockToggle={(b) => void savePolicy({ mode: edgeMode, autoBlock: b }, { mode: edgeMode, autoBlock: edgeAutoBlock })}
                 standbyAgents={standbyAgents}
                 onAgentClick={focusOperator}
               />

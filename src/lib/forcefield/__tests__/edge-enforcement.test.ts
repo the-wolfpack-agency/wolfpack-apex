@@ -41,3 +41,30 @@ describe("monitor mode is shadow mode", () => {
     expect(d.mode).toBe("monitor");
   });
 });
+
+import { qualifiesForAutoBlock } from "@/lib/forcefield/edge-enforcement";
+
+describe("qualifiesForAutoBlock - block the bad agent, NEVER the client", () => {
+  const sig = (p: Partial<EdgeSignals>): EdgeSignals => ({ blocked: false, trustBand: "hostile", mandateExceeded: false, principalStatus: "absent", networkHostile: false, ...p });
+
+  it("auto-blocks a PROVEN hostile actor", () => {
+    expect(qualifiesForAutoBlock(sig({ trustBand: "hostile" }), { proven: true }).auto).toBe(true);
+  });
+  it("auto-blocks a verified agent that exceeded its mandate (authorization abused)", () => {
+    expect(qualifiesForAutoBlock(sig({ principalStatus: "verified", mandateExceeded: true }), { proven: true }).auto).toBe(true);
+  });
+  it("NEVER auto-blocks on an inferred grouping (could be legitimate client traffic)", () => {
+    const v = qualifiesForAutoBlock(sig({ trustBand: "hostile" }), { proven: false });
+    expect(v.auto).toBe(false);
+    expect(v.reason).toMatch(/inferred|legitimate/i);
+  });
+  it("NEVER auto-blocks a verified principal within its mandate (a good, authorized agent)", () => {
+    expect(qualifiesForAutoBlock(sig({ principalStatus: "verified", trustBand: "caution" }), { proven: true }).auto).toBe(false);
+  });
+  it("NEVER auto-blocks a trusted, rule-respecting actor (a good bot)", () => {
+    expect(qualifiesForAutoBlock(sig({ trustBand: "trusted" }), { proven: true }).auto).toBe(false);
+  });
+  it("does not auto-block an untrusted-but-not-hostile actor (watch, let a human decide)", () => {
+    expect(qualifiesForAutoBlock(sig({ trustBand: "untrusted" }), { proven: true }).auto).toBe(false);
+  });
+});

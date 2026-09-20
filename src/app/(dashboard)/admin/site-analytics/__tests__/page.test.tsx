@@ -524,7 +524,7 @@ test("edge-policy panel reflects the loaded mode and the toggle POSTs the change
   await screen.findByTestId("edge-policy");
   await waitFor(() => expect(screen.getByTestId("edge-policy-mode")).toHaveTextContent(/monitor/i));
   fireEvent.click(screen.getByTestId("edge-policy-toggle"));
-  await waitFor(() => expect(posted).toContainEqual({ mode: "enforce" }));
+  await waitFor(() => expect(posted).toContainEqual({ mode: "enforce", autoBlock: false }));
 });
 
 test("operator edge chip shows 'would block' for a blocklisted operator in monitor mode", async () => {

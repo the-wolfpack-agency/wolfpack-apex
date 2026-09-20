@@ -56,3 +56,24 @@ describe("ForcefieldSwitch", () => {
     expect(screen.queryByTestId("forcefield-standby-agents")).not.toBeInTheDocument();
   });
 });
+
+describe("ForcefieldSwitch - auto-block toggle", () => {
+  it("shows the auto-block control only when protecting, and toggles it", () => {
+    const onAutoBlockToggle = jest.fn();
+    const { rerender } = render(<ForcefieldSwitch mode="monitor" canManage onToggle={jest.fn()} standbyAgents={[]} autoBlock={false} onAutoBlockToggle={onAutoBlockToggle} />);
+    // monitor: no auto-block control (nothing is blocked in shadow mode)
+    expect(screen.queryByTestId("forcefield-autoblock")).not.toBeInTheDocument();
+    // enforce: the control appears
+    rerender(<ForcefieldSwitch mode="enforce" canManage onToggle={jest.fn()} standbyAgents={[]} autoBlock={false} onAutoBlockToggle={onAutoBlockToggle} />);
+    fireEvent.click(screen.getByTestId("forcefield-autoblock-toggle"));
+    expect(onAutoBlockToggle).toHaveBeenCalledWith(true);
+  });
+  it("disables the auto-block toggle for a viewer who cannot manage", () => {
+    const onAutoBlockToggle = jest.fn();
+    render(<ForcefieldSwitch mode="enforce" canManage={false} onToggle={jest.fn()} standbyAgents={[]} autoBlock onAutoBlockToggle={onAutoBlockToggle} />);
+    const t = screen.getByTestId("forcefield-autoblock-toggle");
+    expect(t).toBeDisabled();
+    fireEvent.click(t);
+    expect(onAutoBlockToggle).not.toHaveBeenCalled();
+  });
+});

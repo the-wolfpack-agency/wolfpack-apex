@@ -19,11 +19,12 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { timingSafeEqual } from "crypto";
-import { decideEdgeAction, type EdgeSignals, type EdgePrincipalStatus } from "@/lib/forcefield/edge-enforcement";
+import { decideEdgeAction, qualifiesForAutoBlock, type EdgeSignals, type EdgePrincipalStatus } from "@/lib/forcefield/edge-enforcement";
 import { getEdgePolicy } from "@/lib/forcefield/edge-policy";
-import { listBlockedOperatorKeys } from "@/lib/agent-operators";
+import { listBlockedOperatorKeys, blockOperator } from "@/lib/agent-operators";
 import { getNetworkReputation, type NetworkReputation } from "@/lib/forcefield/operator-reputation";
 import { trackEvent } from "@/lib/analytics";
+import { recordAudit } from "@/lib/audit-log";
 import type { TrustBand } from "@/lib/agent-operators-view";
 
 export const runtime = "nodejs";
@@ -47,7 +48,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
   }
 
-  let body: { operatorKey?: unknown; trustBand?: unknown; principalStatus?: unknown; mandateExceeded?: unknown };
+  let body: { operatorKey?: unknown; trustBand?: unknown; principalStatus?: unknown; mandateExceeded?: unknown; proven?: unknown };
   try {
     body = await req.json();
   } catch {
@@ -76,7 +77,33 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const policy = await getEdgePolicy(EDGE_WORKSPACE_ID);
   const decision = decideEdgeAction(signals, policy);
 
-  // Feed the enforcement learning loop. Opaque operator key only; no PII.
+  // Auto-block: when enforcement is on AND auto-block is enabled AND the operator
+  // is PROVEN-hostile (never on inference, never a verified/good actor - see
+  // qualifiesForAutoBlock), durably add it to the blocklist so it is stopped on
+  // sight. Fingerprint-scoped (the opaque operator key), reversible, and audited.
+  // This NEVER stops observation: the decision event below still fires, so the
+  // agent keeps building its case file even while blocked.
+  let autoBlocked = false;
+  if (policy.mode === "enforce" && policy.autoBlock && !signals.blocked) {
+    const q = qualifiesForAutoBlock(signals, { proven: body.proven === true });
+    if (q.auto) {
+      await blockOperator({ workspaceId: EDGE_WORKSPACE_ID, operatorKey, reason: `auto: ${q.reason}`, blockedBy: "forcefield.auto" }).catch(() => {});
+      autoBlocked = true;
+      trackEvent("forcefield.operator_auto_blocked", `operator:${operatorKey}`, "forcefield", {
+        operator: operatorKey, rule: decision.ruleId, proven: true,
+      });
+      await recordAudit({
+        actor: { user_id: "forcefield.auto", role: "system" },
+        action: "operator.blocked",
+        resourceType: "agent_operator",
+        resourceId: operatorKey,
+        afterState: { workspace_id: EDGE_WORKSPACE_ID, blocked: true, auto: true, reason: q.reason },
+      }).catch(() => {});
+    }
+  }
+
+  // Feed the enforcement learning loop. Opaque operator key only; no PII. Fires on
+  // EVERY decision including a block - enforcement never blinds our collection.
   trackEvent("forcefield.edge_decision", `operator:${operatorKey}`, "external_agent", {
     operator: operatorKey,
     action: decision.action,
@@ -86,5 +113,5 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     enforced: decision.enforced,
   });
 
-  return NextResponse.json({ ok: true, decision });
+  return NextResponse.json({ ok: true, decision, autoBlocked });
 }

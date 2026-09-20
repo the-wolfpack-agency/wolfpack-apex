@@ -95,3 +95,40 @@ export function decideEdgeAction(signals: EdgeSignals, policy: { mode: EdgeMode 
     reason,
   };
 }
+
+
+/** The verdict on whether an operator qualifies for AUTOMATIC blocking. This is
+ *  deliberately stricter than the edge decision: auto-block is a durable action a
+ *  human would otherwise take, so it fires ONLY on high-confidence, proven-hostile
+ *  actors and NEVER on anything that could be legitimate client traffic. */
+export interface AutoBlockVerdict {
+  auto: boolean;
+  /** Why, in the operator's terms. */
+  reason: string;
+}
+
+/**
+ * Decide whether to auto-block. Safety rails, worst-case-first:
+ *  - Never on an INFERRED grouping: a coarse fingerprint can sweep up real users.
+ *  - Never a verified principal acting within its mandate (a good, authorized agent).
+ *  - Never a trusted actor (identified, rule-respecting good bot).
+ *  - Only then: a verified agent that abused its mandate, or a PROVEN-hostile actor
+ *    (one pinned by a correlation token it carried - a trap or hidden field only a
+ *    bot touches), qualifies. Deterministic + pure.
+ */
+export function qualifiesForAutoBlock(signals: EdgeSignals, opts: { proven: boolean }): AutoBlockVerdict {
+  if (!opts.proven) return { auto: false, reason: "Inferred grouping - a coarse fingerprint could catch legitimate client traffic." };
+  if (signals.principalStatus === "verified" && !signals.mandateExceeded) {
+    return { auto: false, reason: "Verified principal acting within its granted mandate." };
+  }
+  if (signals.trustBand === "trusted") {
+    return { auto: false, reason: "Trusted, rule-respecting actor." };
+  }
+  if (signals.mandateExceeded) {
+    return { auto: true, reason: "A verified agent stepped outside its mandate - authorization abused." };
+  }
+  if (signals.trustBand === "hostile") {
+    return { auto: true, reason: "Proven hostile behavior (pinned by a correlation token only a bot carries)." };
+  }
+  return { auto: false, reason: "No proven-hostile trigger; watch and let a human decide." };
+}
