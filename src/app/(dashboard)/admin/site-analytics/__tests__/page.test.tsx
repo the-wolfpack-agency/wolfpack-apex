@@ -696,3 +696,32 @@ test("shows method clusters: operators that share tradecraft, linked across fing
   expect(cluster).toHaveTextContent("op_beta");
   expect(cluster).toHaveTextContent(/payload_attack|id_enumeration|exploit_attempt/);
 });
+
+test("shows a coordinated campaign: concurrent look-alike operators hitting shared targets", async () => {
+  // two distinct operators, same tradecraft, overlapping recent windows, shared target
+  const mk = (opKey: string, fpKey: string, at: string) => ({
+    key: fpKey, confidence: "proven", behaviorClass: "exploit_attempt",
+    signals: ["payload_attack"], path: ["/api/users", "/login"], eventCount: 3,
+    firstAt: at, lastAt: at, summary: "Injection + IDOR.", triage: "new",
+    profile: {
+      operatorKey: opKey, correlationKey: fpKey,
+      verdict: { confidence: "proven", why: "Proven." }, processes: [],
+      scaffolding: { readsRobotsFirst: true, probedSensitive: true, pathDiscovery: "link-following", requestCount: 3, spanSeconds: 3, observability: "Observed." },
+      toolComposition: { usedTools: ["fetch", "submit_form"], novelTools: [], policies: [], riskTier: "dangerous", intent: "exploitation", confidence: "proven", summary: "Injection." },
+      policies: [], timeline: { firstAt: at, lastAt: at, spanSeconds: 3, eventCount: 3 },
+      disclaimer: "d", insights: [{ kind: "payload_attack", attack: "sqli" }, { kind: "id_enumeration" }],
+    },
+  });
+  const twoOps = { ...SUMMARY, journeys: [mk("op_alpha", "fpA", "2026-09-19T10:00:00Z"), mk("op_beta", "fpB", "2026-09-19T10:15:00Z")] };
+  mockFetchWithRefresh.mockImplementation((url: string) => {
+    if (String(url).includes("/edge-policy")) return Promise.resolve({ ok: true, json: async () => ({ mode: "monitor" }) });
+    return Promise.resolve({ ok: true, json: async () => ({ summary: twoOps, permissions: PERMS }) });
+  });
+  render(<SiteAnalyticsPage />);
+  await waitFor(() => expect(screen.getByTestId("ff-journeys-triage")).toBeInTheDocument());
+  fireEvent.click(screen.getByText("By operator"));
+  const campaign = await screen.findByTestId("campaign-0");
+  expect(campaign).toHaveTextContent("2 operators");
+  expect(campaign).toHaveTextContent("2 concurrent");
+  expect(campaign).toHaveTextContent("/api/users"); // shared target
+});
