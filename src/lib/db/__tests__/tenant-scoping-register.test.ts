@@ -236,6 +236,9 @@ const NO_WORKSPACE_COLUMN: readonly string[] = [
   // Global by design: a system-wide registry of TRUSTED telemetry forwarders
   // (their public keys), not per-tenant data. Signed-ingest verification (gap #1).
   "instinct_ingest_sources",
+  // Global by design: external audit-chain anchors (seq + hash published to a
+  // witness). The audit log itself is global; its anchors are too. (gap #7).
+  "instinct_audit_external_anchors",
 ];
 
 /** Read every table and its columns out of the migrations. */
@@ -294,7 +297,7 @@ describe("every table declares whether it is tenant-scoped", () => {
     // Instinct is ready to be run by someone else. Tables that are global by
     // design are counted separately, so this number only ever moves for the
     // reason it was created to track.
-    expect(NO_WORKSPACE_COLUMN.length).toBe(150);
+    expect(NO_WORKSPACE_COLUMN.length).toBe(151);
   });
 
   it("does not let the by-design list become a second backlog", () => {
