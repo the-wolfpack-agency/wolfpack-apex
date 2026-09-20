@@ -17,6 +17,7 @@ type Data = {
   assurance: { controls: Control[]; activeCount: number; partialCount: number; gapCount: number; total: number; score: number };
   adversarial: { results: Scenario[]; defendedCount: number; total: number; allDefended: boolean };
   breaches: { results: Breach[]; prevented: number; detected: number; outOfScope: number; total: number };
+  lowAndSlow: { profiles: { id: string; name: string; evasive: boolean; detected: boolean; outcome: string }[]; detected: number; total: number; rate: number; evasiveRate: number; note: string };
 };
 const COVERAGE_COLOR = { prevented: "#30a46c", detected: "#f5a623", out_of_scope: "#9ca3af" } as const;
 const COVERAGE_LABEL = { prevented: "prevented", detected: "detected", out_of_scope: "out of scope" } as const;
@@ -111,6 +112,21 @@ export function ForcefieldAssurance() {
                   </li>
                 ))}
               </ul>
+            </div>
+            {/* low-and-slow detection benchmark - honest, names what we miss */}
+            <div>
+              <div style={{ fontSize: "0.62rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--wp-text-muted, #9ca3af)", marginBottom: "0.5rem" }}>
+                Low-and-slow detection (honest) &middot; <span data-testid="lowslow-rate" style={{ color: "var(--wp-text, #eee)" }}>{data.lowAndSlow.rate}% overall</span>, {data.lowAndSlow.evasiveRate}% on evasive profiles
+              </div>
+              <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: "0.25rem" }}>
+                {data.lowAndSlow.profiles.map((pf) => (
+                  <li key={pf.id} data-testid={`lowslow-${pf.id}`} style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.72rem", color: "var(--wp-text-muted, #9ca3af)" }}>
+                    <span style={{ color: pf.detected ? "var(--wp-success, #30a46c)" : "var(--wp-warning, #f5a623)", fontWeight: 800 }}>{pf.detected ? "detected" : "MISSED"}</span>
+                    <span style={{ color: "var(--wp-text, #eee)" }}>{pf.name}</span>
+                  </li>
+                ))}
+              </ul>
+              <p style={{ fontSize: "0.66rem", color: "var(--wp-text-muted, #6b7280)", marginTop: "0.4rem", lineHeight: 1.4 }}>{data.lowAndSlow.note}</p>
             </div>
           </div>
         )}

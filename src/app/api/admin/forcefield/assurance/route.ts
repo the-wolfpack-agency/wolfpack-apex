@@ -15,6 +15,7 @@ import { requireCapability } from "@/lib/auth/require-capability";
 import { buildAssuranceReport } from "@/lib/forcefield/assurance";
 import { runAdversarialSuite } from "@/lib/forcefield/adversarial";
 import { runBreachCorpus } from "@/lib/forcefield/breach-corpus";
+import { benchmarkLowAndSlow } from "@/lib/forcefield/low-and-slow";
 import { getEdgePolicy } from "@/lib/forcefield/edge-policy";
 import { listDelegationIssuers } from "@/lib/forcefield/principal";
 import { getReputationOptIn } from "@/lib/forcefield/operator-reputation";
@@ -52,6 +53,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   });
 
   const [adversarial, breaches] = await Promise.all([runAdversarialSuite(), runBreachCorpus()]);
+  const lowAndSlow = benchmarkLowAndSlow();
 
-  return NextResponse.json({ assurance, adversarial, breaches });
+  return NextResponse.json({ assurance, adversarial, breaches, lowAndSlow });
 }

@@ -24,6 +24,13 @@ const DATA = {
     ],
     prevented: 1, detected: 0, outOfScope: 1, total: 2,
   },
+  lowAndSlow: {
+    profiles: [
+      { id: "greedy-decoy", name: "Greedy scraper", evasive: false, detected: true, outcome: "aggressive_scraper (proven)" },
+      { id: "patient-passive", name: "Patient passive reader", evasive: true, detected: false, outcome: "unclassified" },
+    ],
+    detected: 1, total: 2, rate: 50, evasiveRate: 0, note: "A truly passive, decoy-avoiding agent is the residual gap.",
+  },
 };
 
 beforeEach(() => mockFetchWithRefresh.mockReset());
@@ -41,6 +48,9 @@ it("runs on open and shows the posture score, controls, and self-attack results"
   // known-attack coverage renders, honestly including an out-of-scope class
   expect(screen.getByTestId("assurance-breach-token-replay")).toHaveTextContent(/prevented/i);
   expect(screen.getByTestId("assurance-breach-supply-chain")).toHaveTextContent(/out of scope/i);
+  // low-and-slow honestly shows the missed profile
+  expect(screen.getByTestId("lowslow-rate")).toHaveTextContent("50%");
+  expect(screen.getByTestId("lowslow-patient-passive")).toHaveTextContent(/MISSED/);
 });
 
 it("surfaces an error without crashing", async () => {
