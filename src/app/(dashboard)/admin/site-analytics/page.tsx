@@ -52,6 +52,7 @@ interface Summary {
   operatorTriage: Record<string, TriageStatus>;
   blockedOperators: string[];
   networkReputation?: Record<string, { operatorKey: string; otherWorkspaces: number; severity: "hostile" | "elevated" | "benign" }>;
+  principalByOperator?: Record<string, { status: "verified" | "claimed"; principal?: string; issuer?: string; scopes: string[]; mandateExceeded: boolean; violations: string[] }>;
 }
 
 interface AgentProfile {
@@ -684,6 +685,27 @@ export default function SiteAnalyticsPage() {
                               style={{ display: "inline-flex", alignItems: "center", gap: "0.25rem", fontSize: "0.6rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em", color: c, border: `1px solid ${c}`, borderRadius: 999, padding: "0.1rem 0.45rem" }}
                             >
                               network: {net.severity} · {net.otherWorkspaces}
+                            </span>
+                          );
+                        })()}
+                        {summary.principalByOperator?.[g.operatorKey] && (() => {
+                          const pr = summary.principalByOperator![g.operatorKey];
+                          const exceeded = pr.mandateExceeded;
+                          const verifiedClean = pr.status === "verified" && !exceeded;
+                          const c = exceeded ? "var(--wp-error, #ef4444)" : verifiedClean ? "var(--wp-success, #30a46c)" : "var(--wp-warning, #f5a623)";
+                          const label = exceeded ? "mandate exceeded" : verifiedClean ? "principal verified" : "principal claimed";
+                          const title = exceeded
+                            ? `Verified principal ${pr.principal ?? ""} (issuer ${pr.issuer ?? "?"}) stepped OUTSIDE its granted scope [${pr.scopes.join(", ")}] - accessed ${pr.violations.length} unauthorized path(s): ${pr.violations.slice(0, 5).join(", ")}. An authorized agent abusing its mandate.`
+                            : verifiedClean
+                              ? `Delegation cryptographically verified: principal ${pr.principal ?? ""} via issuer ${pr.issuer ?? "?"}, acting within its granted scope [${pr.scopes.join(", ")}].`
+                              : `A delegation credential was presented but did NOT verify against any registered issuer. Claimed principal ${pr.principal ?? "(unstated)"} - treated as unauthenticated.`;
+                          return (
+                            <span
+                              data-testid={`operator-principal-${g.operatorKey}`}
+                              title={title}
+                              style={{ display: "inline-flex", alignItems: "center", gap: "0.25rem", fontSize: "0.6rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em", color: c, border: `1px solid ${c}`, borderRadius: 999, padding: "0.1rem 0.45rem" }}
+                            >
+                              {label}
                             </span>
                           );
                         })()}

@@ -337,6 +337,8 @@ export function deriveOperatorInsight<T extends OperatorViewJourney>(g: Operator
 export type TrustBand = "trusted" | "caution" | "untrusted" | "hostile";
 
 export type AgentIntent =
+  | "mandate_violation"
+  | "authorized_delegation"
   | "legitimate_crawl"
   | "content_harvesting"
   | "vulnerability_recon"
@@ -359,6 +361,8 @@ export interface AgentTrustProfile {
 }
 
 const INTENT_LABEL: Record<AgentIntent, string> = {
+  mandate_violation: "Authorized agent exceeding its mandate",
+  authorized_delegation: "Authorized delegated access",
   legitimate_crawl: "Legitimate crawl",
   content_harvesting: "Content harvesting",
   vulnerability_recon: "Vulnerability reconnaissance",
@@ -402,6 +406,9 @@ export function deriveTrustProfile<T extends OperatorViewJourney>(g: OperatorGro
   if (kinds.has("deliberate_violation")) score -= 15;
   if (kinds.has("id_enumeration")) score -= 15;
   if (kinds.has("runaway_loop")) score -= 10;
+  if (kinds.has("mandate_exceeded")) score -= 30; // had authorization and abused it
+  if (kinds.has("principal_unverifiable")) score -= 12; // claimed a right it cannot prove
+  if (kinds.has("principal_verified")) score += 25; // proven accountable principal, in-scope
   if (g.proven && g.severity === "hostile") score -= 8; // certain-bad pushes further down
   if (worstClass === "benign_crawler" && g.proven) score += 7; // certain-good rewarded
   if (g.targeting.topSeverity === "critical") score -= 8;
@@ -412,7 +419,8 @@ export function deriveTrustProfile<T extends OperatorViewJourney>(g: OperatorGro
 
   // Intent: what it is trying to do, worst-first.
   let intent: AgentIntent;
-  if (kinds.has("payload_attack") || classes.includes("exploit_attempt")) intent = "active_exploitation";
+  if (kinds.has("mandate_exceeded")) intent = "mandate_violation";
+  else if (kinds.has("payload_attack") || classes.includes("exploit_attempt")) intent = "active_exploitation";
   else if (kinds.has("impersonation")) intent = "impersonation";
   else if (kinds.has("id_enumeration")) intent = "access_probing";
   else if (classes.includes("vuln_scanner")) intent = "vulnerability_recon";
@@ -420,6 +428,7 @@ export function deriveTrustProfile<T extends OperatorViewJourney>(g: OperatorGro
   else if (classes.includes("form_spammer")) intent = "form_abuse";
   else if (classes.includes("aggressive_scraper")) intent = "content_harvesting";
   else if (classes.includes("benign_crawler")) intent = "legitimate_crawl";
+  else if (kinds.has("principal_verified")) intent = "authorized_delegation";
   else intent = "unclear";
 
   const intentConfidence: "proven" | "inferred" = g.proven ? "proven" : "inferred";

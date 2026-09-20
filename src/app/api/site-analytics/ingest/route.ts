@@ -22,9 +22,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { timingSafeEqual } from "crypto";
 import { isSiteEventType, recordSiteEvent } from "@/lib/site-analytics";
+import { verifyPresentedDelegation, getDelegationIssuer } from "@/lib/forcefield/principal";
 
 const WINDOW_MS = 60 * 1000;
 const MAX_PER_WINDOW = 600; // generous for a marketing site; bounds abuse.
+// The marketing-site event stream is a single global tenant; its trusted
+// delegation issuers live under this workspace id.
+const SITE_WORKSPACE_ID = process.env.SITE_ANALYTICS_WORKSPACE_ID || "default";
 let windowStart = 0;
 let windowCount = 0;
 
@@ -96,6 +100,26 @@ export async function POST(req: NextRequest) {
       else if (typeof v === "number" || typeof v === "boolean") props[k] = v;
     }
   }
+
+  // Know the Principal: if the agent presented a signed delegation credential,
+  // verify it HERE, fail-closed, and store only the non-sensitive VERDICT - never
+  // the raw credential. "verified" means the signature checked out against a
+  // registered issuer and it has not expired; anything else is "claimed". This is
+  // the honesty rail: the marketing site cannot hold our issuer secrets, so it
+  // cannot self-certify a principal - only this boundary can.
+  if (typeof b.delegation === "string" && b.delegation.length > 0) {
+    const verdict = await verifyPresentedDelegation(b.delegation, {
+      resolveIssuer: (iss) => getDelegationIssuer(SITE_WORKSPACE_ID, iss),
+      nowSeconds: Math.floor(Date.now() / 1000),
+      audience: process.env.SITE_ANALYTICS_AUDIENCE,
+    });
+    props.principal_status = verdict.status;
+    if (verdict.principal) props.principal = verdict.principal.slice(0, 120);
+    if (verdict.issuer) props.principal_issuer = verdict.issuer.slice(0, 120);
+    if (verdict.scopes.length > 0) props.principal_scopes = JSON.stringify(verdict.scopes).slice(0, 400);
+  }
+  // The raw credential is never persisted.
+  delete (props as Record<string, unknown>).delegation;
 
   await recordSiteEvent({
     eventType: b.type,
