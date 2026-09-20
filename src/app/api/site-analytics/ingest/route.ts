@@ -23,6 +23,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { timingSafeEqual } from "crypto";
 import { isSiteEventType, recordSiteEvent } from "@/lib/site-analytics";
 import { verifyPresentedDelegation, getDelegationIssuer, consumeDelegationJti } from "@/lib/forcefield/principal";
+import { ingestSigningEnforced, verifyIngestSignature } from "@/lib/forcefield/ingest-signing";
 
 const WINDOW_MS = 60 * 1000;
 const MAX_PER_WINDOW = 600; // generous for a marketing site; bounds abuse.
@@ -77,9 +78,26 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "rate_limited" }, { status: 429 });
   }
 
+  const rawBody = await req.text();
+
+  // Signed ingest (gap #1): when enforced, a valid shared token is NOT enough -
+  // the batch must be signed by a registered source. Fail-closed.
+  if (ingestSigningEnforced()) {
+    const check = await verifyIngestSignature({
+      sourceId: req.headers.get("x-ingest-source") || "",
+      timestamp: Number(req.headers.get("x-ingest-timestamp")),
+      signature: req.headers.get("x-ingest-signature") || "",
+      rawBody,
+      nowMs: Date.now(),
+    });
+    if (!check.ok) {
+      return NextResponse.json({ ok: false, error: "unsigned_or_bad_signature" }, { status: 401 });
+    }
+  }
+
   let body: unknown;
   try {
-    body = await req.json();
+    body = JSON.parse(rawBody);
   } catch {
     return NextResponse.json({ ok: false, error: "invalid_json" }, { status: 400 });
   }

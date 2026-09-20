@@ -18,6 +18,7 @@ import { getEdgePolicy } from "@/lib/forcefield/edge-policy";
 import { listDelegationIssuers } from "@/lib/forcefield/principal";
 import { getReputationOptIn } from "@/lib/forcefield/operator-reputation";
 import { listCanariesForDisplay } from "@/lib/forcefield/canary-store";
+import { listIngestSources, ingestSigningEnforced } from "@/lib/forcefield/ingest-signing";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,11 +28,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (!auth.ok) return auth.response;
   const workspaceId = auth.user.workspaceId ?? "default";
 
-  const [policy, issuers, optIn, canaries] = await Promise.all([
+  const [policy, issuers, optIn, canaries, ingestSources] = await Promise.all([
     getEdgePolicy(workspaceId).catch(() => ({ mode: "monitor" as const, autoBlock: false })),
     listDelegationIssuers(workspaceId).catch(() => []),
     getReputationOptIn(workspaceId).catch(() => ({ contribute: false, consume: false })),
     listCanariesForDisplay(workspaceId).catch(() => []),
+    listIngestSources().catch(() => []),
   ]);
 
   const assurance = buildAssuranceReport({
@@ -43,7 +45,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     reputationConsume: optIn.consume,
     hybridTlsAsserted: !!process.env.PROD_DOMAIN,
     externalAuditAnchor: !!process.env.FORCEFIELD_AUDIT_ANCHOR_URL,
-    ingestSourceSigned: !!process.env.SITE_ANALYTICS_INGEST_SIGNING,
+    ingestSourceSigned: ingestSigningEnforced() && ingestSources.length > 0,
   });
 
   const adversarial = await runAdversarialSuite();
