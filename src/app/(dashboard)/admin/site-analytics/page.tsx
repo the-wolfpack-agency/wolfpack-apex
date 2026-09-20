@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Admin Site Analytics — where and when ogiam.com is being used, on our own
+ * Admin Site Analytics: where and when ogiam.com is being used, on our own
  * infrastructure (no third-party analytics product). Reads the aggregated
  * summary from /api/admin/site-analytics and renders the REUSED HourHeatmap
  * (time of day) plus top pages and top countries. Gated by analytics.view.
@@ -643,9 +643,13 @@ export default function SiteAnalyticsPage() {
           <div style={card} data-testid="ff-journeys">
             <div style={label}>Agent journeys &middot; behavior across the surface</div>
             <p style={{ margin: "0.5rem 0 0", fontSize: "0.76rem", color: "var(--wp-text-muted, #9ca3af)", lineHeight: 1.5 }}>
-              Correlated sessions with a fused behavior class. <strong style={{ color: "var(--wp-text, #eee)" }}>Proven</strong> =
-              the actor carried a correlation token (engaged a trap or a hidden field only a bot touches). <strong style={{ color: "var(--wp-text, #eee)" }}>Inferred</strong> =
-              grouped by a coarse fingerprint, a likely match, not confirmed.
+              Every agent that touched the site, consolidated into one actor with its whole journey: a
+              <strong style={{ color: "var(--wp-text, #eee)" }}> trust score</strong>, its
+              <strong style={{ color: "var(--wp-text, #eee)" }}> intent</strong>, the path it took, and what the edge would do about it.
+              A card is <strong style={{ color: "var(--wp-text, #eee)" }}>distinctive</strong> when the actor is pinned by a token it
+              carried (a trap or a hidden field only a bot touches), or <strong style={{ color: "var(--wp-text, #eee)" }}>inferred</strong>
+              {" "}when it is grouped by a coarser fingerprint (a likely match, not confirmed). Switch to
+              <strong style={{ color: "var(--wp-text, #eee)" }}> By severity</strong> to work the raw findings as a triage queue.
             </p>
             {/* View toggle: triage findings by severity, or consolidate them by operator. */}
             <div style={{ display: "flex", gap: "0.4rem", marginTop: "0.8rem" }}>
