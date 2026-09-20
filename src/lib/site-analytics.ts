@@ -11,6 +11,7 @@
 import { query, safeQuery } from "@/lib/db";
 import { buildJourneys, type AgentJourney, type CorrelationKind } from "@/lib/agent-behavior";
 import { buildAgentProfile, type AgentProfile } from "@/lib/agent-profile";
+import { getNetworkReputation, type NetworkReputation } from "@/lib/forcefield/operator-reputation";
 import { summarizeProbeIntel, type ProbeIntelEntry } from "@/lib/agent-probe-signatures";
 import { getFindingTriage, type TriageStatus } from "@/lib/site-finding-triage";
 import { listBlockedOperatorKeys } from "@/lib/agent-operators";
@@ -116,6 +117,10 @@ export interface SiteAnalyticsSummary {
   /* Operator keys currently on the blocklist, so the consolidation view can show
      which actors are already blocked. */
   blockedOperators: string[];
+  /* Cross-workspace reputation for the operators shown, keyed by operatorKey, when
+     this workspace has opted in to consume the network. Only counts + severity from
+     OTHER workspaces - never which ones. Empty when not opted in. */
+  networkReputation: Record<string, NetworkReputation>;
 }
 
 /** Clamp the requested window to a sane integer day count. */
@@ -262,6 +267,9 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
   );
   const operatorTriage = await operatorTriageStates(journeys, workspaceId);
   const blockedOperators = workspaceId ? Array.from(await listBlockedOperatorKeys(workspaceId)) : [];
+  const networkReputation = workspaceId
+    ? await getNetworkReputation(workspaceId, Array.from(new Set(journeys.map((j) => j.profile.operatorKey))))
+    : {};
   return {
     rangeDays: days,
     totalPageViews: t ? Number(t.page_views) : 0,
@@ -279,6 +287,7 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
     journeys,
     operatorTriage,
     blockedOperators,
+    networkReputation,
     agentOrigins: agentOriginRows.rows.map((r) => ({
       country: r.country,
       total: Number(r.total),
