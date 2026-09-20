@@ -8,7 +8,7 @@ jest.mock("@/lib/db", () => ({
   hasDatabase: () => true,
 }));
 
-import { contributeHostileOperator, getNetworkReputation } from "@/lib/forcefield/operator-reputation";
+import { contributeHostileOperator, getNetworkReputation, getNetworkTradecraft } from "@/lib/forcefield/operator-reputation";
 
 function optIn(contribute: boolean, consume: boolean) {
   safeQuery.mockResolvedValueOnce({ rows: [{ contribute, consume }] }); // getReputationOptIn
@@ -82,5 +82,33 @@ describe("operator reputation - opt-in gating", () => {
   it("returns {} for an empty key set without touching the db", async () => {
     expect(await getNetworkReputation("w1", [])).toEqual({});
     expect(safeQuery).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("getNetworkTradecraft - the network's known-hostile actors (for matching)", () => {
+  it("returns [] when not opted in to consume (no cross-workspace read)", async () => {
+    optIn(false, false);
+    const r = await getNetworkTradecraft("w1");
+    expect(r).toEqual([]);
+    expect(safeQuery).toHaveBeenCalledTimes(1); // only the opt-in check
+  });
+
+  it("returns corroborated actors with >= 2 tells, excluding the caller, no keys or workspace identity", async () => {
+    optIn(false, true);
+    safeQuery.mockResolvedValueOnce({ rows: [
+      { workspaces: "4", sev_rank: 3, tells: ["exploit_attempt", "payload_attack", "id_enumeration"] },
+      { workspaces: "2", sev_rank: 3, tells: ["only_one"] }, // too little signature -> dropped
+    ] });
+    const r = await getNetworkTradecraft("w1");
+    expect(r).toEqual([{ tells: ["exploit_attempt", "payload_attack", "id_enumeration"], workspaceCount: 4, severity: "hostile" }]);
+    const call = safeQuery.mock.calls[1];
+    expect(String(call[0])).toMatch(/workspace_id <> \$1/);
+    expect(String(call[0])).toMatch(/HAVING count\(DISTINCT r.workspace_id\) FILTER \(WHERE r.severity = 'hostile'\) >= \$2/);
+    expect(call[1]).toEqual(["w1", 2, 200]); // caller, corroboration floor, limit
+    // privacy: the RETURNED shape carries no operator key and no workspace identity
+    // (grouping by operator_key is fine; it is never selected or returned).
+    expect(r[0]).not.toHaveProperty("operatorKey");
+    expect(r[0]).not.toHaveProperty("workspaceId");
   });
 });

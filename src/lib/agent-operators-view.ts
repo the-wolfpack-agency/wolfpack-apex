@@ -541,6 +541,78 @@ export function tradecraftTrend<T extends OperatorViewJourney>(
     .sort((a, b) => b.delta - a.delta || a.tag.localeCompare(b.tag));
 }
 
+// ---------------------------------------------------------------------------
+// Cross-workspace matching (recognize a network actor on first contact)
+// ---------------------------------------------------------------------------
+//
+// The reputation network flags an operator by its FINGERPRINT when another
+// workspace has seen that exact fingerprint. This goes further: it matches one of
+// YOUR operators against the network's known-hostile actors by their TRADECRAFT,
+// so a brand-new fingerprint on your surface is caught the first time it acts if
+// it operates like an actor the rest of the network already knows. Day-one benefit
+// from everyone's history. Pure + deterministic; the network actors are fetched
+// server-side (gated by opt-in) and passed in.
+
+/** One network actor's tradecraft signature, mirrored from the reputation layer
+ *  (kept local so this module has no server dependency). */
+export interface NetworkActorSignature {
+  tells: string[];
+  workspaceCount: number;
+  severity: Severity;
+}
+
+export interface NetworkMatch {
+  operatorKey: string;
+  /** The tradecraft your operator shares with the matched network actor. */
+  sharedTells: string[];
+  /** Jaccard similarity to the matched actor, 0..1. */
+  similarity: number;
+  /** How many other workspaces corroborated the matched actor. */
+  networkWorkspaces: number;
+  severity: Severity;
+}
+
+/**
+ * Match your operators against the network's known-hostile actors by tradecraft.
+ * An operator matches when it shares at least `minShared` tells with an actor AND
+ * their Jaccard similarity is at least `minJaccard` (so a single common tag never
+ * matches). Each operator keeps only its single best match. Deterministic; ties
+ * broken by operator key. Returns only operators that matched.
+ */
+export function matchOperatorsToNetwork<T extends OperatorViewJourney>(
+  groups: readonly OperatorGroup<T>[],
+  network: readonly NetworkActorSignature[],
+  opts: { minShared?: number; minJaccard?: number } = {},
+): NetworkMatch[] {
+  const minShared = opts.minShared ?? 2;
+  const minJaccard = opts.minJaccard ?? 0.34;
+  const actors = network.map((a) => ({ ...a, set: new Set(a.tells) })).filter((a) => a.set.size > 0);
+  const matches: NetworkMatch[] = [];
+  for (const g of groups) {
+    const mine = tellSetOf(g);
+    if (mine.size === 0) continue;
+    let best: NetworkMatch | null = null;
+    for (const a of actors) {
+      let inter = 0;
+      for (const t of mine) if (a.set.has(t)) inter++;
+      if (inter < minShared) continue;
+      const jac = inter / (mine.size + a.set.size - inter);
+      if (jac < minJaccard) continue;
+      if (!best || jac > best.similarity || (jac === best.similarity && a.workspaceCount > best.networkWorkspaces)) {
+        best = {
+          operatorKey: g.operatorKey,
+          sharedTells: Array.from(mine).filter((t) => a.set.has(t)).sort(),
+          similarity: Math.round(jac * 100) / 100,
+          networkWorkspaces: a.workspaceCount,
+          severity: a.severity,
+        };
+      }
+    }
+    if (best) matches.push(best);
+  }
+  return matches.sort((a, b) => b.similarity - a.similarity || b.networkWorkspaces - a.networkWorkspaces || a.operatorKey.localeCompare(b.operatorKey));
+}
+
 /** Synthesize one operator group into a decision-ready brief. Deterministic. */
 export function deriveOperatorInsight<T extends OperatorViewJourney>(g: OperatorGroup<T>): OperatorInsight {
   const confidence: "proven" | "inferred" = g.proven ? "proven" : "inferred";

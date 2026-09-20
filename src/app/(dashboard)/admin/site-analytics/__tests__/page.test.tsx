@@ -725,3 +725,35 @@ test("shows a coordinated campaign: concurrent look-alike operators hitting shar
   expect(campaign).toHaveTextContent("2 concurrent");
   expect(campaign).toHaveTextContent("/api/users"); // shared target
 });
+
+test("flags an operator whose tradecraft matches a known-hostile network actor (new fingerprint, known methods)", async () => {
+  const j2 = {
+    key: "fpNew", confidence: "proven", behaviorClass: "exploit_attempt",
+    signals: ["payload_attack"], path: ["/api/users"], eventCount: 3,
+    firstAt: "2026-09-18T11:00:00Z", lastAt: "2026-09-18T11:00:03Z",
+    summary: "Injection + IDOR.", triage: "new",
+    profile: {
+      operatorKey: "op_newbie", correlationKey: "fpNew",
+      verdict: { confidence: "proven", why: "Proven." }, processes: [],
+      scaffolding: { readsRobotsFirst: false, probedSensitive: true, pathDiscovery: "none", requestCount: 3, spanSeconds: 3, observability: "Observed." },
+      toolComposition: { usedTools: ["fetch"], novelTools: [], policies: [], riskTier: "dangerous", intent: "exploitation", confidence: "proven", summary: "Injection." },
+      policies: [], timeline: { firstAt: "2026-09-18T11:00:00Z", lastAt: "2026-09-18T11:00:03Z", spanSeconds: 3, eventCount: 3 },
+      disclaimer: "d", insights: [{ kind: "payload_attack", attack: "sqli" }, { kind: "id_enumeration" }],
+    },
+  };
+  const withNetwork = {
+    ...SUMMARY,
+    journeys: [j2],
+    // an actor the rest of the network already knows, sharing this operator's methods
+    networkTradecraft: [{ tells: ["exploit_attempt", "payload_attack", "id_enumeration"], workspaceCount: 5, severity: "hostile" }],
+  };
+  mockFetchWithRefresh.mockImplementation((url: string) => {
+    if (String(url).includes("/edge-policy")) return Promise.resolve({ ok: true, json: async () => ({ mode: "monitor" }) });
+    return Promise.resolve({ ok: true, json: async () => ({ summary: withNetwork, permissions: PERMS }) });
+  });
+  render(<SiteAnalyticsPage />);
+  await waitFor(() => expect(screen.getByTestId("ff-journeys-triage")).toBeInTheDocument());
+  fireEvent.click(screen.getByText("By operator"));
+  const badge = await screen.findByTestId("operator-network-match-op_newbie");
+  expect(badge).toHaveTextContent(/matches network actor/i);
+});

@@ -17,7 +17,7 @@ import { AgentJourneyTimeline } from "@/components/AgentJourneyTimeline";
 import { AgentActionLog } from "@/components/AgentActionLog";
 import type { JourneyStep } from "@/lib/agent-behavior";
 import { triageJourneys, type Severity } from "@/lib/agent-triage";
-import { consolidateByOperator, deriveOperatorInsight, deriveTrustProfile, aggregateTradecraft, clusterByTradecraft, detectCampaigns, tradecraftTrend } from "@/lib/agent-operators-view";
+import { consolidateByOperator, deriveOperatorInsight, deriveTrustProfile, aggregateTradecraft, clusterByTradecraft, detectCampaigns, tradecraftTrend, matchOperatorsToNetwork } from "@/lib/agent-operators-view";
 import { decideEdgeAction, type EdgeMode } from "@/lib/forcefield/edge-enforcement";
 import { ForcefieldSwitch } from "@/components/ForcefieldSwitch";
 import { ForcefieldAssurance } from "@/components/forcefield/ForcefieldAssurance";
@@ -58,6 +58,7 @@ interface Summary {
   operatorTriage: Record<string, TriageStatus>;
   blockedOperators: string[];
   networkReputation?: Record<string, { operatorKey: string; otherWorkspaces: number; severity: "hostile" | "elevated" | "benign"; ttps?: string[] }>;
+  networkTradecraft?: Array<{ tells: string[]; workspaceCount: number; severity: "hostile" | "elevated" | "benign" }>;
   principalByOperator?: Record<string, { status: "verified" | "claimed"; principal?: string; issuer?: string; scopes: string[]; mandateExceeded: boolean; violations: string[] }>;
 }
 
@@ -714,6 +715,8 @@ export default function SiteAnalyticsPage() {
                   const methodClusters = clusterByTradecraft(groups).slice(0, 6);
                   const campaigns = detectCampaigns(groups).slice(0, 4);
                   const rising = tradecraftTrend(groups, new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()).filter((r) => r.delta > 0).slice(0, 6);
+                  const networkMatches = matchOperatorsToNetwork(groups, summary.networkTradecraft ?? []);
+                  const matchByOp = new Map(networkMatches.map((m) => [m.operatorKey, m]));
                   return (
                   <>
                   {groups.length > 1 && tradecraft.length > 0 && (
@@ -816,6 +819,19 @@ export default function SiteAnalyticsPage() {
                               style={{ display: "inline-flex", alignItems: "center", gap: "0.25rem", fontSize: "0.6rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em", color: c, border: `1px solid ${c}`, borderRadius: 999, padding: "0.1rem 0.45rem" }}
                             >
                               network: {net.severity} · {net.otherWorkspaces}{net.ttps && net.ttps.length ? ` · ${net.ttps.length} TTP${net.ttps.length === 1 ? "" : "s"}` : ""}
+                            </span>
+                          );
+                        })()}
+                        {matchByOp.get(g.operatorKey) && (() => {
+                          const m = matchByOp.get(g.operatorKey)!;
+                          const c = m.severity === "hostile" ? "var(--wp-error, #ef4444)" : "var(--wp-warning, #f5a623)";
+                          return (
+                            <span
+                              data-testid={`operator-network-match-${g.operatorKey}`}
+                              title={`Matches a known-hostile network actor seen by ${m.networkWorkspaces} other workspace(s) - ${Math.round(m.similarity * 100)}% tradecraft match, even though the fingerprint is new here. Shared: ${m.sharedTells.join(", ")}`}
+                              style={{ display: "inline-flex", alignItems: "center", gap: "0.25rem", fontSize: "0.6rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em", color: c, border: `1px dashed ${c}`, borderRadius: 999, padding: "0.1rem 0.45rem" }}
+                            >
+                              matches network actor · {Math.round(m.similarity * 100)}%
                             </span>
                           );
                         })()}
