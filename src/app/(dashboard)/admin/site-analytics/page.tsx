@@ -19,6 +19,7 @@ import type { JourneyStep } from "@/lib/agent-behavior";
 import { triageJourneys, type Severity } from "@/lib/agent-triage";
 import { consolidateByOperator, deriveOperatorInsight, deriveTrustProfile } from "@/lib/agent-operators-view";
 import { decideEdgeAction, type EdgeMode } from "@/lib/forcefield/edge-enforcement";
+import { ForcefieldSwitch } from "@/components/ForcefieldSwitch";
 
 interface Summary {
   rangeDays: number;
@@ -433,6 +434,34 @@ export default function SiteAnalyticsPage() {
 
       {state === "ready" && summary && (
         <>
+          {/* Forcefield hero: the prominent auto-block on/off. The count is how many
+              operators in view the edge would block or challenge if protection were on. */}
+          {permissions.manageOperators && (() => {
+            const groups = consolidateByOperator(summary.journeys);
+            const wouldActCount = groups.filter((g) => {
+              const pr = summary.principalByOperator?.[g.operatorKey];
+              const d = decideEdgeAction(
+                {
+                  blocked: blockedOverride[g.operatorKey] ?? (summary.blockedOperators ?? []).includes(g.operatorKey),
+                  trustBand: deriveTrustProfile(g).band,
+                  mandateExceeded: pr?.mandateExceeded ?? false,
+                  principalStatus: pr?.status ?? "absent",
+                  networkHostile: summary.networkReputation?.[g.operatorKey]?.severity === "hostile",
+                },
+                { mode: "enforce" },
+              );
+              return d.intended !== "allow";
+            }).length;
+            return (
+              <ForcefieldSwitch
+                mode={edgeMode}
+                canManage={permissions.manageOperators}
+                onToggle={(next) => void saveEdgeMode(next)}
+                wouldActCount={wouldActCount}
+              />
+            );
+          })()}
+
           {/* Totals */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "1rem" }}>
             <div style={card}>
@@ -655,21 +684,6 @@ export default function SiteAnalyticsPage() {
                       <input type="checkbox" data-testid="reputation-optin-consume" checked={!!repOptIn?.consume} onChange={(e) => void saveReputationOptIn({ contribute: !!repOptIn?.contribute, consume: e.target.checked })} />
                       Flag operators already known hostile to other workspaces
                     </label>
-                  </div>
-                )}
-                {permissions.manageOperators && (
-                  <div data-testid="edge-policy" style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap", padding: "0.55rem 0.7rem", borderRadius: 8, background: "var(--wp-dark-2, rgba(255,255,255,0.03))", border: `1px solid ${edgeMode === "enforce" ? "var(--wp-warning, #f5a623)" : "var(--wp-dark-border, #333)"}` }}>
-                    <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--wp-text, #eee)" }}>Inline edge enforcement</span>
-                    <span data-testid="edge-policy-mode" style={{ fontSize: "0.62rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em", borderRadius: 999, padding: "0.1rem 0.5rem", color: "var(--wp-dark, #0b0d11)", background: edgeMode === "enforce" ? "var(--wp-warning, #f5a623)" : "var(--wp-text-muted, #9ca3af)" }}>{edgeMode === "enforce" ? "enforcing" : "monitor (shadow)"}</span>
-                    <span style={{ fontSize: "0.62rem", color: "var(--wp-text-muted, #9ca3af)" }}>{edgeMode === "enforce" ? "the edge blocks/challenges in real time" : "decisions are recorded but nothing is blocked"}</span>
-                    <button
-                      type="button"
-                      data-testid="edge-policy-toggle"
-                      onClick={() => void saveEdgeMode(edgeMode === "enforce" ? "monitor" : "enforce")}
-                      style={{ marginLeft: "auto", padding: "0.12rem 0.6rem", borderRadius: 999, fontSize: "0.68rem", fontWeight: 600, cursor: "pointer", background: "transparent", color: edgeMode === "enforce" ? "var(--wp-text-muted, #9ca3af)" : "var(--wp-warning, #f5a623)", border: `1px solid ${edgeMode === "enforce" ? "var(--wp-text-muted, #9ca3af)" : "var(--wp-warning, #f5a623)"}` }}
-                    >
-                      {edgeMode === "enforce" ? "Switch to monitor" : "Switch to enforce"}
-                    </button>
                   </div>
                 )}
                 {(() => {

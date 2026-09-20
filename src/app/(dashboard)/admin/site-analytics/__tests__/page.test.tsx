@@ -530,3 +530,15 @@ test("operator edge chip reads 'blocking' (not 'would block') once enforcement i
   await screen.findByTestId("ff-operators-view");
   await waitFor(() => expect(screen.getByTestId("operator-edge-op_abc12345")).toHaveTextContent(/^edge: blocking$/i));
 });
+
+test("the Forcefield hero switch is prominent - it renders at the top without switching to the operator view", async () => {
+  mockFetchWithRefresh.mockImplementation((url: string) => {
+    if (String(url).includes("/edge-policy")) return Promise.resolve({ ok: true, json: async () => ({ mode: "monitor" }) });
+    return Promise.resolve({ ok: true, json: async () => ({ summary: SUMMARY, permissions: PERMS }) });
+  });
+  render(<SiteAnalyticsPage />);
+  // visible on the default (severity) view, no interaction needed
+  await screen.findByTestId("edge-policy");
+  expect(screen.getByTestId("edge-policy-mode")).toHaveTextContent(/monitoring/i);
+  expect(screen.getByTestId("forcefield-standby-count")).toBeInTheDocument();
+});
