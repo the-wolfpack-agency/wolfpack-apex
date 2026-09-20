@@ -21,6 +21,7 @@ import { getReputationOptIn } from "@/lib/forcefield/operator-reputation";
 import { listCanariesForDisplay } from "@/lib/forcefield/canary-store";
 import { listIngestSources, ingestSigningEnforced } from "@/lib/forcefield/ingest-signing";
 import { anchorStatus } from "@/lib/forcefield/audit-anchor";
+import { buildPqInventory } from "@/lib/crypto/pq-inventory";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -39,6 +40,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     anchorStatus().catch(() => ({ configured: false, count: 0, lastSeq: null })),
   ]);
 
+  const pqInventory = buildPqInventory();
   const assurance = buildAssuranceReport({
     enforceMode: policy.mode,
     autoBlockEnabled: policy.autoBlock,
@@ -49,6 +51,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     hybridTlsAsserted: !!process.env.PROD_DOMAIN,
     externalAuditAnchor: anchors.configured && anchors.count > 0,
     ingestSourceSigned: ingestSigningEnforced() && ingestSources.length > 0,
+    pqQuantumVulnerable: pqInventory.quantumVulnerable,
+    pqSlotImplemented: pqInventory.pqSlotImplemented,
   });
 
   const [adversarial, breaches] = await Promise.all([runAdversarialSuite(), runBreachCorpus()]);

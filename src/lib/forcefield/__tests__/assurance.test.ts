@@ -7,12 +7,12 @@ import { buildAssuranceReport, type AssuranceInput } from "@/lib/forcefield/assu
 
 const bare: AssuranceInput = {
   enforceMode: "monitor", autoBlockEnabled: false, delegationIssuers: 0, asymmetricIssuers: 0,
-  decoysSeeded: 0, reputationConsume: false, hybridTlsAsserted: false, externalAuditAnchor: false, ingestSourceSigned: false,
+  decoysSeeded: 0, reputationConsume: false, hybridTlsAsserted: false, externalAuditAnchor: false, ingestSourceSigned: false, pqQuantumVulnerable: 2, pqSlotImplemented: false,
 };
 
 const armed: AssuranceInput = {
   enforceMode: "enforce", autoBlockEnabled: true, delegationIssuers: 3, asymmetricIssuers: 2,
-  decoysSeeded: 5, reputationConsume: true, hybridTlsAsserted: true, externalAuditAnchor: true, ingestSourceSigned: true,
+  decoysSeeded: 5, reputationConsume: true, hybridTlsAsserted: true, externalAuditAnchor: true, ingestSourceSigned: true, pqQuantumVulnerable: 2, pqSlotImplemented: false,
 };
 
 const byId = (r: ReturnType<typeof buildAssuranceReport>, id: string) => r.controls.find((c) => c.id === id)!;
