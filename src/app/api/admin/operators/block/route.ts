@@ -7,6 +7,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { blockOperator, unblockOperator } from "@/lib/agent-operators";
+import { contributeHostileOperator } from "@/lib/forcefield/operator-reputation";
 import { recordAudit } from "@/lib/audit-log";
 
 export const runtime = "nodejs";
@@ -29,6 +30,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   if (block) {
     await blockOperator({ workspaceId, operatorKey, reason: typeof body.reason === "string" ? body.reason.slice(0, 300) : undefined, blockedBy: auth.user.id });
+    // A block is a human-confirmed hostile signal. If this workspace opted in to
+    // the reputation network, contribute the opaque fingerprint so the rest of the
+    // network can pre-flag this operator. Gated + fail-safe inside the helper.
+    await contributeHostileOperator({ workspaceId, operatorKey, severity: "hostile" }).catch(() => {});
   } else {
     await unblockOperator(workspaceId, operatorKey);
   }
