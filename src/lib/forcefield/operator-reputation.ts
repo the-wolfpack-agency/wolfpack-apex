@@ -56,17 +56,19 @@ export async function contributeHostileOperator(input: {
   operatorKey: string;
   severity?: Severity;
   behaviorClasses?: readonly string[];
+  /** The specific tradecraft tells (signal names) this actor gave off. */
+  tells?: readonly string[];
 }): Promise<void> {
   if (!hasDatabase()) return;
   const { contribute } = await getReputationOptIn(input.workspaceId);
   if (!contribute) return; // not opted in: never share
   const severity = input.severity ?? "hostile"; // a block is a hostile confirmation
   await query(
-    `INSERT INTO instinct_operator_reputation (operator_key, workspace_id, severity, behavior_classes)
-       VALUES ($1, $2, $3, $4)
+    `INSERT INTO instinct_operator_reputation (operator_key, workspace_id, severity, behavior_classes, tells)
+       VALUES ($1, $2, $3, $4, $5)
      ON CONFLICT (operator_key, workspace_id) DO UPDATE
-       SET severity = EXCLUDED.severity, behavior_classes = EXCLUDED.behavior_classes, updated_at = now()`,
-    [input.operatorKey, input.workspaceId, severity, input.behaviorClasses ?? []],
+       SET severity = EXCLUDED.severity, behavior_classes = EXCLUDED.behavior_classes, tells = EXCLUDED.tells, updated_at = now()`,
+    [input.operatorKey, input.workspaceId, severity, input.behaviorClasses ?? [], input.tells ?? []],
   );
 }
 
@@ -76,6 +78,9 @@ export interface NetworkReputation {
   otherWorkspaces: number;
   /** Worst severity reported by other workspaces. */
   severity: Severity;
+  /** Union of the tradecraft this actor showed across workspaces (behavior
+   *  classes + tells), so you recognize its METHODS, not just its fingerprint. */
+  ttps: string[];
 }
 
 const SEV_BY_RANK: Record<number, Severity> = { 3: "hostile", 2: "elevated", 1: "benign" };
@@ -100,14 +105,20 @@ export async function getNetworkReputation(
   // Cross-workspace by design: aggregate reports from workspaces OTHER than the
   // caller. Selects workspace_id (the count) but is intentionally not workspace-
   // scoped - this is the network signal.
-  const { rows } = await safeQuery<{ operator_key: string; other_workspaces: string; hostile_reporters: string; sev_rank: number }>(
-    `SELECT operator_key,
-            count(DISTINCT workspace_id) AS other_workspaces,
-            count(DISTINCT workspace_id) FILTER (WHERE severity = 'hostile') AS hostile_reporters,
-            max(CASE severity WHEN 'hostile' THEN 3 WHEN 'elevated' THEN 2 ELSE 1 END) AS sev_rank
-       FROM instinct_operator_reputation
-      WHERE operator_key = ANY($1) AND workspace_id <> $2
-      GROUP BY operator_key`,
+  const { rows } = await safeQuery<{ operator_key: string; other_workspaces: string; hostile_reporters: string; sev_rank: number; ttps: string[] | null }>(
+    // ttps: the union of every tradecraft signal (behavior classes + tells) this
+    // actor showed across ALL reporting workspaces. LEFT JOIN LATERAL unnest so an
+    // actor with empty arrays still counts toward other_workspaces; array_agg
+    // DISTINCT then dedupes across the whole group. Capped to 12 in JS.
+    `SELECT r.operator_key,
+            count(DISTINCT r.workspace_id) AS other_workspaces,
+            count(DISTINCT r.workspace_id) FILTER (WHERE r.severity = 'hostile') AS hostile_reporters,
+            max(CASE r.severity WHEN 'hostile' THEN 3 WHEN 'elevated' THEN 2 ELSE 1 END) AS sev_rank,
+            array_remove(array_agg(DISTINCT sig.tag), NULL) AS ttps
+       FROM instinct_operator_reputation r
+       LEFT JOIN LATERAL unnest(r.behavior_classes || r.tells) AS sig(tag) ON true
+      WHERE r.operator_key = ANY($1) AND r.workspace_id <> $2
+      GROUP BY r.operator_key`,
     [operatorKeys as string[], callerWorkspaceId],
   );
   const out: Record<string, NetworkReputation> = {};
@@ -119,7 +130,8 @@ export async function getNetworkReputation(
     if (hostileReporters >= HOSTILE_CORROBORATION_MIN) severity = "hostile"; // corroborated
     else if (hostileReporters >= 1) severity = "elevated";                   // uncorroborated hostile -> challenge, not block
     else severity = SEV_BY_RANK[r.sev_rank] ?? "elevated";                   // elevated/benign as reported
-    out[r.operator_key] = { operatorKey: r.operator_key, otherWorkspaces: n, severity };
+    const ttps = (Array.isArray(r.ttps) ? r.ttps.filter((t): t is string => typeof t === "string" && t.length > 0) : []).slice(0, 12);
+    out[r.operator_key] = { operatorKey: r.operator_key, otherWorkspaces: n, severity, ttps };
   }
   return out;
 }

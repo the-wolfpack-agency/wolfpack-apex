@@ -272,6 +272,38 @@ const CLASS_RANK: Record<string, number> = {
 };
 const SEVERITY_WORD: Record<Severity, string> = { hostile: "hostile", elevated: "elevated-risk", benign: "benign" };
 
+/** One row of the corpus-wide tradecraft ranking: a signal/class/attack tag and
+ *  how many DISTINCT operators showed it. */
+export interface TradecraftPrevalence {
+  tag: string;
+  /** Distinct operators (not findings) that exhibited this tag. */
+  operators: number;
+}
+
+/**
+ * Insights over ALL the agents we have encountered, not one at a time. As the
+ * dataset grows this is where the pattern surfaces: which tradecraft is most
+ * common across every operator (behavior classes + the higher-order insight kinds
+ * + named attacks), counted by DISTINCT operators so a single noisy actor cannot
+ * dominate the ranking. Pure + deterministic (ties broken by tag name), so it is
+ * cheap to compute over the groups already in memory and safe to test. The corpus
+ * itself is the durable intel (every journey is persisted); this reads it.
+ */
+export function aggregateTradecraft<T extends OperatorViewJourney>(groups: readonly OperatorGroup<T>[]): TradecraftPrevalence[] {
+  const counts = new Map<string, number>();
+  for (const g of groups) {
+    // Count each tag at most once per operator (distinct-operator prevalence).
+    const tags = new Set<string>();
+    for (const c of g.behaviorClasses) if (c && c !== "unclassified") tags.add(c);
+    for (const a of g.attacks) if (a) tags.add(`attack:${a}`);
+    for (const j of g.journeys) for (const i of j.profile.insights) if (i.kind) tags.add(i.kind);
+    for (const t of tags) counts.set(t, (counts.get(t) ?? 0) + 1);
+  }
+  return Array.from(counts.entries())
+    .map(([tag, operators]) => ({ tag, operators }))
+    .sort((a, b) => b.operators - a.operators || a.tag.localeCompare(b.tag));
+}
+
 /** Synthesize one operator group into a decision-ready brief. Deterministic. */
 export function deriveOperatorInsight<T extends OperatorViewJourney>(g: OperatorGroup<T>): OperatorInsight {
   const confidence: "proven" | "inferred" = g.proven ? "proven" : "inferred";

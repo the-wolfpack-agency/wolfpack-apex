@@ -22,7 +22,7 @@ import { timingSafeEqual } from "crypto";
 import { decideEdgeAction, qualifiesForAutoBlock, type EdgeSignals, type EdgePrincipalStatus } from "@/lib/forcefield/edge-enforcement";
 import { getEdgePolicy } from "@/lib/forcefield/edge-policy";
 import { listBlockedOperatorKeys, blockOperator } from "@/lib/agent-operators";
-import { getNetworkReputation, type NetworkReputation } from "@/lib/forcefield/operator-reputation";
+import { getNetworkReputation, contributeHostileOperator, type NetworkReputation } from "@/lib/forcefield/operator-reputation";
 import { trackEvent } from "@/lib/analytics";
 import { recordAudit } from "@/lib/audit-log";
 import type { TrustBand } from "@/lib/agent-operators-view";
@@ -88,6 +88,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const q = qualifiesForAutoBlock(signals, { proven: body.proven === true });
     if (q.auto) {
       await blockOperator({ workspaceId: EDGE_WORKSPACE_ID, operatorKey, reason: `auto: ${q.reason}`, blockedBy: "forcefield.auto" }).catch(() => {});
+      // An auto-block is a proven-hostile decision too - contribute it to the
+      // reputation network (gated + fail-safe inside the helper) so other
+      // workspaces learn this operator's methods. The rule that fired IS the tell;
+      // no extra DB read on this hot path. Non-PII: opaque key + rule name.
+      void contributeHostileOperator({ workspaceId: EDGE_WORKSPACE_ID, operatorKey, severity: "hostile", tells: [decision.ruleId] }).catch(() => {});
       autoBlocked = true;
       trackEvent("forcefield.operator_auto_blocked", `operator:${operatorKey}`, "forcefield", {
         operator: operatorKey, rule: decision.ruleId, proven: true,

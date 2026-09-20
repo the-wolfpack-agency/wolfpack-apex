@@ -7,7 +7,8 @@ const trackEvent = jest.fn();
 const blockOperator = jest.fn();
 const recordAudit = jest.fn();
 jest.mock("@/lib/agent-operators", () => ({ listBlockedOperatorKeys: (...a: unknown[]) => listBlockedOperatorKeys(...a), blockOperator: (...a: unknown[]) => blockOperator(...a) }));
-jest.mock("@/lib/forcefield/operator-reputation", () => ({ getNetworkReputation: (...a: unknown[]) => getNetworkReputation(...a) }));
+const contributeHostileOperator = jest.fn();
+jest.mock("@/lib/forcefield/operator-reputation", () => ({ getNetworkReputation: (...a: unknown[]) => getNetworkReputation(...a), contributeHostileOperator: (...a: unknown[]) => contributeHostileOperator(...a) }));
 jest.mock("@/lib/forcefield/edge-policy", () => ({ getEdgePolicy: (...a: unknown[]) => getEdgePolicy(...a) }));
 jest.mock("@/lib/analytics", () => ({ trackEvent: (...a: unknown[]) => trackEvent(...a) }));
 jest.mock("@/lib/audit-log", () => ({ recordAudit: (...a: unknown[]) => recordAudit(...a) }));
@@ -20,7 +21,8 @@ const req = (body: unknown, token = "edge-token") =>
 
 beforeEach(() => {
   process.env.FORCEFIELD_EDGE_TOKEN = "edge-token";
-  [listBlockedOperatorKeys, getNetworkReputation, getEdgePolicy, trackEvent, blockOperator, recordAudit].forEach((m) => m.mockReset());
+  [listBlockedOperatorKeys, getNetworkReputation, getEdgePolicy, trackEvent, blockOperator, recordAudit, contributeHostileOperator].forEach((m) => m.mockReset());
+  contributeHostileOperator.mockResolvedValue(undefined);
   recordAudit.mockResolvedValue(undefined); blockOperator.mockResolvedValue(undefined);
   listBlockedOperatorKeys.mockResolvedValue(new Set());
   getNetworkReputation.mockResolvedValue({});
@@ -71,6 +73,9 @@ describe("auto-block: stop the proven-bad agent, spare everyone else", () => {
     const body = await res.json();
     expect(body.autoBlocked).toBe(true);
     expect(blockOperator).toHaveBeenCalledWith(expect.objectContaining({ operatorKey: "op-bad", blockedBy: "forcefield.auto" }));
+    // an auto-block is a proven-hostile signal: it contributes to the network too,
+    // carrying the rule that fired as the shared tell (no extra DB read).
+    expect(contributeHostileOperator).toHaveBeenCalledWith(expect.objectContaining({ operatorKey: "op-bad", severity: "hostile", tells: ["trust_hostile"] }));
     expect(trackEvent).toHaveBeenCalledWith("forcefield.operator_auto_blocked", expect.any(String), expect.any(String), expect.objectContaining({ operator: "op-bad" }));
     // enforcement never blinds observation: the decision event still fires on a block
     expect(trackEvent).toHaveBeenCalledWith("forcefield.edge_decision", expect.any(String), expect.any(String), expect.objectContaining({ action: "block" }));

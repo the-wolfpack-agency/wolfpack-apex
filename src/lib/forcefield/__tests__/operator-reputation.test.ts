@@ -28,7 +28,7 @@ describe("operator reputation - opt-in gating", () => {
     await contributeHostileOperator({ workspaceId: "w1", operatorKey: "op_x", severity: "hostile" });
     expect(query).toHaveBeenCalledTimes(1);
     expect(String(query.mock.calls[0][0])).toMatch(/INSERT INTO instinct_operator_reputation/);
-    expect(query.mock.calls[0][1]).toEqual(["op_x", "w1", "hostile", []]);
+    expect(query.mock.calls[0][1]).toEqual(["op_x", "w1", "hostile", [], []]);
   });
 
   it("returns {} from the network read when not opted in to consume", async () => {
@@ -42,11 +42,41 @@ describe("operator reputation - opt-in gating", () => {
     optIn(false, true);
     safeQuery.mockResolvedValueOnce({ rows: [{ operator_key: "op_x", other_workspaces: "3", sev_rank: 3 }] });
     const r = await getNetworkReputation("w1", ["op_x"]);
-    expect(r.op_x).toEqual({ operatorKey: "op_x", otherWorkspaces: 3, severity: "hostile" });
+    expect(r.op_x).toEqual({ operatorKey: "op_x", otherWorkspaces: 3, severity: "hostile", ttps: [] });
     // the network query excludes the caller's own workspace
     const call = safeQuery.mock.calls[1];
     expect(String(call[0])).toMatch(/workspace_id <> \$2/);
     expect(call[1]).toEqual([["op_x"], "w1"]);
+  });
+
+  it("contributes the behavioral signature (behavior classes + tells), not just the fingerprint", async () => {
+    optIn(true, false);
+    await contributeHostileOperator({
+      workspaceId: "w1",
+      operatorKey: "op_x",
+      severity: "hostile",
+      behaviorClasses: ["aggressive_scraper", "exploit_attempt"],
+      tells: ["tripped_decoy", "payload_attack", "id_enumeration"],
+    });
+    expect(query).toHaveBeenCalledTimes(1);
+    expect(String(query.mock.calls[0][0])).toMatch(/behavior_classes, tells/);
+    expect(query.mock.calls[0][1]).toEqual([
+      "op_x", "w1", "hostile",
+      ["aggressive_scraper", "exploit_attempt"],
+      ["tripped_decoy", "payload_attack", "id_enumeration"],
+    ]);
+  });
+
+  it("surfaces the shared TTPs (deduped tradecraft) on the network read", async () => {
+    optIn(false, true);
+    safeQuery.mockResolvedValueOnce({
+      rows: [{ operator_key: "op_x", other_workspaces: "2", hostile_reporters: "2", sev_rank: 3, ttps: ["payload_attack", "id_enumeration", "tripped_decoy"] }],
+    });
+    const r = await getNetworkReputation("w1", ["op_x"]);
+    expect(r.op_x.severity).toBe("hostile");
+    expect(r.op_x.ttps).toEqual(["payload_attack", "id_enumeration", "tripped_decoy"]);
+    // the read aggregates behavior_classes || tells across the group
+    expect(String(safeQuery.mock.calls[1][0])).toMatch(/behavior_classes \|\| r\.tells/);
   });
 
   it("returns {} for an empty key set without touching the db", async () => {

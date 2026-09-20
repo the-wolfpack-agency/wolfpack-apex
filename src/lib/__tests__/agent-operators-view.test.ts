@@ -1,4 +1,4 @@
-import { consolidateByOperator, type OperatorViewJourney } from "@/lib/agent-operators-view";
+import { consolidateByOperator, aggregateTradecraft, type OperatorViewJourney } from "@/lib/agent-operators-view";
 
 function j(over: Partial<OperatorViewJourney> & { operatorKey: string }): OperatorViewJourney {
   const { operatorKey, ...rest } = over;
@@ -134,5 +134,40 @@ describe("sub-actors (B) - finer identity without changing the durable key", () 
     const a = consolidateByOperator(input)[0].subActors.map((s) => s.fingerprint).sort();
     const b = consolidateByOperator(input)[0].subActors.map((s) => s.fingerprint).sort();
     expect(a).toEqual(b);
+  });
+});
+
+
+describe("aggregateTradecraft - insights over ALL operators", () => {
+  it("counts each tag by DISTINCT operators (a noisy single actor cannot dominate)", () => {
+    const groups = consolidateByOperator([
+      // operator A: two findings, both exploit_attempt + payload_attack
+      j({ operatorKey: "op_a", behaviorClass: "exploit_attempt", key: "a1", profile: { operatorKey: "op_a", scaffolding: { pathDiscovery: "none", readsRobotsFirst: false }, toolComposition: { usedTools: ["fetch"] }, insights: [{ kind: "payload_attack", attack: "sqli" }] } }),
+      j({ operatorKey: "op_a", behaviorClass: "exploit_attempt", key: "a2", profile: { operatorKey: "op_a", scaffolding: { pathDiscovery: "none", readsRobotsFirst: false }, toolComposition: { usedTools: ["fetch"] }, insights: [{ kind: "payload_attack", attack: "sqli" }] } }),
+      // operator B: one finding, vuln_scanner
+      j({ operatorKey: "op_b", behaviorClass: "vuln_scanner", key: "b1" }),
+    ]);
+    const tc = aggregateTradecraft(groups);
+    const byTag = Object.fromEntries(tc.map((t) => [t.tag, t.operators]));
+    // exploit_attempt shown by 1 distinct operator (A), despite 2 findings
+    expect(byTag.exploit_attempt).toBe(1);
+    expect(byTag.payload_attack).toBe(1);
+    expect(byTag["attack:sqli"]).toBe(1);
+    expect(byTag.vuln_scanner).toBe(1);
+  });
+
+  it("ranks the most prevalent tradecraft first, ties broken by tag name; drops unclassified", () => {
+    const groups = consolidateByOperator([
+      j({ operatorKey: "op_1", behaviorClass: "aggressive_scraper" }),
+      j({ operatorKey: "op_2", behaviorClass: "aggressive_scraper" }),
+      j({ operatorKey: "op_3", behaviorClass: "unclassified" }),
+    ]);
+    const tc = aggregateTradecraft(groups);
+    expect(tc[0]).toEqual({ tag: "aggressive_scraper", operators: 2 });
+    expect(tc.some((t) => t.tag === "unclassified")).toBe(false);
+  });
+
+  it("returns [] for no operators", () => {
+    expect(aggregateTradecraft([])).toEqual([]);
   });
 });
