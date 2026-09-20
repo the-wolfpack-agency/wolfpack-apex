@@ -15,8 +15,13 @@ export type ActionSeverity = "good" | "info" | "notice" | "hostile";
 
 export interface ActionLogEntry {
   at: string;
-  /** Wall clock HH:MM:SS (UTC-agnostic; formatted from the ISO instant). */
+  /** Wall clock HH:MM:SS (UTC). */
   clock: string;
+  /** Short date, e.g. "20 Sep 2026" (UTC). Shown when the day changes so a
+   *  multi-day journey is never ambiguous. */
+  date: string;
+  /** Stable day key (YYYY-MM-DD, UTC) for detecting a day change between steps. */
+  dayKey: string;
   /** Elapsed since the previous step, e.g. "+4s" / "+2m" ("start" for the first). */
   delta: string;
   phase: ActionPhase;
@@ -58,6 +63,21 @@ function clockOf(iso: string): string {
   return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
 }
 
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+function dateOf(iso: string): string {
+  const ms = Date.parse(iso);
+  if (Number.isNaN(ms)) return "";
+  const d = new Date(ms);
+  return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+}
+function dayKeyOf(iso: string): string {
+  const ms = Date.parse(iso);
+  if (Number.isNaN(ms)) return "";
+  const d = new Date(ms);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+}
+
 function deltaOf(prevIso: string | null, iso: string): string {
   if (!prevIso) return "start";
   const a = Date.parse(prevIso);
@@ -95,6 +115,8 @@ export function buildActionLog(steps: readonly JourneyStep[]): ActionLogEntry[] 
     out.push({
       at: step.at,
       clock: clockOf(step.at),
+      date: dateOf(step.at),
+      dayKey: dayKeyOf(step.at),
       delta: deltaOf(prevIso, step.at),
       phase,
       severity: d.severity,

@@ -46,6 +46,18 @@ describe("buildActionLog", () => {
     expect(log[0].clock).toBe("10:00:00");
   });
 
+  it("carries an explicit UTC date + day key so a multi-day journey is unambiguous", () => {
+    const log = buildActionLog([
+      step("2026-09-20T23:59:00Z", "/a", null),
+      step("2026-09-21T00:10:00Z", "/b", "probed_sensitive"), // crosses midnight
+    ]);
+    expect(log[0].date).toBe("20 Sep 2026");
+    expect(log[0].dayKey).toBe("2026-09-20");
+    expect(log[1].date).toBe("21 Sep 2026");
+    expect(log[1].dayKey).toBe("2026-09-21");
+    expect(log[0].dayKey).not.toBe(log[1].dayKey);
+  });
+
   it("labels everything lead-up when there is no hostile act", () => {
     const log = buildActionLog([
       step("2026-09-20T10:00:00Z", "/robots.txt", "read_robots"),
