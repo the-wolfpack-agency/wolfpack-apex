@@ -28,6 +28,9 @@ export interface AssuranceInput {
   hybridTlsAsserted: boolean;
   externalAuditAnchor: boolean;
   ingestSourceSigned: boolean;
+  /** From the PQ crypto inventory. */
+  pqQuantumVulnerable: number;
+  pqSlotImplemented: boolean;
 }
 
 export interface AssuranceReport {
@@ -123,8 +126,10 @@ export function buildAssuranceReport(input: AssuranceInput): AssuranceReport {
     {
       id: "crypto.pq_signatures",
       title: "Post-quantum signatures (ML-DSA)",
-      status: "partial",
-      detail: "Crypto-agility registry + reserved ML-DSA-65 slot; asymmetric ES256 live, PQ signing fails closed until implemented.",
+      status: input.pqSlotImplemented ? "active" : "partial",
+      detail: input.pqSlotImplemented
+        ? "ML-DSA-65 signing is live; the audit head and delegations can dual-sign (classical + PQ)."
+        : `Crypto-agility registry with a precise PQ inventory: ${input.pqQuantumVulnerable} asymmetric algorithm(s) are the migration targets, symmetric HMAC is PQ-resilient, and the ML-DSA-65 slot is reserved (fails closed) until a compliant lib lands. Quantum-migration-ready, not quantum-safe today.`,
     },
   ];
 
