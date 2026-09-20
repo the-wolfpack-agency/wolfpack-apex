@@ -14,6 +14,9 @@ export interface DelegationBody {
   audience?: string;
   /** Expiry, epoch seconds. Absent = does not expire (discouraged). */
   exp?: number;
+  /** Unique credential id. Required to defend against replay: a jti is accepted
+   *  once, then any later presentation of the same jti is rejected. */
+  jti?: string;
 }
 
 export interface PrincipalVerdict {
@@ -26,11 +29,14 @@ export interface PrincipalVerdict {
   reason: string;
 }
 
-/** A registered issuer a workspace trusts to sign delegations. */
+/** A registered issuer a workspace trusts to sign delegations. hs256 carries a
+ *  shared symmetric `secret`; es256 (and the reserved ml-dsa-65-hybrid PQ slot)
+ *  carry an asymmetric `publicKey` (JWK) so there is no shared secret to leak. */
 export interface DelegationIssuer {
   issuer: string;
-  algorithm: "hs256";
-  secret: string;
+  algorithm: "hs256" | "es256" | "ml-dsa-65-hybrid";
+  secret?: string | null;
+  publicKey?: Record<string, unknown> | null;
   allowedScopes: string[];
 }
 

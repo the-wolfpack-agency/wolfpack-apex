@@ -42,6 +42,13 @@ it("POST registers a valid issuer and audits (secret never in the audit)", async
   expect(JSON.stringify(audit.afterState)).not.toContain("a-strong-secret-value");
 });
 
+it("POST registers an ASYMMETRIC issuer from a public key (no secret needed)", async () => {
+  requireCapability.mockResolvedValue(OK);
+  const res = await POST(req({ issuer: "asym-fleet", publicKey: { kty: "EC", crv: "P-256", x: "a", y: "b" }, allowedScopes: ["/catalog"] }));
+  expect(res.status).toBe(200);
+  expect(registerDelegationIssuer).toHaveBeenCalledWith(expect.objectContaining({ issuer: "asym-fleet", publicKey: expect.objectContaining({ kty: "EC" }) }));
+});
+
 it("POST 400s a too-short secret and never registers", async () => {
   requireCapability.mockResolvedValue(OK);
   expect((await POST(req({ issuer: "acme", secret: "short" }))).status).toBe(400);
