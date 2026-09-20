@@ -107,12 +107,17 @@ export async function POST(req: NextRequest) {
   // registered issuer and it has not expired; anything else is "claimed". This is
   // the honesty rail: the marketing site cannot hold our issuer secrets, so it
   // cannot self-certify a principal - only this boundary can.
-  if (typeof b.delegation === "string" && b.delegation.length > 0) {
-    const verdict = await verifyPresentedDelegation(b.delegation, {
-      resolveIssuer: (iss) => getDelegationIssuer(SITE_WORKSPACE_ID, iss),
-      nowSeconds: Math.floor(Date.now() / 1000),
-      audience: process.env.SITE_ANALYTICS_AUDIENCE,
-    });
+  // Always run the verifier: it returns "absent" for a missing/empty credential,
+  // so the decision to verify is NOT gated on a user-controlled value, and a
+  // missing credential can never bypass anything - absent is the untrusted
+  // default. Only a non-absent verdict writes principal props.
+  const presented = typeof b.delegation === "string" && b.delegation.length > 0 ? b.delegation : null;
+  const verdict = await verifyPresentedDelegation(presented, {
+    resolveIssuer: (iss) => getDelegationIssuer(SITE_WORKSPACE_ID, iss),
+    nowSeconds: Math.floor(Date.now() / 1000),
+    audience: process.env.SITE_ANALYTICS_AUDIENCE,
+  });
+  if (verdict.status !== "absent") {
     props.principal_status = verdict.status;
     if (verdict.principal) props.principal = verdict.principal.slice(0, 120);
     if (verdict.issuer) props.principal_issuer = verdict.issuer.slice(0, 120);
