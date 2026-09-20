@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Admin Site Analytics: where and when ogiam.com is being used, on our own
+ * Forcefield (OGIAM.com agent defense): where and when ogiam.com is being used, on our own
  * infrastructure (no third-party analytics product). Reads the aggregated
  * summary from /api/admin/site-analytics and renders the REUSED HourHeatmap
  * (time of day) plus top pages and top countries. Gated by analytics.view.
@@ -402,7 +402,7 @@ export default function SiteAnalyticsPage() {
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "1rem", flexWrap: "wrap" }}>
         <div>
           <h1 style={{ margin: 0, fontSize: "1.35rem", fontWeight: 700, color: "var(--wp-text, #eee)", display: "flex", alignItems: "center", gap: "0.55rem", flexWrap: "wrap" }}>
-            Site Analytics
+            Forcefield
             <span
               data-testid="site-analytics-scope"
               style={{

@@ -338,7 +338,7 @@ function BarList({
   );
 }
 
-/* HourHeatmap moved to src/components/HourHeatmap.tsx (reused by Site Analytics). */
+/* HourHeatmap moved to src/components/HourHeatmap.tsx (reused by Forcefield (site analytics)). */
 
 /* ------------------------------------------------------------------ */
 /* Section card                                                        */
