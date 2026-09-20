@@ -16,7 +16,7 @@ import { AgentOriginMap } from "@/components/AgentOriginMap";
 import { AgentJourneyTimeline } from "@/components/AgentJourneyTimeline";
 import type { JourneyStep } from "@/lib/agent-behavior";
 import { triageJourneys, type Severity } from "@/lib/agent-triage";
-import { consolidateByOperator, deriveOperatorInsight } from "@/lib/agent-operators-view";
+import { consolidateByOperator, deriveOperatorInsight, deriveTrustProfile } from "@/lib/agent-operators-view";
 
 interface Summary {
   rangeDays: number;
@@ -248,7 +248,7 @@ export default function SiteAnalyticsPage() {
     </button>
   );
   const renderJourneyCard = (j: Journey) => (
-    <li key={j.key} data-testid={`ff-journey-${j.key}`} style={{ border: "1px solid var(--wp-dark-border, #333)", borderRadius: 6, padding: "0.7rem 0.8rem" }}>
+    <li key={j.key} data-testid={`ff-journey-${j.key}`} style={{ border: "1px solid var(--wp-dark-border, #333)", borderRadius: 6, padding: "0.7rem 0.8rem", minWidth: 0 }}>
       <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
         <span style={{ fontWeight: 700, fontSize: "0.9rem", color: CLASS_COLOR[j.behaviorClass] ?? "var(--wp-text, #eee)" }}>
           {CLASS_LABEL[j.behaviorClass] ?? j.behaviorClass}
@@ -639,9 +639,20 @@ export default function SiteAnalyticsPage() {
                       </div>
                       {(() => {
                         const insight = deriveOperatorInsight(g);
+                        const trust = deriveTrustProfile(g);
                         const actionColor: Record<string, string> = { block: "var(--wp-error, #ef4444)", escalate: "var(--wp-warning, #f5a623)", watch: "var(--wp-gold, #e8b528)", acknowledge: "var(--wp-text-muted, #9ca3af)" };
+                        const bandColor: Record<string, string> = { trusted: "var(--wp-success, #30a46c)", caution: "var(--wp-gold, #e8b528)", untrusted: "var(--wp-warning, #f5a623)", hostile: "var(--wp-error, #ef4444)" };
                         return (
-                          <div data-testid={`operator-insight-${g.operatorKey}`} style={{ display: "grid", gap: "0.3rem", padding: "0.5rem 0.6rem", borderRadius: 6, background: "var(--wp-dark-2, rgba(255,255,255,0.03))", border: "1px solid var(--wp-dark-border, #333)" }}>
+                          <div data-testid={`operator-insight-${g.operatorKey}`} style={{ display: "grid", gap: "0.4rem", padding: "0.5rem 0.6rem", borderRadius: 6, background: "var(--wp-dark-2, rgba(255,255,255,0.03))", border: "1px solid var(--wp-dark-border, #333)" }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", flexWrap: "wrap" }}>
+                              <span data-testid={`operator-trust-${g.operatorKey}`} title={trust.rationale} style={{ display: "inline-flex", alignItems: "baseline", gap: "0.25rem", padding: "0.15rem 0.55rem", borderRadius: 8, border: `1px solid ${bandColor[trust.band]}`, background: `color-mix(in srgb, ${bandColor[trust.band]} 12%, transparent)` }}>
+                                <span style={{ fontSize: "1.15rem", fontWeight: 800, lineHeight: 1, color: bandColor[trust.band] }}>{trust.score}</span>
+                                <span style={{ fontSize: "0.58rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em", color: bandColor[trust.band] }}>/100 {trust.band}</span>
+                              </span>
+                              <span style={{ fontSize: "0.6rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em", color: "var(--wp-text-muted, #6b7280)" }}>Intent</span>
+                              <span data-testid={`operator-intent-${g.operatorKey}`} style={{ fontSize: "0.78rem", fontWeight: 600, color: "var(--wp-text, #eee)" }}>{trust.intentLabel}</span>
+                              <span style={{ fontSize: "0.6rem", color: "var(--wp-text-muted, #6b7280)" }}>({trust.intentConfidence})</span>
+                            </div>
                             <div style={{ display: "flex", alignItems: "baseline", gap: "0.5rem", flexWrap: "wrap" }}>
                               <span data-testid={`operator-verdict-${g.operatorKey}`} style={{ fontSize: "0.82rem", fontWeight: 700, color: sevColor(g.severity) }}>{insight.verdict}</span>
                               <span data-testid={`operator-recommend-${g.operatorKey}`} title={insight.actionRationale} style={{ marginLeft: "auto", fontSize: "0.62rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em", borderRadius: 999, padding: "0.1rem 0.5rem", color: "var(--wp-dark, #0b0d11)", background: actionColor[insight.recommendedAction] }}>Recommend: {insight.recommendedAction}</span>
@@ -667,7 +678,7 @@ export default function SiteAnalyticsPage() {
                           .slice(0, 40);
                         if (opSteps.length === 0) return null;
                         return (
-                          <div data-testid={`operator-path-${g.operatorKey}`} style={{ display: "grid", gap: "0.15rem" }}>
+                          <div data-testid={`operator-path-${g.operatorKey}`} style={{ display: "grid", gap: "0.15rem", minWidth: 0 }}>
                             <span style={{ fontSize: "0.62rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em", color: "var(--wp-text-muted, #6b7280)" }}>Path across the surface</span>
                             <AgentJourneyTimeline steps={opSteps} testId={`operator-timeline-${g.operatorKey}`} />
                           </div>

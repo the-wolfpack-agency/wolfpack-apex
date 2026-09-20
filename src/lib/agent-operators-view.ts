@@ -324,3 +324,109 @@ export function deriveOperatorInsight<T extends OperatorViewJourney>(g: Operator
 
   return { verdict, targeting, tells, recommendedAction, actionRationale, confidence };
 }
+
+// ── Agent trust score + intent (the market's "intent visibility") ────────────
+// A deterministic 0-100 trust score and an explicit INTENT for an operator,
+// synthesized from the signals we already hold: behavior class, proven-vs-
+// inferred, the higher-order insights (impersonation, deliberate violation,
+// payloads, IDOR enumeration, runaway loops), and targeting severity. This is
+// the industry's crown criterion ("what is it trying to do, and how much do I
+// trust it") - answered deterministically, so the score is reproducible and
+// auditable, never a black-box guess. Pure.
+
+export type TrustBand = "trusted" | "caution" | "untrusted" | "hostile";
+
+export type AgentIntent =
+  | "legitimate_crawl"
+  | "content_harvesting"
+  | "vulnerability_recon"
+  | "access_probing"
+  | "active_exploitation"
+  | "impersonation"
+  | "resource_abuse"
+  | "form_abuse"
+  | "unclear";
+
+export interface AgentTrustProfile {
+  /** 0 (hostile) to 100 (fully trusted). */
+  score: number;
+  band: TrustBand;
+  /** What the agent is trying to DO, not just its threat class. */
+  intent: AgentIntent;
+  intentLabel: string;
+  intentConfidence: "proven" | "inferred";
+  rationale: string;
+}
+
+const INTENT_LABEL: Record<AgentIntent, string> = {
+  legitimate_crawl: "Legitimate crawl",
+  content_harvesting: "Content harvesting",
+  vulnerability_recon: "Vulnerability reconnaissance",
+  access_probing: "Access-control probing (IDOR)",
+  active_exploitation: "Active exploitation",
+  impersonation: "Evasion via impersonation",
+  resource_abuse: "Resource abuse",
+  form_abuse: "Form abuse / spam",
+  unclear: "Unclear (low signal)",
+};
+
+// Base trust contribution of the worst behavior class the operator showed.
+const CLASS_TRUST: Record<string, number> = {
+  benign_crawler: 38,
+  suspicious: -3,
+  unclassified: -3,
+  form_spammer: -30,
+  aggressive_scraper: -35,
+  vuln_scanner: -40,
+  exploit_attempt: -50,
+};
+const CLASS_RANK_TRUST: Record<string, number> = {
+  exploit_attempt: 6, vuln_scanner: 5, aggressive_scraper: 4, form_spammer: 3, suspicious: 2, unclassified: 1, benign_crawler: 0,
+};
+
+function clamp01to100(n: number): number {
+  return Math.max(0, Math.min(100, Math.round(n)));
+}
+
+/** Synthesize an operator's trust score + intent. Deterministic. */
+export function deriveTrustProfile<T extends OperatorViewJourney>(g: OperatorGroup<T>): AgentTrustProfile {
+  const kinds = new Set(g.journeys.flatMap((j) => j.profile.insights.map((i) => i.kind)));
+  const classes = g.behaviorClasses;
+  const worstClass = [...classes].sort((a, b) => (CLASS_RANK_TRUST[b] ?? 0) - (CLASS_RANK_TRUST[a] ?? 0))[0] ?? "unclassified";
+
+  // Score: an unknown baseline moved by the worst class + compounding hostile
+  // tells + certainty + targeting severity.
+  let score = 55 + (CLASS_TRUST[worstClass] ?? 0);
+  if (kinds.has("payload_attack")) score -= 20;
+  if (kinds.has("impersonation")) score -= 25; // wearing a disguise is maximally untrustworthy
+  if (kinds.has("deliberate_violation")) score -= 15;
+  if (kinds.has("id_enumeration")) score -= 15;
+  if (kinds.has("runaway_loop")) score -= 10;
+  if (g.proven && g.severity === "hostile") score -= 8; // certain-bad pushes further down
+  if (worstClass === "benign_crawler" && g.proven) score += 7; // certain-good rewarded
+  if (g.targeting.topSeverity === "critical") score -= 8;
+  else if (g.targeting.topSeverity === "high") score -= 4;
+  score = clamp01to100(score);
+
+  const band: TrustBand = score >= 75 ? "trusted" : score >= 50 ? "caution" : score >= 25 ? "untrusted" : "hostile";
+
+  // Intent: what it is trying to do, worst-first.
+  let intent: AgentIntent;
+  if (kinds.has("payload_attack") || classes.includes("exploit_attempt")) intent = "active_exploitation";
+  else if (kinds.has("impersonation")) intent = "impersonation";
+  else if (kinds.has("id_enumeration")) intent = "access_probing";
+  else if (classes.includes("vuln_scanner")) intent = "vulnerability_recon";
+  else if (kinds.has("runaway_loop")) intent = "resource_abuse";
+  else if (classes.includes("form_spammer")) intent = "form_abuse";
+  else if (classes.includes("aggressive_scraper")) intent = "content_harvesting";
+  else if (classes.includes("benign_crawler")) intent = "legitimate_crawl";
+  else intent = "unclear";
+
+  const intentConfidence: "proven" | "inferred" = g.proven ? "proven" : "inferred";
+  const rationale =
+    intent === "legitimate_crawl"
+      ? "Identified and rule-respecting; no hostile behavior observed."
+      : `${intentConfidence === "proven" ? "Proven" : "Likely"} ${INTENT_LABEL[intent].toLowerCase()}${g.targeting.topSeverity !== "none" ? `, targeting ${g.targeting.topSeverity}-severity surfaces` : ""}.`;
+
+  return { score, band, intent, intentLabel: INTENT_LABEL[intent], intentConfidence, rationale };
+}
