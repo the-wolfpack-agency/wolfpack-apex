@@ -20,6 +20,7 @@ import { triageJourneys, type Severity } from "@/lib/agent-triage";
 import { consolidateByOperator, deriveOperatorInsight, deriveTrustProfile } from "@/lib/agent-operators-view";
 import { decideEdgeAction, type EdgeMode } from "@/lib/forcefield/edge-enforcement";
 import { ForcefieldSwitch } from "@/components/ForcefieldSwitch";
+import { ForcefieldAssurance } from "@/components/forcefield/ForcefieldAssurance";
 import { ProbeIntelPanel } from "@/components/forcefield/ProbeIntelPanel";
 import { PayloadIntelPanel } from "@/components/forcefield/PayloadIntelPanel";
 
@@ -495,6 +496,8 @@ export default function SiteAnalyticsPage() {
               />
             );
           })()}
+
+          {permissions.manageOperators && <ForcefieldAssurance />}
 
           {/* Totals */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "1rem" }}>
