@@ -747,12 +747,13 @@ export default function SiteAnalyticsPage() {
                         })()}
                         <span style={{ marginLeft: "auto", fontSize: "0.72rem", color: "var(--wp-text-muted, #9ca3af)" }}>{g.findingCount} finding{g.findingCount === 1 ? "" : "s"}</span>
                         {(() => {
+                          const pr = summary.principalByOperator?.[g.operatorKey];
                           const decision = decideEdgeAction(
                             {
                               blocked: isBlocked(g.operatorKey),
                               trustBand: deriveTrustProfile(g).band,
-                              mandateExceeded: false,
-                              principalStatus: "absent",
+                              mandateExceeded: pr?.mandateExceeded ?? false,
+                              principalStatus: pr?.status ?? "absent",
                               networkHostile: summary.networkReputation?.[g.operatorKey]?.severity === "hostile",
                             },
                             { mode: edgeMode },
