@@ -614,10 +614,6 @@ export default function SiteAnalyticsPage() {
             </div>
           </div>
 
-          {/* Probe intelligence + payload attacks, in the shared Forcefield visual language. */}
-          <ProbeIntelPanel intel={summary.probeIntel ?? []} />
-          <PayloadIntelPanel intel={summary.payloadIntel ?? []} />
-
           {/* Forcefield for the Web: agent traffic on ogiam.com. Watch-first, so
               these are observed, not blocked. */}
           <div style={card} data-testid="ff-agent-traffic">
@@ -669,6 +665,12 @@ export default function SiteAnalyticsPage() {
               ))}
             </div>
           </div>
+
+          {/* Probe intelligence + payload attacks. Placed BELOW the agent-traffic
+              summary - that section ties directly to the map above, so it leads;
+              this is the deeper per-path drill-down. */}
+          <ProbeIntelPanel intel={summary.probeIntel ?? []} />
+          <PayloadIntelPanel intel={summary.payloadIntel ?? []} />
 
           {/* Agent journeys: correlated sessions, each a behavior class with a
               proven/inferred confidence. Following the agent's flow across the
