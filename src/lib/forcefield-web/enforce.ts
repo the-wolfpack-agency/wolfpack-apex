@@ -62,6 +62,11 @@ const ALLOW: EnforcementDecision = { block: false, reason: "no proven-hostile si
  *  contains, so a match is high-confidence hostile and safe to turn away. Kept
  *  deliberately tight (precision over recall) - a missed attack is still caught
  *  by monitoring, but a false block hits a real user. */
+// Whitespace as it can appear in a URL: a real space, OR its encoded forms
+// (%20, +, tab/newline). Baked INTO the SQL patterns so a payload matches
+// whether or not the edge runtime decoded the query - "UNION%20SELECT" and
+// "UNION SELECT" both hit, no reliance on decodeURIComponent landing.
+const WS = "(?:\\s|%20|%09|%0a|%0d|\\+)";
 const PAYLOAD_SIGNATURES: ReadonlyArray<{ attack: string; patterns: readonly RegExp[] }> = [
   {
     attack: "path_traversal",
@@ -69,7 +74,13 @@ const PAYLOAD_SIGNATURES: ReadonlyArray<{ attack: string; patterns: readonly Reg
   },
   {
     attack: "sql_injection",
-    patterns: [/union\s+select/i, /\bor\s+1\s*=\s*1\b/i, /'\s*or\s*'1'\s*=\s*'1/i, /\bsleep\s*\(/i, /\bbenchmark\s*\(/i, /information_schema/i, /waitfor\s+delay/i],
+    patterns: [
+      new RegExp(`union${WS}+select`, "i"),
+      new RegExp(`\\bor${WS}+1${WS}*=${WS}*1\\b`, "i"),
+      new RegExp(`'${WS}*or${WS}*'1'${WS}*=${WS}*'1`, "i"),
+      /\bsleep\s*\(/i, /\bbenchmark\s*\(/i, /information_schema/i,
+      new RegExp(`waitfor${WS}+delay`, "i"),
+    ],
   },
   {
     attack: "xss",
@@ -82,18 +93,26 @@ const PAYLOAD_SIGNATURES: ReadonlyArray<{ attack: string; patterns: readonly Reg
 ];
 
 /** Scan the request target for an injection payload; returns the attack family
- *  or null. Checks both the raw (encoded) and decoded forms so an encoded
- *  payload can't slip past a decoded-only pattern and vice versa. */
+ *  or null. Matches against SEVERAL normalized forms so a payload can't hide in
+ *  encoding: the raw string, a full percent-decode, and a form where only the
+ *  common encoded-whitespace sequences (%20, +, tab/newline) are turned into
+ *  spaces. The last one matters because some edge runtimes hand middleware a URL
+ *  where decodeURIComponent does not fully apply, so "UNION%20SELECT" would slip
+ *  past a decoded-only check - the whitespace-normalized form still catches it. */
 export function detectPayload(rawUrl: string): string | null {
   const raw = rawUrl ?? "";
   let decoded = raw;
   try {
     decoded = decodeURIComponent(raw);
   } catch {
-    /* malformed percent-encoding: fall back to the raw form only. */
+    /* malformed percent-encoding: fall back to the other forms. */
   }
+  // Encoded-whitespace -> space, applied to BOTH raw and decoded so keyword
+  // pairs separated by %20/+/%09/%0a/%0d are seen as separated by a space.
+  const dws = (s: string): string => s.replace(/%20|%09|%0a|%0d|\+/gi, " ");
+  const forms = [raw, decoded, dws(raw), dws(decoded)];
   for (const { attack, patterns } of PAYLOAD_SIGNATURES) {
-    if (patterns.some((re) => re.test(raw) || re.test(decoded))) return attack;
+    if (patterns.some((re) => forms.some((f) => re.test(f)))) return attack;
   }
   return null;
 }

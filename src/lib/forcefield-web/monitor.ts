@@ -29,6 +29,10 @@ export interface MonitorRequestLike {
   method: string;
   headers: Headers;
   nextUrl: { pathname: string; search?: string };
+  /** The full request URL (absolute). Used as the authoritative source for the
+   *  query string when scanning for payloads, because nextUrl.search can be
+   *  empty in some edge runtimes. Optional so tests can omit it. */
+  url?: string;
 }
 
 /**
@@ -88,11 +92,22 @@ export async function forcefieldGuard(args: { site: string; req: MonitorRequestL
     const { req } = args;
     const ruleset = await fetchRuleset(process.env.FORCEFIELD_RULESET_URL ?? "");
     const pathname = req.nextUrl.pathname;
-    const search = req.nextUrl.search ?? "";
+    // Authoritative query source: the full req.url (nextUrl.search can be empty
+    // at the edge). Reduce to path+query so the payload scan sees the query but
+    // not the host. Fall back to nextUrl.search when req.url is absent (tests).
+    let rawUrl = pathname + (req.nextUrl.search ?? "");
+    if (req.url) {
+      try {
+        const u = new URL(req.url);
+        rawUrl = u.pathname + u.search;
+      } catch {
+        /* keep the nextUrl-derived value */
+      }
+    }
     const decision = decideEnforcement(
       {
         path: pathname,
-        rawUrl: pathname + search,
+        rawUrl,
         method: req.method,
         userAgent: req.headers.get("user-agent") ?? "",
         headerNames: Array.from(req.headers.keys()),

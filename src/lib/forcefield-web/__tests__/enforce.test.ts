@@ -96,6 +96,11 @@ describe("detectPayload - catches encoded and decoded forms", () => {
   it("catches encoded XSS", () => {
     expect(detectPayload("/x?q=%3Cscript%3Ealert(1)%3C/script%3E")).toBe("xss");
   });
+  it("catches encoded-whitespace SQLi even if decodeURIComponent under-applies (edge)", () => {
+    // "UNION%20SELECT" with no other decoding must still be caught.
+    expect(detectPayload("/p?q=1%20UNION%20SELECT%20pw%20FROM%20users")).toBe("sql_injection");
+    expect(detectPayload("/p?q=1+OR+1=1")).toBe("sql_injection");
+  });
   it("returns null for clean input", () => {
     expect(detectPayload("/products?category=shoes&sort=price")).toBeNull();
   });
