@@ -8,6 +8,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { blockOperator, unblockOperator, getOperators } from "@/lib/agent-operators";
 import { contributeHostileOperator } from "@/lib/forcefield/operator-reputation";
+import { captureBlockedFingerprints, clearBlockedFingerprints } from "@/lib/forcefield/blocked-fingerprints";
 import { recordAudit } from "@/lib/audit-log";
 
 export const runtime = "nodejs";
@@ -46,8 +47,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       behaviorClasses: signature?.behaviorClasses ?? [],
       tells: signature?.tells ?? [],
     }).catch(() => {});
+    // Capture the operator's stable fingerprints so the ruleset can distribute
+    // them and every connected site turns it away pre-emptively. Fail-safe: a
+    // resolution failure leaves the block behavior-based (still enforced), it
+    // just doesn't add a fingerprint. Only serves live when FORCEFIELD_
+    // DISTRIBUTE_BLOCKS is on (see the ruleset endpoint).
+    await captureBlockedFingerprints(workspaceId, operatorKey).catch(() => 0);
   } else {
     await unblockOperator(workspaceId, operatorKey);
+    await clearBlockedFingerprints(workspaceId, operatorKey).catch(() => {});
   }
   // Blocking/unblocking an operator is a security-relevant admin action.
   await recordAudit({

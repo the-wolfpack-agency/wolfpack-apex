@@ -9,24 +9,37 @@
  * endpoint is intentionally unauthenticated and CDN-cacheable - sites on any
  * origin must be able to read it, and it must not depend on a session.
  *
- * Today it returns the bundled DEFAULT_RULESET; a DB-backed override (editable
- * from the admin board) can replace the source without changing this contract.
+ * Returns the bundled DEFAULT_RULESET, plus (when FORCEFIELD_DISTRIBUTE_BLOCKS is
+ * "on") the blockedFingerprints an admin has blocked from the board, so every
+ * site turns those operators away pre-emptively. Flag-gated + fail-safe: any
+ * error, or the flag off, serves an EMPTY block list rather than a wrong one.
  *
  * Responses: 200 { ruleset }.
  */
 import { NextResponse } from "next/server";
 import { DEFAULT_RULESET } from "@/lib/forcefield-web/ruleset";
+import { getBlockedFingerprints } from "@/lib/forcefield/blocked-fingerprints";
 
 export const runtime = "nodejs";
 
-export function GET() {
+const EDGE_WORKSPACE_ID = process.env.FORCEFIELD_EDGE_WORKSPACE_ID || "default";
+
+export async function GET() {
+  // Distributed operator blocks: dark unless explicitly enabled, and fail-safe
+  // to an empty list so a resolution error never turns real traffic away.
+  let blockedFingerprints: string[] = [];
+  if (process.env.FORCEFIELD_DISTRIBUTE_BLOCKS === "on") {
+    blockedFingerprints = await getBlockedFingerprints(EDGE_WORKSPACE_ID).catch(() => []);
+  }
+
   return NextResponse.json(
-    { ruleset: DEFAULT_RULESET },
+    { ruleset: { ...DEFAULT_RULESET, blockedFingerprints } },
     {
       status: 200,
       headers: {
         // Cache at the CDN for 5 minutes, serve stale while revalidating - the
         // ruleset changes rarely and a site's own fetch cache is the primary layer.
+        // The 5-min TTL also bounds how long a fresh block takes to reach a site.
         "cache-control": "public, s-maxage=300, stale-while-revalidate=600",
       },
     },
