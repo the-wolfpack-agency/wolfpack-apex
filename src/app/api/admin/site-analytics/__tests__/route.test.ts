@@ -38,7 +38,15 @@ describe("GET /api/admin/site-analytics", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.summary.rangeDays).toBe(7);
-    expect(mockGetSummary).toHaveBeenCalledWith(7, "w1");
+    expect(mockGetSummary).toHaveBeenCalledWith(7, "w1", "all");
+  });
+
+  it("passes a valid surface filter through, and rejects a malformed one to 'all'", async () => {
+    mockGetSummary.mockResolvedValue({ rangeDays: 30 });
+    await GET(mkReq("?days=30&surface=instinct"));
+    expect(mockGetSummary).toHaveBeenLastCalledWith(30, "w1", "instinct");
+    await GET(mkReq("?days=30&surface=%20drop%20table"));
+    expect(mockGetSummary).toHaveBeenLastCalledWith(30, "w1", "all"); // malformed -> safe default
   });
 
   it("reports the caller's write permissions so the UI hides controls it can't use", async () => {

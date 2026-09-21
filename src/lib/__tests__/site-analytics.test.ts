@@ -82,7 +82,8 @@ describe("getSiteAnalyticsSummary", () => {
       .mockResolvedValueOnce({ rows: [ // payload attacks by kind
         { attack: "sql_injection", count: "3" },
         { attack: "xss", count: "1" },
-      ] });
+      ] })
+      .mockResolvedValueOnce({ rows: [{ surface: "ogiam.com" }, { surface: "instinct" }] }); // distinct surfaces
 
     const summary = await getSiteAnalyticsSummary(30);
     expect(summary.rangeDays).toBe(30);
@@ -95,6 +96,9 @@ describe("getSiteAnalyticsSummary", () => {
     expect(summary.byPage).toEqual([{ path: "/ogiam-iam", count: 40 }]);
     expect(summary.byCountry).toEqual([{ country: "US", count: 35 }]);
     expect(summary.byType).toEqual([{ type: "site.page_viewed", count: 42 }]);
+    // the property picker's options + the default (unfiltered) selection
+    expect(summary.surfaces).toEqual(["ogiam.com", "instinct"]);
+    expect(summary.surface).toBe("all");
     expect(summary.forcefield).toEqual({
       welcomed: 3, flagged: 5, trapped: 2, topAgents: [{ agent: "GPTBot", count: 3 }],
     });
@@ -134,5 +138,30 @@ describe("getSiteAnalyticsSummary", () => {
     expect(summary.rangeDays).toBe(365);
     // The clamped value is passed to SQL as a string param.
     expect(mockSafeQuery.mock.calls[0][1]).toEqual(["365"]);
+  });
+});
+
+describe("getSiteAnalyticsSummary - per-site (surface) filter", () => {
+  it("adds a bound surface predicate to the event queries when a surface is selected", async () => {
+    mockSafeQuery.mockResolvedValue({ rows: [] });
+    await getSiteAnalyticsSummary(30, undefined, "instinct");
+    // every event query is filtered to the surface via a BOUND param (never interpolated)
+    const eventCalls = mockSafeQuery.mock.calls.filter(([sql]) =>
+      String(sql).includes("FROM site_analytics_events") && String(sql).includes("coalesce(props->>'surface'"),
+    );
+    expect(eventCalls.length).toBeGreaterThan(0);
+    for (const [sql, params] of eventCalls) {
+      // the surfaces-LIST query intentionally does NOT filter by surface (it lists all)
+      if (String(sql).includes("SELECT DISTINCT coalesce(props->>'surface'")) continue;
+      expect(String(sql)).toMatch(/= \$2/);
+      expect(params).toEqual(["30", "instinct"]);
+    }
+  });
+
+  it("adds NO surface predicate for the cross-site 'all' view (default)", async () => {
+    mockSafeQuery.mockResolvedValue({ rows: [] });
+    await getSiteAnalyticsSummary(30, undefined, "all");
+    const filtered = mockSafeQuery.mock.calls.filter(([sql]) => /= \$2/.test(String(sql)));
+    expect(filtered).toHaveLength(0); // nothing is surface-scoped
   });
 });
