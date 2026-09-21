@@ -212,3 +212,31 @@ describe("payload-attack classification", () => {
     expect(j.summary).toMatch(/active exploitation/i);
   });
 });
+
+describe("classifySession - client tool/type derivation (operator-fingerprint input)", () => {
+  it("derives the dominant UA tool + client type across the session", () => {
+    const j = classifySession({
+      key: "s", keyKind: "fingerprint", events: [
+        ev("site.agent_flagged", "/a", "2026-09-18T10:00:00Z", { tool: "sqlmap", clientType: "scanner" }),
+        ev("site.agent_flagged", "/b", "2026-09-18T10:00:01Z", { tool: "sqlmap", clientType: "scanner" }),
+        ev("site.agent_flagged", "/c", "2026-09-18T10:00:02Z", { tool: "curl", clientType: "scripted_library" }),
+      ],
+    });
+    expect(j.clientTool).toBe("sqlmap"); // most frequent
+    expect(j.clientType).toBe("scanner");
+  });
+
+  it("leaves clientTool undefined when no event carried a tool (legacy events)", () => {
+    const j = classifySession({ key: "s", keyKind: "fingerprint", events: [ev("site.agent_flagged", "/", "2026-09-18T10:00:00Z")] });
+    expect(j.clientTool).toBeUndefined();
+    expect(j.clientType).toBeUndefined();
+  });
+
+  it("buildJourneys threads tool/clientType from rows into the journey", () => {
+    const [j] = buildJourneys([
+      { key: "fp1", keyKind: "fingerprint", type: "site.agent_flagged", path: "/", at: "2026-09-18T10:00:00Z", tool: "python-requests", clientType: "scripted_library" },
+    ]);
+    expect(j.clientTool).toBe("python-requests");
+    expect(j.clientType).toBe("scripted_library");
+  });
+});

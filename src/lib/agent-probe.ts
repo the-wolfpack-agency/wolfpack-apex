@@ -112,6 +112,10 @@ export interface ScaffoldingSignature {
   /** Re-requested a path after a non-200 (retry logic in the scaffolding). */
   retries: boolean;
   probedSensitive: boolean;
+  /** UA-derived tool name + client type, when known. Folded into the operator
+   *  fingerprint so distinct tools are distinct operators. */
+  clientTool?: string;
+  clientType?: string;
 }
 
 export interface ProbeDriverCtx {
