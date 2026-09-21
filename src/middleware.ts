@@ -133,9 +133,14 @@ export function middleware(req: NextRequest, event?: NextFetchEvent) {
         nowMs: Date.now(),
       });
       const token = process.env.SITE_ANALYTICS_INGEST_TOKEN;
-      if (obs && token && event) {
+      // The ingest URL is a CONFIGURED absolute URL, never derived from the
+      // request. Building it from req.nextUrl.origin would let an attacker set the
+      // Host header and exfiltrate the ingest token to a server they control
+      // (SSRF / request-forgery). No env set => no forward (fail-safe).
+      const ingestUrl = process.env.FORCEFIELD_INGEST_URL;
+      if (obs && token && event && ingestUrl) {
         event.waitUntil(
-          fetch(`${req.nextUrl.origin}/api/site-analytics/ingest`, {
+          fetch(ingestUrl, {
             method: "POST",
             headers: { "content-type": "application/json", "x-ingest-token": token },
             body: JSON.stringify({

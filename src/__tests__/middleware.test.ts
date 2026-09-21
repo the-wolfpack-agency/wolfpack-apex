@@ -18,10 +18,11 @@ const ev = () => {
   return { event: { waitUntil: (p: Promise<unknown>) => waited.push(p) } as never, waited };
 };
 
-const ORIG = { ff: process.env.FORCEFIELD_WEB, tok: process.env.SITE_ANALYTICS_INGEST_TOKEN };
+const ORIG = { ff: process.env.FORCEFIELD_WEB, tok: process.env.SITE_ANALYTICS_INGEST_TOKEN, url: process.env.FORCEFIELD_INGEST_URL };
 afterEach(() => {
   process.env.FORCEFIELD_WEB = ORIG.ff;
   process.env.SITE_ANALYTICS_INGEST_TOKEN = ORIG.tok;
+  if (ORIG.url === undefined) delete process.env.FORCEFIELD_INGEST_URL; else process.env.FORCEFIELD_INGEST_URL = ORIG.url;
   jest.restoreAllMocks();
 });
 
@@ -49,6 +50,7 @@ describe("Forcefield self-defense block", () => {
   it("when ON: forwards a flagged bot to the ingest (monitor-only) and still returns the response", () => {
     process.env.FORCEFIELD_WEB = "on";
     process.env.SITE_ANALYTICS_INGEST_TOKEN = "secret-token";
+    process.env.FORCEFIELD_INGEST_URL = "https://wolfpack-instinct.vercel.app/api/site-analytics/ingest";
     const fetchSpy = jest.spyOn(global, "fetch").mockResolvedValue(new Response(null));
     const { event, waited } = ev();
     const res = middleware(req("/", "EvilScraper/9 (bot)"), event);
@@ -58,6 +60,7 @@ describe("Forcefield self-defense block", () => {
     expect(waited).toHaveLength(1);
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     const [url, init] = fetchSpy.mock.calls[0];
+    // uses the CONFIGURED url, never one derived from the request (SSRF-safe)
     expect(String(url)).toBe("https://wolfpack-instinct.vercel.app/api/site-analytics/ingest");
     expect((init as RequestInit).method).toBe("POST");
     expect((init as RequestInit).headers).toMatchObject({ "x-ingest-token": "secret-token" });
@@ -68,6 +71,7 @@ describe("Forcefield self-defense block", () => {
   it("when ON: a normal visitor forwards nothing", () => {
     process.env.FORCEFIELD_WEB = "on";
     process.env.SITE_ANALYTICS_INGEST_TOKEN = "secret-token";
+    process.env.FORCEFIELD_INGEST_URL = "https://wolfpack-instinct.vercel.app/api/site-analytics/ingest";
     const fetchSpy = jest.spyOn(global, "fetch").mockResolvedValue(new Response(null));
     const { event } = ev();
     middleware(req("/dashboard", "Mozilla/5.0 (Macintosh)"), event);
@@ -77,6 +81,18 @@ describe("Forcefield self-defense block", () => {
   it("when ON but no ingest token: does not forward (fails safe, request intact)", () => {
     process.env.FORCEFIELD_WEB = "on";
     delete process.env.SITE_ANALYTICS_INGEST_TOKEN;
+    process.env.FORCEFIELD_INGEST_URL = "https://wolfpack-instinct.vercel.app/api/site-analytics/ingest";
+    const fetchSpy = jest.spyOn(global, "fetch").mockResolvedValue(new Response(null));
+    const { event } = ev();
+    const res = middleware(req("/", "EvilScraper/9 (bot)"), event);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(res.headers.get("Content-Security-Policy")).toBeTruthy();
+  });
+
+  it("when ON but no configured ingest URL: does not forward (never derives it from the request - SSRF-safe)", () => {
+    process.env.FORCEFIELD_WEB = "on";
+    process.env.SITE_ANALYTICS_INGEST_TOKEN = "secret-token";
+    delete process.env.FORCEFIELD_INGEST_URL;
     const fetchSpy = jest.spyOn(global, "fetch").mockResolvedValue(new Response(null));
     const { event } = ev();
     const res = middleware(req("/", "EvilScraper/9 (bot)"), event);
@@ -87,6 +103,7 @@ describe("Forcefield self-defense block", () => {
   it("is FAIL-OPEN: even if the forward throws synchronously, the response still returns", () => {
     process.env.FORCEFIELD_WEB = "on";
     process.env.SITE_ANALYTICS_INGEST_TOKEN = "secret-token";
+    process.env.FORCEFIELD_INGEST_URL = "https://wolfpack-instinct.vercel.app/api/site-analytics/ingest";
     jest.spyOn(global, "fetch").mockImplementation(() => { throw new Error("edge fetch blew up"); });
     const { event } = ev();
     // must not throw, must still return a response with headers
