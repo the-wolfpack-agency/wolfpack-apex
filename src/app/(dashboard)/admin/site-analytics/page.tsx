@@ -452,28 +452,76 @@ export default function SiteAnalyticsPage() {
         </div>
       </div>
 
-      {(summary?.surfaces?.length ?? 0) > 0 && (
-        <div data-testid="surface-filter" style={{ display: "flex", alignItems: "center", gap: "0.4rem", flexWrap: "wrap", marginBottom: "0.9rem" }}>
-          <span style={{ fontSize: "0.62rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--wp-text-muted, #9ca3af)" }}>Property</span>
-          {["all", ...(summary?.surfaces ?? [])].map((sf) => (
-            <button
-              key={sf}
-              type="button"
-              data-testid={`surface-${sf}`}
-              onClick={() => setSurface(sf)}
+      {(summary?.surfaces?.length ?? 0) > 0 && (() => {
+        const allProps = ["all", ...(summary?.surfaces ?? [])];
+        const propCount = summary?.surfaces?.length ?? 0;
+        const isAll = surface === "all";
+        const accent = isAll ? "var(--wp-text-muted, #9ca3af)" : "var(--wp-gold, #e8b528)";
+        return (
+          <div style={{ marginBottom: "0.9rem", display: "grid", gap: "0.55rem" }}>
+            {/* The switcher. The selected property is deliberately dominant - a
+                filled gold pill with a ring and a leading dot - so the active
+                context is never ambiguous at a glance. */}
+            <div data-testid="surface-filter" style={{ display: "flex", alignItems: "center", gap: "0.4rem", flexWrap: "wrap" }}>
+              <span style={{ fontSize: "0.62rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--wp-text-muted, #9ca3af)" }}>Property</span>
+              {allProps.map((sf) => {
+                const active = surface === sf;
+                return (
+                  <button
+                    key={sf}
+                    type="button"
+                    data-testid={`surface-${sf}`}
+                    aria-pressed={active}
+                    onClick={() => setSurface(sf)}
+                    style={{
+                      display: "inline-flex", alignItems: "center", gap: "0.3rem",
+                      padding: active ? "0.3rem 0.8rem" : "0.25rem 0.6rem",
+                      borderRadius: 999, fontSize: active ? "0.76rem" : "0.72rem", fontWeight: active ? 800 : 600, cursor: "pointer",
+                      fontFamily: sf === "all" ? undefined : "var(--wp-mono, ui-monospace, monospace)",
+                      background: active ? "var(--wp-gold, #e8b528)" : "transparent",
+                      color: active ? "var(--wp-dark, #0b0d11)" : "var(--wp-text-muted, #9ca3af)",
+                      border: `1px solid ${active ? "var(--wp-gold, #e8b528)" : "var(--wp-dark-border, #333)"}`,
+                      boxShadow: active ? "0 0 0 3px rgba(232,181,40,0.28)" : "none",
+                      transition: "box-shadow 160ms ease, padding 160ms ease",
+                    }}
+                  >
+                    {active && <span aria-hidden style={{ fontSize: "0.6rem" }}>&#9679;</span>}
+                    {sf === "all" ? "All sites" : sf}
+                  </button>
+                );
+              })}
+            </div>
+            {/* Unmistakable current-context banner: the first thing the eye lands
+                on, so nobody reads one property's numbers as another's. */}
+            <div
+              data-testid="property-scope"
               style={{
-                padding: "0.25rem 0.6rem", borderRadius: 999, fontSize: "0.72rem", fontWeight: 600, cursor: "pointer",
-                fontFamily: sf === "all" ? undefined : "var(--wp-mono, ui-monospace, monospace)",
-                background: surface === sf ? "var(--wp-gold, #e8b528)" : "transparent",
-                color: surface === sf ? "var(--wp-dark, #0b0d11)" : "var(--wp-text-muted, #9ca3af)",
-                border: "1px solid var(--wp-dark-border, #333)",
+                display: "flex", alignItems: "center", gap: "0.6rem", flexWrap: "wrap",
+                padding: "0.55rem 0.85rem", borderRadius: 8,
+                borderLeft: `4px solid ${accent}`,
+                background: isAll ? "var(--wp-dark-2, rgba(255,255,255,0.035))" : "color-mix(in srgb, var(--wp-gold, #e8b528) 12%, transparent)",
               }}
             >
-              {sf === "all" ? "All sites" : sf}
-            </button>
-          ))}
-        </div>
-      )}
+              <span style={{ fontSize: "0.56rem", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.12em", color: "var(--wp-text-muted, #9ca3af)" }}>Viewing</span>
+              <span
+                data-testid="property-scope-name"
+                style={{
+                  fontSize: "1.05rem", fontWeight: 800, lineHeight: 1,
+                  fontFamily: isAll ? undefined : "var(--wp-mono, ui-monospace, monospace)",
+                  color: isAll ? "var(--wp-text, #eee)" : "var(--wp-gold, #e8b528)",
+                }}
+              >
+                {isAll ? "All properties" : surface}
+              </span>
+              <span style={{ fontSize: "0.72rem", color: "var(--wp-text-muted, #8b90a0)" }}>
+                {isAll
+                  ? `combined across ${propCount} ${propCount === 1 ? "property" : "properties"} — pick one above to isolate it`
+                  : "every number below is for this property only"}
+              </span>
+            </div>
+          </div>
+        );
+      })()}
 
       {state === "loading" && (
         <div data-testid="site-analytics-loading" style={{ ...card, color: "var(--wp-text-muted, #9ca3af)" }}>
