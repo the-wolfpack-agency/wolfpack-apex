@@ -152,3 +152,22 @@ export function headerSignature(headerNames: readonly string[]): string {
   }
   return (h >>> 0).toString(16).padStart(8, "0");
 }
+
+/**
+ * The operator fingerprint used to enforce an admin block at the edge. It binds
+ * the header-order shape to the client's TOOL (or, absent a named tool, its
+ * client type), so a match is "this header shape AND this tool", not the header
+ * shape alone. That precision is what makes distributed blocking safe on a
+ * client site: a scanner (e.g. sqlmap) gets a specific fingerprint, and a
+ * legitimate integration that merely shares a header shape but runs a different
+ * tool produces a DIFFERENT fingerprint and is never caught. Stable (not time-
+ * bucketed) so the same client reproduces it on any later request.
+ */
+export function operatorFingerprint(
+  headerNames: readonly string[],
+  tool?: string,
+  clientType?: string,
+): string {
+  const kind = lc(tool || clientType || "unknown") || "unknown";
+  return `${headerSignature(headerNames)}:${kind}`;
+}

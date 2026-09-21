@@ -12,7 +12,7 @@
  * block decision (props always record posture "monitor", blocked false).
  */
 import { classifyWebRequest } from "./classify";
-import { classifyClient, headerSignature } from "./fingerprint";
+import { classifyClient, headerSignature, operatorFingerprint } from "./fingerprint";
 import type { ForcefieldRuleset } from "./ruleset";
 
 export type ForcefieldEventType =
@@ -143,12 +143,13 @@ export function observeRequest(input: ObserveInput, ruleset: ForcefieldRuleset):
 
   const props: Record<string, string | number | boolean> = {
     sig: sessionSig(userAgent, input.country, input.headerNames, input.nowMs),
-    // A STABLE per-request operator fingerprint (header-order shape, NOT time-
-    // bucketed like sig). This is the key an admin "Block operator" is enforced
-    // by at the edge: it is recomputable from any later request by the same
-    // client, so a blocked operator is turned away pre-emptively. Coarse by
-    // design; the edge only acts on it for NON-browser clients (see enforce.ts).
-    fp: headerSignature(input.headerNames),
+    // A STABLE operator fingerprint (header-order shape bound to the client's
+    // tool, NOT time-bucketed like sig). This is the key an admin "Block
+    // operator" is enforced by at the edge: recomputable from any later request
+    // by the same client + tool, so a blocked operator is turned away pre-
+    // emptively, while a legit integration that only shares a header shape (but
+    // runs a different tool) gets a different fp and is never caught.
+    fp: operatorFingerprint(input.headerNames, client.tool, client.clientType),
     // Persisted as `site` (NOT `surface`): some properties already emit a
     // `props.surface` for the UI element an event came from (e.g. "dropdown",
     // "mobile"), so reusing it here would collide on the board's property filter.

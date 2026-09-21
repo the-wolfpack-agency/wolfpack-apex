@@ -1,4 +1,4 @@
-import { classifyClient, headerSignature, DEFAULT_TOOL_SIGNATURES } from "@/lib/forcefield-web/fingerprint";
+import { classifyClient, headerSignature, DEFAULT_TOOL_SIGNATURES , operatorFingerprint } from "@/lib/forcefield-web/fingerprint"
 
 describe("classifyClient - name the tool, resolve the actor", () => {
   it("names a scanner (strongest hostile tell), outranking its base library", () => {
@@ -47,5 +47,23 @@ describe("headerSignature", () => {
     const botish = ["host", "user-agent", "accept-encoding"];
     expect(headerSignature(browserish)).toBe(headerSignature(browserish));
     expect(headerSignature(browserish)).not.toBe(headerSignature(botish));
+  });
+});
+
+
+describe("operatorFingerprint - header shape bound to the tool", () => {
+  const H = ["host", "user-agent", "accept-encoding"];
+  it("binds the tool so the same header shape with a DIFFERENT tool is a different fingerprint", () => {
+    const sqlmap = operatorFingerprint(H, "sqlmap", "scanner");
+    const legit = operatorFingerprint(H, "acme-integration", "scripted_library");
+    expect(sqlmap).not.toBe(legit); // same headers, different tool -> not the same actor
+    expect(sqlmap).toContain(":sqlmap");
+  });
+  it("falls back to client type when there is no named tool", () => {
+    expect(operatorFingerprint(H, undefined, "headless")).toContain(":headless");
+    expect(operatorFingerprint(H, undefined, undefined)).toContain(":unknown");
+  });
+  it("is stable: same inputs -> same fingerprint", () => {
+    expect(operatorFingerprint(H, "curl")).toBe(operatorFingerprint(H, "curl"));
   });
 });

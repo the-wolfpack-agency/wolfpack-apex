@@ -65,6 +65,17 @@ describe("Forcefield ENFORCEMENT (opt-in edge blocking)", () => {
     expect(res.headers.get("x-forcefield")).toContain("blocked:");
   });
 
+  it("NEVER blocks the Forcefield control-plane endpoints (ruleset/ingest), even for a hostile UA", async () => {
+    process.env.FORCEFIELD_WEB = "on";
+    process.env.FORCEFIELD_ENFORCE = "on";
+    delete process.env.FORCEFIELD_RULESET_URL;
+    const { event } = ev();
+    const ruleset = await middleware(req("/api/forcefield/ruleset", "sqlmap/1.7"), event);
+    expect(ruleset.status).not.toBe(403); // the channel that distributes blocks can't block itself
+    const ingest = await middleware(req("/api/site-analytics/ingest", "sqlmap/1.7"), event);
+    expect(ingest.status).not.toBe(403);
+  });
+
   it("lets a normal human request through (200/next) even with enforcement on", async () => {
     process.env.FORCEFIELD_WEB = "on";
     process.env.FORCEFIELD_ENFORCE = "on";

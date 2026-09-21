@@ -1,4 +1,5 @@
 import { decideEnforcement, detectPayload } from "@/lib/forcefield-web/enforce";
+import { operatorFingerprint } from "@/lib/forcefield-web/fingerprint";
 import { DEFAULT_RULESET } from "@/lib/forcefield-web/ruleset";
 
 const R = DEFAULT_RULESET;
@@ -96,6 +97,36 @@ describe("decideEnforcement - NEVER blocks legitimate traffic (no false positive
 
   it("does NOT block when a fingerprint is present but not on the blocked list", () => {
     expect(decideEnforcement({ ...base, path: "/", userAgent: "curl/8", headerNames: ["host"], fingerprint: "safe999" }, R, { blockedFingerprints: ["bad000"] }).block).toBe(false);
+  });
+});
+
+describe("decideEnforcement - fingerprint precision (tool-bound, no header-shape collisions)", () => {
+  const H = ["host", "user-agent", "accept-encoding"]; // minimal, non-browser
+  // The blocked operator's fingerprint: a python-requests client with header shape H.
+  const blockedFp = operatorFingerprint(H, "python-requests", "scripted_library");
+
+  it("BLOCKS the exact tool+header-shape the admin blocked", () => {
+    const d = decideEnforcement(
+      { ...base, path: "/", userAgent: "python-requests/2.31", headerNames: H },
+      R, { blockedFingerprints: [blockedFp] },
+    );
+    expect(d.block).toBe(true);
+    expect(d.reasonKind).toBe("blocked_fingerprint");
+  });
+
+  it("does NOT block a DIFFERENT tool that merely shares the header shape (the precision win)", () => {
+    // Same headers H, but curl instead of python-requests -> different fingerprint -> allowed.
+    const d = decideEnforcement(
+      { ...base, path: "/", userAgent: "curl/8.4", headerNames: H },
+      R, { blockedFingerprints: [blockedFp] },
+    );
+    expect(d.block).toBe(false);
+  });
+
+  it("does NOT block a real browser even if its fingerprint were on the list (safety gate holds)", () => {
+    const browserFp = operatorFingerprint(base.headerNames, undefined, "browser");
+    const d = decideEnforcement({ ...base, path: "/" }, R, { blockedFingerprints: [browserFp] });
+    expect(d.block).toBe(false);
   });
 });
 
