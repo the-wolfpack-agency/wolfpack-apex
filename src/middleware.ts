@@ -79,7 +79,13 @@ export async function middleware(req: NextRequest, event?: NextFetchEvent) {
      page is served. The guard returns null unless enforcement is enabled AND the
      request is proven hostile, so a normal visitor is never affected. The block
      is still reported to the board so the dashboard shows it was turned away. */
-  const block = await forcefieldGuard({ site: "instinct", req });
+  // The Forcefield control plane must never be able to block itself: the ruleset
+  // endpoint sites fetch, and the ingest they forward to, are infrastructure, not
+  // attack surface. Excluding them stops a distributed fingerprint from cutting
+  // off the very channel that distributes it.
+  const ffPath = req.nextUrl.pathname;
+  const ffControlPlane = ffPath.startsWith("/api/forcefield/") || ffPath.startsWith("/api/site-analytics/");
+  const block = ffControlPlane ? null : await forcefieldGuard({ site: "instinct", req });
   if (block) {
     if (event) event.waitUntil(forcefieldMonitor({ site: "instinct", req }));
     return new NextResponse("Forbidden: this request was flagged as a hostile automated action.", {
