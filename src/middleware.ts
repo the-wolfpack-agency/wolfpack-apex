@@ -11,8 +11,9 @@
  */
 
 import { NextResponse } from "next/server";
-import type { NextRequest } from "next/server";
+import type { NextRequest, NextFetchEvent } from "next/server";
 import { getObsClient } from "@/lib/obs";
+import { inspectInstinctRequest } from "@/lib/forcefield-web/instinct-observe";
 
 const IS_PROD = process.env.NODE_ENV === "production";
 
@@ -71,7 +72,7 @@ const CSP_DIRECTIVES = [
   "report-uri /api/csp-report",
 ].join("; ");
 
-export function middleware(req: NextRequest) {
+export function middleware(req: NextRequest, event?: NextFetchEvent) {
   const response = NextResponse.next();
 
   response.headers.set("Content-Security-Policy", CSP_DIRECTIVES);
@@ -112,6 +113,43 @@ export function middleware(req: NextRequest) {
     }
   } catch {
     /* obs must never crash the host */
+  }
+
+  /* Forcefield self-defense - DARK BY DEFAULT, MONITOR-ONLY, FAIL-OPEN.
+     Off entirely unless FORCEFIELD_WEB === "on", so merging/deploying this
+     changes nothing until the env var is set (an instant kill-switch, no
+     redeploy needed to disable). When on, it only OBSERVES: it classifies the
+     request with the pure core and, for a non-normal verdict, fires a
+     fire-and-forget forward to the analytics ingest (surface: "instinct"). It
+     never inspects or alters `response`, never blocks, and the whole block is
+     wrapped so a bug here can never break a request. */
+  if (process.env.FORCEFIELD_WEB === "on") {
+    try {
+      const obs = inspectInstinctRequest({
+        path: req.nextUrl.pathname,
+        method: req.method,
+        userAgent: req.headers.get("user-agent") ?? "",
+        country: req.headers.get("x-vercel-ip-country") ?? "",
+        nowMs: Date.now(),
+      });
+      const token = process.env.SITE_ANALYTICS_INGEST_TOKEN;
+      if (obs && token && event) {
+        event.waitUntil(
+          fetch(`${req.nextUrl.origin}/api/site-analytics/ingest`, {
+            method: "POST",
+            headers: { "content-type": "application/json", "x-ingest-token": token },
+            body: JSON.stringify({
+              type: obs.type,
+              path: obs.path,
+              country: req.headers.get("x-vercel-ip-country") || undefined,
+              props: obs.props,
+            }),
+          }).catch(() => {}),
+        );
+      }
+    } catch {
+      /* Forcefield must never affect the request. */
+    }
   }
 
   return response;
