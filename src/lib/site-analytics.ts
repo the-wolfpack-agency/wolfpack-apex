@@ -78,6 +78,12 @@ export async function recordSiteEvent(input: RecordSiteEventInput): Promise<void
 
 export interface SiteAnalyticsSummary {
   rangeDays: number;
+  /* The distinct properties (surfaces) that have forwarded events in-window, so
+     the board can offer a per-site filter. Legacy events with no surface tag are
+     reported as 'ogiam.com'. */
+  surfaces: string[];
+  /* The surface this summary is filtered to ('all' = every property). */
+  surface: string;
   totalPageViews: number;
   totalEvents: number;
   /** 0..23 buckets of page views by hour of day (UTC), for the heatmap. */
@@ -184,46 +190,52 @@ async function operatorTriageStates(
  * page renders. Pure SQL aggregation; reads only. Degrades to empty arrays when
  * the DB is unavailable (safeQuery), never throws.
  */
-export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: string): Promise<SiteAnalyticsSummary> {
+export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: string, surface = "all"): Promise<SiteAnalyticsSummary> {
   const days = clampDays(rangeDays);
   const sinceClause = `created_at > now() - ($1 || ' days')::interval`;
+  // Per-site filter. Legacy events carry no surface tag, so null coalesces to
+  // 'ogiam.com'. When 'all', no extra predicate (the cross-site view). The value
+  // is always a bound parameter ($2), never interpolated.
+  const filtered = surface !== "all" && surface.length > 0;
+  const surfaceClause = filtered ? ` AND coalesce(props->>'surface', 'ogiam.com') = $2` : "";
+  const params = filtered ? [String(days), surface] : [String(days)];
 
-  const [hour, page, country, type, totals, ff, ffAgents, journeyRows, agentOriginRows, payloadRows] = await Promise.all([
+  const [hour, page, country, type, totals, ff, ffAgents, journeyRows, agentOriginRows, payloadRows, surfacesRows] = await Promise.all([
     safeQuery<{ hour: number; count: string }>(
       `SELECT EXTRACT(HOUR FROM created_at AT TIME ZONE 'UTC')::int AS hour, count(*) AS count
          FROM site_analytics_events
-        WHERE ${sinceClause} AND event_type = 'site.page_viewed'
+        WHERE ${sinceClause}${surfaceClause} AND event_type = 'site.page_viewed'
         GROUP BY 1 ORDER BY 1`,
-      [String(days)],
+      params,
     ),
     safeQuery<{ path: string; count: string }>(
       `SELECT coalesce(path, '(unknown)') AS path, count(*) AS count
          FROM site_analytics_events
-        WHERE ${sinceClause} AND event_type = 'site.page_viewed'
+        WHERE ${sinceClause}${surfaceClause} AND event_type = 'site.page_viewed'
         GROUP BY 1 ORDER BY count(*) DESC LIMIT 20`,
-      [String(days)],
+      params,
     ),
     safeQuery<{ country: string; count: string }>(
       `SELECT coalesce(country, '(unknown)') AS country, count(*) AS count
          FROM site_analytics_events
-        WHERE ${sinceClause} AND event_type = 'site.page_viewed'
+        WHERE ${sinceClause}${surfaceClause} AND event_type = 'site.page_viewed'
         GROUP BY 1 ORDER BY count(*) DESC LIMIT 20`,
-      [String(days)],
+      params,
     ),
     safeQuery<{ event_type: string; count: string }>(
       `SELECT event_type, count(*) AS count
          FROM site_analytics_events
-        WHERE ${sinceClause}
+        WHERE ${sinceClause}${surfaceClause}
         GROUP BY 1 ORDER BY count(*) DESC`,
-      [String(days)],
+      params,
     ),
     safeQuery<{ page_views: string; total: string }>(
       `SELECT
          count(*) FILTER (WHERE event_type = 'site.page_viewed') AS page_views,
          count(*) AS total
          FROM site_analytics_events
-        WHERE ${sinceClause}`,
-      [String(days)],
+        WHERE ${sinceClause}${surfaceClause}`,
+      params,
     ),
     safeQuery<{ welcomed: string; flagged: string; trapped: string }>(
       `SELECT
@@ -231,15 +243,15 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
          count(*) FILTER (WHERE event_type = 'site.agent_flagged')      AS flagged,
          count(*) FILTER (WHERE event_type = 'site.agent_trap_tripped') AS trapped
          FROM site_analytics_events
-        WHERE ${sinceClause}`,
-      [String(days)],
+        WHERE ${sinceClause}${surfaceClause}`,
+      params,
     ),
     safeQuery<{ agent: string; count: string }>(
       `SELECT coalesce(props->>'agent', '(unidentified)') AS agent, count(*) AS count
          FROM site_analytics_events
-        WHERE ${sinceClause} AND event_type = 'site.agent_welcomed'
+        WHERE ${sinceClause}${surfaceClause} AND event_type = 'site.agent_welcomed'
         GROUP BY 1 ORDER BY count(*) DESC LIMIT 10`,
-      [String(days)],
+      params,
     ),
     safeQuery<{ event_type: string; path: string | null; created_at: string; sig: string | null; nonce: string | null; agent: string | null; attack: string | null; principal_status: string | null; principal: string | null; principal_issuer: string | null; principal_scopes: string | null }>(
       `SELECT event_type, path, created_at::text AS created_at,
@@ -247,11 +259,11 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
               props->>'principal_status' AS principal_status, props->>'principal' AS principal,
               props->>'principal_issuer' AS principal_issuer, props->>'principal_scopes' AS principal_scopes
          FROM site_analytics_events
-        WHERE ${sinceClause}
+        WHERE ${sinceClause}${surfaceClause}
           AND (props->>'sig' IS NOT NULL OR props->>'nonce' IS NOT NULL)
         ORDER BY created_at
         LIMIT 2000`,
-      [String(days)],
+      params,
     ),
     /* Agent provenance by edge country. Only AGENT-signal events (not page
        views), split by how Forcefield handled each, so a hostile cluster from
@@ -264,15 +276,25 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
               count(*) FILTER (WHERE event_type = 'site.agent_flagged')  AS flagged,
               count(*) FILTER (WHERE event_type IN ('site.agent_trap_tripped', 'site.agent_probed_sensitive', 'site.agent_form_honeypot', 'site.agent_form_too_fast')) AS hostile
          FROM site_analytics_events
-        WHERE ${sinceClause} AND event_type LIKE 'site.agent_%' AND country IS NOT NULL AND country <> ''
+        WHERE ${sinceClause}${surfaceClause} AND event_type LIKE 'site.agent_%' AND country IS NOT NULL AND country <> ''
         GROUP BY country ORDER BY count(*) DESC LIMIT 100`,
-      [String(days)],
+      params,
     ),
     safeQuery<{ attack: string; count: string }>(
       `SELECT coalesce(props->>'attack', 'unknown') AS attack, count(*) AS count
          FROM site_analytics_events
-        WHERE ${sinceClause} AND event_type = 'site.agent_payload_attack'
+        WHERE ${sinceClause}${surfaceClause} AND event_type = 'site.agent_payload_attack'
         GROUP BY 1 ORDER BY count(*) DESC LIMIT 20`,
+      params,
+    ),
+    /* The distinct surfaces present in-window - NOT filtered by the selected
+       surface, so the picker always lists every property. Legacy events (no tag)
+       show as 'ogiam.com'. */
+    safeQuery<{ surface: string }>(
+      `SELECT DISTINCT coalesce(props->>'surface', 'ogiam.com') AS surface
+         FROM site_analytics_events
+        WHERE ${sinceClause}
+        ORDER BY 1`,
       [String(days)],
     ),
   ]);
@@ -324,6 +346,8 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
 
   return {
     rangeDays: days,
+    surfaces: surfacesRows.rows.map((r) => r.surface).filter((x): x is string => typeof x === "string" && x.length > 0),
+    surface,
     totalPageViews: t ? Number(t.page_views) : 0,
     totalEvents: t ? Number(t.total) : 0,
     byHour: hour.rows.map((r) => ({ hour: Number(r.hour), count: Number(r.count) })),

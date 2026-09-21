@@ -26,6 +26,8 @@ import { PayloadIntelPanel } from "@/components/forcefield/PayloadIntelPanel";
 
 interface Summary {
   rangeDays: number;
+  surfaces?: string[];
+  surface?: string;
   totalPageViews: number;
   totalEvents: number;
   byHour: Array<{ hour: number; count: number }>;
@@ -115,6 +117,7 @@ const RANGES = [7, 30, 90] as const;
 
 export default function SiteAnalyticsPage() {
   const [days, setDays] = useState<number>(30);
+  const [surface, setSurface] = useState<string>("all");
   const [summary, setSummary] = useState<Summary | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -237,14 +240,14 @@ export default function SiteAnalyticsPage() {
     }
   }, []);
 
-  const load = useCallback(async (range: number) => {
+  const load = useCallback(async (range: number, surf: string) => {
     setState("loading");
     setTriageOverride({});
     setOperatorTriageOverride({});
     setBlockedOverride({});
     setPromotedOps({});
     try {
-      const res = await fetchWithRefresh(`/api/admin/site-analytics?days=${range}`);
+      const res = await fetchWithRefresh(`/api/admin/site-analytics?days=${range}&surface=${encodeURIComponent(surf)}`);
       if (!res.ok) {
         setState("error");
         return;
@@ -269,8 +272,8 @@ export default function SiteAnalyticsPage() {
   }, []);
 
   useEffect(() => {
-    void load(days);
-  }, [days, load]);
+    void load(days, surface);
+  }, [days, surface, load]);
 
   const card: React.CSSProperties = {
     background: "var(--wp-dark-surface, #1f1f22)",
@@ -448,6 +451,29 @@ export default function SiteAnalyticsPage() {
           ))}
         </div>
       </div>
+
+      {(summary?.surfaces?.length ?? 0) > 0 && (
+        <div data-testid="surface-filter" style={{ display: "flex", alignItems: "center", gap: "0.4rem", flexWrap: "wrap", marginBottom: "0.9rem" }}>
+          <span style={{ fontSize: "0.62rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--wp-text-muted, #9ca3af)" }}>Property</span>
+          {["all", ...(summary?.surfaces ?? [])].map((sf) => (
+            <button
+              key={sf}
+              type="button"
+              data-testid={`surface-${sf}`}
+              onClick={() => setSurface(sf)}
+              style={{
+                padding: "0.25rem 0.6rem", borderRadius: 999, fontSize: "0.72rem", fontWeight: 600, cursor: "pointer",
+                fontFamily: sf === "all" ? undefined : "var(--wp-mono, ui-monospace, monospace)",
+                background: surface === sf ? "var(--wp-gold, #e8b528)" : "transparent",
+                color: surface === sf ? "var(--wp-dark, #0b0d11)" : "var(--wp-text-muted, #9ca3af)",
+                border: "1px solid var(--wp-dark-border, #333)",
+              }}
+            >
+              {sf === "all" ? "All sites" : sf}
+            </button>
+          ))}
+        </div>
+      )}
 
       {state === "loading" && (
         <div data-testid="site-analytics-loading" style={{ ...card, color: "var(--wp-text-muted, #9ca3af)" }}>

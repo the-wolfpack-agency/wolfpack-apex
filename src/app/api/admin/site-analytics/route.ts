@@ -17,10 +17,16 @@ export async function GET(req: NextRequest) {
   const auth = await requireCapability(req, "analytics.view");
   if (!auth.ok) return auth.response;
 
-  const daysRaw = new URL(req.url).searchParams.get("days");
+  const sp = new URL(req.url).searchParams;
+  const daysRaw = sp.get("days");
   const days = daysRaw ? Number(daysRaw) : 30;
+  // Per-site filter. Bounded to a short slug so an arbitrary value can't reach
+  // the query as anything but a bind parameter; unknown values simply match no
+  // rows. Defaults to "all" (the cross-site view).
+  const surfaceRaw = sp.get("surface");
+  const surface = surfaceRaw && /^[a-z0-9.\-_]{1,64}$/i.test(surfaceRaw) ? surfaceRaw : "all";
 
-  const summary = await getSiteAnalyticsSummary(days, auth.user.workspaceId);
+  const summary = await getSiteAnalyticsSummary(days, auth.user.workspaceId, surface);
   // The read is now org-wide (analytics.view is in SELF_SERVICE), but the write
   // actions on the page stay gated. Tell the client which controls the caller
   // may use so a viewer never sees a button that would 403 (a UI defect).

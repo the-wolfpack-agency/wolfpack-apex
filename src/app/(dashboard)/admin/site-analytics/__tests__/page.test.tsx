@@ -757,3 +757,21 @@ test("flags an operator whose tradecraft matches a known-hostile network actor (
   const badge = await screen.findByTestId("operator-network-match-op_newbie");
   expect(badge).toHaveTextContent(/matches network actor/i);
 });
+
+test("renders the property (surface) filter and re-fetches scoped to the chosen site", async () => {
+  const withSurfaces = { ...SUMMARY, surfaces: ["ogiam.com", "instinct"], surface: "all" };
+  const calls: string[] = [];
+  mockFetchWithRefresh.mockImplementation((url: string) => {
+    calls.push(String(url));
+    if (String(url).includes("/edge-policy")) return Promise.resolve({ ok: true, json: async () => ({ mode: "monitor" }) });
+    return Promise.resolve({ ok: true, json: async () => ({ summary: withSurfaces, permissions: PERMS }) });
+  });
+  render(<SiteAnalyticsPage />);
+  // the picker shows "All sites" plus each property
+  await screen.findByTestId("surface-filter");
+  expect(screen.getByTestId("surface-all")).toBeInTheDocument();
+  expect(screen.getByTestId("surface-instinct")).toBeInTheDocument();
+  // choosing a property re-fetches the summary scoped to it
+  fireEvent.click(screen.getByTestId("surface-instinct"));
+  await waitFor(() => expect(calls.some((u) => u.includes("/api/admin/site-analytics?days=") && u.includes("surface=instinct"))).toBe(true));
+});
