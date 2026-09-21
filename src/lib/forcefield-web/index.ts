@@ -28,3 +28,27 @@ export {
   TRAP_PATH_PREFIX,
   type PageTrap,
 } from "./decoy";
+export {
+  observeRequest,
+  type Observation,
+  type ObserveInput,
+  type ForcefieldEventType,
+} from "./observe";
+export {
+  forcefieldMonitor,
+  type MonitorRequestLike,
+} from "./monitor";
+export {
+  fetchRuleset,
+  coerceRuleset,
+  DEFAULT_RULESET,
+  type ForcefieldRuleset,
+} from "./ruleset";
+export {
+  classifyClient,
+  headerSignature,
+  DEFAULT_TOOL_SIGNATURES,
+  type ClientType,
+  type ClientFingerprint,
+  type ToolSignature,
+} from "./fingerprint";

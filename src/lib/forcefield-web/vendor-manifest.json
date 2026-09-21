@@ -1,0 +1,15 @@
+{
+  "note": "The PORTABLE Forcefield core, vendored into each connected site. These files import ONLY each other (relative) + edge-safe globals, so they run in any Next.js middleware. record.ts and rollup.ts are apex-only adapters (they touch @/lib/analytics and @/lib/db) and are intentionally NOT vendored.",
+  "sourceDir": "src/lib/forcefield-web",
+  "targetDir": "src/lib/forcefield-web",
+  "files": [
+    "classify.ts",
+    "posture.ts",
+    "decoy.ts",
+    "fingerprint.ts",
+    "ruleset.ts",
+    "observe.ts",
+    "monitor.ts",
+    "index.ts"
+  ]
+}
