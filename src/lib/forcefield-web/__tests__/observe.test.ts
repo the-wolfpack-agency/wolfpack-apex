@@ -46,6 +46,9 @@ describe("observeRequest - ruleset-driven, monitor-only", () => {
     expect(o.props.site).toBe("instinct");
     expect(o.props.blocked).toBe(false);
     expect(o.props.posture).toBe("monitor");
+    // stamps a stable operator fingerprint (fp) that an admin block enforces by.
+    expect(typeof o.props.fp).toBe("string");
+    expect((o.props.fp as string).length).toBeGreaterThan(0);
   });
 
   it("records a sensitive-path probe and names the path", () => {
