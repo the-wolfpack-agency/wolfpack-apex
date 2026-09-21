@@ -420,12 +420,13 @@ export default function SiteAnalyticsPage() {
                 color: "var(--wp-dark, #0b0d11)",
               }}
             >
-              ogiam.com
+              {surface === "all" ? "all properties" : surface}
             </span>
           </h1>
           <p style={{ margin: "0.35rem 0 0", fontSize: "0.85rem", color: "var(--wp-text-muted, #9ca3af)" }}>
-            This tab covers ogiam.com only: where and when it is used, and how Forcefield
-            handled agent traffic. Our own data, no third-party analytics.
+            {surface === "all"
+              ? "Agent traffic across every connected property, and how Forcefield handled it. Our own data, no third-party analytics."
+              : `Agent traffic on ${surface}, and how Forcefield handled it. Our own data, no third-party analytics.`}
           </p>
         </div>
         <div style={{ display: "flex", gap: "0.4rem" }}>
@@ -597,8 +598,10 @@ export default function SiteAnalyticsPage() {
               <HourHeatmap data={summary.byHour} testIdPrefix="site-hour" unitLabel="view" />
             </div>
             {summary.totalPageViews === 0 && (
-              <p data-testid="site-analytics-empty" style={{ marginTop: "0.7rem", fontSize: "0.78rem", color: "var(--wp-text-muted, #9ca3af)" }}>
-                No page views recorded in this window yet.
+              <p data-testid="site-analytics-empty" style={{ marginTop: "0.7rem", fontSize: "0.78rem", color: "var(--wp-text-muted, #9ca3af)", lineHeight: 1.5 }}>
+                {summary.totalEvents > 0
+                  ? "This property is monitored by Forcefield, which forwards AGENT traffic (bots, scanners, crawlers) - not human page views - so this chart stays empty by design. The real data for this property is the agent traffic and operators below."
+                  : "No page views recorded in this window yet."}
               </p>
             )}
           </div>

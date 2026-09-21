@@ -70,9 +70,9 @@ test("renders the reused heatmap, totals, and top pages/countries from the summa
   expect(screen.getByTestId("total-page-views")).toHaveTextContent("128");
   expect(screen.getByTestId("top-pages")).toHaveTextContent("/ogiam-iam");
   expect(screen.getByTestId("top-countries")).toHaveTextContent("US");
-  // The tab is clearly scoped to ogiam.com, and the Forcefield agent-traffic
-  // panel renders the welcomed/flagged/trapped counts + top identified agent.
-  expect(screen.getByTestId("site-analytics-scope")).toHaveTextContent("ogiam.com");
+  // The header reflects the active property (default: all), and the Forcefield
+  // agent-traffic panel renders the welcomed/flagged/trapped counts + top identified agent.
+  expect(screen.getByTestId("site-analytics-scope")).toHaveTextContent("all properties");
   expect(screen.getByTestId("ff-welcomed")).toHaveTextContent("6");
   expect(screen.getByTestId("ff-flagged")).toHaveTextContent("9");
   expect(screen.getByTestId("ff-trapped")).toHaveTextContent("2");
@@ -816,4 +816,15 @@ test("the property scope banner makes the active context unmistakable and update
   expect(screen.getByTestId("property-scope")).toHaveTextContent(/for this property only/i);
   // the selected pill is marked pressed for a11y + visual dominance
   expect(screen.getByTestId("surface-instinct")).toHaveAttribute("aria-pressed", "true");
+});
+
+test("a monitored property (agent events, no page views) explains why the page-views chart is empty", async () => {
+  const monitored = { ...SUMMARY, totalPageViews: 0, totalEvents: 449, byHour: [] };
+  mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: monitored, permissions: PERMS }) });
+  render(<SiteAnalyticsPage />);
+  const empty = await screen.findByTestId("site-analytics-empty");
+  expect(empty).toHaveTextContent(/monitored by Forcefield/i);
+  expect(empty).toHaveTextContent(/agent traffic/i);
+  // and NOT the misleading "no page views yet" (which implies missing data)
+  expect(empty).not.toHaveTextContent(/No page views recorded in this window yet/i);
 });
