@@ -53,6 +53,8 @@ export async function forcefieldMonitor(args: { site: string; req: MonitorReques
         userAgent: req.headers.get("user-agent") ?? "",
         country,
         headerNames: Array.from(req.headers.keys()),
+        accept: req.headers.get("accept") ?? "",
+        secFetchDest: req.headers.get("sec-fetch-dest") ?? "",
         nowMs: Date.now(),
       },
       ruleset,

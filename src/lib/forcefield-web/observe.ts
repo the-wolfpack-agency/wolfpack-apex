@@ -16,6 +16,7 @@ import { classifyClient, headerSignature } from "./fingerprint";
 import type { ForcefieldRuleset } from "./ruleset";
 
 export type ForcefieldEventType =
+  | "site.page_viewed"
   | "site.agent_welcomed"
   | "site.agent_flagged"
   | "site.agent_trap_tripped"
@@ -36,7 +37,36 @@ export interface ObserveInput {
   country: string;
   /** Lowercased list of the request's header names (for the header-order sig). */
   headerNames: readonly string[];
+  /** The request's `Accept` header (used to tell a page navigation from an
+   *  asset/XHR when `Sec-Fetch-Dest` is absent). Optional. */
+  accept?: string;
+  /** The request's `Sec-Fetch-Dest` header - "document" for a top-level page
+   *  navigation. The strongest human-page-view signal (browser-only). Optional. */
+  secFetchDest?: string;
   nowMs: number;
+}
+
+/** A file-extension asset, an API call, or a Next internal - never a page view. */
+function isNonPagePath(path: string): boolean {
+  if (path === "/api" || path.startsWith("/api/")) return true;
+  if (path.startsWith("/_next/")) return true;
+  // A trailing file extension (.js, .css, .png, .ico, .map, .woff2, ...).
+  return /\.[a-z0-9]{1,8}$/i.test(path);
+}
+
+/**
+ * Is this a real human page view? A top-level HTML document navigation via GET.
+ * `Sec-Fetch-Dest: document` is the definitive browser signal; when it is absent
+ * we fall back to an `Accept: text/html` GET. Assets, API calls, XHR/fetch, and
+ * non-GET methods are excluded, so this counts pages a person actually loaded -
+ * the same thing ogiam.com's analytics counts, now for every monitored property.
+ */
+function isHumanPageView(input: ObserveInput): boolean {
+  if (input.method.toUpperCase() !== "GET") return false;
+  if (isNonPagePath(input.path)) return false;
+  const dest = (input.secFetchDest ?? "").toLowerCase();
+  if (dest) return dest === "document";
+  return (input.accept ?? "").toLowerCase().includes("text/html");
 }
 
 /** A stable, non-PII session key: UA + country + hour bucket + header-order hash,
@@ -92,7 +122,24 @@ export function observeRequest(input: ObserveInput, ruleset: ForcefieldRuleset):
   ) {
     type = "site.agent_flagged";
   }
-  if (!type) return null;
+
+  // Not an agent. If it is a real human page navigation, forward it as a page
+  // view so the property reports the SAME analytics as ogiam.com (page views,
+  // hourly heatmap, top pages, top countries) - not just agent traffic. Anything
+  // else (assets, XHR, non-GET) is a normal non-page request: forward nothing.
+  if (!type) {
+    if (isHumanPageView(input)) {
+      return {
+        type: "site.page_viewed",
+        path,
+        props: {
+          site: input.site,
+          sig: sessionSig(userAgent, input.country, input.headerNames, input.nowMs),
+        },
+      };
+    }
+    return null;
+  }
 
   const props: Record<string, string | number | boolean> = {
     sig: sessionSig(userAgent, input.country, input.headerNames, input.nowMs),

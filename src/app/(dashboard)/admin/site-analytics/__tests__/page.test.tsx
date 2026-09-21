@@ -103,6 +103,39 @@ test("renders the reused heatmap, totals, and top pages/countries from the summa
   expect(String(mockFetchWithRefresh.mock.calls[0][0])).toContain("days=30");
 });
 
+test("shows n/a for page views on an agent-monitoring-only property, never a misleading 0", async () => {
+  // A Forcefield-monitored property (instinct/WWP/aidan) forwards only agent
+  // observations, never a page view. collectsPageViews:false must render "n/a"
+  // + the reason, NOT "0", which reads as a broken tool.
+  const agentOnly = { ...SUMMARY, surface: "instinct", totalPageViews: 0, collectsPageViews: false };
+  mockFetchWithRefresh.mockResolvedValue({
+    ok: true,
+    json: async () => ({ summary: agentOnly, permissions: PERMS }),
+  });
+
+  render(<SiteAnalyticsPage />);
+
+  await waitFor(() => expect(screen.getByTestId("total-page-views")).toBeInTheDocument());
+  expect(screen.getByTestId("total-page-views")).toHaveTextContent("n/a");
+  expect(screen.getByTestId("total-page-views")).not.toHaveTextContent("0");
+  expect(screen.getByText(/agent monitoring only/i)).toBeInTheDocument();
+  // Total events still shows the real number - the property IS reporting.
+  expect(screen.getByText("190")).toBeInTheDocument();
+  // The heatmap empty-note explains agent-monitoring by design, not "no page views yet".
+  expect(screen.getByTestId("site-analytics-empty")).toHaveTextContent(/AGENT traffic.*not human page views/i);
+});
+
+test("shows the real page-view count when the property does collect them", async () => {
+  const collects = { ...SUMMARY, totalPageViews: 128, collectsPageViews: true };
+  mockFetchWithRefresh.mockResolvedValue({
+    ok: true,
+    json: async () => ({ summary: collects, permissions: PERMS }),
+  });
+  render(<SiteAnalyticsPage />);
+  await waitFor(() => expect(screen.getByTestId("total-page-views")).toBeInTheDocument());
+  expect(screen.getByTestId("total-page-views")).toHaveTextContent("128");
+});
+
 test("shows an error state when the data route fails", async () => {
   mockFetchWithRefresh.mockResolvedValue({ ok: false, json: async () => ({}) });
   render(<SiteAnalyticsPage />);

@@ -5,8 +5,39 @@ const R = DEFAULT_RULESET;
 const base = { site: "instinct", method: "GET", country: "US", headerNames: ["host", "user-agent"], nowMs: 1_758_000_000_000 };
 
 describe("observeRequest - ruleset-driven, monitor-only", () => {
-  it("returns null for a normal browser visitor (nothing forwarded)", () => {
-    expect(observeRequest({ ...base, path: "/dashboard", userAgent: "Mozilla/5.0 (Macintosh)", headerNames: ["host", "accept", "accept-language", "accept-encoding", "user-agent"] }, R)).toBeNull();
+  it("forwards a page view for a real human navigation (Sec-Fetch-Dest: document)", () => {
+    const o = observeRequest({ ...base, path: "/dashboard", userAgent: "Mozilla/5.0 (Macintosh)", headerNames: ["host", "accept", "accept-language", "accept-encoding", "user-agent"], accept: "text/html,application/xhtml+xml", secFetchDest: "document" }, R)!;
+    expect(o.type).toBe("site.page_viewed");
+    expect(o.path).toBe("/dashboard");
+    expect(o.props.site).toBe("instinct");
+    expect(typeof o.props.sig).toBe("string"); // session key, no PII
+  });
+
+  it("forwards a page view on Accept: text/html when Sec-Fetch-Dest is absent (older browsers)", () => {
+    const o = observeRequest({ ...base, path: "/pricing", userAgent: "Mozilla/5.0 (Macintosh)", headerNames: ["host", "user-agent", "accept", "accept-language", "accept-encoding"], accept: "text/html,application/xhtml+xml" }, R)!;
+    expect(o.type).toBe("site.page_viewed");
+  });
+
+  it("does NOT forward a page view for assets, API, XHR, or non-GET", () => {
+    // Realistic browser headers so classification does not flag these as agents;
+    // this isolates the page-view decision itself.
+    const br = { userAgent: "Mozilla/5.0 (Macintosh)", headerNames: ["host", "user-agent", "accept", "accept-language", "accept-encoding", "sec-fetch-dest"] };
+    // asset (file extension)
+    expect(observeRequest({ ...base, ...br, path: "/logo.png", accept: "image/*", secFetchDest: "image" }, R)).toBeNull();
+    // API call
+    expect(observeRequest({ ...base, ...br, path: "/api/dashboard", accept: "application/json", secFetchDest: "empty" }, R)).toBeNull();
+    // fetch/XHR (not a document)
+    expect(observeRequest({ ...base, ...br, path: "/dashboard", accept: "application/json", secFetchDest: "empty" }, R)).toBeNull();
+    // no document signal at all -> nothing forwarded
+    expect(observeRequest({ ...base, ...br, path: "/dashboard" }, R)).toBeNull();
+    // non-GET
+    expect(observeRequest({ ...base, ...br, path: "/dashboard", method: "POST", secFetchDest: "document" }, R)).toBeNull();
+  });
+
+  it("an agent on an HTML page is still an agent event, never a page view", () => {
+    // sqlmap requesting a document must NOT be counted as a human page view.
+    const o = observeRequest({ ...base, path: "/search", userAgent: "sqlmap/1.7", accept: "text/html", secFetchDest: "document" }, R)!;
+    expect(o.type).toBe("site.agent_flagged");
   });
 
   it("records a decoy trip (highest signal) and tags the surface", () => {

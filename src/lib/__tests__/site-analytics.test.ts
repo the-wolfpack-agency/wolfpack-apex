@@ -83,11 +83,14 @@ describe("getSiteAnalyticsSummary", () => {
         { attack: "sql_injection", count: "3" },
         { attack: "xss", count: "1" },
       ] })
-      .mockResolvedValueOnce({ rows: [{ surface: "ogiam.com" }, { surface: "instinct" }] }); // distinct surfaces
+      .mockResolvedValueOnce({ rows: [{ surface: "ogiam.com" }, { surface: "instinct" }] }) // distinct surfaces
+      .mockResolvedValueOnce({ rows: [{ has_pv: true }] }); // lifetime page-view existence
 
     const summary = await getSiteAnalyticsSummary(30);
     expect(summary.rangeDays).toBe(30);
     expect(summary.totalPageViews).toBe(42);
+    // This property has page-view telemetry, so the count is real, not n/a.
+    expect(summary.collectsPageViews).toBe(true);
     expect(summary.totalEvents).toBe(55);
     expect(summary.byHour).toEqual([
       { hour: 9, count: 12 },
@@ -153,9 +156,32 @@ describe("getSiteAnalyticsSummary - per-site (surface) filter", () => {
     for (const [sql, params] of eventCalls) {
       // the surfaces-LIST query intentionally does NOT filter by surface (it lists all)
       if (String(sql).includes("SELECT DISTINCT coalesce(props->>'site'")) continue;
+      // the lifetime page-view EXISTS check is surface-only (no since window), so
+      // it binds the surface as $1 with no days param - a deliberate exception.
+      if (String(sql).includes("EXISTS(")) {
+        expect(String(sql)).toMatch(/= \$1/);
+        expect(params).toEqual(["instinct"]);
+        continue;
+      }
       expect(String(sql)).toMatch(/= \$2/);
       expect(params).toEqual(["30", "instinct"]);
     }
+  });
+
+  it("reports collectsPageViews=false for an agent-monitored property with no page-view events", async () => {
+    // Every query empty EXCEPT: totals report 0 page views, and the lifetime
+    // EXISTS check returns has_pv:false -> the property forwards agent events
+    // only, so page views are n/a rather than a measured 0.
+    mockSafeQuery.mockImplementation((sql: string) => {
+      if (String(sql).includes("EXISTS(")) return Promise.resolve({ rows: [{ has_pv: false }] });
+      if (String(sql).includes("count(*) AS total")) return Promise.resolve({ rows: [{ page_views: "0", total: "17" }] });
+      return Promise.resolve({ rows: [] });
+    });
+    const summary = await getSiteAnalyticsSummary(30, undefined, "instinct");
+    expect(summary.collectsPageViews).toBe(false);
+    expect(summary.totalPageViews).toBe(0);
+    // It IS reporting - it just reports agent events, not page views.
+    expect(summary.totalEvents).toBe(17);
   });
 
   it("adds NO surface predicate for the cross-site 'all' view (default)", async () => {
