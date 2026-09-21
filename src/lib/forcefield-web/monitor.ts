@@ -22,6 +22,7 @@
 import { observeRequest } from "./observe";
 import { fetchRuleset } from "./ruleset";
 import { decideEnforcement, type EnforcementDecision } from "./enforce";
+import { headerSignature } from "./fingerprint";
 
 /** The subset of a NextRequest this needs - structural, so a NextRequest fits
  *  without importing framework types (keeps the module edge- and test-friendly). */
@@ -104,13 +105,18 @@ export async function forcefieldGuard(args: { site: string; req: MonitorRequestL
         /* keep the nextUrl-derived value */
       }
     }
+    const headerNames = Array.from(req.headers.keys());
     const decision = decideEnforcement(
       {
         path: pathname,
         rawUrl,
         method: req.method,
         userAgent: req.headers.get("user-agent") ?? "",
-        headerNames: Array.from(req.headers.keys()),
+        headerNames,
+        // Same stable fingerprint observe.ts stamps on events, so an admin block
+        // of this operator (distributed via ruleset.blockedFingerprints) is
+        // enforced here on any later request by the same client.
+        fingerprint: headerSignature(headerNames),
       },
       ruleset,
       { blockedFingerprints: ruleset.blockedFingerprints },

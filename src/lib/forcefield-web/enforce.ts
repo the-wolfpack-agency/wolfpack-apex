@@ -152,8 +152,18 @@ export function decideEnforcement(
       return { block: true, reasonKind: "payload", reason: `injection payload: ${attack}`, attack };
     }
 
-    // 4. A fingerprint a human explicitly blocked from the board.
-    if (input.fingerprint && opts.blockedFingerprints && opts.blockedFingerprints.includes(input.fingerprint)) {
+    // 4. A fingerprint a human explicitly blocked from the board. SAFETY GATE:
+    //    only act on it for a NON-browser client. A real person uses a browser
+    //    whose header shape matches; a blocked scraper is scripted/scanner/
+    //    headless/unknown. So even if a fingerprint collides with a real user's,
+    //    that user (a browser) is never turned away - the block reaches only
+    //    automation, which is who the admin meant to block.
+    if (
+      input.fingerprint &&
+      opts.blockedFingerprints &&
+      opts.blockedFingerprints.includes(input.fingerprint) &&
+      client.clientType !== "browser"
+    ) {
       return { block: true, reasonKind: "blocked_fingerprint", reason: "operator fingerprint blocked by an administrator" };
     }
 

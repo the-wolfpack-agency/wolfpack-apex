@@ -143,6 +143,12 @@ export function observeRequest(input: ObserveInput, ruleset: ForcefieldRuleset):
 
   const props: Record<string, string | number | boolean> = {
     sig: sessionSig(userAgent, input.country, input.headerNames, input.nowMs),
+    // A STABLE per-request operator fingerprint (header-order shape, NOT time-
+    // bucketed like sig). This is the key an admin "Block operator" is enforced
+    // by at the edge: it is recomputable from any later request by the same
+    // client, so a blocked operator is turned away pre-emptively. Coarse by
+    // design; the edge only acts on it for NON-browser clients (see enforce.ts).
+    fp: headerSignature(input.headerNames),
     // Persisted as `site` (NOT `surface`): some properties already emit a
     // `props.surface` for the UI element an event came from (e.g. "dropdown",
     // "mobile"), so reusing it here would collide on the board's property filter.

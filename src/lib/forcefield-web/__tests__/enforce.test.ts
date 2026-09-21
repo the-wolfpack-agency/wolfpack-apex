@@ -47,10 +47,20 @@ describe("decideEnforcement - blocks proven-hostile requests only", () => {
     expect(d.attack).toBe("open_redirect");
   });
 
-  it("BLOCKS a fingerprint an admin explicitly blocked (distributed via ruleset)", () => {
-    const d = decideEnforcement({ ...base, path: "/", fingerprint: "abcd1234" }, R, { blockedFingerprints: ["abcd1234"] });
+  it("BLOCKS a blocked fingerprint for a NON-browser client (a scripted scraper)", () => {
+    const d = decideEnforcement(
+      { ...base, path: "/", userAgent: "python-requests/2.31", headerNames: ["host", "user-agent"], fingerprint: "abcd1234" },
+      R, { blockedFingerprints: ["abcd1234"] },
+    );
     expect(d.block).toBe(true);
     expect(d.reasonKind).toBe("blocked_fingerprint");
+  });
+
+  it("SAFETY: does NOT block a blocked fingerprint when the client is a real browser", () => {
+    // Even if a real user's header shape collides with a blocked fingerprint,
+    // a browser is never turned away - the block reaches only automation.
+    const d = decideEnforcement({ ...base, path: "/", fingerprint: "abcd1234" }, R, { blockedFingerprints: ["abcd1234"] });
+    expect(d.block).toBe(false);
   });
 });
 
@@ -85,7 +95,7 @@ describe("decideEnforcement - NEVER blocks legitimate traffic (no false positive
   });
 
   it("does NOT block when a fingerprint is present but not on the blocked list", () => {
-    expect(decideEnforcement({ ...base, path: "/", fingerprint: "safe999" }, R, { blockedFingerprints: ["bad000"] }).block).toBe(false);
+    expect(decideEnforcement({ ...base, path: "/", userAgent: "curl/8", headerNames: ["host"], fingerprint: "safe999" }, R, { blockedFingerprints: ["bad000"] }).block).toBe(false);
   });
 });
 
