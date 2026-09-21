@@ -87,6 +87,10 @@ export interface SessionEvent {
   agent?: string;
   /** The attack kind, when this is a payload-attack event (props.attack). */
   attack?: string;
+  /** UA-derived tool name (props.tool: "python-requests", "sqlmap", ...). */
+  tool?: string;
+  /** UA-derived client type (props.client_type: "scanner", "scripted_library", ...). */
+  clientType?: string;
   /** Principal verdict fields, verified at the ingest boundary and carried on
    *  the event props. "verified" here is already cryptographically proven; this
    *  module never re-verifies, it only reasons about behavior vs the mandate. */
@@ -118,6 +122,11 @@ export interface AgentJourney {
   lastAt: string;
   /** One plain sentence a non-expert can read. */
   summary: string;
+  /** The dominant UA-derived tool + client type across the session. These sharpen
+   *  the operator fingerprint so distinct tools (python-requests vs sqlmap vs
+   *  HeadlessChrome) become distinct operators instead of one coarse bucket. */
+  clientTool?: string;
+  clientType?: string;
   /** Novel conclusions beyond the behavior class (impersonation, deliberate
    *  rule violation). Empty when none apply. */
   insights: JourneyInsight[];
@@ -349,6 +358,17 @@ export function classifySession(input: AgentSessionInput): AgentJourney {
   const eventCount = events.length;
   const firstAt = events[0]?.at ?? "";
   const lastAt = events[events.length - 1]?.at ?? "";
+  // Dominant (most-frequent, non-null) UA tool + client type across the session.
+  const dominant = (vals: Array<string | undefined>): string | undefined => {
+    const counts = new Map<string, number>();
+    for (const v of vals) if (v) counts.set(v, (counts.get(v) ?? 0) + 1);
+    let best: string | undefined;
+    let bestN = 0;
+    for (const [v, n] of counts) if (n > bestN || (n === bestN && best !== undefined && v < best)) { best = v; bestN = n; }
+    return best;
+  };
+  const clientTool = dominant(events.map((e) => e.tool));
+  const clientType = dominant(events.map((e) => e.clientType));
 
   return {
     key: input.key,
@@ -361,6 +381,8 @@ export function classifySession(input: AgentSessionInput): AgentJourney {
     firstAt,
     lastAt,
     summary: summarize(behaviorClass, confidence, signals),
+    clientTool,
+    clientType,
     insights,
     principal,
     mandate,
@@ -411,7 +433,7 @@ function summarize(cls: BehaviorClass, conf: Confidence, signals: readonly Agent
  * otherwise a fingerprint (inferred). Returns journeys newest-activity first.
  */
 export function buildJourneys(
-  rows: ReadonlyArray<{ key: string; keyKind: CorrelationKind; type: string; path: string; at: string; nonceLinked?: boolean; agent?: string; attack?: string }>,
+  rows: ReadonlyArray<{ key: string; keyKind: CorrelationKind; type: string; path: string; at: string; nonceLinked?: boolean; agent?: string; attack?: string; tool?: string; clientType?: string }>,
 ): AgentJourney[] {
   const byKey = new Map<string, AgentSessionInput>();
   for (const r of rows) {
@@ -422,7 +444,7 @@ export function buildJourneys(
     }
     // A nonce grouping always wins over a fingerprint grouping for the same key.
     if (r.keyKind === "nonce") (s as { keyKind: CorrelationKind }).keyKind = "nonce";
-    (s.events as SessionEvent[]).push({ type: r.type, path: r.path, at: r.at, nonceLinked: r.nonceLinked, agent: r.agent, attack: r.attack });
+    (s.events as SessionEvent[]).push({ type: r.type, path: r.path, at: r.at, nonceLinked: r.nonceLinked, agent: r.agent, attack: r.attack, tool: r.tool, clientType: r.clientType });
   }
   return Array.from(byKey.values())
     .map(classifySession)

@@ -145,6 +145,8 @@ export function buildAgentProfile(journey: AgentJourney): AgentProfile {
     pathDiscovery: scaffoldingLite.pathDiscovery,
     retries: false,
     probedSensitive: scaffoldingLite.probedSensitive,
+    clientTool: journey.clientTool,
+    clientType: journey.clientType,
   };
   const operatorKey = operatorKeyFor(scaffoldingSig, toolComposition);
 

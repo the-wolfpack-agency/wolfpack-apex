@@ -85,3 +85,24 @@ it("buildDossiers clusters mixed sightings into per-operator dossiers", () => {
   const a = ds.find((d) => d.operatorKey === operatorKeyFor(opA.sc, opA.t))!;
   expect(a.sightingCount).toBe(2);
 });
+
+describe("operatorKeyFor - UA client tool folds into the fingerprint", () => {
+  it("distinct client tools yield distinct operator keys (python-requests != sqlmap)", () => {
+    const a = operatorKeyFor(scaff({ clientTool: "python-requests", clientType: "scripted_library" }), tools());
+    const b = operatorKeyFor(scaff({ clientTool: "sqlmap", clientType: "scanner" }), tools());
+    const c = operatorKeyFor(scaff({ clientTool: "HeadlessChrome", clientType: "headless" }), tools());
+    expect(new Set([a, b, c]).size).toBe(3);
+  });
+
+  it("the same client tool yields the same key (correlates that tool across sites)", () => {
+    expect(operatorKeyFor(scaff({ clientTool: "sqlmap", clientType: "scanner" }), tools()))
+      .toBe(operatorKeyFor(scaff({ clientTool: "sqlmap", clientType: "scanner" }), tools()));
+  });
+
+  it("is backward-compatible: no client tool leaves the base fingerprint unchanged", () => {
+    // A scaffolding with no client fields must key exactly as one with explicit
+    // undefined - i.e. legacy (no-tool) events keep their existing operator key.
+    expect(operatorKeyFor(scaff(), tools()))
+      .toBe(operatorKeyFor(scaff({ clientTool: undefined, clientType: undefined }), tools()));
+  });
+});

@@ -81,7 +81,14 @@ export function stableHash(input: string): string {
 
 export function operatorKeyFor(scaffolding: ScaffoldingSignature, tools: ToolCompositionReport): string {
   const toolSig = [...tools.usedTools].sort().join(",");
-  const input = `${scaffolding.pathDiscovery}|robotsFirst:${scaffolding.readsRobotsFirst}|${toolSig}`;
+  let input = `${scaffolding.pathDiscovery}|robotsFirst:${scaffolding.readsRobotsFirst}|${toolSig}`;
+  // Fold in the UA-derived client tool/type (python-requests, sqlmap,
+  // HeadlessChrome, ...) when known, so distinct tools become distinct operators
+  // rather than one coarse bucket. Appended ONLY when present, so legacy events
+  // with no tool keep their existing fingerprint (no spurious re-bucketing).
+  if (scaffolding.clientTool || scaffolding.clientType) {
+    input += `|client:${scaffolding.clientType ?? ""}:${scaffolding.clientTool ?? ""}`;
+  }
   return `op_${stableHash(input)}`;
 }
 
