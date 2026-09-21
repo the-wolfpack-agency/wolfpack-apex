@@ -25,7 +25,7 @@ describe("middleware security headers", () => {
     jest.resetModules();
     const { middleware } = await import("@/middleware");
     const req = new NextRequest("https://instinct.wolfpackagency.com/");
-    const res = middleware(req) as NextResponse;
+    const res = await middleware(req);
     // @ts-expect-error
     process.env.NODE_ENV = original;
     return res.headers;
