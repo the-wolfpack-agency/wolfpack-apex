@@ -656,11 +656,18 @@ export default function SiteAnalyticsPage() {
                 ))}
               </ul>
             </div>
-            <p style={{ marginTop: "0.9rem", fontSize: "0.76rem", color: "var(--wp-text-muted, #9ca3af)", lineHeight: 1.5 }}>
-              Welcomed = identified good agents (search + AI crawlers). Flagged = unidentified
-              automation, a weak signal recorded only. Decoy trips = a scraper followed an
-              invisible, robots-disallowed honeypot link, near-certainly ignoring the rules.
-            </p>
+            <div data-testid="forcefield-legend" style={{ marginTop: "1rem", paddingTop: "0.8rem", borderTop: "1px solid var(--wp-dark-border, #262a33)", display: "grid", gap: "0.5rem" }}>
+              {[
+                { term: "Welcomed", color: "var(--wp-success, #30a46c)", def: "identified good agents (search + AI crawlers) - given a welcome lane, never blocked." },
+                { term: "Flagged", color: "var(--wp-warning, #f5a623)", def: "unidentified automation - a weak signal, recorded only." },
+                { term: "Decoy trips", color: "var(--wp-error, #ef4444)", def: "a scraper followed an invisible, robots-disallowed honeypot link - near-certainly ignoring the rules." },
+              ].map((row) => (
+                <div key={row.term} style={{ display: "flex", gap: "0.6rem", alignItems: "baseline", fontSize: "0.82rem", lineHeight: 1.45 }}>
+                  <span style={{ flexShrink: 0, minWidth: "6.5rem", fontWeight: 800, letterSpacing: "0.02em", color: row.color, textTransform: "uppercase", fontSize: "0.72rem" }}>{row.term}</span>
+                  <span style={{ color: "var(--wp-text, #d8dbe0)" }}>{row.def}</span>
+                </div>
+              ))}
+            </div>
           </div>
 
           {/* Agent journeys: correlated sessions, each a behavior class with a
@@ -954,9 +961,9 @@ export default function SiteAnalyticsPage() {
                         if (opSteps.length === 0) return null;
                         return (
                           <div data-testid={`operator-path-${g.operatorKey}`} style={{ display: "grid", gap: "0.55rem", minWidth: 0 }}>
-                            <div style={{ display: "flex", alignItems: "baseline", gap: "0.5rem", flexWrap: "wrap" }}>
-                              <span style={{ fontSize: "0.76rem", fontWeight: 800, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--wp-gold, #e8b528)" }}>Path across the surface</span>
-                              <span style={{ fontSize: "0.68rem", color: "var(--wp-text-muted, #9ca3af)" }}>the full journey - every step this agent took, in order</span>
+                            <div style={{ display: "flex", alignItems: "baseline", gap: "0.6rem", flexWrap: "wrap", borderLeft: "3px solid var(--wp-gold, #e8b528)", paddingLeft: "0.65rem" }}>
+                              <span style={{ fontSize: "0.98rem", fontWeight: 800, letterSpacing: "0.03em", textTransform: "uppercase", color: "var(--wp-gold, #e8b528)" }}>Path across the surface</span>
+                              <span style={{ fontSize: "0.76rem", fontWeight: 500, color: "var(--wp-text, #c8ccd4)" }}>the full journey - every step this agent took, in order</span>
                             </div>
                             {/* quick-glance visual chain (the constellation) */}
                             <AgentJourneyTimeline steps={opSteps} testId={`operator-timeline-${g.operatorKey}`} />
