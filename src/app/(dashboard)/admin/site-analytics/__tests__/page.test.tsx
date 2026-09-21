@@ -787,3 +787,14 @@ test("the Forcefield legend stacks each term on its own line, emphasized", async
   // the legend is a stacked grid of rows, one per term
   expect(legend.querySelectorAll(":scope > div").length).toBe(3);
 });
+
+test("Forcefield agent-traffic sits right after the map, before probe intelligence", async () => {
+  mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: SUMMARY, permissions: PERMS }) });
+  render(<SiteAnalyticsPage />);
+  const map = await screen.findByTestId("ff-origin-map");
+  const traffic = screen.getByTestId("ff-agent-traffic");
+  const probe = screen.getByTestId("probe-intel-list");
+  // DOM order: map -> agent traffic -> probe intel
+  expect(map.compareDocumentPosition(traffic) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(traffic.compareDocumentPosition(probe) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+});
