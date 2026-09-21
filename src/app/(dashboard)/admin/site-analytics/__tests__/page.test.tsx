@@ -798,3 +798,22 @@ test("Forcefield agent-traffic sits right after the map, before probe intelligen
   expect(map.compareDocumentPosition(traffic) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(traffic.compareDocumentPosition(probe) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });
+
+test("the property scope banner makes the active context unmistakable and updates on switch", async () => {
+  const withSurfaces = { ...SUMMARY, surfaces: ["ogiam.com", "instinct"], surface: "all" };
+  mockFetchWithRefresh.mockImplementation((url: string) => {
+    if (String(url).includes("/edge-policy")) return Promise.resolve({ ok: true, json: async () => ({ mode: "monitor" }) });
+    return Promise.resolve({ ok: true, json: async () => ({ summary: withSurfaces, permissions: PERMS }) });
+  });
+  render(<SiteAnalyticsPage />);
+  const scope = await screen.findByTestId("property-scope");
+  // default: All properties, explicitly a combined view
+  expect(screen.getByTestId("property-scope-name")).toHaveTextContent("All properties");
+  expect(scope).toHaveTextContent(/combined across 2 properties/i);
+  // switching to a site names it and says the numbers are for that site only
+  fireEvent.click(screen.getByTestId("surface-instinct"));
+  await waitFor(() => expect(screen.getByTestId("property-scope-name")).toHaveTextContent("instinct"));
+  expect(screen.getByTestId("property-scope")).toHaveTextContent(/for this property only/i);
+  // the selected pill is marked pressed for a11y + visual dominance
+  expect(screen.getByTestId("surface-instinct")).toHaveAttribute("aria-pressed", "true");
+});
