@@ -64,13 +64,21 @@ function cap(v: unknown, max: number): string | null {
 }
 
 export async function POST(req: NextRequest) {
-  const expected = process.env.SITE_ANALYTICS_INGEST_TOKEN;
-  if (!expected) {
+  // Accept ANY configured ingest token, so each connected property can carry its
+  // own secret without sharing one value or rotating the others. The primary
+  // SITE_ANALYTICS_INGEST_TOKEN stays for existing forwarders (e.g. ogiam.com);
+  // SITE_ANALYTICS_INGEST_TOKEN_2 lets new sites onboard without touching it. Each
+  // candidate is compared in constant time. No token configured -> 503, never open.
+  const expected = [
+    process.env.SITE_ANALYTICS_INGEST_TOKEN,
+    process.env.SITE_ANALYTICS_INGEST_TOKEN_2,
+  ].filter((t): t is string => typeof t === "string" && t.length > 0);
+  if (expected.length === 0) {
     return NextResponse.json({ ok: false, error: "ingest_disabled" }, { status: 503 });
   }
 
   const provided = req.headers.get("x-ingest-token") || "";
-  if (!tokenMatches(provided, expected)) {
+  if (!expected.some((t) => tokenMatches(provided, t))) {
     return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
   }
 

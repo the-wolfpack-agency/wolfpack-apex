@@ -33,10 +33,12 @@ beforeEach(() => {
   jest.clearAllMocks();
   _resetIngestRateLimit();
   process.env.SITE_ANALYTICS_INGEST_TOKEN = "secret-token";
+  delete process.env.SITE_ANALYTICS_INGEST_TOKEN_2;
 });
 afterAll(() => {
   if (ORIGINAL_TOKEN === undefined) delete process.env.SITE_ANALYTICS_INGEST_TOKEN;
   else process.env.SITE_ANALYTICS_INGEST_TOKEN = ORIGINAL_TOKEN;
+  delete process.env.SITE_ANALYTICS_INGEST_TOKEN_2;
 });
 
 describe("POST /api/site-analytics/ingest", () => {
@@ -51,6 +53,25 @@ describe("POST /api/site-analytics/ingest", () => {
     expect((await POST(mkReq({ type: "site.page_viewed" }))).status).toBe(401);
     expect((await POST(mkReq({ type: "site.page_viewed" }, "wrong"))).status).toBe(401);
     expect(mockRecordSiteEvent).not.toHaveBeenCalled();
+  });
+
+  it("accepts EITHER configured token, so a new site can onboard without sharing the primary", async () => {
+    process.env.SITE_ANALYTICS_INGEST_TOKEN_2 = "second-site-token";
+    // the primary still works (e.g. ogiam.com)
+    expect((await POST(mkReq({ type: "site.page_viewed" }, "secret-token"))).status).toBe(200);
+    // and the second token works (e.g. a newly onboarded property)
+    expect((await POST(mkReq({ type: "site.page_viewed" }, "second-site-token"))).status).toBe(200);
+    // a token matching neither is still rejected
+    expect((await POST(mkReq({ type: "site.page_viewed" }, "neither"))).status).toBe(401);
+  });
+
+  it("503 only when NEITHER token is configured", async () => {
+    delete process.env.SITE_ANALYTICS_INGEST_TOKEN;
+    delete process.env.SITE_ANALYTICS_INGEST_TOKEN_2;
+    expect((await POST(mkReq({ type: "site.page_viewed" }, "anything"))).status).toBe(503);
+    // with only the second set, it is enabled again
+    process.env.SITE_ANALYTICS_INGEST_TOKEN_2 = "only-second";
+    expect((await POST(mkReq({ type: "site.page_viewed" }, "only-second"))).status).toBe(200);
   });
 
   it("200 accepts the Forcefield agent events (welcomed / flagged / trap_tripped)", async () => {
