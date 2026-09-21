@@ -55,8 +55,8 @@ async function loadJourneysWithFingerprints(): Promise<{
       WHERE created_at > now() - ($1 || ' days')::interval
         AND props->>'fp' IS NOT NULL
       ORDER BY created_at DESC
-      LIMIT ${MAX_EVENTS}`,
-    [String(LOOKBACK_DAYS)],
+      LIMIT $2`,
+    [String(LOOKBACK_DAYS), MAX_EVENTS],
   );
 
   const fpByKey = new Map<string, Set<string>>();
