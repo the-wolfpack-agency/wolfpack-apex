@@ -3,7 +3,7 @@ import { GET } from "@/app/api/forcefield/ruleset/route";
 
 describe("GET /api/forcefield/ruleset", () => {
   it("serves the ruleset publicly and CDN-cacheable", async () => {
-    const res = GET();
+    const res = await GET();
     expect(res.status).toBe(200);
     expect(res.headers.get("cache-control")).toContain("s-maxage");
     const body = await res.json();
