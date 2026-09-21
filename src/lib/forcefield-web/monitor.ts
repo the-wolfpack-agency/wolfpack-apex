@@ -21,13 +21,14 @@
  */
 import { observeRequest } from "./observe";
 import { fetchRuleset } from "./ruleset";
+import { decideEnforcement, type EnforcementDecision } from "./enforce";
 
 /** The subset of a NextRequest this needs - structural, so a NextRequest fits
  *  without importing framework types (keeps the module edge- and test-friendly). */
 export interface MonitorRequestLike {
   method: string;
   headers: Headers;
-  nextUrl: { pathname: string };
+  nextUrl: { pathname: string; search?: string };
 }
 
 /**
@@ -68,5 +69,39 @@ export async function forcefieldMonitor(args: { site: string; req: MonitorReques
     }).catch(() => {});
   } catch {
     /* Forcefield must never affect the request. */
+  }
+}
+
+/**
+ * ENFORCEMENT guard - the synchronous block decision the middleware acts on.
+ *
+ * Returns a decision to TURN THE REQUEST AWAY, or null to let it through. It is a
+ * no-op (null) unless BOTH FORCEFIELD_WEB and FORCEFIELD_ENFORCE are "on", so
+ * enforcement is a second, explicit opt-in on top of monitoring - a site watches
+ * first, then graduates. FAIL-OPEN: any error, or a ruleset that won't load,
+ * returns null (allow), so enforcement can never itself break the site. The
+ * caller (middleware) builds the 403 response and still reports the block.
+ */
+export async function forcefieldGuard(args: { site: string; req: MonitorRequestLike }): Promise<EnforcementDecision | null> {
+  try {
+    if (process.env.FORCEFIELD_WEB !== "on" || process.env.FORCEFIELD_ENFORCE !== "on") return null;
+    const { req } = args;
+    const ruleset = await fetchRuleset(process.env.FORCEFIELD_RULESET_URL ?? "");
+    const pathname = req.nextUrl.pathname;
+    const search = req.nextUrl.search ?? "";
+    const decision = decideEnforcement(
+      {
+        path: pathname,
+        rawUrl: pathname + search,
+        method: req.method,
+        userAgent: req.headers.get("user-agent") ?? "",
+        headerNames: Array.from(req.headers.keys()),
+      },
+      ruleset,
+      { blockedFingerprints: ruleset.blockedFingerprints },
+    );
+    return decision.block ? decision : null;
+  } catch {
+    return null; // fail-open: enforcement must never break the site.
   }
 }

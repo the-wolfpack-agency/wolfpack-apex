@@ -29,6 +29,11 @@ export interface ForcefieldRuleset {
   sensitivePaths: string[];
   /** Named tool signatures for the client fingerprint. */
   toolSignatures: ToolSignature[];
+  /** Per-request fingerprints an administrator explicitly blocked from the
+   *  board. Distributed here so a block made once turns the operator away on
+   *  EVERY connected site (update-once). Only consulted when a site is in
+   *  enforce mode; optional so an older ruleset without it still validates. */
+  blockedFingerprints?: string[];
 }
 
 /** The bundled fallback baked into every site. Kept deliberately broad so a site
@@ -54,6 +59,7 @@ export const DEFAULT_RULESET: ForcefieldRuleset = {
     "/admin.php", "/vendor/", "/.vscode", "/.DS_Store", "/server-status",
   ],
   toolSignatures: [...DEFAULT_TOOL_SIGNATURES],
+  blockedFingerprints: [],
 };
 
 /** Validate + coerce an untrusted payload into a ruleset, or null if it is not
@@ -79,12 +85,16 @@ export function coerceRuleset(data: unknown): ForcefieldRuleset | null {
       ? (d.toolSignatures as ToolSignature[])
       : null;
   if (!agents || !traps || !sensitive || !sigs) return null;
+  // Optional: absent or malformed -> empty (never blocks), so an older ruleset
+  // still validates and a bad field can't accidentally enable enforcement.
+  const blockedFingerprints = strArr(d.blockedFingerprints) ?? [];
   return {
     version: typeof d.version === "string" ? d.version : "remote",
     knownAgents: agents,
     trapPaths: traps,
     sensitivePaths: sensitive,
     toolSignatures: sigs,
+    blockedFingerprints,
   };
 }
 

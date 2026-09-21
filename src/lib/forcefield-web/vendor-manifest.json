@@ -9,6 +9,7 @@
     "fingerprint.ts",
     "ruleset.ts",
     "observe.ts",
+    "enforce.ts",
     "monitor.ts",
     "index.ts"
   ]

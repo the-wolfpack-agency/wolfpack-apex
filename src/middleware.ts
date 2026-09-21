@@ -13,7 +13,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest, NextFetchEvent } from "next/server";
 import { getObsClient } from "@/lib/obs";
-import { forcefieldMonitor } from "@/lib/forcefield-web/monitor";
+import { forcefieldMonitor, forcefieldGuard } from "@/lib/forcefield-web/monitor";
 
 const IS_PROD = process.env.NODE_ENV === "production";
 
@@ -72,7 +72,22 @@ const CSP_DIRECTIVES = [
   "report-uri /api/csp-report",
 ].join("; ");
 
-export function middleware(req: NextRequest, event?: NextFetchEvent) {
+export async function middleware(req: NextRequest, event?: NextFetchEvent) {
+  /* Forcefield ENFORCEMENT - opt-in (FORCEFIELD_ENFORCE=on) on top of monitoring,
+     FAIL-OPEN. Turns away ONLY proven-hostile requests (decoy trip, named attack
+     tool, live injection payload, or an admin-blocked fingerprint) before the
+     page is served. The guard returns null unless enforcement is enabled AND the
+     request is proven hostile, so a normal visitor is never affected. The block
+     is still reported to the board so the dashboard shows it was turned away. */
+  const block = await forcefieldGuard({ site: "instinct", req });
+  if (block) {
+    if (event) event.waitUntil(forcefieldMonitor({ site: "instinct", req }));
+    return new NextResponse("Forbidden: this request was flagged as a hostile automated action.", {
+      status: 403,
+      headers: { "content-type": "text/plain; charset=utf-8", "x-forcefield": `blocked:${block.reasonKind ?? "hostile"}` },
+    });
+  }
+
   const response = NextResponse.next();
 
   response.headers.set("Content-Security-Policy", CSP_DIRECTIVES);
