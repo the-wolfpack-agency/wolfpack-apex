@@ -85,6 +85,15 @@ export interface SiteAnalyticsSummary {
   /* The surface this summary is filtered to ('all' = every property). */
   surface: string;
   totalPageViews: number;
+  /**
+   * Whether this property collects page-view telemetry at all. A Forcefield-
+   * monitored property (instinct, weekendwithporsche, aidanmulready) forwards
+   * only AGENT observations via the site shim and never a `site.page_viewed`,
+   * so its page-view count is structurally 0, not "measured zero". The board
+   * renders "n/a - agent monitoring only" instead of a misleading 0 when this
+   * is false. True iff the property has ever sent a single page-view event.
+   */
+  collectsPageViews: boolean;
   totalEvents: number;
   /** 0..23 buckets of page views by hour of day (UTC), for the heatmap. */
   byHour: Array<{ hour: number; count: number }>;
@@ -200,7 +209,7 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
   const surfaceClause = filtered ? ` AND coalesce(props->>'site', 'ogiam.com') = $2` : "";
   const params = filtered ? [String(days), surface] : [String(days)];
 
-  const [hour, page, country, type, totals, ff, ffAgents, journeyRows, agentOriginRows, payloadRows, surfacesRows] = await Promise.all([
+  const [hour, page, country, type, totals, ff, ffAgents, journeyRows, agentOriginRows, payloadRows, surfacesRows, pvExists] = await Promise.all([
     safeQuery<{ hour: number; count: string }>(
       `SELECT EXTRACT(HOUR FROM created_at AT TIME ZONE 'UTC')::int AS hour, count(*) AS count
          FROM site_analytics_events
@@ -298,6 +307,17 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
         ORDER BY 1`,
       [String(days)],
     ),
+    /* Does this property collect page views AT ALL, lifetime (ignore the
+       window)? Distinguishes an agent-monitored property that never forwards a
+       page view (-> "n/a") from one that simply had none in the window (-> 0).
+       Surface filter only; no since clause, so a single bound param at most. */
+    safeQuery<{ has_pv: boolean }>(
+      `SELECT EXISTS(
+         SELECT 1 FROM site_analytics_events
+          WHERE event_type = 'site.page_viewed'${filtered ? ` AND coalesce(props->>'site', 'ogiam.com') = $1` : ""}
+       ) AS has_pv`,
+      filtered ? [surface] : [],
+    ),
   ]);
 
   const t = totals.rows[0];
@@ -350,6 +370,7 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
     surfaces: surfacesRows.rows.map((r) => r.surface).filter((x): x is string => typeof x === "string" && x.length > 0),
     surface,
     totalPageViews: t ? Number(t.page_views) : 0,
+    collectsPageViews: pvExists?.rows?.[0]?.has_pv === true,
     totalEvents: t ? Number(t.total) : 0,
     byHour: hour.rows.map((r) => ({ hour: Number(r.hour), count: Number(r.count) })),
     byPage: page.rows.map((r) => ({ path: r.path, count: Number(r.count) })),

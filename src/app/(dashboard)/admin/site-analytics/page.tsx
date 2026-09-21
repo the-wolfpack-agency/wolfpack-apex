@@ -29,6 +29,7 @@ interface Summary {
   surfaces?: string[];
   surface?: string;
   totalPageViews: number;
+  collectsPageViews?: boolean;
   totalEvents: number;
   byHour: Array<{ hour: number; count: number }>;
   byPage: Array<{ path: string; count: number }>;
@@ -579,9 +580,23 @@ export default function SiteAnalyticsPage() {
           <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "1rem" }}>
             <div style={card}>
               <div style={label}>Page views ({summary.rangeDays}d)</div>
-              <div data-testid="total-page-views" style={{ marginTop: "0.3rem", fontSize: "1.6rem", fontWeight: 700, color: "var(--wp-text, #eee)" }}>
-                {summary.totalPageViews.toLocaleString()}
-              </div>
+              {summary.collectsPageViews === false ? (
+                // This property forwards only agent observations (Forcefield
+                // web shim), never a page view, so the count is structurally
+                // n/a - showing 0 would read as "the tool isn't working".
+                <>
+                  <div data-testid="total-page-views" style={{ marginTop: "0.3rem", fontSize: "1.6rem", fontWeight: 700, color: "var(--wp-text-muted, #9ca3af)" }}>
+                    n/a
+                  </div>
+                  <div style={{ marginTop: "0.15rem", fontSize: "0.72rem", color: "var(--wp-text-muted, #9ca3af)" }}>
+                    agent monitoring only
+                  </div>
+                </>
+              ) : (
+                <div data-testid="total-page-views" style={{ marginTop: "0.3rem", fontSize: "1.6rem", fontWeight: 700, color: "var(--wp-text, #eee)" }}>
+                  {summary.totalPageViews.toLocaleString()}
+                </div>
+              )}
             </div>
             <div style={card}>
               <div style={label}>Total events</div>
@@ -599,7 +614,11 @@ export default function SiteAnalyticsPage() {
             </div>
             {summary.totalPageViews === 0 && (
               <p data-testid="site-analytics-empty" style={{ marginTop: "0.7rem", fontSize: "0.78rem", color: "var(--wp-text-muted, #9ca3af)", lineHeight: 1.5 }}>
-                {summary.totalEvents > 0
+                {/* Precise signal first: a property that has never sent a page
+                    view is agent-monitored by design. Fall back to the
+                    events-present heuristic when the field is absent (an older
+                    cached API response mid-deploy). */}
+                {summary.collectsPageViews === false || (summary.collectsPageViews === undefined && summary.totalEvents > 0)
                   ? "This property is monitored by Forcefield, which forwards AGENT traffic (bots, scanners, crawlers) - not human page views - so this chart stays empty by design. The real data for this property is the agent traffic and operators below."
                   : "No page views recorded in this window yet."}
               </p>
