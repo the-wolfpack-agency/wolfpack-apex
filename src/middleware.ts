@@ -120,7 +120,7 @@ export function middleware(req: NextRequest, event?: NextFetchEvent) {
      (an instant kill-switch), it only OBSERVES and forwards (never blocks), and it
      never touches `response`. Handed to waitUntil so the forward survives the
      response; the shim itself never throws. Instinct is just another surface. */
-  if (event && process.env.FORCEFIELD_WEB === "on") event.waitUntil(forcefieldMonitor({ surface: "instinct", req }));
+  if (event && process.env.FORCEFIELD_WEB === "on") event.waitUntil(forcefieldMonitor({ site: "instinct", req }));
 
   return response;
 }

@@ -2,7 +2,7 @@ import { observeRequest } from "@/lib/forcefield-web/observe";
 import { DEFAULT_RULESET } from "@/lib/forcefield-web/ruleset";
 
 const R = DEFAULT_RULESET;
-const base = { surface: "instinct", method: "GET", country: "US", headerNames: ["host", "user-agent"], nowMs: 1_758_000_000_000 };
+const base = { site: "instinct", method: "GET", country: "US", headerNames: ["host", "user-agent"], nowMs: 1_758_000_000_000 };
 
 describe("observeRequest - ruleset-driven, monitor-only", () => {
   it("returns null for a normal browser visitor (nothing forwarded)", () => {
@@ -12,7 +12,7 @@ describe("observeRequest - ruleset-driven, monitor-only", () => {
   it("records a decoy trip (highest signal) and tags the surface", () => {
     const o = observeRequest({ ...base, path: "/_ff/records", userAgent: "x" }, R)!;
     expect(o.type).toBe("site.agent_trap_tripped");
-    expect(o.props.surface).toBe("instinct");
+    expect(o.props.site).toBe("instinct");
     expect(o.props.blocked).toBe(false);
     expect(o.props.posture).toBe("monitor");
   });
