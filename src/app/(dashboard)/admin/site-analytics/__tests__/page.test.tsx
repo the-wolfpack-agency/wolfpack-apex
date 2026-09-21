@@ -775,3 +775,15 @@ test("renders the property (surface) filter and re-fetches scoped to the chosen 
   fireEvent.click(screen.getByTestId("surface-instinct"));
   await waitFor(() => expect(calls.some((u) => u.includes("/api/admin/site-analytics?days=") && u.includes("surface=instinct"))).toBe(true));
 });
+
+test("the Forcefield legend stacks each term on its own line, emphasized", async () => {
+  mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: SUMMARY, permissions: PERMS }) });
+  render(<SiteAnalyticsPage />);
+  const legend = await screen.findByTestId("forcefield-legend");
+  // each term is present as its own labeled row (not one wrapped sentence)
+  expect(legend).toHaveTextContent("Welcomed");
+  expect(legend).toHaveTextContent("Flagged");
+  expect(legend).toHaveTextContent("Decoy trips");
+  // the legend is a stacked grid of rows, one per term
+  expect(legend.querySelectorAll(":scope > div").length).toBe(3);
+});
