@@ -28,8 +28,8 @@ export interface Observation {
 }
 
 export interface ObserveInput {
-  /** The property this request hit (e.g. "instinct", "ogiam.com"). */
-  surface: string;
+  /** The property/site this request hit (e.g. "instinct", "ogiam.com"). */
+  site: string;
   path: string;
   method: string;
   userAgent: string;
@@ -96,7 +96,10 @@ export function observeRequest(input: ObserveInput, ruleset: ForcefieldRuleset):
 
   const props: Record<string, string | number | boolean> = {
     sig: sessionSig(userAgent, input.country, input.headerNames, input.nowMs),
-    surface: input.surface,
+    // Persisted as `site` (NOT `surface`): some properties already emit a
+    // `props.surface` for the UI element an event came from (e.g. "dropdown",
+    // "mobile"), so reusing it here would collide on the board's property filter.
+    site: input.site,
     posture: "monitor",
     action: "report",
     blocked: false,

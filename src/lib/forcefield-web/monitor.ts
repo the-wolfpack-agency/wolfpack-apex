@@ -3,7 +3,7 @@
  *
  * Onboarding a site is now one line in its middleware:
  *
- *     event.waitUntil(forcefieldMonitor({ surface: "aidanmulready", req }));
+ *     event.waitUntil(forcefieldMonitor({ site: "aidanmulready", req }));
  *
  * Everything else - activation, the ruleset, the classify, the forward - lives
  * here and is shared. It is DARK BY DEFAULT (off unless FORCEFIELD_WEB === "on"),
@@ -35,7 +35,7 @@ export interface MonitorRequestLike {
  * Returns a promise the caller should hand to event.waitUntil so the forward
  * survives the response. Never throws; a no-op unless fully configured + enabled.
  */
-export async function forcefieldMonitor(args: { surface: string; req: MonitorRequestLike }): Promise<void> {
+export async function forcefieldMonitor(args: { site: string; req: MonitorRequestLike }): Promise<void> {
   try {
     if (process.env.FORCEFIELD_WEB !== "on") return;
     const token = process.env.SITE_ANALYTICS_INGEST_TOKEN;
@@ -47,7 +47,7 @@ export async function forcefieldMonitor(args: { surface: string; req: MonitorReq
     const ruleset = await fetchRuleset(process.env.FORCEFIELD_RULESET_URL ?? "");
     const obs = observeRequest(
       {
-        surface: args.surface,
+        site: args.site,
         path: req.nextUrl.pathname,
         method: req.method,
         userAgent: req.headers.get("user-agent") ?? "",

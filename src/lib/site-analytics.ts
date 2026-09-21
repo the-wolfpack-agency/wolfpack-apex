@@ -197,7 +197,7 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
   // 'ogiam.com'. When 'all', no extra predicate (the cross-site view). The value
   // is always a bound parameter ($2), never interpolated.
   const filtered = surface !== "all" && surface.length > 0;
-  const surfaceClause = filtered ? ` AND coalesce(props->>'surface', 'ogiam.com') = $2` : "";
+  const surfaceClause = filtered ? ` AND coalesce(props->>'site', 'ogiam.com') = $2` : "";
   const params = filtered ? [String(days), surface] : [String(days)];
 
   const [hour, page, country, type, totals, ff, ffAgents, journeyRows, agentOriginRows, payloadRows, surfacesRows] = await Promise.all([
@@ -291,7 +291,7 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
        surface, so the picker always lists every property. Legacy events (no tag)
        show as 'ogiam.com'. */
     safeQuery<{ surface: string }>(
-      `SELECT DISTINCT coalesce(props->>'surface', 'ogiam.com') AS surface
+      `SELECT DISTINCT coalesce(props->>'site', 'ogiam.com') AS surface
          FROM site_analytics_events
         WHERE ${sinceClause}
         ORDER BY 1`,

@@ -147,12 +147,12 @@ describe("getSiteAnalyticsSummary - per-site (surface) filter", () => {
     await getSiteAnalyticsSummary(30, undefined, "instinct");
     // every event query is filtered to the surface via a BOUND param (never interpolated)
     const eventCalls = mockSafeQuery.mock.calls.filter(([sql]) =>
-      String(sql).includes("FROM site_analytics_events") && String(sql).includes("coalesce(props->>'surface'"),
+      String(sql).includes("FROM site_analytics_events") && String(sql).includes("coalesce(props->>'site'"),
     );
     expect(eventCalls.length).toBeGreaterThan(0);
     for (const [sql, params] of eventCalls) {
       // the surfaces-LIST query intentionally does NOT filter by surface (it lists all)
-      if (String(sql).includes("SELECT DISTINCT coalesce(props->>'surface'")) continue;
+      if (String(sql).includes("SELECT DISTINCT coalesce(props->>'site'")) continue;
       expect(String(sql)).toMatch(/= \$2/);
       expect(params).toEqual(["30", "instinct"]);
     }
