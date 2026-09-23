@@ -39,8 +39,10 @@ interface Summary {
     welcomed: number;
     flagged: number;
     trapped: number;
+    blocked: number;
     topAgents: Array<{ agent: string; count: number }>;
   };
+  learnedSignatures?: { shadow: number; enforcing: number; autoBlocked: number };
   journeys: Array<{
     key: string;
     confidence: "proven" | "inferred";
@@ -684,10 +686,15 @@ export default function SiteAnalyticsPage() {
             </div>
           </div>
 
-          {/* Forcefield for the Web: agent traffic on ogiam.com. Watch-first, so
-              these are observed, not blocked. */}
+          {/* Forcefield for the Web: agent traffic across all monitored sites.
+              Detection is always on; enforcement turns away proven-hostile
+              traffic (honeytoken trip / live payload / blocked fingerprint). */}
           <div style={card} data-testid="ff-agent-traffic">
-            <div style={label}>Forcefield &middot; agent traffic (watch-first, nothing blocked)</div>
+            <div style={label} data-testid="ff-posture">
+              {summary.forcefield.blocked > 0
+                ? `Forcefield · agent traffic (enforcing · ${summary.forcefield.blocked.toLocaleString()} blocked)`
+                : "Forcefield · agent traffic (monitoring · none turned away in range)"}
+            </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "1rem", marginTop: "0.8rem" }}>
               <div>
                 <div style={{ ...label, color: "var(--wp-success, #30a46c)" }}>Agents welcomed</div>
@@ -705,6 +712,12 @@ export default function SiteAnalyticsPage() {
                 <div style={{ ...label, color: "var(--wp-error, #ef4444)" }}>Decoy trips</div>
                 <div data-testid="ff-trapped" style={{ marginTop: "0.25rem", fontSize: "1.5rem", fontWeight: 700, color: "var(--wp-text, #eee)" }}>
                   {summary.forcefield.trapped.toLocaleString()}
+                </div>
+              </div>
+              <div>
+                <div style={{ ...label, color: "var(--wp-error, #ef4444)" }}>Blocked (enforced)</div>
+                <div data-testid="ff-blocked" style={{ marginTop: "0.25rem", fontSize: "1.5rem", fontWeight: 700, color: "var(--wp-text, #eee)" }}>
+                  {summary.forcefield.blocked.toLocaleString()}
                 </div>
               </div>
             </div>
@@ -727,12 +740,44 @@ export default function SiteAnalyticsPage() {
                 { term: "Welcomed", color: "var(--wp-success, #30a46c)", def: "identified good agents (search + AI crawlers) - given a welcome lane, never blocked." },
                 { term: "Flagged", color: "var(--wp-warning, #f5a623)", def: "unidentified automation - a weak signal, recorded only." },
                 { term: "Decoy trips", color: "var(--wp-error, #ef4444)", def: "a scraper followed an invisible, robots-disallowed honeypot link - near-certainly ignoring the rules." },
+                { term: "Blocked", color: "var(--wp-error, #ef4444)", def: "requests actually turned away by enforcement - proven-hostile only (honeytoken trip, live payload, or a fingerprint/signature we already caught). Legitimate visitors are never blocked." },
               ].map((row) => (
                 <div key={row.term} style={{ display: "flex", gap: "0.6rem", alignItems: "baseline", fontSize: "0.82rem", lineHeight: 1.45 }}>
                   <span style={{ flexShrink: 0, minWidth: "6.5rem", fontWeight: 800, letterSpacing: "0.02em", color: row.color, textTransform: "uppercase", fontSize: "0.72rem" }}>{row.term}</span>
                   <span style={{ color: "var(--wp-text, #d8dbe0)" }}>{row.def}</span>
                 </div>
               ))}
+            </div>
+          </div>
+
+          {/* Learned hostile-tradecraft signatures: combos mined from agents we've
+              already caught, used to catch new ones by their methods. Shadow =
+              still proving itself (would-block only); Enforcing = earned auto-block
+              across every site. */}
+          <div style={card} data-testid="ff-learned-signatures">
+            <div style={label}>Learned hostile-tradecraft signatures</div>
+            <div style={{ fontSize: "0.8rem", color: "var(--wp-text-muted, #9ca3af)", marginTop: "0.35rem", lineHeight: 1.5 }}>
+              Recurring tool/action combos mined from operators we&apos;ve already caught. A signature must be exhibited by multiple distinct hostiles and prove zero false positives against good agents before it earns auto-block, so the corpus makes detection faster without risking legitimate traffic.
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "1rem", marginTop: "0.8rem" }}>
+              <div>
+                <div style={{ ...label, color: "var(--wp-gold, #e8b528)" }}>Shadow (proving)</div>
+                <div data-testid="sig-shadow" style={{ marginTop: "0.25rem", fontSize: "1.5rem", fontWeight: 700, color: "var(--wp-text, #eee)" }}>
+                  {(summary.learnedSignatures?.shadow ?? 0).toLocaleString()}
+                </div>
+              </div>
+              <div>
+                <div style={{ ...label, color: "var(--wp-error, #ef4444)" }}>Enforcing</div>
+                <div data-testid="sig-enforcing" style={{ marginTop: "0.25rem", fontSize: "1.5rem", fontWeight: 700, color: "var(--wp-text, #eee)" }}>
+                  {(summary.learnedSignatures?.enforcing ?? 0).toLocaleString()}
+                </div>
+              </div>
+              <div>
+                <div style={{ ...label, color: "var(--wp-error, #ef4444)" }}>Operators auto-blocked</div>
+                <div data-testid="sig-autoblocked" style={{ marginTop: "0.25rem", fontSize: "1.5rem", fontWeight: 700, color: "var(--wp-text, #eee)" }}>
+                  {(summary.learnedSignatures?.autoBlocked ?? 0).toLocaleString()}
+                </div>
+              </div>
             </div>
           </div>
 

@@ -69,7 +69,7 @@ describe("getSiteAnalyticsSummary", () => {
       .mockResolvedValueOnce({ rows: [{ country: "US", count: "35" }] }) // byCountry
       .mockResolvedValueOnce({ rows: [{ event_type: "site.page_viewed", count: "42" }] }) // byType
       .mockResolvedValueOnce({ rows: [{ page_views: "42", total: "55" }] }) // totals
-      .mockResolvedValueOnce({ rows: [{ welcomed: "3", flagged: "5", trapped: "2" }] }) // forcefield counts
+      .mockResolvedValueOnce({ rows: [{ welcomed: "3", flagged: "5", trapped: "2", blocked: "1" }] }) // forcefield counts
       .mockResolvedValueOnce({ rows: [{ agent: "GPTBot", count: "3" }] }) // forcefield top agents
       .mockResolvedValueOnce({ rows: [ // journey rows (correlated agent events)
         { event_type: "site.agent_trap_tripped", path: "/_ff/x", created_at: "2026-09-18T10:00:00Z", sig: "fp1", nonce: null, agent: null },
@@ -84,7 +84,8 @@ describe("getSiteAnalyticsSummary", () => {
         { attack: "xss", count: "1" },
       ] })
       .mockResolvedValueOnce({ rows: [{ surface: "ogiam.com" }, { surface: "instinct" }] }) // distinct surfaces
-      .mockResolvedValueOnce({ rows: [{ has_pv: true }] }); // lifetime page-view existence
+      .mockResolvedValueOnce({ rows: [{ has_pv: true }] }) // lifetime page-view existence
+      .mockResolvedValueOnce({ rows: [{ shadow: "2", enforcing: "1", auto_blocked: "3" }] }); // learned signatures
 
     const summary = await getSiteAnalyticsSummary(30);
     expect(summary.rangeDays).toBe(30);
@@ -103,8 +104,9 @@ describe("getSiteAnalyticsSummary", () => {
     expect(summary.surfaces).toEqual(["ogiam.com", "instinct"]);
     expect(summary.surface).toBe("all");
     expect(summary.forcefield).toEqual({
-      welcomed: 3, flagged: 5, trapped: 2, topAgents: [{ agent: "GPTBot", count: 3 }],
+      welcomed: 3, flagged: 5, trapped: 2, blocked: 1, topAgents: [{ agent: "GPTBot", count: 3 }],
     });
+    expect(summary.learnedSignatures).toEqual({ shadow: 2, enforcing: 1, autoBlocked: 3 });
     // The two correlated events (same fingerprint) fuse into one classified journey.
     expect(summary.journeys).toHaveLength(1);
     expect(summary.journeys[0].behaviorClass).toBe("vuln_scanner"); // probing outranks scraping when both present

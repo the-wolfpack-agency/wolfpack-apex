@@ -156,6 +156,32 @@ export async function autoBlockFingerprint(fp: string, reason: string): Promise<
   }
 }
 
+/** Auto-block a whole OPERATOR (a behavioral cluster, not a single fp): resolve
+ *  its stable edge fingerprints and store them under a reserved "auto:<reason>"
+ *  key so getBlockedFingerprints serves them unconditionally. Used by the learned-
+ *  signature loop when a live operator matches an ENFORCING signature. Fail-safe +
+ *  idempotent; returns the number of fingerprints written for it. */
+export async function autoBlockOperator(operatorKey: string, reason: string): Promise<number> {
+  if (!process.env.DATABASE_URL || !operatorKey) return 0;
+  const workspaceId = process.env.FORCEFIELD_EDGE_WORKSPACE_ID || "default";
+  const fps = await resolveOperatorFingerprints(operatorKey);
+  if (fps.length === 0) return 0;
+  const opKey = `auto:${reason}`;
+  try {
+    const res = await query(
+      `INSERT INTO instinct_agent_blocked_fingerprints (workspace_id, operator_key, fp)
+         SELECT $1, $2, unnest($3::text[])
+       ON CONFLICT (workspace_id, operator_key, fp) DO NOTHING`,
+      [workspaceId, opKey, fps],
+    );
+    if ((res.rowCount ?? 0) > 0) trackEvent("forcefield.fingerprint_autoblocked", "system", "forcefield", { operatorKey, reason, count: res.rowCount ?? 0 });
+    return fps.length;
+  } catch (err) {
+    console.warn("[blocked-fingerprints] auto-block operator failed:", (err as Error).message);
+    return 0;
+  }
+}
+
 /** The distinct fingerprints to distribute for a workspace - ONLY those whose
  *  operator is still blocked (a stale row for an unblocked operator never
  *  enforces). Empty on any error (fail-safe: the ruleset falls back to no

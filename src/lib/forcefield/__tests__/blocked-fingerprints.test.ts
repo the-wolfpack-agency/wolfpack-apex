@@ -1,5 +1,5 @@
 /** @jest-environment node */
-import { getBlockedFingerprints, captureBlockedFingerprints, clearBlockedFingerprints } from "@/lib/forcefield/blocked-fingerprints";
+import { getBlockedFingerprints, captureBlockedFingerprints, clearBlockedFingerprints, autoBlockOperator } from "@/lib/forcefield/blocked-fingerprints";
 
 const mockQuery = jest.fn();
 const mockListBlocked = jest.fn();
@@ -70,6 +70,20 @@ describe("captureBlockedFingerprints", () => {
   it("returns 0 without a database (no throw)", async () => {
     delete process.env.DATABASE_URL;
     expect(await captureBlockedFingerprints("default", "op_x")).toBe(0);
+  });
+});
+
+describe("autoBlockOperator", () => {
+  it("returns 0 without a database (no throw)", async () => {
+    delete process.env.DATABASE_URL;
+    expect(await autoBlockOperator("op_x", "learned:abcd1234")).toBe(0);
+  });
+
+  it("is a no-op (0) when the operator resolves to no fingerprints", async () => {
+    // resolveOperatorFingerprints -> loadJourneysWithFingerprints queries events;
+    // no rows -> no journeys -> no fps -> nothing to block.
+    mockQuery.mockResolvedValue({ rows: [] });
+    expect(await autoBlockOperator("op_x", "learned:abcd1234")).toBe(0);
   });
 });
 
