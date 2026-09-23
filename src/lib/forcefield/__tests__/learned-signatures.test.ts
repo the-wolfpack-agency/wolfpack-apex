@@ -33,31 +33,34 @@ describe("matchOperator", () => {
 });
 
 describe("mineSignatures", () => {
-  it("mines only from hostiles with >= 2 tells and counts prevalence by superset", () => {
+  it("mines from every caught operator (hostile + elevated) with >= 2 tells, by superset prevalence", () => {
     const dossiers: OperatorDossierLite[] = [
       { operatorKey: "h1", threatLevel: "hostile", tells: ["payload_attack", "id_enumeration"] },
       { operatorKey: "h2", threatLevel: "hostile", tells: ["payload_attack", "id_enumeration", "tripped_decoy"] },
-      { operatorKey: "h3", threatLevel: "hostile", tells: ["payload_attack", "id_enumeration"] },
-      { operatorKey: "b1", threatLevel: "benign", tells: ["read_robots", "read_sitemap"] }, // ignored
-      { operatorKey: "e1", threatLevel: "elevated", tells: ["payload_attack", "id_enumeration"] }, // ignored (not hostile)
+      { operatorKey: "e1", threatLevel: "elevated", tells: ["payload_attack", "id_enumeration"] }, // counts: elevated is caught
+      { operatorKey: "b1", threatLevel: "benign", tells: ["payload_attack", "id_enumeration"] }, // ignored: benign
+      { operatorKey: "w1", threatLevel: "elevated", welcomed: true, tells: ["payload_attack", "id_enumeration"] }, // ignored: welcomed
     ];
     const mined = mineSignatures(dossiers);
     const combo = mined.find((m) => m.tells.join(",") === "id_enumeration,payload_attack");
-    // h1, h2, h3 all contain {payload_attack, id_enumeration} -> prevalence 3.
+    // h1, h2, e1 contain {payload_attack, id_enumeration}; b1 and w1 excluded -> 3.
     expect(combo?.prevalence).toBe(3);
     expect(combo?.dangerous).toBe(true);
   });
 
-  it("marks a combo of only weak tells as not dangerous", () => {
+  it("marks a combo of only weak tells as not dangerous (so it can never enforce)", () => {
     const mined = mineSignatures([
-      { operatorKey: "h1", threatLevel: "hostile", tells: ["read_robots", "read_sitemap"] },
-      { operatorKey: "h2", threatLevel: "hostile", tells: ["read_robots", "read_sitemap"] },
+      { operatorKey: "e1", threatLevel: "elevated", tells: ["read_robots", "read_sitemap"] },
+      { operatorKey: "e2", threatLevel: "elevated", tells: ["read_robots", "read_sitemap"] },
     ]);
     expect(mined[0]?.dangerous).toBe(false);
   });
 
-  it("returns nothing when there are no hostiles", () => {
-    expect(mineSignatures([{ operatorKey: "b", threatLevel: "benign", tells: ["a", "b"] }])).toEqual([]);
+  it("returns nothing when there are only benign/welcomed operators", () => {
+    expect(mineSignatures([
+      { operatorKey: "b", threatLevel: "benign", tells: ["a", "b"] },
+      { operatorKey: "w", threatLevel: "elevated", welcomed: true, tells: ["a", "b"] },
+    ])).toEqual([]);
   });
 });
 

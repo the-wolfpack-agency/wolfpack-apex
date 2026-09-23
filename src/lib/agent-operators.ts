@@ -11,7 +11,8 @@
  */
 import { query, safeQuery } from "@/lib/db";
 import { operatorKeyFor, buildDossiers, buildDossier, type Sighting, type AttributionDossier } from "@/lib/agent-dossier";
-import type { AgentJourney } from "@/lib/agent-behavior";
+import { buildJourneys, type AgentJourney, type CorrelationKind } from "@/lib/agent-behavior";
+import { liveSightingFor } from "@/lib/agent-profile";
 import type { ScaffoldingSignature } from "@/lib/agent-probe";
 import type { ToolCompositionReport } from "@/lib/agent-tool-composition";
 
@@ -80,6 +81,47 @@ export async function getOperators(workspaceId: string, rangeDays = 30): Promise
     listBlockedOperatorKeys(workspaceId),
   ]);
   return buildDossiers(sightings).map((d) => ({ ...d, blocked: blocked.has(d.operatorKey) }));
+}
+
+/**
+ * Operator dossiers built from the LIVE edge stream (site_analytics_events), the
+ * same source the /admin/site-analytics board reads - NOT the instinct_agent_
+ * sightings table (which only the public harness writes). The edge shim records
+ * agent activity as site.agent_* events, so any consumer that wants the real
+ * inbound operators (e.g. the learned-signature miner) must reconstruct dossiers
+ * here rather than from getOperators. Reconstructs journeys exactly as the board
+ * does (buildJourneys) and reuses liveSightingFor so the operator key matches the
+ * one autoBlockOperator resolves. Fail-safe: empty on any error / no DB.
+ */
+export async function liveOperatorDossiers(rangeDays = 30): Promise<AttributionDossier[]> {
+  if (!process.env.DATABASE_URL) return [];
+  const days = clampDays(rangeDays);
+  try {
+    const { rows } = await safeQuery<{ event_type: string; path: string | null; created_at: string; sig: string | null; nonce: string | null; agent: string | null; attack: string | null; tool: string | null; client_type: string | null; site: string | null }>(
+      `SELECT event_type, path, created_at::text AS created_at,
+              props->>'sig' AS sig, props->>'nonce' AS nonce, props->>'agent' AS agent, props->>'attack' AS attack,
+              props->>'tool' AS tool, props->>'client_type' AS client_type, coalesce(props->>'site', 'ogiam.com') AS site
+         FROM site_analytics_events
+        WHERE created_at > now() - ($1 || ' days')::interval
+          AND (props->>'sig' IS NOT NULL OR props->>'nonce' IS NOT NULL)
+        ORDER BY created_at ASC
+        LIMIT 5000`,
+      [String(days)],
+    );
+    const siteByKey = new Map<string, string>();
+    const jrows = rows.map((r) => {
+      const nonce = r.nonce ?? undefined;
+      const key = nonce ?? r.sig ?? "";
+      if (key && r.site) siteByKey.set(key, r.site);
+      return { key, keyKind: (nonce ? "nonce" : "fingerprint") as CorrelationKind, type: r.event_type, path: r.path ?? "", at: r.created_at, nonceLinked: !!nonce, agent: r.agent ?? undefined, attack: r.attack ?? undefined, tool: r.tool ?? undefined, clientType: r.client_type ?? undefined };
+    }).filter((r) => r.key !== "");
+    const journeys = buildJourneys(jrows);
+    const sightings = journeys.map((j) => liveSightingFor(j, siteByKey.get(j.key) ?? "edge"));
+    return buildDossiers(sightings);
+  } catch (err) {
+    console.warn("[agent-operators] liveOperatorDossiers failed:", (err as Error).message);
+    return [];
+  }
 }
 
 /** Block an operator by its durable fingerprint. Idempotent (upsert). No-op

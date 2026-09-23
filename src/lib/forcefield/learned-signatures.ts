@@ -84,21 +84,26 @@ export function matchOperator(operatorTells: readonly string[], signatureTells: 
  * never combinatorial. Only combos of >= MIN_TELLS are considered.
  */
 export function mineSignatures(dossiers: readonly OperatorDossierLite[]): MinedSignature[] {
-  const hostiles = dossiers.filter((d) => d.threatLevel === "hostile" && d.tells.length >= MIN_TELLS);
-  if (hostiles.length === 0) return [];
+  // Mine from every CAUGHT operator - hostile (proven) AND elevated (probing /
+  // scraping, inferred) - since both are bad agents whose methods we want to
+  // learn. A welcomed/benign operator is never mined. Enforcement stays gated
+  // downstream (dangerous-tier tell + prevalence + zero false positives), so a
+  // broad candidate pool never means a broad block list.
+  const caught = dossiers.filter((d) => d.threatLevel !== "benign" && d.welcomed !== true && d.tells.length >= MIN_TELLS);
+  if (caught.length === 0) return [];
 
   // Distinct candidate combos, keyed by canonical hash.
   const candidates = new Map<string, string[]>();
-  for (const h of hostiles) {
+  for (const h of caught) {
     const combo = Array.from(new Set(h.tells)).sort();
     candidates.set(signatureHash(combo), combo);
   }
 
   const out: MinedSignature[] = [];
   for (const [sigHash, combo] of candidates) {
-    // Prevalence: distinct hostiles whose tells contain the whole combo.
+    // Prevalence: distinct caught operators whose tells contain the whole combo.
     let prevalence = 0;
-    for (const h of hostiles) if (matchOperator(h.tells, combo)) prevalence++;
+    for (const h of caught) if (matchOperator(h.tells, combo)) prevalence++;
     out.push({ sigHash, tells: combo, dangerous: combo.some((t) => DANGEROUS_TELLS.has(t)), prevalence });
   }
   return out.sort((a, b) => b.prevalence - a.prevalence);

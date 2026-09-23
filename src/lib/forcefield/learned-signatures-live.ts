@@ -6,7 +6,7 @@
  */
 import { query } from "@/lib/db";
 import { trackEvent, type InstinctEventType } from "@/lib/analytics";
-import { getOperators } from "@/lib/agent-operators";
+import { liveOperatorDossiers } from "@/lib/agent-operators";
 import { autoBlockOperator } from "@/lib/forcefield/blocked-fingerprints";
 import type { LearnedSignatureDeps, MinedSignature, OperatorDossierLite, StoredSignature } from "@/lib/forcefield/learned-signatures";
 
@@ -22,7 +22,10 @@ export function liveLearnedSignatureDeps(): LearnedSignatureDeps {
   const workspaceId = process.env.FORCEFIELD_EDGE_WORKSPACE_ID || "default";
   return {
     listDossiers: async (): Promise<OperatorDossierLite[]> => {
-      const ops = await getOperators(workspaceId, LOOKBACK_DAYS);
+      // Read the LIVE edge stream (site_analytics_events), the same source the
+      // board shows - NOT the sightings table, which only the public harness
+      // writes and which left the miner with no hostiles to learn from.
+      const ops = await liveOperatorDossiers(LOOKBACK_DAYS);
       return ops.map((o) => ({
         operatorKey: o.operatorKey,
         threatLevel: o.threatLevel,
