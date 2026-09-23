@@ -160,10 +160,12 @@ test("threat coverage panel: shows the honest headline, gaps, and per-threat sta
   await waitFor(() => expect(screen.getByTestId("threat-coverage")).toBeInTheDocument());
   // Honest headline: detected / observable (excludes code-level CWEs).
   expect(screen.getByTestId("coverage-headline")).toHaveTextContent(/\d+ \/ \d+ agent-observable threats detected/i);
-  // The gaps callout names prompt injection - the "not caught off guard" part.
+  // The gaps callout names the honest frontier gap - the "not caught off guard" part.
+  // LLM02 is now live on the model-output lens (partial), so the named gap moved to
+  // indirect prompt injection, which the inbound edge genuinely cannot see.
   const gaps = screen.getByTestId("coverage-gaps");
-  expect(gaps).toHaveTextContent(/LLM02/); // insecure output handling is still an honest gap
-  expect(gaps).toHaveTextContent(/gaps to close/i);
+  expect(gaps).toHaveTextContent(/indirect prompt injection/i);
+  expect(gaps).toHaveTextContent(/gaps? to close/i);
   // A covered injection CWE reads "covered"; a code-level CWE reads out-of-scope.
   expect(screen.getByTestId("coverage-row-CWE-89")).toHaveTextContent(/covered/i);
   expect(screen.getByTestId("coverage-row-CWE-352")).toHaveTextContent(/not agent observable/i);

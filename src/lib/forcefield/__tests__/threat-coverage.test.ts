@@ -49,10 +49,20 @@ describe("threat-coverage matrix", () => {
     }
   });
 
-  it("covers the OWASP-LLM agent classes (LLM07/LLM08 covered, LLM01/LLM02 flagged)", () => {
+  it("covers the OWASP-LLM agent classes (LLM07/LLM08 covered, LLM02 live on the model-output lens)", () => {
     expect(THREAT_COVERAGE.find((e) => e.id === "LLM07")!.status).toBe("covered");
     expect(THREAT_COVERAGE.find((e) => e.id === "LLM08")!.status).toBe("covered");
-    expect(THREAT_COVERAGE.find((e) => e.id === "LLM02")!.status).toBe("gap");
+    const llm02 = THREAT_COVERAGE.find((e) => e.id === "LLM02")!;
+    expect(llm02.status).toBe("partial");
+    expect(llm02.lenses).toContain("model-output");
+  });
+
+  it("still names an honest frontier gap (never claims completeness)", () => {
+    // Closing LLM02 must not zero out the gap list - the matrix keeps naming what
+    // it does NOT yet cover (here: indirect prompt injection via retrieved content).
+    const summary = coverageSummary();
+    expect(summary.gap).toBeGreaterThan(0);
+    expect(THREAT_COVERAGE.find((e) => e.id === "LLM01-indirect")!.status).toBe("gap");
   });
 
   it("the behavior-lens gaps are now covered (IDOR enumeration, runaway-loop exhaustion)", () => {

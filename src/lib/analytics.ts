@@ -717,6 +717,11 @@ export type InstinctEventType =
   | "forcefield.signature_mined"
   | "forcefield.signature_promoted"
   | "forcefield.signature_autoblocked"
+  // assistant.insecure_output_flagged { kinds, count } - the live model-output
+  // lens (LLM02): the assistant's free-text answer carried active/executable
+  // content (script/iframe/js-uri/event-handler/data-html) outside code fences.
+  // Observe-only; recorded, never blocks the answer.
+  | "assistant.insecure_output_flagged"
   // OGIAM self-serve tenancy. tenant_registered { tenant_id } - a new org signed
   //   up (admin email is NOT in analytics, only that a tenant was registered).
   | "tenancy.tenant_registered"

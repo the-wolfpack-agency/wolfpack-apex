@@ -30,6 +30,7 @@ export type DetectionLens =
   | "agent-behavior" // agent-behavior: how an agent acts (rate, decoys, violations)
   | "tool-composition" // agent-tool-composition: what an agent is equipped to do
   | "web-classifier" // forcefield-web/classify: UA + decoy classification
+  | "model-output" // forcefield/output-safety: active/executable content in the model's own answer
   | "red-team-offline"; // ai-redteam: exercised against the gate, not live traffic
 
 export type CoverageStatus =
@@ -90,7 +91,8 @@ export const THREAT_COVERAGE: readonly ThreatEntry[] = [
 
   // ── Agent / LLM-specific classes ─────────────────────────────────────────
   { id: "CWE-1427", name: "Prompt injection (OWASP LLM01)", family: "agent-llm", status: "covered", lenses: ["payload", "red-team-offline"], note: "Live inbound detection: instruction-override verbs + prompt/rule targets, jailbreak tokens, and chat-template delimiter injection, plus the offline red-team." },
-  { id: "LLM02", name: "Insecure output handling", family: "agent-llm", status: "gap", lenses: [], note: "Insecure output SINKS in AI-GENERATED code (dangerouslySetInnerHTML / innerHTML / eval / SQL interpolation) are caught upstream by the AI-code gate before the code can ship. What remains an honest gap here is LIVE scanning of free-text model CHAT output before a downstream sink renders it - a runtime output scanner not yet built." },
+  { id: "LLM02", name: "Insecure output handling", family: "agent-llm", status: "partial", lenses: ["model-output"], note: "The assistant's free-text answer is scanned LIVE for active/executable content (script / iframe / javascript: / event-handler / data:text-html) before it reaches the UI (forcefield/output-safety, observe-only; code examples in fences are ignored). This covers our own assistant boundary; every downstream sink that might render model output elsewhere is not yet scanned, so partial." },
+  { id: "LLM01-indirect", name: "Indirect prompt injection (via retrieved content)", family: "agent-llm", status: "gap", lenses: [], note: "Direct prompt-injection in the inbound request is covered (CWE-1427). Injection hidden inside third-party content the agent later RETRIEVES and trusts is not observable at our inbound edge - the honest frontier gap this stack has not closed." },
   { id: "LLM06", name: "Sensitive information disclosure", family: "agent-llm", status: "partial", lenses: ["tool-composition", "probe-path"], note: "data-exfil tool intent + secrets-exposure probing; no output scanning." },
   { id: "LLM07", name: "Insecure tool / plugin design", family: "agent-llm", status: "covered", lenses: ["tool-composition"], note: "unauthorized-access / credential-abuse tool intents from the toolset." },
   { id: "LLM08", name: "Excessive agency", family: "agent-llm", status: "covered", lenses: ["tool-composition"], note: "MALICIOUS_COMBINATIONS intents (data_theft, intrusion_attempt) from the equipped tools." },
