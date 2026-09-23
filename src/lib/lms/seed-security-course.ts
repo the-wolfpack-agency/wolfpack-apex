@@ -11,7 +11,8 @@
 import { query, safeQuery, hasDatabase } from "@/lib/db";
 import {
   HEADLINE, CERT_PREMISE, PRECISION_NOTE, CERT_TIERS, PRODUCTS, DEEP_DIVES, ACQUISITIONS,
-  type ProductPlain, type AcquisitionPlain,
+  PRACTITIONER_PLAYS, AMBASSADOR_DRILL,
+  type ProductPlain, type AcquisitionPlain, type PractitionerPlay,
 } from "@/lib/builds/security-plain-language";
 import type { LessonBlock } from "./content";
 
@@ -31,6 +32,15 @@ function acquisitionBlocks(a: AcquisitionPlain): LessonBlock[] {
     { type: "plain", text: a.plain },
     { type: "stops", text: a.stops },
     { type: "without", text: a.without },
+  ];
+}
+function practitionerBlocks(p: PractitionerPlay): LessonBlock[] {
+  return [
+    { type: "plain", text: p.problem },
+    { type: "text", text: `Reach for: ${p.product}` },
+    { type: "plain", text: p.say },
+    { type: "text", text: `When they push back: ${p.objection}` },
+    { type: "plain", text: p.answer },
   ];
 }
 
@@ -53,6 +63,16 @@ export function buildSecurityCourseSpec() {
       title: "Recent acquisitions, in plain words",
       summary: "The acquisitions arrive with their own jargon; the same four beats translate them.",
       lessons: ACQUISITIONS.map((a) => ({ title: a.name, subtitle: a.brought, blocks: acquisitionBlocks(a) })),
+    },
+    {
+      title: "Practitioner: map the problem, handle the objection",
+      summary: "Foundations proves you can SAY it. Practitioner proves you can pick the right product for a customer's real problem and hold the line, in plain words, when they push back.",
+      lessons: PRACTITIONER_PLAYS.map((p) => ({ title: p.product, subtitle: "objection handling", blocks: practitionerBlocks(p) })),
+    },
+    {
+      title: "Ambassador: keep the fluency current",
+      summary: AMBASSADOR_DRILL.intro,
+      lessons: AMBASSADOR_DRILL.drills.map((d) => ({ title: d.habit, subtitle: "a habit that keeps the plain language alive", blocks: [{ type: "plain", text: d.how }] as LessonBlock[] })),
     },
   ];
   return {
@@ -83,27 +103,38 @@ export async function seedSecurityCourse(workspaceId: string): Promise<string | 
   const courseId = up[0]?.id;
   if (!courseId) return null;
 
-  // Seed-once: if content already present, do not rebuild (protects progress).
-  const { rows: existing } = await safeQuery<{ n: string }>(
-    `SELECT count(*)::text AS n FROM lms_modules WHERE course_id = $1 AND workspace_id = $2`,
+  // ADDITIVE reconcile (was seed-once). Insert only what is missing - new tracks
+  // by name, new modules by title (with their lessons) at the next free position -
+  // so existing modules and lessons keep their ids and no learner progress is
+  // orphaned. Content revisions to an EXISTING lesson remain a later, versioned
+  // concern; this only ever adds, never edits or deletes.
+  const { rows: haveTracks } = await safeQuery<{ name: string }>(
+    `SELECT name FROM lms_tracks WHERE course_id = $1 AND workspace_id = $2`,
     [courseId, workspaceId],
   );
-  if (Number(existing[0]?.n ?? "0") > 0) return courseId;
+  const trackNames = new Set(haveTracks.map((r) => r.name));
+  const { rows: haveMods } = await safeQuery<{ title: string; position: number }>(
+    `SELECT title, position FROM lms_modules WHERE course_id = $1 AND workspace_id = $2`,
+    [courseId, workspaceId],
+  );
+  const moduleTitles = new Set(haveMods.map((r) => r.title));
+  let nextTrackPos = haveTracks.length;
+  let nextModPos = haveMods.reduce((mx, r) => Math.max(mx, r.position + 1), 0);
 
-  for (let i = 0; i < spec.tracks.length; i++) {
-    const t = spec.tracks[i];
+  for (const t of spec.tracks) {
+    if (trackNames.has(t.name)) continue;
     await query(
       `INSERT INTO lms_tracks (workspace_id, course_id, position, name, audience, proves)
          VALUES ($1, $2, $3, $4, $5, $6)`,
-      [workspaceId, courseId, i, t.name, t.audience, t.proves],
+      [workspaceId, courseId, nextTrackPos++, t.name, t.audience, t.proves],
     );
   }
-  for (let mi = 0; mi < spec.modules.length; mi++) {
-    const m = spec.modules[mi];
+  for (const m of spec.modules) {
+    if (moduleTitles.has(m.title)) continue;
     const { rows: mr } = await query<{ id: string }>(
       `INSERT INTO lms_modules (workspace_id, course_id, position, title, summary)
          VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-      [workspaceId, courseId, mi, m.title, m.summary],
+      [workspaceId, courseId, nextModPos++, m.title, m.summary],
     );
     const moduleId = mr[0].id;
     for (let li = 0; li < m.lessons.length; li++) {

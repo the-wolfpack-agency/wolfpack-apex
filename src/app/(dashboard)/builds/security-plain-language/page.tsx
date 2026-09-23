@@ -21,7 +21,7 @@ import { fetchWithRefresh, getInstinctToken, jsonHeaders } from "@/lib/client-au
 import { CLIENT_BUILDS } from "@/lib/builds/registry";
 import BuildBanner from "@/components/BuildBanner";
 import { Stepper, type StepperStep } from "@/components/console";
-import { METHOD, HEADLINE, CERT_PREMISE, PRECISION_NOTE, GATEKEEPING, REUSES, WHY_IT_WORKS, TO_BUILD_OUT } from "@/lib/builds/security-plain-language";
+import { METHOD, HEADLINE, CERT_PREMISE, PRECISION_NOTE, GATEKEEPING, REUSES, WHY_IT_WORKS, TO_BUILD_OUT, MEETING_BRIEF, DEMO_PATH } from "@/lib/builds/security-plain-language";
 import type { LmsCourse, LessonBlock } from "@/lib/lms/content";
 import type { CourseProgress, LessonStatus } from "@/lib/lms/progress";
 
@@ -135,7 +135,7 @@ export default function SecurityPlainLanguagePage() {
       status = complete ? "passed" : progress?.enrolled ? "running" : "pending";
     } else {
       status = "pending";
-      detail = `${t.proves} (requires assessment - arrives with the tutor)`;
+      detail = `${t.proves} (lessons ready below; the certification assessment arrives with the tutor)`;
     }
     return { key: t.id, label: `${t.name} - ${t.audience}`, status, detail };
   });
@@ -192,6 +192,41 @@ export default function SecurityPlainLanguagePage() {
           <ul className="wp-pilot-list">
             {TO_BUILD_OUT.map((t) => (<li key={t.question}><strong>{t.question}</strong> {t.why}</li>))}
           </ul>
+        </div>
+      </details>
+
+      {/* PRESENTER NOTES for the warm second meeting. Collapsed by default so it
+          is never on screen during the live demo; open it to prep. */}
+      <details className="wp-pilot-section" data-testid="spl-meeting">
+        <summary className="wp-build-brief-summary" data-testid="spl-meeting-summary">
+          Presenter notes: the Friday meeting (for the team running the room)
+        </summary>
+        <div className="wp-build-brief-body">
+          <p className="wp-pilot-aside">{MEETING_BRIEF.context}</p>
+
+          <h3>Open by</h3>
+          <p className="wp-pilot-aside">{MEETING_BRIEF.openBy}</p>
+
+          <h3>Three things to land</h3>
+          <ul className="wp-pilot-list">
+            {MEETING_BRIEF.landThese.map((l) => (<li key={l}>{l}</li>))}
+          </ul>
+
+          <h3>The demo moment</h3>
+          <p className="wp-pilot-aside">{MEETING_BRIEF.demoMoment}</p>
+
+          <h3>The honest line</h3>
+          <p className="wp-pilot-aside">{MEETING_BRIEF.theHonestLine}</p>
+
+          <h3>The ask</h3>
+          <p className="wp-pilot-aside">{MEETING_BRIEF.theAsk}</p>
+
+          <h3>Demo path, in order</h3>
+          <ol className="wp-pilot-list">
+            {DEMO_PATH.map((d) => (
+              <li key={d.step}><strong>{d.step}.</strong> Show {d.show} <em>Why: {d.why}</em></li>
+            ))}
+          </ol>
         </div>
       </details>
 

@@ -17,6 +17,10 @@ import {
   REUSES,
   TO_BUILD_OUT,
   WHY_IT_WORKS,
+  PRACTITIONER_PLAYS,
+  AMBASSADOR_DRILL,
+  MEETING_BRIEF,
+  DEMO_PATH,
 } from "@/lib/builds/security-plain-language";
 
 describe("the method", () => {
@@ -103,5 +107,34 @@ describe("honesty and reuse", () => {
     for (const s of [HEADLINE, CERT_PREMISE, PRECISION_NOTE]) expect(s.trim().length).toBeGreaterThan(20);
     expect(WHY_IT_WORKS.length).toBeGreaterThanOrEqual(2);
     expect(TO_BUILD_OUT.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("covers the deep dives sellers get lost in", () => {
+    const products = DEEP_DIVES.map((d) => d.product);
+    for (const p of ["Cortex XSIAM", "Prisma AIRS", "Prisma Cloud", "Cortex XDR"]) expect(products).toContain(p);
+  });
+
+  it("carries Practitioner plays with a problem, product, objection and plain answer", () => {
+    expect(PRACTITIONER_PLAYS.length).toBeGreaterThanOrEqual(3);
+    for (const p of PRACTITIONER_PLAYS) {
+      for (const field of [p.problem, p.product, p.say, p.objection, p.answer]) expect(field.trim()).not.toBe("");
+      expect(p.answer.length).toBeGreaterThan(40);
+    }
+  });
+
+  it("carries Ambassador habits that keep the fluency current", () => {
+    expect(AMBASSADOR_DRILL.intro.trim().length).toBeGreaterThan(20);
+    expect(AMBASSADOR_DRILL.drills.length).toBeGreaterThanOrEqual(3);
+    for (const d of AMBASSADOR_DRILL.drills) {
+      expect(d.habit.trim()).not.toBe("");
+      expect(d.how.trim()).not.toBe("");
+    }
+  });
+
+  it("carries a meeting brief and an ordered demo path for the presenter", () => {
+    for (const s of [MEETING_BRIEF.context, MEETING_BRIEF.openBy, MEETING_BRIEF.demoMoment, MEETING_BRIEF.theHonestLine, MEETING_BRIEF.theAsk]) expect(s.trim().length).toBeGreaterThan(20);
+    expect(MEETING_BRIEF.landThese.length).toBeGreaterThanOrEqual(3);
+    expect(DEMO_PATH.length).toBeGreaterThanOrEqual(3);
+    for (const d of DEMO_PATH) for (const field of [d.step, d.show, d.why]) expect(field.trim()).not.toBe("");
   });
 });

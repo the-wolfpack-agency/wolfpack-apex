@@ -233,7 +233,90 @@ export const AIRS_DEEP: DeepDive = {
 
 /** Every feature-level dive, rendered in order. XSIAM (the flagship) first, then
  *  AIRS (the AI-security product nearest our data-governance complement). */
-export const DEEP_DIVES: DeepDive[] = [XSIAM_DEEP, AIRS_DEEP];
+/** The cloud-security platform, feature by feature. A seller says "Prisma Cloud"
+ *  and the buyer hears one thing; it is really a stack of distinct guards. Written
+ *  from public product descriptions; confirm the current module names against
+ *  their own deck (Palo Alto renames and repackages these regularly). */
+export const PRISMA_CLOUD_DEEP: DeepDive = {
+  product: "Prisma Cloud",
+  what: "Palo Alto's cloud-security platform (a CNAPP - one tool that covers the whole cloud instead of five). One name, several separate jobs; here is each one in plain words.",
+  features: [
+    {
+      name: "Checking the settings (posture / CSPM)",
+      jargon: "CSPM, misconfiguration, posture management",
+      plain: "It continuously reads how your cloud is set up and flags the risky settings - a storage bucket left open to the internet, a database with no password - before someone finds them.",
+      stops: "The 'we left it exposed by accident' mistake that causes most cloud leaks.",
+      without: "A single wrong toggle sits open for months until an attacker finds it first.",
+    },
+    {
+      name: "Guarding what is running (workloads / CWPP)",
+      jargon: "CWPP, containers, hosts, serverless",
+      plain: "The settings can be perfect and the thing still gets attacked while it runs. This watches the actual running apps and containers for live threats, not just the blueprint.",
+      stops: "An attack on the live application that a settings check would never see.",
+      without: "You secured the plan and left the running building unwatched.",
+    },
+    {
+      name: "Fixing it in the blueprint (code security)",
+      jargon: "IaC scanning, shift-left, infrastructure-as-code",
+      plain: "The cheapest place to fix a cloud mistake is before it is built. This checks the blueprints developers write, so the door is never built unlocked in the first place.",
+      stops: "The same misconfiguration shipping to production over and over.",
+      without: "Every fix happens live and in a panic instead of once, in the plan.",
+    },
+    {
+      name: "Who can touch what (entitlements / CIEM)",
+      jargon: "CIEM, over-permissioned, least privilege",
+      plain: "In the cloud, accounts quietly accumulate far more permissions than they need. This maps who can actually reach what and trims the excess, so a stolen account can do less.",
+      stops: "One compromised account having the run of the whole cloud.",
+      without: "A minor break-in reaches everything because everyone could reach everything.",
+    },
+    {
+      name: "Finding the sensitive data (data security / DSPM)",
+      jargon: "DSPM, data classification, shadow data",
+      plain: "You cannot protect data you forgot you had. This finds where sensitive data actually lives across the cloud - including copies nobody remembered - and flags the exposed ones.",
+      stops: "A forgotten copy of customer data sitting somewhere unguarded.",
+      without: "The breach comes through the database nobody knew was still there.",
+    },
+  ],
+};
+
+/** The endpoint / detection-and-response platform, feature by feature. Written
+ *  from public product descriptions; confirm module names against their deck. */
+export const XDR_DEEP: DeepDive = {
+  product: "Cortex XDR",
+  what: "The platform that watches the actual devices and ties the alarms together. 'XDR' is one control room over many sensors; here is what the sensors and the room each do.",
+  features: [
+    {
+      name: "The guard on each device (endpoint protection)",
+      jargon: "EPP, NGAV, endpoint",
+      plain: "Every laptop, phone, and server runs a guard that blocks known malware and ransomware on the spot, before it can run.",
+      stops: "Ransomware executing on the machine it landed on.",
+      without: "One opened attachment encrypts the laptop and everything it can reach.",
+    },
+    {
+      name: "Spotting the odd behavior (detection / EDR)",
+      jargon: "EDR, behavioral analytics, detection and response",
+      plain: "New attacks have no 'known' signature, so this watches for odd behavior instead - a normal program suddenly acting like an intruder - and can rewind to show exactly what happened.",
+      stops: "A brand-new attack that no blocklist has seen yet.",
+      without: "Anything without a known fingerprint walks straight past.",
+    },
+    {
+      name: "Connecting the alarms (the control room / XDR)",
+      jargon: "XDR, correlation, cross-source",
+      plain: "It stitches the device, network, and cloud alarms into one story - 'this laptop got infected, then reached for these servers' - instead of fifty disconnected pings.",
+      stops: "A real attack hiding in plain sight because each alert looked minor alone.",
+      without: "Analysts chase fifty small alarms and miss the one pattern that matters.",
+    },
+    {
+      name: "Catching the stolen login (identity threats)",
+      jargon: "ITDR, identity threat detection, credential abuse",
+      plain: "Most attackers log in rather than break in. This learns how each account normally behaves and flags the moment one starts acting like someone else.",
+      stops: "A stolen password being used quietly from the inside.",
+      without: "The intruder looks exactly like a legitimate employee until it is too late.",
+    },
+  ],
+};
+
+export const DEEP_DIVES: DeepDive[] = [XSIAM_DEEP, AIRS_DEEP, PRISMA_CLOUD_DEEP, XDR_DEEP];
 
 /** Recent acquisitions, in plain terms. Their own product line is only half the
  *  jargon a seller faces; the acquisitions arrive with their own, and nobody has
@@ -296,4 +379,106 @@ export const TO_BUILD_OUT = [
   { question: "The rest of the line, and the new acquisitions.", why: "We have taken Cortex XSIAM, the flagship, down to the feature level here. An engagement extends the same treatment across the portfolio and each new acquisition, so the fluency does not decay as the product set grows." },
   { question: "Their words, not ours.", why: "This is written from public knowledge. A real program reads their own decks and calls, so the language matches how their teams already talk and the corrections come from them." },
   { question: "The format the team will actually use.", why: "Whether this lives as a card deck, a one-page-per-product sheet, an onboarding path, or coaching prompts is a change-management decision made with them, not for them." },
+];
+
+/* ============================================================================
+ * PRACTITIONER TIER - map the problem, handle the objection.
+ * Foundations proves a person can SAY what each product does. Practitioner proves
+ * they can pick the RIGHT one for a customer's actual problem and hold the line
+ * when the customer pushes back - still in plain language, no acronym rescue. The
+ * objections are the ones every security buyer raises; the answers are written
+ * from public product positioning and general security-sales experience, not from
+ * any Palo Alto material.
+ * ==========================================================================*/
+export interface PractitionerPlay {
+  /** The customer's pain, in their words. */
+  problem: string;
+  /** Which product answers it. */
+  product: string;
+  /** The one-line value, in the customer's terms (not the acronym). */
+  say: string;
+  /** The pushback you will hear. */
+  objection: string;
+  /** The plain-language reply. */
+  answer: string;
+}
+export const PRACTITIONER_PLAYS: PractitionerPlay[] = [
+  {
+    problem: "\"My security team is drowning in alerts and we still miss things.\"",
+    product: "Cortex XSIAM",
+    say: "It reads the alert firehose for your team and handles the routine responses on its own, so your people only spend time on what actually matters.",
+    objection: "\"We already have a SIEM.\"",
+    answer: "That is the tool it replaces. A SIEM still makes a human read every event; this reads them with AI and closes the obvious ones itself, so the same team covers far more without you hiring more analysts.",
+  },
+  {
+    problem: "\"We are moving fast in the cloud and I am scared we left something exposed.\"",
+    product: "Prisma Cloud",
+    say: "It walks every door and window in your cloud continuously - from the blueprint to the running app - and hands you the risky ones before an attacker finds them.",
+    objection: "\"Our cloud provider already has security tools.\"",
+    answer: "Those cover one cloud each and stop at their own edge. Most companies run more than one, plus their own code on top. This gives you a single view across all of it, so a gap does not hide in the seam between two consoles.",
+  },
+  {
+    problem: "\"We are plugging AI into everything and I do not know what that opens up.\"",
+    product: "Prisma AIRS",
+    say: "It watches your AI while it runs and blocks the new tricks - someone slipping a hidden instruction in to make it leak data or act against you.",
+    objection: "\"Our AI vendor says it is already safe.\"",
+    answer: "Their model has guardrails; your USE of it is the exposure - the data you feed it and the actions you let it take. This guards that layer, the part that is yours to protect, the same way a firewall guards traffic the network vendor already 'secured.'",
+  },
+  {
+    problem: "\"Most breaches I read about start with a stolen password. That terrifies me.\"",
+    product: "Identity security (CyberArk)",
+    say: "It checks that every login - a person, a service, or now an AI agent - is really who it claims, and boxes in what each one can touch, so one stolen password is not the keys to the building.",
+    objection: "\"We already make everyone use multi-factor login.\"",
+    answer: "That helps at the front door for people. This covers the powerful accounts attackers actually hunt - admins, service accounts, and AI agents - which often have no human and no second factor at all. That is the door they walk through.",
+  },
+  {
+    problem: "\"Honestly, I do not even know everything of ours that is exposed to the internet.\"",
+    product: "Cortex Xpanse",
+    say: "It scans the internet the way an attacker would, finds everything with your name on it - including the forgotten test server - and hands you the list first.",
+    objection: "\"We think we already know our assets.\"",
+    answer: "Everyone thinks that, and the breach almost always comes through the one nobody remembered. This is the outside-in view an attacker has, which is the only inventory that actually matters.",
+  },
+];
+
+/* ============================================================================
+ * AMBASSADOR TIER - keep the fluency alive as the portfolio grows.
+ * Foundations and Practitioner are a snapshot; a security line changes every
+ * quarter. Ambassador is the habit that keeps the plain language current: run the
+ * four beats on every new feature and acquisition so nobody slides back into
+ * acronyms. This is method, not product - it is true regardless of the vendor.
+ * ==========================================================================*/
+export const AMBASSADOR_DRILL = {
+  intro: "An Ambassador does not just know the line today; they keep it plain as it changes. Three habits keep the fluency from decaying as the portfolio grows.",
+  drills: [
+    { habit: "Translate on arrival.", how: "When a new feature or acquisition lands, run the four beats on it that week - jargon, plain, what it stops, what happens without it - before the acronym hardens into how everyone talks about it." },
+    { habit: "Catch the acronym in the room.", how: "When a teammate reaches for a three-letter word in front of a customer, offer the plain sentence right after. The correction in the moment is what makes the habit stick for the whole team." },
+    { habit: "Take the correction from the customer.", how: "When a customer describes their own problem in their own words, capture those words - they are better than ours. The best plain language is the customer's, fed back to them." },
+  ],
+};
+
+/* ============================================================================
+ * THE FRIDAY MEETING - a warm second meeting. This is presenter-facing (for the
+ * team running the room), not learner content. It says how to open, what to land,
+ * where to demo the live course, and what to ask for next. No new product claims.
+ * ==========================================================================*/
+export const MEETING_BRIEF = {
+  context: "A warm second meeting: they already know us and liked the idea. This meeting is not to re-pitch the concept; it is to make it feel real and inevitable, and to agree the first concrete step.",
+  openBy: "Remind them of the one idea that landed last time - their own line is full of jargon that quietly gates their non-technical people out - then show, not tell: open the live course and let them see their products in plain words.",
+  landThese: [
+    "It is already real, not a slide. The course runs, the content is seeded, and a person's progress is measured. We built the method working; we did not draw it.",
+    "It is their whole line, not one product. Foundations covers the platforms; the deep dives go feature-level where sellers actually get lost (XSIAM, Prisma Cloud, XDR, AIRS).",
+    "It is a ladder, not a class. Foundations (everyone can say it), Practitioner (sales can map it and handle objections), Ambassador (leads keep it current as the line grows).",
+  ],
+  demoMoment: "Open one Practitioner play live: a customer problem in plain words, the product that answers it, and the exact reply to the objection they will actually hear. That is the moment it stops being a training idea and becomes a sales tool.",
+  theHonestLine: "Say plainly what is public knowledge vs. theirs: the product descriptions are written from public material, and the real program reads THEIR decks and calls so the language matches how their teams already talk. That honesty is the pitch - it is why the corrections come from them.",
+  theAsk: "Agree one concrete next step: a short working session where they hand us one product's deck and we translate it together, live, into the four beats. Small, low-risk, and it makes the engagement start in the room.",
+};
+
+/** A short, ordered path to demo the live course in the meeting without fumbling. */
+export const DEMO_PATH = [
+  { step: "Open on the plain line", show: "The product line in plain words - pick the product they care about most and read the four beats aloud.", why: "Instant proof the jargon is gone; they hear their own product explained to a human." },
+  { step: "Go one level deeper", show: "A deep dive (XSIAM or Prisma Cloud) - the feature-level lessons.", why: "Shows it is not shallow marketing; it holds up where their sellers actually get lost." },
+  { step: "Show the ladder", show: "The certification ladder - Foundations running, Practitioner and Ambassador above it.", why: "Frames it as a capability people are certified against, not a class they sat through." },
+  { step: "Run one objection", show: "A Practitioner play - problem, product, the objection, the plain answer.", why: "The moment it becomes a sales tool, not a glossary." },
+  { step: "Land the honest caveat", show: "The engagement brief - what is public vs. what needs their words.", why: "The honesty is the close: the real thing reads their material, and the corrections come from them." },
 ];
