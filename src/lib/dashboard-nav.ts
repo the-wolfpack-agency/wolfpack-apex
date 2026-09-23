@@ -99,6 +99,11 @@ export const NAV_ITEMS: NavItem[] = [
   { label: "Agents", href: "/admin/agents", roles: ["ceo", "cto", "evp", "vp", "cco"], icon: "M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m16-6h2m-2 6h2M7 7h10v10H7V7zm3 3h4v4h-4z" },
   { label: "Code Gate", href: "/admin/ai-code", roles: ["ceo", "cto", "evp", "vp", "cco"], icon: "M9 12l2 2 4-4m6-2a9 9 0 11-18 0 9 9 0 0118 0z" },
   { label: "Forcefield · Internal", href: "/admin/forcefield", roles: ["ceo", "cto", "evp", "vp", "cco"], icon: "M12 2l7 4v6c0 5-3 8-7 10-4-2-7-5-7-10V6l7-4z" },
+  // The two Forcefield halves sit together: Internal (agents inside the system)
+  // then Web (inbound agents on our sites). No role gate on Web: the agent-traffic
+  // report is org-wide reading for every seat (analytics.view is in SELF_SERVICE);
+  // the write actions on the page stay capability-gated.
+  { label: "Forcefield · Web", href: "/admin/site-analytics", icon: "M3 3v18h18M7 14l3-3 3 3 5-5" },
   { label: "Self-Serve", href: "/admin/self-serve", roles: ["ceo", "cto", "evp", "vp", "cco"], icon: "M12 3l8 4v5c0 5-3.4 8.5-8 10-4.6-1.5-8-5-8-10V7l8-4zM9 12l2 2 4-4" },
   { label: "Effectiveness", href: "/admin/effectiveness", roles: ["ceo", "cto", "evp", "vp", "cco"], icon: "M3 17l6-6 4 4 8-8M21 7v6h-6" },
   // Visible to everyone: the trust surface is for all users, not just engineers.
@@ -127,12 +132,6 @@ export const NAV_ITEMS: NavItem[] = [
      it reaches out to a client system and the ownership floor is enforced under
      settings.manage_team. */
   { label: "Compliance Scan", href: "/admin/compliance-scan", roles: ["ceo", "cto", "evp", "vp", "cco"], icon: "M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" },
-  /* Site Analytics: ogiam.com usage (where + when), ingested into our own
-     platform and rendered with the reused HourHeatmap. Admin-scoped. */
-  // No role gate: Site Analytics (the Forcefield agent-traffic report) is
-  // org-wide reading for every seat (capability analytics.view is in
-  // SELF_SERVICE). The write actions on the page stay capability-gated.
-  { label: "Forcefield · Web", href: "/admin/site-analytics", icon: "M3 3v18h18M7 14l3-3 3 3 5-5" },
   { label: "QR Codes", href: "/qr", icon: "M3.75 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 013.75 9.375v-4.5zM3.75 14.625c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5a1.125 1.125 0 01-1.125-1.125v-4.5zM13.5 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0113.5 9.375v-4.5z M6.75 6.75h.75v.75h-.75v-.75zM6.75 16.5h.75v.75h-.75v-.75zM16.5 6.75h.75v.75h-.75v-.75zM13.5 13.5h.75v.75h-.75v-.75zM13.5 19.5h.75v.75h-.75v-.75zM19.5 13.5h.75v.75h-.75v-.75zM19.5 19.5h.75v.75h-.75v-.75zM16.5 16.5h.75v.75h-.75v-.75z" },
   { label: "Surveys", href: "/surveys", icon: "M9 12h6m-6 4h6m-7-9h.01M9 7h6m-9 13h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" },
   { label: "Job Codes", href: "/job-codes", icon: "M3.75 6h16.5M3.75 12h16.5m-16.5 6h16.5" },
