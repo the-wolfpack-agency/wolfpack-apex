@@ -135,3 +135,61 @@ export const PHASE_LABEL: Record<ActionPhase, string> = {
   hostile_act: "The hostile action",
   aftermath: "Afterward",
 };
+
+/** A focused view item: either a single kept entry, or a collapsed run of
+ *  consecutive routine (good/info) steps that carry no key signal. */
+export type ActionLogGroup =
+  | { kind: "entry"; entry: ActionLogEntry; index: number }
+  | { kind: "collapsed"; entries: ActionLogEntry[]; from: number; count: number; summary: string };
+
+/** An entry is KEY (always shown) when it is the hostile action or a rapid/loop
+ *  notice, the first or last step, or the step where the phase changes. Only runs
+ *  of consecutive NON-key routine steps are eligible to collapse. */
+function isKeyEntry(entries: readonly ActionLogEntry[], i: number): boolean {
+  const e = entries[i];
+  if (e.severity === "hostile" || e.severity === "notice") return true;
+  if (i === 0 || i === entries.length - 1) return true;
+  if (e.phase !== entries[i - 1].phase) return true;
+  return false;
+}
+
+/** One-line summary for a collapsed run, e.g. "12 routine steps (mostly Visited)". */
+function summarizeRun(run: readonly ActionLogEntry[]): string {
+  const counts = new Map<string, number>();
+  for (const e of run) counts.set(e.headline, (counts.get(e.headline) ?? 0) + 1);
+  const top = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "routine";
+  return `${run.length} routine step${run.length === 1 ? "" : "s"} (mostly ${top})`;
+}
+
+/**
+ * Collapse a case file to its signal: keep every key step (hostile act, rapid/loop
+ * notice, first, last, phase change) and fold each run of >= `collapseThreshold`
+ * consecutive routine steps into ONE expandable summary. A long "hammered one
+ * endpoint in a loop" trail becomes a few key rows plus "N routine steps", instead
+ * of pages of identical "Visited" lines. Short runs stay inline (not worth a fold).
+ */
+export function focusActionLog(entries: readonly ActionLogEntry[], collapseThreshold = 3): ActionLogGroup[] {
+  const out: ActionLogGroup[] = [];
+  let run: ActionLogEntry[] = [];
+  let runStart = 0;
+  const flush = () => {
+    if (run.length === 0) return;
+    if (run.length >= collapseThreshold) {
+      out.push({ kind: "collapsed", entries: run, from: runStart, count: run.length, summary: summarizeRun(run) });
+    } else {
+      run.forEach((entry, k) => out.push({ kind: "entry", entry, index: runStart + k }));
+    }
+    run = [];
+  };
+  entries.forEach((entry, i) => {
+    if (isKeyEntry(entries, i)) {
+      flush();
+      out.push({ kind: "entry", entry, index: i });
+    } else {
+      if (run.length === 0) runStart = i;
+      run.push(entry);
+    }
+  });
+  flush();
+  return out;
+}

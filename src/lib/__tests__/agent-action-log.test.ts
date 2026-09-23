@@ -3,7 +3,7 @@
  * lead-up -> hostile action -> aftermath bands, a plain sentence per step, and
  * honest severities. Pure + deterministic.
  */
-import { buildActionLog, PHASE_LABEL } from "@/lib/agent-action-log";
+import { buildActionLog, focusActionLog, PHASE_LABEL } from "@/lib/agent-action-log";
 import type { JourneyStep } from "@/lib/agent-behavior";
 
 const step = (at: string, path: string, signal: JourneyStep["signal"], attack?: string): JourneyStep => ({ at, path, signal, ...(attack ? { attack } : {}) });
@@ -70,5 +70,50 @@ describe("buildActionLog", () => {
   it("returns nothing for an empty trace", () => {
     expect(buildActionLog([])).toEqual([]);
     expect(PHASE_LABEL.hostile_act).toMatch(/hostile/i);
+  });
+});
+
+describe("focusActionLog", () => {
+  const visits = (n: number, from = 0): JourneyStep[] =>
+    Array.from({ length: n }, (_, i) => ({ at: `2026-09-21T18:${String(46 + Math.floor((from + i) / 60)).padStart(2, "0")}:${String((from + i) % 60).padStart(2, "0")}Z`, path: "/manifest.json", signal: null }));
+
+  it("collapses a long routine run but keeps the hostile act and the ends", () => {
+    const steps: JourneyStep[] = [
+      ...visits(8),
+      { at: "2026-09-21T18:47:00Z", path: "/admin", signal: "probed_sensitive" },
+      ...visits(4, 20),
+    ];
+    const entries = buildActionLog(steps);
+    const groups = focusActionLog(entries);
+    // The fold shrinks the list.
+    expect(groups.length).toBeLessThan(entries.length);
+    // At least one collapsed run of routine steps.
+    expect(groups.some((g) => g.kind === "collapsed")).toBe(true);
+    // The hostile action is never hidden.
+    expect(groups.some((g) => g.kind === "entry" && g.entry.headline === "Probed sensitive")).toBe(true);
+    // First and last steps are always shown.
+    expect(groups[0].kind).toBe("entry");
+    expect(groups[groups.length - 1].kind).toBe("entry");
+  });
+
+  it("does not collapse a short run (below threshold) - keeps them inline", () => {
+    const steps: JourneyStep[] = [
+      { at: "2026-09-21T18:46:00Z", path: "/a", signal: "probed_sensitive" },
+      ...visits(2, 10),
+      { at: "2026-09-21T18:47:30Z", path: "/b", signal: "payload_attack", attack: "sql_injection" },
+    ];
+    const groups = focusActionLog(buildActionLog(steps));
+    expect(groups.every((g) => g.kind === "entry")).toBe(true);
+  });
+
+  it("collapsed run carries a human summary and its original offset", () => {
+    const groups = focusActionLog(buildActionLog([
+      { at: "2026-09-21T18:46:00Z", path: "/x", signal: "probed_sensitive" },
+      ...visits(5, 5),
+      { at: "2026-09-21T18:48:00Z", path: "/y", signal: "payload_attack", attack: "xss" },
+    ]));
+    const collapsed = groups.find((g) => g.kind === "collapsed");
+    expect(collapsed && collapsed.kind === "collapsed" && collapsed.summary).toMatch(/routine step/);
+    expect(collapsed && collapsed.kind === "collapsed" && typeof collapsed.from).toBe("number");
   });
 });

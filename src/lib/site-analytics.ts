@@ -269,17 +269,27 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
         GROUP BY 1 ORDER BY count(*) DESC LIMIT 10`,
       params,
     ),
+    /* Journey events. A single global LIMIT ordered by time silently starves the
+       "all properties" view: the highest-volume site fills the cap and the quieter
+       ones (and every RECENT agent) never appear. Instead take the most-recent N
+       events PER SITE, so every property is represented and newest agents always
+       show, then order ascending for the journey reconstruction. */
     safeQuery<{ event_type: string; path: string | null; created_at: string; sig: string | null; nonce: string | null; agent: string | null; attack: string | null; tool: string | null; client_type: string | null; principal_status: string | null; principal: string | null; principal_issuer: string | null; principal_scopes: string | null }>(
-      `SELECT event_type, path, created_at::text AS created_at,
-              props->>'sig' AS sig, props->>'nonce' AS nonce, props->>'agent' AS agent, props->>'attack' AS attack,
-              props->>'tool' AS tool, props->>'client_type' AS client_type,
-              props->>'principal_status' AS principal_status, props->>'principal' AS principal,
-              props->>'principal_issuer' AS principal_issuer, props->>'principal_scopes' AS principal_scopes
-         FROM site_analytics_events
-        WHERE ${sinceClause}${surfaceClause}
-          AND (props->>'sig' IS NOT NULL OR props->>'nonce' IS NOT NULL)
-        ORDER BY created_at
-        LIMIT 2000`,
+      `SELECT event_type, path, created_at::text AS created_at, sig, nonce, agent, attack, tool, client_type,
+              principal_status, principal, principal_issuer, principal_scopes
+         FROM (
+           SELECT event_type, path, created_at,
+                  props->>'sig' AS sig, props->>'nonce' AS nonce, props->>'agent' AS agent, props->>'attack' AS attack,
+                  props->>'tool' AS tool, props->>'client_type' AS client_type,
+                  props->>'principal_status' AS principal_status, props->>'principal' AS principal,
+                  props->>'principal_issuer' AS principal_issuer, props->>'principal_scopes' AS principal_scopes,
+                  ROW_NUMBER() OVER (PARTITION BY coalesce(props->>'site', 'ogiam.com') ORDER BY created_at DESC) AS rn
+             FROM site_analytics_events
+            WHERE ${sinceClause}${surfaceClause}
+              AND (props->>'sig' IS NOT NULL OR props->>'nonce' IS NOT NULL)
+         ) t
+        WHERE rn <= 1500
+        ORDER BY created_at ASC`,
       params,
     ),
     /* Agent provenance by edge country. Only AGENT-signal events (not page
