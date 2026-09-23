@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getUserFromRequest } from "@/lib/auth";
 import { trackEvent } from "@/lib/analytics";
+import { scanModelOutput } from "@/lib/forcefield/output-safety";
 import {
   chat,
   getConversations,
@@ -457,6 +458,18 @@ export async function POST(req: NextRequest) {
         url: p.href,
         type: "page",
       }));
+    }
+
+    // LLM02 (insecure output handling): scan the model's free-text answer for
+    // active/executable content before it reaches the UI. OBSERVE-ONLY - never
+    // alters or blocks the answer; it is the live model-output lens for the
+    // Forcefield threat-coverage matrix. Code examples in fences are ignored.
+    const outputRisks = scanModelOutput(responseText);
+    if (outputRisks.length > 0) {
+      trackEvent("assistant.insecure_output_flagged", user.id, user.role, {
+        kinds: outputRisks.map((r) => r.kind).join(","),
+        count: outputRisks.length,
+      });
     }
 
     return NextResponse.json(response);
