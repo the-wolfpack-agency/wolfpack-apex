@@ -15,6 +15,12 @@ export interface TeamFanoutInput {
   analyticsEvent: InstinctEventType;
   analyticsPayload?: Record<string, unknown>;
   excludeActor?: boolean;
+  /**
+   * Restrict delivery to these member emails only. Omit for the default
+   * whole-team fanout. Callers use this to keep an alert scoped to its owners
+   * (e.g. a security tool still in testing that must not notify the whole team).
+   */
+  recipientEmails?: string[];
 }
 
 export interface TeamFanoutResult {
@@ -36,8 +42,12 @@ export async function fanoutToTeam(
   let recipientCount = 0;
   let skipped = 0;
   try {
+    const scopeEmails = input.recipientEmails && input.recipientEmails.length ? input.recipientEmails : null;
     const { rows } = await safeQuery<{ id: string }>(
-      `SELECT id FROM instinct_team_members WHERE is_active = true`,
+      `SELECT id FROM instinct_team_members
+        WHERE is_active = true
+          AND ($1::text[] IS NULL OR email = ANY($1))`,
+      [scopeEmails],
     );
     for (const row of rows) {
       if (input.excludeActor && row.id === input.actor.id) continue;

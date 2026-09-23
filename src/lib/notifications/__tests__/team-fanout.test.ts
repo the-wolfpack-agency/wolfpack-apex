@@ -49,6 +49,27 @@ describe("fanoutToTeam", () => {
     );
   });
 
+  it("scopes delivery to recipientEmails when provided (does not notify the whole team)", async () => {
+    safeQuery.mockResolvedValue({ rows: [{ id: "u-owner" }] });
+    notify.mockResolvedValue({ ok: true });
+
+    const result = await fanoutToTeam({ ...baseInput(), recipientEmails: ["owner@wolfpack.dev"] });
+
+    // The email filter is bound as the query param, not a client-side slice.
+    expect(safeQuery).toHaveBeenCalledWith(expect.stringContaining("email = ANY($1)"), [["owner@wolfpack.dev"]]);
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(result.recipientCount).toBe(1);
+  });
+
+  it("passes null (whole-team fanout) when recipientEmails is omitted", async () => {
+    safeQuery.mockResolvedValue({ rows: [{ id: "u-a" }, { id: "u-b" }] });
+    notify.mockResolvedValue({ ok: true });
+
+    await fanoutToTeam(baseInput());
+
+    expect(safeQuery).toHaveBeenCalledWith(expect.any(String), [null]);
+  });
+
   it("excludeActor skips the caller row", async () => {
     safeQuery.mockResolvedValue({
       rows: [{ id: "u-ceo" }, { id: "u-b" }],

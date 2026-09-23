@@ -26,6 +26,19 @@ it("dispatches once per new hostile signal, and fans out via the notifications l
   expect((sent[0] as { category: string }).category).toBe("security");
 });
 
+it("scopes every dispatch to the single security owner, never the whole team", async () => {
+  const sig: HostileSignal[] = [
+    { kind: "honeytoken_trip", fp: "abc", site: "s", samplePath: "/_ff/records", count: 1 },
+    { kind: "payload_attack", fp: "def", site: "s2", samplePath: "/wp-login.php", count: 3 },
+  ];
+  const { deps: d, sent } = deps(sig);
+  await scanForcefieldWebAlerts(d);
+  // Default recipient is the CTO work account; the whole-team fanout path is never used.
+  for (const input of sent as { recipientEmails?: string[] }[]) {
+    expect(input.recipientEmails).toEqual(["homyk@thewolfpack.agency"]);
+  }
+});
+
 it("does not re-alert an already-seen fingerprint (dedupe)", async () => {
   const sig: HostileSignal[] = [{ kind: "honeytoken_trip", fp: "abc", site: "s", samplePath: "/_ff", count: 1 }];
   const seen = new Set<string>();

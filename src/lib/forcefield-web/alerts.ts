@@ -15,6 +15,17 @@ import { createHash } from "node:crypto";
 import { safeQuery, query } from "@/lib/db";
 import { fanoutToTeam, type TeamFanoutInput } from "@/lib/notifications/team-fanout";
 
+/**
+ * Forcefield is still in testing and most of the team does not know it exists,
+ * so alerts go to the security owner ONLY, never the whole team. Configurable
+ * via env; defaults to the CTO work account. To widen later, set
+ * FORCEFIELD_ALERT_RECIPIENT_EMAIL to a comma-separated list.
+ */
+const ALERT_RECIPIENT_EMAILS = (process.env.FORCEFIELD_ALERT_RECIPIENT_EMAIL || "homyk@thewolfpack.agency")
+  .split(",")
+  .map((e) => e.trim())
+  .filter(Boolean);
+
 export type ForcefieldWebAlertKind = "honeytoken_trip" | "payload_attack";
 
 export interface HostileSignal {
@@ -54,6 +65,7 @@ export async function scanForcefieldWebAlerts(deps: ForcefieldAlertDeps, sinceHo
       actionUrl: "/admin/forcefield-web",
       actionLabel: "Open Forcefield",
       category: "security",
+      recipientEmails: ALERT_RECIPIENT_EMAILS,
       source: "forcefield-web",
       sourceId: fingerprint,
       metadata: { kind: s.kind, fp: s.fp, site: s.site, count: s.count },
