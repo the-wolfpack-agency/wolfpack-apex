@@ -16,11 +16,13 @@ describe("buildSecurityCourseSpec", () => {
     expect(spec.tracks.every((t) => t.audience && t.proves)).toBe(true);
   });
 
-  it("makes a module for the product line, each deep dive, and the acquisitions", () => {
-    // products module + one module per deep dive + acquisitions module
-    expect(spec.modules).toHaveLength(1 + DEEP_DIVES.length + 1);
+  it("makes a module for the product line, each deep dive, acquisitions, and the higher tiers", () => {
+    // products + one per deep dive + acquisitions + practitioner + ambassador
+    expect(spec.modules).toHaveLength(1 + DEEP_DIVES.length + 1 + 2);
     const titles = spec.modules.map((m) => m.title);
     for (const d of DEEP_DIVES) expect(titles).toContain(d.product);
+    expect(titles.some((t) => /Practitioner/.test(t))).toBe(true);
+    expect(titles.some((t) => /Ambassador/.test(t))).toBe(true);
   });
 
   it("turns every product into a lesson with all four beats as blocks", () => {
@@ -36,8 +38,15 @@ describe("buildSecurityCourseSpec", () => {
   });
 
   it("carries every acquisition as a lesson too", () => {
-    const acq = spec.modules[spec.modules.length - 1];
+    const acq = spec.modules.find((m) => /acquisitions/i.test(m.title))!;
     expect(acq.lessons).toHaveLength(ACQUISITIONS.length);
     expect(acq.lessons[0].blocks.map((b) => b.type)).toEqual(["text", "plain", "stops", "without"]);
+  });
+
+  it("carries the Practitioner objection-handling plays as lessons", () => {
+    const prac = spec.modules.find((m) => /Practitioner/.test(m.title))!;
+    expect(prac.lessons.length).toBeGreaterThanOrEqual(3);
+    // each play ends on the plain-language answer
+    expect(prac.lessons[0].blocks[prac.lessons[0].blocks.length - 1].type).toBe("plain");
   });
 });
