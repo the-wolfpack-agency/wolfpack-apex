@@ -708,6 +708,15 @@ export type InstinctEventType =
   // confidence hostile signal (honeytoken trip / payload attack) was alerted to
   // the team via the notifications layer. Deduped so it fires once per fingerprint.
   | "forcefield.web_alert_dispatched"
+  // Learned hostile-tradecraft signatures (collect -> learn -> detect faster).
+  // signature_mined { count, dangerous } - candidate combos mined from caught
+  // hostiles this pass. signature_promoted { sigHash, prevalence, tells } - a
+  // shadow signature earned enforcement (>= prevalence, dangerous, 0 false
+  // positives). signature_autoblocked { sigHash, operatorKey, fps } - a live
+  // operator matched an ENFORCING signature and was auto-blocked distributively.
+  | "forcefield.signature_mined"
+  | "forcefield.signature_promoted"
+  | "forcefield.signature_autoblocked"
   // OGIAM self-serve tenancy. tenant_registered { tenant_id } - a new org signed
   //   up (admin email is NOT in analytics, only that a tenant was registered).
   | "tenancy.tenant_registered"

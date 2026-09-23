@@ -21,7 +21,8 @@ const SUMMARY = {
   byPage: [{ path: "/ogiam-iam", count: 80 }, { path: "/agentic-qa", count: 48 }],
   byCountry: [{ country: "US", count: 90 }],
   byType: [{ type: "site.page_viewed", count: 128 }],
-  forcefield: { welcomed: 6, flagged: 9, trapped: 2, topAgents: [{ agent: "GPTBot", count: 6 }] },
+  forcefield: { welcomed: 6, flagged: 9, trapped: 2, blocked: 4, topAgents: [{ agent: "GPTBot", count: 6 }] },
+  learnedSignatures: { shadow: 3, enforcing: 1, autoBlocked: 2 },
   journeys: [
     { key: "fp1", confidence: "proven", behaviorClass: "aggressive_scraper", signals: ["tripped_decoy"], path: ["/_ff/x", "/admin"], eventCount: 2, firstAt: "2026-09-18T10:00:00Z", lastAt: "2026-09-18T10:00:05Z", summary: "Followed an invisible trap link and harvested greedily.", triage: "new", profile: {
       operatorKey: "op_abc12345",
@@ -77,6 +78,15 @@ test("renders the reused heatmap, totals, and top pages/countries from the summa
   expect(screen.getByTestId("ff-flagged")).toHaveTextContent("9");
   expect(screen.getByTestId("ff-trapped")).toHaveTextContent("2");
   expect(screen.getByTestId("ff-top-agents")).toHaveTextContent("GPTBot");
+  // Enforcement is surfaced truthfully: a real Blocked count + an enforcing posture
+  // (no more "watch-first, nothing blocked" when the tool is actually blocking).
+  expect(screen.getByTestId("ff-blocked")).toHaveTextContent("4");
+  expect(screen.getByTestId("ff-posture")).toHaveTextContent("enforcing");
+  expect(screen.getByTestId("ff-posture")).not.toHaveTextContent("nothing blocked");
+  // Learned hostile-tradecraft signatures panel.
+  expect(screen.getByTestId("sig-shadow")).toHaveTextContent("3");
+  expect(screen.getByTestId("sig-enforcing")).toHaveTextContent("1");
+  expect(screen.getByTestId("sig-autoblocked")).toHaveTextContent("2");
   // Agent journeys panel (severity view): select it, then the correlated session renders.
   fireEvent.click(screen.getByTestId("journey-view-severity"));
   const journeys = screen.getByTestId("ff-journeys-triage");
@@ -817,8 +827,8 @@ test("the Forcefield legend stacks each term on its own line, emphasized", async
   expect(legend).toHaveTextContent("Welcomed");
   expect(legend).toHaveTextContent("Flagged");
   expect(legend).toHaveTextContent("Decoy trips");
-  // the legend is a stacked grid of rows, one per term
-  expect(legend.querySelectorAll(":scope > div").length).toBe(3);
+  // the legend is a stacked grid of rows, one per term (welcomed/flagged/decoy/blocked)
+  expect(legend.querySelectorAll(":scope > div").length).toBe(4);
 });
 
 test("Forcefield agent-traffic sits right after the map, before probe intelligence", async () => {

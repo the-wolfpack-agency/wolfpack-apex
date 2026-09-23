@@ -100,16 +100,22 @@ export interface SiteAnalyticsSummary {
   byPage: Array<{ path: string; count: number }>;
   byCountry: Array<{ country: string; count: number }>;
   byType: Array<{ type: string; count: number }>;
-  /* Forcefield for the Web: how ogiam.com handled agent traffic. welcomed =
-     identified good agents given the welcome lane; flagged = unidentified
-     automation; trapped = scrapers that tripped the honeypot. Watch-first, so
-     these are observed, not blocked. */
+  /* Forcefield for the Web: how the monitored sites handled agent traffic.
+     welcomed = identified good agents given the welcome lane; flagged =
+     unidentified automation (a weak signal, recorded); trapped = scrapers that
+     tripped the honeypot; blocked = requests actually turned away by enforcement
+     (proven-hostile: honeytoken trip / live payload / blocked fingerprint). */
   forcefield: {
     welcomed: number;
     flagged: number;
     trapped: number;
+    blocked: number;
     topAgents: Array<{ agent: string; count: number }>;
   };
+  /* Learned hostile-tradecraft signatures: combos mined from caught hostiles.
+     shadow = still proving itself (records would-block only); enforcing = earned
+     auto-block; autoBlocked = operators turned away by an enforcing signature. */
+  learnedSignatures: { shadow: number; enforcing: number; autoBlocked: number };
   /* Reconstructed agent journeys: correlated sessions with a fused behavior
      class and a proven/inferred confidence. Newest first, capped. */
   journeys: Array<AgentJourney & { profile: AgentProfile; triage: TriageStatus }>;
@@ -209,7 +215,7 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
   const surfaceClause = filtered ? ` AND coalesce(props->>'site', 'ogiam.com') = $2` : "";
   const params = filtered ? [String(days), surface] : [String(days)];
 
-  const [hour, page, country, type, totals, ff, ffAgents, journeyRows, agentOriginRows, payloadRows, surfacesRows, pvExists] = await Promise.all([
+  const [hour, page, country, type, totals, ff, ffAgents, journeyRows, agentOriginRows, payloadRows, surfacesRows, pvExists, learnedSig] = await Promise.all([
     safeQuery<{ hour: number; count: string }>(
       `SELECT EXTRACT(HOUR FROM created_at AT TIME ZONE 'UTC')::int AS hour, count(*) AS count
          FROM site_analytics_events
@@ -246,11 +252,12 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
         WHERE ${sinceClause}${surfaceClause}`,
       params,
     ),
-    safeQuery<{ welcomed: string; flagged: string; trapped: string }>(
+    safeQuery<{ welcomed: string; flagged: string; trapped: string; blocked: string }>(
       `SELECT
          count(*) FILTER (WHERE event_type = 'site.agent_welcomed')     AS welcomed,
          count(*) FILTER (WHERE event_type = 'site.agent_flagged')      AS flagged,
-         count(*) FILTER (WHERE event_type = 'site.agent_trap_tripped') AS trapped
+         count(*) FILTER (WHERE event_type = 'site.agent_trap_tripped') AS trapped,
+         count(*) FILTER (WHERE props->>'blocked' = 'true')             AS blocked
          FROM site_analytics_events
         WHERE ${sinceClause}${surfaceClause}`,
       params,
@@ -318,6 +325,18 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
        ) AS has_pv`,
       filtered ? [surface] : [],
     ),
+    /* Learned hostile-tradecraft signatures, workspace-global (not window/surface
+       scoped - a signature is cross-site). Counts by status + total operators
+       auto-blocked by an enforcing signature. */
+    safeQuery<{ shadow: string; enforcing: string; auto_blocked: string }>(
+      `SELECT
+         count(*) FILTER (WHERE status = 'shadow')    AS shadow,
+         count(*) FILTER (WHERE status = 'enforcing') AS enforcing,
+         coalesce(sum(auto_blocked), 0)               AS auto_blocked
+         FROM instinct_learned_hostile_signatures
+        WHERE workspace_id = $1`,
+      [process.env.FORCEFIELD_EDGE_WORKSPACE_ID || "default"],
+    ),
   ]);
 
   const t = totals.rows[0];
@@ -380,7 +399,13 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
       welcomed: ff.rows[0] ? Number(ff.rows[0].welcomed) : 0,
       flagged: ff.rows[0] ? Number(ff.rows[0].flagged) : 0,
       trapped: ff.rows[0] ? Number(ff.rows[0].trapped) : 0,
+      blocked: ff.rows[0] ? Number(ff.rows[0].blocked) : 0,
       topAgents: ffAgents.rows.map((r) => ({ agent: r.agent, count: Number(r.count) })),
+    },
+    learnedSignatures: {
+      shadow: learnedSig?.rows?.[0] ? Number(learnedSig.rows[0].shadow) : 0,
+      enforcing: learnedSig?.rows?.[0] ? Number(learnedSig.rows[0].enforcing) : 0,
+      autoBlocked: learnedSig?.rows?.[0] ? Number(learnedSig.rows[0].auto_blocked) : 0,
     },
     journeys,
     operatorTriage,
