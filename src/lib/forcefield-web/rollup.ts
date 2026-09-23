@@ -8,11 +8,10 @@
  * from the event log; an empty log is an honest zero, not a fabricated figure.
  *
  * The reader is injected so this is unit-testable with no DB; liveWebProtection
- * Deps wires the real event query (scoped by metadata->>'workspace_id', the same
- * mechanism the enforcement reader uses).
+ * Deps reads the LIVE agent-inspection stream the edge shim actually writes
+ * (site_analytics_events site.agent_* events), optionally scoped to one surface.
  */
 import { safeQuery } from "@/lib/db";
-import { FORCEFIELD_WEB_EVENT } from "./record";
 import type { WebClass } from "./classify";
 import type { WebAction } from "./posture";
 
@@ -45,25 +44,46 @@ export interface WebProtectionDeps {
 
 const PAGE = 1000;
 
+/** Map a live site event to the protection row shape. The forcefield edge shim
+ *  stamps `action`/`blocked` into props; class is derived from the event type so
+ *  the report is truthful even for legacy rows that predate those props. */
+export function eventToInspection(eventType: string, action: string | null, blocked: boolean): WebInspectionRow {
+  let cls: WebClass = "normal";
+  if (eventType === "site.agent_welcomed") cls = "known_agent";
+  else if (eventType === "site.agent_trap_tripped") cls = "trapped";
+  else if (eventType === "site.agent_flagged" || eventType === "site.agent_probed_sensitive" || eventType === "site.agent_payload_attack" || eventType === "site.agent_high_rate" || eventType === "site.agent_form_honeypot" || eventType === "site.agent_form_too_fast") cls = "suspicious";
+  const act = (action === "welcome" || action === "allow" || action === "report" || action === "block")
+    ? (action as WebAction)
+    : cls === "known_agent" ? "welcome" : cls === "normal" ? "allow" : "report";
+  return { class: cls, action: blocked ? "block" : act, blocked };
+}
+
+const AGENT_EVENT_TYPES = [
+  "site.agent_welcomed", "site.agent_flagged", "site.agent_trap_tripped",
+  "site.agent_probed_sensitive", "site.agent_payload_attack", "site.agent_high_rate",
+  "site.agent_form_honeypot", "site.agent_form_too_fast",
+];
+
+/** Reads the LIVE agent-inspection stream the edge shim actually writes
+ *  (site_analytics_events), not the internal/demo event. Optionally scoped to one
+ *  surface (site) via the workspaceId arg when it names a surface; "default"/empty
+ *  reports across all monitored sites. */
 export function liveWebProtectionDeps(): WebProtectionDeps {
   return {
     listInspections: async (workspaceId, limit) => {
-      const { rows } = await safeQuery<{ class: WebClass; action: WebAction; blocked: boolean | string }>(
-        `SELECT metadata->>'class' AS class,
-                metadata->>'action' AS action,
-                (metadata->>'blocked')::boolean AS blocked
-           FROM instinct_events
-          WHERE event_type = $1
-            AND metadata->>'workspace_id' = $2
-          ORDER BY timestamp DESC
+      const surface = workspaceId && workspaceId !== "default" ? workspaceId : null;
+      const { rows } = await safeQuery<{ event_type: string; action: string | null; blocked: boolean | string | null }>(
+        `SELECT event_type,
+                props->>'action' AS action,
+                (props->>'blocked')::boolean AS blocked
+           FROM site_analytics_events
+          WHERE event_type = ANY($1)
+            ${surface ? "AND props->>'site' = $2" : ""}
+          ORDER BY created_at DESC
           LIMIT ${PAGE}`,
-        [FORCEFIELD_WEB_EVENT, workspaceId],
+        surface ? [AGENT_EVENT_TYPES, surface] : [AGENT_EVENT_TYPES],
       );
-      return rows.map((r) => ({
-        class: r.class,
-        action: r.action,
-        blocked: r.blocked === true || r.blocked === "true",
-      }));
+      return rows.map((r) => eventToInspection(r.event_type, r.action, r.blocked === true || r.blocked === "true"));
     },
   };
 }

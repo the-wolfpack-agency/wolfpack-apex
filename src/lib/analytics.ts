@@ -700,6 +700,14 @@ export type InstinctEventType =
   // forcefield.operator_auto_blocked { operator, rule, proven } - an operator was
   //   AUTO-added to the blocklist on a proven-hostile verdict. Opaque key only.
   | "forcefield.operator_auto_blocked"
+  // forcefield.fingerprint_autoblocked { fp, reason } - a client fingerprint was
+  // auto-added to the distributed block list because it tripped a honeytoken (the
+  // highest-confidence hostile signal), so the central ruleset turns it away next.
+  | "forcefield.fingerprint_autoblocked"
+  // forcefield.web_alert_dispatched { kind, fingerprint, count } - a NEW high-
+  // confidence hostile signal (honeytoken trip / payload attack) was alerted to
+  // the team via the notifications layer. Deduped so it fires once per fingerprint.
+  | "forcefield.web_alert_dispatched"
   // OGIAM self-serve tenancy. tenant_registered { tenant_id } - a new org signed
   //   up (admin email is NOT in analytics, only that a tenant was registered).
   | "tenancy.tenant_registered"
