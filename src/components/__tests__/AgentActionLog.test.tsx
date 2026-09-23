@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
 import "@testing-library/jest-dom";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { AgentActionLog } from "@/components/AgentActionLog";
 import type { JourneyStep } from "@/lib/agent-behavior";
 
@@ -47,4 +47,29 @@ describe("AgentActionLog", () => {
     const { container } = render(<AgentActionLog steps={[]} testId="cf3" />);
     expect(container).toBeEmptyDOMElement();
   });
+
+  it("folds a long routine run to focus on key steps, with an expandable full trail", () => {
+    const long: JourneyStep[] = [
+      ...Array.from({ length: 8 }, (_, i) => ({ at: `2026-09-21T18:46:${String(i).padStart(2, "0")}Z`, path: "/manifest.json", signal: null as null })),
+      { at: "2026-09-21T18:47:00Z", path: "/admin", signal: "probed_sensitive" as const },
+      ...Array.from({ length: 4 }, (_, i) => ({ at: `2026-09-21T18:47:${String(10 + i).padStart(2, "0")}Z`, path: "/manifest.json", signal: null as null })),
+    ];
+    const { unmount } = render(<AgentActionLog steps={long} testId="cfl" />);
+    // Focus view: the hostile step is shown, but the routine run is folded to a summary.
+    expect(screen.getByText(/probed sensitive/i)).toBeInTheDocument();
+    const collapsed = screen.getByTestId(/^cfl-collapsed-/) as HTMLElement;
+    expect(collapsed).toHaveTextContent(/routine step/i);
+    // Fewer entries than steps are rendered up front.
+    expect(screen.queryAllByTestId(/^cfl-entry-/).length).toBeLessThan(long.length);
+    // Expanding the run reveals its hidden steps.
+    fireEvent.click(collapsed);
+    expect(screen.queryByTestId(/^cfl-collapsed-/)).not.toBeInTheDocument();
+    unmount();
+
+    // The full-trail toggle shows every step.
+    render(<AgentActionLog steps={long} testId="cff" />);
+    fireEvent.click(screen.getByTestId("cff-toggle-full"));
+    expect(screen.queryAllByTestId(/^cff-entry-/).length).toBe(long.length);
+  });
+
 });
