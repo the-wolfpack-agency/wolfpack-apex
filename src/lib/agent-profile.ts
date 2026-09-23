@@ -183,6 +183,11 @@ export function liveSightingFor(journey: AgentJourney, surface: string): Sightin
     pathDiscovery: scaffoldingLite.pathDiscovery,
     retries: false,
     probedSensitive: scaffoldingLite.probedSensitive,
+    // Carry the UA-derived client tool/type so operatorKeyFor buckets this sighting
+    // into the SAME operator key buildAgentProfile computes for the same journey.
+    // Without these, a promoted sighting and its live profile split into two keys.
+    clientTool: journey.clientTool,
+    clientType: journey.clientType,
   };
   return { surface, at: journey.lastAt || journey.firstAt || "", journey, scaffolding, tools };
 }
