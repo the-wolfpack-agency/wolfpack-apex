@@ -199,7 +199,7 @@ export default function SecurityPlainLanguagePage() {
           is never on screen during the live demo; open it to prep. */}
       <details className="wp-pilot-section" data-testid="spl-meeting">
         <summary className="wp-build-brief-summary" data-testid="spl-meeting-summary">
-          Presenter notes: the Friday meeting (for the team running the room)
+          Notes
         </summary>
         <div className="wp-build-brief-body">
           <p className="wp-pilot-aside">{MEETING_BRIEF.context}</p>
