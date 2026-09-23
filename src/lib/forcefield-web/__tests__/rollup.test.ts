@@ -33,3 +33,14 @@ it("flags sampleCapped when the reader returns a full page", async () => {
   const r = await computeWebProtection("w1", deps(many));
   expect(r.sampleCapped).toBe(true);
 });
+
+import { eventToInspection } from "../rollup";
+
+it("maps live site.agent_* events to inspection rows (the repointed source)", () => {
+  expect(eventToInspection("site.agent_welcomed", null, false)).toEqual({ class: "known_agent", action: "welcome", blocked: false });
+  expect(eventToInspection("site.agent_trap_tripped", null, false)).toEqual({ class: "trapped", action: "report", blocked: false });
+  expect(eventToInspection("site.agent_trap_tripped", "report", true)).toEqual({ class: "trapped", action: "block", blocked: true });
+  expect(eventToInspection("site.agent_flagged", null, false)).toEqual({ class: "suspicious", action: "report", blocked: false });
+  expect(eventToInspection("site.agent_payload_attack", null, true)).toEqual({ class: "suspicious", action: "block", blocked: true });
+  expect(eventToInspection("site.page_viewed", null, false)).toEqual({ class: "normal", action: "allow", blocked: false });
+});

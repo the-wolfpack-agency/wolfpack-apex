@@ -30,10 +30,21 @@ describe("getBlockedFingerprints", () => {
     expect(fps.sort()).toEqual(["aaaa", "bbbb"]);
   });
 
-  it("returns empty when nothing is blocked (never queries the fp table needlessly)", async () => {
+  it("returns empty when there are no blocked fingerprints (admin or auto)", async () => {
     mockListBlocked.mockResolvedValue(new Set());
+    mockQuery.mockResolvedValue({ rows: [] });
     expect(await getBlockedFingerprints("default")).toEqual([]);
-    expect(mockQuery).not.toHaveBeenCalled();
+  });
+
+  it("serves auto-blocked (honeytoken) fingerprints unconditionally, even with no admin-blocked operators", async () => {
+    mockListBlocked.mockResolvedValue(new Set());
+    mockQuery.mockResolvedValue({
+      rows: [
+        { fp: "auto1", operator_key: "auto:honeytoken" }, // kept: auto-block enforces on its own
+        { fp: "op_only", operator_key: "op_notblocked" }, // dropped: operator not admin-blocked
+      ],
+    });
+    expect(await getBlockedFingerprints("default")).toEqual(["auto1"]);
   });
 
   it("fail-safe: returns empty on a DB error (never serves a wrong block list)", async () => {

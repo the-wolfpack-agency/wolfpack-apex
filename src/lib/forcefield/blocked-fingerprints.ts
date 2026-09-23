@@ -19,6 +19,7 @@
  * importantly, cause the ruleset to serve a bad block list.
  */
 import { query } from "@/lib/db";
+import { trackEvent } from "@/lib/analytics";
 import { buildJourneys } from "@/lib/agent-behavior";
 import { buildAgentProfile } from "@/lib/agent-profile";
 import { listBlockedOperatorKeys } from "@/lib/agent-operators";
@@ -133,6 +134,28 @@ export async function clearBlockedFingerprints(workspaceId: string, operatorKey:
   }
 }
 
+/** Auto-block a client fingerprint that tripped a honeytoken - the highest-
+ *  confidence hostile signal, so no human step is needed. Written under a reserved
+ *  "auto:<reason>" operator key so getBlockedFingerprints serves it unconditionally
+ *  (it does not depend on an admin having blocked an operator). The central ruleset
+ *  distributes it and enforce.ts turns the same fingerprint away on its next hit,
+ *  across every connected site. Fail-safe + idempotent; never throws. */
+export async function autoBlockFingerprint(fp: string, reason: string): Promise<void> {
+  if (!process.env.DATABASE_URL || !fp) return;
+  const workspaceId = process.env.FORCEFIELD_EDGE_WORKSPACE_ID || "default";
+  const operatorKey = `auto:${reason}`;
+  try {
+    const res = await query(
+      `INSERT INTO instinct_agent_blocked_fingerprints (workspace_id, operator_key, fp)
+       VALUES ($1, $2, $3) ON CONFLICT (workspace_id, operator_key, fp) DO NOTHING`,
+      [workspaceId, operatorKey, fp],
+    );
+    if ((res.rowCount ?? 0) > 0) trackEvent("forcefield.fingerprint_autoblocked", "system", "forcefield", { fp, reason });
+  } catch (err) {
+    console.warn("[blocked-fingerprints] auto-block failed:", (err as Error).message);
+  }
+}
+
 /** The distinct fingerprints to distribute for a workspace - ONLY those whose
  *  operator is still blocked (a stale row for an unblocked operator never
  *  enforces). Empty on any error (fail-safe: the ruleset falls back to no
@@ -140,14 +163,17 @@ export async function clearBlockedFingerprints(workspaceId: string, operatorKey:
 export async function getBlockedFingerprints(workspaceId: string): Promise<string[]> {
   if (!process.env.DATABASE_URL) return [];
   try {
-    const blocked = await listBlockedOperatorKeys(workspaceId);
-    if (blocked.size === 0) return [];
     const res = await query<{ fp: string; operator_key: string }>(
       `SELECT DISTINCT fp, operator_key FROM instinct_agent_blocked_fingerprints WHERE workspace_id = $1`,
       [workspaceId],
     );
+    if (res.rows.length === 0) return [];
+    // Auto-blocked (honeytoken) fingerprints enforce unconditionally; admin
+    // operator blocks enforce only while that operator is still blocked (a stale
+    // row for an unblocked operator never enforces).
+    const blocked = await listBlockedOperatorKeys(workspaceId);
     const out = new Set<string>();
-    for (const r of res.rows) if (blocked.has(r.operator_key)) out.add(r.fp);
+    for (const r of res.rows) if (r.operator_key.startsWith("auto:") || blocked.has(r.operator_key)) out.add(r.fp);
     return [...out];
   } catch {
     return [];

@@ -22,6 +22,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { timingSafeEqual } from "crypto";
 import { isSiteEventType, recordSiteEvent } from "@/lib/site-analytics";
+import { autoBlockFingerprint } from "@/lib/forcefield/blocked-fingerprints";
 import { verifyPresentedDelegation, getDelegationIssuer, consumeDelegationJti } from "@/lib/forcefield/principal";
 import { ingestSigningEnforced, verifyIngestSignature } from "@/lib/forcefield/ingest-signing";
 
@@ -163,6 +164,13 @@ export async function POST(req: NextRequest) {
     referrerHost: cap(b.referrer, 256),
     props,
   });
+
+  // Flywheel: a honeytoken trip is the highest-confidence hostile signal, so
+  // auto-block that client fingerprint. The central ruleset then turns it away on
+  // its next hit across every connected site (enforced when FORCEFIELD_ENFORCE=on).
+  if (b.type === "site.agent_trap_tripped" && typeof props.fp === "string" && props.fp) {
+    await autoBlockFingerprint(props.fp, "honeytoken").catch(() => {});
+  }
 
   return NextResponse.json({ ok: true });
 }

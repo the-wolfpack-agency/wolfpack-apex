@@ -81,6 +81,12 @@ const GLOBAL_BY_DESIGN: readonly string[] = [
      without a chicken-and-egg. It lives in the control-plane DB and holds no
      tenant business data, only the provisioning record. */
   "instinct_tenant_registry",
+  /* Dedupe store for Forcefield-web hostile-signal alerts, computed over the
+     GLOBAL site_analytics_events stream (public-site protection). A public-site
+     attack has no tenant to attribute, so per-workspace rows would be WRONG: two
+     tenants cannot hold different beliefs about whether a fingerprint attacked a
+     public property. */
+  "instinct_forcefield_web_alerts",
 ];
 
 const NO_WORKSPACE_COLUMN: readonly string[] = [
