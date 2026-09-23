@@ -12,10 +12,17 @@ import type { LearnedSignatureDeps, MinedSignature, OperatorDossierLite, StoredS
 
 const LOOKBACK_DAYS = 30;
 
-/** An operator is treated as known-good (a false-positive if matched) when it is
- *  an identified/rule-respecting crawler or presents a verified principal. */
-function isWelcomed(behaviorClasses: string[], tells: string[]): boolean {
-  return behaviorClasses.includes("benign_crawler") || tells.includes("identified_agent") || tells.includes("principal_verified");
+/** An operator is treated as known-good (a false-positive if matched) ONLY when it
+ *  is genuinely benign AND rule-respecting - a benign-classified crawler, or one
+ *  presenting a CRYPTOGRAPHICALLY VERIFIED principal (unspoofable). The bare
+ *  `identified_agent` tell is a self-declared CLAIM an impersonator spoofs while
+ *  attacking, so it is NOT trusted on its own: an operator that declares itself a
+ *  known crawler AND fires payloads / trips decoys is a hostile impersonator, not
+ *  a false positive, and must not be allowed to block its own signature from
+ *  ever promoting. `threatLevel` (from the actual behavior) is the deciding gate. */
+function isWelcomed(threatLevel: string, behaviorClasses: string[], tells: string[]): boolean {
+  if (tells.includes("principal_verified")) return true; // verified identity cannot be spoofed
+  return threatLevel === "benign" && (behaviorClasses.includes("benign_crawler") || tells.includes("identified_agent"));
 }
 
 export function liveLearnedSignatureDeps(): LearnedSignatureDeps {
@@ -29,7 +36,7 @@ export function liveLearnedSignatureDeps(): LearnedSignatureDeps {
       return ops.map((o) => ({
         operatorKey: o.operatorKey,
         threatLevel: o.threatLevel,
-        welcomed: isWelcomed(o.behaviorClasses, o.tells),
+        welcomed: isWelcomed(o.threatLevel, o.behaviorClasses, o.tells),
         tells: o.tells,
       }));
     },
