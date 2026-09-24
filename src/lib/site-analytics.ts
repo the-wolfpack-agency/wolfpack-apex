@@ -14,7 +14,7 @@ import { buildAgentProfile, type AgentProfile } from "@/lib/agent-profile";
 import { getNetworkReputation, getNetworkTradecraft, type NetworkReputation, type NetworkTradecraftActor } from "@/lib/forcefield/operator-reputation";
 import { summarizeProbeIntel, type ProbeIntelEntry } from "@/lib/agent-probe-signatures";
 import { getFindingTriage, type TriageStatus } from "@/lib/site-finding-triage";
-import { listBlockedOperatorKeys } from "@/lib/agent-operators";
+import { listBlockedOperatorKeys, liveAgentIntelligence, type AgentIntelSummary } from "@/lib/agent-operators";
 
 /** Closed event vocabulary, mirrored from the marketing site's analytics. A
  *  value outside this set is rejected at the ingest boundary. */
@@ -116,6 +116,9 @@ export interface SiteAnalyticsSummary {
      shadow = still proving itself (records would-block only); enforcing = earned
      auto-block; autoBlocked = operators turned away by an enforcing signature. */
   learnedSignatures: { shadow: number; enforcing: number; autoBlocked: number };
+  /* Deeper agent intelligence: cross-site campaigns, the automation/AI/script mix,
+     and who adapted after being blocked. From liveAgentIntelligence. */
+  agentIntel: AgentIntelSummary;
   /* Reconstructed agent journeys: correlated sessions with a fused behavior
      class and a proven/inferred confidence. Newest first, capped. */
   journeys: Array<AgentJourney & { profile: AgentProfile; triage: TriageStatus }>;
@@ -215,7 +218,7 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
   const surfaceClause = filtered ? ` AND coalesce(props->>'site', 'ogiam.com') = $2` : "";
   const params = filtered ? [String(days), surface] : [String(days)];
 
-  const [hour, page, country, type, totals, ff, ffAgents, journeyRows, agentOriginRows, payloadRows, surfacesRows, pvExists, learnedSig] = await Promise.all([
+  const [hour, page, country, type, totals, ff, ffAgents, journeyRows, agentOriginRows, payloadRows, surfacesRows, pvExists, learnedSig, agentIntel] = await Promise.all([
     safeQuery<{ hour: number; count: string }>(
       `SELECT EXTRACT(HOUR FROM created_at AT TIME ZONE 'UTC')::int AS hour, count(*) AS count
          FROM site_analytics_events
@@ -347,6 +350,9 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
         WHERE workspace_id = $1`,
       [process.env.FORCEFIELD_EDGE_WORKSPACE_ID || "default"],
     ),
+    // Deeper agent intelligence across the live edge stream (cross-site campaigns,
+    // automation/AI/script mix, adaptive reactions). Not a query - a rollup.
+    liveAgentIntelligence(days),
   ]);
 
   const t = totals.rows[0];
@@ -417,6 +423,7 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
       enforcing: learnedSig?.rows?.[0] ? Number(learnedSig.rows[0].enforcing) : 0,
       autoBlocked: learnedSig?.rows?.[0] ? Number(learnedSig.rows[0].auto_blocked) : 0,
     },
+    agentIntel,
     journeys,
     operatorTriage,
     blockedOperators,

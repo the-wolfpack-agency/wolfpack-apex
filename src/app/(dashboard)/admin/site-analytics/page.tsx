@@ -43,6 +43,16 @@ interface Summary {
     topAgents: Array<{ agent: string; count: number }>;
   };
   learnedSignatures?: { shadow: number; enforcing: number; autoBlocked: number };
+  agentIntel?: {
+    operators: number;
+    campaigns: number;
+    automationFleet: number;
+    aiAgents: number;
+    scripts: number;
+    persistedAfterBlock: number;
+    escalatedAfterBlock: number;
+    topCampaigns: Array<{ fp: string; sites: string[]; clientClass: string; rhythm: string }>;
+  };
   journeys: Array<{
     key: string;
     confidence: "proven" | "inferred";
@@ -780,6 +790,46 @@ export default function SiteAnalyticsPage() {
               </div>
             </div>
           </div>
+
+          {/* Agent intelligence: deeper profiling of the caught agents - cross-site
+              campaigns, the automation/AI/script mix, and who adapted after a block.
+              Turns "it used HeadlessChrome" into a real picture of the adversary. */}
+          {summary.agentIntel && (
+            <div style={card} data-testid="ff-agent-intel">
+              <div style={label}>Agent intelligence &middot; who these agents really are</div>
+              <div style={{ fontSize: "0.8rem", color: "var(--wp-text-muted, #9ca3af)", marginTop: "0.35rem", lineHeight: 1.5 }}>
+                Deeper profiling of the {summary.agentIntel.operators.toLocaleString()} distinct operators seen: the same fingerprint across properties is one coordinated campaign, and the client mix shows what is actually reaching you.
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "1rem", marginTop: "0.8rem" }}>
+                {[
+                  { k: "Cross-site campaigns", v: summary.agentIntel.campaigns, c: "var(--wp-error, #ef4444)", t: "intel-campaigns" },
+                  { k: "Automation fleet", v: summary.agentIntel.automationFleet, c: "var(--wp-warning, #f5a623)", t: "intel-automation" },
+                  { k: "AI agents", v: summary.agentIntel.aiAgents, c: "var(--wp-gold, #e8b528)", t: "intel-ai" },
+                  { k: "Scripts", v: summary.agentIntel.scripts, c: "var(--wp-text-muted, #9ca3af)", t: "intel-scripts" },
+                  { k: "Persisted after block", v: summary.agentIntel.persistedAfterBlock, c: "var(--wp-error, #ef4444)", t: "intel-persisted" },
+                  { k: "Escalated after block", v: summary.agentIntel.escalatedAfterBlock, c: "var(--wp-error, #ef4444)", t: "intel-escalated" },
+                ].map((m) => (
+                  <div key={m.k}>
+                    <div style={{ ...label, color: m.c }}>{m.k}</div>
+                    <div data-testid={m.t} style={{ marginTop: "0.25rem", fontSize: "1.5rem", fontWeight: 700, color: "var(--wp-text, #eee)" }}>{m.v.toLocaleString()}</div>
+                  </div>
+                ))}
+              </div>
+              {summary.agentIntel.topCampaigns.length > 0 && (
+                <div style={{ marginTop: "1rem" }}>
+                  <div style={label}>Coordinated campaigns (one operator, multiple properties)</div>
+                  <ul data-testid="intel-top-campaigns" style={{ listStyle: "none", margin: "0.5rem 0 0", padding: 0, display: "grid", gap: "0.4rem" }}>
+                    {summary.agentIntel.topCampaigns.map((c) => (
+                      <li key={c.fp} style={{ display: "flex", justifyContent: "space-between", gap: "0.6rem", fontSize: "0.82rem", color: "var(--wp-text, #eee)", flexWrap: "wrap" }}>
+                        <span style={{ fontFamily: "var(--wp-mono, ui-monospace, monospace)", color: "var(--wp-text-muted, #b8bcc4)" }}>{c.fp} &middot; {c.clientClass.replace(/_/g, " ")} &middot; {c.rhythm.replace(/_/g, " ")}</span>
+                        <span style={{ color: "var(--wp-error, #ef4444)" }}>{c.sites.join(" + ")}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Probe intelligence + payload attacks. Placed BELOW the agent-traffic
               summary - that section ties directly to the map above, so it leads;
