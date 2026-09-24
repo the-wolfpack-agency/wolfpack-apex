@@ -22,3 +22,21 @@ describe("hosting classifier (portable edge core)", () => {
     expect(ipInPrefix(ipv4ToInt("35.0.0.1")!, p)).toBe(false);
   });
 });
+
+import { datacenterPrefixesFrom, _resetHostingCache, DATACENTER_SEED as SEED2 } from "../hosting";
+describe("datacenterPrefixesFrom (ruleset distribution = united rollout)", () => {
+  beforeEach(() => _resetHostingCache());
+  it("uses the ruleset's full set (compact base/bits) over the bundled seed", () => {
+    // 34.64.0.0/10 = base 574619648 -> covers 34.64.4.1
+    const p = datacenterPrefixesFrom(["574619648/10"]);
+    expect(classifyHosting("34.64.4.1", p)).toBe("datacenter");
+    expect(classifyHosting("8.8.8.8", p)).toBe("residential"); // not in the ruleset set
+  });
+  it("falls back to the bundled seed when the ruleset carries none", () => {
+    expect(datacenterPrefixesFrom(undefined)).toBe(SEED2);
+    expect(datacenterPrefixesFrom([])).toBe(SEED2);
+  });
+  it("falls back to the seed when every ruleset entry is malformed (never worse off)", () => {
+    expect(datacenterPrefixesFrom(["garbage", "x/y"])).toBe(SEED2);
+  });
+});

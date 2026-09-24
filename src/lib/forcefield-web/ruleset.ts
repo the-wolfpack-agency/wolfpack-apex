@@ -34,6 +34,12 @@ export interface ForcefieldRuleset {
    *  EVERY connected site (update-once). Only consulted when a site is in
    *  enforce mode; optional so an older ruleset without it still validates. */
   blockedFingerprints?: string[];
+  /** Datacenter/cloud IPv4 prefixes ("base/bits") for hosting classification.
+   *  Distributed here so the FULL provider range set (not just the bundled seed)
+   *  reaches EVERY site at once and refreshes centrally - the united rollout: a
+   *  coverage update ships to all client sites via one ruleset refresh, no
+   *  re-vendor. Optional; a site with none falls back to its bundled seed. */
+  datacenterPrefixes?: string[];
 }
 
 /** The bundled fallback baked into every site. Kept deliberately broad so a site
@@ -60,6 +66,7 @@ export const DEFAULT_RULESET: ForcefieldRuleset = {
   ],
   toolSignatures: [...DEFAULT_TOOL_SIGNATURES],
   blockedFingerprints: [],
+  datacenterPrefixes: [],
 };
 
 /** Validate + coerce an untrusted payload into a ruleset, or null if it is not
@@ -88,6 +95,7 @@ export function coerceRuleset(data: unknown): ForcefieldRuleset | null {
   // Optional: absent or malformed -> empty (never blocks), so an older ruleset
   // still validates and a bad field can't accidentally enable enforcement.
   const blockedFingerprints = strArr(d.blockedFingerprints) ?? [];
+  const datacenterPrefixes = strArr(d.datacenterPrefixes) ?? [];
   return {
     version: typeof d.version === "string" ? d.version : "remote",
     knownAgents: agents,
@@ -95,6 +103,7 @@ export function coerceRuleset(data: unknown): ForcefieldRuleset | null {
     sensitivePaths: sensitive,
     toolSignatures: sigs,
     blockedFingerprints,
+    datacenterPrefixes,
   };
 }
 

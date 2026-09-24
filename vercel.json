@@ -87,6 +87,10 @@
     {
       "path": "/api/cron/forcefield-learn",
       "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron/datacenter-ranges-refresh",
+      "schedule": "0 6 * * 1"
     }
   ]
 }

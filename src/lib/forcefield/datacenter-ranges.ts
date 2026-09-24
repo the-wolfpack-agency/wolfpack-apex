@@ -64,3 +64,43 @@ export async function fetchDatacenterPrefixes(): Promise<DatacenterPrefix[]> {
   }
   return out;
 }
+
+/** Read the distributed prefix set (compact "base/bits") for the ruleset. Empty
+ *  on any error / no DB, so the ruleset simply omits them and sites use the seed. */
+export async function getDatacenterPrefixes(): Promise<string[]> {
+  if (!process.env.DATABASE_URL) return [];
+  try {
+    const { query } = await import("@/lib/db");
+    const { rows } = await query<{ prefix: string }>(`SELECT prefix FROM instinct_datacenter_prefixes`);
+    return rows.map((r) => r.prefix);
+  } catch {
+    return [];
+  }
+}
+
+/** Refresh the stored prefix set from the providers' published lists (cron).
+ *  Replaces the table transactionally so a mid-refresh read never sees a partial
+ *  set. Returns the count written (0 if the fetch yielded nothing - the OLD set
+ *  is kept rather than wiped). */
+export async function refreshDatacenterPrefixes(): Promise<number> {
+  if (!process.env.DATABASE_URL) return 0;
+  const prefixes = await fetchDatacenterPrefixes();
+  if (prefixes.length === 0) return 0; // keep the existing set rather than wipe on a failed fetch
+  const { query } = await import("@/lib/db");
+  const values = prefixes.map((p) => `${p.base >>> 0}/${p.bits}`);
+  try {
+    await query("BEGIN");
+    await query(`DELETE FROM instinct_datacenter_prefixes`);
+    // Bulk insert in one statement.
+    await query(
+      `INSERT INTO instinct_datacenter_prefixes (prefix) SELECT unnest($1::text[]) ON CONFLICT (prefix) DO NOTHING`,
+      [values],
+    );
+    await query("COMMIT");
+    return values.length;
+  } catch (err) {
+    try { await query("ROLLBACK"); } catch { /* ignore */ }
+    console.warn("[datacenter-ranges] refresh failed:", (err as Error).message);
+    return 0;
+  }
+}
