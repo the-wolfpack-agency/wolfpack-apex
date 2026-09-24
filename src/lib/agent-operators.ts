@@ -13,6 +13,7 @@ import { query, safeQuery } from "@/lib/db";
 import { operatorKeyFor, buildDossiers, buildDossier, type Sighting, type AttributionDossier } from "@/lib/agent-dossier";
 import { buildJourneys, type AgentJourney, type CorrelationKind } from "@/lib/agent-behavior";
 import { liveSightingFor } from "@/lib/agent-profile";
+import { analyzeAgent, type AgentIntelEvent } from "@/lib/forcefield/agent-intelligence";
 import type { ScaffoldingSignature } from "@/lib/agent-probe";
 import type { ToolCompositionReport } from "@/lib/agent-tool-composition";
 
@@ -164,4 +165,79 @@ export async function listBlockedOperatorKeys(workspaceId: string): Promise<Set<
  *  uses to deny a known-hostile operator on sight. */
 export async function isOperatorBlocked(workspaceId: string, operatorKey: string): Promise<boolean> {
   return (await listBlockedOperatorKeys(workspaceId)).has(operatorKey);
+}
+
+/** The event_type -> structural signal map, for the intelligence rollup. */
+const INTEL_SIGNAL_OF: Record<string, string> = {
+  "site.agent_probed_sensitive": "probed_sensitive",
+  "site.agent_trap_tripped": "tripped_decoy",
+  "site.agent_payload_attack": "payload_attack",
+  "site.agent_read_robots": "read_robots",
+  "site.agent_read_sitemap": "read_sitemap",
+  "site.agent_high_rate": "high_rate",
+  "site.agent_form_honeypot": "form_honeypot",
+  "site.agent_form_too_fast": "form_too_fast",
+};
+
+export interface AgentIntelSummary {
+  operators: number;
+  campaigns: number; // one operator active on >1 property
+  automationFleet: number; // headless / framework operators
+  aiAgents: number;
+  scripts: number;
+  persistedAfterBlock: number; // kept going after we turned it away
+  escalatedAfterBlock: number; // brought a NEW hostile technique after a block
+  /** A few notable cross-site campaigns to show, most-sites-first. */
+  topCampaigns: Array<{ fp: string; sites: string[]; clientClass: string; rhythm: string }>;
+}
+
+const EMPTY_INTEL: AgentIntelSummary = { operators: 0, campaigns: 0, automationFleet: 0, aiAgents: 0, scripts: 0, persistedAfterBlock: 0, escalatedAfterBlock: 0, topCampaigns: [] };
+
+/**
+ * Deeper agent intelligence rolled up across the LIVE edge stream: cross-site
+ * campaigns, automation/AI/script mix, and who adapted after being blocked.
+ * Groups events by the stable edge fingerprint and runs the pure analyzeAgent
+ * on each. Fail-safe: empty on any error / no DB.
+ */
+export async function liveAgentIntelligence(rangeDays = 7): Promise<AgentIntelSummary> {
+  if (!process.env.DATABASE_URL) return EMPTY_INTEL;
+  const days = clampDays(rangeDays);
+  try {
+    // Cross-site by design: NOT scoped to a surface (a campaign spans properties),
+    // so the site is selected raw and coalesced in JS rather than in SQL.
+    const { rows } = await safeQuery<{ at: string; site: string | null; fp: string; blocked: boolean | null; tool: string | null; ctype: string | null; event_type: string }>(
+      `SELECT created_at::text AS at, props->>'site' AS site, props->>'fp' AS fp,
+              (props->>'blocked')::boolean AS blocked, props->>'tool' AS tool, props->>'client_type' AS ctype, event_type
+         FROM site_analytics_events
+        WHERE created_at > now() - ($1 || ' days')::interval
+          AND event_type LIKE 'site.agent_%'
+          AND props->>'fp' IS NOT NULL
+        ORDER BY created_at ASC
+        LIMIT 20000`,
+      [String(days)],
+    );
+    const byFp = new Map<string, AgentIntelEvent[]>();
+    for (const r of rows) {
+      let arr = byFp.get(r.fp);
+      if (!arr) byFp.set(r.fp, (arr = []));
+      const sig = INTEL_SIGNAL_OF[r.event_type];
+      arr.push({ at: r.at, site: r.site ?? "ogiam.com", blocked: r.blocked === true, tool: r.tool ?? undefined, clientType: r.ctype ?? undefined, signals: sig ? [sig] : [] });
+    }
+    const out = { ...EMPTY_INTEL, operators: byFp.size, topCampaigns: [] as AgentIntelSummary["topCampaigns"] };
+    const campaigns: AgentIntelSummary["topCampaigns"] = [];
+    for (const [fp, events] of byFp) {
+      const a = analyzeAgent(events);
+      if (a.crossSite.campaign) { out.campaigns++; campaigns.push({ fp: fp.slice(0, 10), sites: a.crossSite.sites, clientClass: a.client.clientClass, rhythm: a.cadence.rhythm }); }
+      if (a.client.clientClass === "automation_framework") out.automationFleet++;
+      else if (a.client.clientClass === "ai_agent") out.aiAgents++;
+      else if (a.client.clientClass === "script") out.scripts++;
+      if (a.adaptive.reaction === "persisted") out.persistedAfterBlock++;
+      else if (a.adaptive.reaction === "escalated") out.escalatedAfterBlock++;
+    }
+    out.topCampaigns = campaigns.sort((x, y) => y.sites.length - x.sites.length).slice(0, 6);
+    return out;
+  } catch (err) {
+    console.warn("[agent-operators] liveAgentIntelligence failed:", (err as Error).message);
+    return EMPTY_INTEL;
+  }
 }
