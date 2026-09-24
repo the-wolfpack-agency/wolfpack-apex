@@ -19,6 +19,7 @@
 import { NextResponse } from "next/server";
 import { DEFAULT_RULESET } from "@/lib/forcefield-web/ruleset";
 import { getBlockedFingerprints } from "@/lib/forcefield/blocked-fingerprints";
+import { getDatacenterPrefixes } from "@/lib/forcefield/datacenter-ranges";
 
 export const runtime = "nodejs";
 
@@ -32,8 +33,12 @@ export async function GET() {
     blockedFingerprints = await getBlockedFingerprints(EDGE_WORKSPACE_ID).catch(() => []);
   }
 
+  // Datacenter prefixes: the FULL provider set distributed to every site at once
+  // (the united rollout). Fail-safe to empty so each site keeps its bundled seed.
+  const datacenterPrefixes = await getDatacenterPrefixes().catch(() => []);
+
   return NextResponse.json(
-    { ruleset: { ...DEFAULT_RULESET, blockedFingerprints } },
+    { ruleset: { ...DEFAULT_RULESET, blockedFingerprints, datacenterPrefixes } },
     {
       status: 200,
       headers: {

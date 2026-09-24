@@ -87,6 +87,11 @@ const GLOBAL_BY_DESIGN: readonly string[] = [
      tenants cannot hold different beliefs about whether a fingerprint attacked a
      public property. */
   "instinct_forcefield_web_alerts",
+  /* Cloud/datacenter IP ranges are a fact about the PROVIDERS (AWS, GCP, ...),
+     identical for every tenant - the same class as ai_model_versions. They are
+     distributed to every site via the central ruleset, so per-workspace rows
+     would be meaningless duplication. */
+  "instinct_datacenter_prefixes",
 ];
 
 const NO_WORKSPACE_COLUMN: readonly string[] = [
@@ -309,7 +314,7 @@ describe("every table declares whether it is tenant-scoped", () => {
   it("does not let the by-design list become a second backlog", () => {
     /* The escape hatch has to stay small enough to read in one go, or it turns
        into the thing it was built to keep honest. */
-    expect(GLOBAL_BY_DESIGN.length).toBeLessThanOrEqual(5);
+    expect(GLOBAL_BY_DESIGN.length).toBeLessThanOrEqual(6);
     for (const table of GLOBAL_BY_DESIGN) {
       expect(NO_WORKSPACE_COLUMN).not.toContain(table);
     }

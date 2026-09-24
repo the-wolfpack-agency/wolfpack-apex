@@ -11,6 +11,7 @@
     "observe.ts",
     "enforce.ts",
     "monitor.ts",
-    "index.ts"
+    "index.ts",
+    "hosting.ts"
   ]
 }

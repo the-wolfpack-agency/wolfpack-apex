@@ -13,7 +13,7 @@
  */
 import { classifyWebRequest } from "./classify";
 import { classifyClient, headerSignature, operatorFingerprint } from "./fingerprint";
-import { classifyHosting, DATACENTER_SEED } from "./hosting";
+import { classifyHosting, datacenterPrefixesFrom } from "./hosting";
 import type { ForcefieldRuleset } from "./ruleset";
 
 export type ForcefieldEventType =
@@ -165,8 +165,9 @@ export function observeRequest(input: ObserveInput, ruleset: ForcefieldRuleset):
     client_type: client.clientType,
     // Hosting: datacenter (cloud/hosting network) vs residential. A "browser"
     // from a datacenter is almost certainly automation - it CONFIRMS the client
-    // class. The IP is classified here and discarded; only this label is stored.
-    hosting: classifyHosting(input.ip, DATACENTER_SEED),
+    // class. Classified against the FULL prefix set the ruleset distributes (or
+    // the bundled seed when absent); the IP is discarded, only this label stored.
+    hosting: classifyHosting(input.ip, datacenterPrefixesFrom(ruleset.datacenterPrefixes)),
   };
   if (client.tool) props.tool = client.tool;
   if (probe) props.probe = probe;

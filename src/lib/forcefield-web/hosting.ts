@@ -64,3 +64,38 @@ export const DATACENTER_SEED: DatacenterPrefix[] = SEED.split(" ").map((s) => {
   const [b, bits] = s.split("/");
   return { base: Number(b) >>> 0, bits: Number(bits) };
 });
+
+// Parsed-ruleset cache: the ruleset object is cached per TTL at the edge, so its
+// datacenterPrefixes array reference is stable within a window - parse once, not
+// per request.
+let _cacheRaw: readonly string[] | null = null;
+let _cacheParsed: DatacenterPrefix[] = [];
+
+/** The prefix set to classify against: the FULL list the ruleset distributes
+ *  (CIDR strings) when present, else the bundled seed. This is the united-rollout
+ *  seam - a central ruleset refresh gives every site the full, current coverage
+ *  with no re-vendor. Falls back to the seed if the ruleset carries none or all
+ *  entries are malformed, so a site is never worse off than its bundle. */
+export function datacenterPrefixesFrom(rulesetPrefixes: readonly string[] | undefined): DatacenterPrefix[] {
+  if (!rulesetPrefixes || rulesetPrefixes.length === 0) return DATACENTER_SEED;
+  if (rulesetPrefixes === _cacheRaw) return _cacheParsed;
+  const parsed: DatacenterPrefix[] = [];
+  for (const s of rulesetPrefixes) {
+    // Compact "base/bits" (uint32 network + prefix length) - same shape as the
+    // seed, so the ruleset stays small and needs no dotted-quad parse per request.
+    const slash = s.indexOf("/");
+    if (slash < 0) continue;
+    const base = Number(s.slice(0, slash));
+    const bits = Number(s.slice(slash + 1));
+    if (Number.isFinite(base) && Number.isInteger(bits) && bits >= 0 && bits <= 32) parsed.push({ base: base >>> 0, bits });
+  }
+  _cacheRaw = rulesetPrefixes;
+  _cacheParsed = parsed.length ? parsed : DATACENTER_SEED;
+  return _cacheParsed;
+}
+
+/** Test-only: reset the parsed-ruleset cache. */
+export function _resetHostingCache(): void {
+  _cacheRaw = null;
+  _cacheParsed = [];
+}
