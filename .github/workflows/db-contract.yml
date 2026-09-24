@@ -33,8 +33,13 @@ permissions:
 
 on:
   pull_request:
+    branches: [main]
   push:
     branches: [main]
+
+concurrency:
+  group: db-contract-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   db-contract:

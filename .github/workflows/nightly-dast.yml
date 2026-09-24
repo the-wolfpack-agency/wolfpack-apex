@@ -2,7 +2,7 @@ name: Nightly DAST
 
 on:
   schedule:
-    - cron: '30 4 * * *'
+    - cron: '30 4 * * 1'  # weekly (Mon); was daily - browser DAST is minute-heavy
   workflow_dispatch:
     inputs:
       target:
