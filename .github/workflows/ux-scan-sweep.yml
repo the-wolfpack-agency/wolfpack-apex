@@ -23,8 +23,8 @@ name: UX Scan Sweep (Browser, Continuous)
 
 on:
   schedule:
-    # Daily at 05:00 UTC - posture-staleness cadence matching the security sweeps.
-    - cron: "0 5 * * *"
+    # Weekly Mon 05:00 UTC; was daily - browser UX sweep is minute-heavy.
+    - cron: "0 5 * * 1"
   workflow_dispatch:
     inputs:
       base:
