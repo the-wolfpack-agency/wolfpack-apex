@@ -34,6 +34,8 @@ export interface AgentIntelEvent {
   tool?: string;
   /** Structural signals on this event (read_robots, probed_sensitive, tripped_decoy, payload_attack, ...). */
   signals?: string[];
+  /** Hosting label from the edge: "datacenter" | "residential" | "unknown". */
+  hosting?: string;
 }
 
 // ── 1. Cross-site footprint ──────────────────────────────────────────────────
