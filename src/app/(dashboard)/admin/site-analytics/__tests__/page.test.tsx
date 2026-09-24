@@ -23,7 +23,7 @@ const SUMMARY = {
   byType: [{ type: "site.page_viewed", count: 128 }],
   forcefield: { welcomed: 6, flagged: 9, trapped: 2, blocked: 4, topAgents: [{ agent: "GPTBot", count: 6 }] },
   learnedSignatures: { shadow: 3, enforcing: 1, autoBlocked: 2 },
-  agentIntel: { operators: 129, campaigns: 14, automationFleet: 42, aiAgents: 0, scripts: 18, persistedAfterBlock: 0, escalatedAfterBlock: 0, topCampaigns: [{ fp: "ed1e916e", sites: ["aidanmulready", "instinct", "weekendwithporsche"], clientClass: "script", rhythm: "bursty" }] },
+  agentIntel: { operators: 129, campaigns: 14, automationFleet: 42, datacenterOperators: 37, aiAgents: 0, scripts: 18, persistedAfterBlock: 0, escalatedAfterBlock: 0, topCampaigns: [{ fp: "ed1e916e", sites: ["aidanmulready", "instinct", "weekendwithporsche"], clientClass: "script", rhythm: "bursty" }] },
   journeys: [
     { key: "fp1", confidence: "proven", behaviorClass: "aggressive_scraper", signals: ["tripped_decoy"], path: ["/_ff/x", "/admin"], eventCount: 2, firstAt: "2026-09-18T10:00:00Z", lastAt: "2026-09-18T10:00:05Z", summary: "Followed an invisible trap link and harvested greedily.", triage: "new", profile: {
       operatorKey: "op_abc12345",
@@ -91,6 +91,7 @@ test("renders the reused heatmap, totals, and top pages/countries from the summa
   // Agent intelligence panel: cross-site campaigns + client mix + the campaign list.
   expect(screen.getByTestId("intel-campaigns")).toHaveTextContent("14");
   expect(screen.getByTestId("intel-automation")).toHaveTextContent("42");
+  expect(screen.getByTestId("intel-datacenter")).toHaveTextContent("37");
   expect(screen.getByTestId("intel-top-campaigns")).toHaveTextContent("aidanmulready + instinct + weekendwithporsche");
   // Agent journeys panel (severity view): select it, then the correlated session renders.
   fireEvent.click(screen.getByTestId("journey-view-severity"));

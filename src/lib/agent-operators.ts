@@ -185,13 +185,14 @@ export interface AgentIntelSummary {
   automationFleet: number; // headless / framework operators
   aiAgents: number;
   scripts: number;
+  datacenterOperators: number; // operators whose traffic came from a datacenter/cloud network
   persistedAfterBlock: number; // kept going after we turned it away
   escalatedAfterBlock: number; // brought a NEW hostile technique after a block
   /** A few notable cross-site campaigns to show, most-sites-first. */
   topCampaigns: Array<{ fp: string; sites: string[]; clientClass: string; rhythm: string }>;
 }
 
-const EMPTY_INTEL: AgentIntelSummary = { operators: 0, campaigns: 0, automationFleet: 0, aiAgents: 0, scripts: 0, persistedAfterBlock: 0, escalatedAfterBlock: 0, topCampaigns: [] };
+const EMPTY_INTEL: AgentIntelSummary = { operators: 0, campaigns: 0, automationFleet: 0, aiAgents: 0, scripts: 0, datacenterOperators: 0, persistedAfterBlock: 0, escalatedAfterBlock: 0, topCampaigns: [] };
 
 /**
  * Deeper agent intelligence rolled up across the LIVE edge stream: cross-site
@@ -205,9 +206,10 @@ export async function liveAgentIntelligence(rangeDays = 7): Promise<AgentIntelSu
   try {
     // Cross-site by design: NOT scoped to a surface (a campaign spans properties),
     // so the site is selected raw and coalesced in JS rather than in SQL.
-    const { rows } = await safeQuery<{ at: string; site: string | null; fp: string; blocked: boolean | null; tool: string | null; ctype: string | null; event_type: string }>(
+    const { rows } = await safeQuery<{ at: string; site: string | null; fp: string; blocked: boolean | null; tool: string | null; ctype: string | null; hosting: string | null; event_type: string }>(
       `SELECT created_at::text AS at, props->>'site' AS site, props->>'fp' AS fp,
-              (props->>'blocked')::boolean AS blocked, props->>'tool' AS tool, props->>'client_type' AS ctype, event_type
+              (props->>'blocked')::boolean AS blocked, props->>'tool' AS tool, props->>'client_type' AS ctype,
+              props->>'hosting' AS hosting, event_type
          FROM site_analytics_events
         WHERE created_at > now() - ($1 || ' days')::interval
           AND event_type LIKE 'site.agent_%'
@@ -221,7 +223,7 @@ export async function liveAgentIntelligence(rangeDays = 7): Promise<AgentIntelSu
       let arr = byFp.get(r.fp);
       if (!arr) byFp.set(r.fp, (arr = []));
       const sig = INTEL_SIGNAL_OF[r.event_type];
-      arr.push({ at: r.at, site: r.site ?? "ogiam.com", blocked: r.blocked === true, tool: r.tool ?? undefined, clientType: r.ctype ?? undefined, signals: sig ? [sig] : [] });
+      arr.push({ at: r.at, site: r.site ?? "ogiam.com", blocked: r.blocked === true, tool: r.tool ?? undefined, clientType: r.ctype ?? undefined, hosting: r.hosting ?? undefined, signals: sig ? [sig] : [] });
     }
     const out = { ...EMPTY_INTEL, operators: byFp.size, topCampaigns: [] as AgentIntelSummary["topCampaigns"] };
     const campaigns: AgentIntelSummary["topCampaigns"] = [];
@@ -233,6 +235,7 @@ export async function liveAgentIntelligence(rangeDays = 7): Promise<AgentIntelSu
       else if (a.client.clientClass === "script") out.scripts++;
       if (a.adaptive.reaction === "persisted") out.persistedAfterBlock++;
       else if (a.adaptive.reaction === "escalated") out.escalatedAfterBlock++;
+      if (events.some((e) => e.hosting === "datacenter")) out.datacenterOperators++;
     }
     out.topCampaigns = campaigns.sort((x, y) => y.sites.length - x.sites.length).slice(0, 6);
     return out;

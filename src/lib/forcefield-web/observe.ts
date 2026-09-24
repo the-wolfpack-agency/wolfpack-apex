@@ -13,6 +13,7 @@
  */
 import { classifyWebRequest } from "./classify";
 import { classifyClient, headerSignature, operatorFingerprint } from "./fingerprint";
+import { classifyHosting, DATACENTER_SEED } from "./hosting";
 import type { ForcefieldRuleset } from "./ruleset";
 
 export type ForcefieldEventType =
@@ -43,6 +44,9 @@ export interface ObserveInput {
   /** The request's `Sec-Fetch-Dest` header - "document" for a top-level page
    *  navigation. The strongest human-page-view signal (browser-only). Optional. */
   secFetchDest?: string;
+  /** The client IP (from the edge). Classified to a hosting label and then
+   *  DISCARDED - never stored. Optional; absent -> hosting "unknown". */
+  ip?: string;
   nowMs: number;
 }
 
@@ -159,6 +163,10 @@ export function observeRequest(input: ObserveInput, ruleset: ForcefieldRuleset):
     blocked: false,
     agent: verdict.matchedAgentId ?? "unidentified",
     client_type: client.clientType,
+    // Hosting: datacenter (cloud/hosting network) vs residential. A "browser"
+    // from a datacenter is almost certainly automation - it CONFIRMS the client
+    // class. The IP is classified here and discarded; only this label is stored.
+    hosting: classifyHosting(input.ip, DATACENTER_SEED),
   };
   if (client.tool) props.tool = client.tool;
   if (probe) props.probe = probe;

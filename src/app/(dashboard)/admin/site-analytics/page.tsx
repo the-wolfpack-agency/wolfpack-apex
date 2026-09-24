@@ -49,6 +49,7 @@ interface Summary {
     automationFleet: number;
     aiAgents: number;
     scripts: number;
+    datacenterOperators?: number;
     persistedAfterBlock: number;
     escalatedAfterBlock: number;
     topCampaigns: Array<{ fp: string; sites: string[]; clientClass: string; rhythm: string }>;
@@ -804,6 +805,7 @@ export default function SiteAnalyticsPage() {
                 {[
                   { k: "Cross-site campaigns", v: summary.agentIntel.campaigns, c: "var(--wp-error, #ef4444)", t: "intel-campaigns" },
                   { k: "Automation fleet", v: summary.agentIntel.automationFleet, c: "var(--wp-warning, #f5a623)", t: "intel-automation" },
+                  { k: "Datacenter-hosted", v: summary.agentIntel.datacenterOperators ?? 0, c: "var(--wp-error, #ef4444)", t: "intel-datacenter" },
                   { k: "AI agents", v: summary.agentIntel.aiAgents, c: "var(--wp-gold, #e8b528)", t: "intel-ai" },
                   { k: "Scripts", v: summary.agentIntel.scripts, c: "var(--wp-text-muted, #9ca3af)", t: "intel-scripts" },
                   { k: "Persisted after block", v: summary.agentIntel.persistedAfterBlock, c: "var(--wp-error, #ef4444)", t: "intel-persisted" },

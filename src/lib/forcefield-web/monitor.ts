@@ -49,6 +49,9 @@ export async function forcefieldMonitor(args: { site: string; req: MonitorReques
 
     const { req } = args;
     const country = req.headers.get("x-vercel-ip-country") ?? "";
+    // Client IP for hosting classification only - classified in observeRequest and
+    // discarded there; never stored. First hop of x-forwarded-for is the client.
+    const ip = (req.headers.get("x-forwarded-for") ?? req.headers.get("x-real-ip") ?? "").split(",")[0].trim();
     const ruleset = await fetchRuleset(process.env.FORCEFIELD_RULESET_URL ?? "");
     const obs = observeRequest(
       {
@@ -60,6 +63,7 @@ export async function forcefieldMonitor(args: { site: string; req: MonitorReques
         headerNames: Array.from(req.headers.keys()),
         accept: req.headers.get("accept") ?? "",
         secFetchDest: req.headers.get("sec-fetch-dest") ?? "",
+        ip: ip || undefined,
         nowMs: Date.now(),
       },
       ruleset,
