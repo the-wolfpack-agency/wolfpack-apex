@@ -90,4 +90,27 @@ describe("observeRequest - ruleset-driven, monitor-only", () => {
     // without the update, that path is just normal
     expect(observeRequest({ ...base, path: "/secret-export", userAgent: "Mozilla/5.0", headerNames: ["host", "accept", "accept-language", "accept-encoding"] }, R)).toBeNull();
   });
+
+  it("does NOT flag a headless browser fetching a static asset (page sub-resource, not an agent action)", () => {
+    const hc = { userAgent: "Mozilla/5.0 (X11; Linux x86_64) HeadlessChrome/120.0.0.0" };
+    // /sw.js, the logo and manifest were ~75% of all flags: one headless visit
+    // pulls a dozen assets, and each was becoming its own "flagged agent".
+    expect(observeRequest({ ...base, ...hc, path: "/sw.js" }, R)).toBeNull();
+    expect(observeRequest({ ...base, ...hc, path: "/wolfpack-logo.png" }, R)).toBeNull();
+    expect(observeRequest({ ...base, ...hc, path: "/manifest.json" }, R)).toBeNull();
+    expect(observeRequest({ ...base, ...hc, path: "/_next/static/chunk.js" }, R)).toBeNull();
+  });
+
+  it("STILL flags a headless browser on a real page/endpoint (the agent itself)", () => {
+    const hc = { userAgent: "Mozilla/5.0 (X11; Linux x86_64) HeadlessChrome/120.0.0.0" };
+    expect(observeRequest({ ...base, ...hc, path: "/admin" }, R)!.type).toBe("site.agent_flagged");
+    expect(observeRequest({ ...base, ...hc, path: "/assistant" }, R)!.type).toBe("site.agent_flagged");
+  });
+
+  it("a NAMED hostile tool is still flagged on ANY path, including an asset", () => {
+    // sqlmap/python-requests are proven tradecraft, not page sub-resources.
+    expect(observeRequest({ ...base, path: "/app.js", userAgent: "sqlmap/1.7" }, R)!.type).toBe("site.agent_flagged");
+    expect(observeRequest({ ...base, path: "/api/x", userAgent: "python-requests/2.31" }, R)!.type).toBe("site.agent_flagged");
+  });
+
 });
