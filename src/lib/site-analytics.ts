@@ -218,6 +218,17 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
   const surfaceClause = filtered ? ` AND coalesce(props->>'site', 'ogiam.com') = $2` : "";
   const params = filtered ? [String(days), surface] : [String(days)];
 
+  // Exclude the page-load asset noise (headless browsers fetching /sw.js, images,
+  // css/js, manifest, /_next/*) from AGENT counts, mirroring isStaticAsset() in
+  // forcefield-web/observe.ts. The source fix only cleans NEW events; this makes
+  // the historical board read right too. Applied to agent-signal queries only -
+  // raw traffic totals + page views are left as-is. `/api` stays counted (signal).
+  const ap = "coalesce(props->>'path', path)";
+  const notAssetFlag =
+    ` AND NOT (event_type = 'site.agent_flagged' AND ${ap} NOT LIKE '/api/%' AND (` +
+    `${ap} LIKE '/_next/%' OR ${ap} IN ('/sw.js','/manifest.json','/favicon.ico') OR ` +
+    `${ap} ~* '\\.(js|mjs|css|map|png|jpe?g|gif|svg|ico|webp|avif|woff2?|ttf|otf|eot|webmanifest)$'))`;
+
   const [hour, page, country, type, totals, ff, ffAgents, journeyRows, agentOriginRows, payloadRows, surfacesRows, pvExists, learnedSig, agentIntel] = await Promise.all([
     safeQuery<{ hour: number; count: string }>(
       `SELECT EXTRACT(HOUR FROM created_at AT TIME ZONE 'UTC')::int AS hour, count(*) AS count
@@ -243,7 +254,7 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
     safeQuery<{ event_type: string; count: string }>(
       `SELECT event_type, count(*) AS count
          FROM site_analytics_events
-        WHERE ${sinceClause}${surfaceClause}
+        WHERE ${sinceClause}${surfaceClause}${notAssetFlag}
         GROUP BY 1 ORDER BY count(*) DESC`,
       params,
     ),
@@ -262,7 +273,7 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
          count(*) FILTER (WHERE event_type = 'site.agent_trap_tripped') AS trapped,
          count(*) FILTER (WHERE props->>'blocked' = 'true')             AS blocked
          FROM site_analytics_events
-        WHERE ${sinceClause}${surfaceClause}`,
+        WHERE ${sinceClause}${surfaceClause}${notAssetFlag}`,
       params,
     ),
     safeQuery<{ agent: string; count: string }>(
@@ -288,7 +299,7 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
                   props->>'principal_issuer' AS principal_issuer, props->>'principal_scopes' AS principal_scopes,
                   ROW_NUMBER() OVER (PARTITION BY coalesce(props->>'site', 'ogiam.com') ORDER BY created_at DESC) AS rn
              FROM site_analytics_events
-            WHERE ${sinceClause}${surfaceClause}
+            WHERE ${sinceClause}${surfaceClause}${notAssetFlag}
               AND (props->>'sig' IS NOT NULL OR props->>'nonce' IS NOT NULL)
          ) t
         WHERE rn <= 1500
@@ -306,7 +317,7 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
               count(*) FILTER (WHERE event_type = 'site.agent_flagged')  AS flagged,
               count(*) FILTER (WHERE event_type IN ('site.agent_trap_tripped', 'site.agent_probed_sensitive', 'site.agent_form_honeypot', 'site.agent_form_too_fast')) AS hostile
          FROM site_analytics_events
-        WHERE ${sinceClause}${surfaceClause} AND event_type LIKE 'site.agent_%' AND country IS NOT NULL AND country <> ''
+        WHERE ${sinceClause}${surfaceClause}${notAssetFlag} AND event_type LIKE 'site.agent_%' AND country IS NOT NULL AND country <> ''
         GROUP BY country ORDER BY count(*) DESC LIMIT 100`,
       params,
     ),
