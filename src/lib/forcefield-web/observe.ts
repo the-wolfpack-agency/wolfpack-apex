@@ -104,6 +104,24 @@ function matchedSensitive(path: string, sensitivePaths: readonly string[]): stri
  * browser UA whose headers don't match). A normal visitor returns null - the
  * common path, so nothing is forwarded for real users.
  */
+/**
+ * A static sub-resource of a page load (script, style, image, font, the PWA
+ * service worker / manifest) - NOT an app endpoint. A headless browser fetches
+ * a dozen of these per visit; flagging each one turned ONE agent visit into a
+ * dozen "flagged" events and buried the real signal (measured 2026-09-25: /sw.js,
+ * the logo and manifest.json were ~75% of all flags). We suppress the WEAK flags
+ * (headless / header-spoof) on these paths. `/api` is deliberately EXCLUDED - a
+ * client hitting an API path is signal, not a page sub-resource - and named
+ * hostile tools (sqlmap, python-requests) are still flagged on any path.
+ */
+const STATIC_ASSET_RE = /\.(?:js|mjs|css|map|png|jpe?g|gif|svg|ico|webp|avif|woff2?|ttf|otf|eot|webmanifest)$/i;
+export function isStaticAsset(path: string): boolean {
+  if (path.startsWith("/api/") || path === "/api") return false;
+  if (path.startsWith("/_next/")) return true;
+  if (path === "/sw.js" || path === "/manifest.json" || path === "/favicon.ico") return true;
+  return STATIC_ASSET_RE.test(path);
+}
+
 export function observeRequest(input: ObserveInput, ruleset: ForcefieldRuleset): Observation | null {
   const { path, method, userAgent } = input;
   const verdict = classifyWebRequest(
@@ -113,17 +131,19 @@ export function observeRequest(input: ObserveInput, ruleset: ForcefieldRuleset):
   const client = classifyClient(userAgent, input.headerNames, ruleset.toolSignatures);
   const probe = matchedSensitive(path, ruleset.sensitivePaths);
 
+  // A NAMED hostile tool (sqlmap, nikto, python-requests, curl) is flagged on any
+  // path - it is proven tradecraft, not a page sub-resource.
+  const hostileTool = client.clientType === "scanner" || client.clientType === "scripted_library";
+  // The WEAKER tells (a headless browser, a header-shape spoof, an otherwise
+  // suspicious classification). These fire on every asset a headless page load
+  // pulls, so they are suppressed on static sub-resources - see isStaticAsset.
+  const weakTell = verdict.class === "suspicious" || client.clientType === "headless" || client.headerMismatch;
+
   let type: ForcefieldEventType | null = null;
   if (verdict.class === "trapped") type = "site.agent_trap_tripped";
   else if (probe) type = "site.agent_probed_sensitive";
   else if (verdict.class === "known_agent") type = "site.agent_welcomed";
-  else if (
-    verdict.class === "suspicious" ||
-    client.clientType === "scanner" ||
-    client.clientType === "scripted_library" ||
-    client.clientType === "headless" ||
-    client.headerMismatch
-  ) {
+  else if (hostileTool || (weakTell && !isStaticAsset(path))) {
     type = "site.agent_flagged";
   }
 
