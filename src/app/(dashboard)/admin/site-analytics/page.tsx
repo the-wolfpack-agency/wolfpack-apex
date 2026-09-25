@@ -17,7 +17,7 @@ import { AgentJourneyTimeline } from "@/components/AgentJourneyTimeline";
 import { AgentActionLog } from "@/components/AgentActionLog";
 import type { JourneyStep } from "@/lib/agent-behavior";
 import { triageJourneys, type Severity } from "@/lib/agent-triage";
-import { consolidateByOperator, deriveOperatorInsight, deriveTrustProfile, aggregateTradecraft, clusterByTradecraft, detectCampaigns, tradecraftTrend, matchOperatorsToNetwork } from "@/lib/agent-operators-view";
+import { consolidateByOperator, filterOperators, deriveOperatorInsight, deriveTrustProfile, aggregateTradecraft, clusterByTradecraft, detectCampaigns, tradecraftTrend, matchOperatorsToNetwork } from "@/lib/agent-operators-view";
 import { decideEdgeAction, type EdgeMode } from "@/lib/forcefield/edge-enforcement";
 import { ForcefieldSwitch } from "@/components/ForcefieldSwitch";
 import { ForcefieldAssurance } from "@/components/forcefield/ForcefieldAssurance";
@@ -141,6 +141,7 @@ export default function SiteAnalyticsPage() {
   const [showDismissed, setShowDismissed] = useState(false);
   const [triageOverride, setTriageOverride] = useState<Record<string, TriageStatus>>({});
   const [journeyView, setJourneyView] = useState<"severity" | "operator">("operator");
+  const [operatorFilter, setOperatorFilter] = useState("");
   const [operatorTriageOverride, setOperatorTriageOverride] = useState<Record<string, TriageStatus>>({});
   const [blockedOverride, setBlockedOverride] = useState<Record<string, boolean>>({});
   const [promotedOps, setPromotedOps] = useState<Record<string, boolean>>({});
@@ -894,6 +895,7 @@ export default function SiteAnalyticsPage() {
                 {(() => {
                   const groups = consolidateByOperator(summary.journeys);
                   if (groups.length === 0) return <p style={{ fontSize: "0.82rem", color: "var(--wp-text-muted, #9ca3af)" }}>No operators yet.</p>;
+                  const shown = filterOperators(groups, operatorFilter);
                   const opStatus = (k: string): TriageStatus => operatorTriageOverride[k] ?? summary.operatorTriage?.[k] ?? "new";
                   const isBlocked = (k: string): boolean => blockedOverride[k] ?? (summary.blockedOperators ?? []).includes(k);
                   const sevColor = (sv: string) => (sv === "hostile" ? "var(--wp-error, #ef4444)" : sv === "elevated" ? "var(--wp-warning, #f5a623)" : "var(--wp-success, #30a46c)");
@@ -921,6 +923,19 @@ export default function SiteAnalyticsPage() {
                   const matchByOp = new Map(networkMatches.map((m) => [m.operatorKey, m]));
                   return (
                   <>
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
+                    <input
+                      type="text"
+                      value={operatorFilter}
+                      onChange={(e) => setOperatorFilter(e.target.value)}
+                      placeholder="Find an operator by target path (e.g. /wp-admin) or key…"
+                      data-testid="operator-filter"
+                      style={{ flex: "1 1 260px", padding: "0.5rem 0.7rem", borderRadius: 8, border: "1px solid var(--wp-dark-border, #333)", background: "var(--wp-dark-surface, #14161b)", color: "var(--wp-text, #eee)", fontSize: "0.82rem" }}
+                    />
+                    {operatorFilter.trim() !== "" && (
+                      <span data-testid="operator-filter-count" style={{ fontSize: "0.72rem", color: "var(--wp-text-muted, #9ca3af)" }}>{shown.length} of {groups.length}</span>
+                    )}
+                  </div>
                   {groups.length > 1 && tradecraft.length > 0 && (
                     <div data-testid="tradecraft-corpus" style={{ border: "1px solid var(--wp-dark-border, #262a33)", borderRadius: 8, padding: "0.7rem 0.9rem", display: "grid", gap: "0.45rem", background: "radial-gradient(120% 120% at 20% 0%, #0e1626 0%, #0b0d11 72%)" }}>
                       <div style={{ display: "flex", alignItems: "baseline", gap: "0.5rem", flexWrap: "wrap" }}>
@@ -993,7 +1008,10 @@ export default function SiteAnalyticsPage() {
                       ))}
                     </div>
                   )}
-                  {groups.map((g) => (
+                  {shown.length === 0 && (
+                    <p data-testid="operator-filter-empty" style={{ fontSize: "0.82rem", color: "var(--wp-text-muted, #9ca3af)" }}>No operator matches &ldquo;{operatorFilter}&rdquo;. It is searched by target path and operator key, not by the raw fingerprint.</p>
+                  )}
+                  {shown.map((g) => (
                     <div key={g.operatorKey} data-testid={`operator-${g.operatorKey}`} data-focused={highlightOp === g.operatorKey ? "true" : undefined} style={{ border: `1px solid ${highlightOp === g.operatorKey ? "var(--wp-gold, #e8b528)" : sevColor(g.severity)}`, borderRadius: 8, padding: "0.8rem 0.9rem", display: "grid", gap: "0.5rem", scrollMarginTop: "6rem", boxShadow: highlightOp === g.operatorKey ? "0 0 0 2px var(--wp-gold, #e8b528), 0 0 18px rgba(232,181,40,0.35)" : "none", transition: "box-shadow 220ms ease, border-color 220ms ease" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
                         <span style={{ fontFamily: "var(--wp-mono, ui-monospace, monospace)", fontSize: "0.85rem", fontWeight: 700, color: "var(--wp-gold, #e8b528)" }}>{g.operatorKey}</span>

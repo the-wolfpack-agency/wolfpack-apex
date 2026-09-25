@@ -1,4 +1,4 @@
-import { consolidateByOperator, aggregateTradecraft, clusterByTradecraft, detectCampaigns, tradecraftTrend, matchOperatorsToNetwork, type OperatorViewJourney } from "@/lib/agent-operators-view";
+import { consolidateByOperator, filterOperators, aggregateTradecraft, clusterByTradecraft, detectCampaigns, tradecraftTrend, matchOperatorsToNetwork, type OperatorViewJourney } from "@/lib/agent-operators-view";
 
 function j(over: Partial<OperatorViewJourney> & { operatorKey: string }): OperatorViewJourney {
   const { operatorKey, ...rest } = over;
@@ -341,5 +341,26 @@ describe("matchOperatorsToNetwork - recognize a network actor on first contact",
   it("returns [] when there is no network corpus to match against", () => {
     const groups = consolidateByOperator([mine("op_local", ["payload_attack", "id_enumeration"])]);
     expect(matchOperatorsToNetwork(groups, [])).toEqual([]);
+  });
+});
+
+describe("filterOperators", () => {
+  const groups = consolidateByOperator([
+    j({ operatorKey: "op_wp", path: ["/wp-admin/install.php"], key: "a" }),
+    j({ operatorKey: "op_other", path: ["/pricing"], key: "b" }),
+  ]);
+  it("empty query returns every operator", () => {
+    expect(filterOperators(groups, "").length).toBe(groups.length);
+    expect(filterOperators(groups, "   ").length).toBe(groups.length);
+  });
+  it("finds an operator by a target path it hit", () => {
+    const r = filterOperators(groups, "/wp-admin");
+    expect(r.map((g) => g.operatorKey)).toEqual(["op_wp"]);
+  });
+  it("finds an operator by its key, case-insensitive", () => {
+    expect(filterOperators(groups, "OP_OTHER").map((g) => g.operatorKey)).toEqual(["op_other"]);
+  });
+  it("returns none when nothing matches", () => {
+    expect(filterOperators(groups, "zzzzz")).toEqual([]);
   });
 });
