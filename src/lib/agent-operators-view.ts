@@ -238,6 +238,29 @@ export function consolidateByOperator<T extends OperatorViewJourney>(journeys: r
   );
 }
 
+/**
+ * Filter operators by a free-text query against the operator key, its target
+ * paths, named attacks, and behavior classes - so an analyst can jump straight
+ * to "the one hitting /wp-admin" instead of scrolling ~150 cards. The raw label
+ * on a card is the operator KEY (a derived hash), not the fingerprint, so a
+ * card's most findable handle is what it DID (its paths); this matches on that.
+ * Empty query returns all. Pure, case-insensitive substring match.
+ */
+export function filterOperators<T extends OperatorViewJourney>(
+  groups: readonly OperatorGroup<T>[],
+  query: string,
+): OperatorGroup<T>[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return [...groups];
+  return groups.filter(
+    (g) =>
+      g.operatorKey.toLowerCase().includes(q) ||
+      g.paths.some((path) => path.toLowerCase().includes(q)) ||
+      g.attacks.some((a) => a.toLowerCase().includes(q)) ||
+      g.behaviorClasses.some((b) => b.toLowerCase().includes(q)),
+  );
+}
+
 // ── Codified operator insight ───────────────────────────────────────────────
 // A deterministic, zero-token synthesis of an operator group into a decision-
 // ready brief: verdict, what it targets, the key tells, and a recommended
