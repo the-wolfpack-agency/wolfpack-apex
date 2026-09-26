@@ -50,6 +50,22 @@ export interface OgiamSignals {
   /** 0..1 prompt-injection likelihood. Optional; a future PIP (Azure OpenAI)
    *  can populate this asynchronously. Advisory only. */
   injectionScore?: number;
+
+  // --- Decidable engineering invariants (objective facts, not estimates) ---
+  // These are computed deterministically by the caller (a CI status, a diff
+  // scan, a deploy plan) and drive HARD rules the same way secretDetected does.
+  // All optional: an action that does not carry one is simply not subject to
+  // that rule, so existing actions are unaffected.
+
+  /** How many times this change would deploy. The scalable-deploy invariant is
+   *  "deploy once"; > 1 fails. */
+  deploymentCount?: number;
+  /** Net new runtime dependencies the change introduces. > 0 means a dependency
+   *  was added, which is a last resort and needs human sign-off. */
+  dependencyDelta?: number;
+  /** Whether CI has FULLY passed for this change. false blocks handoff to a
+   *  human reviewer; undefined means "not applicable to this action". */
+  ciComplete?: boolean;
 }
 
 /** A typed AI action: what the agent wants to do. Derived from the tool the
