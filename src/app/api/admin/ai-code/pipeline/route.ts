@@ -1,9 +1,11 @@
 /**
  * /api/admin/ai-code/pipeline — one governed run over an AI-authored change.
  *
- *   POST { ref, prompt, answers?, diff, author, authorModel, maxAttempts? }
- *        -> intake (fixed multiple-choice -> frozen spec) -> the deterministic
- *           gate -> Stage 2 re-route repair on a non-allow verdict. Returns a run
+ *   POST { ref, prompt, answers?, diff?, author?, authorModel?, executorProviderPin?, maxAttempts? }
+ *        -> EXECUTOR (no diff supplied -> a model authors it from the prompt;
+ *           input-to-output) -> intake (fixed multiple-choice -> frozen spec) ->
+ *           the deterministic gate -> Stage 2 re-route repair on a non-allow
+ *           verdict (a DIFFERENT lineage than the executor). Returns a run
  *           that is READY FOR PR only when the gate allowed the final diff (the
  *           original or a repaired one it re-checked), otherwise needs_human.
  *           This route never merges: a human opens the PR.
@@ -22,6 +24,8 @@ import { recordAudit } from "@/lib/audit-log";
 import { runCodeReview } from "@/lib/ai-code/scan";
 import { liveRepairComplete } from "@/lib/ai-code/repair";
 import { runPipeline } from "@/lib/ai-code/pipeline";
+import { authorDiff, type AuthorResult } from "@/lib/ai-code/author";
+import { getAIClient } from "@/lib/ai";
 import { DEFAULT_SPEC_QUESTIONS } from "@/lib/ai-code/intake";
 import { createPendingApproval } from "@/lib/agents/approvals/store";
 import type { CodeReviewResult } from "@/lib/ai-code/types";
@@ -56,6 +60,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     diff?: unknown;
     author?: unknown;
     authorModel?: unknown;
+    executorProviderPin?: unknown;
     maxAttempts?: unknown;
   };
   const ref = typeof b.ref === "string" ? b.ref.trim() : "";
@@ -63,8 +68,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const diff = typeof b.diff === "string" ? b.diff : "";
   if (!ref) return NextResponse.json({ error: "ref is required" }, { status: 400 });
   if (!prompt.trim()) return NextResponse.json({ error: "prompt is required" }, { status: 400 });
-  if (!diff.trim()) return NextResponse.json({ error: "diff is required" }, { status: 400 });
-  if (diff.length > MAX_DIFF) return NextResponse.json({ error: "diff too large" }, { status: 400 });
+  // diff is OPTIONAL: when absent, the EXECUTOR stage authors it from the prompt
+  // (input-to-output). A manually supplied diff is still governed as before.
+  if (diff && diff.length > MAX_DIFF) return NextResponse.json({ error: "diff too large" }, { status: 400 });
 
   // Answers are a flat questionId -> optionId map. The property NAME is
   // allowlisted to the fixed question set - never write a user-named property
@@ -85,8 +91,32 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       : 2;
 
   const workspaceId = auth.user.workspaceId ?? "default";
+
+  // EXECUTOR stage. No diff supplied -> a model authors it from the prompt, and
+  // the authoring model becomes the pipeline `author` so the repairer is a
+  // different lineage. Fail-closed: no diff authored -> 422 with the executor
+  // evidence, never a 500 and never a fabricated diff.
+  const executorProviderPin =
+    typeof b.executorProviderPin === "string" && b.executorProviderPin.trim() ? b.executorProviderPin.trim() : undefined;
+  let effectiveDiff = diff;
+  let effectiveAuthor = authorModel;
+  let executor: AuthorResult | null = null;
+  if (!effectiveDiff.trim()) {
+    const client = getAIClient();
+    executor = await authorDiff(
+      { prompt, executorProviderPin, feature: "ai-code-pipeline-author" },
+      { complete: (r) => client.complete(r) },
+    );
+    effectiveDiff = executor.diff;
+    effectiveAuthor = executor.author;
+    if (!effectiveDiff.trim()) {
+      return NextResponse.json({ error: "executor produced no diff", executor }, { status: 422 });
+    }
+    if (effectiveDiff.length > MAX_DIFF) return NextResponse.json({ error: "authored diff too large" }, { status: 400 });
+  }
+
   const review = async (d: string): Promise<CodeReviewResult> =>
-    runCodeReview({ workspaceId, ref, author, diff: d, nowIso: new Date().toISOString() });
+    runCodeReview({ workspaceId, ref, author: effectiveAuthor, diff: d, nowIso: new Date().toISOString() });
 
   let run;
   try {
@@ -94,8 +124,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       ref,
       prompt,
       answers,
-      diff,
-      author: authorModel,
+      diff: effectiveDiff,
+      author: effectiveAuthor,
       nowIso: new Date().toISOString(),
       review,
       repair: liveRepairComplete(),
@@ -118,7 +148,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       final_outcome: run.review.verdict.outcome,
       open_questions: run.openQuestions.length,
       conforms: run.conformance.conforms,
-      author,
+      author: effectiveAuthor,
+      executed: Boolean(executor),
     },
   });
 
@@ -155,5 +186,5 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     });
   }
 
-  return NextResponse.json({ run, approvalId });
+  return NextResponse.json({ run, approvalId, executor });
 }
