@@ -15,6 +15,7 @@
  * own merits, not an exception the caller has to catch.
  */
 import type { AICompleteRequest, AICompleteResponse } from "@/lib/ai/types";
+import { AI_CODE_AUTHOR_PROMPT } from "@/lib/prompts/definitions/ai-code-author";
 
 export interface AuthorInput {
   /** What to build, in the words a person would use. */
@@ -43,17 +44,6 @@ export interface AuthorResult {
 export interface AuthorDeps {
   complete: (req: AICompleteRequest) => Promise<AICompleteResponse>;
 }
-
-const AUTHOR_SYSTEM = [
-  "You are a senior engineer. Implement the requested change as a single unified diff.",
-  "",
-  "Rules:",
-  "- Output ONLY the diff, inside one ```diff fenced block. No prose before or after.",
-  "- Use standard `diff --git` / `---` / `+++` / `@@` unified-diff syntax.",
-  "- Include tests for the change in the same diff.",
-  "- Never edit test files that grade the task, CI config, or the gate itself.",
-  "- Prefer small, self-contained files with no new runtime dependencies.",
-].join("\n");
 
 /**
  * Pull the unified diff out of the model's reply. Prefers a ```diff fence, then
@@ -85,7 +75,7 @@ export async function authorDiff(input: AuthorInput, deps: AuthorDeps): Promise<
   const result: AuthorResult = { diff: "", author: input.executorProviderPin ?? "unknown", provider: null, costUsd: null, latencyMs: null, error: null };
   try {
     const resp = await deps.complete({
-      system: AUTHOR_SYSTEM,
+      system: AI_CODE_AUTHOR_PROMPT.render({}),
       messages: [{ role: "user", content: input.prompt }],
       max_tokens: maxTokens,
       model_tier: "standard",
