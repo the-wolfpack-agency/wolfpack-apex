@@ -231,6 +231,29 @@ export async function enableActions(
   });
 }
 
+export interface CheckRun {
+  name: string;
+  /** queued | in_progress | completed */
+  status: string;
+  /** success | failure | neutral | cancelled | timed_out | action_required | skipped | null */
+  conclusion: string | null;
+}
+
+/** List the check runs for a commit / branch / PR head ref. Used to read a
+ *  factory PR's CI status back into Instinct. */
+export async function listCheckRuns(
+  client: GithubClient,
+  repoFullName: string,
+  ref: string,
+): Promise<CheckRun[]> {
+  const res = await gh<{ check_runs?: CheckRun[] }>(
+    client,
+    "GET",
+    `/repos/${repoFullName}/commits/${encodeURIComponent(ref)}/check-runs?per_page=100`,
+  );
+  return res.check_runs ?? [];
+}
+
 export async function triggerWorkflow(
   client: GithubClient,
   repoFullName: string,
