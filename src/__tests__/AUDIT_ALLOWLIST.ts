@@ -28,6 +28,10 @@ export interface AuditAllowlistEntry {
 
 export const AUDIT_ALLOWLIST: ReadonlyArray<AuditAllowlistEntry> = [
   {
+    route: "src/app/api/forcefield/observe/route.ts",
+    reason: "Central Forcefield engine: one call per inbound request across every connected site is a high-volume observability event, recorded via recordSiteEvent (the site.* analytics event) for the protection/learning rollup, not a durable state mutation. A per-request hash-chained audit row would flood the ledger without compliance value; classification and the block decision are deterministic and reconstructable from the recorded signals. This is the unified central form of forcefield/edge/decide, allowlisted for the same reason; the operator-block CHANGES that govern it ARE audited at their admin endpoints.",
+  },
+  {
     route: "src/app/api/forcefield/edge/decide/route.ts",
     reason: "Inline edge enforcement decision: one call per inbound agent request is a high-volume observability event, recorded via trackEvent (forcefield.edge_decision) for the enforcement learning loop, not a durable state mutation. A per-request hash-chained audit row would flood the ledger without compliance value; the decision is deterministic and reconstructable from the recorded signals. The mode CHANGE that governs it IS audited, at /api/admin/forcefield/edge-policy.",
   },
