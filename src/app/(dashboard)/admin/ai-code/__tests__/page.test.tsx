@@ -25,7 +25,7 @@ const FINDING = {
 };
 const EXECUTOR = { diff: "diff --git a/lib/x.ts b/lib/x.ts", author: "gpt-4o-mini", provider: "azure-openai", costUsd: 0.0003, latencyMs: 800, error: null };
 
-function runResp(over: Partial<{ outcome: string; status: string; findings: unknown[]; judgments?: unknown[] }> = {}) {
+function runResp(over: Partial<{ outcome: string; status: string; findings: unknown[]; judgments?: unknown[]; invariants: unknown; deepScan: unknown; approvalId: string | null }> = {}) {
   const outcome = over.outcome ?? "allow";
   return {
     run: {
@@ -41,8 +41,10 @@ function runResp(over: Partial<{ outcome: string; status: string; findings: unkn
       conformance: { conforms: true, findings: [] },
       openQuestions: [],
     },
-    approvalId: outcome === "allow" ? "appr-1" : null,
+    approvalId: over.approvalId !== undefined ? over.approvalId : outcome === "allow" ? "appr-1" : null,
     executor: EXECUTOR,
+    invariants: over.invariants ?? { ruleId: "R-MUTATION-ALLOW", intendedOutcome: "allow", wouldBlock: false, reason: "ok" },
+    deepScan: over.deepScan ?? { scanned: 1, critical: 0, high: 0, blocking: false },
   };
 }
 
@@ -71,7 +73,7 @@ test("submits a PROMPT (no diff) to the pipeline and shows the executor + allow 
   // executor + verdict render
   await waitFor(() => expect(screen.getByText("gpt-4o-mini")).toBeInTheDocument());
   expect(screen.getByText(/Allowed/)).toBeInTheDocument();
-  expect(screen.getByText(/Ready for PR/)).toBeInTheDocument();
+  expect(screen.getAllByText(/Ready for PR/).length).toBeGreaterThan(0); // verdict pill + handoff status
 });
 
 test("shows a block verdict with the finding, and needs-human status", async () => {
@@ -80,7 +82,7 @@ test("shows a block verdict with the finding, and needs-human status", async () 
   await submitPrompt();
   await waitFor(() => expect(screen.getByText(/Blocked - do not merge/)).toBeInTheDocument());
   expect(screen.getByText(/credential written to a log/i)).toBeInTheDocument();
-  expect(screen.getByText(/Needs human/)).toBeInTheDocument();
+  expect(screen.getAllByText(/Needs human/).length).toBeGreaterThan(0); // verdict pill + handoff status
 });
 
 test("shows the independent judge only when judgments are present", async () => {
@@ -112,4 +114,42 @@ test("validates an empty prompt before calling the API", async () => {
   await act(async () => { fireEvent.click(screen.getByRole("button", { name: /generate & gate/i })); });
   expect(screen.getByRole("alert")).toHaveTextContent(/describe the change/i);
   expect(mockFetch).not.toHaveBeenCalled();
+});
+
+test("governance panel: clean invariants + deep scan, handoff captured", async () => {
+  mockFetch.mockResolvedValue(resp(200, runResp({ outcome: "allow" })));
+  render(<CodeFactoryPage />);
+  await submitPrompt();
+  await waitFor(() => expect(screen.getByTestId("governance-panel")).toBeInTheDocument());
+  expect(screen.getByText(/Invariants: clear/)).toBeInTheDocument();
+  expect(screen.getByText(/Deep scan: clean/)).toBeInTheDocument();
+  expect(screen.getByTestId("handoff-status")).toHaveTextContent(/handoff captured/i);
+});
+
+test("governance panel: an invariant blocks -> withheld from handoff", async () => {
+  mockFetch.mockResolvedValue(
+    resp(200, runResp({
+      outcome: "allow",
+      approvalId: null, // withheld
+      invariants: { ruleId: "R-DEPENDENCY-ADDED-ESCALATE", intendedOutcome: "escalate", wouldBlock: true, reason: "adds a runtime dependency" },
+    })),
+  );
+  render(<CodeFactoryPage />);
+  await submitPrompt();
+  await waitFor(() => expect(screen.getByTestId("handoff-status")).toHaveTextContent(/Withheld from PR handoff: R-DEPENDENCY-ADDED-ESCALATE/));
+  expect(screen.getByText(/Invariant: R-DEPENDENCY-ADDED-ESCALATE/)).toBeInTheDocument();
+});
+
+test("governance panel: a critical deep-scan finding -> withheld from handoff", async () => {
+  mockFetch.mockResolvedValue(
+    resp(200, runResp({
+      outcome: "allow",
+      approvalId: null,
+      deepScan: { scanned: 1, critical: 1, high: 0, blocking: true },
+    })),
+  );
+  render(<CodeFactoryPage />);
+  await submitPrompt();
+  await waitFor(() => expect(screen.getByText(/Deep scan: 1 critical/)).toBeInTheDocument());
+  expect(screen.getByTestId("handoff-status")).toHaveTextContent(/critical security finding/);
 });
