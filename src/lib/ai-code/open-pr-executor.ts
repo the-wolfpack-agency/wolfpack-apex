@@ -15,6 +15,7 @@
  */
 import { createHash } from "node:crypto";
 import { workspaceGithubClient, createBranch, putFile, openPullRequest } from "@/lib/github-client";
+import { authorize } from "@/lib/ogiam/authorize";
 import { newFilesFromDiff } from "./oracle";
 
 export interface OpenPrParams {
@@ -56,6 +57,30 @@ export async function executeOpenPr(params: OpenPrParams, ctx: WriteCtx): Promis
   // maps to the same branch (a retried approval reuses it rather than forking).
   const hash = createHash("sha256").update(diff).digest("hex").slice(0, 8);
   const branch = `factory/${ref}-${hash}`;
+
+  // Governed like every other agent write: run the PR-open through the OGIAM
+  // gate + hash-chained ledger, exactly as platform-scan remediation does (DRY -
+  // reuse the PEP, do not reinvent one). Monitor mode in Phase 0 records the
+  // decision without blocking; an enforce-mode block short-circuits before any
+  // write. This puts factory actions in the same governance surfaces as the rest.
+  const decision = await authorize({
+    principal: {
+      kind: "ai_agent",
+      agent: "instinct.ai_code",
+      onBehalfOfUserId: ctx.userId,
+      onBehalfOfRole: ctx.userRole,
+      workspaceId: ctx.workspaceId ?? "default",
+    },
+    tool: "ai_code.open_pr",
+    capability: "code.write",
+    isMutation: true,
+    surface: "/agent",
+    params: { repo, branch, ref },
+    mode: "monitor",
+  });
+  if (decision.enforced && decision.effectiveOutcome !== "allow") {
+    return { ok: false, reason: `gate_blocked: ${decision.ruleId} (${decision.reason})` };
+  }
 
   const client = await workspaceGithubClient(ctx.workspaceId);
   if (!client.token) return { ok: false, reason: "no GitHub token configured for the factory" };

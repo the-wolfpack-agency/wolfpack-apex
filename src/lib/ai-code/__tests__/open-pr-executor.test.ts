@@ -9,6 +9,7 @@ const createBranch = jest.fn();
 const putFile = jest.fn();
 const openPullRequest = jest.fn();
 const workspaceGithubClient = jest.fn();
+const authorize = jest.fn();
 
 jest.mock("@/lib/github-client", () => ({
   workspaceGithubClient: (...a: unknown[]) => workspaceGithubClient(...a),
@@ -16,6 +17,7 @@ jest.mock("@/lib/github-client", () => ({
   putFile: (...a: unknown[]) => putFile(...a),
   openPullRequest: (...a: unknown[]) => openPullRequest(...a),
 }));
+jest.mock("@/lib/ogiam/authorize", () => ({ authorize: (...a: unknown[]) => authorize(...a) }));
 
 import { executeOpenPr } from "../open-pr-executor";
 
@@ -41,6 +43,24 @@ beforeEach(() => {
   createBranch.mockResolvedValue(undefined);
   putFile.mockResolvedValue(undefined);
   openPullRequest.mockResolvedValue({ html_url: "https://github.com/o/r/pull/7", number: 7 });
+  // Monitor mode: records the decision, never blocks (the Phase 0 default).
+  authorize.mockResolvedValue({ enforced: false, effectiveOutcome: "monitor", ruleId: "R-MUTATION-ALLOW", reason: "ok" });
+});
+
+test("routes the PR-open through the OGIAM gate (governed like every agent write)", async () => {
+  await executeOpenPr({ ref: "x", diff: NEW_FILE_DIFF, repo: "o/r" }, ctx);
+  expect(authorize).toHaveBeenCalledWith(
+    expect.objectContaining({ tool: "ai_code.open_pr", capability: "code.write", isMutation: true, principal: expect.objectContaining({ kind: "ai_agent", agent: "instinct.ai_code" }) }),
+  );
+});
+
+test("an enforce-mode gate block short-circuits before any GitHub write", async () => {
+  authorize.mockResolvedValue({ enforced: true, effectiveOutcome: "deny", ruleId: "R-SECRET-DENY", reason: "secret in params" });
+  const out = await executeOpenPr({ ref: "x", diff: NEW_FILE_DIFF, repo: "o/r" }, ctx);
+  expect(out.ok).toBe(false);
+  if (!out.ok) expect(out.reason).toMatch(/gate_blocked: R-SECRET-DENY/);
+  expect(createBranch).not.toHaveBeenCalled();
+  expect(openPullRequest).not.toHaveBeenCalled();
 });
 
 test("opens a real PR for a new-file change: branch + commit + PR", async () => {
