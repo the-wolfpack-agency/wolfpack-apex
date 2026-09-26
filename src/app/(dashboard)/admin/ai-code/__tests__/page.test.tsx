@@ -153,3 +153,28 @@ test("governance panel: a critical deep-scan finding -> withheld from handoff", 
   await waitFor(() => expect(screen.getByText(/Deep scan: 1 critical/)).toBeInTheDocument());
   expect(screen.getByTestId("handoff-status")).toHaveTextContent(/critical security finding/);
 });
+
+test("approve & open PR: clicking approve opens the real PR and shows the link", async () => {
+  mockFetch
+    .mockResolvedValueOnce(resp(200, runResp({ outcome: "allow" }))) // the pipeline run
+    .mockResolvedValueOnce(resp(200, { ok: true, status: "executed", outcome: { ok: true, url: "https://github.com/o/r/pull/42", number: 42 } })); // the approve
+  render(<CodeFactoryPage />);
+  await submitPrompt();
+  await waitFor(() => expect(screen.getByTestId("approve-open-pr")).toBeInTheDocument());
+  await act(async () => { fireEvent.click(screen.getByTestId("approve-open-pr")); });
+  await waitFor(() => expect(screen.getByTestId("pr-link")).toHaveAttribute("href", "https://github.com/o/r/pull/42"));
+  // it approved the captured approval id
+  expect(mockFetch.mock.calls[1][0]).toBe("/api/admin/agents/approvals/appr-1");
+});
+
+test("approve failure surfaces the reason, no PR link", async () => {
+  mockFetch
+    .mockResolvedValueOnce(resp(200, runResp({ outcome: "allow" })))
+    .mockResolvedValueOnce(resp(200, { ok: false, status: "executed", outcome: { ok: false, reason: "no GitHub token configured" } }));
+  render(<CodeFactoryPage />);
+  await submitPrompt();
+  await waitFor(() => expect(screen.getByTestId("approve-open-pr")).toBeInTheDocument());
+  await act(async () => { fireEvent.click(screen.getByTestId("approve-open-pr")); });
+  await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/no GitHub token/));
+  expect(screen.queryByTestId("pr-link")).not.toBeInTheDocument();
+});
