@@ -65,3 +65,43 @@ describe("authorDiff", () => {
     expect(out.error).toBeNull();
   });
 });
+
+describe("authorFileChanges (full-file executor)", () => {
+  const FILES_REPLY = [
+    "FILE: src/lib/is-even.ts",
+    "```ts",
+    "export const isEven = (n: number) => n % 2 === 0;",
+    "```",
+    "FILE: src/lib/__tests__/is-even.test.ts",
+    "```ts",
+    "import { isEven } from '../is-even';",
+    "expect(isEven(2)).toBe(true);",
+    "```",
+  ].join("\n");
+  const filesResp = (content: string) => ({ content, model_used: "azure-gpt-4o", provider_used: "azure-openai", input_tokens: 50, output_tokens: 120, cost_usd: 0.001, latency_ms: 1100 });
+
+  it("authors full file contents and records executor evidence", async () => {
+    const { authorFileChanges } = await import("../author");
+    const deps = { complete: async (_r: unknown) => filesResp(FILES_REPLY) as never };
+    const out = await authorFileChanges({ prompt: "add isEven with a test", executorProviderPin: "azure-openai" }, deps);
+    expect(out.changes.map((c) => c.path)).toEqual(["src/lib/is-even.ts", "src/lib/__tests__/is-even.test.ts"]);
+    expect(out.changes[0].content).toContain("isEven");
+    expect(out.author).toBe("azure-gpt-4o");
+    expect(out.error).toBeNull();
+  });
+
+  it("degrades honestly when the executor is unavailable (empty changes + recorded error)", async () => {
+    const { authorFileChanges } = await import("../author");
+    const deps = { complete: async () => { throw new Error("NoProviderAvailableError"); } };
+    const out = await authorFileChanges({ prompt: "x" }, deps);
+    expect(out.changes).toEqual([]);
+    expect(out.error).toMatch(/NoProvider/);
+  });
+
+  it("returns empty changes (not a fake file) when the model answers with prose", async () => {
+    const { authorFileChanges } = await import("../author");
+    const deps = { complete: async () => filesResp("I would add an isEven function.") as never };
+    const out = await authorFileChanges({ prompt: "x" }, deps);
+    expect(out.changes).toEqual([]);
+  });
+});
