@@ -150,6 +150,26 @@ describe("POST /api/admin/ai-code/pipeline", () => {
     expect(body.changeFacts.dependencyDelta).toBe(1);
   });
 
+  it("withholds PR handoff when the deep static scan finds a critical (e.g. a hardcoded secret)", async () => {
+    // Security gate allowed, but the authored NEW file carries a provider-signature
+    // secret the full platform-scan engine flags critical -> no handoff.
+    const SECRET_DIFF = [
+      "diff --git a/src/config.ts b/src/config.ts",
+      "new file mode 100644",
+      "--- /dev/null",
+      "+++ b/src/config.ts",
+      "@@ -0,0 +1,1 @@",
+      '+export const KEY = "AKIA1234567890ABCDEF";',
+    ].join("\n");
+    mockRunPipeline.mockResolvedValue({ ...RUN, status: "ready_for_pr", diff: SECRET_DIFF });
+    const res = await POST(post(VALID));
+    const body = await res.json();
+    expect(body.deepScan.blocking).toBe(true);
+    expect(body.deepScan.critical).toBeGreaterThan(0);
+    expect(body.approvalId).toBeNull(); // handoff withheld
+    expect(mockCreateApproval).not.toHaveBeenCalled();
+  });
+
   it("audits and emits the run for the learning loop", async () => {
     await POST(post(VALID));
     expect(mockRecordAudit).toHaveBeenCalledWith(

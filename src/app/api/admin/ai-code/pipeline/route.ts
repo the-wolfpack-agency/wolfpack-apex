@@ -26,6 +26,7 @@ import { liveRepairComplete } from "@/lib/ai-code/repair";
 import { runPipeline } from "@/lib/ai-code/pipeline";
 import { authorDiff, type AuthorResult } from "@/lib/ai-code/author";
 import { evaluateChangeInvariants } from "@/lib/ai-code/change-facts";
+import { deepScanChange } from "@/lib/ai-code/deep-scan";
 import { getAIClient } from "@/lib/ai";
 import { DEFAULT_SPEC_QUESTIONS } from "@/lib/ai-code/intake";
 import { createPendingApproval } from "@/lib/agents/approvals/store";
@@ -167,6 +168,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // security gate allows AND no invariant would block.
   const { decision: invariants, facts: changeFacts } = evaluateChangeInvariants(run.diff);
 
+  // Full-power deep static scan: run the platform-scan detector engine (provider-
+  // signature secrets, taint/SSRF/SQLi) on the authored files, not just the ai-code
+  // subset. A critical finding withholds the handoff, same as an invariant block.
+  const repoForScan = typeof b.repo === "string" && b.repo.trim() ? b.repo.trim() : undefined;
+  const deepScan = await deepScanChange(run.diff, repoForScan);
+
   await recordAudit({
     actor: { user_id: auth.user.id, role: auth.user.role },
     action: "ai_code.pipeline_run",
@@ -184,6 +191,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       invariant_rule: invariants.ruleId,
       invariant_outcome: invariants.intendedOutcome,
       dependency_delta: changeFacts.dependencyDelta,
+      deep_scan_critical: deepScan.critical,
+      deep_scan_high: deepScan.high,
     },
   });
 
@@ -202,7 +211,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // agent-approvals surface. A needs_human run has nothing to hand off. Capturing
   // is best-effort (null without a database); the run is returned either way.
   let approvalId: string | null = null;
-  if (run.status === "ready_for_pr" && !invariants.wouldBlock) {
+  if (run.status === "ready_for_pr" && !invariants.wouldBlock && !deepScan.blocking) {
     approvalId = await createPendingApproval({
       workspaceId,
       agentId: CODE_GATE_AGENT_ID,
@@ -224,5 +233,5 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     });
   }
 
-  return NextResponse.json({ run, approvalId, executor, invariants, changeFacts });
+  return NextResponse.json({ run, approvalId, executor, invariants, changeFacts, deepScan });
 }
