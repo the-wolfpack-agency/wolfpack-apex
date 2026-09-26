@@ -14,7 +14,7 @@
  * no usable diff is a recorded, empty-diff result the gate then rejects on its
  * own merits, not an exception the caller has to catch.
  */
-import type { AICompleteRequest, AICompleteResponse } from "@/lib/ai/types";
+import type { AICompleteRequest, AICompleteResponse, AIModelTier } from "@/lib/ai/types";
 import { AI_CODE_AUTHOR_PROMPT } from "@/lib/prompts/definitions/ai-code-author";
 
 export interface AuthorInput {
@@ -24,6 +24,9 @@ export interface AuthorInput {
    *  Leaving it unset lets the router choose; setting it is how the factory
    *  guarantees a cross-family executor/repairer split. */
   executorProviderPin?: string;
+  /** Capability tier to author at. The capability ladder starts cheap and
+   *  escalates; the router picks the model at this tier. Defaults to standard. */
+  tier?: AIModelTier;
   maxTokens?: number;
   feature?: string;
 }
@@ -78,7 +81,7 @@ export async function authorDiff(input: AuthorInput, deps: AuthorDeps): Promise<
       system: AI_CODE_AUTHOR_PROMPT.render({}),
       messages: [{ role: "user", content: input.prompt }],
       max_tokens: maxTokens,
-      model_tier: "standard",
+      model_tier: input.tier ?? "standard",
       ...(input.executorProviderPin ? { provider_pin: input.executorProviderPin } : {}),
       metadata: { feature },
     });
