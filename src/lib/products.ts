@@ -147,6 +147,27 @@ export const PRODUCTS: Product[] = [
     status: "live",
   },
   {
+    id: "secure-agent",
+    name: "Secure Agent",
+    area: "Secure Agent",
+    tagline: "Governed, model-agnostic AI that writes production code",
+    summary:
+      "Secure Agent turns a plain-language request into production code that has already been proven against your rules. A model writes the change; a deterministic gate decides whether it may reach a human. It checks for secrets, unsafe patterns, and injection, enforces your engineering rules (deploy once, dependencies as a last resort, tests before handoff), runs a full static scan, and has an independent second model review the work. Only a change that clears every gate becomes a pull request for a person to approve and merge. The model never merges, and its code never runs on your infrastructure: your own CI verifies it, the same way it verifies an engineer's work. Every decision and outcome is written to a tamper-evident ledger you can hand an auditor.",
+    highlights: [
+      "Prompt in, governed pull request out: the agent writes the change, deterministic policy decides if it ships",
+      "Model-agnostic and cost-routed: bring your own model, cheapest-capable first, escalate only when needed",
+      "A hash-chained record of every decision and its outcome, as a byproduct of the governance",
+      "Human in the loop by design: the agent proposes, a person approves and merges; it never merges itself",
+    ],
+    audience: "Engineering teams that want AI to do real work under rules they can prove, and the people who sign off on what ships",
+    potentialUses: [
+      "Codifying a team's engineering standards into gates every AI-authored change must pass",
+      "Onboarding AI into a regulated codebase where every change needs an audit trail",
+      "The gate, ledger, and model router underpin any product that needs governed AI actions, not just code",
+    ],
+    status: "preview",
+  },
+  {
     id: "ogiam",
     name: "OGIAM IAM",
     area: "OGIAM IAM",
