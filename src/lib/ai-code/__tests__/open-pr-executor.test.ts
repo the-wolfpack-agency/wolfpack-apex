@@ -103,7 +103,7 @@ test("the branch is deterministic for the same diff (a retried approval reuses i
 test("refuses a modification-only diff without touching GitHub (Stage 1 = new files)", async () => {
   const out = await executeOpenPr({ ref: "edit", diff: EDIT_ONLY_DIFF, repo: "o/r" }, ctx);
   expect(out.ok).toBe(false);
-  if (!out.ok) expect(out.reason).toMatch(/new-file changes only/);
+  if (!out.ok) expect(out.reason).toMatch(/no file changes to commit/);
   expect(createBranch).not.toHaveBeenCalled();
   expect(openPullRequest).not.toHaveBeenCalled();
 });
@@ -120,4 +120,23 @@ test("never throws: a GitHub error becomes a recorded ok:false", async () => {
   const out = await executeOpenPr({ ref: "x", diff: NEW_FILE_DIFF, repo: "o/r" }, ctx);
   expect(out.ok).toBe(false);
   if (!out.ok) expect(out.reason).toMatch(/422/);
+});
+
+test("commits full-file CHANGES (edit-support), including a modified existing file", async () => {
+  const out = await executeOpenPr(
+    {
+      ref: "edit-x",
+      repo: "o/r",
+      changes: [
+        { path: "src/existing.ts", content: "export const x = 2; // modified" },
+        { path: "src/new.ts", content: "export const y = 1;" },
+      ],
+    },
+    ctx,
+  );
+  expect(out.ok).toBe(true);
+  if (out.ok) expect(out.files).toBe(2);
+  // both files committed via putFile (create-or-update handles the modification)
+  expect(putFile).toHaveBeenCalledTimes(2);
+  expect(openPullRequest).toHaveBeenCalledTimes(1);
 });

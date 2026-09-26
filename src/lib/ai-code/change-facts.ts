@@ -75,6 +75,10 @@ export interface ChangeInvariantInput {
   ciComplete?: boolean;
   /** How many times the change would deploy (known at the deploy point). */
   deploymentCount?: number;
+  /** Full-file mode cannot derive a net dependency delta (a whole file shows every
+   *  dep as "added"), so it skips that signal rather than over-flag. The dependency
+   *  invariant then only fires in diff mode, where +/- dep lines are real. */
+  skipDependency?: boolean;
 }
 
 /**
@@ -96,7 +100,7 @@ export function evaluateChangeInvariants(
       surface: "ai-code/factory",
       paramsHash: "n/a",
       signals: {
-        dependencyDelta: facts.dependencyDelta,
+        ...(input.skipDependency ? {} : { dependencyDelta: facts.dependencyDelta }),
         ...(input.ciComplete !== undefined ? { ciComplete: input.ciComplete } : {}),
         ...(input.deploymentCount !== undefined ? { deploymentCount: input.deploymentCount } : {}),
       },

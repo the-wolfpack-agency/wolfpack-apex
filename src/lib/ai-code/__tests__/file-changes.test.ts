@@ -71,3 +71,15 @@ describe("commitFileChanges", () => {
     expect(putFile).not.toHaveBeenCalled();
   });
 });
+
+describe("filesToDiff", () => {
+  it("renders each change as an added-content block the diff-native gate can read", async () => {
+    const { filesToDiff } = await import("../file-changes");
+    const { newFilesFromDiff } = await import("../oracle");
+    const diff = filesToDiff([{ path: "src/a.ts", content: "export const a = 1;\nexport const b = 2;" }]);
+    expect(diff).toMatch(/\+\+\+ b\/src\/a\.ts/);
+    // round-trips: the deep scan / gate extract the full content back out
+    const files = newFilesFromDiff(diff);
+    expect(files["src/a.ts"]).toBe("export const a = 1;\nexport const b = 2;");
+  });
+});
