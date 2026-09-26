@@ -16,6 +16,7 @@
 import { createHash } from "node:crypto";
 import { workspaceGithubClient, createBranch, putFile, openPullRequest } from "@/lib/github-client";
 import { authorize } from "@/lib/ogiam/authorize";
+import { recordActionOutcome } from "@/lib/ogiam/ledger";
 import { newFilesFromDiff } from "./oracle";
 
 export interface OpenPrParams {
@@ -78,12 +79,33 @@ export async function executeOpenPr(params: OpenPrParams, ctx: WriteCtx): Promis
     params: { repo, branch, ref },
     mode: "monitor",
   });
+  const startMs = Date.now();
+  // Close the ledger loop: every decision gets an OUTCOME tied to its seq, so the
+  // record is "what was decided AND what happened", not just the decision. Best
+  // effort + only when the decision was actually recorded (recordedSeq present).
+  const recordOutcome = async (ok: boolean, code: string, result: string): Promise<void> => {
+    if (decision.recordedSeq == null) return;
+    await recordActionOutcome({
+      workspaceId: ctx.workspaceId ?? "default",
+      decisionSeq: decision.recordedSeq,
+      agentId: "instinct.ai_code",
+      ok,
+      code,
+      resultRedacted: result,
+      durationMs: Date.now() - startMs,
+    }).catch(() => {});
+  };
+
   if (decision.enforced && decision.effectiveOutcome !== "allow") {
+    await recordOutcome(false, "gate_blocked", `${decision.ruleId}: ${decision.reason}`);
     return { ok: false, reason: `gate_blocked: ${decision.ruleId} (${decision.reason})` };
   }
 
   const client = await workspaceGithubClient(ctx.workspaceId);
-  if (!client.token) return { ok: false, reason: "no GitHub token configured for the factory" };
+  if (!client.token) {
+    await recordOutcome(false, "no_token", "no GitHub token configured");
+    return { ok: false, reason: "no GitHub token configured for the factory" };
+  }
 
   try {
     await createBranch(client, repo, branch, base);
@@ -100,10 +122,12 @@ export async function executeOpenPr(params: OpenPrParams, ctx: WriteCtx): Promis
       "This change passed the deterministic security gate + engineering invariants and a human approved the handoff. A human still reviews and merges this PR; the factory never merges.",
     ].join("\n");
     const pr = await openPullRequest(client, repo, branch, base, title, body);
+    await recordOutcome(true, "ok", pr.html_url);
     return { ok: true, url: pr.html_url, number: pr.number, branch, files: paths.length };
   } catch (err) {
     // Never throw from an approved-write executor: a recorded ok:false is the
     // audited outcome; a throw would lose the reason.
+    await recordOutcome(false, "github_error", (err as Error).message);
     return { ok: false, reason: (err as Error).message };
   }
 }
