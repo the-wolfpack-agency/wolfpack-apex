@@ -1,13 +1,14 @@
 "use client";
 
 /**
- * /admin/ai-code - the Code Gate. Paste an AI-authored diff, get the gate's
- * verdict: block / needs-review / allow, the findings behind it, and (optionally)
- * an independent-family model's second opinion on each one.
+ * /admin/ai-code - the code factory. Submit a PROMPT (not a diff): a model
+ * authors the change, the deterministic gate decides block / needs-review /
+ * allow, an independent-family judge advises, and a non-allow verdict re-routes
+ * to a different-lineage model. Ready for PR only when the gate allows.
  *
- * The gate DECIDES deterministically; the judge only advises. This page makes
- * that visible: the verdict pill is the gate, the judge column is a separate,
- * clearly-labeled opinion - never dressed up as the decision.
+ * Input to output: prompt in, code generated + gated, output. The gate DECIDES
+ * deterministically; the judge only advises - the verdict pill is the gate, the
+ * judge column is a separate, clearly-labeled opinion, never the decision.
  *
  * Auth: every fetch goes through fetchWithRefresh; an unauthenticated user is
  * redirected to /login, never shown a blank page.
@@ -35,13 +36,36 @@ interface Judgment {
   judgeLineage: string | null;
   reason: string;
 }
-interface Result {
+interface CodeReview {
   ref: string;
   author: string;
   findings: Finding[];
   verdict: { outcome: Outcome; highestSeverity: string; reason: string; ruleId: string };
   bySeverity: Record<string, number>;
   judgments?: Judgment[];
+}
+interface Executor {
+  diff: string;
+  author: string;
+  provider: string | null;
+  costUsd: number | null;
+  latencyMs: number | null;
+  error: string | null;
+}
+interface PipelineRun {
+  ref: string;
+  status: "ready_for_pr" | "needs_human";
+  diff: string;
+  review: CodeReview;
+  remediation: { status: string; attempts: unknown[]; repairerLineage: string | null; reason: string };
+  conformance: { conforms: boolean; findings: unknown[] };
+  openQuestions: unknown[];
+}
+interface PipelineResponse {
+  run?: PipelineRun;
+  approvalId?: string | null;
+  executor?: Executor | null;
+  error?: string;
 }
 
 const OUTCOME: Record<Outcome, { label: string; tone: SeverityTone }> = {
@@ -86,13 +110,14 @@ const rowStyle: CSSProperties = {
   borderRadius: 8,
 };
 
-export default function CodeGatePage() {
+export default function CodeFactoryPage() {
   const router = useRouter();
   const [ref, setRef] = useState("");
-  const [authorModel, setAuthorModel] = useState("");
-  const [diff, setDiff] = useState("");
-  const [judge, setJudge] = useState(false);
-  const [result, setResult] = useState<Result | null>(null);
+  const [prompt, setPrompt] = useState("");
+  const [executorPin, setExecutorPin] = useState("");
+  const [run, setRun] = useState<PipelineRun | null>(null);
+  const [executor, setExecutor] = useState<Executor | null>(null);
+  const [approvalId, setApprovalId] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
@@ -106,76 +131,90 @@ export default function CodeGatePage() {
     setReady(true);
   }, [router]);
 
-  const review = useCallback(async () => {
-    if (!diff.trim()) {
-      setError("Paste a diff to review.");
+  const generate = useCallback(async () => {
+    if (!prompt.trim()) {
+      setError("Describe the change you want the factory to build.");
       return;
     }
     setRunning(true);
     setError(null);
+    setRun(null);
+    setExecutor(null);
+    setApprovalId(null);
     try {
-      const res = await fetchWithRefresh("/api/admin/ai-code/review", {
+      const res = await fetchWithRefresh("/api/admin/ai-code/pipeline", {
         method: "POST",
         headers: jsonHeaders(),
-        body: JSON.stringify({ ref: ref.trim() || "manual", diff, judge, authorModel: authorModel.trim() || undefined }),
+        body: JSON.stringify({
+          ref: ref.trim() || "factory",
+          prompt: prompt.trim(),
+          executorProviderPin: executorPin.trim() || undefined,
+        }),
       });
-      const body = (await res.json()) as { result?: Result; error?: string };
-      if (!res.ok || !body.result) {
-        setError(body.error ? `The gate could not run: ${body.error}` : `Request failed (${res.status}).`);
-        setResult(null);
+      const body = (await res.json()) as PipelineResponse;
+      if (res.status === 422) {
+        // The executor could not produce a diff - show that honestly.
+        setExecutor(body.executor ?? null);
+        setError("The model did not produce a usable change. Try a more specific prompt.");
         return;
       }
-      setResult(body.result);
+      if (!res.ok || !body.run) {
+        setError(body.error ? `The factory could not run: ${body.error}` : `Request failed (${res.status}).`);
+        return;
+      }
+      setRun(body.run);
+      setExecutor(body.executor ?? null);
+      setApprovalId(body.approvalId ?? null);
     } catch {
-      setError("Network error - the gate did not run.");
-      setResult(null);
+      setError("Network error - the factory did not run.");
     } finally {
       setRunning(false);
     }
-  }, [ref, authorModel, diff, judge]);
+  }, [ref, prompt, executorPin]);
 
   if (!ready) return null;
 
-  const v = result ? OUTCOME[result.verdict.outcome] : null;
+  const v = run ? OUTCOME[run.review.verdict.outcome] : null;
+  const reroutes = run ? run.remediation.attempts.length : 0;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
+    <div data-testid="ai-code-page" style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
       <SectionHeader
         as="h1"
         eyebrow="Secure Agent"
-        title="Code gate"
-        subtitle="Paste an AI-authored diff. The deterministic gate decides block / needs-review / allow; an independent-family model can add a second opinion on each finding."
+        title="Code factory"
+        subtitle="Describe a change. A model authors it, the deterministic gate decides block / needs-review / allow, an independent-family model advises, and a non-allow verdict re-routes to a different model. It reaches a pull request only when the gate allows."
       />
 
-      <GlassPanel title="Review a diff">
+      <GlassPanel title="Build a change">
         <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap", alignItems: "flex-end" }}>
-          <label style={{ display: "flex", flexDirection: "column", gap: "0.35rem", flex: "1 1 12rem" }}>
-            <span style={{ fontSize: "0.8rem", color: "var(--wp-text-dim)" }}>Ref (PR / commit)</span>
-            <input value={ref} onChange={(e) => setRef(e.target.value)} placeholder="PR-123" aria-label="Ref" style={inputStyle} />
+          <label style={{ display: "flex", flexDirection: "column", gap: "0.35rem", flex: "1 1 10rem" }}>
+            <span style={{ fontSize: "0.8rem", color: "var(--wp-text-dim)" }}>Ref (PR / task id)</span>
+            <input value={ref} onChange={(e) => setRef(e.target.value)} placeholder="factory" aria-label="Ref" style={inputStyle} />
           </label>
-          <label style={{ display: "flex", flexDirection: "column", gap: "0.35rem", flex: "1 1 12rem" }}>
-            <span style={{ fontSize: "0.8rem", color: "var(--wp-text-dim)" }}>Author model (for the judge)</span>
-            <input value={authorModel} onChange={(e) => setAuthorModel(e.target.value)} placeholder="e.g. gpt-4o" aria-label="Author model" style={inputStyle} />
+          <label style={{ display: "flex", flexDirection: "column", gap: "0.35rem", flex: "1 1 10rem" }}>
+            <span style={{ fontSize: "0.8rem", color: "var(--wp-text-dim)" }}>Executor (optional)</span>
+            <select value={executorPin} onChange={(e) => setExecutorPin(e.target.value)} aria-label="Executor" style={inputStyle}>
+              <option value="">Auto (cheapest capable)</option>
+              <option value="azure-openai">Azure (OpenAI family)</option>
+              <option value="anthropic">Anthropic</option>
+            </select>
           </label>
         </div>
         <label style={{ display: "flex", flexDirection: "column", gap: "0.35rem", marginTop: "0.75rem" }}>
-          <span style={{ fontSize: "0.8rem", color: "var(--wp-text-dim)" }}>Unified diff</span>
+          <span style={{ fontSize: "0.8rem", color: "var(--wp-text-dim)" }}>What should the factory build?</span>
           <textarea
-            value={diff}
-            onChange={(e) => setDiff(e.target.value)}
-            placeholder={"diff --git a/x.ts b/x.ts\n--- a/x.ts\n+++ b/x.ts\n@@ -1,0 +1,1 @@\n+export const sum = (a, b) => a + b;"}
-            aria-label="Unified diff"
-            rows={10}
-            style={{ ...inputStyle, fontFamily: "ui-monospace, monospace", resize: "vertical" }}
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            placeholder={"e.g. Add a pure function isPalindrome(s) in src/lib/strings.ts that ignores case and non-alphanumerics, with tests."}
+            aria-label="Prompt"
+            rows={5}
+            style={{ ...inputStyle, resize: "vertical" }}
           />
         </label>
-        <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginTop: "0.75rem", flexWrap: "wrap" }}>
-          <label style={{ display: "flex", alignItems: "center", gap: "0.4rem", fontSize: "0.85rem", color: "var(--wp-text-dim)" }}>
-            <input type="checkbox" checked={judge} onChange={(e) => setJudge(e.target.checked)} aria-label="Independent judge" />
-            Get an independent model&apos;s second opinion
-          </label>
-          <button type="button" onClick={() => void review()} disabled={running} style={btnStyle(running)}>
-            {running ? "Reviewing…" : "Review"}
+        <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginTop: "0.75rem" }}>
+          <button type="button" onClick={() => void generate()} disabled={running} style={btnStyle(running)}>
+            {running ? "Building…" : "Generate & gate"}
           </button>
         </div>
         {error && (
@@ -185,26 +224,64 @@ export default function CodeGatePage() {
         )}
       </GlassPanel>
 
-      {result && v && (
+      {executor && (
+        <GlassPanel title="Executor" subtitle="The model that authored the change">
+          <div style={{ display: "flex", gap: "1.5rem", flexWrap: "wrap" }}>
+            {[
+              { label: "Model", value: executor.author || "unknown" },
+              { label: "Provider", value: executor.provider ?? "-" },
+              { label: "Cost", value: executor.costUsd === null ? "-" : `$${executor.costUsd.toFixed(5)}` },
+              { label: "Latency", value: executor.latencyMs === null ? "-" : `${executor.latencyMs}ms` },
+            ].map((m) => (
+              <div key={m.label} style={{ display: "flex", flexDirection: "column", gap: "0.2rem" }}>
+                <span style={{ fontSize: "0.75rem", color: "var(--wp-text-dim)", textTransform: "uppercase", letterSpacing: "0.03em" }}>{m.label}</span>
+                <span style={{ fontSize: "1rem", fontWeight: 600 }}>{m.value}</span>
+              </div>
+            ))}
+          </div>
+          {executor.error && (
+            <p style={{ margin: "0.6rem 0 0", color: "var(--wp-error, #ef4444)", fontSize: "0.85rem" }}>{executor.error}</p>
+          )}
+        </GlassPanel>
+      )}
+
+      {run && v && (
         <>
-          <GlassPanel title="Verdict" subtitle={result.ref}>
+          <GlassPanel title="Verdict" subtitle={run.ref}>
             <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap", marginBottom: "0.75rem" }}>
-              <StatusPill status={result.verdict.outcome} tone={v.tone} label={v.label} />
-              <span style={{ color: "var(--wp-text-dim)", fontSize: "0.9rem" }}>{result.verdict.reason}</span>
+              <StatusPill status={run.review.verdict.outcome} tone={v.tone} label={v.label} />
+              <StatusPill
+                status={run.status}
+                tone={run.status === "ready_for_pr" ? "success" : "warning"}
+                label={run.status === "ready_for_pr" ? "Ready for PR" : "Needs human"}
+                size="sm"
+              />
+              <span style={{ color: "var(--wp-text-dim)", fontSize: "0.9rem" }}>{run.review.verdict.reason}</span>
             </div>
             <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
-              <MetricTile value={result.findings.length} label="Findings" />
-              <MetricTile value={result.bySeverity.critical ?? 0} label="Critical" />
-              <MetricTile value={result.bySeverity.high ?? 0} label="High" />
+              <MetricTile value={run.review.findings.length} label="Findings" />
+              <MetricTile value={run.review.bySeverity.critical ?? 0} label="Critical" />
+              <MetricTile value={run.review.bySeverity.high ?? 0} label="High" />
+              <MetricTile value={reroutes} label="Re-routes" />
             </div>
+            {reroutes > 0 && run.remediation.repairerLineage && (
+              <p style={{ margin: "0.6rem 0 0", color: "var(--wp-text-dim)", fontSize: "0.85rem" }}>
+                Re-routed to a different lineage ({run.remediation.repairerLineage}) after a non-allow verdict.
+              </p>
+            )}
+            {approvalId && (
+              <p style={{ margin: "0.6rem 0 0", color: "var(--wp-text-dim)", fontSize: "0.85rem" }}>
+                Handoff captured as a pending approval ({approvalId}). A human opens the PR; the factory never merges.
+              </p>
+            )}
           </GlassPanel>
 
           <GlassPanel title="Findings">
-            {result.findings.length === 0 ? (
-              <p style={{ color: "var(--wp-text-dim)" }}>No security findings in the added lines.</p>
+            {run.review.findings.length === 0 ? (
+              <p style={{ color: "var(--wp-text-dim)" }}>No security findings in the authored change.</p>
             ) : (
               <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: "0.6rem" }}>
-                {result.findings.map((f, i) => (
+                {run.review.findings.map((f, i) => (
                   <li key={`${f.file}:${f.line}:${f.klass}:${i}`} style={rowStyle}>
                     <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", flexWrap: "wrap" }}>
                       <StatusPill status={f.severity} size="sm" />
@@ -221,10 +298,10 @@ export default function CodeGatePage() {
             )}
           </GlassPanel>
 
-          {result.judgments && result.judgments.length > 0 && (
+          {run.review.judgments && run.review.judgments.length > 0 && (
             <GlassPanel title="Independent judge" subtitle="A different-family model's opinion - advisory, never the decision">
               <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: "0.6rem" }}>
-                {result.judgments.map((j, i) => (
+                {run.review.judgments.map((j, i) => (
                   <li key={`j:${i}`} style={rowStyle}>
                     <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", flexWrap: "wrap" }}>
                       <StatusPill status={j.verdict} tone={JUDGE_TONE[j.verdict]} label={JUDGE_LABEL[j.verdict]} size="sm" />
@@ -235,6 +312,31 @@ export default function CodeGatePage() {
                   </li>
                 ))}
               </ul>
+            </GlassPanel>
+          )}
+
+          {run.diff && (
+            <GlassPanel title="Authored change">
+              <details>
+                <summary style={{ cursor: "pointer", color: "var(--wp-text-dim)", fontSize: "0.85rem" }}>
+                  View the diff the gate governed
+                </summary>
+                <pre
+                  aria-label="Authored diff"
+                  style={{
+                    marginTop: "0.6rem",
+                    padding: "0.75rem",
+                    background: "var(--wp-surface-2, #171a21)",
+                    border: "1px solid var(--wp-border, #2a2f3a)",
+                    borderRadius: 8,
+                    overflowX: "auto",
+                    fontSize: "0.8rem",
+                    fontFamily: "ui-monospace, monospace",
+                  }}
+                >
+                  {run.diff}
+                </pre>
+              </details>
             </GlassPanel>
           )}
         </>
