@@ -61,10 +61,25 @@ interface PipelineRun {
   conformance: { conforms: boolean; findings: unknown[] };
   openQuestions: unknown[];
 }
+interface InvariantDecision {
+  ruleId: string;
+  intendedOutcome: string;
+  wouldBlock: boolean;
+  reason: string;
+}
+interface DeepScanSummary {
+  scanned: number;
+  critical: number;
+  high: number;
+  blocking: boolean;
+}
 interface PipelineResponse {
   run?: PipelineRun;
   approvalId?: string | null;
   executor?: Executor | null;
+  invariants?: InvariantDecision;
+  deepScan?: DeepScanSummary;
+  mode?: string;
   error?: string;
 }
 
@@ -118,6 +133,8 @@ export default function CodeFactoryPage() {
   const [run, setRun] = useState<PipelineRun | null>(null);
   const [executor, setExecutor] = useState<Executor | null>(null);
   const [approvalId, setApprovalId] = useState<string | null>(null);
+  const [invariants, setInvariants] = useState<InvariantDecision | null>(null);
+  const [deepScan, setDeepScan] = useState<DeepScanSummary | null>(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
@@ -141,6 +158,8 @@ export default function CodeFactoryPage() {
     setRun(null);
     setExecutor(null);
     setApprovalId(null);
+    setInvariants(null);
+    setDeepScan(null);
     try {
       const res = await fetchWithRefresh("/api/admin/ai-code/pipeline", {
         method: "POST",
@@ -165,6 +184,8 @@ export default function CodeFactoryPage() {
       setRun(body.run);
       setExecutor(body.executor ?? null);
       setApprovalId(body.approvalId ?? null);
+      setInvariants(body.invariants ?? null);
+      setDeepScan(body.deepScan ?? null);
     } catch {
       setError("Network error - the factory did not run.");
     } finally {
@@ -275,6 +296,46 @@ export default function CodeFactoryPage() {
               </p>
             )}
           </GlassPanel>
+
+          {(invariants || deepScan) && (
+            <GlassPanel title="Governance" subtitle="Deterministic engineering invariants + full deep static scan">
+              <div data-testid="governance-panel" style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
+                {invariants && (
+                  <StatusPill
+                    status={invariants.intendedOutcome}
+                    tone={invariants.wouldBlock ? "warning" : "success"}
+                    label={invariants.wouldBlock ? `Invariant: ${invariants.ruleId}` : "Invariants: clear"}
+                    size="sm"
+                  />
+                )}
+                {deepScan && (
+                  <StatusPill
+                    status="deep-scan"
+                    tone={deepScan.blocking ? "error" : "success"}
+                    label={deepScan.blocking ? `Deep scan: ${deepScan.critical} critical` : "Deep scan: clean"}
+                    size="sm"
+                  />
+                )}
+              </div>
+              {invariants?.wouldBlock && (
+                <p style={{ margin: "0.5rem 0 0", color: "var(--wp-text-dim)", fontSize: "0.85rem" }}>
+                  {invariants.ruleId}: {invariants.reason}
+                </p>
+              )}
+              {deepScan?.blocking && (
+                <p style={{ margin: "0.35rem 0 0", color: "var(--wp-text-dim)", fontSize: "0.85rem" }}>
+                  The deep static scan found {deepScan.critical} critical finding(s); handoff withheld.
+                </p>
+              )}
+              <p data-testid="handoff-status" style={{ margin: "0.6rem 0 0", fontSize: "0.85rem", fontWeight: 600 }}>
+                {approvalId
+                  ? "Ready for PR - handoff captured for human approval; the factory never merges."
+                  : run.status === "needs_human"
+                    ? "Needs human - the gate did not allow this change."
+                    : `Withheld from PR handoff: ${invariants?.wouldBlock ? invariants.ruleId : deepScan?.blocking ? "critical security finding" : "needs human"}.`}
+              </p>
+            </GlassPanel>
+          )}
 
           <GlassPanel title="Findings">
             {run.review.findings.length === 0 ? (
