@@ -40,6 +40,19 @@ const CLEAN = fileDiff("src/config.ts", ["export const apiKey = process.env.API_
 const AUTHOR = "gpt-4o-mini"; // openai lineage
 
 describe("repair loop diverts a failed execution from a lower tier to a higher one", () => {
+  // The repairer must be an INDEPENDENT family from the openai-lineage author,
+  // so a real independent candidate must exist. judgeCandidates now correctly
+  // refuses to offer an unconfigured provider, so configure Anthropic here. The
+  // repair completion is injected, so no Anthropic call is made - this only lets
+  // chooseIndependentJudge find a different-lineage candidate to attribute to.
+  const OLD_ENV = process.env;
+  beforeAll(() => {
+    process.env = { ...OLD_ENV, ANTHROPIC_API_KEY: "sk-ant-test" };
+  });
+  afterAll(() => {
+    process.env = OLD_ENV;
+  });
+
   it("escalates standard -> premium, and the ESCALATED attempt is what rescues the fix", async () => {
     const tiers: AIModelTier[] = [];
     // Only the premium (escalated) attempt produces a gate-passing fix; standard
