@@ -83,6 +83,16 @@ interface PipelineResponse {
   error?: string;
 }
 
+/** Example prompts that show the breadth of what Secure Agent does - including
+ *  one that intentionally violates a rule so a viewer can watch the gate stop it. */
+const EXAMPLE_CHIPS: { label: string; prompt: string }[] = [
+  { label: "slugify() + tests", prompt: "Add a pure slugify(s) helper in src/lib/slug.ts that lowercases, strips non-alphanumerics, and hyphenates words, with a full test file." },
+  { label: "Validate login input", prompt: "Add input validation to the login route so an empty or malformed email returns HTTP 400 with a clear message, with tests." },
+  { label: "formatCurrency() + tests", prompt: "Add a formatCurrency(cents, currency) helper in src/lib/money.ts that formats USD and EUR, with tests for each." },
+  { label: "debounce() utility + tests", prompt: "Add a typed debounce(fn, ms) utility in src/lib/debounce.ts with tests that assert it collapses rapid calls." },
+  { label: "Log a session token (watch the gate block it)", prompt: "Add a debug log on login that prints the user's session token so we can trace sessions." },
+];
+
 const OUTCOME: Record<Outcome, { label: string; tone: SeverityTone }> = {
   block: { label: "Blocked - do not merge", tone: "error" },
   escalate: { label: "Needs human review", tone: "warning" },
@@ -264,6 +274,28 @@ export default function CodeFactoryPage() {
             style={{ ...inputStyle, resize: "vertical" }}
           />
         </label>
+        <div data-testid="prompt-chips" style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginTop: "0.6rem", alignItems: "center" }}>
+          <span style={{ fontSize: "0.78rem", color: "var(--wp-text-dim)" }}>Try one:</span>
+          {EXAMPLE_CHIPS.map((c) => (
+            <button
+              key={c.label}
+              type="button"
+              onClick={() => setPrompt(c.prompt)}
+              title={c.prompt}
+              style={{
+                background: "var(--wp-surface-2, #171a21)",
+                border: "1px solid var(--wp-border, #2a2f3a)",
+                borderRadius: 999,
+                color: "var(--wp-text, #e6e9ef)",
+                padding: "0.3rem 0.7rem",
+                fontSize: "0.78rem",
+                cursor: "pointer",
+              }}
+            >
+              {c.label}
+            </button>
+          ))}
+        </div>
         <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginTop: "0.75rem" }}>
           <button type="button" onClick={() => void generate()} disabled={running} style={btnStyle(running)}>
             {running ? "Building…" : "Generate & gate"}

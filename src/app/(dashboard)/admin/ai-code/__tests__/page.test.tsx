@@ -178,3 +178,14 @@ test("approve failure surfaces the reason, no PR link", async () => {
   await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/no GitHub token/));
   expect(screen.queryByTestId("pr-link")).not.toBeInTheDocument();
 });
+
+test("example chips populate the prompt (showing what the factory can do)", async () => {
+  render(<CodeFactoryPage />);
+  const chips = screen.getByTestId("prompt-chips");
+  expect(chips).toBeInTheDocument();
+  // clicking a chip fills the prompt textarea
+  fireEvent.click(screen.getByRole("button", { name: /slugify\(\) \+ tests/i }));
+  expect((screen.getByLabelText("Prompt") as HTMLTextAreaElement).value).toMatch(/slugify/i);
+  // the negative-demo chip is present, framed as showing the gate block
+  expect(screen.getByRole("button", { name: /watch the gate block it/i })).toBeInTheDocument();
+});
