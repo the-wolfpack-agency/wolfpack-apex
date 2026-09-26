@@ -116,11 +116,38 @@ describe("POST /api/admin/ai-code/pipeline", () => {
   it("200: delegates with the author MODEL and returns the run", async () => {
     const res = await POST(post(VALID));
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ run: RUN, approvalId: "appr-1", executor: null });
+    const body = await res.json();
+    expect(body.run).toEqual(RUN);
+    expect(body.approvalId).toBe("appr-1"); // clean diff (no added deps) -> handed off
+    expect(body.executor).toBeNull();
+    expect(body.invariants.wouldBlock).toBe(false);
     const args = mockRunPipeline.mock.calls[0][0];
     expect(args.author).toBe("claude-3-5-sonnet");
     expect(args.prompt).toBe("Add a value");
     expect(args.answers).toEqual({ tests: "all" });
+  });
+
+  it("withholds PR handoff when an invariant blocks, even if the security gate allowed", async () => {
+    // Security gate allows (ready_for_pr), but the diff adds a runtime dependency,
+    // which the OGIAM registry escalates -> no approval is captured.
+    const DEP_DIFF = [
+      "diff --git a/package.json b/package.json",
+      "--- a/package.json",
+      "+++ b/package.json",
+      "@@ -5,6 +5,7 @@",
+      '   "dependencies": {',
+      '+    "left-pad": "^1.3.0",',
+      '     "react": "19.0.0"',
+      "   },",
+    ].join("\n");
+    mockRunPipeline.mockResolvedValue({ ...RUN, status: "ready_for_pr", diff: DEP_DIFF });
+    const res = await POST(post(VALID));
+    const body = await res.json();
+    expect(body.invariants.ruleId).toBe("R-DEPENDENCY-ADDED-ESCALATE");
+    expect(body.invariants.wouldBlock).toBe(true);
+    expect(body.approvalId).toBeNull(); // NOT handed off
+    expect(mockCreateApproval).not.toHaveBeenCalled();
+    expect(body.changeFacts.dependencyDelta).toBe(1);
   });
 
   it("audits and emits the run for the learning loop", async () => {

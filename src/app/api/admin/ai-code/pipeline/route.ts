@@ -25,6 +25,7 @@ import { runCodeReview } from "@/lib/ai-code/scan";
 import { liveRepairComplete } from "@/lib/ai-code/repair";
 import { runPipeline } from "@/lib/ai-code/pipeline";
 import { authorDiff, type AuthorResult } from "@/lib/ai-code/author";
+import { evaluateChangeInvariants } from "@/lib/ai-code/change-facts";
 import { getAIClient } from "@/lib/ai";
 import { DEFAULT_SPEC_QUESTIONS } from "@/lib/ai-code/intake";
 import { createPendingApproval } from "@/lib/agents/approvals/store";
@@ -158,6 +159,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: (err as Error).message }, { status: 400 });
   }
 
+  // Deterministic engineering invariants over the FINAL diff, decided by the
+  // OGIAM registry (deploy-once, dependency-as-last-resort; CI-complete applies
+  // at the merge point, not authoring, so it is not asserted here). This runs
+  // alongside the security gate: a change is only handed off when BOTH the
+  // security gate allows AND no invariant would block.
+  const { decision: invariants, facts: changeFacts } = evaluateChangeInvariants(run.diff);
+
   await recordAudit({
     actor: { user_id: auth.user.id, role: auth.user.role },
     action: "ai_code.pipeline_run",
@@ -172,6 +180,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       conforms: run.conformance.conforms,
       author: effectiveAuthor,
       executed: Boolean(executor),
+      invariant_rule: invariants.ruleId,
+      invariant_outcome: invariants.intendedOutcome,
+      dependency_delta: changeFacts.dependencyDelta,
     },
   });
 
@@ -190,7 +201,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // agent-approvals surface. A needs_human run has nothing to hand off. Capturing
   // is best-effort (null without a database); the run is returned either way.
   let approvalId: string | null = null;
-  if (run.status === "ready_for_pr") {
+  if (run.status === "ready_for_pr" && !invariants.wouldBlock) {
     approvalId = await createPendingApproval({
       workspaceId,
       agentId: CODE_GATE_AGENT_ID,
@@ -208,5 +219,5 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     });
   }
 
-  return NextResponse.json({ run, approvalId, executor });
+  return NextResponse.json({ run, approvalId, executor, invariants, changeFacts });
 }
