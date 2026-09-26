@@ -9,9 +9,14 @@
  * sites at once. No per-site re-vendoring, no divergent copies. This is what makes
  * Forcefield uniform and scalable to hundreds of sites from a single source.
  *
- * Auth: x-edge-token (a per-site edge secret). FAIL-OPEN on any error - Forcefield
- * must never break a customer's site, so a bad token / bad body / engine throw all
- * return { action: "allow" }.
+ * PUBLIC: unauthenticated by design in the session sense - a site's edge calls
+ * this before any user session exists, so it is NOT capability-gated. It is
+ * locked down by the shared-secret header `x-edge-token` == FORCEFIELD_EDGE_TOKEN
+ * (constant-time compare); a missing/mismatched token does nothing. Same posture
+ * as forcefield/edge/decide and the site-analytics ingest endpoint.
+ *
+ * FAIL-OPEN on any error - Forcefield must never break a customer's site, so a bad
+ * token / bad body / engine throw all return { action: "allow" }.
  */
 import { NextRequest, NextResponse } from "next/server";
 import { timingSafeEqual } from "crypto";
@@ -21,6 +26,9 @@ import { DEFAULT_RULESET } from "@/lib/forcefield-web/ruleset";
 import { getBlockedFingerprints } from "@/lib/forcefield/blocked-fingerprints";
 import { getDatacenterPrefixes } from "@/lib/forcefield/datacenter-ranges";
 import { recordSiteEvent } from "@/lib/site-analytics";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 const EDGE_WORKSPACE_ID = process.env.FORCEFIELD_EDGE_WORKSPACE_ID || "default";
 
@@ -33,6 +41,8 @@ function tokenMatches(got: string, expected: string): boolean {
   }
 }
 
+// PUBLIC: unauthenticated (no user session); authorized by the x-edge-token
+// shared secret only, constant-time compared below. See the file header.
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const expected = process.env.FORCEFIELD_EDGE_TOKEN || "";
   // No token configured, or mismatch -> do nothing, fail open. A site must never
