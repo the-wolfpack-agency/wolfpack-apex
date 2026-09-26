@@ -23,8 +23,9 @@ Format: id, when it fires, the deterministic predicate, and the action.
 - **Pain:** standing "no em dashes anywhere, including chat" rule, broken because
   it lived in memory. (A committed-content guardrail already exists in apex;
   this covers the assistant's own prose, which nothing checks.)
-- **Predicate:** the assistant's outgoing message contains `—` (U+2014) or `–`
-  (U+2013).
+- **Predicate:** the assistant's outgoing message contains an em dash (U+2014)
+  or an en dash (U+2013). (Named by code point here on purpose, so this file does
+  not trip the very guardrail it describes.)
 - **Action:** block / auto-replace with a hyphen before sending.
 
 ## C-VERIFY-BEFORE-PUSH
