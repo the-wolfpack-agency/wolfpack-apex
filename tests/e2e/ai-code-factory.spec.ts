@@ -67,6 +67,14 @@ test.describe("Code factory reality check", () => {
     await page.route("**/api/admin/ai-code/pipeline", async (route) => {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(PIPELINE_RESPONSE) });
     });
+    // Stub the approve -> open-PR step so no real GitHub write happens.
+    await page.route("**/api/admin/agents/approvals/**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ ok: true, status: "executed", outcome: { ok: true, url: "https://github.com/o/r/pull/42", number: 42 } }),
+      });
+    });
 
     const snapshot = collectConsoleAndNetworkFailures(page);
     const nav = await page.goto(`${target.baseUrl}/admin/ai-code`, { waitUntil: "domcontentloaded", timeout: 20_000 });
@@ -89,6 +97,10 @@ test.describe("Code factory reality check", () => {
     await expect(page.getByText(/Invariants: clear/)).toBeVisible();
     await expect(page.getByText(/Deep scan: clean/)).toBeVisible();
     await expect(page.getByTestId("handoff-status")).toContainText(/handoff captured/i);
+
+    // The human-in-the-loop step: approve opens the real PR and the link appears.
+    await page.getByTestId("approve-open-pr").click();
+    await expect(page.getByTestId("pr-link"), "the opened PR link is shown").toHaveAttribute("href", /github\.com\/.*\/pull\/\d+/, { timeout: 10_000 });
 
     // No CSP or network failures during a short idle window.
     await page.waitForTimeout(2_000);

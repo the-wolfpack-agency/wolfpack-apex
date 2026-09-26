@@ -135,6 +135,9 @@ export default function CodeFactoryPage() {
   const [approvalId, setApprovalId] = useState<string | null>(null);
   const [invariants, setInvariants] = useState<InvariantDecision | null>(null);
   const [deepScan, setDeepScan] = useState<DeepScanSummary | null>(null);
+  const [prUrl, setPrUrl] = useState<string | null>(null);
+  const [approving, setApproving] = useState(false);
+  const [approveError, setApproveError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
@@ -160,6 +163,8 @@ export default function CodeFactoryPage() {
     setApprovalId(null);
     setInvariants(null);
     setDeepScan(null);
+    setPrUrl(null);
+    setApproveError(null);
     try {
       const res = await fetchWithRefresh("/api/admin/ai-code/pipeline", {
         method: "POST",
@@ -192,6 +197,32 @@ export default function CodeFactoryPage() {
       setRunning(false);
     }
   }, [ref, prompt, executorPin]);
+
+  // Approve the captured handoff -> the approved write executes (opens the real
+  // PR as the owner, re-gated + ledgered) and returns the PR url. This is the
+  // human-in-the-loop step; the factory never merges.
+  const approve = useCallback(async () => {
+    if (!approvalId) return;
+    setApproving(true);
+    setApproveError(null);
+    try {
+      const res = await fetchWithRefresh(`/api/admin/agents/approvals/${approvalId}`, {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: JSON.stringify({ action: "approve" }),
+      });
+      const body = (await res.json()) as { ok?: boolean; outcome?: { ok?: boolean; url?: string; reason?: string }; error?: string };
+      if (res.ok && body.outcome?.ok && body.outcome.url) {
+        setPrUrl(body.outcome.url);
+      } else {
+        setApproveError(body.outcome?.reason || body.error || "Approval did not open a PR.");
+      }
+    } catch {
+      setApproveError("Network error - the approval did not run.");
+    } finally {
+      setApproving(false);
+    }
+  }, [approvalId]);
 
   if (!ready) return null;
 
@@ -334,6 +365,28 @@ export default function CodeFactoryPage() {
                     ? "Needs human - the gate did not allow this change."
                     : `Withheld from PR handoff: ${invariants?.wouldBlock ? invariants.ruleId : deepScan?.blocking ? "critical security finding" : "needs human"}.`}
               </p>
+
+              {/* The human-in-the-loop step: approve to open the real PR, then link it. */}
+              {approvalId && !prUrl && (
+                <div style={{ marginTop: "0.75rem" }}>
+                  <button type="button" onClick={() => void approve()} disabled={approving} style={btnStyle(approving)} data-testid="approve-open-pr">
+                    {approving ? "Opening PR…" : "Approve & open PR"}
+                  </button>
+                  {approveError && (
+                    <p role="alert" style={{ margin: "0.5rem 0 0", color: "var(--wp-error, #ef4444)", fontSize: "0.85rem" }}>
+                      {approveError}
+                    </p>
+                  )}
+                </div>
+              )}
+              {prUrl && (
+                <p style={{ margin: "0.75rem 0 0", fontSize: "0.9rem", fontWeight: 600 }}>
+                  Pull request opened:{" "}
+                  <a data-testid="pr-link" href={prUrl} target="_blank" rel="noreferrer" style={{ color: "var(--wp-gold, #e8b528)" }}>
+                    {prUrl}
+                  </a>
+                </p>
+              )}
             </GlassPanel>
           )}
 
