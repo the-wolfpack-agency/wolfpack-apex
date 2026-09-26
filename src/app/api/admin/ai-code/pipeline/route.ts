@@ -24,7 +24,8 @@ import { recordAudit } from "@/lib/audit-log";
 import { runCodeReview } from "@/lib/ai-code/scan";
 import { liveRepairComplete } from "@/lib/ai-code/repair";
 import { runPipeline } from "@/lib/ai-code/pipeline";
-import { authorDiff, type AuthorResult } from "@/lib/ai-code/author";
+import { authorDiff, authorFileChanges } from "@/lib/ai-code/author";
+import { filesToDiff, type FileChange } from "@/lib/ai-code/file-changes";
 import { evaluateChangeInvariants } from "@/lib/ai-code/change-facts";
 import { deepScanChange } from "@/lib/ai-code/deep-scan";
 import { getAIClient } from "@/lib/ai";
@@ -43,26 +44,42 @@ const CODE_GATE_AGENT_ID = "ai-code-gate";
  *  a property name to write. */
 const SPEC_QUESTION_IDS = new Set(DEFAULT_SPEC_QUESTIONS.map((q) => q.id));
 
+/** Common executor evidence (both authoring modes carry these). */
+type ExecutorEvidence = { author: string; provider: string | null; costUsd: number | null; latencyMs: number | null; error: string | null };
+
 /**
- * Resolve the diff the pipeline will govern: use a supplied diff as-is, or, when
- * none is supplied, have the EXECUTOR author one from the prompt. Both outcomes
- * flow into the SAME downstream security gate; authoring is a feature, not a
- * security check, so nothing here decides access. Kept as a self-contained step
- * so the handler never branches around the model call on a request value.
+ * Resolve the change the pipeline will govern. Three sources, all feeding the
+ * SAME gate (authoring is a feature, not a security check):
+ *  - supplied diff (governed as-is)
+ *  - files mode: the executor authors FULL FILE CONTENTS (edit-support); the
+ *    review substrate is a synthesized diff, and `changes` carries the files for
+ *    the commit
+ *  - diff mode (default): the executor authors a unified diff (new files)
  */
-async function resolveDiff(args: {
+async function resolveChange(args: {
+  mode: "diff" | "files";
   diff: string;
   prompt: string;
   authorModel: string;
   executorProviderPin?: string;
-}): Promise<{ diff: string; author: string; executor: AuthorResult | null }> {
-  if (args.diff.trim()) return { diff: args.diff, author: args.authorModel, executor: null };
+}): Promise<{ diff: string; author: string; executor: ExecutorEvidence | null; changes: FileChange[] | null }> {
+  if (args.mode === "files") {
+    const client = getAIClient();
+    const authored = await authorFileChanges(
+      { prompt: args.prompt, executorProviderPin: args.executorProviderPin, feature: "ai-code-pipeline-author-files" },
+      { complete: (r) => client.complete(r) },
+    );
+    const ev: ExecutorEvidence = { author: authored.author, provider: authored.provider, costUsd: authored.costUsd, latencyMs: authored.latencyMs, error: authored.error };
+    return { diff: filesToDiff(authored.changes), author: authored.author, executor: ev, changes: authored.changes };
+  }
+  if (args.diff.trim()) return { diff: args.diff, author: args.authorModel, executor: null, changes: null };
   const client = getAIClient();
   const executor = await authorDiff(
     { prompt: args.prompt, executorProviderPin: args.executorProviderPin, feature: "ai-code-pipeline-author" },
     { complete: (r) => client.complete(r) },
   );
-  return { diff: executor.diff, author: executor.author, executor };
+  const ev: ExecutorEvidence = { author: executor.author, provider: executor.provider, costUsd: executor.costUsd, latencyMs: executor.latencyMs, error: executor.error };
+  return { diff: executor.diff, author: executor.author, executor: ev, changes: null };
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
@@ -86,6 +103,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     authorModel?: unknown;
     executorProviderPin?: unknown;
     repo?: unknown;
+    mode?: unknown;
     maxAttempts?: unknown;
   };
   const ref = typeof b.ref === "string" ? b.ref.trim() : "";
@@ -124,16 +142,18 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // evidence, never a 500 and never a fabricated diff.
   const executorProviderPin =
     typeof b.executorProviderPin === "string" && b.executorProviderPin.trim() ? b.executorProviderPin.trim() : undefined;
-  const { diff: effectiveDiff, author: effectiveAuthor, executor } = await resolveDiff({
+  const mode: "diff" | "files" = b.mode === "files" ? "files" : "diff";
+  const { diff: effectiveDiff, author: effectiveAuthor, executor, changes } = await resolveChange({
+    mode,
     diff,
     prompt,
     authorModel,
     executorProviderPin,
   });
   // Fail-closed: the executor ran but produced nothing usable. Never a 500, and
-  // never a fabricated diff - the gate has nothing to govern.
+  // never a fabricated change - the gate has nothing to govern.
   if (executor && !effectiveDiff.trim()) {
-    return NextResponse.json({ error: "executor produced no diff", executor }, { status: 422 });
+    return NextResponse.json({ error: "executor produced no change", executor }, { status: 422 });
   }
   // Unconditional ceiling on the final diff, whatever its source (supplied or
   // authored). Enforced on every path, so no user-controlled input decides
@@ -166,7 +186,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // at the merge point, not authoring, so it is not asserted here). This runs
   // alongside the security gate: a change is only handed off when BOTH the
   // security gate allows AND no invariant would block.
-  const { decision: invariants, facts: changeFacts } = evaluateChangeInvariants(run.diff);
+  // In files mode the dependency delta is not derivable from a synthesized full
+  // file (it shows every dep as "added"), so skip that signal; it stays exact in
+  // diff mode. All other invariants apply in both modes.
+  const { decision: invariants, facts: changeFacts } = evaluateChangeInvariants(run.diff, { skipDependency: changes != null });
 
   // Full-power deep static scan: run the platform-scan detector engine (provider-
   // signature secrets, taint/SSRF/SQLi) on the authored files, not just the ai-code
@@ -213,8 +236,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // NOT open a PR. A human opens the PR by approving this, through the existing
   // agent-approvals surface. A needs_human run has nothing to hand off. Capturing
   // is best-effort (null without a database); the run is returned either way.
+  // Files mode auto-hands-off only when the FIRST authored files passed the gate
+  // (no repair). The repair loop is diff-native and does not map to full files, so
+  // a files-mode change that needed repair is needs_human (a human takes the
+  // surfaced diff); files-native repair is a follow-up. Diff mode is unaffected.
+  const filesModeHandoffOk = changes == null || run.remediation.attempts.length === 0;
+
   let approvalId: string | null = null;
-  if (run.status === "ready_for_pr" && !invariants.wouldBlock && !deepScan.blocking) {
+  if (run.status === "ready_for_pr" && !invariants.wouldBlock && !deepScan.blocking && filesModeHandoffOk) {
     approvalId = await createPendingApproval({
       workspaceId,
       agentId: CODE_GATE_AGENT_ID,
@@ -228,13 +257,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         repo: typeof b.repo === "string" && b.repo.trim() ? b.repo.trim() : undefined,
         spec_hash: run.spec.hash,
         conforms: run.conformance.conforms,
-        // The gate ALLOWED this diff, so it carries no secret to store; a human
-        // sees exactly what they are approving.
+        // The gate ALLOWED this change, so it carries no secret to store; a human
+        // sees exactly what they are approving. In files mode the commit uses the
+        // full-file changes; in diff mode it uses the diff's new files.
         diff: run.diff,
+        ...(changes ? { changes } : {}),
       },
       capability: "settings.manage_team",
     });
   }
 
-  return NextResponse.json({ run, approvalId, executor, invariants, changeFacts, deepScan });
+  return NextResponse.json({ run, approvalId, executor, invariants, changeFacts, deepScan, mode });
 }

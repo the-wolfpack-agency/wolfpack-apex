@@ -102,7 +102,7 @@ describe("POST /api/admin/ai-code/pipeline", () => {
     mockComplete.mockResolvedValue(authorResp("I would add a function called k."));
     const res = await POST(post({ ref: "pr-3", prompt: "add k", answers: { tests: "all" } }));
     expect(res.status).toBe(422);
-    expect((await res.json()).error).toMatch(/no diff/);
+    expect((await res.json()).error).toMatch(/no change/);
     expect(mockRunPipeline).not.toHaveBeenCalled();
   });
 
@@ -220,5 +220,46 @@ describe("entitlement gate", () => {
     mockGate.mockResolvedValue(new Response(JSON.stringify({ entitled: false, feature: "secure_agent" }), { status: 403 }));
     expect((await POST(post(VALID))).status).toBe(403);
     expect(mockRunPipeline).not.toHaveBeenCalled(); // gated before the pipeline runs
+  });
+});
+
+describe("files mode (edit-support)", () => {
+  const FILES_REPLY = [
+    "FILE: src/lib/k.ts",
+    "```ts",
+    "export const k = 1;",
+    "```",
+  ].join("\n");
+
+  it("authors FULL FILE contents and captures them for the commit when the gate allows first-try", async () => {
+    mockComplete.mockResolvedValue(authorResp(FILES_REPLY));
+    mockRunPipeline.mockResolvedValue(RUN); // allow, attempts [] (first-pass)
+    const res = await POST(post({ ref: "pr-files", prompt: "add k", answers: { tests: "all" }, mode: "files", executorProviderPin: "azure-openai" }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.mode).toBe("files");
+    expect(body.executor.author).toBe("azure-gpt-4o");
+    // the approval captured the full-file changes for the commit
+    const captured = mockCreateApproval.mock.calls[0][0];
+    expect(captured.params.changes).toEqual([{ path: "src/lib/k.ts", content: "export const k = 1;" }]);
+    // runPipeline governed a synthesized diff of that file
+    expect(mockRunPipeline.mock.calls[0][0].diff).toMatch(/\+\+\+ b\/src\/lib\/k\.ts/);
+  });
+
+  it("does NOT auto-hand-off a files change that needed repair (needs_human; diff-native repair does not map to files)", async () => {
+    mockComplete.mockResolvedValue(authorResp(FILES_REPLY));
+    // ready_for_pr but reached via a repair attempt -> files mode withholds handoff
+    mockRunPipeline.mockResolvedValue({ ...RUN, status: "ready_for_pr", remediation: { ...RUN.remediation, attempts: [{ tier: "standard" }] } });
+    const res = await POST(post({ ref: "pr-files2", prompt: "add k", answers: { tests: "all" }, mode: "files" }));
+    const body = await res.json();
+    expect(body.approvalId).toBeNull();
+    expect(mockCreateApproval).not.toHaveBeenCalled();
+  });
+
+  it("422 when the files executor produces no parseable files", async () => {
+    mockComplete.mockResolvedValue(authorResp("I would add a k constant."));
+    const res = await POST(post({ ref: "pr-files3", prompt: "add k", answers: { tests: "all" }, mode: "files" }));
+    expect(res.status).toBe(422);
+    expect((await res.json()).error).toMatch(/no change/);
   });
 });
