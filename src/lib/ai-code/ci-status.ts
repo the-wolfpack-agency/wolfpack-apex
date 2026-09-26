@@ -27,6 +27,8 @@ export interface CiSummary {
   ciComplete: boolean;
   /** Names of the checks that failed, for a legible verdict. */
   failedChecks: string[];
+  /** Failed checks with GitHub's output summary - the material a fixer acts on. */
+  failedDetails: { name: string; summary: string }[];
 }
 
 /** Summarize a check-run list. Pure: no IO. */
@@ -35,6 +37,7 @@ export function summarizeChecks(checks: readonly CheckRun[]): CiSummary {
   let failed = 0;
   let pending = 0;
   const failedChecks: string[] = [];
+  const failedDetails: { name: string; summary: string }[] = [];
   for (const c of checks) {
     if (c.status !== "completed") {
       pending++;
@@ -45,11 +48,12 @@ export function summarizeChecks(checks: readonly CheckRun[]): CiSummary {
     } else {
       failed++;
       failedChecks.push(c.name);
+      failedDetails.push({ name: c.name, summary: (c.output?.summary ?? "").slice(0, 2000) });
     }
   }
   const total = checks.length;
   const complete = total > 0 && pending === 0;
-  return { total, passed, failed, pending, complete, ciComplete: complete && failed === 0, failedChecks };
+  return { total, passed, failed, pending, complete, ciComplete: complete && failed === 0, failedChecks, failedDetails };
 }
 
 /** Fetch + summarize a PR head ref's CI. Never throws: a GitHub error becomes an

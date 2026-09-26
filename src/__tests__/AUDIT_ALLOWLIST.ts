@@ -44,6 +44,11 @@ export const AUDIT_ALLOWLIST: ReadonlyArray<AuditAllowlistEntry> = [
     route: "src/app/api/admin/agent-probe/run/route.ts",
     reason: "Runs a model against an allowlisted target and returns a behavior report + dossier; it persists one anonymous, non-PII SIGHTING (structural features + an opaque operator fingerprint) for the operators history - observability data, not a user-facing state mutation, the same class as an analytics row. The model call itself is metered and recorded by the router's own hash-chained AI ledger (recordRouterCall), where model/provider/cost are known, so a second thinner audit row would duplicate it",
   },
+  // Read-only-by-effect (POST that returns a computation, no durable write)
+  {
+    route: "src/app/api/admin/ai-code/ci-fix/route.ts",
+    reason: "One step of the read-CI-and-fix loop: reads a factory PR's CI status and returns a deterministic decision (merge_ready / wait / author_fix / escalate_human) plus a fix brief. It performs NO write - it does not commit, merge, or persist; the caller (or the workspace stage) acts on the decision. POST only because it takes a body. The writes it may lead to (a commit, a merge) are audited at their own executors.",
+  },
   // High-volume observability sink
   {
     route: "src/app/api/forcefield-web/inspect/route.ts",
