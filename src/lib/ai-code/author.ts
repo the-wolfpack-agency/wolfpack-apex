@@ -16,6 +16,8 @@
  */
 import type { AICompleteRequest, AICompleteResponse, AIModelTier } from "@/lib/ai/types";
 import { AI_CODE_AUTHOR_PROMPT } from "@/lib/prompts/definitions/ai-code-author";
+import { AI_CODE_AUTHOR_FILES_PROMPT } from "@/lib/prompts/definitions/ai-code-author-files";
+import { parseFileChanges, type FileChange } from "./file-changes";
 
 export interface AuthorInput {
   /** What to build, in the words a person would use. */
@@ -95,6 +97,49 @@ export async function authorDiff(input: AuthorInput, deps: AuthorDeps): Promise<
   } catch (e) {
     // silent-ok: recorded to result.error and returned, so an unavailable
     // executor reads as "no diff authored", never as a thrown request.
+    result.error = errText(e);
+  }
+  return result;
+}
+
+export interface AuthorFilesResult {
+  /** Full content of each changed file (new or modified). */
+  changes: FileChange[];
+  author: string;
+  provider: string | null;
+  costUsd: number | null;
+  latencyMs: number | null;
+  error: string | null;
+}
+
+/**
+ * Author a change as FULL FILE CONTENTS (edit-support): the executor writes the
+ * whole content of each changed file, which is committed via the Contents API -
+ * no diff, no patch-applier, no checkout (the CI-as-runner design). Never throws:
+ * an unavailable executor / no parseable files is an empty changes list + a
+ * recorded error, which the gate rejects on its own merits.
+ */
+export async function authorFileChanges(input: AuthorInput, deps: AuthorDeps): Promise<AuthorFilesResult> {
+  const maxTokens = input.maxTokens ?? 4000;
+  const feature = input.feature ?? "ai-code-author-files";
+  const result: AuthorFilesResult = { changes: [], author: input.executorProviderPin ?? "unknown", provider: null, costUsd: null, latencyMs: null, error: null };
+  try {
+    const resp = await deps.complete({
+      system: AI_CODE_AUTHOR_FILES_PROMPT.render({}),
+      messages: [{ role: "user", content: input.prompt }],
+      max_tokens: maxTokens,
+      model_tier: input.tier ?? "standard",
+      ...(input.executorProviderPin ? { provider_pin: input.executorProviderPin } : {}),
+      metadata: { feature },
+    });
+    result.changes = parseFileChanges(resp.content);
+    result.author = resp.model_used || resp.provider_used || result.author;
+    result.provider = resp.provider_used;
+    result.costUsd = resp.cost_usd;
+    result.latencyMs = resp.latency_ms;
+  } catch (e) {
+    // silent-ok: recorded to result.error and returned; an unavailable executor
+    // reads as "no files authored", never as a thrown request.
     result.error = errText(e);
   }
   return result;
