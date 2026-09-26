@@ -41,6 +41,28 @@ const CODE_GATE_AGENT_ID = "ai-code-gate";
  *  a property name to write. */
 const SPEC_QUESTION_IDS = new Set(DEFAULT_SPEC_QUESTIONS.map((q) => q.id));
 
+/**
+ * Resolve the diff the pipeline will govern: use a supplied diff as-is, or, when
+ * none is supplied, have the EXECUTOR author one from the prompt. Both outcomes
+ * flow into the SAME downstream security gate; authoring is a feature, not a
+ * security check, so nothing here decides access. Kept as a self-contained step
+ * so the handler never branches around the model call on a request value.
+ */
+async function resolveDiff(args: {
+  diff: string;
+  prompt: string;
+  authorModel: string;
+  executorProviderPin?: string;
+}): Promise<{ diff: string; author: string; executor: AuthorResult | null }> {
+  if (args.diff.trim()) return { diff: args.diff, author: args.authorModel, executor: null };
+  const client = getAIClient();
+  const executor = await authorDiff(
+    { prompt: args.prompt, executorProviderPin: args.executorProviderPin, feature: "ai-code-pipeline-author" },
+    { complete: (r) => client.complete(r) },
+  );
+  return { diff: executor.diff, author: executor.author, executor };
+}
+
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const auth = await requireCapability(req, "settings.manage_team");
   if (!auth.ok) return auth.response;
@@ -99,22 +121,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // evidence, never a 500 and never a fabricated diff.
   const executorProviderPin =
     typeof b.executorProviderPin === "string" && b.executorProviderPin.trim() ? b.executorProviderPin.trim() : undefined;
-  let effectiveDiff = diff;
-  let effectiveAuthor = authorModel;
-  let executor: AuthorResult | null = null;
-  if (!effectiveDiff.trim()) {
-    const client = getAIClient();
-    executor = await authorDiff(
-      { prompt, executorProviderPin, feature: "ai-code-pipeline-author" },
-      { complete: (r) => client.complete(r) },
-    );
-    effectiveDiff = executor.diff;
-    effectiveAuthor = executor.author;
-    if (!effectiveDiff.trim()) {
-      return NextResponse.json({ error: "executor produced no diff", executor }, { status: 422 });
-    }
+  const { diff: effectiveDiff, author: effectiveAuthor, executor } = await resolveDiff({
+    diff,
+    prompt,
+    authorModel,
+    executorProviderPin,
+  });
+  // Fail-closed: the executor ran but produced nothing usable. Never a 500, and
+  // never a fabricated diff - the gate has nothing to govern.
+  if (executor && !effectiveDiff.trim()) {
+    return NextResponse.json({ error: "executor produced no diff", executor }, { status: 422 });
   }
-
   // Unconditional ceiling on the final diff, whatever its source (supplied or
   // authored). Enforced on every path, so no user-controlled input decides
   // whether this check runs.
