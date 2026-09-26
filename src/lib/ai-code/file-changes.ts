@@ -39,6 +39,30 @@ export function parseFileChanges(reply: string): FileChange[] {
   return out;
 }
 
+/**
+ * Synthesize a review diff from full-file changes so the diff-native gate, deep
+ * scan, and reviewer can run on full-file content without a base. Each file is
+ * rendered as an added-content block (a modified file is reviewed as its whole
+ * new content - conservative and safe: it reviews everything, never less). The
+ * dependency invariant is NOT derivable from this (a full file shows every dep as
+ * "added"), so callers in full-file mode skip that signal rather than over-flag.
+ */
+export function filesToDiff(changes: readonly FileChange[]): string {
+  return changes
+    .map((c) => {
+      const lines = c.content.split("\n");
+      return [
+        `diff --git a/${c.path} b/${c.path}`,
+        "new file mode 100644",
+        "--- /dev/null",
+        `+++ b/${c.path}`,
+        `@@ -0,0 +1,${lines.length} @@`,
+        ...lines.map((l) => "+" + l),
+      ].join("\n");
+    })
+    .join("\n");
+}
+
 /** Confine a path to the repo (no traversal / absolute), same rule as the sandbox. */
 export function isSafeRepoPath(path: string): boolean {
   if (!path || path.startsWith("/")) return false;

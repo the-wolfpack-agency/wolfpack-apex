@@ -88,3 +88,14 @@ describe("evaluateChangeInvariants (drives the OGIAM registry)", () => {
     expect(decision.wouldBlock).toBe(false);
   });
 });
+
+describe("evaluateChangeInvariants skipDependency (full-file mode)", () => {
+  it("does NOT flag a dependency add when skipDependency is set (full file cannot yield a net delta)", async () => {
+    const { evaluateChangeInvariants } = await import("../change-facts");
+    const { filesToDiff } = await import("../file-changes");
+    // A synthesized full-file package.json would show every dep as 'added'; skip avoids the false flag.
+    const diff = filesToDiff([{ path: "package.json", content: '{\n  "dependencies": {\n    "next": "16",\n    "react": "19"\n  }\n}' }]);
+    const { decision } = evaluateChangeInvariants(diff, { skipDependency: true });
+    expect(decision.ruleId).not.toBe("R-DEPENDENCY-ADDED-ESCALATE");
+  });
+});

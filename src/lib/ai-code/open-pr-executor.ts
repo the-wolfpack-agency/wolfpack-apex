@@ -14,18 +14,22 @@
  * is the git-workspace stage, not this one.
  */
 import { createHash } from "node:crypto";
-import { workspaceGithubClient, createBranch, putFile, openPullRequest } from "@/lib/github-client";
+import { workspaceGithubClient, openPullRequest } from "@/lib/github-client";
 import { authorize } from "@/lib/ogiam/authorize";
 import { recordActionOutcome } from "@/lib/ogiam/ledger";
 import { newFilesFromDiff } from "./oracle";
+import { commitFileChanges, type FileChange } from "./file-changes";
 
 export interface OpenPrParams {
   /** target repo "owner/name". Defaults to apex (self-hosting) when absent. */
   repo?: string;
   /** the run ref / task id, used in the branch name + PR title. */
   ref?: string;
-  /** the gate-approved unified diff. */
+  /** the gate-approved unified diff (new-file mode). */
   diff?: string;
+  /** the gate-approved FULL file contents (edit-support mode). Takes precedence
+   *  over diff when present, and can commit modifications, not just new files. */
+  changes?: FileChange[];
   /** the originating prompt, for the PR title/body. */
   prompt?: string;
   /** base branch to target. Defaults to main. */
@@ -45,18 +49,23 @@ function sanitizeRef(ref: string): string {
 
 export async function executeOpenPr(params: OpenPrParams, ctx: WriteCtx): Promise<OpenPrOutcome> {
   const diff = typeof params.diff === "string" ? params.diff : "";
-  const files = newFilesFromDiff(diff);
-  const paths = Object.keys(files);
-  if (paths.length === 0) {
-    return { ok: false, reason: "Stage 1 opens PRs for new-file changes only, and this diff creates no new files" };
+  // Edit-support: full file contents (new OR modified) take precedence; else fall
+  // back to the new files extracted from the diff. Either way we commit full
+  // contents via commitFileChanges - no patch application.
+  const changes: FileChange[] =
+    params.changes && params.changes.length > 0
+      ? params.changes
+      : Object.entries(newFilesFromDiff(diff)).map(([path, content]) => ({ path, content }));
+  if (changes.length === 0) {
+    return { ok: false, reason: "no file changes to commit (a modification-only diff needs full-file changes)" };
   }
 
   const repo = params.repo || DEFAULT_REPO;
   const base = params.base || "main";
   const ref = sanitizeRef(params.ref || "change");
-  // Deterministic, unique-per-change branch: no clock, so the same diff always
-  // maps to the same branch (a retried approval reuses it rather than forking).
-  const hash = createHash("sha256").update(diff).digest("hex").slice(0, 8);
+  // Deterministic, unique-per-change branch: hash the exact content committed, so
+  // the same change always maps to the same branch (a retried approval reuses it).
+  const hash = createHash("sha256").update(JSON.stringify(changes)).digest("hex").slice(0, 8);
   const branch = `factory/${ref}-${hash}`;
 
   // Governed like every other agent write: run the PR-open through the OGIAM
@@ -108,22 +117,19 @@ export async function executeOpenPr(params: OpenPrParams, ctx: WriteCtx): Promis
   }
 
   try {
-    await createBranch(client, repo, branch, base);
-    for (const path of paths) {
-      await putFile(client, repo, path, files[path], `factory: ${ref} (${path})`, branch);
-    }
+    const committed = await commitFileChanges({ client, repoFullName: repo, branch, base, changes, message: `factory: ${ref}` });
     const title = `factory: ${(params.prompt || ref).replace(/\s+/g, " ").trim().slice(0, 72)}`;
     const body = [
       "Authored by the Instinct code factory and submitted through Instinct.",
       "",
       `- ref: ${ref}`,
-      `- files: ${paths.map((p) => `\`${p}\``).join(", ")}`,
+      `- files: ${committed.map((p) => `\`${p}\``).join(", ")}`,
       "",
       "This change passed the deterministic security gate + engineering invariants and a human approved the handoff. A human still reviews and merges this PR; the factory never merges.",
     ].join("\n");
     const pr = await openPullRequest(client, repo, branch, base, title, body);
     await recordOutcome(true, "ok", pr.html_url);
-    return { ok: true, url: pr.html_url, number: pr.number, branch, files: paths.length };
+    return { ok: true, url: pr.html_url, number: pr.number, branch, files: committed.length };
   } catch (err) {
     // Never throw from an approved-write executor: a recorded ok:false is the
     // audited outcome; a throw would lose the reason.
