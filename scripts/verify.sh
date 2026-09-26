@@ -172,6 +172,10 @@ stage_enabled lint      && run_stage "ci-timeouts" npm run ci:check-timeouts
 # enforces it; carrying it here is the difference between finding out before
 # the push and after it.
 stage_enabled lint      && run_stage "action-pins" npm run ci:check-action-pins
+# House rules over the branch's own commits: the noreply author, no Co-Authored-By
+# trailer, no private email. Decidable and cheap; --strict fails the push here
+# instead of a reviewer catching it later (or not).
+stage_enabled lint      && run_stage "commit-hygiene" npm run check:commit-hygiene -- --strict
 stage_enabled typecheck && run_stage "typecheck"  npx tsc --noEmit
 stage_enabled unit      && run_stage "unit-tests" run_unit_tests
 
