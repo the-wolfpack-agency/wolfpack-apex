@@ -137,6 +137,8 @@ export async function runCrossFamilyHandoff(input: HandoffInput, deps: HandoffDe
     delivery.latencyMs = resp.latency_ms;
     delivery.answer = resp.content;
   } catch (e) {
+    // silent-ok: not swallowed - recorded to delivery.error and surfaced in the
+    // evidence envelope so "B was unreachable" never reads as "B answered".
     delivery.error = errText(e);
   }
 
@@ -184,6 +186,8 @@ export async function runCrossFamilyHandoff(input: HandoffInput, deps: HandoffDe
       check.sound = result.sound;
       check.reason = result.reason;
     } catch (e) {
+      // silent-ok: not swallowed - recorded to check.error and surfaced so a
+      // judge that could not run never reads as a passed verdict.
       check.error = errText(e);
     }
   } else if (!delivery.delivered) {
