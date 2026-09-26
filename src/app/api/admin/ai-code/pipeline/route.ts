@@ -84,6 +84,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     author?: unknown;
     authorModel?: unknown;
     executorProviderPin?: unknown;
+    repo?: unknown;
     maxAttempts?: unknown;
   };
   const ref = typeof b.ref === "string" ? b.ref.trim() : "";
@@ -209,6 +210,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       tool: "ai_code.open_pr",
       params: {
         ref,
+        prompt,
+        // Target repo for the PR; the executor defaults to apex (self-hosting)
+        // when absent. Not user-secret; a human sees exactly what they approve.
+        repo: typeof b.repo === "string" && b.repo.trim() ? b.repo.trim() : undefined,
         spec_hash: run.spec.hash,
         conforms: run.conformance.conforms,
         // The gate ALLOWED this diff, so it carries no secret to store; a human
