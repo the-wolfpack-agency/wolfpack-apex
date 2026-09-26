@@ -237,6 +237,9 @@ export interface CheckRun {
   status: string;
   /** success | failure | neutral | cancelled | timed_out | action_required | skipped | null */
   conclusion: string | null;
+  /** GitHub's rendered check output - the summary/title is what a fixer needs to
+   *  know WHY a check failed. Present on most Actions check runs. */
+  output?: { title?: string | null; summary?: string | null } | null;
 }
 
 /** List the check runs for a commit / branch / PR head ref. Used to read a
