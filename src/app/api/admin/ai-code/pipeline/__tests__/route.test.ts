@@ -26,8 +26,13 @@ jest.mock("@/lib/audit-log", () => ({ recordAudit: (...a: unknown[]) => mockReco
 jest.mock("@/lib/agents/approvals/store", () => ({ createPendingApproval: (...a: unknown[]) => mockCreateApproval(...a) }));
 const mockGate = jest.fn();
 jest.mock("@/lib/tenancy/require-entitlement", () => ({ requireEntitlement: (...a: unknown[]) => mockGate(...a) }));
+const mockComplete = jest.fn();
+jest.mock("@/lib/ai", () => ({ getAIClient: () => ({ complete: (...a: unknown[]) => mockComplete(...a) }) }));
 
 import { POST } from "../route";
+
+const AUTHORED_DIFF = "diff --git a/src/k.ts b/src/k.ts\n--- /dev/null\n+++ b/src/k.ts\n@@ -0,0 +1 @@\n+export const k = 1;";
+const authorResp = (content: string) => ({ content, model_used: "azure-gpt-4o", provider_used: "azure-openai", input_tokens: 1, output_tokens: 1, cost_usd: 0.0001, latency_ms: 100 });
 
 const OK_USER = { ok: true, user: { id: "u1", role: "admin", workspaceId: "w1" } };
 const deny = (status: number) => ({ ok: false, response: new Response("{}", { status }) });
@@ -61,6 +66,7 @@ beforeEach(() => {
   mockRunPipeline.mockResolvedValue(RUN);
   mockRecordAudit.mockResolvedValue({ ok: true });
   mockCreateApproval.mockResolvedValue("appr-1");
+  mockComplete.mockResolvedValue(authorResp("```diff\n" + AUTHORED_DIFF + "\n```"));
 });
 
 describe("POST /api/admin/ai-code/pipeline", () => {
@@ -74,10 +80,30 @@ describe("POST /api/admin/ai-code/pipeline", () => {
     expect((await POST(post(VALID))).status).toBe(403);
   });
 
-  it("400 when ref, prompt or diff is missing", async () => {
+  it("400 when ref or prompt is missing", async () => {
     expect((await POST(post({ ...VALID, ref: "" }))).status).toBe(400);
     expect((await POST(post({ ...VALID, prompt: "" }))).status).toBe(400);
-    expect((await POST(post({ ...VALID, diff: "" }))).status).toBe(400);
+  });
+
+  it("authors the diff from the prompt when none is supplied (executor stage)", async () => {
+    const res = await POST(post({ ref: "pr-2", prompt: "add k", answers: { tests: "all" }, executorProviderPin: "azure-openai" }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.executor.author).toBe("azure-gpt-4o");
+    expect(body.executor.provider).toBe("azure-openai");
+    // runPipeline governs the AUTHORED diff, attributed to the executor model so
+    // the repairer is guaranteed a different lineage.
+    const call = mockRunPipeline.mock.calls[0][0];
+    expect(call.diff).toContain("export const k");
+    expect(call.author).toBe("azure-gpt-4o");
+  });
+
+  it("422 (fail-closed) when the executor produces no diff - never a fabricated one", async () => {
+    mockComplete.mockResolvedValue(authorResp("I would add a function called k."));
+    const res = await POST(post({ ref: "pr-3", prompt: "add k", answers: { tests: "all" } }));
+    expect(res.status).toBe(422);
+    expect((await res.json()).error).toMatch(/no diff/);
+    expect(mockRunPipeline).not.toHaveBeenCalled();
   });
 
   it("400 (not 500) on an off-menu intake answer", async () => {
@@ -90,7 +116,7 @@ describe("POST /api/admin/ai-code/pipeline", () => {
   it("200: delegates with the author MODEL and returns the run", async () => {
     const res = await POST(post(VALID));
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ run: RUN, approvalId: "appr-1" });
+    expect(await res.json()).toEqual({ run: RUN, approvalId: "appr-1", executor: null });
     const args = mockRunPipeline.mock.calls[0][0];
     expect(args.author).toBe("claude-3-5-sonnet");
     expect(args.prompt).toBe("Add a value");
