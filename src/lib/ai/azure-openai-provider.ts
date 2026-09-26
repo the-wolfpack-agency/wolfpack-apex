@@ -57,7 +57,7 @@ const TIER_DEPLOYMENT_ENV: Record<AIModelTier, string> = {
 };
 
 const CLASSIC_API_VERSION = "2024-08-01-preview";
-const FOUNDRY_API_VERSION = "2024-05-01-preview";
+export const FOUNDRY_API_VERSION = "2024-05-01-preview";
 
 export type AzureEndpointFormat = "classic" | "foundry";
 
@@ -192,7 +192,7 @@ function toAzureMessage(m: AIMessage): AzureChatMessage {
  * we use that as the base; otherwise we append `/models`. Either way the
  * canonical path is `{base}/models/chat/completions?api-version=...`.
  */
-function buildFoundryUrl(endpoint: string): string {
+export function buildFoundryUrl(endpoint: string): string {
   const trimmed = endpoint.replace(/\/+$/, "");
   const base = /\/models$/i.test(trimmed) ? trimmed : `${trimmed}/models`;
   return `${base}/chat/completions?api-version=${FOUNDRY_API_VERSION}`;

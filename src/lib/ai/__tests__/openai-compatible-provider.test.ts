@@ -98,6 +98,22 @@ describe("chatCompletionsUrl", () => {
   it("tolerates trailing slashes", () => {
     expect(chatCompletionsUrl("https://x.dev/v1/")).toBe("https://x.dev/v1/chat/completions");
   });
+
+  // Azure AI Foundry (serverless DeepSeek/Llama/etc.) needs the model-inference
+  // path + api-version query, not the OpenAI /v1 path.
+  it("builds the Azure AI Inference URL for a *.services.ai.azure.com host", () => {
+    expect(chatCompletionsUrl("https://my-resource.services.ai.azure.com")).toBe(
+      "https://my-resource.services.ai.azure.com/models/chat/completions?api-version=2024-05-01-preview",
+    );
+  });
+  it("does not double /models when the operator already included it", () => {
+    expect(chatCompletionsUrl("https://my-resource.services.ai.azure.com/models")).toBe(
+      "https://my-resource.services.ai.azure.com/models/chat/completions?api-version=2024-05-01-preview",
+    );
+  });
+  it("leaves a non-Azure OpenAI-style host on the /v1 path (no api-version)", () => {
+    expect(chatCompletionsUrl("https://api.groq.com/openai/v1")).toBe("https://api.groq.com/openai/v1/chat/completions");
+  });
 });
 
 describe("parseCompletion", () => {
