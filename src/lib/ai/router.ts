@@ -1612,7 +1612,11 @@ export function judgeCandidates(
 ): JudgeCandidate[] {
   const out: JudgeCandidate[] = [];
 
-  if (registry.anthropic.supportsTier(tier)) {
+  // Only offer Anthropic as a judge when it is actually configured. Offering a
+  // keyless provider means chooseIndependentJudge can pick it (it is a valid
+  // lineage), and then the judge "cannot be reached" - which is exactly the
+  // failure that hid a working DeepSeek behind an unconfigured Anthropic.
+  if (registry.anthropic.supportsTier(tier) && isAnthropicConfigured()) {
     out.push({
       provider: registry.anthropic.name,
       model: ANTHROPIC_TIER_TO_MODEL[tier],

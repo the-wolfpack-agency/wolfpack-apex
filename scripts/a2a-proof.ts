@@ -18,6 +18,7 @@
 /* FIRST. Imports hoist, so anything below already read process.env. */
 import "./load-env";
 import { getAIClient } from "@/lib/ai";
+import { buildRegistry, judgeCandidates } from "@/lib/ai/router";
 import { runCrossFamilyHandoff } from "@/lib/ai/a2a-proof";
 
 function line(label: string, value: string | number | boolean | null): void {
@@ -28,8 +29,12 @@ async function main(): Promise<void> {
   const prompt = process.argv.slice(2).join(" ").trim() || "In one sentence, what is the capital of France and why is it significant?";
 
   const client = getAIClient();
+  // Use the ACTUALLY-configured providers as judge candidates (the judge runs
+  // at the cheap tier), so a configured DeepSeek/Foundry model is considered -
+  // instead of a hardcoded list that never saw it.
+  const candidates = judgeCandidates(buildRegistry(), "cheap");
   const ev = await runCrossFamilyHandoff(
-    { prompt, targetProviderPin: "azure-openai" },
+    { prompt, targetProviderPin: "azure-openai", judgeCandidates: candidates },
     { complete: (req) => client.complete(req) },
   );
 
