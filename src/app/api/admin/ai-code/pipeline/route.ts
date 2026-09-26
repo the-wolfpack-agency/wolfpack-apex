@@ -204,6 +204,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     final_outcome: run.review.verdict.outcome,
     open_questions: run.openQuestions.length,
     conforms: run.conformance.conforms,
+    // Attribution for grading + per-model drift (src/lib/ai-code/grading.ts).
+    model: effectiveAuthor,
+    deep_scan_critical: deepScan.critical,
   });
 
   // Fail-closed handoff. A ready-for-PR run captures a PENDING APPROVAL - it does
