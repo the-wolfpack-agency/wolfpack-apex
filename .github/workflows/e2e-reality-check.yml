@@ -188,6 +188,7 @@ jobs:
           tests/e2e/routines-loop.spec.ts
           tests/e2e/routines-discovery.spec.ts
           tests/e2e/every-role.spec.ts
+          tests/e2e/ai-code-factory.spec.ts
           --config=playwright.config.ts --reporter=github,json
 
       # THE STEP ABOVE CANNOT FAIL, WHICH IS WHY NOBODY KNEW.
