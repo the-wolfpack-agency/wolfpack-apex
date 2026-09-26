@@ -10,6 +10,7 @@ const putFile = jest.fn();
 const openPullRequest = jest.fn();
 const workspaceGithubClient = jest.fn();
 const authorize = jest.fn();
+const recordActionOutcome = jest.fn();
 
 jest.mock("@/lib/github-client", () => ({
   workspaceGithubClient: (...a: unknown[]) => workspaceGithubClient(...a),
@@ -18,6 +19,7 @@ jest.mock("@/lib/github-client", () => ({
   openPullRequest: (...a: unknown[]) => openPullRequest(...a),
 }));
 jest.mock("@/lib/ogiam/authorize", () => ({ authorize: (...a: unknown[]) => authorize(...a) }));
+jest.mock("@/lib/ogiam/ledger", () => ({ recordActionOutcome: (...a: unknown[]) => recordActionOutcome(...a) }));
 
 import { executeOpenPr } from "../open-pr-executor";
 
@@ -43,8 +45,9 @@ beforeEach(() => {
   createBranch.mockResolvedValue(undefined);
   putFile.mockResolvedValue(undefined);
   openPullRequest.mockResolvedValue({ html_url: "https://github.com/o/r/pull/7", number: 7 });
-  // Monitor mode: records the decision, never blocks (the Phase 0 default).
-  authorize.mockResolvedValue({ enforced: false, effectiveOutcome: "monitor", ruleId: "R-MUTATION-ALLOW", reason: "ok" });
+  // Monitor mode: records the decision (recordedSeq set), never blocks.
+  authorize.mockResolvedValue({ enforced: false, effectiveOutcome: "monitor", ruleId: "R-MUTATION-ALLOW", reason: "ok", recordedSeq: 42 });
+  recordActionOutcome.mockResolvedValue(undefined);
 });
 
 test("routes the PR-open through the OGIAM gate (governed like every agent write)", async () => {
@@ -54,13 +57,28 @@ test("routes the PR-open through the OGIAM gate (governed like every agent write
   );
 });
 
-test("an enforce-mode gate block short-circuits before any GitHub write", async () => {
-  authorize.mockResolvedValue({ enforced: true, effectiveOutcome: "deny", ruleId: "R-SECRET-DENY", reason: "secret in params" });
+test("an enforce-mode gate block short-circuits before any GitHub write, and records the blocked outcome", async () => {
+  authorize.mockResolvedValue({ enforced: true, effectiveOutcome: "deny", ruleId: "R-SECRET-DENY", reason: "secret in params", recordedSeq: 7 });
   const out = await executeOpenPr({ ref: "x", diff: NEW_FILE_DIFF, repo: "o/r" }, ctx);
   expect(out.ok).toBe(false);
   if (!out.ok) expect(out.reason).toMatch(/gate_blocked: R-SECRET-DENY/);
   expect(createBranch).not.toHaveBeenCalled();
   expect(openPullRequest).not.toHaveBeenCalled();
+  // the block is captured on the ledger as an outcome, not just a decision
+  expect(recordActionOutcome).toHaveBeenCalledWith(expect.objectContaining({ decisionSeq: 7, ok: false, code: "gate_blocked" }));
+});
+
+test("records the OUTCOME on the ledger (decision + outcome), not just the decision", async () => {
+  await executeOpenPr({ ref: "x", diff: NEW_FILE_DIFF, repo: "o/r" }, ctx);
+  expect(recordActionOutcome).toHaveBeenCalledWith(
+    expect.objectContaining({ decisionSeq: 42, agentId: "instinct.ai_code", ok: true, code: "ok" }),
+  );
+});
+
+test("does not record an outcome when the decision was not recorded (no seq)", async () => {
+  authorize.mockResolvedValue({ enforced: false, effectiveOutcome: "monitor", ruleId: "R-MUTATION-ALLOW", reason: "ok" }); // no recordedSeq
+  await executeOpenPr({ ref: "x", diff: NEW_FILE_DIFF, repo: "o/r" }, ctx);
+  expect(recordActionOutcome).not.toHaveBeenCalled();
 });
 
 test("opens a real PR for a new-file change: branch + commit + PR", async () => {
