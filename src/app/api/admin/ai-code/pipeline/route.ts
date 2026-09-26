@@ -69,8 +69,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if (!ref) return NextResponse.json({ error: "ref is required" }, { status: 400 });
   if (!prompt.trim()) return NextResponse.json({ error: "prompt is required" }, { status: 400 });
   // diff is OPTIONAL: when absent, the EXECUTOR stage authors it from the prompt
-  // (input-to-output). A manually supplied diff is still governed as before.
-  if (diff && diff.length > MAX_DIFF) return NextResponse.json({ error: "diff too large" }, { status: 400 });
+  // (input-to-output). A manually supplied diff is still governed as before. The
+  // size ceiling is enforced ONCE, unconditionally, on the final diff below - it
+  // is never gated by a user-controlled branch.
 
   // Answers are a flat questionId -> optionId map. The property NAME is
   // allowlisted to the fixed question set - never write a user-named property
@@ -112,8 +113,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     if (!effectiveDiff.trim()) {
       return NextResponse.json({ error: "executor produced no diff", executor }, { status: 422 });
     }
-    if (effectiveDiff.length > MAX_DIFF) return NextResponse.json({ error: "authored diff too large" }, { status: 400 });
   }
+
+  // Unconditional ceiling on the final diff, whatever its source (supplied or
+  // authored). Enforced on every path, so no user-controlled input decides
+  // whether this check runs.
+  if (effectiveDiff.length > MAX_DIFF) return NextResponse.json({ error: "diff too large" }, { status: 400 });
 
   const review = async (d: string): Promise<CodeReviewResult> =>
     runCodeReview({ workspaceId, ref, author: effectiveAuthor, diff: d, nowIso: new Date().toISOString() });
