@@ -10,6 +10,7 @@ import {
 import { getAgent } from "@/lib/agents/store";
 import { executeCreateExternalRecord } from "@/lib/assistant/tools/create-external-record-tool";
 import { executeUpdateExternalRecord } from "@/lib/assistant/tools/update-external-record-tool";
+import { executeOpenPr } from "@/lib/ai-code/open-pr-executor";
 
 type WriteCtx = { userId: string; userRole: string; workspaceId?: string; agentId?: string };
 type WriteOutcome = { ok: boolean; [k: string]: unknown };
@@ -19,6 +20,8 @@ type WriteOutcome = { ok: boolean; [k: string]: unknown };
 const EXECUTORS: Record<string, (params: never, ctx: WriteCtx) => Promise<WriteOutcome>> = {
   create_external_record: executeCreateExternalRecord as never,
   update_external_record: executeUpdateExternalRecord as never,
+  // The factory's approved handoff: open a real PR from the gate-approved diff.
+  "ai_code.open_pr": executeOpenPr as never,
 };
 
 /** Resolve the OWNER's role + workspace so the approved write runs AS the owner
