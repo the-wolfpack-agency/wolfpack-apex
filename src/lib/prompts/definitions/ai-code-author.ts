@@ -9,10 +9,11 @@
  * config, or the gate itself (the anti-oracle-gaming rule, stated up front).
  */
 import { definePrompt } from "../registry";
+import { authoringConstraintsBrief } from "@/lib/ai-code/authoring-constraints";
 
 export const AI_CODE_AUTHOR_PROMPT = definePrompt({
   id: "ai_code.executor",
-  version: 1,
+  version: 2,
   purpose: "Author a single unified diff (with tests) implementing a requested change.",
   scope: {
     inScope: ["the code change described in this request", "new or existing source files needed to implement it", "tests for the change"],
@@ -35,5 +36,10 @@ export const AI_CODE_AUTHOR_PROMPT = definePrompt({
       "- Include tests for the change in the same diff.",
       "- Never edit test files that grade the task, CI config, or the gate itself.",
       "- Prefer small, self-contained files with no new runtime dependencies.",
+      "",
+      // Generated from the one authoring-rule catalog, so a new guardrail teaches
+      // the executor by adding a single line there (DRY: enforcement stays in the
+      // guardrails; this only states the rules to the author).
+      authoringConstraintsBrief(),
     ].join("\n"),
 });
