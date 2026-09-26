@@ -35,6 +35,7 @@ const DRY = process.argv.includes("--dry-run");
 /** Repo folder -> the product area it reports under. */
 const REPOS: { dir: string; area: string }[] = [
   { dir: "wolfpack-apex", area: "Instinct" },
+  { dir: "wolfpack-ford", area: "Ford" },
   { dir: "wolfpack-auto", area: "Auto" },
   { dir: "AgenticQA", area: "AgenticQA" },
   { dir: "wolfpack-beyond", area: "Beyond" },
