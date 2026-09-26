@@ -34,6 +34,7 @@
  * is deliberately inconvenient in the right direction.
  */
 import { decideEgress } from "@/lib/containment/allowlist";
+import { detectEndpointFormat, buildFoundryUrl } from "./azure-openai-provider";
 import type {
   AICompleteRequest,
   AICompleteResponse,
@@ -135,6 +136,12 @@ export function configuredCompatibleProviders(
 /** Join the base URL to the chat-completions path without doubling /v1. */
 export function chatCompletionsUrl(baseUrl: string): string {
   const trimmed = baseUrl.replace(/\/+$/, "");
+  // Azure AI Inference endpoints (Foundry serverless: DeepSeek, Llama, Mistral,
+  // ...) need the model-inference path plus an api-version query, NOT the
+  // OpenAI /v1 path - without it Azure returns 400. Reuse the Azure provider's
+  // format helpers so both callers stay identical (a *.services.ai.azure.com
+  // host or a base ending in /models is detected as Foundry).
+  if (detectEndpointFormat(trimmed) === "foundry") return buildFoundryUrl(trimmed);
   if (/\/chat\/completions$/.test(trimmed)) return trimmed;
   if (/\/v1$/.test(trimmed)) return `${trimmed}/chat/completions`;
   return `${trimmed}/v1/chat/completions`;
