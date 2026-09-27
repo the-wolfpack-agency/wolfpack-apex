@@ -342,6 +342,30 @@ export async function listCheckRuns(
   return res.check_runs ?? [];
 }
 
+/** Read a ref's CI as GitHub ACTIONS workflow runs, mapped to the check shape.
+ *  A fallback for when the token can read Actions but NOT the Checks API (the
+ *  shared factory token has Actions but "Checks" is not even a grantable
+ *  permission on it). Resolves the ref to a SHA and lists the workflow runs for
+ *  that commit; one CheckRun per run (name = workflow name). Coarser than per-job
+ *  check-runs, but enough to know CI passed/failed and which workflow. */
+export async function listWorkflowRunChecks(
+  client: GithubClient,
+  repoFullName: string,
+  ref: string,
+): Promise<CheckRun[]> {
+  const sha = /^[0-9a-f]{7,40}$/i.test(ref) ? ref : await getBranchHead(client, repoFullName, ref);
+  const res = await gh<{ workflow_runs?: { name?: string; display_title?: string; status?: string; conclusion?: string | null }[] }>(
+    client,
+    "GET",
+    `/repos/${repoFullName}/actions/runs?head_sha=${encodeURIComponent(sha)}&per_page=100`,
+  );
+  return (res.workflow_runs ?? []).map((w) => ({
+    name: w.name || w.display_title || "workflow",
+    status: w.status || "completed",
+    conclusion: w.conclusion ?? null,
+  }));
+}
+
 export async function triggerWorkflow(
   client: GithubClient,
   repoFullName: string,
