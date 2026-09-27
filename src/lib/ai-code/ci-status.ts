@@ -10,7 +10,25 @@
  * every check has completed, and none failed. No checks yet -> NOT complete
  * (nothing verified is not the same as verified).
  */
-import { listCheckRuns, workspaceGithubClient, type CheckRun, type GithubClient } from "@/lib/github-client";
+import { listCheckRuns, listWorkflowRunChecks, workspaceGithubClient, type CheckRun, type GithubClient } from "@/lib/github-client";
+
+/** Read a ref's CI checks, tolerant of the token's permission shape: try the
+ *  Checks API (per-job check-runs) first; if that is forbidden (the shared token
+ *  cannot get "Checks", which is not even a grantable permission on it), fall
+ *  back to the Actions API (workflow runs), which the token's Actions permission
+ *  allows. Throws only when BOTH are unavailable, so a caller can surface the
+ *  real reason. */
+async function readChecks(client: GithubClient, repoFullName: string, ref: string): Promise<CheckRun[]> {
+  try {
+    return await listCheckRuns(client, repoFullName, ref);
+  } catch (checksErr) {
+    try {
+      return await listWorkflowRunChecks(client, repoFullName, ref);
+    } catch {
+      throw checksErr; // surface the original (usually the more informative) error
+    }
+  }
+}
 
 /** Conclusions that count as a pass. Everything else that has a conclusion is a
  *  fail; a null conclusion means it has not finished. */
@@ -77,16 +95,12 @@ export async function fetchCiStatus(repoFullName: string, ref: string, workspace
   try {
     const client: GithubClient = await workspaceGithubClient(workspaceId);
     if (!client.token) return unreadable("no GitHub credential for this workspace");
-    const checks = await listCheckRuns(client, repoFullName, ref);
+    const checks = await readChecks(client, repoFullName, ref);
     return summarizeChecks(checks);
   } catch (e) {
-    // A 403 here is almost always the token lacking Checks: read (the shared PAT
-    // has contents/actions but not checks). Surface it - never a silent "0 checks".
-    const msg = (e as Error).message;
-    const hint = /403|forbidden|not accessible/i.test(msg)
-      ? "cannot read CI check runs - the token lacks Checks: read. Install the GitHub App (or grant Checks: read) for this workspace."
-      : `cannot read CI: ${msg.slice(0, 160)}`;
-    return unreadable(hint);
+    // Both the Checks and Actions reads failed. Surface the RAW reason (never a
+    // silent "0 checks"), so what is actually wrong is visible.
+    return unreadable(`cannot read CI: ${(e as Error).message.slice(0, 200)}`);
   }
 }
 
@@ -179,7 +193,7 @@ export async function fetchCiDashboard(repoFullName: string, ref: string, worksp
   try {
     const client: GithubClient = await workspaceGithubClient(workspaceId);
     if (!client.token) return categorizeChecks([]);
-    const checks = await listCheckRuns(client, repoFullName, ref);
+    const checks = await readChecks(client, repoFullName, ref);
     return categorizeChecks(checks);
   } catch {
     return categorizeChecks([]);
@@ -290,8 +304,8 @@ export async function fetchCiAttribution(
     const client: GithubClient = await workspaceGithubClient(workspaceId);
     if (!client.token) return attributeChecks([], []);
     const [baseline, head] = await Promise.all([
-      listCheckRuns(client, repoFullName, baseRef).catch(() => [] as CheckRun[]),
-      listCheckRuns(client, repoFullName, headRef).catch(() => [] as CheckRun[]),
+      readChecks(client, repoFullName, baseRef).catch(() => [] as CheckRun[]),
+      readChecks(client, repoFullName, headRef).catch(() => [] as CheckRun[]),
     ]);
     return attributeChecks(baseline, head);
   } catch {

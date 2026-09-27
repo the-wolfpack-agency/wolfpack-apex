@@ -187,6 +187,19 @@ export interface RepoInfo {
   private: boolean;
 }
 
+/** Probe whether the current token can access pull requests on a repo (i.e. it
+ *  holds the Pull requests permission). Listing PRs needs that permission, so a
+ *  successful call proves the token can manage them - the App is NOT required.
+ *  Never throws: any error (403 = lacks the permission) returns false. */
+export async function probePullRequestAccess(client: GithubClient, repoFullName: string): Promise<boolean> {
+  try {
+    await gh(client, "GET", `/repos/${repoFullName}/pulls?state=all&per_page=1`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Read a repo's metadata (default branch, visibility). Doubles as a
  *  reachability probe: throws if the token cannot see the repo. */
 export async function fetchRepoInfo(
@@ -340,6 +353,30 @@ export async function listCheckRuns(
     `/repos/${repoFullName}/commits/${encodeRef(ref)}/check-runs?per_page=100`,
   );
   return res.check_runs ?? [];
+}
+
+/** Read a ref's CI as GitHub ACTIONS workflow runs, mapped to the check shape.
+ *  A fallback for when the token can read Actions but NOT the Checks API (the
+ *  shared factory token has Actions but "Checks" is not even a grantable
+ *  permission on it). Resolves the ref to a SHA and lists the workflow runs for
+ *  that commit; one CheckRun per run (name = workflow name). Coarser than per-job
+ *  check-runs, but enough to know CI passed/failed and which workflow. */
+export async function listWorkflowRunChecks(
+  client: GithubClient,
+  repoFullName: string,
+  ref: string,
+): Promise<CheckRun[]> {
+  const sha = /^[0-9a-f]{7,40}$/i.test(ref) ? ref : await getBranchHead(client, repoFullName, ref);
+  const res = await gh<{ workflow_runs?: { name?: string; display_title?: string; status?: string; conclusion?: string | null }[] }>(
+    client,
+    "GET",
+    `/repos/${repoFullName}/actions/runs?head_sha=${encodeURIComponent(sha)}&per_page=100`,
+  );
+  return (res.workflow_runs ?? []).map((w) => ({
+    name: w.name || w.display_title || "workflow",
+    status: w.status || "completed",
+    conclusion: w.conclusion ?? null,
+  }));
 }
 
 export async function triggerWorkflow(
