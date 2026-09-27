@@ -62,6 +62,7 @@ async function submitPrompt(text = "add isPalindrome with tests") {
 let pipelineResp: Response;
 let approveResp: Response;
 let historyResp: Response;
+let auditResp: Response;
 let ciResp: Response;
 beforeEach(() => {
   jest.clearAllMocks();
@@ -69,6 +70,7 @@ beforeEach(() => {
   pipelineResp = resp(200, runResp({ outcome: "allow" }));
   approveResp = resp(200, { ok: true, status: "executed", outcome: { ok: true, url: "https://github.com/o/r/pull/42", number: 42 } });
   historyResp = HISTORY_EMPTY();
+  auditResp = resp(200, { verification: { ok: true, verifiedCount: 7, legacyCount: 0, brokenAtSeq: null, headSeq: 7, headHash: "h" }, entries: [{ seq: 7, created_at: "2026-09-27T10:00:00Z", principal_agent: "instinct.ai_code", intended_outcome: "allow", effective_outcome: "allow", would_block: false, rule_id: "R-MUTATION-ALLOW", reason: null }], entryCount: 1, generatedAtIso: "2026-09-27T10:00:00.000Z" });
   ciResp = resp(200, { dashboard: { categories: [{ key: "unit", label: "Unit tests", status: "pass", passed: 3, failed: 0, pending: 0, checks: ["unit"] }, { key: "security", label: "Security", status: "fail", passed: 0, failed: 1, pending: 0, checks: ["scan"] }], overall: "fail", summary: { total: 4, passed: 3, failed: 1, pending: 0 } } });
   // URL-aware: the page fetches run history on mount and after each run; route it
   // to an empty history so it never consumes a per-test response. Everything else
@@ -76,6 +78,7 @@ beforeEach(() => {
   mockFetch.mockImplementation((url: string) => {
     const u = String(url);
     if (u.includes("/ai-code/history")) return Promise.resolve(historyResp);
+    if (u.includes("/ai-code/audit")) return Promise.resolve(auditResp);
     if (u.includes("/ai-code/ci")) return Promise.resolve(ciResp);
     if (u.includes("/approvals/")) return Promise.resolve(approveResp);
     return Promise.resolve(pipelineResp);
@@ -330,4 +333,14 @@ test("human-in-the-gate: the approve button is disabled until consent is given, 
   // consent enables it
   fireEvent.click(screen.getByTestId("approve-consent"));
   expect(screen.getByTestId("approve-open-pr")).not.toBeDisabled();
+});
+
+test("audit evidence: verifying the chain shows a tamper-evident verdict and offers a download", async () => {
+  render(<CodeFactoryPage />);
+  await act(async () => { fireEvent.click(screen.getByTestId("verify-audit")); });
+  await waitFor(() => expect(screen.getByTestId("audit-result")).toBeInTheDocument());
+  expect(screen.getByTestId("audit-verdict")).toHaveTextContent(/tamper-evident chain verified/i);
+  expect(screen.getByTestId("audit-verdict")).toHaveTextContent("7");
+  expect(screen.getByTestId("download-audit")).toBeInTheDocument();
+  expect(screen.getByTestId("audit-entries")).toHaveTextContent("R-MUTATION-ALLOW");
 });
