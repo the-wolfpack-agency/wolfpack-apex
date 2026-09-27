@@ -22,7 +22,7 @@ import WelcomeTooltip from "@/components/WelcomeTooltip";
 import CommandPalette from "@/components/ui/CommandPalette";
 import { useAmbientRefresh } from "@/lib/hooks/useAmbientRefresh";
 import { useEmailArrivalPoll } from "@/lib/hooks/useEmailArrivalPoll";
-import { NAV_ITEMS, PINNED_NAV_HREFS, defaultHiddenForRole, canSeeNavItem } from "@/lib/dashboard-nav";
+import { NAV_ITEMS, PINNED_NAV_HREFS, defaultHiddenForRole, canSeeNavItem, activeNavHref } from "@/lib/dashboard-nav";
 import { BOOT_SPLASH_TESTID, BOOT_SPLASH_TEXT } from "@/lib/ui/boot-splash";
 import { APP_SHELL_BAR_HEIGHT } from "@/lib/ui/app-shell";
 
@@ -218,9 +218,11 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
     router.push("/login");
   }
 
+  // Most-specific-wins: only the longest matching href is active, so a parent
+  // (/admin/ai-code) does not light up alongside its child (/admin/ai-code/overview).
+  const activeHref = activeNavHref(pathname, NAV_ITEMS.map((i) => i.href));
   function isActive(href: string) {
-    if (href === "/") return pathname === "/";
-    return pathname.startsWith(href);
+    return href === activeHref;
   }
 
   if (!user) {

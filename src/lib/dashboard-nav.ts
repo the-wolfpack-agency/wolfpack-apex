@@ -194,3 +194,23 @@ export function defaultHiddenForRole(role: string | undefined): string[] {
   if (!role) return [];
   return [...(DEFAULT_HIDDEN_BY_ROLE[role.toLowerCase()] ?? [])];
 }
+
+/**
+ * Most-specific-wins active-nav match: of all registered nav hrefs, return the
+ * LONGEST one that the current path is at or under. Prevents a parent href
+ * (e.g. /admin/ai-code) from staying highlighted on a child route
+ * (/admin/ai-code/overview) at the same time as the child, which is why two nav
+ * items were lighting up at once. Exact match or a path-segment-boundary prefix
+ * only, so /admin/ai-code never matches /admin/ai-code-foo.
+ */
+export function activeNavHref(pathname: string, hrefs: readonly string[]): string | null {
+  if (pathname === "/") return hrefs.includes("/") ? "/" : null;
+  let best: string | null = null;
+  for (const href of hrefs) {
+    if (href === "/") continue;
+    if (pathname === href || pathname.startsWith(href + "/")) {
+      if (best === null || href.length > best.length) best = href;
+    }
+  }
+  return best;
+}
