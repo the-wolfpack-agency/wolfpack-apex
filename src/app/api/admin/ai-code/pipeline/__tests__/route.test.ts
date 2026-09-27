@@ -120,6 +120,16 @@ describe("POST /api/admin/ai-code/pipeline", () => {
     expect(call.author).toBe("azure-gpt-4o");
   });
 
+  it("returns a cost meter: this run's cost + a cross-model comparison", async () => {
+    const res = await POST(post({ ref: "pr-cost", prompt: "add k", answers: { tests: "all" } }));
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.cost).toBeDefined();
+    expect(body.cost.attempts).toBeGreaterThanOrEqual(1);
+    expect(Array.isArray(body.cost.comparison)).toBe(true);
+    expect(body.cost.comparison.length).toBeGreaterThan(0);
+  });
+
   it("with a target repo and no diff, fetches repo-aware context and returns the fetched files", async () => {
     mockBuildContext.mockResolvedValue({ block: "FILE: src/x.ts\n```\nexport const x = 1;\n```", files: ["src/x.ts"] });
     const res = await POST(post({ ref: "pr-ctx", prompt: "edit src/x.ts", answers: { tests: "all" }, repo: "acme/app" }));
