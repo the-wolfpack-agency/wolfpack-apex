@@ -240,7 +240,7 @@ export default function CodeFactoryPage() {
     } finally {
       setRunning(false);
     }
-  }, [ref, prompt, executorPin, repo, loadHistory]);
+  }, [ref, prompt, executorPin, loadHistory]);
 
   // Approve the captured handoff -> the approved write executes (opens the real
   // PR as the owner, re-gated + ledgered) and returns the PR url. This is the
