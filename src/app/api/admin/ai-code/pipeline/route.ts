@@ -26,6 +26,8 @@ import { liveRepairComplete } from "@/lib/ai-code/repair";
 import { runPipeline } from "@/lib/ai-code/pipeline";
 import { authorDiff, authorFileChanges } from "@/lib/ai-code/author";
 import { filesToDiff, type FileChange } from "@/lib/ai-code/file-changes";
+import { newFilesFromDiff } from "@/lib/ai-code/oracle";
+import { checkSyntax } from "@/lib/ai-code/syntax-check";
 import { remediateFileChanges } from "@/lib/ai-code/repair-files";
 import { buildRegistry, judgeCandidates } from "@/lib/ai/router";
 import { chooseIndependentJudge } from "@/lib/ai/judge-selection";
@@ -51,6 +53,14 @@ const SPEC_QUESTION_IDS = new Set(DEFAULT_SPEC_QUESTIONS.map((q) => q.id));
 
 /** Common executor evidence (both authoring modes carry these). */
 type ExecutorEvidence = { author: string; provider: string | null; costUsd: number | null; latencyMs: number | null; inputTokens: number | null; outputTokens: number | null; error: string | null };
+
+/** The new/changed files a resolved change carries: full-file changes when
+ *  present, else the new files reconstructed from the diff. Used for the syntax
+ *  gate and the retry-on-unparseable check. */
+function resolvedFiles(r: { diff: string; changes: FileChange[] | null }): { path: string; content: string }[] {
+  if (r.changes && r.changes.length > 0) return r.changes;
+  return Object.entries(newFilesFromDiff(r.diff)).map(([path, content]) => ({ path, content }));
+}
 
 /**
  * Resolve the change the pipeline will govern. Three sources, all feeding the
@@ -102,10 +112,15 @@ async function resolveChangeWithFallback(
   args: ResolveArgs,
 ): Promise<Awaited<ReturnType<typeof resolveChange>> & { executorAttempts: number }> {
   const emptyOrError = (r: Awaited<ReturnType<typeof resolveChange>>) => !r.diff.trim() || Boolean(r.executor?.error);
+  // A draft is bad if it is empty/errored OR does not PARSE. Diff-mode authoring
+  // can truncate a file (a wrong hunk line-count drops the closing brace), which
+  // produces code that will not compile - retry once on a stronger model rather
+  // than hand a human unparseable output. Found by dogfooding.
+  const badDraft = (r: Awaited<ReturnType<typeof resolveChange>>) => emptyOrError(r) || !checkSyntax(resolvedFiles(r)).ok;
   let resolved = await resolveChange(args);
   let attempts = 1;
   const manualDiff = args.diff.trim().length > 0;
-  if (!manualDiff && emptyOrError(resolved)) {
+  if (!manualDiff && badDraft(resolved)) {
     const retry = await resolveChange({ ...args, tier: "premium" });
     attempts++;
     resolved = retry; // the escalated attempt is the final draft (its evidence is what a human sees if it too failed)
@@ -353,8 +368,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // its bounded attempts. Diff mode is unaffected.
   const filesModeHandoffOk = mode !== "files" || filesRepairStatus === "clean";
 
+  // Syntax gate: the change must PARSE. The security gate scans for secrets /
+  // injection, not "does this compile", so a truncated/malformed draft could
+  // otherwise be marked ready. Code that does not parse can never hand off - it
+  // is needs_human, with the parse errors surfaced. (Found by dogfooding: a
+  // diff-truncated file missing its closing brace was marked allow / ready.)
+  const syntax = checkSyntax(resolvedFiles({ diff: run.diff, changes }));
+
   let approvalId: string | null = null;
-  if (run.status === "ready_for_pr" && !invariants.wouldBlock && !deepScan.blocking && filesModeHandoffOk) {
+  if (run.status === "ready_for_pr" && !invariants.wouldBlock && !deepScan.blocking && filesModeHandoffOk && syntax.ok) {
     // Provision the factory's own governed principal (active + revocable) and hand
     // the approval its REAL agent id, so the human-in-the-gate approval's
     // kill-switch re-check finds an active agent instead of auto-rejecting. A null
@@ -398,5 +420,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     repairAttempts: run.remediation.attempts.length,
   });
 
-  return NextResponse.json({ run, approvalId, executor, invariants, changeFacts, deepScan, mode, executorAttempts, repoContext: { files: repoContextFiles }, cost });
+  // A change that does not parse is never "ready_for_pr", whatever the gate said.
+  const effectiveRun = syntax.ok ? run : { ...run, status: "needs_human" as const };
+  return NextResponse.json({ run: effectiveRun, approvalId, executor, invariants, changeFacts, deepScan, syntax, mode, executorAttempts, repoContext: { files: repoContextFiles }, cost });
 }

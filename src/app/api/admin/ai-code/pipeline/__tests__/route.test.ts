@@ -41,6 +41,8 @@ jest.mock("@/lib/ai-code/repo-context", () => ({
 import { POST } from "../route";
 
 const AUTHORED_DIFF = "diff --git a/src/k.ts b/src/k.ts\n--- /dev/null\n+++ b/src/k.ts\n@@ -0,0 +1 @@\n+export const k = 1;";
+// A new file truncated before its closing brace - the exact dogfooding failure.
+const TRUNCATED_DIFF = "diff --git a/src/lib/slug.ts b/src/lib/slug.ts\n--- /dev/null\n+++ b/src/lib/slug.ts\n@@ -0,0 +1,2 @@\n+export function slugify(s: string): string {\n+  return s.toLowerCase();";
 const authorResp = (content: string) => ({ content, model_used: "azure-gpt-4o", provider_used: "azure-openai", input_tokens: 1, output_tokens: 1, cost_usd: 0.0001, latency_ms: 100 });
 
 const OK_USER = { ok: true, user: { id: "u1", role: "admin", workspaceId: "w1" } };
@@ -288,6 +290,18 @@ describe("POST /api/admin/ai-code/pipeline", () => {
     const res = await POST(post(VALID));
     expect(mockCreateApproval).not.toHaveBeenCalled();
     expect((await res.json()).approvalId).toBeNull();
+  });
+
+  it("SYNTAX GATE: a change that does not parse is needs_human with no approval, even if the gate allowed it", async () => {
+    // The security gate said allow (ready_for_pr), but the file is truncated
+    // before its closing brace - exactly the dogfooding failure. It must not hand off.
+    mockRunPipeline.mockResolvedValue({ ...RUN, status: "ready_for_pr", diff: TRUNCATED_DIFF });
+    const body = await (await POST(post(VALID))).json();
+    expect(body.syntax.ok).toBe(false);
+    expect(body.syntax.issues.length).toBeGreaterThan(0);
+    expect(body.run.status).toBe("needs_human"); // overridden, never a misleading "ready"
+    expect(body.approvalId).toBeNull();
+    expect(mockCreateApproval).not.toHaveBeenCalled();
   });
 });
 
