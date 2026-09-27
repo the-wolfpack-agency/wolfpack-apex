@@ -1,22 +1,28 @@
 /**
- * POST /api/admin/ai-code/ci-fix  { repo, ref, attempt?, maxAttempts? }
+ * POST /api/admin/ai-code/ci-fix  { repo, ref, branch?, attempt?, maxAttempts? }
  *
- * One step of the read-CI-and-fix-until-green loop for a factory PR: read the
- * PR's CI, decide the next action (merge_ready / wait / author_fix /
- * escalate_human), and when a fix is due, return the fix brief the executor
- * acts on. A poller / webhook calls this repeatedly until it returns merge_ready
- * or escalate_human. The DECISION is deterministic; authoring + committing the
- * fix (which edits existing files) is the workspace stage and is the caller's
- * job today.
+ * One step of the read-CI-and-fix-until-green loop for a factory PR.
  *
- * Read-only itself. Capability + secure_agent entitlement gated.
- * Returns: 200 { decision, ci, brief? } | 400 | 401/403
+ *  - Without `branch`: DECIDE only (merge_ready / wait / author_fix /
+ *    escalate_human) and, when a fix is due, return the brief. Legacy behavior.
+ *  - With `branch`: DRIVE it. On a red CI with budget left, re-author the fix and
+ *    COMMIT it to the PR branch (which re-triggers CI). A poller / webhook calls
+ *    this repeatedly until `terminal` is true (green or handed to a human).
+ *
+ * The decision is deterministic (ci-fix-loop); authoring + committing is the
+ * driver (ci-fix-driver). Capability + secure_agent entitlement gated.
+ * Returns: 200 { decision, ci, fix?, terminal?, brief? } | 400 | 401/403
  */
 import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { requireEntitlement } from "@/lib/tenancy/require-entitlement";
 import { fetchCiStatus } from "@/lib/ai-code/ci-status";
 import { decideFixAction, buildFixBrief } from "@/lib/ai-code/ci-fix-loop";
+import { runCiFixStep } from "@/lib/ai-code/ci-fix-driver";
+import { workspaceGithubClient } from "@/lib/github-client";
+import { commitFileChanges } from "@/lib/ai-code/file-changes";
+import { authorFileChanges } from "@/lib/ai-code/author";
+import { getAIClient } from "@/lib/ai";
 
 const MAX_ATTEMPTS_CEILING = 5;
 
@@ -26,7 +32,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const gate = await requireEntitlement(auth.user.workspaceId, "secure_agent");
   if (gate) return gate;
 
-  let b: { repo?: unknown; ref?: unknown; attempt?: unknown; maxAttempts?: unknown };
+  let b: { repo?: unknown; ref?: unknown; branch?: unknown; attempt?: unknown; maxAttempts?: unknown };
   try {
     b = (await req.json()) as typeof b;
   } catch {
@@ -34,17 +40,54 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
   const repo = typeof b.repo === "string" ? b.repo.trim() : "";
   const ref = typeof b.ref === "string" ? b.ref.trim() : "";
+  const branch = typeof b.branch === "string" ? b.branch.trim() : "";
   if (!repo || !ref) return NextResponse.json({ error: "repo and ref are required" }, { status: 400 });
+  if (!/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(repo)) {
+    return NextResponse.json({ error: "repo must be in owner/name form" }, { status: 400 });
+  }
 
+  const workspaceId = auth.user.workspaceId ?? undefined;
   const attempt = typeof b.attempt === "number" && Number.isFinite(b.attempt) ? Math.max(0, Math.floor(b.attempt)) : 0;
   const maxAttempts =
     typeof b.maxAttempts === "number" && Number.isFinite(b.maxAttempts)
       ? Math.max(1, Math.min(MAX_ATTEMPTS_CEILING, Math.floor(b.maxAttempts)))
       : 3;
 
-  const ci = await fetchCiStatus(repo, ref, auth.user.workspaceId ?? undefined);
-  const decision = decideFixAction({ ci, attempt, maxAttempts });
-  const brief = decision.action === "author_fix" ? buildFixBrief(ci.failedDetails) : undefined;
+  const ci = await fetchCiStatus(repo, ref, workspaceId);
 
-  return NextResponse.json({ decision, ci, ...(brief ? { brief } : {}) });
+  // Decide-only when there is no branch to commit a fix to.
+  if (!branch) {
+    const decision = decideFixAction({ ci, attempt, maxAttempts });
+    const brief = decision.action === "author_fix" ? buildFixBrief(ci.failedDetails) : undefined;
+    return NextResponse.json({ decision, ci, ...(brief ? { brief } : {}) });
+  }
+
+  // Drive it: author the fix and commit to the PR branch.
+  const ai = getAIClient();
+  const client = await workspaceGithubClient(workspaceId ?? "default");
+  if (!client.token) {
+    // Cannot commit without a token; fall back to a decision the caller can act on.
+    const decision = decideFixAction({ ci, attempt, maxAttempts });
+    return NextResponse.json({ decision, ci, terminal: decision.action !== "author_fix", note: "no GitHub token; decision only" });
+  }
+
+  const result = await runCiFixStep({
+    ci,
+    attempt,
+    maxAttempts,
+    reauthor: async (brief) => {
+      const prompt =
+        `The pull request on branch ${branch} of ${repo} is failing CI.\n\n${brief}\n\n` +
+        "Author the FULL file contents that fix the failing checks. Do not weaken or delete any test.";
+      const authored = await authorFileChanges(
+        { prompt, feature: "ai-code-ci-fix" },
+        { complete: (r) => ai.complete(r) },
+      );
+      return { changes: authored.changes, author: authored.author, error: authored.error };
+    },
+    commit: (changes) =>
+      commitFileChanges({ client, repoFullName: repo, branch, base: branch, changes, message: `factory ci-fix: ${ref}` }),
+  });
+
+  return NextResponse.json(result);
 }
