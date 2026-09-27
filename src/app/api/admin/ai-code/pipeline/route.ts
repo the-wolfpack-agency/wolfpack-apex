@@ -31,6 +31,8 @@ import { buildRegistry, judgeCandidates } from "@/lib/ai/router";
 import { chooseIndependentJudge } from "@/lib/ai/judge-selection";
 import { evaluateChangeInvariants } from "@/lib/ai-code/change-facts";
 import { deepScanChange } from "@/lib/ai-code/deep-scan";
+import { workspaceGithubClient } from "@/lib/github-client";
+import { buildRepoContext, withRepoContext } from "@/lib/ai-code/repo-context";
 import { getAIClient } from "@/lib/ai";
 import { DEFAULT_SPEC_QUESTIONS } from "@/lib/ai-code/intake";
 import { createPendingApproval } from "@/lib/agents/approvals/store";
@@ -154,7 +156,28 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const executorProviderPin =
     typeof b.executorProviderPin === "string" && b.executorProviderPin.trim() ? b.executorProviderPin.trim() : undefined;
   const mode: "diff" | "files" = b.mode === "files" ? "files" : "diff";
-  const resolved = await resolveChange({ mode, diff, prompt, authorModel, executorProviderPin });
+
+  // Repo-aware context: when a target repo is set, fetch the current contents of
+  // the files the prompt NAMES and prepend them so the executor MODIFIES existing
+  // code consistently instead of authoring blind. Best-effort: any failure falls
+  // back to prompt-only authoring (no regression). Skipped when a diff is supplied
+  // (that is governed as-is). Uses the `repo` already validated above.
+  let authorPrompt = prompt;
+  let repoContextFiles: string[] = [];
+  if (repo && !diff.trim()) {
+    try {
+      const ghClient = await workspaceGithubClient(workspaceId);
+      if (ghClient.token) {
+        const ctx = await buildRepoContext({ client: ghClient, repo, prompt });
+        authorPrompt = withRepoContext(prompt, ctx.block);
+        repoContextFiles = ctx.files;
+      }
+    } catch {
+      /* best-effort context; author from the prompt alone on any failure */
+    }
+  }
+
+  const resolved = await resolveChange({ mode, diff, prompt: authorPrompt, authorModel, executorProviderPin });
   const executor = resolved.executor;
   let effectiveDiff = resolved.diff;
   let effectiveAuthor = resolved.author;
@@ -267,6 +290,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     conforms: run.conformance.conforms,
     // Attribution for grading + per-model drift (src/lib/ai-code/grading.ts).
     model: effectiveAuthor,
+    repo_context_files: repoContextFiles.length,
     deep_scan_critical: deepScan.critical,
   });
 
@@ -304,5 +328,5 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     });
   }
 
-  return NextResponse.json({ run, approvalId, executor, invariants, changeFacts, deepScan, mode });
+  return NextResponse.json({ run, approvalId, executor, invariants, changeFacts, deepScan, mode, repoContext: { files: repoContextFiles } });
 }
