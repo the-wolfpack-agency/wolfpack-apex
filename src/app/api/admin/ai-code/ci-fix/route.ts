@@ -88,6 +88,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ decision, ci, terminal: decision.action !== "author_fix", note: "no GitHub token; decision only" });
   }
 
+  // Observability: what failure context the fixer actually gathered (so a "no fix"
+  // is diagnosable - did it see the error + files, or nothing?).
+  let contextSummary: { detailChars: number; files: string[] } | null = null;
   const result = await runCiFixStep({
     ci,
     attempt,
@@ -101,6 +104,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       // only a check name and produces nothing usable (found by dogfooding).
       const headSha = await getBranchHead(client, repo, branch).catch(() => branch);
       const context = await gatherFailureContext(client, repo, headSha, branch);
+      contextSummary = { detailChars: context.detail.length, files: context.files.map((f) => f.path) };
       const prompt = buildEnrichedFixPrompt({ repo, branch, brief, context });
       const authored = await authorFileChanges(
         { prompt, feature: "ai-code-ci-fix" },
@@ -119,5 +123,5 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       commitFileChanges({ client, repoFullName: repo, branch, base: branch, changes, message: `factory ci-fix: ${ref}` }),
   });
 
-  return NextResponse.json(result);
+  return NextResponse.json({ ...result, context: contextSummary });
 }
