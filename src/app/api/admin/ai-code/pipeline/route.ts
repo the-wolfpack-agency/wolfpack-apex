@@ -34,6 +34,7 @@ import { deepScanChange } from "@/lib/ai-code/deep-scan";
 import { buildRunCost } from "@/lib/ai-code/cost";
 import { workspaceGithubClient } from "@/lib/github-client";
 import { buildRepoContext, withRepoContext } from "@/lib/ai-code/repo-context";
+import { fetchRepoGrounding } from "@/lib/ai-code/repo-grounding";
 import { getAIClient } from "@/lib/ai";
 import type { AIModelTier } from "@/lib/ai/types";
 import { DEFAULT_SPEC_QUESTIONS } from "@/lib/ai-code/intake";
@@ -193,8 +194,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     try {
       const ghClient = await workspaceGithubClient(workspaceId);
       if (ghClient.token) {
-        const ctx = await buildRepoContext({ client: ghClient, repo, prompt });
-        authorPrompt = withRepoContext(prompt, ctx.block);
+        // Two layers of context: GROUNDING (the repo's real shape - framework,
+        // existing modules, test convention, installed deps) so the author never
+        // invents an import, plus the named-file context for edits. Both are
+        // best-effort and prepend to the author prompt.
+        const [grounding, ctx] = await Promise.all([
+          fetchRepoGrounding(ghClient, repo),
+          buildRepoContext({ client: ghClient, repo, prompt }),
+        ]);
+        const block = [grounding, ctx.block].filter(Boolean).join("\n\n---\n\n");
+        authorPrompt = withRepoContext(prompt, block);
         repoContextFiles = ctx.files;
       }
     } catch {

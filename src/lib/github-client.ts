@@ -188,6 +188,30 @@ export async function fetchRepoInfo(
   return { defaultBranch: r.default_branch, private: r.private };
 }
 
+/** Every file path in the repo tree at a ref (recursive). Best-effort: returns
+ *  [] on any error. Used to GROUND code generation in the repo's real layout so
+ *  the model reuses what exists instead of inventing imports. Resolves the
+ *  default branch when no ref is given. */
+export async function fetchRepoTree(
+  client: GithubClient,
+  repoFullName: string,
+  ref?: string,
+): Promise<string[]> {
+  try {
+    const branch = ref ?? (await gh<{ default_branch: string }>(client, "GET", `/repos/${repoFullName}`)).default_branch;
+    const r = await gh<{ tree?: { path?: string; type?: string }[] }>(
+      client,
+      "GET",
+      `/repos/${repoFullName}/git/trees/${encodeURIComponent(branch)}?recursive=1`,
+    );
+    return (r.tree ?? [])
+      .filter((t) => t.type === "blob" && typeof t.path === "string")
+      .map((t) => t.path as string);
+  } catch {
+    return [];
+  }
+}
+
 /** Current head SHA of a branch: the checkpoint a later revert restores to. */
 export async function getBranchHead(
   client: GithubClient,
