@@ -10,6 +10,8 @@ const mockGate = jest.fn();
 const mockListRuns = jest.fn();
 jest.mock("@/lib/auth/require-capability", () => ({ requireCapability: (...a: unknown[]) => mockRequireCapability(...a) }));
 jest.mock("@/lib/tenancy/require-entitlement", () => ({ requireEntitlement: (...a: unknown[]) => mockGate(...a) }));
+const mockProtections = jest.fn();
+jest.mock("@/lib/ai-code/protections", () => ({ listProtections: (...a: unknown[]) => mockProtections(...a) }));
 jest.mock("@/lib/ai-code/runs", () => ({
   listPipelineRuns: (...a: unknown[]) => mockListRuns(...a),
   toRunRecords: (runs: unknown[]) => runs, // identity: these are already record-shaped in the test
@@ -23,6 +25,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockRequireCapability.mockResolvedValue({ ok: true, user: { id: "u1", role: "admin", workspaceId: "w1" } });
   mockGate.mockResolvedValue(null);
+  mockProtections.mockResolvedValue({ totalCaught: 4, byClass: [{ klass: "logged_credential", label: "Secret written to a log", count: 4 }], changesBlocked: 1, sentForReview: 0, criticalsCaught: 2, windowDays: 30 });
 });
 
 it("401 when unauthenticated", async () => {
@@ -48,4 +51,6 @@ it("returns runs + grade + drift, workspace-scoped", async () => {
   expect(body.grade.blockRate).toBe(0.5);
   expect(Array.isArray(body.runs)).toBe(true);
   expect(Array.isArray(body.drift)).toBe(true);
+  expect(body.protected.totalCaught).toBe(4);
+  expect(body.protected.byClass[0].label).toMatch(/secret/i);
 });

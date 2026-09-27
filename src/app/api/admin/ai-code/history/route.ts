@@ -13,6 +13,7 @@ import { requireCapability } from "@/lib/auth/require-capability";
 import { requireEntitlement } from "@/lib/tenancy/require-entitlement";
 import { listPipelineRuns, toRunRecords } from "@/lib/ai-code/runs";
 import { gradeRuns, detectDrift } from "@/lib/ai-code/grading";
+import { listProtections } from "@/lib/ai-code/protections";
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const auth = await requireCapability(req, "settings.manage_team");
@@ -27,6 +28,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const records = toRunRecords(runs);
   const grade = gradeRuns(records);
   const drift = detectDrift(records);
+  const protected_ = await listProtections(auth.user.workspaceId, 30);
 
-  return NextResponse.json({ runs, grade, drift });
+  return NextResponse.json({ runs, grade, drift, protected: protected_ });
 }
