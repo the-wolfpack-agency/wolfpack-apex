@@ -37,6 +37,23 @@ describe("decideFixAction", () => {
   });
 });
 
+describe("decideFixAction, baseline-aware", () => {
+  const red = ci({ complete: true, ciComplete: false, failed: 1, failedChecks: ["e2e"] });
+  it("authors a fix when the change INTRODUCED failing checks (budget left)", () => {
+    const d = decideFixAction({ ci: red, attempt: 0, maxAttempts: 3, introducedFailing: 1 });
+    expect(d.action).toBe("author_fix");
+  });
+  it("does NOT author a fix when every failure is pre-existing (introduced = 0)", () => {
+    const d = decideFixAction({ ci: red, attempt: 0, maxAttempts: 3, introducedFailing: 0 });
+    expect(d.action).toBe("escalate_human");
+    expect(d.reason).toMatch(/already failing on the base branch|pre-existing/i);
+  });
+  it("without attribution (undefined) keeps the baseline-unaware behavior: fix any red", () => {
+    const d = decideFixAction({ ci: red, attempt: 0, maxAttempts: 3 });
+    expect(d.action).toBe("author_fix");
+  });
+});
+
 describe("buildFixBrief", () => {
   it("lists each failed check with its summary and forbids weakening tests", () => {
     const brief = buildFixBrief([

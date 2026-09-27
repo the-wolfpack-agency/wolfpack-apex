@@ -16,7 +16,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { requireEntitlement } from "@/lib/tenancy/require-entitlement";
-import { fetchCiStatus } from "@/lib/ai-code/ci-status";
+import { fetchCiStatus, fetchCiAttribution } from "@/lib/ai-code/ci-status";
 import { decideFixAction, buildFixBrief } from "@/lib/ai-code/ci-fix-loop";
 import { runCiFixStep } from "@/lib/ai-code/ci-fix-driver";
 import { workspaceGithubClient } from "@/lib/github-client";
@@ -33,7 +33,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const gate = await requireEntitlement(auth.user.workspaceId, "secure_agent");
   if (gate) return gate;
 
-  let b: { repo?: unknown; ref?: unknown; branch?: unknown; attempt?: unknown; maxAttempts?: unknown };
+  let b: { repo?: unknown; ref?: unknown; branch?: unknown; base?: unknown; attempt?: unknown; maxAttempts?: unknown };
   try {
     b = (await req.json()) as typeof b;
   } catch {
@@ -42,6 +42,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const repo = typeof b.repo === "string" ? b.repo.trim() : "";
   const ref = typeof b.ref === "string" ? b.ref.trim() : "";
   const branch = typeof b.branch === "string" ? b.branch.trim() : "";
+  const base = typeof b.base === "string" ? b.base.trim() : "";
   if (!repo || !ref) return NextResponse.json({ error: "repo and ref are required" }, { status: 400 });
   if (!/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(repo)) {
     return NextResponse.json({ error: "repo must be in owner/name form" }, { status: 400 });
@@ -56,11 +57,21 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const ci = await fetchCiStatus(repo, ref, workspaceId);
 
+  // Baseline attribution: when a base branch is named, only the failures this
+  // change INTRODUCED are the fixer's to repair. Pre-existing red is not touched
+  // (the fixer did not break it), and the fix brief targets only introduced
+  // checks. Without a base, the fixer stays baseline-unaware (fixes any red).
+  const attribution = base ? await fetchCiAttribution(repo, base, ref, workspaceId) : null;
+  const introducedFailing = attribution ? attribution.introduced.length : undefined;
+  const briefDetails = attribution
+    ? ci.failedDetails.filter((d) => attribution.introduced.includes(d.name))
+    : ci.failedDetails;
+
   // Decide-only when there is no branch to commit a fix to.
   if (!branch) {
-    const decision = decideFixAction({ ci, attempt, maxAttempts });
-    const brief = decision.action === "author_fix" ? buildFixBrief(ci.failedDetails) : undefined;
-    return NextResponse.json({ decision, ci, ...(brief ? { brief } : {}) });
+    const decision = decideFixAction({ ci, attempt, maxAttempts, introducedFailing });
+    const brief = decision.action === "author_fix" ? buildFixBrief(briefDetails) : undefined;
+    return NextResponse.json({ decision, ci, ...(attribution ? { attribution } : {}), ...(brief ? { brief } : {}) });
   }
 
   // Drive it: author the fix and commit to the PR branch.
@@ -68,7 +79,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const client = await workspaceGithubClient(workspaceId ?? "default");
   if (!client.token) {
     // Cannot commit without a token; fall back to a decision the caller can act on.
-    const decision = decideFixAction({ ci, attempt, maxAttempts });
+    const decision = decideFixAction({ ci, attempt, maxAttempts, introducedFailing });
     return NextResponse.json({ decision, ci, terminal: decision.action !== "author_fix", note: "no GitHub token; decision only" });
   }
 
@@ -76,6 +87,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     ci,
     attempt,
     maxAttempts,
+    introducedFailing,
+    briefDetails,
     reauthor: async (brief) => {
       const prompt =
         `The pull request on branch ${branch} of ${repo} is failing CI.\n\n${brief}\n\n` +

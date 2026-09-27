@@ -29,6 +29,14 @@ export async function runCiFixStep(args: {
   ci: CiSummary;
   attempt: number;
   maxAttempts: number;
+  /** Baseline attribution: how many failing checks the change INTRODUCED. When
+   *  zero, the fixer does not author (the red is pre-existing). Threaded to the
+   *  deterministic decision. */
+  introducedFailing?: number;
+  /** The failed-check details to brief the re-author with. Defaults to every
+   *  failing check; the route narrows this to only the INTRODUCED checks so the
+   *  fixer never tries to repair pre-existing red. */
+  briefDetails?: readonly { name: string; summary: string }[];
   /** Re-author a fix for the failing checks. Route to a DIFFERENT lineage than
    *  the original author for independence. Returns full-file changes. */
   reauthor: (brief: string) => Promise<{ changes: FileChange[]; author: string; error: string | null }>;
@@ -40,7 +48,7 @@ export async function runCiFixStep(args: {
    *  but the route always supplies the real combined gate. */
   gate?: (changes: FileChange[]) => Promise<{ cleared: boolean; blockedBy: string | null }>;
 }): Promise<CiFixStepResult> {
-  const decision = decideFixAction({ ci: args.ci, attempt: args.attempt, maxAttempts: args.maxAttempts });
+  const decision = decideFixAction({ ci: args.ci, attempt: args.attempt, maxAttempts: args.maxAttempts, introducedFailing: args.introducedFailing });
 
   // Only author_fix does work. merge_ready / escalate_human are terminal; wait is
   // non-terminal (poll again) but changes nothing.
@@ -52,7 +60,7 @@ export async function runCiFixStep(args: {
     };
   }
 
-  const brief = buildFixBrief(args.ci.failedDetails);
+  const brief = buildFixBrief(args.briefDetails ?? args.ci.failedDetails);
   const authored = await args.reauthor(brief);
   if (authored.error || authored.changes.length === 0) {
     return {
