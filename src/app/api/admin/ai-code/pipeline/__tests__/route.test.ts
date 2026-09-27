@@ -85,6 +85,19 @@ describe("POST /api/admin/ai-code/pipeline", () => {
     expect((await POST(post({ ...VALID, prompt: "" }))).status).toBe(400);
   });
 
+  it("400 on a malformed target repo (not owner/name)", async () => {
+    expect((await POST(post({ ...VALID, repo: "not a repo" }))).status).toBe(400);
+    expect((await POST(post({ ...VALID, repo: "../etc/passwd" }))).status).toBe(400);
+  });
+
+  it("passes a valid target repo through to the approval", async () => {
+    const res = await POST(post({ ...VALID, repo: "acme/app" }));
+    expect(res.status).toBe(200);
+    expect(mockCreateApproval).toHaveBeenCalledWith(expect.objectContaining({
+      params: expect.objectContaining({ repo: "acme/app" }),
+    }));
+  });
+
   it("authors the diff from the prompt when none is supplied (executor stage)", async () => {
     const res = await POST(post({ ref: "pr-2", prompt: "add k", answers: { tests: "all" }, executorProviderPin: "azure-openai" }));
     expect(res.status).toBe(200);

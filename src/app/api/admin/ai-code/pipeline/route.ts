@@ -111,6 +111,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const diff = typeof b.diff === "string" ? b.diff : "";
   if (!ref) return NextResponse.json({ error: "ref is required" }, { status: 400 });
   if (!prompt.trim()) return NextResponse.json({ error: "prompt is required" }, { status: 400 });
+  // Optional target repo. Validate the owner/repo shape up front so a malformed
+  // value is a clean 400, never a string interpolated into a GitHub API path.
+  // Absent -> the executor defaults to apex (self-hosting).
+  const repoRaw = typeof b.repo === "string" ? b.repo.trim() : "";
+  if (repoRaw && !/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(repoRaw)) {
+    return NextResponse.json({ error: "repo must be in owner/name form" }, { status: 400 });
+  }
+  const repo = repoRaw || undefined;
   // diff is OPTIONAL: when absent, the EXECUTOR stage authors it from the prompt
   // (input-to-output). A manually supplied diff is still governed as before. The
   // size ceiling is enforced ONCE, unconditionally, on the final diff below - it
@@ -194,8 +202,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // Full-power deep static scan: run the platform-scan detector engine (provider-
   // signature secrets, taint/SSRF/SQLi) on the authored files, not just the ai-code
   // subset. A critical finding withholds the handoff, same as an invariant block.
-  const repoForScan = typeof b.repo === "string" && b.repo.trim() ? b.repo.trim() : undefined;
-  const deepScan = await deepScanChange(run.diff, repoForScan);
+  const deepScan = await deepScanChange(run.diff, repo);
 
   await recordAudit({
     actor: { user_id: auth.user.id, role: auth.user.role },
@@ -254,7 +261,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         prompt,
         // Target repo for the PR; the executor defaults to apex (self-hosting)
         // when absent. Not user-secret; a human sees exactly what they approve.
-        repo: typeof b.repo === "string" && b.repo.trim() ? b.repo.trim() : undefined,
+        repo,
         spec_hash: run.spec.hash,
         conforms: run.conformance.conforms,
         // The gate ALLOWED this change, so it carries no secret to store; a human
