@@ -117,6 +117,10 @@ interface DriftFlag { model: string; priorReadyRate: number; recentReadyRate: nu
 interface ProtectionSummary { totalCaught: number; byClass: { klass: string; label: string; count: number }[]; changesBlocked: number; sentForReview: number; criticalsCaught: number; windowDays: number }
 interface HistoryData { runs: RunSummary[]; grade: Grade; drift: DriftFlag[]; protected?: ProtectionSummary }
 
+interface AuditVerification { ok: boolean; verifiedCount: number; legacyCount: number; brokenAtSeq: number | null; headSeq: number; headHash: string | null }
+interface AuditEntry { seq: number; created_at: string; principal_agent: string; intended_outcome: string; effective_outcome: string; would_block: boolean; rule_id: string; reason: string | null }
+interface AuditData { verification: AuditVerification; entries: AuditEntry[]; entryCount: number; generatedAtIso: string }
+
 type CiStatus = "pass" | "fail" | "pending" | "absent";
 interface CiCategory { key: string; label: string; status: CiStatus; passed: number; failed: number; pending: number; checks: string[] }
 interface CiDashboard { categories: CiCategory[]; overall: CiStatus; summary: { total: number; passed: number; failed: number; pending: number } }
@@ -232,6 +236,34 @@ export default function CodeFactoryPage() {
   const [error, setError] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
   const [history, setHistory] = useState<HistoryData | null>(null);
+  const [audit, setAudit] = useState<AuditData | null>(null);
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [auditError, setAuditError] = useState<string | null>(null);
+
+  const verifyAudit = useCallback(async () => {
+    setAuditLoading(true);
+    setAuditError(null);
+    try {
+      const res = await fetchWithRefresh("/api/admin/ai-code/audit?limit=200");
+      if (!res.ok) { setAuditError(`Could not read the audit ledger (HTTP ${res.status}).`); return; }
+      setAudit((await res.json()) as AuditData);
+    } catch {
+      setAuditError("Network error reading the audit ledger.");
+    } finally {
+      setAuditLoading(false);
+    }
+  }, []);
+
+  const downloadAudit = useCallback(() => {
+    if (!audit) return;
+    const blob = new Blob([JSON.stringify(audit, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `secure-agent-audit-${audit.generatedAtIso.slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [audit]);
   const [copied, setCopied] = useState(false);
 
   const copyDiff = useCallback(async (diff: string) => {
@@ -843,6 +875,44 @@ export default function CodeFactoryPage() {
           </div>
         </GlassPanel>
       )}
+
+      <GlassPanel title="Audit evidence" subtitle="Verifiable, not just visible - re-check the tamper-evident record of every gate decision">
+        <div style={{ display: "flex", gap: "0.6rem", flexWrap: "wrap", alignItems: "center", marginBottom: audit ? "0.85rem" : 0 }}>
+          <button type="button" data-testid="verify-audit" onClick={() => void verifyAudit()} disabled={auditLoading} style={btnStyle(auditLoading)}>
+            {auditLoading ? "Verifying…" : audit ? "Re-verify" : "Verify the audit chain"}
+          </button>
+          {audit && (
+            <button type="button" data-testid="download-audit" onClick={downloadAudit} style={{ background: "var(--wp-surface-2, #171a21)", border: "1px solid var(--wp-border, #2a2f3a)", borderRadius: 8, color: "var(--wp-text, #e6e9ef)", padding: "0.55rem 1rem", fontSize: "0.85rem", cursor: "pointer" }}>
+              Download evidence (JSON)
+            </button>
+          )}
+        </div>
+        {auditError && <p role="alert" style={{ color: "var(--wp-error, #ef4444)", fontSize: "0.85rem", margin: 0 }}>{auditError}</p>}
+        {audit && (
+          <div data-testid="audit-result">
+            <div style={{ display: "flex", alignItems: "center", gap: "0.7rem", padding: "0.7rem 0.9rem", borderRadius: 10, border: `1px solid ${audit.verification.ok ? "#30a46c" : "#ef4444"}`, background: `color-mix(in srgb, ${audit.verification.ok ? "#30a46c" : "#ef4444"} 12%, transparent)` }}>
+              <span aria-hidden style={{ width: 12, height: 12, borderRadius: "50%", background: audit.verification.ok ? "#30a46c" : "#ef4444", boxShadow: `0 0 9px 1px ${audit.verification.ok ? "#30a46c" : "#ef4444"}` }} />
+              <span data-testid="audit-verdict" style={{ fontWeight: 700, color: "var(--wp-text, #e6e9ef)" }}>
+                {audit.verification.ok
+                  ? `Tamper-evident chain verified - ${audit.verification.verifiedCount.toLocaleString()} decisions, unbroken`
+                  : `Chain broken at decision #${audit.verification.brokenAtSeq}`}
+              </span>
+            </div>
+            <p style={{ margin: "0.6rem 0 0.4rem", fontSize: "0.72rem", color: "var(--wp-text-dim)", lineHeight: 1.45 }}>
+              Each decision&rsquo;s hash was recomputed here from the prior decision&rsquo;s hash plus its stored payload. Any altered row breaks the chain. Download the full record to verify it yourself or hand it to an auditor.
+            </p>
+            <div data-testid="audit-entries" style={{ display: "grid", gap: "0.3rem", marginTop: "0.4rem" }}>
+              {audit.entries.slice(0, 8).map((e) => (
+                <div key={e.seq} style={{ display: "flex", alignItems: "center", gap: "0.6rem", flexWrap: "wrap", fontSize: "0.8rem", padding: "0.35rem 0.55rem", borderRadius: 6, background: "var(--wp-surface-2, #171a21)", border: "1px solid var(--wp-border, #2a2f3a)" }}>
+                  <span style={{ color: "var(--wp-text-dim)", fontVariantNumeric: "tabular-nums" }}>#{e.seq}</span>
+                  <span style={{ fontWeight: 600 }}>{e.rule_id}</span>
+                  <span style={{ marginLeft: "auto", color: e.effective_outcome === "block" ? "#ef4444" : e.effective_outcome === "escalate" ? "#f5a623" : "#30a46c" }}>{e.effective_outcome}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </GlassPanel>
     </div>
   );
 }
