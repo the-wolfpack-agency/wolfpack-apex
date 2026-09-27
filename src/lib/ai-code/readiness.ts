@@ -111,13 +111,17 @@ export function buildReadinessChecks(p: ReadinessProbes): ReadinessCheck[] {
   );
 
   // 5. Is the baseline green. A red baseline is disclosed up front so its red
-  //    is never mistaken for something the tool introduced.
+  //    is never mistaken for something the tool introduced. Critically, "no CI
+  //    ran" is NOT green: zero failures because nothing executed is unmeasured,
+  //    not verified-clean, and calling it green would be a false reassurance.
   checks.push(
     !p.repoReachable
       ? { id: "baseline-health", label: "Baseline health", status: "warn", detail: "Baseline could not be measured because the repository is unreachable." }
-      : p.baselineFailingCount === 0
-        ? { id: "baseline-health", label: "Baseline health", status: "pass", detail: "The base branch is green: a clean starting point." }
-        : { id: "baseline-health", label: "Baseline health", status: "warn", detail: `The base branch already has ${p.baselineFailingCount} failing check(s). These will appear on every pull request as PRE-EXISTING and are not caused by your changes.` },
+      : !p.ciPresent
+        ? { id: "baseline-health", label: "Baseline health", status: "warn", detail: "No CI has run on the base branch, so there is no baseline to compare against yet. It is not verified-clean, just unmeasured." }
+        : p.baselineFailingCount === 0
+          ? { id: "baseline-health", label: "Baseline health", status: "pass", detail: "The base branch is green: a measured, clean starting point." }
+          : { id: "baseline-health", label: "Baseline health", status: "warn", detail: `The base branch already has ${p.baselineFailingCount} failing check(s). These will appear on every pull request as PRE-EXISTING and are not caused by your changes.` },
   );
 
   return checks;
