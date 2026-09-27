@@ -122,7 +122,7 @@ interface CiDashboard { categories: CiCategory[]; overall: CiStatus; summary: { 
 
 const pct = (n: number): string => `${Math.round(n * 100)}%`;
 
-// Vehicle-dashboard instrument colours: a glowing light per checkpoint.
+// Vehicle-dashboard instrument colors: a glowing light per checkpoint.
 const CI_LIGHT: Record<CiStatus, { color: string; label: string }> = {
   pass: { color: "#30a46c", label: "Passed" },
   fail: { color: "#ef4444", label: "Failed" },
