@@ -18,6 +18,9 @@ export interface CiFixStepResult {
   ci: CiSummary;
   /** Present only when a fix was authored + committed this step. */
   fix?: { author: string; files: string[]; brief: string };
+  /** The gate verdict on the re-authored fix, when a gate was supplied. A blocked
+   *  fix is NEVER committed; it escalates to a human instead. */
+  gate?: { cleared: boolean; blockedBy: string | null };
   /** True when the caller should STOP polling (green, escalated, or unfixable). */
   terminal: boolean;
 }
@@ -31,6 +34,11 @@ export async function runCiFixStep(args: {
   reauthor: (brief: string) => Promise<{ changes: FileChange[]; author: string; error: string | null }>;
   /** Commit the authored files to the PR branch. Returns committed paths. */
   commit: (changes: FileChange[]) => Promise<string[]>;
+  /** Gate the re-authored fix BEFORE it is committed. A fix that does not clear
+   *  the gate (a secret, an injection, a critical finding) is never pushed to the
+   *  PR branch; it escalates to a human. Optional so the driver stays testable,
+   *  but the route always supplies the real combined gate. */
+  gate?: (changes: FileChange[]) => Promise<{ cleared: boolean; blockedBy: string | null }>;
 }): Promise<CiFixStepResult> {
   const decision = decideFixAction({ ci: args.ci, attempt: args.attempt, maxAttempts: args.maxAttempts });
 
@@ -54,8 +62,33 @@ export async function runCiFixStep(args: {
     };
   }
 
+  // Gate the fix BEFORE committing. An autonomous fixer must clear the SAME
+  // deterministic gate as the front door: a fix that introduces a secret,
+  // injection, or critical finding is never pushed to the PR branch. It escalates
+  // to a human instead. This is the "behind its gate" guarantee for the loop.
+  if (args.gate) {
+    const gate = await args.gate(authored.changes);
+    if (!gate.cleared) {
+      return {
+        decision: {
+          action: "escalate_human",
+          reason: `the re-authored fix did not pass the gate${gate.blockedBy ? ` (blocked by ${gate.blockedBy})` : ""}; it was NOT committed`,
+        },
+        ci: args.ci,
+        gate,
+        terminal: true,
+      };
+    }
+  }
+
   const files = await args.commit(authored.changes);
   // The commit pushes the branch, so CI re-runs; the next poll re-evaluates. Not
   // terminal: the caller polls again to see whether this fix turned CI green.
-  return { decision, ci: args.ci, fix: { author: authored.author, files, brief }, terminal: false };
+  return {
+    decision,
+    ci: args.ci,
+    fix: { author: authored.author, files, brief },
+    ...(args.gate ? { gate: { cleared: true, blockedBy: null } } : {}),
+    terminal: false,
+  };
 }

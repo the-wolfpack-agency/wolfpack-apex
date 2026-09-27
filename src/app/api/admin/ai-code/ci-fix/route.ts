@@ -20,7 +20,8 @@ import { fetchCiStatus } from "@/lib/ai-code/ci-status";
 import { decideFixAction, buildFixBrief } from "@/lib/ai-code/ci-fix-loop";
 import { runCiFixStep } from "@/lib/ai-code/ci-fix-driver";
 import { workspaceGithubClient } from "@/lib/github-client";
-import { commitFileChanges } from "@/lib/ai-code/file-changes";
+import { commitFileChanges, filesToDiff } from "@/lib/ai-code/file-changes";
+import { assessChange } from "@/lib/ai-code/assess";
 import { authorFileChanges } from "@/lib/ai-code/author";
 import { getAIClient } from "@/lib/ai";
 
@@ -84,6 +85,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         { complete: (r) => ai.complete(r) },
       );
       return { changes: authored.changes, author: authored.author, error: authored.error };
+    },
+    // The autonomous fix clears the SAME combined gate as the front door before it
+    // is committed. A fix carrying a secret / injection / critical finding is never
+    // pushed to the PR branch; the step escalates to a human.
+    gate: async (changes) => {
+      const a = await assessChange(filesToDiff(changes));
+      return { cleared: a.handoffAllowed, blockedBy: a.blockedBy };
     },
     commit: (changes) =>
       commitFileChanges({ client, repoFullName: repo, branch, base: branch, changes, message: `factory ci-fix: ${ref}` }),

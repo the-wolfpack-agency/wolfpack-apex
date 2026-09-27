@@ -51,3 +51,30 @@ test("re-author produces nothing usable -> escalate_human, terminal, no commit",
   expect(res.terminal).toBe(true);
   expect(commit).not.toHaveBeenCalled();
 });
+
+test("GATE blocks the re-authored fix -> escalate_human, terminal, NOT committed", async () => {
+  const reauthor = jest.fn().mockResolvedValue({ changes, author: "model-b", error: null });
+  const commit = jest.fn();
+  // The fix carries a critical finding (e.g. a hardcoded secret); the gate refuses it.
+  const gate = jest.fn().mockResolvedValue({ cleared: false, blockedBy: "security" });
+  const res = await runCiFixStep({ ci: red, attempt: 0, maxAttempts: 3, reauthor, commit, gate });
+  expect(gate).toHaveBeenCalledWith(changes);
+  expect(commit).not.toHaveBeenCalled(); // an ungated autonomous push is exactly what this prevents
+  expect(res.decision.action).toBe("escalate_human");
+  expect(res.decision.reason).toMatch(/gate/i);
+  expect(res.decision.reason).toMatch(/security/);
+  expect(res.gate).toEqual({ cleared: false, blockedBy: "security" });
+  expect(res.terminal).toBe(true);
+});
+
+test("GATE clears the re-authored fix -> commits it, non-terminal", async () => {
+  const reauthor = jest.fn().mockResolvedValue({ changes, author: "model-b", error: null });
+  const commit = jest.fn().mockResolvedValue(["src/x.ts"]);
+  const gate = jest.fn().mockResolvedValue({ cleared: true, blockedBy: null });
+  const res = await runCiFixStep({ ci: red, attempt: 0, maxAttempts: 3, reauthor, commit, gate });
+  expect(gate).toHaveBeenCalledWith(changes);
+  expect(commit).toHaveBeenCalledWith(changes);
+  expect(res.fix).toMatchObject({ author: "model-b", files: ["src/x.ts"] });
+  expect(res.gate).toEqual({ cleared: true, blockedBy: null });
+  expect(res.terminal).toBe(false);
+});
