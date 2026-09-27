@@ -69,7 +69,7 @@ describe("getSiteAnalyticsSummary", () => {
       .mockResolvedValueOnce({ rows: [{ country: "US", count: "35" }] }) // byCountry
       .mockResolvedValueOnce({ rows: [{ event_type: "site.page_viewed", count: "42" }] }) // byType
       .mockResolvedValueOnce({ rows: [{ page_views: "42", total: "55" }] }) // totals
-      .mockResolvedValueOnce({ rows: [{ welcomed: "3", flagged: "5", trapped: "2", blocked: "1" }] }) // forcefield counts
+      .mockResolvedValueOnce({ rows: [{ welcomed: "3", flagged: "5", trapped: "2", blocked: "1", hostile_operators: "2", hostile_events: "4" }] }) // forcefield counts
       .mockResolvedValueOnce({ rows: [{ agent: "GPTBot", count: "3" }] }) // forcefield top agents
       .mockResolvedValueOnce({ rows: [ // journey rows (correlated agent events)
         { event_type: "site.agent_trap_tripped", path: "/_ff/x", created_at: "2026-09-18T10:00:00Z", sig: "fp1", nonce: null, agent: null },
@@ -104,7 +104,7 @@ describe("getSiteAnalyticsSummary", () => {
     expect(summary.surfaces).toEqual(["ogiam.com", "instinct"]);
     expect(summary.surface).toBe("all");
     expect(summary.forcefield).toEqual({
-      welcomed: 3, flagged: 5, trapped: 2, blocked: 1, topAgents: [{ agent: "GPTBot", count: 3 }],
+      welcomed: 3, flagged: 5, trapped: 2, blocked: 1, hostileOperators: 2, hostileEvents: 4, topAgents: [{ agent: "GPTBot", count: 3 }],
     });
     expect(summary.learnedSignatures).toEqual({ shadow: 2, enforcing: 1, autoBlocked: 3 });
     // The two correlated events (same fingerprint) fuse into one classified journey.
