@@ -39,7 +39,10 @@ export interface OpenPrParams {
 export type WriteCtx = { userId: string; userRole: string; workspaceId?: string; agentId?: string };
 export type OpenPrOutcome =
   | { ok: true; url: string; number: number; branch: string; files: number }
-  | { ok: false; reason: string };
+  // On a failure AFTER the branch was pushed, we still hand back the branch + a
+  // one-click compare link so the pushed work is never lost and a human can open
+  // the PR themselves (e.g. when the token lacks pull_requests: write).
+  | { ok: false; reason: string; branch?: string; files?: number; compareUrl?: string };
 
 const DEFAULT_REPO = process.env.FACTORY_TARGET_REPO || "the-wolfpack-agency/wolfpack-apex";
 
@@ -127,9 +130,28 @@ export async function executeOpenPr(params: OpenPrParams, ctx: WriteCtx): Promis
       "",
       "This change passed the deterministic security gate + engineering invariants and a human approved the handoff. A human still reviews and merges this PR; the factory never merges.",
     ].join("\n");
-    const pr = await openPullRequest(client, repo, branch, base, title, body);
-    await recordOutcome(true, "ok", pr.html_url);
-    return { ok: true, url: pr.html_url, number: pr.number, branch, files: committed.length };
+    try {
+      const pr = await openPullRequest(client, repo, branch, base, title, body);
+      await recordOutcome(true, "ok", pr.html_url);
+      return { ok: true, url: pr.html_url, number: pr.number, branch, files: committed.length };
+    } catch (prErr) {
+      // The branch + commit LANDED, but opening the PR failed - most commonly a
+      // token without `pull_requests: write` on the repo (a 403). Do not lose the
+      // pushed work: hand back a one-click compare link so a human can open the PR,
+      // plus an actionable reason (install the App / grant the scope). Minimum
+      // client effort, and the generated code is safe on the branch either way.
+      const msg = (prErr as Error).message;
+      // Branch + base are already safe path segments (sanitizeRef limits the ref
+      // to [A-Za-z0-9._-]); do NOT encode the "/" in "factory/..." or the compare
+      // link breaks.
+      const compareUrl = `https://github.com/${repo}/compare/${base}...${branch}?expand=1`;
+      const permission = /403|not accessible|pull_requests|forbidden/i.test(msg);
+      const reason = permission
+        ? `The change was pushed to branch "${branch}", but this GitHub token cannot open pull requests on ${repo}. Install the Instinct GitHub App (or grant the token Pull requests: write), then open the PR from the compare link.`
+        : `The change was pushed to branch "${branch}", but opening the pull request failed: ${msg}`;
+      await recordOutcome(false, permission ? "pr_permission" : "pr_open_error", `${reason} | ${compareUrl}`);
+      return { ok: false, reason, branch, files: committed.length, compareUrl };
+    }
   } catch (err) {
     // Never throw from an approved-write executor: a recorded ok:false is the
     // audited outcome; a throw would lose the reason.

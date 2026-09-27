@@ -124,8 +124,10 @@ interface AuditData { verification: AuditVerification; entries: AuditEntry[]; en
 
 const pct = (n: number): string => `${Math.round(n * 100)}%`;
 
-/** Count files + added/removed lines in a unified diff, for the header summary. */
-function diffStats(diff: string): { files: number; added: number; removed: number } {
+/** Count files, changed lines, and the total line count of a unified diff, for
+ *  the header summary. `lines` is the net line count of the change (added minus
+ *  removed) so it reads as "how many lines of code this produces". */
+function diffStats(diff: string): { files: number; added: number; removed: number; lines: number } {
   const lines = diff.split("\n");
   const gitFiles = lines.filter((l) => l.startsWith("diff --git")).length;
   const plusFiles = lines.filter((l) => l.startsWith("+++ ")).length;
@@ -135,7 +137,7 @@ function diffStats(diff: string): { files: number; added: number; removed: numbe
     if (l.startsWith("+") && !l.startsWith("+++")) added++;
     else if (l.startsWith("-") && !l.startsWith("---")) removed++;
   }
-  return { files, added, removed };
+  return { files, added, removed, lines: added - removed };
 }
 
 /** Color one diff line by its role: added, removed, hunk header, file header. */
@@ -216,6 +218,9 @@ export default function CodeFactoryPage() {
   const [approving, setApproving] = useState(false);
   const [approveConsent, setApproveConsent] = useState(false);
   const [approveError, setApproveError] = useState<string | null>(null);
+  // Set when the branch was pushed but the PR could not be opened (e.g. token
+  // without pull_requests: write): a one-click link to open the PR manually.
+  const [compareUrl, setCompareUrl] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
@@ -389,13 +394,14 @@ export default function CodeFactoryPage() {
     if (!approvalId) return;
     setApproving(true);
     setApproveError(null);
+    setCompareUrl(null);
     try {
       const res = await fetchWithRefresh(`/api/admin/agents/approvals/${approvalId}`, {
         method: "POST",
         headers: jsonHeaders(),
         body: JSON.stringify({ action: "approve" }),
       });
-      const body = (await res.json()) as { ok?: boolean; outcome?: { ok?: boolean; url?: string; reason?: string; branch?: string }; error?: string };
+      const body = (await res.json()) as { ok?: boolean; outcome?: { ok?: boolean; url?: string; reason?: string; branch?: string; compareUrl?: string }; error?: string };
       if (res.ok && body.outcome?.ok && body.outcome.url) {
         setPrUrl(body.outcome.url);
         // Tie the pipeline to the work: the PR is open, so show its build + deploy
@@ -406,6 +412,9 @@ export default function CodeFactoryPage() {
         }
       } else {
         setApproveError(body.outcome?.reason || body.error || "Approval did not open a PR.");
+        // The branch may still have been pushed (a PR-permission failure): offer a
+        // one-click compare link so the pushed work is never lost.
+        if (body.outcome?.compareUrl) setCompareUrl(body.outcome.compareUrl);
       }
     } catch {
       setApproveError("Network error - the approval did not run.");
@@ -653,6 +662,7 @@ export default function CodeFactoryPage() {
                 <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", marginBottom: "0.6rem", flexWrap: "wrap" }}>
                   <span data-testid="generated-code-stats" style={{ display: "inline-flex", alignItems: "center", gap: "0.6rem", fontSize: "0.82rem" }}>
                     <span style={{ color: "var(--wp-text-dim)" }}>{stats.files} file{stats.files === 1 ? "" : "s"}</span>
+                    <span data-testid="generated-code-linecount" style={{ color: "var(--wp-text-dim)" }}>{stats.lines} line{Math.abs(stats.lines) === 1 ? "" : "s"}</span>
                     <span style={{ color: "#3fb950", fontWeight: 600 }}>+{stats.added}</span>
                     <span style={{ color: "#f85149", fontWeight: 600 }}>&minus;{stats.removed}</span>
                   </span>
@@ -738,6 +748,13 @@ export default function CodeFactoryPage() {
                   {approveError && (
                     <p role="alert" style={{ margin: "0.5rem 0 0", color: "var(--wp-error, #ef4444)", fontSize: "0.85rem" }}>
                       {approveError}
+                    </p>
+                  )}
+                  {compareUrl && (
+                    <p style={{ margin: "0.4rem 0 0", fontSize: "0.85rem" }}>
+                      <a data-testid="compare-link" href={compareUrl} target="_blank" rel="noreferrer" style={{ color: "var(--wp-gold, #e8b528)" }}>
+                        Open the pull request on GitHub &rarr;
+                      </a>
                     </p>
                   )}
                 </div>

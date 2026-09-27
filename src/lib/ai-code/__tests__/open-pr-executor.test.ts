@@ -122,6 +122,25 @@ test("never throws: a GitHub error becomes a recorded ok:false", async () => {
   if (!out.ok) expect(out.reason).toMatch(/422/);
 });
 
+test("a PR-permission 403 does NOT lose the pushed work: returns a compare link + actionable reason", async () => {
+  // The branch commit succeeded; only opening the PR 403'd (token without
+  // pull_requests: write) - the exact failure seen live on cayenne-e4.
+  openPullRequest.mockRejectedValue(new Error("github POST /repos/o/r/pulls → 403: Resource not accessible by personal access token"));
+  const out = await executeOpenPr({ ref: "x", diff: NEW_FILE_DIFF, repo: "o/r" }, ctx);
+  expect(out.ok).toBe(false);
+  if (!out.ok) {
+    // The commit still happened, so the branch + a one-click compare link come back.
+    expect(out.branch).toMatch(/^factory\//);
+    expect(out.compareUrl).toContain("https://github.com/o/r/compare/");
+    expect(out.compareUrl).toContain(out.branch!);
+    // Actionable, not a raw API error: name the fix (App / scope).
+    expect(out.reason).toMatch(/GitHub App|Pull requests: write/i);
+    expect(out.reason).toMatch(/pushed to branch/i);
+  }
+  // The outcome is recorded on the ledger with the permission code.
+  expect(recordActionOutcome).toHaveBeenCalledWith(expect.objectContaining({ ok: false, code: "pr_permission" }));
+});
+
 test("commits full-file CHANGES (edit-support), including a modified existing file", async () => {
   const out = await executeOpenPr(
     {
