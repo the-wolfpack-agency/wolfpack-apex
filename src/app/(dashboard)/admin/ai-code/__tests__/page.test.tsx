@@ -249,6 +249,27 @@ test("clarifier: changing an answer and re-running sends the confirmed answers",
   expect(body.answers).toEqual({ tests: "all" });
 });
 
+test("clarifier: a FRESH submit clears prior answers so every question re-opens (regression: the tests section stopped reappearing)", async () => {
+  pipelineResp = resp(200, runResp({ outcome: "allow", openQuestions: OPEN_Q }));
+  render(<CodeFactoryPage />);
+  // First run: answer the tests question and re-run with it.
+  await submitPrompt();
+  await waitFor(() => expect(screen.getByTestId("clarifier-tests")).toBeInTheDocument());
+  fireEvent.change(screen.getByTestId("clarifier-tests"), { target: { value: "all" } });
+  await act(async () => { fireEvent.click(screen.getByTestId("clarifier-rerun")); });
+
+  // Now a FRESH submission (the main Generate button), as if adding more code.
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: /generate & gate/i })); });
+
+  // The fresh run must NOT carry the stale answer - it sends answers=undefined so
+  // the clarifier re-opens the tests question against the new prompt.
+  const pipelineCalls = mockFetch.mock.calls.filter((c) => c[0] === "/api/admin/ai-code/pipeline");
+  const lastBody = JSON.parse((pipelineCalls[pipelineCalls.length - 1][1] as { body: string }).body);
+  expect(lastBody.answers).toBeUndefined();
+  // And the clarifier is still on screen (the section did not vanish).
+  await waitFor(() => expect(screen.getByTestId("clarifier-tests")).toBeInTheDocument());
+});
+
 test("run history panel shows grade, drift, and recent runs when history has data", async () => {
   historyResp = resp(200, {
     runs: [

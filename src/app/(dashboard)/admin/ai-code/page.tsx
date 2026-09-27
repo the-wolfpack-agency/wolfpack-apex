@@ -307,11 +307,19 @@ export default function CodeFactoryPage() {
     void loadHistory();
   }, [loadHistory]);
 
-  const generate = useCallback(async () => {
+  const generate = useCallback(async (opts?: { keepAnswers?: boolean }) => {
     if (!prompt.trim()) {
       setError("Describe the change you want the factory to build.");
       return;
     }
+    // A fresh submission re-evaluates the clarifier from scratch, so every
+    // question (e.g. "add tests?") re-opens. Only the clarifier's own "re-run with
+    // these answers" keeps the accumulated answers. Without this, once a question
+    // was answered its answer stuck forever and the section never came back on the
+    // next prompt.
+    const keepAnswers = opts?.keepAnswers === true;
+    const answersToSend = keepAnswers ? answers : {};
+    if (!keepAnswers) setAnswers({});
     setRunning(true);
     setError(null);
     setRun(null);
@@ -334,8 +342,9 @@ export default function CodeFactoryPage() {
           repo: repo.trim() || undefined,
           prompt: prompt.trim(),
           executorProviderPin: executorPin.trim() || undefined,
-          // Confirmed/changed assumptions from the clarifier (empty on first run).
-          answers: Object.keys(answers).length > 0 ? answers : undefined,
+          // Confirmed/changed assumptions from the clarifier (empty on a fresh run,
+          // so the clarifier re-opens every question against the new prompt).
+          answers: Object.keys(answersToSend).length > 0 ? answersToSend : undefined,
         }),
       });
       const body = (await res.json()) as PipelineResponse;
@@ -601,7 +610,7 @@ export default function CodeFactoryPage() {
                   );
                 })}
                 <div>
-                  <button type="button" data-testid="clarifier-rerun" onClick={() => void generate()} disabled={running} style={btnStyle(running)}>
+                  <button type="button" data-testid="clarifier-rerun" onClick={() => void generate({ keepAnswers: true })} disabled={running} style={btnStyle(running)}>
                     {running ? "Re-running…" : "Re-run with these answers"}
                   </button>
                 </div>
