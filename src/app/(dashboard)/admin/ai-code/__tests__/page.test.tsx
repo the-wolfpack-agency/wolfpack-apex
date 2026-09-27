@@ -191,6 +191,7 @@ test("approve & open PR: clicking approve opens the real PR and shows the link",
   render(<CodeFactoryPage />);
   await submitPrompt();
   await waitFor(() => expect(screen.getByTestId("approve-open-pr")).toBeInTheDocument());
+  fireEvent.click(screen.getByTestId("approve-consent")); // human-in-the-gate consent
   await act(async () => { fireEvent.click(screen.getByTestId("approve-open-pr")); });
   await waitFor(() => expect(screen.getByTestId("pr-link")).toHaveAttribute("href", "https://github.com/o/r/pull/42"));
   // it approved the captured approval id
@@ -202,6 +203,7 @@ test("approve failure surfaces the reason, no PR link", async () => {
   render(<CodeFactoryPage />);
   await submitPrompt();
   await waitFor(() => expect(screen.getByTestId("approve-open-pr")).toBeInTheDocument());
+  fireEvent.click(screen.getByTestId("approve-consent")); // human-in-the-gate consent
   await act(async () => { fireEvent.click(screen.getByTestId("approve-open-pr")); });
   await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/no GitHub token/));
   expect(screen.queryByTestId("pr-link")).not.toBeInTheDocument();
@@ -314,4 +316,18 @@ test("protected panel shows what the gate caught, by class, from mount", async (
   const byClass = screen.getByTestId("protected-by-class");
   expect(byClass).toHaveTextContent("Secret written to a log");
   expect(byClass).toHaveTextContent("SQL injection");
+});
+
+test("human-in-the-gate: the approve button is disabled until consent is given, and nothing touches GitHub before then", async () => {
+  pipelineResp = resp(200, runResp({ outcome: "allow" }));
+  render(<CodeFactoryPage />);
+  await submitPrompt();
+  await waitFor(() => expect(screen.getByTestId("approve-open-pr")).toBeInTheDocument());
+  // gated: disabled before consent, and clicking it does not call the approval endpoint
+  expect(screen.getByTestId("approve-open-pr")).toBeDisabled();
+  await act(async () => { fireEvent.click(screen.getByTestId("approve-open-pr")); });
+  expect(approvalCall()).toBeUndefined(); // no GitHub-touching call yet
+  // consent enables it
+  fireEvent.click(screen.getByTestId("approve-consent"));
+  expect(screen.getByTestId("approve-open-pr")).not.toBeDisabled();
 });

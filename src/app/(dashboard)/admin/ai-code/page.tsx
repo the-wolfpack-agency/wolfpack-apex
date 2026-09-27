@@ -227,6 +227,7 @@ export default function CodeFactoryPage() {
   const [cost, setCost] = useState<RunCost | null>(null);
   const [prUrl, setPrUrl] = useState<string | null>(null);
   const [approving, setApproving] = useState(false);
+  const [approveConsent, setApproveConsent] = useState(false);
   const [approveError, setApproveError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -305,6 +306,7 @@ export default function CodeFactoryPage() {
     setCost(null);
     setPrUrl(null);
     setApproveError(null);
+    setApproveConsent(false);
     try {
       const res = await fetchWithRefresh("/api/admin/ai-code/pipeline", {
         method: "POST",
@@ -704,11 +706,26 @@ export default function CodeFactoryPage() {
                     : `Withheld from PR handoff: ${invariants?.wouldBlock ? invariants.ruleId : deepScan?.blocking ? "critical security finding" : "needs human"}.`}
               </p>
 
-              {/* The human-in-the-loop step: approve to open the real PR, then link it. */}
+              {/* The human-in-the-gate step: an explicit, logged consent must be
+                  given before anything touches the user's GitHub. The button that
+                  acts on their repo stays disabled until the box is checked. */}
               {approvalId && !prUrl && (
-                <div style={{ marginTop: "0.75rem" }}>
-                  <button type="button" onClick={() => void approve()} disabled={approving} style={btnStyle(approving)} data-testid="approve-open-pr">
-                    {approving ? "Opening PR…" : "Approve & open PR"}
+                <div style={{ marginTop: "0.85rem", display: "grid", gap: "0.6rem" }}>
+                  <label style={{ display: "flex", gap: "0.55rem", alignItems: "flex-start", fontSize: "0.85rem", color: "var(--wp-text, #e6e9ef)", cursor: "pointer", lineHeight: 1.45 }}>
+                    <input
+                      type="checkbox"
+                      data-testid="approve-consent"
+                      checked={approveConsent}
+                      onChange={(e) => setApproveConsent(e.target.checked)}
+                      style={{ marginTop: "0.15rem", flexShrink: 0 }}
+                    />
+                    <span>
+                      I have reviewed the generated code and the gate results, and I authorize opening a pull request on{" "}
+                      <strong>{repo.trim() || "the-wolfpack-agency/wolfpack-apex"}</strong>. The factory opens the PR; it never merges.
+                    </span>
+                  </label>
+                  <button type="button" onClick={() => void approve()} disabled={approving || !approveConsent} style={btnStyle(approving || !approveConsent)} data-testid="approve-open-pr">
+                    {approving ? "Opening PR…" : "Approve & open PR on GitHub"}
                   </button>
                   {approveError && (
                     <p role="alert" style={{ margin: "0.5rem 0 0", color: "var(--wp-error, #ef4444)", fontSize: "0.85rem" }}>
