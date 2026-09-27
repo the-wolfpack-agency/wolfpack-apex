@@ -169,6 +169,25 @@ export async function createBranch(
   }
 }
 
+export interface RepoInfo {
+  defaultBranch: string;
+  private: boolean;
+}
+
+/** Read a repo's metadata (default branch, visibility). Doubles as a
+ *  reachability probe: throws if the token cannot see the repo. */
+export async function fetchRepoInfo(
+  client: GithubClient,
+  repoFullName: string,
+): Promise<RepoInfo> {
+  const r = await gh<{ default_branch: string; private: boolean }>(
+    client,
+    "GET",
+    `/repos/${repoFullName}`,
+  );
+  return { defaultBranch: r.default_branch, private: r.private };
+}
+
 /** Current head SHA of a branch: the checkpoint a later revert restores to. */
 export async function getBranchHead(
   client: GithubClient,
