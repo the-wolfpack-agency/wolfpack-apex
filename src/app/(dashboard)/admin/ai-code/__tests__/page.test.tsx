@@ -25,7 +25,7 @@ const FINDING = {
 };
 const EXECUTOR = { diff: "diff --git a/lib/x.ts b/lib/x.ts", author: "gpt-4o-mini", provider: "azure-openai", costUsd: 0.0003, latencyMs: 800, error: null };
 
-function runResp(over: Partial<{ outcome: string; status: string; findings: unknown[]; judgments?: unknown[]; invariants: unknown; deepScan: unknown; approvalId: string | null }> = {}) {
+function runResp(over: Partial<{ outcome: string; status: string; findings: unknown[]; judgments?: unknown[]; invariants: unknown; deepScan: unknown; approvalId: string | null; openQuestions: unknown[] }> = {}) {
   const outcome = over.outcome ?? "allow";
   return {
     run: {
@@ -39,7 +39,7 @@ function runResp(over: Partial<{ outcome: string; status: string; findings: unkn
       },
       remediation: { status: "clean", attempts: [], repairerLineage: null, reason: "ok" },
       conformance: { conforms: true, findings: [] },
-      openQuestions: [],
+      openQuestions: over.openQuestions ?? [],
     },
     approvalId: over.approvalId !== undefined ? over.approvalId : outcome === "allow" ? "appr-1" : null,
     executor: EXECUTOR,
@@ -188,4 +188,30 @@ test("example chips populate the prompt (showing what the factory can do)", asyn
   expect((screen.getByLabelText("Prompt") as HTMLTextAreaElement).value).toMatch(/slugify/i);
   // the negative-demo chip is present, framed as showing the gate block
   expect(screen.getByRole("button", { name: /watch the gate block it/i })).toBeInTheDocument();
+});
+
+const OPEN_Q = [
+  { id: "tests", prompt: "Testing depth?", options: [{ id: "unit", label: "Unit only" }, { id: "all", label: "Unit, contract and e2e" }], default: "unit" },
+];
+
+test("clarifier: open questions render as multiple-choice with the assumed default preselected", async () => {
+  mockFetch.mockResolvedValue(resp(200, runResp({ outcome: "allow", openQuestions: OPEN_Q })));
+  render(<CodeFactoryPage />);
+  await submitPrompt();
+  await waitFor(() => expect(screen.getByTestId("clarifier")).toBeInTheDocument());
+  const sel = screen.getByTestId("clarifier-tests") as HTMLSelectElement;
+  expect(sel.value).toBe("unit"); // the assumed default
+  expect(screen.getByText(/Assumed: Unit only/)).toBeInTheDocument();
+});
+
+test("clarifier: changing an answer and re-running sends the confirmed answers", async () => {
+  mockFetch.mockResolvedValue(resp(200, runResp({ outcome: "allow", openQuestions: OPEN_Q })));
+  render(<CodeFactoryPage />);
+  await submitPrompt();
+  await waitFor(() => expect(screen.getByTestId("clarifier-tests")).toBeInTheDocument());
+  fireEvent.change(screen.getByTestId("clarifier-tests"), { target: { value: "all" } });
+  await act(async () => { fireEvent.click(screen.getByTestId("clarifier-rerun")); });
+  const lastCall = mockFetch.mock.calls[mockFetch.mock.calls.length - 1];
+  const body = JSON.parse((lastCall[1] as { body: string }).body);
+  expect(body.answers).toEqual({ tests: "all" });
 });

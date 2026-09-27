@@ -52,6 +52,12 @@ interface Executor {
   latencyMs: number | null;
   error: string | null;
 }
+interface SpecQuestion {
+  id: string;
+  prompt: string;
+  options: { id: string; label: string }[];
+  default: string;
+}
 interface PipelineRun {
   ref: string;
   status: "ready_for_pr" | "needs_human";
@@ -59,7 +65,8 @@ interface PipelineRun {
   review: CodeReview;
   remediation: { status: string; attempts: unknown[]; repairerLineage: string | null; reason: string };
   conformance: { conforms: boolean; findings: unknown[] };
-  openQuestions: unknown[];
+  spec?: { answers?: Record<string, string> };
+  openQuestions: SpecQuestion[];
 }
 interface InvariantDecision {
   ruleId: string;
@@ -140,6 +147,7 @@ export default function CodeFactoryPage() {
   const [ref, setRef] = useState("");
   const [prompt, setPrompt] = useState("");
   const [executorPin, setExecutorPin] = useState("");
+  const [answers, setAnswers] = useState<Record<string, string>>({});
   const [run, setRun] = useState<PipelineRun | null>(null);
   const [executor, setExecutor] = useState<Executor | null>(null);
   const [approvalId, setApprovalId] = useState<string | null>(null);
@@ -183,6 +191,8 @@ export default function CodeFactoryPage() {
           ref: ref.trim() || "factory",
           prompt: prompt.trim(),
           executorProviderPin: executorPin.trim() || undefined,
+          // Confirmed/changed assumptions from the clarifier (empty on first run).
+          answers: Object.keys(answers).length > 0 ? answers : undefined,
         }),
       });
       const body = (await res.json()) as PipelineResponse;
@@ -201,12 +211,22 @@ export default function CodeFactoryPage() {
       setApprovalId(body.approvalId ?? null);
       setInvariants(body.invariants ?? null);
       setDeepScan(body.deepScan ?? null);
+      // Seed the clarifier with each open question's assumed default so re-running
+      // sends them explicitly (confirming the assumption resolves it).
+      const oq = body.run.openQuestions ?? [];
+      if (oq.length > 0) {
+        setAnswers((prev) => {
+          const next = { ...prev };
+          for (const q of oq) if (!(q.id in next)) next[q.id] = q.default;
+          return next;
+        });
+      }
     } catch {
       setError("Network error - the factory did not run.");
     } finally {
       setRunning(false);
     }
-  }, [ref, prompt, executorPin]);
+  }, [ref, prompt, executorPin, answers]);
 
   // Approve the captured handoff -> the approved write executes (opens the real
   // PR as the owner, re-gated + ledgered) and returns the PR url. This is the
@@ -331,6 +351,39 @@ export default function CodeFactoryPage() {
 
       {run && v && (
         <>
+          {run.openQuestions.length > 0 && (
+            <GlassPanel title="Confirm the factory's assumptions" subtitle="It proceeded on these defaults so nothing blocked. Change any and re-run.">
+              <div data-testid="clarifier" style={{ display: "grid", gap: "0.75rem" }}>
+                {run.openQuestions.map((q) => {
+                  const assumed = q.options.find((o) => o.id === q.default);
+                  return (
+                    <label key={q.id} style={{ display: "grid", gap: "0.3rem" }}>
+                      <span style={{ fontSize: "0.85rem", color: "var(--wp-text, #e6e9ef)" }}>{q.prompt}</span>
+                      <select
+                        data-testid={`clarifier-${q.id}`}
+                        aria-label={q.prompt}
+                        value={answers[q.id] ?? q.default}
+                        onChange={(e) => setAnswers((prev) => ({ ...prev, [q.id]: e.target.value }))}
+                        style={inputStyle}
+                      >
+                        {q.options.map((o) => (
+                          <option key={o.id} value={o.id}>{o.label}</option>
+                        ))}
+                      </select>
+                      <span style={{ fontSize: "0.72rem", color: "var(--wp-text-dim)" }}>
+                        Assumed: {assumed?.label ?? q.default}
+                      </span>
+                    </label>
+                  );
+                })}
+                <div>
+                  <button type="button" data-testid="clarifier-rerun" onClick={() => void generate()} disabled={running} style={btnStyle(running)}>
+                    {running ? "Re-running…" : "Re-run with these answers"}
+                  </button>
+                </div>
+              </div>
+            </GlassPanel>
+          )}
           <GlassPanel title="Verdict" subtitle={run.ref}>
             <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap", marginBottom: "0.75rem" }}>
               <StatusPill status={run.review.verdict.outcome} tone={v.tone} label={v.label} />
