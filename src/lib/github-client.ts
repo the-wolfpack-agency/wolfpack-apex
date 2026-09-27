@@ -78,6 +78,19 @@ async function gh<T = unknown>(
   return (await res.json()) as T;
 }
 
+/** A git ref (branch or sha) used as a URL PATH segment. Unlike a query value, a
+ *  "/" here is SIGNIFICANT and must NOT be percent-encoded: encodeURIComponent
+ *  turns "factory/x" into "factory%2Fx", which GitHub 404s - silently emptying
+ *  every CI read (and ref lookup) for a slashed branch, i.e. every factory
+ *  branch. Validate to safe ref characters (so it can neither traverse nor
+ *  inject) and pass the slashes through. */
+export function encodeRef(ref: string): string {
+  if (!/^[A-Za-z0-9._/-]+$/.test(ref) || ref.includes("..")) {
+    throw new Error(`unsafe git ref: ${ref.slice(0, 60)}`);
+  }
+  return ref;
+}
+
 export interface CreatedRepo {
   full_name: string;
   html_url: string;
@@ -158,7 +171,7 @@ export async function createBranch(
   fromBranch?: string,
 ): Promise<void> {
   const base = fromBranch ?? (await gh<{ default_branch: string }>(client, "GET", `/repos/${repoFullName}`)).default_branch;
-  const ref = await gh<{ object: { sha: string } }>(client, "GET", `/repos/${repoFullName}/git/ref/heads/${encodeURIComponent(base)}`);
+  const ref = await gh<{ object: { sha: string } }>(client, "GET", `/repos/${repoFullName}/git/ref/heads/${encodeRef(base)}`);
   try {
     await gh(client, "POST", `/repos/${repoFullName}/git/refs`, {
       ref: `refs/heads/${newBranch}`,
@@ -202,7 +215,7 @@ export async function fetchRepoTree(
     const r = await gh<{ tree?: { path?: string; type?: string }[] }>(
       client,
       "GET",
-      `/repos/${repoFullName}/git/trees/${encodeURIComponent(branch)}?recursive=1`,
+      `/repos/${repoFullName}/git/trees/${encodeRef(branch)}?recursive=1`,
     );
     return (r.tree ?? [])
       .filter((t) => t.type === "blob" && typeof t.path === "string")
@@ -221,7 +234,7 @@ export async function getBranchHead(
   const ref = await gh<{ object: { sha: string } }>(
     client,
     "GET",
-    `/repos/${repoFullName}/git/ref/heads/${encodeURIComponent(branch)}`,
+    `/repos/${repoFullName}/git/ref/heads/${encodeRef(branch)}`,
   );
   return ref.object.sha;
 }
@@ -235,7 +248,7 @@ export async function resetBranchTo(
   branch: string,
   sha: string,
 ): Promise<void> {
-  await gh(client, "PATCH", `/repos/${repoFullName}/git/refs/heads/${encodeURIComponent(branch)}`, {
+  await gh(client, "PATCH", `/repos/${repoFullName}/git/refs/heads/${encodeRef(branch)}`, {
     sha,
     force: true,
   });
@@ -324,7 +337,7 @@ export async function listCheckRuns(
   const res = await gh<{ check_runs?: CheckRun[] }>(
     client,
     "GET",
-    `/repos/${repoFullName}/commits/${encodeURIComponent(ref)}/check-runs?per_page=100`,
+    `/repos/${repoFullName}/commits/${encodeRef(ref)}/check-runs?per_page=100`,
   );
   return res.check_runs ?? [];
 }
