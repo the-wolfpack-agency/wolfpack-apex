@@ -84,6 +84,15 @@ test("redirects an unauthenticated user to login, never a blank page", () => {
   expect(mockPush).toHaveBeenCalledWith("/login?next=/admin/ai-code");
 });
 
+test("sends the chosen target repo in the pipeline request", async () => {
+  pipelineResp = resp(200, runResp({ outcome: "allow" }));
+  render(<CodeFactoryPage />);
+  fireEvent.change(screen.getByLabelText("Target repo"), { target: { value: "acme/app" } });
+  await submitPrompt();
+  const body = JSON.parse((pipelineCall()[1] as { body: string }).body);
+  expect(body.repo).toBe("acme/app");
+});
+
 test("submits a PROMPT (no diff) to the pipeline and shows the executor + allow verdict", async () => {
   pipelineResp = resp(200, runResp({ outcome: "allow" }));
   render(<CodeFactoryPage />);
@@ -93,6 +102,8 @@ test("submits a PROMPT (no diff) to the pipeline and shows the executor + allow 
   expect(body.prompt).toContain("isPalindrome");
   expect(body).not.toHaveProperty("diff");
   expect(pipelineCall()[0]).toBe("/api/admin/ai-code/pipeline");
+  // no repo entered -> the field is omitted (executor defaults to apex)
+  expect(body.repo).toBeUndefined();
   // executor + verdict render
   await waitFor(() => expect(screen.getByText("gpt-4o-mini")).toBeInTheDocument());
   expect(screen.getByText(/Allowed/)).toBeInTheDocument();

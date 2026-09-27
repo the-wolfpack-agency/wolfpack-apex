@@ -21,7 +21,7 @@ const SUMMARY = {
   byPage: [{ path: "/ogiam-iam", count: 80 }, { path: "/agentic-qa", count: 48 }],
   byCountry: [{ country: "US", count: 90 }],
   byType: [{ type: "site.page_viewed", count: 128 }],
-  forcefield: { welcomed: 6, flagged: 9, trapped: 2, blocked: 4, topAgents: [{ agent: "GPTBot", count: 6 }] },
+  forcefield: { welcomed: 6, flagged: 9, trapped: 2, blocked: 4, hostileOperators: 2, hostileEvents: 5, topAgents: [{ agent: "GPTBot", count: 6 }] },
   learnedSignatures: { shadow: 3, enforcing: 1, autoBlocked: 2 },
   agentIntel: { operators: 129, campaigns: 14, automationFleet: 42, datacenterOperators: 37, aiAgents: 0, scripts: 18, persistedAfterBlock: 0, escalatedAfterBlock: 0, topCampaigns: [{ fp: "ed1e916e", sites: ["aidanmulready", "instinct", "weekendwithporsche"], clientClass: "script", rhythm: "bursty" }] },
   journeys: [
@@ -77,6 +77,10 @@ test("renders the reused heatmap, totals, and top pages/countries from the summa
   expect(screen.getByTestId("site-analytics-scope")).toHaveTextContent("all properties");
   expect(screen.getByTestId("ff-welcomed")).toHaveTextContent("6");
   expect(screen.getByTestId("ff-flagged")).toHaveTextContent("9");
+  // The truthful headline: operators with real tradecraft, not the weak flagged heuristic.
+  expect(screen.getByTestId("ff-hostile-operators")).toHaveTextContent("2");
+  expect(screen.getByText(/Confirmed hostile/i)).toBeInTheDocument();
+  expect(screen.getByText(/Flagged \(unconfirmed\)/i)).toBeInTheDocument();
   expect(screen.getByTestId("ff-trapped")).toHaveTextContent("2");
   expect(screen.getByTestId("ff-top-agents")).toHaveTextContent("GPTBot");
   // Enforcement is surfaced truthfully: a real Blocked count + an enforcing posture
@@ -114,6 +118,13 @@ test("renders the reused heatmap, totals, and top pages/countries from the summa
   expect(screen.getByTestId("ff-payload-intel")).toHaveTextContent(/sql injection/i);
   // Top pages / countries are collapsed by default (native details, closed).
   expect(screen.getByTestId("top-pages-collapse")).not.toHaveAttribute("open");
+
+  // Secondary intel panels are collapsed by default to cut initial density; their
+  // content still lives in the DOM (the sig-*/intel-* assertions above read it
+  // through the closed details), and a click opens them.
+  for (const id of ["ff-learned-signatures", "ff-agent-intel", "ff-intel-drilldown"]) {
+    expect(screen.getByTestId(id)).not.toHaveAttribute("open");
+  }
 
   // The data route was queried with the default 30-day window.
   expect(String(mockFetchWithRefresh.mock.calls[0][0])).toContain("days=30");
