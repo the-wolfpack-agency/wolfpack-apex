@@ -83,6 +83,23 @@ interface PipelineResponse {
   error?: string;
 }
 
+interface RunSummary {
+  ref: string;
+  model: string;
+  status: "ready_for_pr" | "needs_human";
+  attempts: number;
+  finalOutcome: Outcome;
+  deepScanCritical: number;
+  conforms: boolean;
+  createdAt: string;
+}
+interface ModelGrade { model: string; n: number; readyRate: number; firstPassRate: number; blockRate: number }
+interface Grade { total: number; readyRate: number; firstPassRate: number; blockRate: number; escalationRate: number; byModel: ModelGrade[] }
+interface DriftFlag { model: string; priorReadyRate: number; recentReadyRate: number; drop: number; priorN: number; recentN: number }
+interface HistoryData { runs: RunSummary[]; grade: Grade; drift: DriftFlag[] }
+
+const pct = (n: number): string => `${Math.round(n * 100)}%`;
+
 /** Example prompts that show the breadth of what Secure Agent does - including
  *  one that intentionally violates a rule so a viewer can watch the gate stop it. */
 const EXAMPLE_CHIPS: { label: string; prompt: string }[] = [
@@ -152,6 +169,16 @@ export default function CodeFactoryPage() {
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
+  const [history, setHistory] = useState<HistoryData | null>(null);
+
+  const loadHistory = useCallback(async () => {
+    try {
+      const res = await fetchWithRefresh("/api/admin/ai-code/history?limit=50");
+      if (res.ok) setHistory((await res.json()) as HistoryData);
+    } catch {
+      /* history is a read-only panel; a failed load just leaves it empty */
+    }
+  }, []);
 
   useEffect(() => {
     const u = getInstinctUser<{ role: string }>();
@@ -161,6 +188,12 @@ export default function CodeFactoryPage() {
     }
     setReady(true);
   }, [router]);
+
+  // Separate mount-only load (stable loadHistory dep) so it fires once, not on
+  // every re-render of the auth effect above.
+  useEffect(() => {
+    void loadHistory();
+  }, [loadHistory]);
 
   const generate = useCallback(async () => {
     if (!prompt.trim()) {
@@ -203,12 +236,13 @@ export default function CodeFactoryPage() {
       setApprovalId(body.approvalId ?? null);
       setInvariants(body.invariants ?? null);
       setDeepScan(body.deepScan ?? null);
+      void loadHistory(); // the just-recorded run joins the grade + history
     } catch {
       setError("Network error - the factory did not run.");
     } finally {
       setRunning(false);
     }
-  }, [ref, prompt, executorPin]);
+  }, [ref, prompt, executorPin, repo, loadHistory]);
 
   // Approve the captured handoff -> the approved write executes (opens the real
   // PR as the owner, re-gated + ledgered) and returns the PR url. This is the
@@ -492,6 +526,48 @@ export default function CodeFactoryPage() {
             </GlassPanel>
           )}
         </>
+      )}
+
+      {(history?.grade?.total ?? 0) > 0 && history && (
+        <GlassPanel title="Run history & quality" subtitle="How the factory is performing over time - grades are measured, not guaranteed">
+          <div data-testid="history-grade" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))", gap: "0.75rem" }}>
+            {[
+              { k: "Runs", v: String(history.grade.total) },
+              { k: "Ready for PR", v: pct(history.grade.readyRate) },
+              { k: "First-pass", v: pct(history.grade.firstPassRate) },
+              { k: "Blocked", v: pct(history.grade.blockRate) },
+              { k: "Escalated", v: pct(history.grade.escalationRate) },
+            ].map((t) => (
+              <div key={t.k} style={{ background: "var(--wp-surface-2, #171a21)", border: "1px solid var(--wp-border, #2a2f3a)", borderRadius: 8, padding: "0.6rem 0.75rem" }}>
+                <div style={{ fontSize: "0.68rem", textTransform: "uppercase", letterSpacing: "0.03em", color: "var(--wp-text-dim)" }}>{t.k}</div>
+                <div style={{ fontSize: "1.3rem", fontWeight: 700, marginTop: "0.2rem" }}>{t.v}</div>
+              </div>
+            ))}
+          </div>
+
+          {history.drift.length > 0 && (
+            <div data-testid="history-drift" style={{ marginTop: "0.9rem", padding: "0.6rem 0.75rem", borderRadius: 8, border: "1px solid var(--wp-error, #ef4444)", background: "color-mix(in srgb, var(--wp-error, #ef4444) 10%, transparent)" }}>
+              <div style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--wp-error, #ef4444)", textTransform: "uppercase", letterSpacing: "0.03em" }}>Drift detected</div>
+              {history.drift.map((d) => (
+                <div key={d.model} style={{ fontSize: "0.82rem", marginTop: "0.3rem" }}>
+                  {d.model}: ready-for-PR fell from {pct(d.priorReadyRate)} to {pct(d.recentReadyRate)} (down {pct(d.drop)}, n={d.priorN}&rarr;{d.recentN})
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div data-testid="history-runs" style={{ marginTop: "0.9rem", display: "grid", gap: "0.35rem" }}>
+            {history.runs.slice(0, 15).map((r, i) => (
+              <div key={`${r.ref}-${i}`} style={{ display: "flex", alignItems: "center", gap: "0.6rem", flexWrap: "wrap", fontSize: "0.82rem", padding: "0.4rem 0.55rem", borderRadius: 6, background: "var(--wp-surface-2, #171a21)", border: "1px solid var(--wp-border, #2a2f3a)" }}>
+                <span style={{ fontWeight: 600, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.ref}</span>
+                <span style={{ color: "var(--wp-text-dim)" }}>{r.model}</span>
+                <span style={{ marginLeft: "auto", color: r.status === "ready_for_pr" ? "var(--wp-success, #30a46c)" : "var(--wp-warning, #f5a623)" }}>{r.status === "ready_for_pr" ? "ready" : "needs human"}</span>
+                <span style={{ color: r.finalOutcome === "block" ? "var(--wp-error, #ef4444)" : "var(--wp-text-dim)" }}>{r.finalOutcome}</span>
+                {r.attempts > 0 ? <span style={{ color: "var(--wp-text-dim)" }}>{r.attempts} repair{r.attempts === 1 ? "" : "s"}</span> : null}
+              </div>
+            ))}
+          </div>
+        </GlassPanel>
       )}
     </div>
   );
