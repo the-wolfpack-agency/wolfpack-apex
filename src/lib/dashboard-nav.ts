@@ -21,6 +21,11 @@ export interface NavItem {
   /** Optional email allowlist — when set, only these (lowercased) emails see the
    *  item. Used for narrow, person-specific surfaces like the Invoices tab. */
   emails?: string[];
+  /** Render indented under the item above it, marking a child surface (e.g. the
+   *  Code Governance overview under the Code Gate factory). Purely visual; each
+   *  item keeps its own visibility gate, so a nested item can be broader (the
+   *  governance overview is roleless) than its visual parent. */
+  nested?: boolean;
 }
 
 /** Everyone who may view ANY invoice tracker (union of the per-tracker
@@ -98,6 +103,10 @@ export const NAV_ITEMS: NavItem[] = [
      way a hire is. */
   { label: "Agents", href: "/admin/agents", roles: ["ceo", "cto", "evp", "vp", "cco"], icon: "M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m16-6h2m-2 6h2M7 7h10v10H7V7zm3 3h4v4h-4z" },
   { label: "Code Gate", href: "/admin/ai-code", roles: ["ceo", "cto", "evp", "vp", "cco"], icon: "M9 12l2 2 4-4m6-2a9 9 0 11-18 0 9 9 0 0118 0z" },
+  // Nested under Code Gate: the read-only trust surface for the same system.
+  // Roleless on purpose (everyone can see governance), so it stays a separate
+  // item rather than a tab inside the role-gated factory page.
+  { label: "Code Governance", href: "/admin/ai-code/overview", nested: true, icon: "M15 12a3 3 0 11-6 0 3 3 0 016 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" },
   { label: "Forcefield · Internal", href: "/admin/forcefield", roles: ["ceo", "cto", "evp", "vp", "cco"], icon: "M12 2l7 4v6c0 5-3 8-7 10-4-2-7-5-7-10V6l7-4z" },
   // The two Forcefield halves sit together: Internal (agents inside the system)
   // then Web (inbound agents on our sites). No role gate on Web: the agent-traffic
@@ -106,8 +115,6 @@ export const NAV_ITEMS: NavItem[] = [
   { label: "Forcefield · Web", href: "/admin/site-analytics", icon: "M3 3v18h18M7 14l3-3 3 3 5-5" },
   { label: "Self-Serve", href: "/admin/self-serve", roles: ["ceo", "cto", "evp", "vp", "cco"], icon: "M12 3l8 4v5c0 5-3.4 8.5-8 10-4.6-1.5-8-5-8-10V7l8-4zM9 12l2 2 4-4" },
   { label: "Effectiveness", href: "/admin/effectiveness", roles: ["ceo", "cto", "evp", "vp", "cco"], icon: "M3 17l6-6 4 4 8-8M21 7v6h-6" },
-  // Visible to everyone: the trust surface is for all users, not just engineers.
-  { label: "Code Governance", href: "/admin/ai-code/overview", icon: "M15 12a3 3 0 11-6 0 3 3 0 016 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" },
   { label: "Financials", href: "/financials", roles: ["ceo", "cto", "evp"], icon: "M12 6v12m-3-2.818l.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 11-18 0 9 9 0 0118 0z" },
   { label: "Instinct Analytics", href: "/analytics", icon: "M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" },
   /* Tools is intentionally hidden from the left nav (2026-08-02, operator

@@ -306,6 +306,11 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
                 style={{
                   background: active ? "var(--wp-dark-surface2)" : "transparent",
                   color: active ? "var(--wp-gold)" : "var(--wp-text-dim)",
+                  // Nested child (e.g. Code Governance under Code Gate): indent and
+                  // add a small left rule so the parent/child relationship reads.
+                  ...(item.nested
+                    ? { marginLeft: "1.35rem", borderLeft: "1px solid var(--wp-dark-border, #333)", borderTopLeftRadius: 0, borderBottomLeftRadius: 0 }
+                    : {}),
                 }}
               >
                 <svg
