@@ -55,13 +55,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       ? Math.max(1, Math.min(MAX_ATTEMPTS_CEILING, Math.floor(b.maxAttempts)))
       : 3;
 
-  const ci = await fetchCiStatus(repo, ref, workspaceId);
+  // Read CI for the PR HEAD (the branch), where the checks actually ran - NOT the
+  // task-id `ref`, which is not a git ref and would 404. Fall back to ref only
+  // when no branch is given (a decide-only caller must pass a real ref then).
+  const ciRef = branch || ref;
+  const ci = await fetchCiStatus(repo, ciRef, workspaceId);
 
   // Baseline attribution: when a base branch is named, only the failures this
   // change INTRODUCED are the fixer's to repair. Pre-existing red is not touched
   // (the fixer did not break it), and the fix brief targets only introduced
   // checks. Without a base, the fixer stays baseline-unaware (fixes any red).
-  const attribution = base ? await fetchCiAttribution(repo, base, ref, workspaceId) : null;
+  const attribution = base ? await fetchCiAttribution(repo, base, ciRef, workspaceId) : null;
   const introducedFailing = attribution ? attribution.introduced.length : undefined;
   const briefDetails = attribution
     ? ci.failedDetails.filter((d) => attribution.introduced.includes(d.name))
