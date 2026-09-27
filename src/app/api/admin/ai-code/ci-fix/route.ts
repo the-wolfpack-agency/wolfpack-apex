@@ -103,7 +103,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       // contents of the files that error points at. Without this the model has
       // only a check name and produces nothing usable (found by dogfooding).
       const headSha = await getBranchHead(client, repo, branch).catch(() => branch);
-      const context = await gatherFailureContext(client, repo, headSha, branch);
+      // Scope the gathered context to the INTRODUCED failures (when a baseline is
+      // known), so the fixer never tries to repair pre-existing red it did not
+      // cause - it fixes only what this change broke.
+      const context = await gatherFailureContext(client, repo, headSha, branch, {
+        onlyRunNames: attribution?.introduced,
+      });
       contextSummary = { detailChars: context.detail.length, files: context.files.map((f) => f.path) };
       const prompt = buildEnrichedFixPrompt({ repo, branch, brief, context });
       const authored = await authorFileChanges(

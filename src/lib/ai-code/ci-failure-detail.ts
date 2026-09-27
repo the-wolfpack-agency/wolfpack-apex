@@ -104,11 +104,17 @@ export async function gatherFailureContext(
   repoFullName: string,
   sha: string,
   ref: string,
-  maxDetailChars = 6000,
+  opts: { onlyRunNames?: string[]; maxDetailChars?: number } = {},
 ): Promise<FailureContext> {
+  const maxDetailChars = opts.maxDetailChars ?? 6000;
   try {
     const runs = await listWorkflowRunsRaw(client, repoFullName, sha);
-    const failedRuns = runs.filter((r) => r.conclusion === "failure").slice(0, 3);
+    // Scope to the INTRODUCED runs when we know them, so the fixer is never asked
+    // to repair a pre-existing failure it did not cause (e.g. a broken e2e suite).
+    const only = opts.onlyRunNames && opts.onlyRunNames.length > 0 ? new Set(opts.onlyRunNames) : null;
+    const failedRuns = runs
+      .filter((r) => r.conclusion === "failure" && (!only || only.has(r.name)))
+      .slice(0, 3);
     const parts: string[] = [];
     for (const run of failedRuns) {
       let jobs: Awaited<ReturnType<typeof listRunJobs>> = [];
