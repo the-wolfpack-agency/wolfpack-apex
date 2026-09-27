@@ -116,7 +116,25 @@ interface Grade { total: number; readyRate: number; firstPassRate: number; block
 interface DriftFlag { model: string; priorReadyRate: number; recentReadyRate: number; drop: number; priorN: number; recentN: number }
 interface HistoryData { runs: RunSummary[]; grade: Grade; drift: DriftFlag[] }
 
+type CiStatus = "pass" | "fail" | "pending" | "absent";
+interface CiCategory { key: string; label: string; status: CiStatus; passed: number; failed: number; pending: number; checks: string[] }
+interface CiDashboard { categories: CiCategory[]; overall: CiStatus; summary: { total: number; passed: number; failed: number; pending: number } }
+
 const pct = (n: number): string => `${Math.round(n * 100)}%`;
+
+// Vehicle-dashboard instrument colors: a glowing light per checkpoint.
+const CI_LIGHT: Record<CiStatus, { color: string; label: string }> = {
+  pass: { color: "#30a46c", label: "Passed" },
+  fail: { color: "#ef4444", label: "Failed" },
+  pending: { color: "#f5a623", label: "Running" },
+  absent: { color: "#4b5563", label: "Not run" },
+};
+const CI_OVERALL: Record<CiStatus, string> = {
+  pass: "All systems go",
+  fail: "Attention needed",
+  pending: "Running checks",
+  absent: "No checks yet",
+};
 
 /** Example prompts that show the breadth of what Secure Agent does - including
  *  one that intentionally violates a rule so a viewer can watch the gate stop it. */
@@ -190,6 +208,28 @@ export default function CodeFactoryPage() {
   const [error, setError] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
   const [history, setHistory] = useState<HistoryData | null>(null);
+  const [pipelineRef, setPipelineRef] = useState("");
+  const [pipeline, setPipeline] = useState<CiDashboard | null>(null);
+  const [pipelineLoading, setPipelineLoading] = useState(false);
+  const [pipelineError, setPipelineError] = useState<string | null>(null);
+
+  const checkPipeline = useCallback(async () => {
+    const r = repo.trim() || "the-wolfpack-agency/wolfpack-apex";
+    const gitRef = pipelineRef.trim();
+    if (!gitRef) { setPipelineError("Enter a branch or commit to check."); return; }
+    setPipelineLoading(true);
+    setPipelineError(null);
+    try {
+      const res = await fetchWithRefresh(`/api/admin/ai-code/ci?repo=${encodeURIComponent(r)}&ref=${encodeURIComponent(gitRef)}`);
+      if (!res.ok) { setPipelineError(`Could not read the pipeline (HTTP ${res.status}).`); return; }
+      const body = (await res.json()) as { dashboard: CiDashboard };
+      setPipeline(body.dashboard);
+    } catch {
+      setPipelineError("Network error reading the pipeline.");
+    } finally {
+      setPipelineLoading(false);
+    }
+  }, [repo, pipelineRef]);
 
   const loadHistory = useCallback(async () => {
     try {
@@ -379,6 +419,49 @@ export default function CodeFactoryPage() {
           <p role="alert" style={{ marginTop: "0.75rem", color: "var(--wp-error, #ef4444)", fontSize: "0.9rem" }}>
             {error}
           </p>
+        )}
+      </GlassPanel>
+
+      <GlassPanel title="Pipeline health" subtitle="A plain-language read on your code's checks, whatever tools run them">
+        <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap", alignItems: "flex-end", marginBottom: "0.9rem" }}>
+          <label style={{ display: "flex", flexDirection: "column", gap: "0.35rem", flex: "1 1 14rem" }}>
+            <span style={{ fontSize: "0.8rem", color: "var(--wp-text-dim)" }}>Branch or commit</span>
+            <input value={pipelineRef} onChange={(e) => setPipelineRef(e.target.value)} placeholder="main" aria-label="Branch or commit" data-testid="pipeline-ref" style={inputStyle} />
+          </label>
+          <button type="button" onClick={() => void checkPipeline()} disabled={pipelineLoading} data-testid="pipeline-check" style={btnStyle(pipelineLoading)}>
+            {pipelineLoading ? "Reading…" : pipeline ? "Refresh" : "Check pipeline"}
+          </button>
+        </div>
+        {pipelineError && <p role="alert" style={{ color: "var(--wp-error, #ef4444)", fontSize: "0.85rem", margin: "0 0 0.6rem" }}>{pipelineError}</p>}
+        {pipeline && (
+          <div data-testid="pipeline-dashboard">
+            <div style={{ display: "flex", alignItems: "center", gap: "0.7rem", padding: "0.7rem 0.9rem", borderRadius: 10, marginBottom: "0.9rem", border: `1px solid ${CI_LIGHT[pipeline.overall].color}`, background: `color-mix(in srgb, ${CI_LIGHT[pipeline.overall].color} 12%, transparent)` }}>
+              <span aria-hidden style={{ width: 14, height: 14, borderRadius: "50%", background: CI_LIGHT[pipeline.overall].color, boxShadow: `0 0 10px 2px ${CI_LIGHT[pipeline.overall].color}` }} />
+              <span data-testid="pipeline-overall" style={{ fontWeight: 700, fontSize: "1.05rem", color: "var(--wp-text, #e6e9ef)" }}>{CI_OVERALL[pipeline.overall]}</span>
+              <span style={{ marginLeft: "auto", fontSize: "0.78rem", color: "var(--wp-text-dim)" }}>{pipeline.summary.passed} passed &middot; {pipeline.summary.failed} failed &middot; {pipeline.summary.pending} running</span>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "0.75rem" }}>
+              {pipeline.categories.filter((c) => c.status !== "absent" || c.key !== "other").map((c) => {
+                const light = CI_LIGHT[c.status];
+                const n = c.failed || c.pending || c.passed;
+                return (
+                  <div key={c.key} data-testid={`pipeline-cat-${c.key}`} style={{ position: "relative", background: "var(--wp-surface-2, #171a21)", border: `1px solid ${c.status === "absent" ? "var(--wp-border, #2a2f3a)" : light.color}`, borderRadius: 12, padding: "0.85rem 0.9rem", opacity: c.status === "absent" ? 0.55 : 1 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                      <span aria-hidden style={{ width: 11, height: 11, borderRadius: "50%", flexShrink: 0, background: light.color, boxShadow: c.status === "absent" ? "none" : `0 0 8px 1px ${light.color}` }} />
+                      <span style={{ fontSize: "0.82rem", fontWeight: 700, color: "var(--wp-text, #e6e9ef)" }}>{c.label}</span>
+                    </div>
+                    <div style={{ marginTop: "0.5rem", fontSize: "0.78rem", color: light.color, fontWeight: 600 }}>{light.label}</div>
+                    {n > 0 && c.status !== "absent" && (
+                      <div style={{ fontSize: "0.72rem", color: "var(--wp-text-dim)", marginTop: "0.15rem" }}>{n} check{n === 1 ? "" : "s"}</div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            <p style={{ margin: "0.7rem 0 0", fontSize: "0.72rem", color: "var(--wp-text-dim)", lineHeight: 1.45 }}>
+              Each light is a checkpoint in your delivery flow. Green means that class of check passed; the tools that ran it stay under the hood.
+            </p>
+          </div>
         )}
       </GlassPanel>
 
