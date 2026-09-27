@@ -687,6 +687,11 @@ export type InstinctEventType =
   // ai_code.model_key_set { workspace_id, provider } - a workspace stored/rotated
   //   its own model key (BYO); the key value is never in analytics.
   | "ai_code.model_key_set"
+  // ai_code.pr_gated { repo, pr_number, conclusion, blocked_by, author_login } - the
+  // Secure Agent gate ran on a pull request (any author, Copilot's coding agent
+  // included) and posted a Check. One per gated PR event so the learning loop sees
+  // pass/block rates by author over time.
+  | "ai_code.pr_gated"
   // forcefield.canary_seeded { workspace_id, kind, seeded_in } - a decoy was
   //   registered; the decoy VALUE is never in analytics.
   | "forcefield.canary_seeded"
