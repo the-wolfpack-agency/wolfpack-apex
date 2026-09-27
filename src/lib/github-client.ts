@@ -416,9 +416,12 @@ export async function listRunJobs(client: GithubClient, repoFullName: string, ru
     .map((j) => ({ id: j.id as number, name: j.name || "job", conclusion: j.conclusion ?? null }));
 }
 
-/** Raw text log of a job (the Actions logs endpoint 302-redirects to a signed
- *  text file; fetch follows the redirect). Needs Actions: read, which the shared
- *  token has. Throws on error. */
+/** Raw text log of a job. The Actions logs endpoint 302-redirects to a SIGNED
+ *  blob URL (the signature is in the query string). That URL must be fetched
+ *  WITHOUT the Authorization header - re-sending the GitHub bearer token makes the
+ *  blob store 401. So we follow the redirect manually and drop the auth header on
+ *  the signed URL. Needs Actions: read, which the shared token has. Throws on
+ *  error. */
 export async function fetchJobLogText(client: GithubClient, repoFullName: string, jobId: number): Promise<string> {
   if (!client.token) throw new Error("no token");
   const res = await client.fetch(`https://api.github.com/repos/${repoFullName}/actions/jobs/${jobId}/logs`, {
@@ -428,7 +431,16 @@ export async function fetchJobLogText(client: GithubClient, repoFullName: string
       "X-GitHub-Api-Version": "2022-11-28",
       "User-Agent": "wolfpack-instinct-sites",
     },
+    redirect: "manual",
   });
+  if (res.status >= 300 && res.status < 400) {
+    const location = res.headers.get("location");
+    if (!location) throw new Error("job logs: redirect without a location");
+    // Fetch the signed URL fresh - NO Authorization header (it 401s the blob).
+    const blob = await client.fetch(location, { headers: { "User-Agent": "wolfpack-instinct-sites" } });
+    if (!blob.ok) throw new Error(`job logs blob → ${blob.status}`);
+    return await blob.text();
+  }
   if (!res.ok) throw new Error(`job logs → ${res.status}`);
   return await res.text();
 }
