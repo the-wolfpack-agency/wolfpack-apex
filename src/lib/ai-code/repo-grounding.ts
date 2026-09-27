@@ -82,15 +82,34 @@ export function buildGroundingBlock(paths: readonly string[], packageJsonRaw: st
   return lines.join("\n");
 }
 
-/** Fetch the repo tree + package.json and build the grounding block. Never
- *  throws: any failure yields "" so authoring falls back to prompt-only. */
+/** Grounding is a repo-structure fact that barely changes between runs, but a
+ *  recursive tree + package.json fetch runs on EVERY factory run. Cache the built
+ *  block per (repo, ref) for a few minutes so repeated runs against the same repo
+ *  do not refetch the whole tree. In-memory (per warm serverless instance); the
+ *  block is non-sensitive (public repo structure). */
+const GROUNDING_TTL_MS = 5 * 60 * 1000;
+const groundingCache = new Map<string, { block: string; at: number }>();
+
+/** Clear the grounding cache (tests). */
+export function __clearGroundingCache(): void {
+  groundingCache.clear();
+}
+
+/** Fetch the repo tree + package.json and build the grounding block, cached per
+ *  (repo, ref) for a few minutes. Never throws: any failure yields "" so
+ *  authoring falls back to prompt-only. */
 export async function fetchRepoGrounding(client: GithubClient, repo: string, ref?: string): Promise<string> {
+  const key = `${repo}@${ref ?? "default"}`;
+  const hit = groundingCache.get(key);
+  if (hit && Date.now() - hit.at < GROUNDING_TTL_MS) return hit.block;
   try {
     const [paths, pkg] = await Promise.all([
       fetchRepoTree(client, repo, ref),
       fetchFileContent(client, repo, "package.json", ref).catch(() => null),
     ]);
-    return buildGroundingBlock(paths, pkg);
+    const block = buildGroundingBlock(paths, pkg);
+    groundingCache.set(key, { block, at: Date.now() });
+    return block;
   } catch {
     return "";
   }
