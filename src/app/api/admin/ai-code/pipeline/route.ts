@@ -26,6 +26,9 @@ import { liveRepairComplete } from "@/lib/ai-code/repair";
 import { runPipeline } from "@/lib/ai-code/pipeline";
 import { authorDiff, authorFileChanges } from "@/lib/ai-code/author";
 import { filesToDiff, type FileChange } from "@/lib/ai-code/file-changes";
+import { remediateFileChanges } from "@/lib/ai-code/repair-files";
+import { buildRegistry, judgeCandidates } from "@/lib/ai/router";
+import { chooseIndependentJudge } from "@/lib/ai/judge-selection";
 import { evaluateChangeInvariants } from "@/lib/ai-code/change-facts";
 import { deepScanChange } from "@/lib/ai-code/deep-scan";
 import { getAIClient } from "@/lib/ai";
@@ -143,18 +146,44 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const executorProviderPin =
     typeof b.executorProviderPin === "string" && b.executorProviderPin.trim() ? b.executorProviderPin.trim() : undefined;
   const mode: "diff" | "files" = b.mode === "files" ? "files" : "diff";
-  const { diff: effectiveDiff, author: effectiveAuthor, executor, changes } = await resolveChange({
-    mode,
-    diff,
-    prompt,
-    authorModel,
-    executorProviderPin,
-  });
+  const resolved = await resolveChange({ mode, diff, prompt, authorModel, executorProviderPin });
+  const executor = resolved.executor;
+  let effectiveDiff = resolved.diff;
+  let effectiveAuthor = resolved.author;
+  let changes = resolved.changes;
   // Fail-closed: the executor ran but produced nothing usable. Never a 500, and
   // never a fabricated change - the gate has nothing to govern.
   if (executor && !effectiveDiff.trim()) {
     return NextResponse.json({ error: "executor produced no change", executor }, { status: 422 });
   }
+
+  // Files-native AUTO-FIX: in files mode, if the authored files do not clear the
+  // combined gate, re-author the whole files with the gate's feedback (routed to a
+  // DIFFERENT lineage), bounded, until they pass or a human is needed. This is the
+  // gate-level half of the auto-fix loop; the CI-level half runs post-PR.
+  let filesRepairStatus: "clean" | "needs_human" | "n/a" = "n/a";
+  if (mode === "files" && changes && changes.length > 0) {
+    const client = getAIClient();
+    const indep = chooseIndependentJudge(
+      { provider: executor?.provider ?? "", model: effectiveAuthor },
+      judgeCandidates(buildRegistry(), "cheap"),
+    ).candidate?.provider;
+    const repaired = await remediateFileChanges({
+      initial: changes,
+      initialAuthor: effectiveAuthor,
+      reauthor: (feedback) =>
+        authorFileChanges(
+          { prompt: `${prompt}\n\nThe previous attempt was rejected. ${feedback}`, executorProviderPin: indep, feature: "ai-code-pipeline-repair-files" },
+          { complete: (r) => client.complete(r) },
+        ),
+      maxAttempts: 2,
+    });
+    changes = repaired.changes;
+    effectiveAuthor = repaired.author;
+    effectiveDiff = filesToDiff(changes);
+    filesRepairStatus = repaired.status;
+  }
+
   // Unconditional ceiling on the final diff, whatever its source (supplied or
   // authored). Enforced on every path, so no user-controlled input decides
   // whether this check runs.
@@ -236,11 +265,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // NOT open a PR. A human opens the PR by approving this, through the existing
   // agent-approvals surface. A needs_human run has nothing to hand off. Capturing
   // is best-effort (null without a database); the run is returned either way.
-  // Files mode auto-hands-off only when the FIRST authored files passed the gate
-  // (no repair). The repair loop is diff-native and does not map to full files, so
-  // a files-mode change that needed repair is needs_human (a human takes the
-  // surfaced diff); files-native repair is a follow-up. Diff mode is unaffected.
-  const filesModeHandoffOk = changes == null || run.remediation.attempts.length === 0;
+  // Files mode hands off when the files-native repair cleared the change (its final
+  // files pass the gate). needs_human means the auto-fix could not clear it after
+  // its bounded attempts. Diff mode is unaffected.
+  const filesModeHandoffOk = mode !== "files" || filesRepairStatus === "clean";
 
   let approvalId: string | null = null;
   if (run.status === "ready_for_pr" && !invariants.wouldBlock && !deepScan.blocking && filesModeHandoffOk) {
