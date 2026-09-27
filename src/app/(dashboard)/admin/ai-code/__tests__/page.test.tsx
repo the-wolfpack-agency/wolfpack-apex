@@ -61,18 +61,21 @@ async function submitPrompt(text = "add isPalindrome with tests") {
 let pipelineResp: Response;
 let approveResp: Response;
 let historyResp: Response;
+let ciResp: Response;
 beforeEach(() => {
   jest.clearAllMocks();
   user = { role: "cto" };
   pipelineResp = resp(200, runResp({ outcome: "allow" }));
   approveResp = resp(200, { ok: true, status: "executed", outcome: { ok: true, url: "https://github.com/o/r/pull/42", number: 42 } });
   historyResp = HISTORY_EMPTY();
+  ciResp = resp(200, { dashboard: { categories: [{ key: "unit", label: "Unit tests", status: "pass", passed: 3, failed: 0, pending: 0, checks: ["unit"] }, { key: "security", label: "Security", status: "fail", passed: 0, failed: 1, pending: 0, checks: ["scan"] }], overall: "fail", summary: { total: 4, passed: 3, failed: 1, pending: 0 } } });
   // URL-aware: the page fetches run history on mount and after each run; route it
   // to an empty history so it never consumes a per-test response. Everything else
   // is the pipeline unless it targets the approvals endpoint.
   mockFetch.mockImplementation((url: string) => {
     const u = String(url);
     if (u.includes("/ai-code/history")) return Promise.resolve(historyResp);
+    if (u.includes("/ai-code/ci")) return Promise.resolve(ciResp);
     if (u.includes("/approvals/")) return Promise.resolve(approveResp);
     return Promise.resolve(pipelineResp);
   });
@@ -260,4 +263,17 @@ test("run history panel is hidden when there are no runs", async () => {
   render(<CodeFactoryPage />);
   await waitFor(() => expect(screen.getByTestId("ai-code-page")).toBeInTheDocument());
   expect(screen.queryByTestId("history-grade")).not.toBeInTheDocument();
+});
+
+test("pipeline health: checking a ref renders product-agnostic checkpoints with status lights", async () => {
+  render(<CodeFactoryPage />);
+  fireEvent.change(screen.getByTestId("pipeline-ref"), { target: { value: "main" } });
+  await act(async () => { fireEvent.click(screen.getByTestId("pipeline-check")); });
+  await waitFor(() => expect(screen.getByTestId("pipeline-dashboard")).toBeInTheDocument());
+  expect(screen.getByTestId("pipeline-overall")).toHaveTextContent(/attention needed/i); // overall fail
+  expect(screen.getByTestId("pipeline-cat-unit")).toHaveTextContent(/Unit tests/);
+  expect(screen.getByTestId("pipeline-cat-unit")).toHaveTextContent(/Passed/);
+  expect(screen.getByTestId("pipeline-cat-security")).toHaveTextContent(/Failed/);
+  // never leaks the underlying tool name
+  expect(screen.getByTestId("pipeline-dashboard")).not.toHaveTextContent(/vercel|codeql|jest|postgres/i);
 });
