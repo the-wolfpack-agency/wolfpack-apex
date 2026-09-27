@@ -24,6 +24,8 @@ jest.mock("@/lib/ai-code/scan", () => ({ runCodeReview: jest.fn() }));
 jest.mock("@/lib/analytics", () => ({ trackEvent: (...a: unknown[]) => mockTrackEvent(...a) }));
 jest.mock("@/lib/audit-log", () => ({ recordAudit: (...a: unknown[]) => mockRecordAudit(...a) }));
 jest.mock("@/lib/agents/approvals/store", () => ({ createPendingApproval: (...a: unknown[]) => mockCreateApproval(...a) }));
+const mockEnsureCodeGateAgent = jest.fn();
+jest.mock("@/lib/agents/store", () => ({ ensureCodeGateAgent: (...a: unknown[]) => mockEnsureCodeGateAgent(...a) }));
 const mockGate = jest.fn();
 jest.mock("@/lib/tenancy/require-entitlement", () => ({ requireEntitlement: (...a: unknown[]) => mockGate(...a) }));
 const mockComplete = jest.fn();
@@ -73,6 +75,7 @@ beforeEach(() => {
   mockRunPipeline.mockResolvedValue(RUN);
   mockRecordAudit.mockResolvedValue({ ok: true });
   mockCreateApproval.mockResolvedValue("appr-1");
+  mockEnsureCodeGateAgent.mockResolvedValue("agent-uuid-1"); // factory principal is provisioned + active
   mockComplete.mockResolvedValue(authorResp("```diff\n" + AUTHORED_DIFF + "\n```"));
   mockWorkspaceClient.mockResolvedValue({ token: "t", fetch: jest.fn() });
   mockBuildContext.mockResolvedValue({ block: "", files: [] });
@@ -256,17 +259,28 @@ describe("POST /api/admin/ai-code/pipeline", () => {
     expect(mockRunPipeline.mock.calls[0][0].answers).toEqual({ tests: "all" });
   });
 
-  it("a ready-for-PR run CAPTURES a pending approval - it does not open a PR", async () => {
+  it("a ready-for-PR run CAPTURES a pending approval under the factory's REAL agent id - it does not open a PR", async () => {
     const res = await POST(post(VALID));
+    // The approval carries the provisioned agent's real id (not a literal string),
+    // so the approval route's kill-switch re-check finds an ACTIVE agent instead of
+    // auto-rejecting. The factory principal is ensured for the caller's workspace.
+    expect(mockEnsureCodeGateAgent).toHaveBeenCalledWith("w1", "u1", expect.any(Object));
     expect(mockCreateApproval).toHaveBeenCalledWith(
       expect.objectContaining({
-        agentId: "ai-code-gate",
+        agentId: "agent-uuid-1",
         ownerUserId: "u1",
         tool: "ai_code.open_pr",
         params: expect.objectContaining({ ref: "pr-1", spec_hash: "spec_abc123" }),
       }),
     );
     expect((await res.json()).approvalId).toBe("appr-1");
+  });
+
+  it("degrades to NO handoff (no approval) when the factory principal cannot be provisioned", async () => {
+    mockEnsureCodeGateAgent.mockResolvedValue(null); // e.g. no database
+    const res = await POST(post(VALID));
+    expect(mockCreateApproval).not.toHaveBeenCalled();
+    expect((await res.json()).approvalId).toBeNull();
   });
 
   it("a needs_human run hands off NOTHING (no approval captured, no PR)", async () => {

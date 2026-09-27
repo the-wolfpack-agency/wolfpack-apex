@@ -38,14 +38,11 @@ import { getAIClient } from "@/lib/ai";
 import type { AIModelTier } from "@/lib/ai/types";
 import { DEFAULT_SPEC_QUESTIONS } from "@/lib/ai-code/intake";
 import { createPendingApproval } from "@/lib/agents/approvals/store";
+import { ensureCodeGateAgent } from "@/lib/agents/store";
 import type { CodeReviewResult } from "@/lib/ai-code/types";
 
 const MAX_DIFF = 2_000_000; // chars
 const MAX_ATTEMPTS_CAP = 4;
-/** The stable principal the Code Gate captures its PR handoffs under, so they
- *  surface in the agent-approvals surface. agent_id is a plain TEXT column (no
- *  FK), so this needs no agent-principal row. */
-const CODE_GATE_AGENT_ID = "ai-code-gate";
 /** The fixed answer-key allowlist. The route always runs the default questions,
  *  so a valid answer names one of these; anything else is dropped, never used as
  *  a property name to write. */
@@ -349,27 +346,37 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   let approvalId: string | null = null;
   if (run.status === "ready_for_pr" && !invariants.wouldBlock && !deepScan.blocking && filesModeHandoffOk) {
-    approvalId = await createPendingApproval({
-      workspaceId,
-      agentId: CODE_GATE_AGENT_ID,
-      ownerUserId: auth.user.id,
-      tool: "ai_code.open_pr",
-      params: {
-        ref,
-        prompt,
-        // Target repo for the PR; the executor defaults to apex (self-hosting)
-        // when absent. Not user-secret; a human sees exactly what they approve.
-        repo,
-        spec_hash: run.spec.hash,
-        conforms: run.conformance.conforms,
-        // The gate ALLOWED this change, so it carries no secret to store; a human
-        // sees exactly what they are approving. In files mode the commit uses the
-        // full-file changes; in diff mode it uses the diff's new files.
-        diff: run.diff,
-        ...(changes ? { changes } : {}),
-      },
-      capability: "settings.manage_team",
+    // Provision the factory's own governed principal (active + revocable) and hand
+    // the approval its REAL agent id, so the human-in-the-gate approval's
+    // kill-switch re-check finds an active agent instead of auto-rejecting. A null
+    // id (no database) degrades to "no handoff", never a thrown request.
+    const codeGateAgentId = await ensureCodeGateAgent(workspaceId, auth.user.id, {
+      userId: auth.user.id,
+      role: auth.user.role,
     });
+    if (codeGateAgentId) {
+      approvalId = await createPendingApproval({
+        workspaceId,
+        agentId: codeGateAgentId,
+        ownerUserId: auth.user.id,
+        tool: "ai_code.open_pr",
+        params: {
+          ref,
+          prompt,
+          // Target repo for the PR; the executor defaults to apex (self-hosting)
+          // when absent. Not user-secret; a human sees exactly what they approve.
+          repo,
+          spec_hash: run.spec.hash,
+          conforms: run.conformance.conforms,
+          // The gate ALLOWED this change, so it carries no secret to store; a human
+          // sees exactly what they are approving. In files mode the commit uses the
+          // full-file changes; in diff mode it uses the diff's new files.
+          diff: run.diff,
+          ...(changes ? { changes } : {}),
+        },
+        capability: "settings.manage_team",
+      });
+    }
   }
 
   // Cost meter: what the run cost + what the same tokens would cost on other
