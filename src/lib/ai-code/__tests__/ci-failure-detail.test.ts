@@ -63,3 +63,26 @@ test("buildEnrichedFixPrompt degrades gracefully with no context (just the brief
   expect(prompt).not.toMatch(/ACTUAL CI failure/);
   expect(prompt).not.toMatch(/FILE:/);
 });
+
+describe("source-of-failing-test derivation", () => {
+  const { deriveSourcePaths, withSourcePaths } = jest.requireActual("@/lib/ai-code/ci-failure-detail");
+
+  it("derives the source path from a __tests__ jest test path", () => {
+    expect(deriveSourcePaths("src/lib/__tests__/readingTime.test.ts")).toContain("src/lib/readingTime.ts");
+  });
+
+  it("derives the source from a same-dir .test/.spec file", () => {
+    expect(deriveSourcePaths("src/components/Card.test.tsx")).toContain("src/components/Card.tsx");
+    expect(deriveSourcePaths("src/lib/x.spec.ts")).toContain("src/lib/x.ts");
+  });
+
+  it("returns [] for a non-test path", () => {
+    expect(deriveSourcePaths("src/lib/readingTime.ts")).toEqual([]);
+  });
+
+  it("withSourcePaths includes the test AND its source (so the fixer sees the code)", () => {
+    const out = withSourcePaths(["src/lib/__tests__/readingTime.test.ts"]);
+    expect(out).toContain("src/lib/__tests__/readingTime.test.ts");
+    expect(out).toContain("src/lib/readingTime.ts");
+  });
+});

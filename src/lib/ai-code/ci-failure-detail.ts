@@ -40,6 +40,39 @@ export function extractErrorLines(log: string, maxLines = 50): string {
 
 const FILE_PATH = /(?:src|tests|app|lib|pages|components)\/[\w./-]+\.(?:tsx?|jsx?)/g;
 
+/** A failing jest error names the TEST file, not the source under test. To fix
+ *  the source (never the test), derive the likely source path(s) from a test
+ *  path: drop the `__tests__/` segment and the `.test`/`.spec` suffix. Returns []
+ *  for a non-test path. Pure. */
+export function deriveSourcePaths(testPath: string): string[] {
+  const out: string[] = [];
+  // src/lib/__tests__/readingTime.test.ts -> src/lib/readingTime.ts
+  const withDir = testPath.match(/^(.*?)__tests__\/(.+)\.(?:test|spec)\.(tsx?|jsx?)$/);
+  if (withDir) out.push(`${withDir[1]}${withDir[2]}.${withDir[3]}`);
+  // src/x.test.ts -> src/x.ts (same-dir convention)
+  const sameDir = testPath.match(/^(.+)\.(?:test|spec)\.(tsx?|jsx?)$/);
+  if (sameDir) out.push(`${sameDir[1]}.${sameDir[2]}`);
+  return [...new Set(out)].filter((p) => p !== testPath);
+}
+
+/** Expand a list of failing files with the SOURCE files behind any test files,
+ *  so the re-author sees the code it must fix (not just the test). Pure. */
+export function withSourcePaths(paths: readonly string[], max = 6): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const add = (p: string) => {
+    if (!seen.has(p) && out.length < max) {
+      seen.add(p);
+      out.push(p);
+    }
+  };
+  for (const p of paths) {
+    add(p);
+    for (const src of deriveSourcePaths(p)) add(src);
+  }
+  return out;
+}
+
 /** Source file paths referenced in the failure text, so we can fetch them for
  *  the re-author. Pure: deduped, capped, order preserved. */
 export function extractFilePaths(text: string, max = 4): string[] {
@@ -95,7 +128,9 @@ export async function gatherFailureContext(
     }
     const detail = parts.join("\n\n").slice(0, maxDetailChars);
     const files: { path: string; content: string }[] = [];
-    for (const path of extractFilePaths(detail)) {
+    // Fetch the files the error names AND the source behind any failing test, so
+    // the re-author can fix the SOURCE (the error only names the test file).
+    for (const path of withSourcePaths(extractFilePaths(detail))) {
       const content = await fetchFileContent(client, repoFullName, path, ref).catch(() => null);
       if (content) files.push({ path, content: content.slice(0, 6000) });
     }
