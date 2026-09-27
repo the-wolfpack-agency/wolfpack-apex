@@ -122,6 +122,7 @@ interface AuditVerification { ok: boolean; verifiedCount: number; legacyCount: n
 interface AuditEntry { seq: number; created_at: string; principal_agent: string; intended_outcome: string; effective_outcome: string; would_block: boolean; rule_id: string; reason: string | null }
 interface AuditData { verification: AuditVerification; entries: AuditEntry[]; entryCount: number; generatedAtIso: string }
 
+interface CiAttribution { introduced: string[]; preexisting: string[]; indeterminate: string[]; fixed: string[]; baselineKnown: boolean; baselineHealthy: boolean; clean: boolean; reason: string }
 interface ReadinessCheck { id: string; label: string; status: "pass" | "warn" | "fail"; detail: string; fix?: { label: string; url?: string } }
 interface ReadinessReport { checks: ReadinessCheck[]; overall: "pass" | "warn" | "fail"; ready: boolean; fullyReady: boolean }
 const READINESS_TONE: Record<ReadinessCheck["status"], string> = { pass: "#30a46c", warn: "#f5a623", fail: "#ef4444" };
@@ -276,6 +277,7 @@ export default function CodeFactoryPage() {
   const [readiness, setReadiness] = useState<ReadinessReport | null>(null);
   const [readinessLoading, setReadinessLoading] = useState(false);
   const [pipeline, setPipeline] = useState<CiDashboard | null>(null);
+  const [attribution, setAttribution] = useState<CiAttribution | null>(null);
   const [pipelineLoading, setPipelineLoading] = useState(false);
   const [pipelineError, setPipelineError] = useState<string | null>(null);
 
@@ -287,10 +289,13 @@ export default function CodeFactoryPage() {
     setPipelineLoading(true);
     setPipelineError(null);
     try {
-      const res = await fetchWithRefresh(`/api/admin/ai-code/ci?repo=${encodeURIComponent(r)}&ref=${encodeURIComponent(gitRef)}`);
+      // base=main so the pipeline read also attributes the delta: which failing
+      // checks THIS change introduced vs which were already failing on the base.
+      const res = await fetchWithRefresh(`/api/admin/ai-code/ci?repo=${encodeURIComponent(r)}&ref=${encodeURIComponent(gitRef)}&base=main`);
       if (!res.ok) { setPipelineError(`Could not read the pipeline (HTTP ${res.status}).`); return; }
-      const body = (await res.json()) as { dashboard: CiDashboard };
+      const body = (await res.json()) as { dashboard: CiDashboard; attribution?: CiAttribution | null };
       setPipeline(body.dashboard);
+      setAttribution(body.attribution ?? null);
     } catch {
       setPipelineError("Network error reading the pipeline.");
     } finally {
@@ -853,6 +858,16 @@ export default function CodeFactoryPage() {
                     </button>
                   </div>
                   {pipelineError && <p role="alert" style={{ color: "var(--wp-error, #ef4444)", fontSize: "0.85rem", margin: "0 0 0.6rem" }}>{pipelineError}</p>}
+                  {attribution && attribution.baselineKnown && (
+                    <p data-testid="ci-attribution" style={{ margin: "0 0 0.6rem", fontSize: "0.83rem", fontWeight: 600, color: attribution.introduced.length > 0 ? "#ef4444" : "#30a46c" }}>
+                      {attribution.introduced.length > 0
+                        ? `This change introduced ${attribution.introduced.length} new failing check(s): ${attribution.introduced.join(", ")}.`
+                        : "This change introduced no new failures."}
+                      {attribution.preexisting.length > 0 && (
+                        <span style={{ color: "var(--wp-text-dim)", fontWeight: 400 }}>{" "}{attribution.preexisting.length} check(s) were already failing on the base branch (pre-existing, not caused by this change).</span>
+                      )}
+                    </p>
+                  )}
                   {pipeline
                     ? <PipelineDashboard dashboard={pipeline} />
                     : <p style={{ fontSize: "0.82rem", color: "var(--wp-text-dim)", margin: 0 }}>Reading your pipeline&hellip; checks appear here as they run.</p>}

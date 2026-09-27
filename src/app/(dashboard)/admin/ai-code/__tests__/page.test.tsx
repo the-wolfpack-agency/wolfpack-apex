@@ -84,7 +84,7 @@ beforeEach(() => {
   approveResp = resp(200, { ok: true, status: "executed", outcome: { ok: true, url: "https://github.com/o/r/pull/42", number: 42 } });
   historyResp = HISTORY_EMPTY();
   auditResp = resp(200, { verification: { ok: true, verifiedCount: 7, legacyCount: 0, brokenAtSeq: null, headSeq: 7, headHash: "h" }, entries: [{ seq: 7, created_at: "2026-09-27T10:00:00Z", principal_agent: "instinct.ai_code", intended_outcome: "allow", effective_outcome: "allow", would_block: false, rule_id: "R-MUTATION-ALLOW", reason: null }], entryCount: 1, generatedAtIso: "2026-09-27T10:00:00.000Z" });
-  ciResp = resp(200, { dashboard: { categories: [{ key: "unit", label: "Unit tests", status: "pass", passed: 3, failed: 0, pending: 0, checks: ["unit"] }, { key: "security", label: "Security", status: "fail", passed: 0, failed: 1, pending: 0, checks: ["scan"] }], overall: "fail", summary: { total: 4, passed: 3, failed: 1, pending: 0 } } });
+  ciResp = resp(200, { dashboard: { categories: [{ key: "unit", label: "Unit tests", status: "pass", passed: 3, failed: 0, pending: 0, checks: ["unit"] }, { key: "security", label: "Security", status: "fail", passed: 0, failed: 1, pending: 0, checks: ["scan"] }], overall: "fail", summary: { total: 4, passed: 3, failed: 1, pending: 0 } }, attribution: { introduced: [], preexisting: ["scan"], indeterminate: [], fixed: [], baselineKnown: true, baselineHealthy: false, clean: true, reason: "This change introduced no new failures. 1 were already failing on the base branch." } });
   readinessResp = resp(200, { readiness: { overall: "warn", ready: true, fullyReady: false, checks: [
     { id: "github-access", label: "GitHub access", status: "pass", detail: "A credential is available." },
     { id: "pr-capability", label: "Automatic pull requests", status: "warn", detail: "Using the shared token. Install the App to guarantee automatic PRs.", fix: { label: "Connect GitHub (one-click install)", url: "https://github.com/apps/agentgate-ai/installations/new" } },
@@ -365,6 +365,10 @@ test("pipeline is tied to the opened PR: build & deploy checkpoints appear autom
   await waitFor(() => expect(screen.getByTestId("pr-link")).toBeInTheDocument());
   // the pipeline auto-loads for the PR branch - no manual ref input at all
   await waitFor(() => expect(screen.getByTestId("pipeline-dashboard")).toBeInTheDocument());
+  // Baseline attribution is shown: the red is disclosed as PRE-EXISTING, so the
+  // failing CI does not read as something this change introduced.
+  expect(screen.getByTestId("ci-attribution")).toHaveTextContent(/introduced no new failures/i);
+  expect(screen.getByTestId("ci-attribution")).toHaveTextContent(/already failing on the base/i);
   expect(screen.getByTestId("pipeline-overall")).toHaveTextContent(/attention needed/i);
   expect(screen.getByTestId("pipeline-cat-unit")).toHaveTextContent(/Unit tests/);
   expect(screen.getByTestId("pipeline-cat-security")).toHaveTextContent(/Failed/);
