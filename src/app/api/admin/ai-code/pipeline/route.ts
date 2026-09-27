@@ -31,6 +31,7 @@ import { buildRegistry, judgeCandidates } from "@/lib/ai/router";
 import { chooseIndependentJudge } from "@/lib/ai/judge-selection";
 import { evaluateChangeInvariants } from "@/lib/ai-code/change-facts";
 import { deepScanChange } from "@/lib/ai-code/deep-scan";
+import { buildRunCost } from "@/lib/ai-code/cost";
 import { workspaceGithubClient } from "@/lib/github-client";
 import { buildRepoContext, withRepoContext } from "@/lib/ai-code/repo-context";
 import { getAIClient } from "@/lib/ai";
@@ -50,7 +51,7 @@ const CODE_GATE_AGENT_ID = "ai-code-gate";
 const SPEC_QUESTION_IDS = new Set(DEFAULT_SPEC_QUESTIONS.map((q) => q.id));
 
 /** Common executor evidence (both authoring modes carry these). */
-type ExecutorEvidence = { author: string; provider: string | null; costUsd: number | null; latencyMs: number | null; error: string | null };
+type ExecutorEvidence = { author: string; provider: string | null; costUsd: number | null; latencyMs: number | null; inputTokens: number | null; outputTokens: number | null; error: string | null };
 
 /**
  * Resolve the change the pipeline will govern. Three sources, all feeding the
@@ -74,7 +75,7 @@ async function resolveChange(args: {
       { prompt: args.prompt, executorProviderPin: args.executorProviderPin, feature: "ai-code-pipeline-author-files" },
       { complete: (r) => client.complete(r) },
     );
-    const ev: ExecutorEvidence = { author: authored.author, provider: authored.provider, costUsd: authored.costUsd, latencyMs: authored.latencyMs, error: authored.error };
+    const ev: ExecutorEvidence = { author: authored.author, provider: authored.provider, costUsd: authored.costUsd, latencyMs: authored.latencyMs, inputTokens: authored.inputTokens ?? null, outputTokens: authored.outputTokens ?? null, error: authored.error };
     return { diff: filesToDiff(authored.changes), author: authored.author, executor: ev, changes: authored.changes };
   }
   if (args.diff.trim()) return { diff: args.diff, author: args.authorModel, executor: null, changes: null };
@@ -83,7 +84,7 @@ async function resolveChange(args: {
     { prompt: args.prompt, executorProviderPin: args.executorProviderPin, feature: "ai-code-pipeline-author" },
     { complete: (r) => client.complete(r) },
   );
-  const ev: ExecutorEvidence = { author: executor.author, provider: executor.provider, costUsd: executor.costUsd, latencyMs: executor.latencyMs, error: executor.error };
+  const ev: ExecutorEvidence = { author: executor.author, provider: executor.provider, costUsd: executor.costUsd, latencyMs: executor.latencyMs, inputTokens: executor.inputTokens ?? null, outputTokens: executor.outputTokens ?? null, error: executor.error };
   return { diff: executor.diff, author: executor.author, executor: ev, changes: null };
 }
 
@@ -290,6 +291,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     conforms: run.conformance.conforms,
     // Attribution for grading + per-model drift (src/lib/ai-code/grading.ts).
     model: effectiveAuthor,
+    cost_usd: executor?.costUsd ?? 0,
     repo_context_files: repoContextFiles.length,
     deep_scan_critical: deepScan.critical,
   });
@@ -328,5 +330,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     });
   }
 
-  return NextResponse.json({ run, approvalId, executor, invariants, changeFacts, deepScan, mode, repoContext: { files: repoContextFiles } });
+  // Cost meter: what the run cost + what the same tokens would cost on other
+  // popular models (reuses the router's pricing registry). Iteration overhead
+  // (repair attempts) is the measurable hidden cost of a cheaper model.
+  const cost = buildRunCost({
+    actualUsd: executor?.costUsd ?? null,
+    inputTokens: executor?.inputTokens ?? null,
+    outputTokens: executor?.outputTokens ?? null,
+    repairAttempts: run.remediation.attempts.length,
+  });
+
+  return NextResponse.json({ run, approvalId, executor, invariants, changeFacts, deepScan, mode, repoContext: { files: repoContextFiles }, cost });
 }

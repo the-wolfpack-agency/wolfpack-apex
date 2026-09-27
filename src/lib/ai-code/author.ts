@@ -42,6 +42,8 @@ export interface AuthorResult {
   provider: string | null;
   costUsd: number | null;
   latencyMs: number | null;
+  inputTokens?: number | null;
+  outputTokens?: number | null;
   /** Honest failure surface: an unavailable executor lands here, not a throw. */
   error: string | null;
 }
@@ -77,7 +79,7 @@ function errText(e: unknown): string {
 export async function authorDiff(input: AuthorInput, deps: AuthorDeps): Promise<AuthorResult> {
   const maxTokens = input.maxTokens ?? 2000;
   const feature = input.feature ?? "ai-code-author";
-  const result: AuthorResult = { diff: "", author: input.executorProviderPin ?? "unknown", provider: null, costUsd: null, latencyMs: null, error: null };
+  const result: AuthorResult = { diff: "", author: input.executorProviderPin ?? "unknown", provider: null, costUsd: null, latencyMs: null, inputTokens: null, outputTokens: null, error: null };
   try {
     const resp = await deps.complete({
       system: AI_CODE_AUTHOR_PROMPT.render({}),
@@ -94,6 +96,8 @@ export async function authorDiff(input: AuthorInput, deps: AuthorDeps): Promise<
     result.provider = resp.provider_used;
     result.costUsd = resp.cost_usd;
     result.latencyMs = resp.latency_ms;
+    result.inputTokens = resp.input_tokens;
+    result.outputTokens = resp.output_tokens;
   } catch (e) {
     // silent-ok: recorded to result.error and returned, so an unavailable
     // executor reads as "no diff authored", never as a thrown request.
@@ -109,6 +113,8 @@ export interface AuthorFilesResult {
   provider: string | null;
   costUsd: number | null;
   latencyMs: number | null;
+  inputTokens?: number | null;
+  outputTokens?: number | null;
   error: string | null;
 }
 
@@ -122,7 +128,7 @@ export interface AuthorFilesResult {
 export async function authorFileChanges(input: AuthorInput, deps: AuthorDeps): Promise<AuthorFilesResult> {
   const maxTokens = input.maxTokens ?? 4000;
   const feature = input.feature ?? "ai-code-author-files";
-  const result: AuthorFilesResult = { changes: [], author: input.executorProviderPin ?? "unknown", provider: null, costUsd: null, latencyMs: null, error: null };
+  const result: AuthorFilesResult = { changes: [], author: input.executorProviderPin ?? "unknown", provider: null, costUsd: null, latencyMs: null, inputTokens: null, outputTokens: null, error: null };
   try {
     const resp = await deps.complete({
       system: AI_CODE_AUTHOR_FILES_PROMPT.render({}),
@@ -137,6 +143,8 @@ export async function authorFileChanges(input: AuthorInput, deps: AuthorDeps): P
     result.provider = resp.provider_used;
     result.costUsd = resp.cost_usd;
     result.latencyMs = resp.latency_ms;
+    result.inputTokens = resp.input_tokens;
+    result.outputTokens = resp.output_tokens;
   } catch (e) {
     // silent-ok: recorded to result.error and returned; an unavailable executor
     // reads as "no files authored", never as a thrown request.
