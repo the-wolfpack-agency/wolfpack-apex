@@ -40,6 +40,8 @@ interface Summary {
     flagged: number;
     trapped: number;
     blocked: number;
+    hostileOperators?: number;
+    hostileEvents?: number;
     topAgents: Array<{ agent: string; count: number }>;
   };
   learnedSignatures?: { shadow: number; enforcing: number; autoBlocked: number };
@@ -709,15 +711,27 @@ export default function SiteAnalyticsPage() {
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "1rem", marginTop: "0.8rem" }}>
               <div>
+                <div style={{ ...label, color: "var(--wp-error, #ef4444)" }}>Confirmed hostile</div>
+                <div data-testid="ff-hostile-operators" style={{ marginTop: "0.25rem", fontSize: "1.5rem", fontWeight: 700, color: (summary.forcefield.hostileOperators ?? 0) > 0 ? "var(--wp-error, #ef4444)" : "var(--wp-text, #eee)" }}>
+                  {(summary.forcefield.hostileOperators ?? 0).toLocaleString()}
+                </div>
+                <div style={{ fontSize: "0.62rem", color: "var(--wp-text-muted, #9ca3af)", marginTop: "0.15rem", lineHeight: 1.35 }}>
+                  operators with real tradecraft (probe / decoy / payload){(summary.forcefield.hostileEvents ?? 0) > 0 ? ` · ${(summary.forcefield.hostileEvents ?? 0).toLocaleString()} events` : ""}
+                </div>
+              </div>
+              <div>
                 <div style={{ ...label, color: "var(--wp-success, #30a46c)" }}>Agents welcomed</div>
                 <div data-testid="ff-welcomed" style={{ marginTop: "0.25rem", fontSize: "1.5rem", fontWeight: 700, color: "var(--wp-text, #eee)" }}>
                   {summary.forcefield.welcomed.toLocaleString()}
                 </div>
               </div>
               <div>
-                <div style={{ ...label, color: "var(--wp-warning, #f5a623)" }}>Automation flagged</div>
-                <div data-testid="ff-flagged" style={{ marginTop: "0.25rem", fontSize: "1.5rem", fontWeight: 700, color: "var(--wp-text, #eee)" }}>
+                <div style={{ ...label, color: "var(--wp-text-muted, #9ca3af)" }}>Flagged (unconfirmed)</div>
+                <div data-testid="ff-flagged" style={{ marginTop: "0.25rem", fontSize: "1.5rem", fontWeight: 700, color: "var(--wp-text-muted, #9ca3af)" }}>
                   {summary.forcefield.flagged.toLocaleString()}
+                </div>
+                <div style={{ fontSize: "0.62rem", color: "var(--wp-text-muted, #6b7280)", marginTop: "0.15rem", lineHeight: 1.35 }}>
+                  weak signal: unidentified automation, mostly benign crawlers &amp; first-party traffic
                 </div>
               </div>
               <div>

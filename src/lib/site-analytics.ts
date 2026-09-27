@@ -110,6 +110,13 @@ export interface SiteAnalyticsSummary {
     flagged: number;
     trapped: number;
     blocked: number;
+    /* The truthful threat headline: DISTINCT operators that exhibited hostile
+       tradecraft (probe / decoy trip / payload / honeypot). "flagged" is a weak
+       heuristic (unidentified automation) and is mostly benign; hostileOperators
+       is the number of actors that actually did something hostile.
+       hostileEvents is their total event volume. */
+    hostileOperators: number;
+    hostileEvents: number;
     topAgents: Array<{ agent: string; count: number }>;
   };
   /* Learned hostile-tradecraft signatures: combos mined from caught hostiles.
@@ -266,12 +273,21 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
         WHERE ${sinceClause}${surfaceClause}`,
       params,
     ),
-    safeQuery<{ welcomed: string; flagged: string; trapped: string; blocked: string }>(
+    safeQuery<{ welcomed: string; flagged: string; trapped: string; blocked: string; hostile_operators: string; hostile_events: string }>(
+      /* welcomed/flagged/trapped/blocked are event tallies. hostile_operators is
+         the number that actually matters: DISTINCT fingerprints that exhibited
+         hostile TRADECRAFT (probed a sensitive path, tripped a decoy, sent a
+         payload, hit a honeypot). "flagged" is a weak heuristic (unidentified
+         automation) and is mostly benign crawlers and first-party traffic, so a
+         raw flagged count reads as "thousands of threats" when almost none did
+         anything hostile. hostile_operators is the truthful headline. */
       `SELECT
          count(*) FILTER (WHERE event_type = 'site.agent_welcomed')     AS welcomed,
          count(*) FILTER (WHERE event_type = 'site.agent_flagged')      AS flagged,
          count(*) FILTER (WHERE event_type = 'site.agent_trap_tripped') AS trapped,
-         count(*) FILTER (WHERE props->>'blocked' = 'true')             AS blocked
+         count(*) FILTER (WHERE props->>'blocked' = 'true')             AS blocked,
+         count(DISTINCT props->>'fp') FILTER (WHERE event_type IN ('site.agent_probed_sensitive','site.agent_payload_attack','site.agent_trap_tripped','site.agent_form_honeypot','site.agent_form_too_fast') AND props->>'fp' IS NOT NULL) AS hostile_operators,
+         count(*) FILTER (WHERE event_type IN ('site.agent_probed_sensitive','site.agent_payload_attack','site.agent_trap_tripped','site.agent_form_honeypot','site.agent_form_too_fast')) AS hostile_events
          FROM site_analytics_events
         WHERE ${sinceClause}${surfaceClause}${notAssetFlag}`,
       params,
@@ -427,6 +443,8 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
       flagged: ff.rows[0] ? Number(ff.rows[0].flagged) : 0,
       trapped: ff.rows[0] ? Number(ff.rows[0].trapped) : 0,
       blocked: ff.rows[0] ? Number(ff.rows[0].blocked) : 0,
+      hostileOperators: ff.rows[0] ? Number(ff.rows[0].hostile_operators) : 0,
+      hostileEvents: ff.rows[0] ? Number(ff.rows[0].hostile_events) : 0,
       topAgents: ffAgents.rows.map((r) => ({ agent: r.agent, count: Number(r.count) })),
     },
     learnedSignatures: {
