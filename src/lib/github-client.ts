@@ -169,6 +169,35 @@ export async function createBranch(
   }
 }
 
+/** Current head SHA of a branch: the checkpoint a later revert restores to. */
+export async function getBranchHead(
+  client: GithubClient,
+  repoFullName: string,
+  branch: string,
+): Promise<string> {
+  const ref = await gh<{ object: { sha: string } }>(
+    client,
+    "GET",
+    `/repos/${repoFullName}/git/ref/heads/${encodeURIComponent(branch)}`,
+  );
+  return ref.object.sha;
+}
+
+/** Force a branch back to a known-good SHA (the revert mechanism). Callers MUST
+ *  restrict this to factory-created branches (see ai-code/revert.ts) so it can
+ *  never rewrite a human branch, a release branch, or main. */
+export async function resetBranchTo(
+  client: GithubClient,
+  repoFullName: string,
+  branch: string,
+  sha: string,
+): Promise<void> {
+  await gh(client, "PATCH", `/repos/${repoFullName}/git/refs/heads/${encodeURIComponent(branch)}`, {
+    sha,
+    force: true,
+  });
+}
+
 export interface OpenedPullRequest {
   html_url: string;
   number: number;
