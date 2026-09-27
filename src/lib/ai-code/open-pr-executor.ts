@@ -42,7 +42,9 @@ export type OpenPrOutcome =
   // On a failure AFTER the branch was pushed, we still hand back the branch + a
   // one-click compare link so the pushed work is never lost and a human can open
   // the PR themselves (e.g. when the token lacks pull_requests: write).
-  | { ok: false; reason: string; branch?: string; files?: number; compareUrl?: string };
+  // needsInstall marks the permission case specifically, so the UI can offer the
+  // one-click GitHub App install (the true minimum-effort fix) rather than a PAT.
+  | { ok: false; reason: string; branch?: string; files?: number; compareUrl?: string; needsInstall?: boolean };
 
 const DEFAULT_REPO = process.env.FACTORY_TARGET_REPO || "the-wolfpack-agency/wolfpack-apex";
 
@@ -150,7 +152,7 @@ export async function executeOpenPr(params: OpenPrParams, ctx: WriteCtx): Promis
         ? `The change was pushed to branch "${branch}", but this GitHub token cannot open pull requests on ${repo}. Install the Instinct GitHub App (or grant the token Pull requests: write), then open the PR from the compare link.`
         : `The change was pushed to branch "${branch}", but opening the pull request failed: ${msg}`;
       await recordOutcome(false, permission ? "pr_permission" : "pr_open_error", `${reason} | ${compareUrl}`);
-      return { ok: false, reason, branch, files: committed.length, compareUrl };
+      return { ok: false, reason, branch, files: committed.length, compareUrl, needsInstall: permission };
     }
   } catch (err) {
     // Never throw from an approved-write executor: a recorded ok:false is the
