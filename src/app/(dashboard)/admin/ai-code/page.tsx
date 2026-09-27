@@ -80,6 +80,14 @@ interface DeepScanSummary {
   high: number;
   blocking: boolean;
 }
+interface ModelCostRow { model: string; provider: string; tier: string; costUsd: number }
+interface RunCost {
+  actualUsd: number;
+  inputTokens: number;
+  outputTokens: number;
+  attempts: number;
+  comparison: ModelCostRow[];
+}
 interface PipelineResponse {
   run?: PipelineRun;
   approvalId?: string | null;
@@ -87,8 +95,11 @@ interface PipelineResponse {
   invariants?: InvariantDecision;
   deepScan?: DeepScanSummary;
   mode?: string;
+  cost?: RunCost;
   error?: string;
 }
+
+const usdFmt = (n: number): string => `$${n > 0 && n < 0.01 ? n.toFixed(4) : n.toFixed(2)}`;
 
 interface RunSummary {
   ref: string;
@@ -189,6 +200,7 @@ export default function CodeFactoryPage() {
   const [approvalId, setApprovalId] = useState<string | null>(null);
   const [invariants, setInvariants] = useState<InvariantDecision | null>(null);
   const [deepScan, setDeepScan] = useState<DeepScanSummary | null>(null);
+  const [cost, setCost] = useState<RunCost | null>(null);
   const [prUrl, setPrUrl] = useState<string | null>(null);
   const [approving, setApproving] = useState(false);
   const [approveError, setApproveError] = useState<string | null>(null);
@@ -255,6 +267,7 @@ export default function CodeFactoryPage() {
     setApprovalId(null);
     setInvariants(null);
     setDeepScan(null);
+    setCost(null);
     setPrUrl(null);
     setApproveError(null);
     try {
@@ -286,6 +299,7 @@ export default function CodeFactoryPage() {
       setApprovalId(body.approvalId ?? null);
       setInvariants(body.invariants ?? null);
       setDeepScan(body.deepScan ?? null);
+      setCost(body.cost ?? null);
       // Seed the clarifier with each open question's assumed default so re-running
       // sends them explicitly (confirming the assumption resolves it).
       const oq = body.run.openQuestions ?? [];
@@ -468,6 +482,57 @@ export default function CodeFactoryPage() {
           </div>
           {executor.error && (
             <p style={{ margin: "0.6rem 0 0", color: "var(--wp-error, #ef4444)", fontSize: "0.85rem" }}>{executor.error}</p>
+          )}
+        </GlassPanel>
+      )}
+
+      {cost && (
+        <GlassPanel title="Cost" subtitle="What this run cost, and what the same tokens would cost on other popular models">
+          <div data-testid="cost-actual" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: "0.75rem" }}>
+            {[
+              { k: "This run", v: usdFmt(cost.actualUsd) },
+              { k: "Input tokens", v: cost.inputTokens.toLocaleString() },
+              { k: "Output tokens", v: cost.outputTokens.toLocaleString() },
+              { k: "Model passes", v: String(cost.attempts) },
+            ].map((t) => (
+              <div key={t.k} style={{ background: "var(--wp-surface-2, #171a21)", border: "1px solid var(--wp-border, #2a2f3a)", borderRadius: 8, padding: "0.6rem 0.75rem" }}>
+                <div style={{ fontSize: "0.68rem", textTransform: "uppercase", letterSpacing: "0.03em", color: "var(--wp-text-dim)" }}>{t.k}</div>
+                <div style={{ fontSize: "1.25rem", fontWeight: 700, marginTop: "0.2rem" }}>{t.v}</div>
+              </div>
+            ))}
+          </div>
+          {cost.attempts > 1 && (
+            <p style={{ margin: "0.6rem 0 0", fontSize: "0.78rem", color: "var(--wp-text-dim)", lineHeight: 1.45 }}>
+              This run took {cost.attempts} model passes ({cost.attempts - 1} repair{cost.attempts - 1 === 1 ? "" : "s"}). Iteration overhead is the hidden cost of a cheaper model: more passes can cost more than a pricier model that passes first try.
+            </p>
+          )}
+          {cost.comparison.length > 0 && (
+            <div style={{ marginTop: "0.9rem", overflowX: "auto" }}>
+              <div style={{ fontSize: "0.72rem", textTransform: "uppercase", letterSpacing: "0.03em", color: "var(--wp-text-dim)", marginBottom: "0.4rem" }}>Same tokens on other models (cheapest first)</div>
+              <table data-testid="cost-comparison" style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.82rem" }}>
+                <thead>
+                  <tr style={{ color: "var(--wp-text-dim)", textAlign: "left" }}>
+                    <th style={{ padding: "0.3rem 0.5rem", fontWeight: 600 }}>Model</th>
+                    <th style={{ padding: "0.3rem 0.5rem", fontWeight: 600 }}>Provider</th>
+                    <th style={{ padding: "0.3rem 0.5rem", fontWeight: 600 }}>Tier</th>
+                    <th style={{ padding: "0.3rem 0.5rem", fontWeight: 600, textAlign: "right" }}>Est. cost</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {cost.comparison.map((r) => (
+                    <tr key={r.model} style={{ borderTop: "1px solid var(--wp-border, #2a2f3a)" }}>
+                      <td style={{ padding: "0.35rem 0.5rem", fontWeight: 600, color: "var(--wp-text, #e6e9ef)" }}>{r.model}</td>
+                      <td style={{ padding: "0.35rem 0.5rem", color: "var(--wp-text-dim)" }}>{r.provider}</td>
+                      <td style={{ padding: "0.35rem 0.5rem", color: "var(--wp-text-dim)" }}>{r.tier}</td>
+                      <td style={{ padding: "0.35rem 0.5rem", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{usdFmt(r.costUsd)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p style={{ margin: "0.5rem 0 0", fontSize: "0.72rem", color: "var(--wp-text-dim)" }}>
+                List price times this run&rsquo;s measured tokens. Reuses the model router&rsquo;s pricing, so factory and router estimates never drift.
+              </p>
+            </div>
           )}
         </GlassPanel>
       )}

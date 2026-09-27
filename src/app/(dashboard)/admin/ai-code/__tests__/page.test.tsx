@@ -50,6 +50,7 @@ function runResp(over: Partial<{ outcome: string; status: string; findings: unkn
     executor: EXECUTOR,
     invariants: over.invariants ?? { ruleId: "R-MUTATION-ALLOW", intendedOutcome: "allow", wouldBlock: false, reason: "ok" },
     deepScan: over.deepScan ?? { scanned: 1, critical: 0, high: 0, blocking: false },
+    cost: { actualUsd: 0.0003, inputTokens: 500, outputTokens: 800, attempts: 1, comparison: [{ model: "gpt-4o-mini", provider: "openai", tier: "small", costUsd: 0.000555 }, { model: "gpt-4o", provider: "openai", tier: "large", costUsd: 0.00925 }] },
   };
 }
 
@@ -108,7 +109,7 @@ test("submits a PROMPT (no diff) to the pipeline and shows the executor + allow 
   // no repo entered -> the field is omitted (executor defaults to apex)
   expect(body.repo).toBeUndefined();
   // executor + verdict render
-  await waitFor(() => expect(screen.getByText("gpt-4o-mini")).toBeInTheDocument());
+  await waitFor(() => expect(screen.getAllByText("gpt-4o-mini").length).toBeGreaterThan(0)); // executor + cost table
   expect(screen.getByText(/Allowed/)).toBeInTheDocument();
   expect(screen.getAllByText(/Ready for PR/).length).toBeGreaterThan(0); // verdict pill + handoff status
 });
@@ -276,4 +277,15 @@ test("pipeline health: checking a ref renders product-agnostic checkpoints with 
   expect(screen.getByTestId("pipeline-cat-security")).toHaveTextContent(/Failed/);
   // never leaks the underlying tool name
   expect(screen.getByTestId("pipeline-dashboard")).not.toHaveTextContent(/vercel|codeql|jest|postgres/i);
+});
+
+test("cost meter shows this run's cost and a cross-model comparison", async () => {
+  pipelineResp = resp(200, runResp({ outcome: "allow" }));
+  render(<CodeFactoryPage />);
+  await submitPrompt();
+  await waitFor(() => expect(screen.getByTestId("cost-actual")).toBeInTheDocument());
+  expect(screen.getByTestId("cost-actual")).toHaveTextContent("$0.0003");
+  const table = screen.getByTestId("cost-comparison");
+  expect(table).toHaveTextContent("gpt-4o-mini");
+  expect(table).toHaveTextContent("gpt-4o");
 });
