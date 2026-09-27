@@ -56,6 +56,26 @@ export async function getInstallation(
   return rowToInstallation(rows[0]);
 }
 
+/**
+ * Reverse lookup: which workspace owns a given installation id. The GitHub App
+ * webhook receives events carrying installation.id (not a workspace), so this
+ * resolves the tenant to gate. Returns null when unknown or in shadow mode.
+ * NEVER throws.
+ */
+export async function getWorkspaceByInstallation(
+  installationId: string,
+): Promise<GithubInstallation | null> {
+  const { rows } = await safeQuery<InstallationRow>(
+    `SELECT workspace_id, installation_id, account_login, linked_at, linked_by
+       FROM github_app_installations
+      WHERE installation_id = $1
+      LIMIT 1`,
+    [installationId],
+  );
+  if (rows.length === 0) return null;
+  return rowToInstallation(rows[0]);
+}
+
 export interface LinkInstallationInput {
   workspaceId: string;
   installationId: string;

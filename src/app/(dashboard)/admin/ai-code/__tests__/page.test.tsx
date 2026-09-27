@@ -19,6 +19,11 @@ function resp(status: number, body: unknown): Response {
   return { ok: status >= 200 && status < 300, status, json: async () => body } as unknown as Response;
 }
 
+// The page fetches run history on mount; route assertions by URL, not call index.
+const HISTORY_EMPTY = () => resp(200, { runs: [], grade: { total: 0, readyRate: 0, firstPassRate: 0, blockRate: 0, escalationRate: 0, byModel: [] }, drift: [] });
+const pipelineCall = () => mockFetch.mock.calls.find((c) => c[0] === "/api/admin/ai-code/pipeline")!;
+const approvalCall = () => mockFetch.mock.calls.find((c) => String(c[0]).includes("/approvals/"))!;
+
 const FINDING = {
   file: "lib/x.ts", line: 2, klass: "logged_credential", severity: "critical", cwe: "CWE-532",
   title: "Possible credential written to a log (resetUrl)", detail: "A reset link reached a log.",
@@ -53,7 +58,25 @@ async function submitPrompt(text = "add isPalindrome with tests") {
   await act(async () => { fireEvent.click(screen.getByRole("button", { name: /generate & gate/i })); });
 }
 
-beforeEach(() => { jest.clearAllMocks(); user = { role: "cto" }; });
+let pipelineResp: Response;
+let approveResp: Response;
+let historyResp: Response;
+beforeEach(() => {
+  jest.clearAllMocks();
+  user = { role: "cto" };
+  pipelineResp = resp(200, runResp({ outcome: "allow" }));
+  approveResp = resp(200, { ok: true, status: "executed", outcome: { ok: true, url: "https://github.com/o/r/pull/42", number: 42 } });
+  historyResp = HISTORY_EMPTY();
+  // URL-aware: the page fetches run history on mount and after each run; route it
+  // to an empty history so it never consumes a per-test response. Everything else
+  // is the pipeline unless it targets the approvals endpoint.
+  mockFetch.mockImplementation((url: string) => {
+    const u = String(url);
+    if (u.includes("/ai-code/history")) return Promise.resolve(historyResp);
+    if (u.includes("/approvals/")) return Promise.resolve(approveResp);
+    return Promise.resolve(pipelineResp);
+  });
+});
 
 test("redirects an unauthenticated user to login, never a blank page", () => {
   user = null;
@@ -61,15 +84,26 @@ test("redirects an unauthenticated user to login, never a blank page", () => {
   expect(mockPush).toHaveBeenCalledWith("/login?next=/admin/ai-code");
 });
 
+test("sends the chosen target repo in the pipeline request", async () => {
+  pipelineResp = resp(200, runResp({ outcome: "allow" }));
+  render(<CodeFactoryPage />);
+  fireEvent.change(screen.getByLabelText("Target repo"), { target: { value: "acme/app" } });
+  await submitPrompt();
+  const body = JSON.parse((pipelineCall()[1] as { body: string }).body);
+  expect(body.repo).toBe("acme/app");
+});
+
 test("submits a PROMPT (no diff) to the pipeline and shows the executor + allow verdict", async () => {
-  mockFetch.mockResolvedValue(resp(200, runResp({ outcome: "allow" })));
+  pipelineResp = resp(200, runResp({ outcome: "allow" }));
   render(<CodeFactoryPage />);
   await submitPrompt();
   // it posted a prompt, not a diff
-  const body = JSON.parse((mockFetch.mock.calls[0][1] as { body: string }).body);
+  const body = JSON.parse((pipelineCall()[1] as { body: string }).body);
   expect(body.prompt).toContain("isPalindrome");
   expect(body).not.toHaveProperty("diff");
-  expect(mockFetch.mock.calls[0][0]).toBe("/api/admin/ai-code/pipeline");
+  expect(pipelineCall()[0]).toBe("/api/admin/ai-code/pipeline");
+  // no repo entered -> the field is omitted (executor defaults to apex)
+  expect(body.repo).toBeUndefined();
   // executor + verdict render
   await waitFor(() => expect(screen.getByText("gpt-4o-mini")).toBeInTheDocument());
   expect(screen.getByText(/Allowed/)).toBeInTheDocument();
@@ -77,7 +111,7 @@ test("submits a PROMPT (no diff) to the pipeline and shows the executor + allow 
 });
 
 test("shows a block verdict with the finding, and needs-human status", async () => {
-  mockFetch.mockResolvedValue(resp(200, runResp({ outcome: "block", findings: [FINDING] })));
+  pipelineResp = resp(200, runResp({ outcome: "block", findings: [FINDING] }));
   render(<CodeFactoryPage />);
   await submitPrompt();
   await waitFor(() => expect(screen.getByText(/Blocked - do not merge/)).toBeInTheDocument());
@@ -86,13 +120,11 @@ test("shows a block verdict with the finding, and needs-human status", async () 
 });
 
 test("shows the independent judge only when judgments are present", async () => {
-  mockFetch.mockResolvedValue(
-    resp(200, runResp({
+  pipelineResp = resp(200, runResp({
       outcome: "escalate",
       findings: [FINDING],
       judgments: [{ finding: FINDING, verdict: "confirmed", authorLineage: "openai", judgeLineage: "anthropic", reason: "real issue" }],
-    })),
-  );
+    }));
   render(<CodeFactoryPage />);
   await submitPrompt();
   await waitFor(() => expect(screen.getByText(/Independent judge/)).toBeInTheDocument());
@@ -100,7 +132,7 @@ test("shows the independent judge only when judgments are present", async () => 
 });
 
 test("surfaces a 422 (executor produced no diff) honestly, without a run", async () => {
-  mockFetch.mockResolvedValue(resp(422, { error: "executor produced no diff", executor: { ...EXECUTOR, diff: "", error: null } }));
+  pipelineResp = resp(422, { error: "executor produced no diff", executor: { ...EXECUTOR, diff: "", error: null } });
   render(<CodeFactoryPage />);
   await submitPrompt();
   await waitFor(() => expect(screen.getByText(/did not produce a usable change/i)).toBeInTheDocument());
@@ -113,11 +145,11 @@ test("validates an empty prompt before calling the API", async () => {
   render(<CodeFactoryPage />);
   await act(async () => { fireEvent.click(screen.getByRole("button", { name: /generate & gate/i })); });
   expect(screen.getByRole("alert")).toHaveTextContent(/describe the change/i);
-  expect(mockFetch).not.toHaveBeenCalled();
+  expect(pipelineCall()).toBeUndefined();
 });
 
 test("governance panel: clean invariants + deep scan, handoff captured", async () => {
-  mockFetch.mockResolvedValue(resp(200, runResp({ outcome: "allow" })));
+  pipelineResp = resp(200, runResp({ outcome: "allow" }));
   render(<CodeFactoryPage />);
   await submitPrompt();
   await waitFor(() => expect(screen.getByTestId("governance-panel")).toBeInTheDocument());
@@ -127,13 +159,11 @@ test("governance panel: clean invariants + deep scan, handoff captured", async (
 });
 
 test("governance panel: an invariant blocks -> withheld from handoff", async () => {
-  mockFetch.mockResolvedValue(
-    resp(200, runResp({
+  pipelineResp = resp(200, runResp({
       outcome: "allow",
       approvalId: null, // withheld
       invariants: { ruleId: "R-DEPENDENCY-ADDED-ESCALATE", intendedOutcome: "escalate", wouldBlock: true, reason: "adds a runtime dependency" },
-    })),
-  );
+    }));
   render(<CodeFactoryPage />);
   await submitPrompt();
   await waitFor(() => expect(screen.getByTestId("handoff-status")).toHaveTextContent(/Withheld from PR handoff: R-DEPENDENCY-ADDED-ESCALATE/));
@@ -141,13 +171,11 @@ test("governance panel: an invariant blocks -> withheld from handoff", async () 
 });
 
 test("governance panel: a critical deep-scan finding -> withheld from handoff", async () => {
-  mockFetch.mockResolvedValue(
-    resp(200, runResp({
+  pipelineResp = resp(200, runResp({
       outcome: "allow",
       approvalId: null,
       deepScan: { scanned: 1, critical: 1, high: 0, blocking: true },
-    })),
-  );
+    }));
   render(<CodeFactoryPage />);
   await submitPrompt();
   await waitFor(() => expect(screen.getByText(/Deep scan: 1 critical/)).toBeInTheDocument());
@@ -155,22 +183,18 @@ test("governance panel: a critical deep-scan finding -> withheld from handoff", 
 });
 
 test("approve & open PR: clicking approve opens the real PR and shows the link", async () => {
-  mockFetch
-    .mockResolvedValueOnce(resp(200, runResp({ outcome: "allow" }))) // the pipeline run
-    .mockResolvedValueOnce(resp(200, { ok: true, status: "executed", outcome: { ok: true, url: "https://github.com/o/r/pull/42", number: 42 } })); // the approve
+  approveResp = resp(200, { ok: true, status: "executed", outcome: { ok: true, url: "https://github.com/o/r/pull/42", number: 42 } });
   render(<CodeFactoryPage />);
   await submitPrompt();
   await waitFor(() => expect(screen.getByTestId("approve-open-pr")).toBeInTheDocument());
   await act(async () => { fireEvent.click(screen.getByTestId("approve-open-pr")); });
   await waitFor(() => expect(screen.getByTestId("pr-link")).toHaveAttribute("href", "https://github.com/o/r/pull/42"));
   // it approved the captured approval id
-  expect(mockFetch.mock.calls[1][0]).toBe("/api/admin/agents/approvals/appr-1");
+  expect(approvalCall()[0]).toBe("/api/admin/agents/approvals/appr-1");
 });
 
 test("approve failure surfaces the reason, no PR link", async () => {
-  mockFetch
-    .mockResolvedValueOnce(resp(200, runResp({ outcome: "allow" })))
-    .mockResolvedValueOnce(resp(200, { ok: false, status: "executed", outcome: { ok: false, reason: "no GitHub token configured" } }));
+  approveResp = resp(200, { ok: false, status: "executed", outcome: { ok: false, reason: "no GitHub token configured" } });
   render(<CodeFactoryPage />);
   await submitPrompt();
   await waitFor(() => expect(screen.getByTestId("approve-open-pr")).toBeInTheDocument());
@@ -195,7 +219,7 @@ const OPEN_Q = [
 ];
 
 test("clarifier: open questions render as multiple-choice with the assumed default preselected", async () => {
-  mockFetch.mockResolvedValue(resp(200, runResp({ outcome: "allow", openQuestions: OPEN_Q })));
+  pipelineResp = resp(200, runResp({ outcome: "allow", openQuestions: OPEN_Q }));
   render(<CodeFactoryPage />);
   await submitPrompt();
   await waitFor(() => expect(screen.getByTestId("clarifier")).toBeInTheDocument());
@@ -205,13 +229,35 @@ test("clarifier: open questions render as multiple-choice with the assumed defau
 });
 
 test("clarifier: changing an answer and re-running sends the confirmed answers", async () => {
-  mockFetch.mockResolvedValue(resp(200, runResp({ outcome: "allow", openQuestions: OPEN_Q })));
+  pipelineResp = resp(200, runResp({ outcome: "allow", openQuestions: OPEN_Q }));
   render(<CodeFactoryPage />);
   await submitPrompt();
   await waitFor(() => expect(screen.getByTestId("clarifier-tests")).toBeInTheDocument());
   fireEvent.change(screen.getByTestId("clarifier-tests"), { target: { value: "all" } });
   await act(async () => { fireEvent.click(screen.getByTestId("clarifier-rerun")); });
-  const lastCall = mockFetch.mock.calls[mockFetch.mock.calls.length - 1];
-  const body = JSON.parse((lastCall[1] as { body: string }).body);
+  const pipelineCalls = mockFetch.mock.calls.filter((c) => c[0] === "/api/admin/ai-code/pipeline");
+  const body = JSON.parse((pipelineCalls[pipelineCalls.length - 1][1] as { body: string }).body);
   expect(body.answers).toEqual({ tests: "all" });
+});
+
+test("run history panel shows grade, drift, and recent runs when history has data", async () => {
+  historyResp = resp(200, {
+    runs: [
+      { ref: "pr-9", model: "gpt-4o-mini", status: "ready_for_pr", attempts: 0, finalOutcome: "allow", deepScanCritical: 0, conforms: true, createdAt: "2026-09-27T10:00:00Z" },
+      { ref: "pr-8", model: "claude", status: "needs_human", attempts: 2, finalOutcome: "block", deepScanCritical: 1, conforms: false, createdAt: "2026-09-27T09:00:00Z" },
+    ],
+    grade: { total: 2, readyRate: 0.5, firstPassRate: 0.5, blockRate: 0.5, escalationRate: 0.5, byModel: [] },
+    drift: [{ model: "claude", priorReadyRate: 0.9, recentReadyRate: 0.4, drop: 0.5, priorN: 6, recentN: 6 }],
+  });
+  render(<CodeFactoryPage />);
+  await waitFor(() => expect(screen.getByTestId("history-grade")).toBeInTheDocument());
+  expect(screen.getByText("Run history & quality")).toBeInTheDocument();
+  expect(screen.getByTestId("history-drift")).toHaveTextContent(/claude/i);
+  expect(screen.getByTestId("history-runs")).toHaveTextContent("pr-9");
+});
+
+test("run history panel is hidden when there are no runs", async () => {
+  render(<CodeFactoryPage />);
+  await waitFor(() => expect(screen.getByTestId("ai-code-page")).toBeInTheDocument());
+  expect(screen.queryByTestId("history-grade")).not.toBeInTheDocument();
 });

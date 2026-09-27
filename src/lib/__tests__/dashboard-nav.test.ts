@@ -42,3 +42,25 @@ describe("Forcefield (site analytics) is org-wide, not admin-only", () => {
     }
   });
 });
+
+describe("Code Governance is nested directly under Code Gate", () => {
+  const gateIdx = NAV.findIndex((i) => i.href === "/admin/ai-code");
+  const govIdx = NAV.findIndex((i) => i.href === "/admin/ai-code/overview");
+
+  it("Code Governance is the item immediately after Code Gate", () => {
+    expect(gateIdx).toBeGreaterThanOrEqual(0);
+    expect(govIdx).toBe(gateIdx + 1);
+  });
+
+  it("Code Governance renders nested (indented child)", () => {
+    expect(NAV[govIdx].nested).toBe(true);
+  });
+
+  it("Code Governance stays roleless so non-engineers keep the trust surface", () => {
+    // The whole reason it is NOT folded into the role-gated factory page.
+    expect(NAV[govIdx].roles).toBeUndefined();
+    for (const role of ["sales", "ops", "hr", "designer", "dev"]) {
+      expect(canSeeNavItem(NAV[govIdx], role, null)).toBe(true);
+    }
+  });
+});
