@@ -212,6 +212,27 @@ test("approve failure surfaces the reason, no PR link", async () => {
   expect(screen.queryByTestId("pr-link")).not.toBeInTheDocument();
 });
 
+test("a PR-permission failure shows a one-click compare link so the pushed work is not lost", async () => {
+  approveResp = resp(200, {
+    ok: false,
+    status: "executed",
+    outcome: {
+      ok: false,
+      reason: 'The change was pushed to branch "factory/x-abc", but this GitHub token cannot open pull requests. Install the Instinct GitHub App.',
+      branch: "factory/x-abc",
+      compareUrl: "https://github.com/o/r/compare/main...factory/x-abc?expand=1",
+    },
+  });
+  render(<CodeFactoryPage />);
+  await submitPrompt();
+  await waitFor(() => expect(screen.getByTestId("approve-open-pr")).toBeInTheDocument());
+  fireEvent.click(screen.getByTestId("approve-consent"));
+  await act(async () => { fireEvent.click(screen.getByTestId("approve-open-pr")); });
+  await waitFor(() => expect(screen.getByTestId("compare-link")).toBeInTheDocument());
+  expect(screen.getByTestId("compare-link")).toHaveAttribute("href", "https://github.com/o/r/compare/main...factory/x-abc?expand=1");
+  expect(screen.getByRole("alert")).toHaveTextContent(/GitHub App/);
+});
+
 test("example chips populate the prompt (showing what the factory can do)", async () => {
   render(<CodeFactoryPage />);
   const chips = screen.getByTestId("prompt-chips");
@@ -330,6 +351,8 @@ test("generated code is shown prominently with a diff summary and copy control",
   expect(screen.getByTestId("generated-code")).toHaveTextContent("const k = 1;");
   // header summarises the change (+1 added from the mock diff) and offers copy
   expect(screen.getByTestId("generated-code-stats")).toHaveTextContent("+1");
+  // and reports the line count of the generated code (net +1 -> "1 line")
+  expect(screen.getByTestId("generated-code-linecount")).toHaveTextContent("1 line");
   expect(screen.getByTestId("copy-code")).toBeInTheDocument();
 });
 
