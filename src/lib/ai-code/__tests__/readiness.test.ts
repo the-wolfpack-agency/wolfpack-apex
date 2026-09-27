@@ -60,6 +60,19 @@ test("no CI on the base -> WARN, does not block", () => {
   expect(summarizeReadiness(Object.values(checks)).ready).toBe(true);
 });
 
+test("no CI on the base is NOT a green baseline (found by dogfooding): baseline-health warns, never 'green'", () => {
+  const checks = byId({ ...base, ciPresent: false, baselineFailingCount: 0 });
+  expect(checks["baseline-health"].status).toBe("warn");
+  expect(checks["baseline-health"].detail).not.toMatch(/green/i);
+  expect(checks["baseline-health"].detail).toMatch(/unmeasured|no baseline to compare/i);
+});
+
+test("a MEASURED clean base (CI ran, zero failures) is green", () => {
+  const checks = byId({ ...base, ciPresent: true, baselineFailingCount: 0 });
+  expect(checks["baseline-health"].status).toBe("pass");
+  expect(checks["baseline-health"].detail).toMatch(/green/i);
+});
+
 test("red baseline -> WARN that discloses pre-existing failures up front, does not block", () => {
   const checks = byId({ ...base, baselineFailingCount: 3 });
   expect(checks["baseline-health"].status).toBe("warn");
