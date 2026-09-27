@@ -109,6 +109,66 @@ export async function createAgent(
   return { agent, onboardingSecret };
 }
 
+/** Stable name of the factory's own governed principal (one row per workspace). */
+export const CODE_GATE_AGENT_NAME = "Secure Agent Code Gate";
+
+/**
+ * Ensure the code factory's governed principal exists and return its id.
+ *
+ * The factory opens PRs by acting AS this agent, so a factory action is a real,
+ * revocable fleet member subject to the same kill switch as any other agent:
+ * pausing or revoking it in the fleet stops every pending PR-open cold. Without
+ * this row the approval route's kill-switch re-check finds no active agent and
+ * auto-rejects, which made the human-in-the-gate approval impossible.
+ *
+ * Idempotent + workspace-scoped (keyed on the (workspace_id, name) unique
+ * constraint). Created ACTIVE on first call; on every later call the existing id
+ * is returned WITHOUT changing its state, so an operator who paused or revoked it
+ * keeps that decision - the kill switch is never silently resurrected. Returns
+ * null if the write fails (e.g. no database) so the caller degrades to "no
+ * handoff" rather than throwing.
+ */
+export async function ensureCodeGateAgent(
+  workspaceId: string,
+  ownerUserId: string,
+  actor: { userId: string; role: string },
+): Promise<string | null> {
+  try {
+    const { rows } = await writeQuery<{ id: string; inserted: boolean }>(
+      `INSERT INTO instinct_agents
+         (workspace_id, name, role, owner_user_id, identity_provider,
+          scan_status, state, activated_at, description, created_by)
+       VALUES ($1, $2, 'dev', $3, 'local', 'complete', 'active', NOW(), $4, $5)
+       ON CONFLICT (workspace_id, name)
+         DO UPDATE SET description = instinct_agents.description
+       RETURNING id, (xmax = 0) AS inserted`,
+      [
+        workspaceId,
+        CODE_GATE_AGENT_NAME,
+        ownerUserId,
+        "Governed principal the code factory acts as to open pull requests. Pause or revoke it to stop all factory PRs.",
+        actor.userId,
+      ],
+      { expectRows: 1 },
+    );
+    const row = rows[0];
+    if (!row) return null;
+    // xmax = 0 means the row was freshly inserted (not a conflict-update), so the
+    // creation event fires exactly once per workspace, not on every run.
+    if (row.inserted) {
+      trackEvent("agent.created", actor.userId, actor.role, {
+        agent_id: row.id,
+        role: "dev",
+        owner_user_id: ownerUserId,
+        identity_provider: "local",
+      });
+    }
+    return row.id;
+  } catch {
+    return null;
+  }
+}
+
 export async function getAgent(
   id: string,
   workspaceId: string,

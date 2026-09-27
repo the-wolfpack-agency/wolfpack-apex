@@ -17,7 +17,7 @@ jest.mock("@/lib/db", () => ({
 const mockTrackEvent = jest.fn();
 jest.mock("@/lib/analytics", () => ({ trackEvent: (...a: unknown[]) => mockTrackEvent(...a) }));
 
-import { createAgent, activateWithOnboardingSecret, setAgentState, listAgents } from "@/lib/agents/store";
+import { createAgent, activateWithOnboardingSecret, setAgentState, listAgents, ensureCodeGateAgent } from "@/lib/agents/store";
 
 function row(over: Record<string, unknown> = {}) {
   return {
@@ -123,5 +123,38 @@ describe("setAgentState", () => {
     expect(mockTrackEvent).toHaveBeenCalledWith(
       "agent.lifecycle_changed", "admin-1", "cto", { agent_id: "agent-1", state: "revoked" },
     );
+  });
+});
+
+describe("ensureCodeGateAgent (the factory's governed principal)", () => {
+  it("creates it ACTIVE on first call and returns its real id, emitting agent.created once", async () => {
+    mockWriteQuery.mockResolvedValue({ rows: [{ id: "cg-1", inserted: true }] });
+    const id = await ensureCodeGateAgent("ws-1", "owner-1", { userId: "admin-1", role: "cto" });
+    expect(id).toBe("cg-1");
+    // Inserted ACTIVE (not the default 'invited'): the sql sets state = 'active'.
+    const sql = String(mockWriteQuery.mock.calls[0][0]);
+    expect(sql).toMatch(/'active'/);
+    expect(mockTrackEvent).toHaveBeenCalledWith(
+      "agent.created", "admin-1", "cto",
+      expect.objectContaining({ agent_id: "cg-1", role: "dev", owner_user_id: "owner-1" }),
+    );
+  });
+
+  it("is idempotent: a later call returns the id WITHOUT re-emitting created and WITHOUT resurrecting a paused/revoked agent", async () => {
+    // xmax != 0 -> conflict update, not a fresh insert; the operator's paused/revoked
+    // state is preserved (the sql only DO UPDATEs description, never state).
+    mockWriteQuery.mockResolvedValue({ rows: [{ id: "cg-1", inserted: false }] });
+    const id = await ensureCodeGateAgent("ws-1", "owner-1", { userId: "admin-1", role: "cto" });
+    expect(id).toBe("cg-1");
+    expect(mockTrackEvent).not.toHaveBeenCalled();
+    const sql = String(mockWriteQuery.mock.calls[0][0]);
+    expect(sql).toMatch(/ON CONFLICT \(workspace_id, name\)/);
+    expect(sql).not.toMatch(/SET state/i); // never forces state back to active
+  });
+
+  it("returns null (degrade, no throw) when the write fails", async () => {
+    mockWriteQuery.mockRejectedValue(new Error("no database"));
+    const id = await ensureCodeGateAgent("ws-1", "owner-1", { userId: "admin-1", role: "cto" });
+    expect(id).toBeNull();
   });
 });
