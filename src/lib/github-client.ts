@@ -379,6 +379,60 @@ export async function listWorkflowRunChecks(
   }));
 }
 
+export interface WorkflowRunRef {
+  id: number;
+  name: string;
+  conclusion: string | null;
+}
+
+/** Workflow runs for a commit, with their run IDs (needed to reach the jobs +
+ *  logs that carry the actual failure detail). */
+export async function listWorkflowRunsRaw(client: GithubClient, repoFullName: string, sha: string): Promise<WorkflowRunRef[]> {
+  const res = await gh<{ workflow_runs?: { id?: number; name?: string; display_title?: string; conclusion?: string | null }[] }>(
+    client,
+    "GET",
+    `/repos/${repoFullName}/actions/runs?head_sha=${encodeURIComponent(sha)}&per_page=100`,
+  );
+  return (res.workflow_runs ?? [])
+    .filter((w) => typeof w.id === "number")
+    .map((w) => ({ id: w.id as number, name: w.name || w.display_title || "workflow", conclusion: w.conclusion ?? null }));
+}
+
+export interface WorkflowJobRef {
+  id: number;
+  name: string;
+  conclusion: string | null;
+}
+
+/** The jobs of a workflow run (the failing one carries the real error). */
+export async function listRunJobs(client: GithubClient, repoFullName: string, runId: number): Promise<WorkflowJobRef[]> {
+  const res = await gh<{ jobs?: { id?: number; name?: string; conclusion?: string | null }[] }>(
+    client,
+    "GET",
+    `/repos/${repoFullName}/actions/runs/${runId}/jobs?per_page=100`,
+  );
+  return (res.jobs ?? [])
+    .filter((j) => typeof j.id === "number")
+    .map((j) => ({ id: j.id as number, name: j.name || "job", conclusion: j.conclusion ?? null }));
+}
+
+/** Raw text log of a job (the Actions logs endpoint 302-redirects to a signed
+ *  text file; fetch follows the redirect). Needs Actions: read, which the shared
+ *  token has. Throws on error. */
+export async function fetchJobLogText(client: GithubClient, repoFullName: string, jobId: number): Promise<string> {
+  if (!client.token) throw new Error("no token");
+  const res = await client.fetch(`https://api.github.com/repos/${repoFullName}/actions/jobs/${jobId}/logs`, {
+    headers: {
+      Authorization: `Bearer ${client.token}`,
+      Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
+      "User-Agent": "wolfpack-instinct-sites",
+    },
+  });
+  if (!res.ok) throw new Error(`job logs → ${res.status}`);
+  return await res.text();
+}
+
 export async function triggerWorkflow(
   client: GithubClient,
   repoFullName: string,

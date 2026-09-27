@@ -19,7 +19,8 @@ import { requireEntitlement } from "@/lib/tenancy/require-entitlement";
 import { fetchCiStatus, fetchCiAttribution } from "@/lib/ai-code/ci-status";
 import { decideFixAction, buildFixBrief } from "@/lib/ai-code/ci-fix-loop";
 import { runCiFixStep } from "@/lib/ai-code/ci-fix-driver";
-import { workspaceGithubClient } from "@/lib/github-client";
+import { workspaceGithubClient, getBranchHead } from "@/lib/github-client";
+import { gatherFailureContext, buildEnrichedFixPrompt } from "@/lib/ai-code/ci-failure-detail";
 import { commitFileChanges, filesToDiff } from "@/lib/ai-code/file-changes";
 import { assessChange } from "@/lib/ai-code/assess";
 import { authorFileChanges } from "@/lib/ai-code/author";
@@ -94,9 +95,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     introducedFailing,
     briefDetails,
     reauthor: async (brief) => {
-      const prompt =
-        `The pull request on branch ${branch} of ${repo} is failing CI.\n\n${brief}\n\n` +
-        "Author the FULL file contents that fix the failing checks. Do not weaken or delete any test.";
+      // Enrich the re-author with what a human would look at: the branch head's
+      // ACTUAL failure detail (the failing job's error lines) and the current
+      // contents of the files that error points at. Without this the model has
+      // only a check name and produces nothing usable (found by dogfooding).
+      const headSha = await getBranchHead(client, repo, branch).catch(() => branch);
+      const context = await gatherFailureContext(client, repo, headSha, branch);
+      const prompt = buildEnrichedFixPrompt({ repo, branch, brief, context });
       const authored = await authorFileChanges(
         { prompt, feature: "ai-code-ci-fix" },
         { complete: (r) => ai.complete(r) },

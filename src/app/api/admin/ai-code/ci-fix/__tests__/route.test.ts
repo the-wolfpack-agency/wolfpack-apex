@@ -14,7 +14,14 @@ const mockWorkspaceClient = jest.fn();
 const mockCommit = jest.fn();
 const mockAuthorFiles = jest.fn();
 const mockAssessChange = jest.fn();
-jest.mock("@/lib/github-client", () => ({ workspaceGithubClient: (...a: unknown[]) => mockWorkspaceClient(...a) }));
+jest.mock("@/lib/github-client", () => ({
+  workspaceGithubClient: (...a: unknown[]) => mockWorkspaceClient(...a),
+  getBranchHead: async () => "headsha123",
+}));
+jest.mock("@/lib/ai-code/ci-failure-detail", () => ({
+  gatherFailureContext: async () => ({ detail: "", files: [] }),
+  buildEnrichedFixPrompt: (a: { brief: string }) => a.brief,
+}));
 jest.mock("@/lib/ai-code/file-changes", () => ({
   commitFileChanges: (...a: unknown[]) => mockCommit(...a),
   filesToDiff: (changes: { path: string; content: string }[]) =>
