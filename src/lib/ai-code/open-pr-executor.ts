@@ -123,7 +123,7 @@ export async function executeOpenPr(params: OpenPrParams, ctx: WriteCtx): Promis
     const committed = await commitFileChanges({ client, repoFullName: repo, branch, base, changes, message: `factory: ${ref}` });
     const title = `factory: ${(params.prompt || ref).replace(/\s+/g, " ").trim().slice(0, 72)}`;
     const body = [
-      "Authored by the Instinct code factory and submitted through Instinct.",
+      "Opened by AgentGate AI, the OGIAM code gate. Authored by a model, gated deterministically, and submitted for human review.",
       "",
       `- ref: ${ref}`,
       `- files: ${committed.map((p) => `\`${p}\``).join(", ")}`,
