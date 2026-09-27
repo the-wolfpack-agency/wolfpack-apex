@@ -35,6 +35,7 @@ import { buildRunCost } from "@/lib/ai-code/cost";
 import { workspaceGithubClient } from "@/lib/github-client";
 import { buildRepoContext, withRepoContext } from "@/lib/ai-code/repo-context";
 import { getAIClient } from "@/lib/ai";
+import type { AIModelTier } from "@/lib/ai/types";
 import { DEFAULT_SPEC_QUESTIONS } from "@/lib/ai-code/intake";
 import { createPendingApproval } from "@/lib/agents/approvals/store";
 import type { CodeReviewResult } from "@/lib/ai-code/types";
@@ -68,11 +69,12 @@ async function resolveChange(args: {
   prompt: string;
   authorModel: string;
   executorProviderPin?: string;
+  tier?: AIModelTier;
 }): Promise<{ diff: string; author: string; executor: ExecutorEvidence | null; changes: FileChange[] | null }> {
   if (args.mode === "files") {
     const client = getAIClient();
     const authored = await authorFileChanges(
-      { prompt: args.prompt, executorProviderPin: args.executorProviderPin, feature: "ai-code-pipeline-author-files" },
+      { prompt: args.prompt, executorProviderPin: args.executorProviderPin, feature: "ai-code-pipeline-author-files", tier: args.tier },
       { complete: (r) => client.complete(r) },
     );
     const ev: ExecutorEvidence = { author: authored.author, provider: authored.provider, costUsd: authored.costUsd, latencyMs: authored.latencyMs, inputTokens: authored.inputTokens ?? null, outputTokens: authored.outputTokens ?? null, error: authored.error };
@@ -81,11 +83,36 @@ async function resolveChange(args: {
   if (args.diff.trim()) return { diff: args.diff, author: args.authorModel, executor: null, changes: null };
   const client = getAIClient();
   const executor = await authorDiff(
-    { prompt: args.prompt, executorProviderPin: args.executorProviderPin, feature: "ai-code-pipeline-author" },
+    { prompt: args.prompt, executorProviderPin: args.executorProviderPin, feature: "ai-code-pipeline-author", tier: args.tier },
     { complete: (r) => client.complete(r) },
   );
   const ev: ExecutorEvidence = { author: executor.author, provider: executor.provider, costUsd: executor.costUsd, latencyMs: executor.latencyMs, inputTokens: executor.inputTokens ?? null, outputTokens: executor.outputTokens ?? null, error: executor.error };
   return { diff: executor.diff, author: executor.author, executor: ev, changes: null };
+}
+
+type ResolveArgs = Parameters<typeof resolveChange>[0];
+
+/**
+ * Author with a GOVERNED fallback so a simple authoring failure does not end the
+ * run. If the first executor produces nothing usable (and no manual diff was
+ * supplied), retry once at an escalated tier - a stronger model gets a usable
+ * draft to the SAME gate. Only after the fallback still produces nothing does the
+ * run surface a 422. The agent keeps the workflow running; the gate still governs
+ * whatever it drafts, so this never weakens a check, it only avoids a dead end.
+ */
+async function resolveChangeWithFallback(
+  args: ResolveArgs,
+): Promise<Awaited<ReturnType<typeof resolveChange>> & { executorAttempts: number }> {
+  const emptyOrError = (r: Awaited<ReturnType<typeof resolveChange>>) => !r.diff.trim() || Boolean(r.executor?.error);
+  let resolved = await resolveChange(args);
+  let attempts = 1;
+  const manualDiff = args.diff.trim().length > 0;
+  if (!manualDiff && emptyOrError(resolved)) {
+    const retry = await resolveChange({ ...args, tier: "premium" });
+    attempts++;
+    resolved = retry; // the escalated attempt is the final draft (its evidence is what a human sees if it too failed)
+  }
+  return { ...resolved, executorAttempts: attempts };
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
@@ -178,7 +205,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
   }
 
-  const resolved = await resolveChange({ mode, diff, prompt: authorPrompt, authorModel, executorProviderPin });
+  const resolved = await resolveChangeWithFallback({ mode, diff, prompt: authorPrompt, authorModel, executorProviderPin });
+  const executorAttempts = resolved.executorAttempts;
   const executor = resolved.executor;
   let effectiveDiff = resolved.diff;
   let effectiveAuthor = resolved.author;
@@ -292,6 +320,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // Attribution for grading + per-model drift (src/lib/ai-code/grading.ts).
     model: effectiveAuthor,
     cost_usd: executor?.costUsd ?? 0,
+    executor_attempts: executorAttempts,
     repo_context_files: repoContextFiles.length,
     deep_scan_critical: deepScan.critical,
   });
@@ -340,5 +369,5 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     repairAttempts: run.remediation.attempts.length,
   });
 
-  return NextResponse.json({ run, approvalId, executor, invariants, changeFacts, deepScan, mode, repoContext: { files: repoContextFiles }, cost });
+  return NextResponse.json({ run, approvalId, executor, invariants, changeFacts, deepScan, mode, executorAttempts, repoContext: { files: repoContextFiles }, cost });
 }

@@ -140,6 +140,26 @@ describe("POST /api/admin/ai-code/pipeline", () => {
     expect(body.repoContext.files).toEqual(["src/x.ts"]);
   });
 
+  it("governed fallback: an empty first draft is retried at a higher tier and the run proceeds", async () => {
+    // First author returns prose (no diff); the escalated retry returns a real diff.
+    mockComplete
+      .mockResolvedValueOnce(authorResp("I would add a function called k."))
+      .mockResolvedValue(authorResp("```diff\n" + AUTHORED_DIFF + "\n```"));
+    const res = await POST(post({ ref: "pr-fb", prompt: "add k", answers: { tests: "all" } }));
+    expect(res.status).toBe(200); // did NOT dead-end on the first empty draft
+    const body = await res.json();
+    expect(body.executorAttempts).toBe(2); // the agent was tagged in a second time
+    expect(mockRunPipeline).toHaveBeenCalled();
+  });
+
+  it("only a TRUE failure surfaces: both the draft and the escalated retry are empty -> 422", async () => {
+    mockComplete.mockResolvedValue(authorResp("no code here, just prose"));
+    const res = await POST(post({ ref: "pr-fb2", prompt: "add k", answers: { tests: "all" } }));
+    expect(res.status).toBe(422);
+    expect(mockComplete).toHaveBeenCalledTimes(2); // it retried before giving up
+    expect(mockRunPipeline).not.toHaveBeenCalled();
+  });
+
   it("422 (fail-closed) when the executor produces no diff - never a fabricated one", async () => {
     mockComplete.mockResolvedValue(authorResp("I would add a function called k."));
     const res = await POST(post({ ref: "pr-3", prompt: "add k", answers: { tests: "all" } }));
