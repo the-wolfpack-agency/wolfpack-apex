@@ -165,3 +165,116 @@ export async function fetchCiDashboard(repoFullName: string, ref: string, worksp
     return categorizeChecks([]);
   }
 }
+
+/* -------------------------------------------------------------------------- *
+ * Baseline attribution: never let a PRE-EXISTING failure read as "the tool
+ * broke it". Compare a change's checks against a BASELINE (the base branch's
+ * most recent run, or a snapshot captured at onboarding) and report the DELTA -
+ * what the change INTRODUCED vs what was already failing. This is the before/
+ * after discipline a human engineer applies to a test environment, encoded so a
+ * client whose repo was already red never blames the tool for it.
+ * -------------------------------------------------------------------------- */
+
+function isCompletedCheck(c: CheckRun): boolean {
+  return c.status === "completed";
+}
+function isFailingCheck(c: CheckRun): boolean {
+  return isCompletedCheck(c) && !(c.conclusion != null && PASSING.has(c.conclusion));
+}
+function isPassingCheck(c: CheckRun): boolean {
+  return isCompletedCheck(c) && c.conclusion != null && PASSING.has(c.conclusion);
+}
+
+export interface CiAttribution {
+  /** Failing on the change, PASSING on the baseline -> the change caused it. */
+  introduced: string[];
+  /** Failing on both -> already broken before the change, not its fault. */
+  preexisting: string[];
+  /** Failing on the change with no accurate baseline for it -> cannot attribute. */
+  indeterminate: string[];
+  /** Passing on the change, was failing on the baseline -> the change fixed it. */
+  fixed: string[];
+  /** Whether any completed baseline checks existed to compare against. */
+  baselineKnown: boolean;
+  /** Baseline had zero failing checks (a clean starting point). */
+  baselineHealthy: boolean;
+  /** The change introduced no NEW attributable failures. Read WITH baselineKnown:
+   *  clean && !baselineKnown just means "nothing to attribute", not "all good". */
+  clean: boolean;
+  /** One-line, honest summary for the UI. */
+  reason: string;
+}
+
+/** Attribute a change's checks against a baseline set of checks. Pure: same
+ *  inputs, same verdict, so the "did the change break it" claim is reproducible
+ *  and auditable. The baseline can be the base branch's latest run OR a snapshot
+ *  captured at onboarding - this function does not care where it came from. */
+export function attributeChecks(
+  baseline: readonly CheckRun[],
+  head: readonly CheckRun[],
+): CiAttribution {
+  const baseByName = new Map<string, CheckRun>();
+  for (const c of baseline) baseByName.set(c.name, c); // last occurrence wins
+
+  const introduced: string[] = [];
+  const preexisting: string[] = [];
+  const indeterminate: string[] = [];
+  const fixed: string[] = [];
+
+  for (const c of head) {
+    if (!isCompletedCheck(c)) continue; // pending/running: nothing to attribute yet
+    const base = baseByName.get(c.name);
+    if (isFailingCheck(c)) {
+      if (base && isFailingCheck(base)) preexisting.push(c.name);
+      else if (base && isPassingCheck(base)) introduced.push(c.name);
+      else indeterminate.push(c.name); // no baseline entry, or baseline still pending
+    } else if (isPassingCheck(c)) {
+      if (base && isFailingCheck(base)) fixed.push(c.name);
+    }
+  }
+
+  const baselineCompleted = baseline.filter(isCompletedCheck);
+  const baselineKnown = baselineCompleted.length > 0;
+  const baselineHealthy = baselineKnown && !baselineCompleted.some(isFailingCheck);
+  const clean = introduced.length === 0;
+
+  let reason: string;
+  if (introduced.length > 0) {
+    reason = `This change introduced ${introduced.length} new failing check(s): ${introduced.join(", ")}.`;
+  } else if (!baselineKnown) {
+    reason =
+      "No baseline run was available on the base branch, so failures could not be attributed to this change. Establish a baseline to compare against.";
+  } else if (preexisting.length > 0 || indeterminate.length > 0) {
+    const parts: string[] = [];
+    if (preexisting.length) parts.push(`${preexisting.length} were already failing on the base branch`);
+    if (indeterminate.length) parts.push(`${indeterminate.length} had no baseline to compare against`);
+    reason = `This change introduced no new failures. ${parts.join("; ")}.`;
+  } else {
+    reason = "This change introduced no new failures; the baseline was clean.";
+  }
+
+  return { introduced, preexisting, indeterminate, fixed, baselineKnown, baselineHealthy, clean, reason };
+}
+
+/** Fetch a change's checks and the base branch's most-recent checks, then
+ *  attribute the delta. Never throws: a GitHub error yields an unknown-baseline
+ *  attribution, which reads as "could not attribute", never as "the change is
+ *  clean". */
+export async function fetchCiAttribution(
+  repoFullName: string,
+  baseRef: string,
+  headRef: string,
+  workspaceId?: string,
+): Promise<CiAttribution> {
+  try {
+    const client: GithubClient = await workspaceGithubClient(workspaceId);
+    if (!client.token) return attributeChecks([], []);
+    const [baseline, head] = await Promise.all([
+      listCheckRuns(client, repoFullName, baseRef).catch(() => [] as CheckRun[]),
+      listCheckRuns(client, repoFullName, headRef).catch(() => [] as CheckRun[]),
+    ]);
+    return attributeChecks(baseline, head);
+  } catch {
+    return attributeChecks([], []);
+  }
+}
