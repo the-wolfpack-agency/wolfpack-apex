@@ -419,6 +419,24 @@ export default function CodeFactoryPage() {
         subtitle="Describe a change. A model authors it, the deterministic gate decides block / needs-review / allow, an independent-family model advises, and a non-allow verdict re-routes to a different model. It reaches a pull request only when the gate allows."
       />
 
+      <GlassPanel title="How it works">
+        <details data-testid="how-it-works">
+          <summary style={{ cursor: "pointer", color: "var(--wp-text-dim)", fontSize: "0.9rem", fontWeight: 600 }}>
+            New here? What happens when you submit a change
+          </summary>
+          <ol style={{ margin: "0.9rem 0 0", paddingLeft: "1.2rem", display: "grid", gap: "0.6rem", fontSize: "0.9rem", lineHeight: 1.5, color: "var(--wp-text, #e6e9ef)" }}>
+            <li><strong>Describe the change</strong> in plain language and pick your repo. A model writes the code for you.</li>
+            <li><strong>The gate checks it</strong> for secrets, injection, unsafe patterns and your engineering rules, and a second model from a <em>different</em> family reviews the findings so no vendor marks its own homework. Anything that fails is re-routed to another model to fix, or held for you. Nothing unsafe reaches this screen.</li>
+            <li><strong>You review</strong> the generated code and the gate&rsquo;s verdict, right here.</li>
+            <li><strong>You approve</strong> with an explicit consent, and only then does a pull request open on your repo. The tool opens the PR; it never merges. You get a direct link.</li>
+            <li><strong>Your build &amp; deploy checkpoints light up</strong> automatically, tied to that pull request, so you watch it go green through to deploy, whatever tools run underneath.</li>
+          </ol>
+          <p style={{ margin: "0.8rem 0 0", fontSize: "0.82rem", color: "var(--wp-text-dim)", lineHeight: 1.45 }}>
+            Every decision is written to a tamper-evident audit trail you can verify and download at the bottom of this page. You do the minimum; the gate does the protecting.
+          </p>
+        </details>
+      </GlassPanel>
+
       <GlassPanel title="Build a change">
         <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap", alignItems: "flex-end" }}>
           <label style={{ display: "flex", flexDirection: "column", gap: "0.35rem", flex: "1 1 14rem" }}>
