@@ -70,6 +70,21 @@ export function isSafeRepoPath(path: string): boolean {
   return !norm.split("/").includes("..");
 }
 
+/**
+ * A VCS merge-conflict marker at the start of a line (`<<<<<<< `, `>>>>>>> `, or
+ * the diff3 `||||||| `). The open/close markers are unambiguous - seven of the
+ * char followed by a space or end of line - and one appearing in a source file
+ * is always a broken merge, never real code. `=======` is deliberately NOT
+ * matched: a bare seven-equals line is a legitimate divider in markdown/comments,
+ * and the open/close markers already prove a conflict.
+ */
+const CONFLICT_MARKER = /^(?:<{7}|>{7}|\|{7})(?: |$)/m;
+
+/** True when the text contains a merge-conflict marker line. Deterministic. */
+export function containsConflictMarkers(text: string): boolean {
+  return CONFLICT_MARKER.test(text);
+}
+
 export interface CommitFileChangesInput {
   client: GithubClient;
   repoFullName: string;
@@ -88,6 +103,11 @@ export interface CommitFileChangesInput {
 export async function commitFileChanges(input: CommitFileChangesInput): Promise<string[]> {
   for (const c of input.changes) {
     if (!isSafeRepoPath(c.path)) throw new Error(`unsafe file path: ${c.path}`);
+    // Never commit a file with a merge-conflict marker. A model can emit one, or a
+    // bad repair merge can leave one; committing it breaks the client's build. This
+    // fails closed BEFORE any GitHub write, so the factory can never open a PR that
+    // carries a conflict marker.
+    if (containsConflictMarkers(c.content)) throw new Error(`conflict marker in authored file: ${c.path}`);
   }
   await createBranch(input.client, input.repoFullName, input.branch, input.base);
   const committed: string[] = [];
