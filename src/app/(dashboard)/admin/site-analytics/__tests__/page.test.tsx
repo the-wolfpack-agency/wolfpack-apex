@@ -115,6 +115,13 @@ test("renders the reused heatmap, totals, and top pages/countries from the summa
   // Top pages / countries are collapsed by default (native details, closed).
   expect(screen.getByTestId("top-pages-collapse")).not.toHaveAttribute("open");
 
+  // Secondary intel panels are collapsed by default to cut initial density; their
+  // content still lives in the DOM (the sig-*/intel-* assertions above read it
+  // through the closed details), and a click opens them.
+  for (const id of ["ff-learned-signatures", "ff-agent-intel", "ff-intel-drilldown"]) {
+    expect(screen.getByTestId(id)).not.toHaveAttribute("open");
+  }
+
   // The data route was queried with the default 30-day window.
   expect(String(mockFetchWithRefresh.mock.calls[0][0])).toContain("days=30");
 });
