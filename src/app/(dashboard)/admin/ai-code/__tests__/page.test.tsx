@@ -271,17 +271,22 @@ test("run history panel is hidden when there are no runs", async () => {
   expect(screen.queryByTestId("history-grade")).not.toBeInTheDocument();
 });
 
-test("pipeline health: checking a ref renders product-agnostic checkpoints with status lights", async () => {
+test("pipeline is tied to the opened PR: build & deploy checkpoints appear automatically, no manual ref", async () => {
+  pipelineResp = resp(200, runResp({ outcome: "allow" }));
+  approveResp = resp(200, { ok: true, status: "executed", outcome: { ok: true, url: "https://github.com/o/r/pull/42", number: 42, branch: "factory/x-abc" } });
   render(<CodeFactoryPage />);
-  fireEvent.change(screen.getByTestId("pipeline-ref"), { target: { value: "main" } });
-  await act(async () => { fireEvent.click(screen.getByTestId("pipeline-check")); });
+  await submitPrompt();
+  await waitFor(() => expect(screen.getByTestId("approve-open-pr")).toBeInTheDocument());
+  fireEvent.click(screen.getByTestId("approve-consent")); // human-in-the-gate consent
+  await act(async () => { fireEvent.click(screen.getByTestId("approve-open-pr")); });
+  await waitFor(() => expect(screen.getByTestId("pr-link")).toBeInTheDocument());
+  // the pipeline auto-loads for the PR branch - no manual ref input at all
   await waitFor(() => expect(screen.getByTestId("pipeline-dashboard")).toBeInTheDocument());
-  expect(screen.getByTestId("pipeline-overall")).toHaveTextContent(/attention needed/i); // overall fail
+  expect(screen.getByTestId("pipeline-overall")).toHaveTextContent(/attention needed/i);
   expect(screen.getByTestId("pipeline-cat-unit")).toHaveTextContent(/Unit tests/);
-  expect(screen.getByTestId("pipeline-cat-unit")).toHaveTextContent(/Passed/);
   expect(screen.getByTestId("pipeline-cat-security")).toHaveTextContent(/Failed/);
-  // never leaks the underlying tool name
   expect(screen.getByTestId("pipeline-dashboard")).not.toHaveTextContent(/vercel|codeql|jest|postgres/i);
+  expect(screen.queryByTestId("pipeline-ref")).not.toBeInTheDocument(); // no copy-paste chore
 });
 
 test("cost meter shows this run's cost and a cross-model comparison", async () => {

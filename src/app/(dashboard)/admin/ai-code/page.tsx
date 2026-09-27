@@ -17,6 +17,7 @@ import { useCallback, useEffect, useState, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import { getInstinctUser, fetchWithRefresh, jsonHeaders } from "@/lib/client-auth";
 import { GlassPanel, MetricTile, StatusPill, SectionHeader, type SeverityTone } from "@/components/console";
+import PipelineDashboard, { type CiDashboard } from "@/components/ai-code/PipelineDashboard";
 
 type Outcome = "allow" | "escalate" | "block";
 
@@ -121,10 +122,6 @@ interface AuditVerification { ok: boolean; verifiedCount: number; legacyCount: n
 interface AuditEntry { seq: number; created_at: string; principal_agent: string; intended_outcome: string; effective_outcome: string; would_block: boolean; rule_id: string; reason: string | null }
 interface AuditData { verification: AuditVerification; entries: AuditEntry[]; entryCount: number; generatedAtIso: string }
 
-type CiStatus = "pass" | "fail" | "pending" | "absent";
-interface CiCategory { key: string; label: string; status: CiStatus; passed: number; failed: number; pending: number; checks: string[] }
-interface CiDashboard { categories: CiCategory[]; overall: CiStatus; summary: { total: number; passed: number; failed: number; pending: number } }
-
 const pct = (n: number): string => `${Math.round(n * 100)}%`;
 
 /** Count files + added/removed lines in a unified diff, for the header summary. */
@@ -149,20 +146,6 @@ function diffLineColor(line: string): string {
   if (line.startsWith("@@")) return "#58a6ff";
   return "var(--wp-text, #e6e9ef)";
 }
-
-// Vehicle-dashboard instrument colors: a glowing light per checkpoint.
-const CI_LIGHT: Record<CiStatus, { color: string; label: string }> = {
-  pass: { color: "#30a46c", label: "Passed" },
-  fail: { color: "#ef4444", label: "Failed" },
-  pending: { color: "#f5a623", label: "Running" },
-  absent: { color: "#4b5563", label: "Not run" },
-};
-const CI_OVERALL: Record<CiStatus, string> = {
-  pass: "All systems go",
-  fail: "Attention needed",
-  pending: "Running checks",
-  absent: "No checks yet",
-};
 
 /** Example prompts that show the breadth of what Secure Agent does - including
  *  one that intentionally violates a rule so a viewer can watch the gate stop it. */
@@ -276,15 +259,16 @@ export default function CodeFactoryPage() {
       /* clipboard blocked (no HTTPS / permissions); the code is still visible */
     }
   }, []);
-  const [pipelineRef, setPipelineRef] = useState("");
+  const [prBranch, setPrBranch] = useState<string | null>(null);
   const [pipeline, setPipeline] = useState<CiDashboard | null>(null);
   const [pipelineLoading, setPipelineLoading] = useState(false);
   const [pipelineError, setPipelineError] = useState<string | null>(null);
 
-  const checkPipeline = useCallback(async () => {
+  // Tied to the work: the pipeline for the branch the factory just opened a PR on.
+  // No copy-paste of a ref - the user sees their own build + deploy progress
+  // automatically once the change is on GitHub.
+  const loadPipeline = useCallback(async (gitRef: string) => {
     const r = repo.trim() || "the-wolfpack-agency/wolfpack-apex";
-    const gitRef = pipelineRef.trim();
-    if (!gitRef) { setPipelineError("Enter a branch or commit to check."); return; }
     setPipelineLoading(true);
     setPipelineError(null);
     try {
@@ -297,7 +281,7 @@ export default function CodeFactoryPage() {
     } finally {
       setPipelineLoading(false);
     }
-  }, [repo, pipelineRef]);
+  }, [repo]);
 
   const loadHistory = useCallback(async () => {
     try {
@@ -337,6 +321,8 @@ export default function CodeFactoryPage() {
     setDeepScan(null);
     setCost(null);
     setPrUrl(null);
+    setPrBranch(null);
+    setPipeline(null);
     setApproveError(null);
     setApproveConsent(false);
     try {
@@ -400,9 +386,15 @@ export default function CodeFactoryPage() {
         headers: jsonHeaders(),
         body: JSON.stringify({ action: "approve" }),
       });
-      const body = (await res.json()) as { ok?: boolean; outcome?: { ok?: boolean; url?: string; reason?: string }; error?: string };
+      const body = (await res.json()) as { ok?: boolean; outcome?: { ok?: boolean; url?: string; reason?: string; branch?: string }; error?: string };
       if (res.ok && body.outcome?.ok && body.outcome.url) {
         setPrUrl(body.outcome.url);
+        // Tie the pipeline to the work: the PR is open, so show its build + deploy
+        // progress automatically for the branch the factory just created.
+        if (body.outcome.branch) {
+          setPrBranch(body.outcome.branch);
+          void loadPipeline(body.outcome.branch);
+        }
       } else {
         setApproveError(body.outcome?.reason || body.error || "Approval did not open a PR.");
       }
@@ -411,7 +403,7 @@ export default function CodeFactoryPage() {
     } finally {
       setApproving(false);
     }
-  }, [approvalId]);
+  }, [approvalId, loadPipeline]);
 
   if (!ready) return null;
 
@@ -488,49 +480,6 @@ export default function CodeFactoryPage() {
           <p role="alert" style={{ marginTop: "0.75rem", color: "var(--wp-error, #ef4444)", fontSize: "0.9rem" }}>
             {error}
           </p>
-        )}
-      </GlassPanel>
-
-      <GlassPanel title="Pipeline health" subtitle="A plain-language read on your code's checks, whatever tools run them">
-        <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap", alignItems: "flex-end", marginBottom: "0.9rem" }}>
-          <label style={{ display: "flex", flexDirection: "column", gap: "0.35rem", flex: "1 1 14rem" }}>
-            <span style={{ fontSize: "0.8rem", color: "var(--wp-text-dim)" }}>Branch or commit</span>
-            <input value={pipelineRef} onChange={(e) => setPipelineRef(e.target.value)} placeholder="main" aria-label="Branch or commit" data-testid="pipeline-ref" style={inputStyle} />
-          </label>
-          <button type="button" onClick={() => void checkPipeline()} disabled={pipelineLoading} data-testid="pipeline-check" style={btnStyle(pipelineLoading)}>
-            {pipelineLoading ? "Reading…" : pipeline ? "Refresh" : "Check pipeline"}
-          </button>
-        </div>
-        {pipelineError && <p role="alert" style={{ color: "var(--wp-error, #ef4444)", fontSize: "0.85rem", margin: "0 0 0.6rem" }}>{pipelineError}</p>}
-        {pipeline && (
-          <div data-testid="pipeline-dashboard">
-            <div style={{ display: "flex", alignItems: "center", gap: "0.7rem", padding: "0.7rem 0.9rem", borderRadius: 10, marginBottom: "0.9rem", border: `1px solid ${CI_LIGHT[pipeline.overall].color}`, background: `color-mix(in srgb, ${CI_LIGHT[pipeline.overall].color} 12%, transparent)` }}>
-              <span aria-hidden style={{ width: 14, height: 14, borderRadius: "50%", background: CI_LIGHT[pipeline.overall].color, boxShadow: `0 0 10px 2px ${CI_LIGHT[pipeline.overall].color}` }} />
-              <span data-testid="pipeline-overall" style={{ fontWeight: 700, fontSize: "1.05rem", color: "var(--wp-text, #e6e9ef)" }}>{CI_OVERALL[pipeline.overall]}</span>
-              <span style={{ marginLeft: "auto", fontSize: "0.78rem", color: "var(--wp-text-dim)" }}>{pipeline.summary.passed} passed &middot; {pipeline.summary.failed} failed &middot; {pipeline.summary.pending} running</span>
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "0.75rem" }}>
-              {pipeline.categories.filter((c) => c.status !== "absent" || c.key !== "other").map((c) => {
-                const light = CI_LIGHT[c.status];
-                const n = c.failed || c.pending || c.passed;
-                return (
-                  <div key={c.key} data-testid={`pipeline-cat-${c.key}`} style={{ position: "relative", background: "var(--wp-surface-2, #171a21)", border: `1px solid ${c.status === "absent" ? "var(--wp-border, #2a2f3a)" : light.color}`, borderRadius: 12, padding: "0.85rem 0.9rem", opacity: c.status === "absent" ? 0.55 : 1 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                      <span aria-hidden style={{ width: 11, height: 11, borderRadius: "50%", flexShrink: 0, background: light.color, boxShadow: c.status === "absent" ? "none" : `0 0 8px 1px ${light.color}` }} />
-                      <span style={{ fontSize: "0.82rem", fontWeight: 700, color: "var(--wp-text, #e6e9ef)" }}>{c.label}</span>
-                    </div>
-                    <div style={{ marginTop: "0.5rem", fontSize: "0.78rem", color: light.color, fontWeight: 600 }}>{light.label}</div>
-                    {n > 0 && c.status !== "absent" && (
-                      <div style={{ fontSize: "0.72rem", color: "var(--wp-text-dim)", marginTop: "0.15rem" }}>{n} check{n === 1 ? "" : "s"}</div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-            <p style={{ margin: "0.7rem 0 0", fontSize: "0.72rem", color: "var(--wp-text-dim)", lineHeight: 1.45 }}>
-              Each light is a checkpoint in your delivery flow. Green means that class of check passed; the tools that ran it stay under the hood.
-            </p>
-          </div>
         )}
       </GlassPanel>
 
@@ -773,6 +722,23 @@ export default function CodeFactoryPage() {
                     {prUrl}
                   </a>
                 </p>
+              )}
+
+              {/* Tied to THIS run: the pipeline for the PR the factory just opened,
+                  through build and deploy. No copy-paste of a ref. */}
+              {prBranch && (
+                <div style={{ marginTop: "0.9rem" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", marginBottom: "0.6rem" }}>
+                    <span style={{ fontSize: "0.85rem", fontWeight: 700, color: "var(--wp-text, #e6e9ef)" }}>Build &amp; deploy</span>
+                    <button type="button" data-testid="pipeline-refresh" onClick={() => void loadPipeline(prBranch)} disabled={pipelineLoading} style={{ marginLeft: "auto", background: "var(--wp-surface-2, #171a21)", border: "1px solid var(--wp-border, #2a2f3a)", borderRadius: 8, color: "var(--wp-text, #e6e9ef)", padding: "0.28rem 0.7rem", fontSize: "0.78rem", cursor: "pointer" }}>
+                      {pipelineLoading ? "Reading…" : "Refresh"}
+                    </button>
+                  </div>
+                  {pipelineError && <p role="alert" style={{ color: "var(--wp-error, #ef4444)", fontSize: "0.85rem", margin: "0 0 0.6rem" }}>{pipelineError}</p>}
+                  {pipeline
+                    ? <PipelineDashboard dashboard={pipeline} />
+                    : <p style={{ fontSize: "0.82rem", color: "var(--wp-text-dim)", margin: 0 }}>Reading your pipeline&hellip; checks appear here as they run.</p>}
+                </div>
               )}
             </GlassPanel>
           )}
