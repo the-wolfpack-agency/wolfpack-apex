@@ -9,8 +9,14 @@ jest.mock("@/lib/ai-code/ci-status", () => ({ fetchCiStatus: (...a: unknown[]) =
 const mockWorkspaceClient = jest.fn();
 const mockCommit = jest.fn();
 const mockAuthorFiles = jest.fn();
+const mockAssessChange = jest.fn();
 jest.mock("@/lib/github-client", () => ({ workspaceGithubClient: (...a: unknown[]) => mockWorkspaceClient(...a) }));
-jest.mock("@/lib/ai-code/file-changes", () => ({ commitFileChanges: (...a: unknown[]) => mockCommit(...a) }));
+jest.mock("@/lib/ai-code/file-changes", () => ({
+  commitFileChanges: (...a: unknown[]) => mockCommit(...a),
+  filesToDiff: (changes: { path: string; content: string }[]) =>
+    changes.map((c) => `+++ b/${c.path}\n${c.content}`).join("\n"),
+}));
+jest.mock("@/lib/ai-code/assess", () => ({ assessChange: (...a: unknown[]) => mockAssessChange(...a) }));
 jest.mock("@/lib/ai-code/author", () => ({ authorFileChanges: (...a: unknown[]) => mockAuthorFiles(...a) }));
 jest.mock("@/lib/ai", () => ({ getAIClient: () => ({ complete: jest.fn() }) }));
 
@@ -32,6 +38,8 @@ beforeEach(() => {
   mockWorkspaceClient.mockResolvedValue({ token: "t", fetch: jest.fn() });
   mockAuthorFiles.mockResolvedValue({ changes: [{ path: "src/x.ts", content: "export const x = 2;" }], author: "model-b", error: null });
   mockCommit.mockResolvedValue(["src/x.ts"]);
+  // Default: the re-authored fix clears the combined gate.
+  mockAssessChange.mockResolvedValue({ securityOutcome: "allow", invariantRuleId: "", invariantBlocked: false, deepScanCritical: 0, deepScanBlocking: false, handoffAllowed: true, blockedBy: null });
 });
 
 test("401 / 403 / 400 guards", async () => {
@@ -77,6 +85,18 @@ test("with a branch + red CI: authors and commits the fix to the PR branch", asy
   expect(body.terminal).toBe(false); // commit re-triggers CI; poll again
   expect(mockAuthorFiles).toHaveBeenCalled();
   expect(mockCommit).toHaveBeenCalledWith(expect.objectContaining({ repoFullName: "o/r", branch: "factory/b-abc" }));
+});
+
+test("with a branch + red CI + a fix that FAILS the gate: escalates, does NOT commit", async () => {
+  mockFetchCiStatus.mockResolvedValue(red);
+  // The autonomously re-authored fix carries a critical finding; the gate refuses it.
+  mockAssessChange.mockResolvedValue({ securityOutcome: "block", invariantRuleId: "", invariantBlocked: false, deepScanCritical: 1, deepScanBlocking: true, handoffAllowed: false, blockedBy: "security" });
+  const body = await (await POST(post({ repo: "o/r", ref: "b", branch: "factory/b-abc", attempt: 0, maxAttempts: 3 }))).json();
+  expect(body.decision.action).toBe("escalate_human");
+  expect(body.decision.reason).toMatch(/gate/i);
+  expect(body.gate).toEqual({ cleared: false, blockedBy: "security" });
+  expect(body.terminal).toBe(true);
+  expect(mockCommit).not.toHaveBeenCalled(); // an ungated autonomous push is exactly what this prevents
 });
 
 test("with a branch + green CI: merge_ready, terminal, no commit", async () => {
