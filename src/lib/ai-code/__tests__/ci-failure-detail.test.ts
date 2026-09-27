@@ -4,7 +4,18 @@
  * points at, and build an enriched re-author prompt. This is what lets the fixer
  * author a REAL fix instead of guessing from a check name.
  */
-import { extractErrorLines, extractFilePaths, buildEnrichedFixPrompt } from "@/lib/ai-code/ci-failure-detail";
+const mockListRuns = jest.fn();
+const mockListJobs = jest.fn();
+const mockLog = jest.fn();
+const mockFile = jest.fn();
+jest.mock("@/lib/github-client", () => ({
+  listWorkflowRunsRaw: (...a: unknown[]) => mockListRuns(...a),
+  listRunJobs: (...a: unknown[]) => mockListJobs(...a),
+  fetchJobLogText: (...a: unknown[]) => mockLog(...a),
+  fetchFileContent: (...a: unknown[]) => mockFile(...a),
+}));
+
+import { extractErrorLines, extractFilePaths, buildEnrichedFixPrompt, gatherFailureContext } from "@/lib/ai-code/ci-failure-detail";
 
 // A slice of a real jest job log (with the ISO timestamp prefix Actions adds).
 const LOG = [
@@ -84,5 +95,31 @@ describe("source-of-failing-test derivation", () => {
     const out = withSourcePaths(["src/lib/__tests__/readingTime.test.ts"]);
     expect(out).toContain("src/lib/__tests__/readingTime.test.ts");
     expect(out).toContain("src/lib/readingTime.ts");
+  });
+});
+
+describe("gatherFailureContext scopes to introduced runs", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockListRuns.mockResolvedValue([
+      { id: 1, name: "agenticqa-full-pipeline", conclusion: "failure" },
+      { id: 2, name: "e2e", conclusion: "failure" },
+    ]);
+    mockListJobs.mockResolvedValue([{ id: 10, name: "test", conclusion: "failure" }]);
+    mockLog.mockResolvedValue("2026-09-27T00:00:00Z FAIL src/lib/__tests__/readingTime.test.ts");
+    mockFile.mockResolvedValue("export function readingTime(){}");
+  });
+
+  it("gathers ONLY the introduced run when onlyRunNames is given (skips pre-existing e2e)", async () => {
+    await gatherFailureContext({} as never, "o/r", "sha", "ref", { onlyRunNames: ["agenticqa-full-pipeline"] });
+    // Jobs fetched only for the introduced run id (1), never the pre-existing e2e run (2).
+    expect(mockListJobs).toHaveBeenCalledWith(expect.anything(), "o/r", 1);
+    expect(mockListJobs).not.toHaveBeenCalledWith(expect.anything(), "o/r", 2);
+  });
+
+  it("gathers all failing runs when onlyRunNames is empty/absent (baseline-unaware)", async () => {
+    await gatherFailureContext({} as never, "o/r", "sha", "ref");
+    expect(mockListJobs).toHaveBeenCalledWith(expect.anything(), "o/r", 1);
+    expect(mockListJobs).toHaveBeenCalledWith(expect.anything(), "o/r", 2);
   });
 });
