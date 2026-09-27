@@ -10,6 +10,8 @@ const base: ReadinessProbes = {
   appConfigured: true,
   installationLinked: true,
   patConfigured: true,
+  prCapable: true,
+  ciReadable: true,
   repoReachable: true,
   defaultBranch: "main",
   ciPresent: true,
@@ -38,18 +40,25 @@ test("unreachable repo -> hard FAIL on repo access", () => {
   expect(summarizeReadiness(Object.values(checks)).ready).toBe(false);
 });
 
-test("PAT fallback (no App installation) -> WARN with install fix, but still ready", () => {
-  const checks = byId({ ...base, installationLinked: false, patConfigured: true });
-  expect(checks["pr-capability"].status).toBe("warn");
-  expect(checks["pr-capability"].detail).toMatch(/install the app/i);
-  expect(checks["pr-capability"].fix?.url).toContain("installations/new");
+test("a CAPABLE token with NO App installed -> PASS (App optional), fully ready", () => {
+  // The key simplification: the App is not required. A token that can open PRs
+  // reads as ready and is never nagged to install the App.
+  const checks = byId({ ...base, installationLinked: false, prCapable: true });
+  expect(checks["pr-capability"].status).toBe("pass");
+  expect(checks["pr-capability"].detail).toMatch(/App is optional/i);
   const report = summarizeReadiness(Object.values(checks));
-  expect(report.ready).toBe(true); // warnings do not block
-  expect(report.fullyReady).toBe(false);
+  expect(report.fullyReady).toBe(true);
 });
 
-test("no App and no PAT -> hard FAIL on PR capability", () => {
-  const checks = byId({ ...base, installationLinked: false, patConfigured: false });
+test("token present but CANNOT open PRs -> WARN with fix (grant Pull requests or install App)", () => {
+  const checks = byId({ ...base, installationLinked: false, prCapable: false });
+  expect(checks["pr-capability"].status).toBe("warn");
+  expect(checks["pr-capability"].detail).toMatch(/Pull requests: Read and write|install the GitHub App/i);
+  expect(summarizeReadiness(Object.values(checks)).ready).toBe(true); // warn does not block
+});
+
+test("no credential at all -> hard FAIL on PR capability", () => {
+  const checks = byId({ ...base, githubTokenPresent: false, prCapable: false });
   expect(checks["pr-capability"].status).toBe("fail");
   expect(summarizeReadiness(Object.values(checks)).ready).toBe(false);
 });
@@ -90,4 +99,12 @@ test("summarizeReadiness takes the worst status as overall", () => {
     { id: "a", label: "A", status: "warn", detail: "" },
     { id: "b", label: "B", status: "fail", detail: "" },
   ]).overall).toBe("fail");
+});
+
+test("CI unreadable with the token -> ci-present + baseline both WARN, never silently green", () => {
+  const checks = byId({ ...base, ciReadable: false, ciPresent: false, baselineFailingCount: 0 });
+  expect(checks["ci-present"].status).toBe("warn");
+  expect(checks["ci-present"].detail).toMatch(/could not be read/i);
+  expect(checks["baseline-health"].status).toBe("warn");
+  expect(checks["baseline-health"].detail).not.toMatch(/green/i);
 });

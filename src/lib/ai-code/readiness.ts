@@ -12,13 +12,12 @@
  */
 import {
   fetchRepoInfo,
-  listCheckRuns,
+  probePullRequestAccess,
   workspaceGithubClient,
-  type CheckRun,
   type GithubClient,
 } from "@/lib/github-client";
 import { getInstallation, readAppConfigFromEnv } from "@/lib/github-app";
-import { summarizeChecks } from "./ci-status";
+import { fetchCiStatus } from "./ci-status";
 
 export type ReadinessStatus = "pass" | "warn" | "fail";
 
@@ -52,6 +51,11 @@ export interface ReadinessProbes {
   installationLinked: boolean;
   /** The shared PAT is configured (the fallback). */
   patConfigured: boolean;
+  /** The token can actually access pull requests (probed) - so it can open PRs
+   *  whether or not the App is installed. This makes the App OPTIONAL. */
+  prCapable: boolean;
+  /** The CI could be read (via the Checks API or the Actions fallback). */
+  ciReadable: boolean;
   /** The repo could be read with the current token. */
   repoReachable: boolean;
   /** The repo's default branch, when reachable. */
@@ -92,22 +96,32 @@ export function buildReadinessChecks(p: ReadinessProbes): ReadinessCheck[] {
       : { id: "repo-access", label: "Repository access", status: "fail", detail: "The repository could not be read with the current credential. Confirm the App is installed on this repo, or that access was granted.", fix: installFix },
   );
 
-  // 3. Can we OPEN pull requests automatically (the core promise). This is the
-  //    exact failure that caused the mid-flow 403: a PAT without pull-requests
-  //    write. An App installation guarantees it; the PAT is a maybe.
-  if (p.installationLinked) {
-    checks.push({ id: "pr-capability", label: "Automatic pull requests", status: "pass", detail: "The GitHub App is installed, so pull requests open automatically with a scoped token." });
-  } else if (p.patConfigured) {
-    checks.push({ id: "pr-capability", label: "Automatic pull requests", status: "warn", detail: "Using the shared token. If it lacks pull-requests write, PRs will not open automatically (you would open them from a one-click link instead). Install the App to guarantee automatic PRs.", fix: installFix });
+  // 3. Can we OPEN pull requests (the core promise). Capability-based: if the
+  //    token can access pull requests - probed, not assumed - it can open them,
+  //    App or no App. The App is OPTIONAL (for per-client scoping at scale), not
+  //    a prerequisite, so a capable token reads as READY, never nagged.
+  if (p.prCapable) {
+    checks.push({
+      id: "pr-capability",
+      label: "Pull requests",
+      status: "pass",
+      detail: p.installationLinked
+        ? "The GitHub App is installed; pull requests open with a scoped token."
+        : "The workspace token can open pull requests. (The GitHub App is optional - for per-client scoping at scale.)",
+    });
+  } else if (p.githubTokenPresent) {
+    checks.push({ id: "pr-capability", label: "Pull requests", status: "warn", detail: "The token cannot open pull requests. Grant it Pull requests: Read and write, or install the GitHub App.", fix: installFix });
   } else {
-    checks.push({ id: "pr-capability", label: "Automatic pull requests", status: "fail", detail: "No way to open pull requests is configured. Install the GitHub App.", fix: installFix });
+    checks.push({ id: "pr-capability", label: "Pull requests", status: "fail", detail: "No credential to open pull requests. Connect GitHub.", fix: installFix });
   }
 
   // 4. Is there CI to verify a change before it merges.
   checks.push(
-    p.ciPresent
-      ? { id: "ci-present", label: "CI to verify changes", status: "pass", detail: "The base branch runs CI, so changes are verified before merge." }
-      : { id: "ci-present", label: "CI to verify changes", status: "warn", detail: "No CI was detected on the base branch. Changes can still open as PRs, but there is nothing to verify them automatically." },
+    !p.ciReadable
+      ? { id: "ci-present", label: "CI to verify changes", status: "warn", detail: "CI could not be read for this repo with the current token." }
+      : p.ciPresent
+        ? { id: "ci-present", label: "CI to verify changes", status: "pass", detail: "The base branch runs CI, so changes are verified before merge." }
+        : { id: "ci-present", label: "CI to verify changes", status: "warn", detail: "No CI was detected on the base branch. Changes can still open as PRs, but there is nothing to verify them automatically." },
   );
 
   // 5. Is the baseline green. A red baseline is disclosed up front so its red
@@ -117,8 +131,8 @@ export function buildReadinessChecks(p: ReadinessProbes): ReadinessCheck[] {
   checks.push(
     !p.repoReachable
       ? { id: "baseline-health", label: "Baseline health", status: "warn", detail: "Baseline could not be measured because the repository is unreachable." }
-      : !p.ciPresent
-        ? { id: "baseline-health", label: "Baseline health", status: "warn", detail: "No CI has run on the base branch, so there is no baseline to compare against yet. It is not verified-clean, just unmeasured." }
+      : !p.ciReadable || !p.ciPresent
+        ? { id: "baseline-health", label: "Baseline health", status: "warn", detail: "No measured CI on the base branch yet, so there is no baseline to compare against. It is not verified-clean, just unmeasured." }
         : p.baselineFailingCount === 0
           ? { id: "baseline-health", label: "Baseline health", status: "pass", detail: "The base branch is green: a measured, clean starting point." }
           : { id: "baseline-health", label: "Baseline health", status: "warn", detail: `The base branch already has ${p.baselineFailingCount} failing check(s). These will appear on every pull request as PRE-EXISTING and are not caused by your changes.` },
@@ -154,6 +168,8 @@ export async function assessReadiness(
 
   let repoReachable = false;
   let defaultBranch: string | null = null;
+  let prCapable = false;
+  let ciReadable = false;
   let ciPresent = false;
   let baselineFailingCount = 0;
 
@@ -162,14 +178,16 @@ export async function assessReadiness(
       const info = await fetchRepoInfo(client, repoFullName);
       repoReachable = true;
       defaultBranch = info.defaultBranch;
-      try {
-        const checks: CheckRun[] = await listCheckRuns(client, repoFullName, info.defaultBranch);
-        const summary = summarizeChecks(checks);
-        ciPresent = summary.total > 0 && summary.pending < summary.total; // at least one completed check ever ran
-        baselineFailingCount = summary.failed;
-      } catch {
-        // CI unreadable: leave ciPresent false / baseline 0 (disclosed as warnings).
-      }
+      // Probe actual capability rather than assume from App-vs-PAT: can the token
+      // reach pull requests, and read CI (via the Checks API or Actions fallback)?
+      const [pr, ci] = await Promise.all([
+        probePullRequestAccess(client, repoFullName),
+        fetchCiStatus(repoFullName, info.defaultBranch, workspaceId ?? undefined),
+      ]);
+      prCapable = pr;
+      ciReadable = ci.readable !== false;
+      ciPresent = ciReadable && ci.total > 0;
+      baselineFailingCount = ci.failed;
     } catch {
       repoReachable = false;
     }
@@ -180,6 +198,8 @@ export async function assessReadiness(
     appConfigured,
     installationLinked,
     patConfigured,
+    prCapable,
+    ciReadable,
     repoReachable,
     defaultBranch,
     ciPresent,

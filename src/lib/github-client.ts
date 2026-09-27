@@ -187,6 +187,19 @@ export interface RepoInfo {
   private: boolean;
 }
 
+/** Probe whether the current token can access pull requests on a repo (i.e. it
+ *  holds the Pull requests permission). Listing PRs needs that permission, so a
+ *  successful call proves the token can manage them - the App is NOT required.
+ *  Never throws: any error (403 = lacks the permission) returns false. */
+export async function probePullRequestAccess(client: GithubClient, repoFullName: string): Promise<boolean> {
+  try {
+    await gh(client, "GET", `/repos/${repoFullName}/pulls?state=all&per_page=1`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Read a repo's metadata (default branch, visibility). Doubles as a
  *  reachability probe: throws if the token cannot see the repo. */
 export async function fetchRepoInfo(
