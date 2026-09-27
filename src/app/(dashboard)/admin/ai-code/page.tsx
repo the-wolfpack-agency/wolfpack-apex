@@ -138,6 +138,7 @@ const rowStyle: CSSProperties = {
 export default function CodeFactoryPage() {
   const router = useRouter();
   const [ref, setRef] = useState("");
+  const [repo, setRepo] = useState("");
   const [prompt, setPrompt] = useState("");
   const [executorPin, setExecutorPin] = useState("");
   const [run, setRun] = useState<PipelineRun | null>(null);
@@ -181,6 +182,7 @@ export default function CodeFactoryPage() {
         headers: jsonHeaders(),
         body: JSON.stringify({
           ref: ref.trim() || "factory",
+          repo: repo.trim() || undefined,
           prompt: prompt.trim(),
           executorProviderPin: executorPin.trim() || undefined,
         }),
@@ -250,6 +252,10 @@ export default function CodeFactoryPage() {
 
       <GlassPanel title="Build a change">
         <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap", alignItems: "flex-end" }}>
+          <label style={{ display: "flex", flexDirection: "column", gap: "0.35rem", flex: "1 1 14rem" }}>
+            <span style={{ fontSize: "0.8rem", color: "var(--wp-text-dim)" }}>Target repo</span>
+            <input value={repo} onChange={(e) => setRepo(e.target.value)} placeholder="the-wolfpack-agency/wolfpack-apex" aria-label="Target repo" data-testid="repo-input" style={inputStyle} />
+          </label>
           <label style={{ display: "flex", flexDirection: "column", gap: "0.35rem", flex: "1 1 10rem" }}>
             <span style={{ fontSize: "0.8rem", color: "var(--wp-text-dim)" }}>Ref (PR / task id)</span>
             <input value={ref} onChange={(e) => setRef(e.target.value)} placeholder="factory" aria-label="Ref" style={inputStyle} />
