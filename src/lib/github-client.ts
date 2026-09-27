@@ -322,3 +322,81 @@ export async function fetchFileContent(
     throw err;
   }
 }
+
+/**
+ * Fetch a pull request's unified diff. GitHub returns raw diff text (not JSON)
+ * when the Accept header requests the diff media type, so this bypasses the JSON
+ * gh() helper. Used by the PR-gate webhook to run the deterministic gate over
+ * exactly what a PR changes, no matter which AI or human authored it.
+ */
+export async function fetchPullRequestDiff(
+  client: GithubClient,
+  repoFullName: string,
+  prNumber: number,
+): Promise<string> {
+  if (!client.token) throw new Error("no GitHub token for diff fetch");
+  const res = await client.fetch(
+    `https://api.github.com/repos/${repoFullName}/pulls/${prNumber}`,
+    {
+      method: "GET",
+      headers: {
+        Accept: "application/vnd.github.v3.diff",
+        Authorization: `Bearer ${client.token}`,
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "wolfpack-instinct-secure-agent",
+      },
+    },
+  );
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`github diff pulls/${prNumber} → ${res.status}: ${text.slice(0, 200)}`);
+  }
+  return res.text();
+}
+
+export interface CheckRunInput {
+  headSha: string;
+  name: string;
+  conclusion: "success" | "action_required" | "neutral" | "failure";
+  title: string;
+  summary: string;
+  detailsUrl?: string;
+}
+
+/**
+ * Post a completed Check Run to a PR's head commit. This is the signal the
+ * client sees on every PR with ZERO setup on their side: they install the App,
+ * and the gate's verdict appears as a check. Making it a REQUIRED check that
+ * blocks merge is the client's one optional branch-protection step.
+ *
+ * Requires the App's checks:write permission.
+ */
+export async function createCheckRun(
+  client: GithubClient,
+  repoFullName: string,
+  input: CheckRunInput,
+): Promise<{ id: number }> {
+  return gh<{ id: number }>(client, "POST", `/repos/${repoFullName}/check-runs`, {
+    name: input.name,
+    head_sha: input.headSha,
+    status: "completed",
+    conclusion: input.conclusion,
+    ...(input.detailsUrl ? { details_url: input.detailsUrl } : {}),
+    output: { title: input.title, summary: input.summary },
+  });
+}
+
+/**
+ * Leave a single issue comment on a PR. Used so a BLOCK is visible even when the
+ * client has not (yet) made the gate a required status check: value from just
+ * the install. Best-effort; requires pull_requests:write (already held to open
+ * PRs).
+ */
+export async function createPrComment(
+  client: GithubClient,
+  repoFullName: string,
+  prNumber: number,
+  body: string,
+): Promise<void> {
+  await gh(client, "POST", `/repos/${repoFullName}/issues/${prNumber}/comments`, { body });
+}

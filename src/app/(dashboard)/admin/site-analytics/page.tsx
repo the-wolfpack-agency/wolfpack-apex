@@ -9,7 +9,7 @@
  * All fetches go through fetchWithRefresh (15-min access TTL) per repo policy.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { fetchWithRefresh, jsonHeaders } from "@/lib/client-auth";
 import { HourHeatmap } from "@/components/HourHeatmap";
 import { AgentOriginMap } from "@/components/AgentOriginMap";
@@ -40,6 +40,8 @@ interface Summary {
     flagged: number;
     trapped: number;
     blocked: number;
+    hostileOperators?: number;
+    hostileEvents?: number;
     topAgents: Array<{ agent: string; count: number }>;
   };
   learnedSignatures?: { shadow: number; enforcing: number; autoBlocked: number };
@@ -289,6 +291,25 @@ export default function SiteAnalyticsPage() {
   useEffect(() => {
     void load(days, surface);
   }, [days, surface, load]);
+
+  // Operator grouping + its derivatives are O(n) over every journey and were
+  // recomputed inline on every render (and consolidateByOperator ran twice). With
+  // ~19 pieces of view state, a single filter toggle re-ran all of it. Memoize on
+  // the data (not the view state) so they compute once per load, not per keystroke.
+  const operatorGroups = useMemo(
+    () => (summary ? consolidateByOperator(summary.journeys) : []),
+    [summary],
+  );
+  const operatorAnalytics = useMemo(
+    () => ({
+      tradecraft: aggregateTradecraft(operatorGroups).slice(0, 8),
+      methodClusters: clusterByTradecraft(operatorGroups).slice(0, 6),
+      campaigns: detectCampaigns(operatorGroups).slice(0, 4),
+      rising: tradecraftTrend(operatorGroups, new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()).filter((r) => r.delta > 0).slice(0, 6),
+      networkMatches: matchOperatorsToNetwork(operatorGroups, summary?.networkTradecraft ?? []),
+    }),
+    [operatorGroups, summary],
+  );
 
   const card: React.CSSProperties = {
     background: "var(--wp-dark-surface, #1f1f22)",
@@ -558,7 +579,7 @@ export default function SiteAnalyticsPage() {
             // The specific operators the edge would act on, named (not just
             // counted) so protection reads as concrete. Worst-first, block above
             // challenge, computed with the same pure policy the edge enforces.
-            const standbyAgents = consolidateByOperator(summary.journeys)
+            const standbyAgents = operatorGroups
               .map((g) => {
                 const pr = summary.principalByOperator?.[g.operatorKey];
                 const d = decideEdgeAction(
@@ -709,15 +730,27 @@ export default function SiteAnalyticsPage() {
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "1rem", marginTop: "0.8rem" }}>
               <div>
+                <div style={{ ...label, color: "var(--wp-error, #ef4444)" }}>Confirmed hostile</div>
+                <div data-testid="ff-hostile-operators" style={{ marginTop: "0.25rem", fontSize: "1.5rem", fontWeight: 700, color: (summary.forcefield.hostileOperators ?? 0) > 0 ? "var(--wp-error, #ef4444)" : "var(--wp-text, #eee)" }}>
+                  {(summary.forcefield.hostileOperators ?? 0).toLocaleString()}
+                </div>
+                <div style={{ fontSize: "0.62rem", color: "var(--wp-text-muted, #9ca3af)", marginTop: "0.15rem", lineHeight: 1.35 }}>
+                  operators with real tradecraft (probe / decoy / payload){(summary.forcefield.hostileEvents ?? 0) > 0 ? ` · ${(summary.forcefield.hostileEvents ?? 0).toLocaleString()} events` : ""}
+                </div>
+              </div>
+              <div>
                 <div style={{ ...label, color: "var(--wp-success, #30a46c)" }}>Agents welcomed</div>
                 <div data-testid="ff-welcomed" style={{ marginTop: "0.25rem", fontSize: "1.5rem", fontWeight: 700, color: "var(--wp-text, #eee)" }}>
                   {summary.forcefield.welcomed.toLocaleString()}
                 </div>
               </div>
               <div>
-                <div style={{ ...label, color: "var(--wp-warning, #f5a623)" }}>Automation flagged</div>
-                <div data-testid="ff-flagged" style={{ marginTop: "0.25rem", fontSize: "1.5rem", fontWeight: 700, color: "var(--wp-text, #eee)" }}>
+                <div style={{ ...label, color: "var(--wp-text-muted, #9ca3af)" }}>Flagged (unconfirmed)</div>
+                <div data-testid="ff-flagged" style={{ marginTop: "0.25rem", fontSize: "1.5rem", fontWeight: 700, color: "var(--wp-text-muted, #9ca3af)" }}>
                   {summary.forcefield.flagged.toLocaleString()}
+                </div>
+                <div style={{ fontSize: "0.62rem", color: "var(--wp-text-muted, #6b7280)", marginTop: "0.15rem", lineHeight: 1.35 }}>
+                  weak signal: unidentified automation, mostly benign crawlers &amp; first-party traffic
                 </div>
               </div>
               <div>
@@ -766,8 +799,13 @@ export default function SiteAnalyticsPage() {
               already caught, used to catch new ones by their methods. Shadow =
               still proving itself (would-block only); Enforcing = earned auto-block
               across every site. */}
-          <div style={card} data-testid="ff-learned-signatures">
-            <div style={label}>Learned hostile-tradecraft signatures</div>
+          <details className="ff-collapse" style={card} data-testid="ff-learned-signatures">
+            <summary>
+              <span style={label}>Learned hostile-tradecraft signatures</span>
+              <span style={{ ...label, display: "flex", alignItems: "center", gap: "0.4rem" }}>
+                {((summary.learnedSignatures?.shadow ?? 0) + (summary.learnedSignatures?.enforcing ?? 0)).toLocaleString()} <span className="ff-chev">&#9656;</span>
+              </span>
+            </summary>
             <div style={{ fontSize: "0.8rem", color: "var(--wp-text-muted, #9ca3af)", marginTop: "0.35rem", lineHeight: 1.5 }}>
               Recurring tool/action combos mined from operators we&apos;ve already caught. A signature must be exhibited by multiple distinct hostiles and prove zero false positives against good agents before it earns auto-block, so the corpus makes detection faster without risking legitimate traffic.
             </div>
@@ -791,14 +829,19 @@ export default function SiteAnalyticsPage() {
                 </div>
               </div>
             </div>
-          </div>
+          </details>
 
           {/* Agent intelligence: deeper profiling of the caught agents - cross-site
               campaigns, the automation/AI/script mix, and who adapted after a block.
               Turns "it used HeadlessChrome" into a real picture of the adversary. */}
           {summary.agentIntel && (
-            <div style={card} data-testid="ff-agent-intel">
-              <div style={label}>Agent intelligence &middot; who these agents really are</div>
+            <details className="ff-collapse" style={card} data-testid="ff-agent-intel">
+              <summary>
+                <span style={label}>Agent intelligence &middot; who these agents really are</span>
+                <span style={{ ...label, display: "flex", alignItems: "center", gap: "0.4rem" }}>
+                  {summary.agentIntel.operators.toLocaleString()} operators <span className="ff-chev">&#9656;</span>
+                </span>
+              </summary>
               <div style={{ fontSize: "0.8rem", color: "var(--wp-text-muted, #9ca3af)", marginTop: "0.35rem", lineHeight: 1.5 }}>
                 Deeper profiling of the {summary.agentIntel.operators.toLocaleString()} distinct operators seen: the same fingerprint across properties is one coordinated campaign, and the client mix shows what is actually reaching you.
               </div>
@@ -831,14 +874,24 @@ export default function SiteAnalyticsPage() {
                   </ul>
                 </div>
               )}
-            </div>
+            </details>
           )}
 
           {/* Probe intelligence + payload attacks. Placed BELOW the agent-traffic
               summary - that section ties directly to the map above, so it leads;
               this is the deeper per-path drill-down. */}
-          <ProbeIntelPanel intel={summary.probeIntel ?? []} />
-          <PayloadIntelPanel intel={summary.payloadIntel ?? []} />
+          <details className="ff-collapse" style={card} data-testid="ff-intel-drilldown">
+            <summary>
+              <span style={label}>Probe &amp; payload intelligence &middot; per-path drill-down</span>
+              <span style={{ ...label, display: "flex", alignItems: "center", gap: "0.4rem" }}>
+                {((summary.probeIntel?.length ?? 0) + (summary.payloadIntel?.length ?? 0)).toLocaleString()} <span className="ff-chev">&#9656;</span>
+              </span>
+            </summary>
+            <div style={{ marginTop: "0.9rem", display: "grid", gap: "1rem" }}>
+              <ProbeIntelPanel intel={summary.probeIntel ?? []} />
+              <PayloadIntelPanel intel={summary.payloadIntel ?? []} />
+            </div>
+          </details>
 
           {/* Agent journeys: correlated sessions, each a behavior class with a
               proven/inferred confidence. Following the agent's flow across the
@@ -893,7 +946,7 @@ export default function SiteAnalyticsPage() {
                   </div>
                 )}
                 {(() => {
-                  const groups = consolidateByOperator(summary.journeys);
+                  const groups = operatorGroups;
                   if (groups.length === 0) return <p style={{ fontSize: "0.82rem", color: "var(--wp-text-muted, #9ca3af)" }}>No operators yet.</p>;
                   const shown = filterOperators(groups, operatorFilter);
                   const opStatus = (k: string): TriageStatus => operatorTriageOverride[k] ?? summary.operatorTriage?.[k] ?? "new";
@@ -915,11 +968,7 @@ export default function SiteAnalyticsPage() {
                       {text}
                     </button>
                   );
-                  const tradecraft = aggregateTradecraft(groups).slice(0, 8);
-                  const methodClusters = clusterByTradecraft(groups).slice(0, 6);
-                  const campaigns = detectCampaigns(groups).slice(0, 4);
-                  const rising = tradecraftTrend(groups, new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()).filter((r) => r.delta > 0).slice(0, 6);
-                  const networkMatches = matchOperatorsToNetwork(groups, summary.networkTradecraft ?? []);
+                  const { tradecraft, methodClusters, campaigns, rising, networkMatches } = operatorAnalytics;
                   const matchByOp = new Map(networkMatches.map((m) => [m.operatorKey, m]));
                   return (
                   <>

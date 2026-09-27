@@ -26,6 +26,9 @@ import { liveRepairComplete } from "@/lib/ai-code/repair";
 import { runPipeline } from "@/lib/ai-code/pipeline";
 import { authorDiff, authorFileChanges } from "@/lib/ai-code/author";
 import { filesToDiff, type FileChange } from "@/lib/ai-code/file-changes";
+import { remediateFileChanges } from "@/lib/ai-code/repair-files";
+import { buildRegistry, judgeCandidates } from "@/lib/ai/router";
+import { chooseIndependentJudge } from "@/lib/ai/judge-selection";
 import { evaluateChangeInvariants } from "@/lib/ai-code/change-facts";
 import { deepScanChange } from "@/lib/ai-code/deep-scan";
 import { workspaceGithubClient } from "@/lib/github-client";
@@ -113,6 +116,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const diff = typeof b.diff === "string" ? b.diff : "";
   if (!ref) return NextResponse.json({ error: "ref is required" }, { status: 400 });
   if (!prompt.trim()) return NextResponse.json({ error: "prompt is required" }, { status: 400 });
+  // Optional target repo. Validate the owner/repo shape up front so a malformed
+  // value is a clean 400, never a string interpolated into a GitHub API path.
+  // Absent -> the executor defaults to apex (self-hosting).
+  const repoRaw = typeof b.repo === "string" ? b.repo.trim() : "";
+  if (repoRaw && !/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(repoRaw)) {
+    return NextResponse.json({ error: "repo must be in owner/name form" }, { status: 400 });
+  }
+  const repo = repoRaw || undefined;
   // diff is OPTIONAL: when absent, the EXECUTOR stage authors it from the prompt
   // (input-to-output). A manually supplied diff is still governed as before. The
   // size ceiling is enforced ONCE, unconditionally, on the final diff below - it
@@ -149,9 +160,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // Repo-aware context: when a target repo is set, fetch the current contents of
   // the files the prompt NAMES and prepend them so the executor MODIFIES existing
   // code consistently instead of authoring blind. Best-effort: any failure falls
-  // back to prompt-only authoring (no regression). No diff supplied only (a
-  // manually supplied diff is governed as-is).
-  const repo = typeof b.repo === "string" && b.repo.trim() ? b.repo.trim() : undefined;
+  // back to prompt-only authoring (no regression). Skipped when a diff is supplied
+  // (that is governed as-is). Uses the `repo` already validated above.
   let authorPrompt = prompt;
   let repoContextFiles: string[] = [];
   if (repo && !diff.trim()) {
@@ -167,18 +177,44 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
   }
 
-  const { diff: effectiveDiff, author: effectiveAuthor, executor, changes } = await resolveChange({
-    mode,
-    diff,
-    prompt: authorPrompt,
-    authorModel,
-    executorProviderPin,
-  });
+  const resolved = await resolveChange({ mode, diff, prompt: authorPrompt, authorModel, executorProviderPin });
+  const executor = resolved.executor;
+  let effectiveDiff = resolved.diff;
+  let effectiveAuthor = resolved.author;
+  let changes = resolved.changes;
   // Fail-closed: the executor ran but produced nothing usable. Never a 500, and
   // never a fabricated change - the gate has nothing to govern.
   if (executor && !effectiveDiff.trim()) {
     return NextResponse.json({ error: "executor produced no change", executor }, { status: 422 });
   }
+
+  // Files-native AUTO-FIX: in files mode, if the authored files do not clear the
+  // combined gate, re-author the whole files with the gate's feedback (routed to a
+  // DIFFERENT lineage), bounded, until they pass or a human is needed. This is the
+  // gate-level half of the auto-fix loop; the CI-level half runs post-PR.
+  let filesRepairStatus: "clean" | "needs_human" | "n/a" = "n/a";
+  if (mode === "files" && changes && changes.length > 0) {
+    const client = getAIClient();
+    const indep = chooseIndependentJudge(
+      { provider: executor?.provider ?? "", model: effectiveAuthor },
+      judgeCandidates(buildRegistry(), "cheap"),
+    ).candidate?.provider;
+    const repaired = await remediateFileChanges({
+      initial: changes,
+      initialAuthor: effectiveAuthor,
+      reauthor: (feedback) =>
+        authorFileChanges(
+          { prompt: `${prompt}\n\nThe previous attempt was rejected. ${feedback}`, executorProviderPin: indep, feature: "ai-code-pipeline-repair-files" },
+          { complete: (r) => client.complete(r) },
+        ),
+      maxAttempts: 2,
+    });
+    changes = repaired.changes;
+    effectiveAuthor = repaired.author;
+    effectiveDiff = filesToDiff(changes);
+    filesRepairStatus = repaired.status;
+  }
+
   // Unconditional ceiling on the final diff, whatever its source (supplied or
   // authored). Enforced on every path, so no user-controlled input decides
   // whether this check runs.
@@ -260,11 +296,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // NOT open a PR. A human opens the PR by approving this, through the existing
   // agent-approvals surface. A needs_human run has nothing to hand off. Capturing
   // is best-effort (null without a database); the run is returned either way.
-  // Files mode auto-hands-off only when the FIRST authored files passed the gate
-  // (no repair). The repair loop is diff-native and does not map to full files, so
-  // a files-mode change that needed repair is needs_human (a human takes the
-  // surfaced diff); files-native repair is a follow-up. Diff mode is unaffected.
-  const filesModeHandoffOk = changes == null || run.remediation.attempts.length === 0;
+  // Files mode hands off when the files-native repair cleared the change (its final
+  // files pass the gate). needs_human means the auto-fix could not clear it after
+  // its bounded attempts. Diff mode is unaffected.
+  const filesModeHandoffOk = mode !== "files" || filesRepairStatus === "clean";
 
   let approvalId: string | null = null;
   if (run.status === "ready_for_pr" && !invariants.wouldBlock && !deepScan.blocking && filesModeHandoffOk) {
@@ -278,7 +313,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         prompt,
         // Target repo for the PR; the executor defaults to apex (self-hosting)
         // when absent. Not user-secret; a human sees exactly what they approve.
-        repo: typeof b.repo === "string" && b.repo.trim() ? b.repo.trim() : undefined,
+        repo,
         spec_hash: run.spec.hash,
         conforms: run.conformance.conforms,
         // The gate ALLOWED this change, so it carries no secret to store; a human

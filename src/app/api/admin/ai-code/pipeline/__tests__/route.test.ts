@@ -94,6 +94,19 @@ describe("POST /api/admin/ai-code/pipeline", () => {
     expect((await POST(post({ ...VALID, prompt: "" }))).status).toBe(400);
   });
 
+  it("400 on a malformed target repo (not owner/name)", async () => {
+    expect((await POST(post({ ...VALID, repo: "not a repo" }))).status).toBe(400);
+    expect((await POST(post({ ...VALID, repo: "../etc/passwd" }))).status).toBe(400);
+  });
+
+  it("passes a valid target repo through to the approval", async () => {
+    const res = await POST(post({ ...VALID, repo: "acme/app" }));
+    expect(res.status).toBe(200);
+    expect(mockCreateApproval).toHaveBeenCalledWith(expect.objectContaining({
+      params: expect.objectContaining({ repo: "acme/app" }),
+    }));
+  });
+
   it("authors the diff from the prompt when none is supplied (executor stage)", async () => {
     const res = await POST(post({ ref: "pr-2", prompt: "add k", answers: { tests: "all" }, executorProviderPin: "azure-openai" }));
     expect(res.status).toBe(200);
@@ -265,14 +278,28 @@ describe("files mode (edit-support)", () => {
     expect(mockRunPipeline.mock.calls[0][0].diff).toMatch(/\+\+\+ b\/src\/lib\/k\.ts/);
   });
 
-  it("does NOT auto-hand-off a files change that needed repair (needs_human; diff-native repair does not map to files)", async () => {
-    mockComplete.mockResolvedValue(authorResp(FILES_REPLY));
-    // ready_for_pr but reached via a repair attempt -> files mode withholds handoff
-    mockRunPipeline.mockResolvedValue({ ...RUN, status: "ready_for_pr", remediation: { ...RUN.remediation, attempts: [{ tier: "standard" }] } });
-    const res = await POST(post({ ref: "pr-files2", prompt: "add k", answers: { tests: "all" }, mode: "files" }));
+  it("does NOT auto-hand-off when files-native repair cannot clear the gate (needs_human)", async () => {
+    // Every authored + re-authored attempt carries a provider-signature secret the
+    // deep scan flags critical, so the auto-fix exhausts -> needs_human, no handoff.
+    const BAD_FILES = ["FILE: src/config.ts", "```ts", 'export const K = "AKIA1234567890ABCDEF";', "```"].join("\n");
+    mockComplete.mockResolvedValue(authorResp(BAD_FILES));
+    mockRunPipeline.mockResolvedValue(RUN);
+    const res = await POST(post({ ref: "pr-files2", prompt: "add config", answers: { tests: "all" }, mode: "files" }));
     const body = await res.json();
     expect(body.approvalId).toBeNull();
     expect(mockCreateApproval).not.toHaveBeenCalled();
+  });
+
+  it("AUTO-REPAIRS: a first attempt that fails the gate, then a clean re-author, hands off", async () => {
+    const BAD = ["FILE: src/config.ts", "```ts", 'export const K = "AKIA1234567890ABCDEF";', "```"].join("\n");
+    const GOOD = ["FILE: src/config.ts", "```ts", "export const K = process.env.K;", "```"].join("\n");
+    mockComplete.mockResolvedValueOnce(authorResp(BAD)).mockResolvedValue(authorResp(GOOD)); // initial bad, re-author clean
+    mockRunPipeline.mockResolvedValue(RUN);
+    const res = await POST(post({ ref: "pr-files3", prompt: "add config", answers: { tests: "all" }, mode: "files" }));
+    const body = await res.json();
+    expect(body.approvalId).toBe("appr-1"); // repaired, then handed off
+    const captured = mockCreateApproval.mock.calls[0][0];
+    expect(captured.params.changes[0].content).toContain("process.env.K"); // the REPAIRED files are committed
   });
 
   it("422 when the files executor produces no parseable files", async () => {
