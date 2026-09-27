@@ -136,6 +136,8 @@ test("a PR-permission 403 does NOT lose the pushed work: returns a compare link 
     // Actionable, not a raw API error: name the fix (App / scope).
     expect(out.reason).toMatch(/GitHub App|Pull requests: write/i);
     expect(out.reason).toMatch(/pushed to branch/i);
+    // Flagged as a permission failure so the UI can offer the one-click App install.
+    expect(out.needsInstall).toBe(true);
   }
   // The outcome is recorded on the ledger with the permission code.
   expect(recordActionOutcome).toHaveBeenCalledWith(expect.objectContaining({ ok: false, code: "pr_permission" }));

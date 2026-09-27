@@ -221,6 +221,10 @@ export default function CodeFactoryPage() {
   // Set when the branch was pushed but the PR could not be opened (e.g. token
   // without pull_requests: write): a one-click link to open the PR manually.
   const [compareUrl, setCompareUrl] = useState<string | null>(null);
+  // True when the PR-open failed specifically on permissions: offer the one-click
+  // GitHub App install (the minimum-effort fix) rather than making the user touch
+  // a PAT. The install URL is configured once, per deployment.
+  const [needsInstall, setNeedsInstall] = useState(false);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
@@ -395,13 +399,14 @@ export default function CodeFactoryPage() {
     setApproving(true);
     setApproveError(null);
     setCompareUrl(null);
+    setNeedsInstall(false);
     try {
       const res = await fetchWithRefresh(`/api/admin/agents/approvals/${approvalId}`, {
         method: "POST",
         headers: jsonHeaders(),
         body: JSON.stringify({ action: "approve" }),
       });
-      const body = (await res.json()) as { ok?: boolean; outcome?: { ok?: boolean; url?: string; reason?: string; branch?: string; compareUrl?: string }; error?: string };
+      const body = (await res.json()) as { ok?: boolean; outcome?: { ok?: boolean; url?: string; reason?: string; branch?: string; compareUrl?: string; needsInstall?: boolean }; error?: string };
       if (res.ok && body.outcome?.ok && body.outcome.url) {
         setPrUrl(body.outcome.url);
         // Tie the pipeline to the work: the PR is open, so show its build + deploy
@@ -413,8 +418,10 @@ export default function CodeFactoryPage() {
       } else {
         setApproveError(body.outcome?.reason || body.error || "Approval did not open a PR.");
         // The branch may still have been pushed (a PR-permission failure): offer a
-        // one-click compare link so the pushed work is never lost.
+        // one-click compare link so the pushed work is never lost, and - when it
+        // was a permission failure - the one-click GitHub App install.
         if (body.outcome?.compareUrl) setCompareUrl(body.outcome.compareUrl);
+        if (body.outcome?.needsInstall) setNeedsInstall(true);
       }
     } catch {
       setApproveError("Network error - the approval did not run.");
@@ -426,6 +433,9 @@ export default function CodeFactoryPage() {
   if (!ready) return null;
 
   const v = run ? OUTCOME[run.review.verdict.outcome] : null;
+  // The GitHub App install link, set once per deployment. Empty until the App is
+  // registered; the one-click "Connect GitHub" affordance only renders when set.
+  const githubAppInstallUrl = process.env.NEXT_PUBLIC_GITHUB_APP_INSTALL_URL || "";
   const reroutes = run ? run.remediation.attempts.length : 0;
 
   return (
@@ -755,6 +765,16 @@ export default function CodeFactoryPage() {
                       <a data-testid="compare-link" href={compareUrl} target="_blank" rel="noreferrer" style={{ color: "var(--wp-gold, #e8b528)" }}>
                         Open the pull request on GitHub &rarr;
                       </a>
+                    </p>
+                  )}
+                  {needsInstall && githubAppInstallUrl && (
+                    <p style={{ margin: "0.3rem 0 0", fontSize: "0.85rem" }}>
+                      <a data-testid="connect-github" href={githubAppInstallUrl} target="_blank" rel="noreferrer" style={{ color: "var(--wp-gold, #e8b528)", fontWeight: 600 }}>
+                        Connect GitHub in one click &rarr;
+                      </a>
+                      <span style={{ color: "var(--wp-text-dim)", marginLeft: "0.4rem" }}>
+                        Install the app on your repo and the factory opens PRs for you, no tokens.
+                      </span>
                     </p>
                   )}
                 </div>

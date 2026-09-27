@@ -233,6 +233,29 @@ test("a PR-permission failure shows a one-click compare link so the pushed work 
   expect(screen.getByRole("alert")).toHaveTextContent(/GitHub App/);
 });
 
+test("a permission failure offers the one-click GitHub App install when the App URL is configured", async () => {
+  process.env.NEXT_PUBLIC_GITHUB_APP_INSTALL_URL = "https://github.com/apps/instinct/installations/new";
+  approveResp = resp(200, {
+    ok: false,
+    status: "executed",
+    outcome: {
+      ok: false,
+      reason: 'The change was pushed to branch "factory/x-abc", but this GitHub token cannot open pull requests. Install the Instinct GitHub App.',
+      branch: "factory/x-abc",
+      compareUrl: "https://github.com/o/r/compare/main...factory/x-abc?expand=1",
+      needsInstall: true,
+    },
+  });
+  render(<CodeFactoryPage />);
+  await submitPrompt();
+  await waitFor(() => expect(screen.getByTestId("approve-open-pr")).toBeInTheDocument());
+  fireEvent.click(screen.getByTestId("approve-consent"));
+  await act(async () => { fireEvent.click(screen.getByTestId("approve-open-pr")); });
+  await waitFor(() => expect(screen.getByTestId("connect-github")).toBeInTheDocument());
+  expect(screen.getByTestId("connect-github")).toHaveAttribute("href", "https://github.com/apps/instinct/installations/new");
+  delete process.env.NEXT_PUBLIC_GITHUB_APP_INSTALL_URL;
+});
+
 test("example chips populate the prompt (showing what the factory can do)", async () => {
   render(<CodeFactoryPage />);
   const chips = screen.getByTestId("prompt-chips");
