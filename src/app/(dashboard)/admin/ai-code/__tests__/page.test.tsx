@@ -349,3 +349,13 @@ test("audit evidence: verifying the chain shows a tamper-evident verdict and off
   expect(screen.getByTestId("download-audit")).toBeInTheDocument();
   expect(screen.getByTestId("audit-entries")).toHaveTextContent("R-MUTATION-ALLOW");
 });
+
+test("in-app help: a How it works guide explains the flow for a new user", async () => {
+  render(<CodeFactoryPage />);
+  await waitFor(() => expect(screen.getByTestId("how-it-works")).toBeInTheDocument());
+  const help = screen.getByTestId("how-it-works");
+  expect(help).toHaveTextContent(/describe the change/i);
+  expect(help).toHaveTextContent(/pull request open on your repo/i);
+  expect(help).toHaveTextContent(/build & deploy checkpoints/i);
+  expect(help).toHaveTextContent(/tamper-evident audit/i);
+});
