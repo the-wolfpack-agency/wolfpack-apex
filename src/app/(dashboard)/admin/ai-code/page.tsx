@@ -114,13 +114,37 @@ interface RunSummary {
 interface ModelGrade { model: string; n: number; readyRate: number; firstPassRate: number; blockRate: number }
 interface Grade { total: number; readyRate: number; firstPassRate: number; blockRate: number; escalationRate: number; byModel: ModelGrade[] }
 interface DriftFlag { model: string; priorReadyRate: number; recentReadyRate: number; drop: number; priorN: number; recentN: number }
-interface HistoryData { runs: RunSummary[]; grade: Grade; drift: DriftFlag[] }
+interface ProtectionSummary { totalCaught: number; byClass: { klass: string; label: string; count: number }[]; changesBlocked: number; sentForReview: number; criticalsCaught: number; windowDays: number }
+interface HistoryData { runs: RunSummary[]; grade: Grade; drift: DriftFlag[]; protected?: ProtectionSummary }
 
 type CiStatus = "pass" | "fail" | "pending" | "absent";
 interface CiCategory { key: string; label: string; status: CiStatus; passed: number; failed: number; pending: number; checks: string[] }
 interface CiDashboard { categories: CiCategory[]; overall: CiStatus; summary: { total: number; passed: number; failed: number; pending: number } }
 
 const pct = (n: number): string => `${Math.round(n * 100)}%`;
+
+/** Count files + added/removed lines in a unified diff, for the header summary. */
+function diffStats(diff: string): { files: number; added: number; removed: number } {
+  const lines = diff.split("\n");
+  const gitFiles = lines.filter((l) => l.startsWith("diff --git")).length;
+  const plusFiles = lines.filter((l) => l.startsWith("+++ ")).length;
+  const files = gitFiles || plusFiles || (diff.trim() ? 1 : 0);
+  let added = 0, removed = 0;
+  for (const l of lines) {
+    if (l.startsWith("+") && !l.startsWith("+++")) added++;
+    else if (l.startsWith("-") && !l.startsWith("---")) removed++;
+  }
+  return { files, added, removed };
+}
+
+/** Color one diff line by its role: added, removed, hunk header, file header. */
+function diffLineColor(line: string): string {
+  if (line.startsWith("+++") || line.startsWith("---") || line.startsWith("diff --git") || line.startsWith("index ")) return "var(--wp-text-dim, #8b93a1)";
+  if (line.startsWith("+")) return "#3fb950";
+  if (line.startsWith("-")) return "#f85149";
+  if (line.startsWith("@@")) return "#58a6ff";
+  return "var(--wp-text, #e6e9ef)";
+}
 
 // Vehicle-dashboard instrument colors: a glowing light per checkpoint.
 const CI_LIGHT: Record<CiStatus, { color: string; label: string }> = {
@@ -208,6 +232,17 @@ export default function CodeFactoryPage() {
   const [error, setError] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
   const [history, setHistory] = useState<HistoryData | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const copyDiff = useCallback(async (diff: string) => {
+    try {
+      await navigator.clipboard.writeText(diff);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1800);
+    } catch {
+      /* clipboard blocked (no HTTPS / permissions); the code is still visible */
+    }
+  }, []);
   const [pipelineRef, setPipelineRef] = useState("");
   const [pipeline, setPipeline] = useState<CiDashboard | null>(null);
   const [pipelineLoading, setPipelineLoading] = useState(false);
@@ -601,6 +636,36 @@ export default function CodeFactoryPage() {
             )}
           </GlassPanel>
 
+          {run.diff && (() => {
+            const stats = diffStats(run.diff);
+            return (
+              <GlassPanel title="Generated code" subtitle="What the model wrote, exactly as the gate governed it">
+                <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", marginBottom: "0.6rem", flexWrap: "wrap" }}>
+                  <span data-testid="generated-code-stats" style={{ display: "inline-flex", alignItems: "center", gap: "0.6rem", fontSize: "0.82rem" }}>
+                    <span style={{ color: "var(--wp-text-dim)" }}>{stats.files} file{stats.files === 1 ? "" : "s"}</span>
+                    <span style={{ color: "#3fb950", fontWeight: 600 }}>+{stats.added}</span>
+                    <span style={{ color: "#f85149", fontWeight: 600 }}>&minus;{stats.removed}</span>
+                  </span>
+                  <button type="button" data-testid="copy-code" onClick={() => void copyDiff(run.diff)} style={{ marginLeft: "auto", background: "var(--wp-surface-2, #171a21)", border: "1px solid var(--wp-border, #2a2f3a)", borderRadius: 8, color: "var(--wp-text, #e6e9ef)", padding: "0.3rem 0.7rem", fontSize: "0.78rem", cursor: "pointer" }}>
+                    {copied ? "Copied" : "Copy"}
+                  </button>
+                </div>
+                <div
+                  data-testid="generated-code"
+                  role="region"
+                  aria-label="Generated code"
+                  style={{ margin: 0, padding: "0.75rem 0", background: "#0d1117", border: "1px solid var(--wp-border, #2a2f3a)", borderRadius: 8, overflowX: "auto", maxHeight: 460, fontSize: "0.8rem", fontFamily: "ui-monospace, SFMono-Regular, monospace", lineHeight: 1.5 }}
+                >
+                  {run.diff.split("\n").map((line, i) => (
+                    <div key={i} style={{ padding: "0 0.85rem", whiteSpace: "pre", color: diffLineColor(line), background: line.startsWith("+") && !line.startsWith("+++") ? "rgba(63,185,80,0.08)" : line.startsWith("-") && !line.startsWith("---") ? "rgba(248,81,73,0.08)" : "transparent" }}>
+                      {line || " "}
+                    </div>
+                  ))}
+                </div>
+              </GlassPanel>
+            );
+          })()}
+
           {(invariants || deepScan) && (
             <GlassPanel title="Governance" subtitle="Deterministic engineering invariants + full deep static scan">
               <div data-testid="governance-panel" style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
@@ -702,31 +767,39 @@ export default function CodeFactoryPage() {
             </GlassPanel>
           )}
 
-          {run.diff && (
-            <GlassPanel title="Authored change">
-              <details>
-                <summary style={{ cursor: "pointer", color: "var(--wp-text-dim)", fontSize: "0.85rem" }}>
-                  View the diff the gate governed
-                </summary>
-                <pre
-                  aria-label="Authored diff"
-                  style={{
-                    marginTop: "0.6rem",
-                    padding: "0.75rem",
-                    background: "var(--wp-surface-2, #171a21)",
-                    border: "1px solid var(--wp-border, #2a2f3a)",
-                    borderRadius: 8,
-                    overflowX: "auto",
-                    fontSize: "0.8rem",
-                    fontFamily: "ui-monospace, monospace",
-                  }}
-                >
-                  {run.diff}
-                </pre>
-              </details>
-            </GlassPanel>
-          )}
         </>
+      )}
+
+      {history?.protected && (history.protected.totalCaught > 0 || history.protected.changesBlocked > 0 || history.protected.criticalsCaught > 0) && (
+        <GlassPanel title="Protected from production issues" subtitle={`What the gate caught before a change reached a human, last ${history.protected.windowDays} days`}>
+          <div data-testid="protected-summary" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: "0.75rem" }}>
+            {[
+              { k: "Issues caught", v: history.protected.totalCaught, c: "var(--wp-gold, #e8b528)" },
+              { k: "Changes blocked", v: history.protected.changesBlocked, c: "var(--wp-error, #ef4444)" },
+              { k: "Critical security", v: history.protected.criticalsCaught, c: "var(--wp-error, #ef4444)" },
+              { k: "Sent for review", v: history.protected.sentForReview, c: "var(--wp-warning, #f5a623)" },
+            ].map((t) => (
+              <div key={t.k} style={{ background: "var(--wp-surface-2, #171a21)", border: "1px solid var(--wp-border, #2a2f3a)", borderRadius: 8, padding: "0.6rem 0.75rem" }}>
+                <div style={{ fontSize: "0.68rem", textTransform: "uppercase", letterSpacing: "0.03em", color: "var(--wp-text-dim)" }}>{t.k}</div>
+                <div style={{ fontSize: "1.4rem", fontWeight: 700, marginTop: "0.2rem", color: t.v > 0 ? t.c : "var(--wp-text, #e6e9ef)" }}>{t.v.toLocaleString()}</div>
+              </div>
+            ))}
+          </div>
+          {history.protected.byClass.length > 0 && (
+            <div data-testid="protected-by-class" style={{ marginTop: "0.9rem", display: "grid", gap: "0.35rem" }}>
+              <div style={{ fontSize: "0.72rem", textTransform: "uppercase", letterSpacing: "0.03em", color: "var(--wp-text-dim)" }}>What it caught</div>
+              {history.protected.byClass.slice(0, 8).map((c) => (
+                <div key={c.klass} style={{ display: "flex", alignItems: "center", gap: "0.6rem", fontSize: "0.85rem", padding: "0.4rem 0.55rem", borderRadius: 6, background: "var(--wp-surface-2, #171a21)", border: "1px solid var(--wp-border, #2a2f3a)" }}>
+                  <span style={{ color: "var(--wp-text, #e6e9ef)" }}>{c.label}</span>
+                  <span style={{ marginLeft: "auto", fontWeight: 700, color: "var(--wp-gold, #e8b528)" }}>{c.count.toLocaleString()}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          <p style={{ margin: "0.7rem 0 0", fontSize: "0.72rem", color: "var(--wp-text-dim)", lineHeight: 1.45 }}>
+            Every one of these was stopped before it could reach production, on a deterministic gate that decides the same way every time.
+          </p>
+        </GlassPanel>
       )}
 
       {(history?.grade?.total ?? 0) > 0 && history && (

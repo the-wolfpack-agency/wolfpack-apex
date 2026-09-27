@@ -289,3 +289,29 @@ test("cost meter shows this run's cost and a cross-model comparison", async () =
   expect(table).toHaveTextContent("gpt-4o-mini");
   expect(table).toHaveTextContent("gpt-4o");
 });
+
+test("generated code is shown prominently with a diff summary and copy control", async () => {
+  pipelineResp = resp(200, runResp({ outcome: "allow" }));
+  render(<CodeFactoryPage />);
+  await submitPrompt();
+  await waitFor(() => expect(screen.getByTestId("generated-code")).toBeInTheDocument());
+  // the actual generated code is visible (not hidden behind a collapsed details)
+  expect(screen.getByTestId("generated-code")).toHaveTextContent("const k = 1;");
+  // header summarises the change (+1 added from the mock diff) and offers copy
+  expect(screen.getByTestId("generated-code-stats")).toHaveTextContent("+1");
+  expect(screen.getByTestId("copy-code")).toBeInTheDocument();
+});
+
+test("protected panel shows what the gate caught, by class, from mount", async () => {
+  historyResp = resp(200, {
+    runs: [], grade: { total: 0, readyRate: 0, firstPassRate: 0, blockRate: 0, escalationRate: 0, byModel: [] }, drift: [],
+    protected: { totalCaught: 5, byClass: [{ klass: "logged_credential", label: "Secret written to a log", count: 3 }, { klass: "sql_injection", label: "SQL injection", count: 2 }], changesBlocked: 2, sentForReview: 1, criticalsCaught: 4, windowDays: 30 },
+  });
+  render(<CodeFactoryPage />);
+  await waitFor(() => expect(screen.getByTestId("protected-summary")).toBeInTheDocument());
+  expect(screen.getByText("Protected from production issues")).toBeInTheDocument();
+  expect(screen.getByTestId("protected-summary")).toHaveTextContent("5"); // issues caught
+  const byClass = screen.getByTestId("protected-by-class");
+  expect(byClass).toHaveTextContent("Secret written to a log");
+  expect(byClass).toHaveTextContent("SQL injection");
+});

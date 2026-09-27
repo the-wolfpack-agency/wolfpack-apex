@@ -325,6 +325,19 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     deep_scan_critical: deepScan.critical,
   });
 
+  // Protection evidence: one finding_detected per issue the gate caught, so the
+  // "protected you from production issues" panel can show what class of problem
+  // was stopped (secrets, injection, unsafe patterns) before it reached a human.
+  // Workspace-scoped and capped. This is the same event the /review route emits.
+  for (const f of run.review.findings.slice(0, 25)) {
+    trackEvent("ai_code.finding_detected", auth.user.id, auth.user.role, {
+      workspace_id: workspaceId,
+      class: f.klass,
+      severity: f.severity,
+      cwe: f.cwe ?? "none",
+    });
+  }
+
   // Fail-closed handoff. A ready-for-PR run captures a PENDING APPROVAL - it does
   // NOT open a PR. A human opens the PR by approving this, through the existing
   // agent-approvals surface. A needs_human run has nothing to hand off. Capturing
