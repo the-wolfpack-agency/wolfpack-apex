@@ -130,3 +130,10 @@ test("with base + an INTRODUCED failure: authors a fix, brief targets only the i
   expect(body.brief).toMatch(/unit/);
   expect(body.brief).not.toMatch(/e2e/); // pre-existing check is not briefed to the fixer
 });
+
+test("reads CI for the BRANCH (PR head), not the task-id ref (dogfooding find)", async () => {
+  mockFetchCiStatus.mockResolvedValue(red);
+  await POST(post({ repo: "o/r", ref: "pr-1", branch: "factory/pr-1-abc", attempt: 0, maxAttempts: 3 }));
+  // The task-id "pr-1" is not a git ref; the CI read must use the branch.
+  expect(mockFetchCiStatus).toHaveBeenCalledWith("o/r", "factory/pr-1-abc", "w1");
+});
