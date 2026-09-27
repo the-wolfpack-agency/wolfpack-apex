@@ -26,6 +26,12 @@ export interface FixLoopState {
   attempt: number;
   /** The hard ceiling. Past it, a human decides. */
   maxAttempts: number;
+  /** Optional baseline attribution: how many of the failing checks this change
+   *  INTRODUCED (were green on the base branch). When provided and zero, the
+   *  fixer does not author a fix - the red is pre-existing, not this change's
+   *  fault, and the fixer must not touch what it did not break. Undefined keeps
+   *  the baseline-unaware behavior (fix any red). */
+  introducedFailing?: number;
 }
 
 /**
@@ -43,6 +49,16 @@ export function decideFixAction(state: FixLoopState): FixDecision {
     return { action: "wait", reason: `CI still running (${state.ci.pending} check(s) pending)` };
   }
   // complete but not green => there are failures.
+  // Baseline-aware: if we know NONE of the failures were introduced by this
+  // change (they were already failing on the base branch), the fixer must not
+  // author a fix - it did not break them and cannot be blamed for them. Hand to a
+  // human to decide whether to merge despite the pre-existing red.
+  if (state.introducedFailing === 0) {
+    return {
+      action: "escalate_human",
+      reason: `CI failed (${state.ci.failedChecks.join(", ")}), but every failing check was already failing on the base branch (pre-existing). This change introduced none, so it is handed to a human rather than auto-fixed.`,
+    };
+  }
   if (state.attempt < state.maxAttempts) {
     return {
       action: "author_fix",

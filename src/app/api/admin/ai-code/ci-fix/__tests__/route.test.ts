@@ -5,7 +5,11 @@ const mockFetchCiStatus = jest.fn();
 
 jest.mock("@/lib/auth/require-capability", () => ({ requireCapability: (...a: unknown[]) => mockRequireCapability(...a) }));
 jest.mock("@/lib/tenancy/require-entitlement", () => ({ requireEntitlement: (...a: unknown[]) => mockGate(...a) }));
-jest.mock("@/lib/ai-code/ci-status", () => ({ fetchCiStatus: (...a: unknown[]) => mockFetchCiStatus(...a) }));
+const mockFetchAttribution = jest.fn();
+jest.mock("@/lib/ai-code/ci-status", () => ({
+  fetchCiStatus: (...a: unknown[]) => mockFetchCiStatus(...a),
+  fetchCiAttribution: (...a: unknown[]) => mockFetchAttribution(...a),
+}));
 const mockWorkspaceClient = jest.fn();
 const mockCommit = jest.fn();
 const mockAuthorFiles = jest.fn();
@@ -105,4 +109,24 @@ test("with a branch + green CI: merge_ready, terminal, no commit", async () => {
   expect(body.decision.action).toBe("merge_ready");
   expect(body.terminal).toBe(true);
   expect(mockCommit).not.toHaveBeenCalled();
+});
+
+test("with base + all failures PRE-EXISTING (introduced 0): does NOT author, escalates to human", async () => {
+  mockFetchCiStatus.mockResolvedValue(red);
+  mockFetchAttribution.mockResolvedValue({ introduced: [], preexisting: ["unit"], indeterminate: [], fixed: [], baselineKnown: true, baselineHealthy: false, clean: true, reason: "pre-existing" });
+  const body = await (await POST(post({ repo: "o/r", ref: "b", base: "main", attempt: 0, maxAttempts: 3 }))).json();
+  expect(mockFetchAttribution).toHaveBeenCalledWith("o/r", "main", "b", "w1");
+  expect(body.decision.action).toBe("escalate_human");
+  expect(body.decision.reason).toMatch(/pre-existing|already failing on the base/i);
+  expect(body.brief).toBeUndefined(); // nothing to author
+});
+
+test("with base + an INTRODUCED failure: authors a fix, brief targets only the introduced check", async () => {
+  const red2 = { ...red, failed: 2, failedChecks: ["unit", "e2e"], failedDetails: [{ name: "unit", summary: "introduced break" }, { name: "e2e", summary: "pre-existing flake" }] };
+  mockFetchCiStatus.mockResolvedValue(red2);
+  mockFetchAttribution.mockResolvedValue({ introduced: ["unit"], preexisting: ["e2e"], indeterminate: [], fixed: [], baselineKnown: true, baselineHealthy: false, clean: false, reason: "introduced unit" });
+  const body = await (await POST(post({ repo: "o/r", ref: "b", base: "main" }))).json();
+  expect(body.decision.action).toBe("author_fix");
+  expect(body.brief).toMatch(/unit/);
+  expect(body.brief).not.toMatch(/e2e/); // pre-existing check is not briefed to the fixer
 });
