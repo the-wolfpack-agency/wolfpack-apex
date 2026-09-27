@@ -122,3 +122,21 @@ describe("removeInstallation", () => {
     expect(mockTrack).not.toHaveBeenCalled();
   });
 });
+
+describe("getWorkspaceByInstallation", () => {
+  it("resolves the workspace that owns an installation id", async () => {
+    mockSafeQuery.mockResolvedValueOnce({
+      rows: [{ workspace_id: "ws9", installation_id: "77", account_login: "acme", linked_at: "2026-06-01T00:00:00.000Z", linked_by: "u1" }],
+    });
+    const { getWorkspaceByInstallation } = await import("@/lib/github-app/storage");
+    const found = await getWorkspaceByInstallation("77");
+    expect(found?.workspaceId).toBe("ws9");
+    expect(mockSafeQuery).toHaveBeenCalledWith(expect.stringContaining("installation_id = $1"), ["77"]);
+  });
+
+  it("returns null for an unknown installation", async () => {
+    mockSafeQuery.mockResolvedValueOnce({ rows: [] });
+    const { getWorkspaceByInstallation } = await import("@/lib/github-app/storage");
+    expect(await getWorkspaceByInstallation("nope")).toBeNull();
+  });
+});
