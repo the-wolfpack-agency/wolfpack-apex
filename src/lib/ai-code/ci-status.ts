@@ -29,6 +29,13 @@ export interface CiSummary {
   failedChecks: string[];
   /** Failed checks with GitHub's output summary - the material a fixer acts on. */
   failedDetails: { name: string; summary: string }[];
+  /** False when the CI could not be READ (no token, or the token lacks Checks:
+   *  read, or a GitHub error) - as opposed to "read successfully, zero checks".
+   *  A caller must never treat unreadable as "still running" or "green". Optional
+   *  for back-compat: absent/true both mean "read succeeded". */
+  readable?: boolean;
+  /** Why the CI was unreadable, when readable is false. */
+  unreadableReason?: string;
 }
 
 /** Summarize a check-run list. Pure: no IO. */
@@ -53,7 +60,14 @@ export function summarizeChecks(checks: readonly CheckRun[]): CiSummary {
   }
   const total = checks.length;
   const complete = total > 0 && pending === 0;
-  return { total, passed, failed, pending, complete, ciComplete: complete && failed === 0, failedChecks, failedDetails };
+  return { total, passed, failed, pending, complete, ciComplete: complete && failed === 0, failedChecks, failedDetails, readable: true };
+}
+
+/** An unreadable-CI summary: we could not read the checks at all. Distinct from a
+ *  successful read of zero checks, so a caller never mistakes it for "green" or
+ *  "still running". */
+function unreadable(reason: string): CiSummary {
+  return { ...summarizeChecks([]), readable: false, unreadableReason: reason };
 }
 
 /** Fetch + summarize a PR head ref's CI. Never throws: a GitHub error becomes an
@@ -62,11 +76,17 @@ export function summarizeChecks(checks: readonly CheckRun[]): CiSummary {
 export async function fetchCiStatus(repoFullName: string, ref: string, workspaceId?: string): Promise<CiSummary> {
   try {
     const client: GithubClient = await workspaceGithubClient(workspaceId);
-    if (!client.token) return summarizeChecks([]);
+    if (!client.token) return unreadable("no GitHub credential for this workspace");
     const checks = await listCheckRuns(client, repoFullName, ref);
     return summarizeChecks(checks);
-  } catch {
-    return summarizeChecks([]);
+  } catch (e) {
+    // A 403 here is almost always the token lacking Checks: read (the shared PAT
+    // has contents/actions but not checks). Surface it - never a silent "0 checks".
+    const msg = (e as Error).message;
+    const hint = /403|forbidden|not accessible/i.test(msg)
+      ? "cannot read CI check runs - the token lacks Checks: read. Install the GitHub App (or grant Checks: read) for this workspace."
+      : `cannot read CI: ${msg.slice(0, 160)}`;
+    return unreadable(hint);
   }
 }
 

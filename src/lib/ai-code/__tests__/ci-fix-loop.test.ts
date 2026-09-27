@@ -68,3 +68,15 @@ describe("buildFixBrief", () => {
     expect(buildFixBrief([])).toMatch(/no per-check detail/i);
   });
 });
+
+describe("decideFixAction, unreadable CI", () => {
+  it("does not pretend 'still running' when CI could not be read - escalates with the reason", () => {
+    const d = decideFixAction({
+      ci: ci({ readable: false, unreadableReason: "cannot read CI check runs - the token lacks Checks: read" }),
+      attempt: 0,
+      maxAttempts: 3,
+    });
+    expect(d.action).toBe("escalate_human");
+    expect(d.reason).toMatch(/Checks: read|cannot read CI/i);
+  });
+});

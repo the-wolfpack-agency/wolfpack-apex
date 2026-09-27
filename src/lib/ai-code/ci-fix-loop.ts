@@ -42,6 +42,12 @@ export interface FixLoopState {
  *  - CI failed, budget spent   -> escalate_human (never loop forever)
  */
 export function decideFixAction(state: FixLoopState): FixDecision {
+  // If we could not even READ the CI, we cannot decide or fix - do not pretend it
+  // is "still running". Hand to a human with the real reason (usually the token
+  // lacking Checks: read).
+  if (state.ci.readable === false) {
+    return { action: "escalate_human", reason: state.ci.unreadableReason ?? "CI could not be read" };
+  }
   if (state.ci.ciComplete) {
     return { action: "merge_ready", reason: "CI is fully green; ready for the human merge approval" };
   }
