@@ -220,6 +220,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   });
 
   trackEvent("ai_code.pipeline_run", auth.user.id, auth.user.role, {
+    // workspace_id scopes the run history + grading read (multi-tenant safe).
+    workspace_id: workspaceId,
     ref,
     spec_hash: run.spec.hash,
     status: run.status,
