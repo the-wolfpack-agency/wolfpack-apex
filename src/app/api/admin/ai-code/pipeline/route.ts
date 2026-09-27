@@ -28,6 +28,8 @@ import { authorDiff, authorFileChanges } from "@/lib/ai-code/author";
 import { filesToDiff, type FileChange } from "@/lib/ai-code/file-changes";
 import { evaluateChangeInvariants } from "@/lib/ai-code/change-facts";
 import { deepScanChange } from "@/lib/ai-code/deep-scan";
+import { workspaceGithubClient } from "@/lib/github-client";
+import { buildRepoContext, withRepoContext } from "@/lib/ai-code/repo-context";
 import { getAIClient } from "@/lib/ai";
 import { DEFAULT_SPEC_QUESTIONS } from "@/lib/ai-code/intake";
 import { createPendingApproval } from "@/lib/agents/approvals/store";
@@ -143,10 +145,32 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const executorProviderPin =
     typeof b.executorProviderPin === "string" && b.executorProviderPin.trim() ? b.executorProviderPin.trim() : undefined;
   const mode: "diff" | "files" = b.mode === "files" ? "files" : "diff";
+
+  // Repo-aware context: when a target repo is set, fetch the current contents of
+  // the files the prompt NAMES and prepend them so the executor MODIFIES existing
+  // code consistently instead of authoring blind. Best-effort: any failure falls
+  // back to prompt-only authoring (no regression). No diff supplied only (a
+  // manually supplied diff is governed as-is).
+  const repo = typeof b.repo === "string" && b.repo.trim() ? b.repo.trim() : undefined;
+  let authorPrompt = prompt;
+  let repoContextFiles: string[] = [];
+  if (repo && !diff.trim()) {
+    try {
+      const ghClient = await workspaceGithubClient(workspaceId);
+      if (ghClient.token) {
+        const ctx = await buildRepoContext({ client: ghClient, repo, prompt });
+        authorPrompt = withRepoContext(prompt, ctx.block);
+        repoContextFiles = ctx.files;
+      }
+    } catch {
+      /* best-effort context; author from the prompt alone on any failure */
+    }
+  }
+
   const { diff: effectiveDiff, author: effectiveAuthor, executor, changes } = await resolveChange({
     mode,
     diff,
-    prompt,
+    prompt: authorPrompt,
     authorModel,
     executorProviderPin,
   });
@@ -194,8 +218,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // Full-power deep static scan: run the platform-scan detector engine (provider-
   // signature secrets, taint/SSRF/SQLi) on the authored files, not just the ai-code
   // subset. A critical finding withholds the handoff, same as an invariant block.
-  const repoForScan = typeof b.repo === "string" && b.repo.trim() ? b.repo.trim() : undefined;
-  const deepScan = await deepScanChange(run.diff, repoForScan);
+  const deepScan = await deepScanChange(run.diff, repo);
 
   await recordAudit({
     actor: { user_id: auth.user.id, role: auth.user.role },
@@ -229,6 +252,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     conforms: run.conformance.conforms,
     // Attribution for grading + per-model drift (src/lib/ai-code/grading.ts).
     model: effectiveAuthor,
+    repo_context_files: repoContextFiles.length,
     deep_scan_critical: deepScan.critical,
   });
 
@@ -267,5 +291,5 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     });
   }
 
-  return NextResponse.json({ run, approvalId, executor, invariants, changeFacts, deepScan, mode });
+  return NextResponse.json({ run, approvalId, executor, invariants, changeFacts, deepScan, mode, repoContext: { files: repoContextFiles } });
 }

@@ -28,6 +28,13 @@ const mockGate = jest.fn();
 jest.mock("@/lib/tenancy/require-entitlement", () => ({ requireEntitlement: (...a: unknown[]) => mockGate(...a) }));
 const mockComplete = jest.fn();
 jest.mock("@/lib/ai", () => ({ getAIClient: () => ({ complete: (...a: unknown[]) => mockComplete(...a) }) }));
+const mockWorkspaceClient = jest.fn();
+const mockBuildContext = jest.fn();
+jest.mock("@/lib/github-client", () => ({ workspaceGithubClient: (...a: unknown[]) => mockWorkspaceClient(...a) }));
+jest.mock("@/lib/ai-code/repo-context", () => ({
+  buildRepoContext: (...a: unknown[]) => mockBuildContext(...a),
+  withRepoContext: (prompt: string, block: string) => (block ? block + "\n" + prompt : prompt),
+}));
 
 import { POST } from "../route";
 
@@ -67,6 +74,8 @@ beforeEach(() => {
   mockRecordAudit.mockResolvedValue({ ok: true });
   mockCreateApproval.mockResolvedValue("appr-1");
   mockComplete.mockResolvedValue(authorResp("```diff\n" + AUTHORED_DIFF + "\n```"));
+  mockWorkspaceClient.mockResolvedValue({ token: "t", fetch: jest.fn() });
+  mockBuildContext.mockResolvedValue({ block: "", files: [] });
 });
 
 describe("POST /api/admin/ai-code/pipeline", () => {
@@ -96,6 +105,16 @@ describe("POST /api/admin/ai-code/pipeline", () => {
     const call = mockRunPipeline.mock.calls[0][0];
     expect(call.diff).toContain("export const k");
     expect(call.author).toBe("azure-gpt-4o");
+  });
+
+  it("with a target repo and no diff, fetches repo-aware context and returns the fetched files", async () => {
+    mockBuildContext.mockResolvedValue({ block: "FILE: src/x.ts\n```\nexport const x = 1;\n```", files: ["src/x.ts"] });
+    const res = await POST(post({ ref: "pr-ctx", prompt: "edit src/x.ts", answers: { tests: "all" }, repo: "acme/app" }));
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(mockWorkspaceClient).toHaveBeenCalledWith("w1");
+    expect(mockBuildContext).toHaveBeenCalledWith(expect.objectContaining({ repo: "acme/app", prompt: "edit src/x.ts" }));
+    expect(body.repoContext.files).toEqual(["src/x.ts"]);
   });
 
   it("422 (fail-closed) when the executor produces no diff - never a fabricated one", async () => {

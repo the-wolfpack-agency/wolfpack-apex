@@ -295,3 +295,30 @@ export async function triggerWorkflow(
   }
   throw lastErr;
 }
+
+/**
+ * Fetch a single file's decoded text from a repo (Contents API). Returns null on
+ * 404 (file does not exist) so a caller can treat "not present" as "no context"
+ * rather than an error. Other failures throw. Used to give the code factory
+ * repo-aware context: the existing content of the files a prompt names.
+ */
+export async function fetchFileContent(
+  client: GithubClient,
+  repoFullName: string,
+  path: string,
+  ref?: string,
+): Promise<string | null> {
+  const q = ref ? `?ref=${encodeURIComponent(ref)}` : "";
+  try {
+    const res = await gh<{ content?: string; encoding?: string; type?: string }>(
+      client,
+      "GET",
+      `/repos/${repoFullName}/contents/${path.split("/").map(encodeURIComponent).join("/")}${q}`,
+    );
+    if (res.type !== "file" || typeof res.content !== "string") return null;
+    return Buffer.from(res.content, (res.encoding as BufferEncoding) || "base64").toString("utf8");
+  } catch (err) {
+    if ((err as Error).message.includes("→ 404")) return null;
+    throw err;
+  }
+}

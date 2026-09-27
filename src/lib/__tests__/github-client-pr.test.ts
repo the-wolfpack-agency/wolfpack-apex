@@ -125,3 +125,32 @@ describe("github-client PR flow", () => {
     expect(pulls!.body).toEqual({ title: "T", head: "feature-branch", base: "main", body: "B" });
   });
 });
+
+describe("fetchFileContent", () => {
+  const b64 = (s: string) => Buffer.from(s, "utf8").toString("base64");
+  function client(reply: (url: string) => { status: number; obj: unknown }): import("@/lib/github-client").GithubClient {
+    const fetchStub = ((input: string | URL | Request) => {
+      const { status, obj } = reply(String(input));
+      return Promise.resolve({ ok: status >= 200 && status < 300, status, json: async () => obj, text: async () => "" } as unknown as Response);
+    }) as unknown as typeof fetch;
+    return { token: "t", fetch: fetchStub };
+  }
+
+  it("decodes base64 file content for an existing file", async () => {
+    const { fetchFileContent } = await import("@/lib/github-client");
+    const c = client(() => ({ status: 200, obj: { type: "file", encoding: "base64", content: b64("export const k = 1;\n") } }));
+    expect(await fetchFileContent(c, "o/r", "src/k.ts", "main")).toBe("export const k = 1;\n");
+  });
+
+  it("returns null on a 404 (file not present)", async () => {
+    const { fetchFileContent } = await import("@/lib/github-client");
+    const c = client(() => ({ status: 404, obj: {} }));
+    expect(await fetchFileContent(c, "o/r", "src/missing.ts")).toBeNull();
+  });
+
+  it("returns null for a non-file (e.g. a directory listing)", async () => {
+    const { fetchFileContent } = await import("@/lib/github-client");
+    const c = client(() => ({ status: 200, obj: [{ type: "file", name: "a.ts" }] }));
+    expect(await fetchFileContent(c, "o/r", "src")).toBeNull();
+  });
+});
