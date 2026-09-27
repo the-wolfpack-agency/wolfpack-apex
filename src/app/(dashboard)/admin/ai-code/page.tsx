@@ -122,6 +122,10 @@ interface AuditVerification { ok: boolean; verifiedCount: number; legacyCount: n
 interface AuditEntry { seq: number; created_at: string; principal_agent: string; intended_outcome: string; effective_outcome: string; would_block: boolean; rule_id: string; reason: string | null }
 interface AuditData { verification: AuditVerification; entries: AuditEntry[]; entryCount: number; generatedAtIso: string }
 
+interface ReadinessCheck { id: string; label: string; status: "pass" | "warn" | "fail"; detail: string; fix?: { label: string; url?: string } }
+interface ReadinessReport { checks: ReadinessCheck[]; overall: "pass" | "warn" | "fail"; ready: boolean; fullyReady: boolean }
+const READINESS_TONE: Record<ReadinessCheck["status"], string> = { pass: "#30a46c", warn: "#f5a623", fail: "#ef4444" };
+
 const pct = (n: number): string => `${Math.round(n * 100)}%`;
 
 /** Count files, changed lines, and the total line count of a unified diff, for
@@ -269,6 +273,8 @@ export default function CodeFactoryPage() {
     }
   }, []);
   const [prBranch, setPrBranch] = useState<string | null>(null);
+  const [readiness, setReadiness] = useState<ReadinessReport | null>(null);
+  const [readinessLoading, setReadinessLoading] = useState(false);
   const [pipeline, setPipeline] = useState<CiDashboard | null>(null);
   const [pipelineLoading, setPipelineLoading] = useState(false);
   const [pipelineError, setPipelineError] = useState<string | null>(null);
@@ -430,6 +436,23 @@ export default function CodeFactoryPage() {
     }
   }, [approvalId, loadPipeline]);
 
+  // Preflight the target repo: surface every blocker (no App linked, unreachable
+  // repo, no CI, a red baseline) up front with a one-click fix, so nothing
+  // surprises the user mid-run.
+  const checkReadiness = useCallback(async () => {
+    if (!repo.trim()) { setReadiness(null); return; }
+    setReadinessLoading(true);
+    try {
+      const res = await fetchWithRefresh(`/api/admin/ai-code/readiness?repo=${encodeURIComponent(repo.trim())}`);
+      const body = (await res.json()) as { readiness?: ReadinessReport };
+      setReadiness(res.ok && body.readiness ? body.readiness : null);
+    } catch {
+      setReadiness(null);
+    } finally {
+      setReadinessLoading(false);
+    }
+  }, [repo]);
+
   if (!ready) return null;
 
   const v = run ? OUTCOME[run.review.verdict.outcome] : null;
@@ -471,6 +494,9 @@ export default function CodeFactoryPage() {
             <span style={{ fontSize: "0.8rem", color: "var(--wp-text-dim)" }}>Target repo</span>
             <input value={repo} onChange={(e) => setRepo(e.target.value)} placeholder="the-wolfpack-agency/wolfpack-apex" aria-label="Target repo" data-testid="repo-input" style={inputStyle} />
           </label>
+          <button type="button" data-testid="check-readiness" onClick={() => void checkReadiness()} disabled={!repo.trim() || readinessLoading} style={{ ...btnStyle(!repo.trim() || readinessLoading), flex: "0 0 auto" }}>
+            {readinessLoading ? "Checking…" : "Check readiness"}
+          </button>
           <label style={{ display: "flex", flexDirection: "column", gap: "0.35rem", flex: "1 1 10rem" }}>
             <span style={{ fontSize: "0.8rem", color: "var(--wp-text-dim)" }}>Ref (PR / task id)</span>
             <input value={ref} onChange={(e) => setRef(e.target.value)} placeholder="factory" aria-label="Ref" style={inputStyle} />
@@ -528,6 +554,34 @@ export default function CodeFactoryPage() {
           </p>
         )}
       </GlassPanel>
+
+      {readiness && (
+        <GlassPanel title="Readiness" subtitle="Checked before you build, so nothing surprises you mid-run">
+          <p data-testid="readiness-overall" style={{ margin: "0 0 0.6rem", fontWeight: 600, color: READINESS_TONE[readiness.overall] }}>
+            {readiness.fullyReady ? "Ready: everything is set up." : readiness.ready ? "Ready, with notes below." : "Not ready: resolve the blockers below."}
+          </p>
+          <ul data-testid="readiness-checks" style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: "0.5rem" }}>
+            {readiness.checks.map((c) => (
+              <li key={c.id} style={{ display: "flex", gap: "0.6rem", alignItems: "baseline" }}>
+                <span aria-hidden style={{ color: READINESS_TONE[c.status], fontWeight: 700, flex: "0 0 auto" }}>
+                  {c.status === "pass" ? "✓" : c.status === "warn" ? "!" : "✕"}
+                </span>
+                <span style={{ fontSize: "0.85rem" }}>
+                  <strong>{c.label}.</strong> {c.detail}
+                  {c.fix?.url && (
+                    <>
+                      {" "}
+                      <a data-testid={`readiness-fix-${c.id}`} href={c.fix.url} target="_blank" rel="noreferrer" style={{ color: "var(--wp-gold, #e8b528)", fontWeight: 600 }}>
+                        {c.fix.label} &rarr;
+                      </a>
+                    </>
+                  )}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </GlassPanel>
+      )}
 
       {executor && (
         <GlassPanel title="Executor" subtitle="The model that authored the change">

@@ -59,11 +59,24 @@ async function submitPrompt(text = "add isPalindrome with tests") {
   await act(async () => { fireEvent.click(screen.getByRole("button", { name: /generate & gate/i })); });
 }
 
+test("readiness preflight: renders the checks and a one-click fix link for a blocker", async () => {
+  render(<CodeFactoryPage />);
+  fireEvent.change(screen.getByTestId("repo-input"), { target: { value: "acme/site" } });
+  await act(async () => { fireEvent.click(screen.getByTestId("check-readiness")); });
+  await waitFor(() => expect(screen.getByTestId("readiness-checks")).toBeInTheDocument());
+  // The warn on automatic-PRs surfaces its one-click install fix (the exact
+  // blocker that caused the mid-flow 403), so the user resolves it up front.
+  const fix = screen.getByTestId("readiness-fix-pr-capability");
+  expect(fix).toHaveAttribute("href", "https://github.com/apps/agentgate-ai/installations/new");
+  expect(screen.getByTestId("readiness-overall")).toHaveTextContent(/ready, with notes/i);
+});
+
 let pipelineResp: Response;
 let approveResp: Response;
 let historyResp: Response;
 let auditResp: Response;
 let ciResp: Response;
+let readinessResp: Response;
 beforeEach(() => {
   jest.clearAllMocks();
   user = { role: "cto" };
@@ -72,6 +85,10 @@ beforeEach(() => {
   historyResp = HISTORY_EMPTY();
   auditResp = resp(200, { verification: { ok: true, verifiedCount: 7, legacyCount: 0, brokenAtSeq: null, headSeq: 7, headHash: "h" }, entries: [{ seq: 7, created_at: "2026-09-27T10:00:00Z", principal_agent: "instinct.ai_code", intended_outcome: "allow", effective_outcome: "allow", would_block: false, rule_id: "R-MUTATION-ALLOW", reason: null }], entryCount: 1, generatedAtIso: "2026-09-27T10:00:00.000Z" });
   ciResp = resp(200, { dashboard: { categories: [{ key: "unit", label: "Unit tests", status: "pass", passed: 3, failed: 0, pending: 0, checks: ["unit"] }, { key: "security", label: "Security", status: "fail", passed: 0, failed: 1, pending: 0, checks: ["scan"] }], overall: "fail", summary: { total: 4, passed: 3, failed: 1, pending: 0 } } });
+  readinessResp = resp(200, { readiness: { overall: "warn", ready: true, fullyReady: false, checks: [
+    { id: "github-access", label: "GitHub access", status: "pass", detail: "A credential is available." },
+    { id: "pr-capability", label: "Automatic pull requests", status: "warn", detail: "Using the shared token. Install the App to guarantee automatic PRs.", fix: { label: "Connect GitHub (one-click install)", url: "https://github.com/apps/agentgate-ai/installations/new" } },
+  ] } });
   // URL-aware: the page fetches run history on mount and after each run; route it
   // to an empty history so it never consumes a per-test response. Everything else
   // is the pipeline unless it targets the approvals endpoint.
@@ -79,6 +96,7 @@ beforeEach(() => {
     const u = String(url);
     if (u.includes("/ai-code/history")) return Promise.resolve(historyResp);
     if (u.includes("/ai-code/audit")) return Promise.resolve(auditResp);
+    if (u.includes("/ai-code/readiness")) return Promise.resolve(readinessResp);
     if (u.includes("/ai-code/ci")) return Promise.resolve(ciResp);
     if (u.includes("/approvals/")) return Promise.resolve(approveResp);
     return Promise.resolve(pipelineResp);
