@@ -44,8 +44,10 @@ export interface CompliancePolicy {
   /** Whether gate input may be sent to a model at all: never, only after
    *  redaction, or in full. The framework enforces this - a gate cannot bypass it. */
   allowModelData: "none" | "redacted" | "full";
-  /** Regex sources stripped from any prompt before it reaches the model (applied
-   *  when allowModelData is "redacted"). */
+  /** LITERAL terms stripped from any prompt before it reaches the model (applied
+   *  when allowModelData is "redacted"). Matched as literal substrings, never as a
+   *  regex - a client-built regex is a ReDoS risk. The default secret/PII scrub
+   *  runs regardless; these are extra client-specific terms (codenames, ids). */
   redactions?: string[];
   /** How long the client wants gate records retained (surfaced, enforced by the
    *  deployment's retention job). */
