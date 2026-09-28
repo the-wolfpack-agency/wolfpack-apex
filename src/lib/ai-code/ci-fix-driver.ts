@@ -45,6 +45,9 @@ export async function runCiFixStep(args: {
   snapshotFailure?: boolean;
   /** Set when a deterministic (no-model) fixer was dispatched for a lint failure - the decision waits. */
   deterministicFixDispatched?: boolean;
+  /** Set when the failing checks produced no readable code-level error (a deploy /
+   *  setup / infra failure) - the decision escalates rather than authoring blind. */
+  unfixableNoDetail?: { checks: readonly string[] };
   /** The failed-check details to brief the re-author with. Defaults to every
    *  failing check; the route narrows this to only the INTRODUCED checks so the
    *  fixer never tries to repair pre-existing red. */
@@ -60,7 +63,7 @@ export async function runCiFixStep(args: {
    *  but the route always supplies the real combined gate. */
   gate?: (changes: FileChange[]) => Promise<{ cleared: boolean; blockedBy: string | null }>;
 }): Promise<CiFixStepResult> {
-  const decision = decideFixAction({ ci: args.ci, attempt: args.attempt, maxAttempts: args.maxAttempts, introducedFailing: args.introducedFailing, governanceFailure: args.governanceFailure, transientFailure: args.transientFailure, flakeRecheckTriggered: args.flakeRecheckTriggered, snapshotFailure: args.snapshotFailure, deterministicFixDispatched: args.deterministicFixDispatched });
+  const decision = decideFixAction({ ci: args.ci, attempt: args.attempt, maxAttempts: args.maxAttempts, introducedFailing: args.introducedFailing, governanceFailure: args.governanceFailure, transientFailure: args.transientFailure, flakeRecheckTriggered: args.flakeRecheckTriggered, snapshotFailure: args.snapshotFailure, deterministicFixDispatched: args.deterministicFixDispatched, unfixableNoDetail: args.unfixableNoDetail });
 
   // Only author_fix does work. merge_ready / escalate_human are terminal; wait is
   // non-terminal (poll again) but changes nothing.

@@ -105,6 +105,23 @@ describe("transient/infra failure re-runs (escalates), never authored", () => {
   });
 });
 
+describe("unfixable-no-detail escalates (deploy/setup/infra failure, no code error)", () => {
+  const redComplete = { total: 3, passed: 0, failed: 3, pending: 0, complete: true, ciComplete: false, readable: true, failedChecks: ["e2e", "vercel-deploy", "preflight"], failedDetails: [{ name: "e2e", summary: "" }] };
+  it("escalates with the failing check names when there is no readable code error", () => {
+    const d = decideFixAction({ ci: redComplete as never, attempt: 0, maxAttempts: 3, introducedFailing: 3, unfixableNoDetail: { checks: ["e2e", "vercel-deploy", "preflight"] } });
+    expect(d.action).toBe("escalate_human");
+    expect(d.reason).toMatch(/no readable code-level error/i);
+    expect(d.reason).toMatch(/deploy|preflight|infra/i);
+    expect(d.reason).toMatch(/vercel-deploy/);
+  });
+  it("a pending flake re-run still WAITS (takes precedence over unfixable)", () => {
+    // The route only sets unfixableNoDetail when no flake re-run is in flight, but
+    // the decision must also prefer waiting if both are somehow present.
+    const d = decideFixAction({ ci: redComplete as never, attempt: 0, maxAttempts: 3, introducedFailing: 3, flakeRecheckTriggered: true, unfixableNoDetail: { checks: ["e2e"] } });
+    expect(d.action).toBe("wait");
+  });
+});
+
 describe("flake recheck waits before authoring", () => {
   const redComplete = { total: 2, passed: 1, failed: 1, pending: 0, complete: true, ciComplete: false, readable: true, failedChecks: ["unit"], failedDetails: [{ name: "unit", summary: "x" }] };
   it("waits (does not author) right after a re-run was triggered", () => {
