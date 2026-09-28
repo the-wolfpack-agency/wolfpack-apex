@@ -157,6 +157,18 @@ export const ciAutofixGate: GateDefinition<CiAutofixInput, CiAutofixOutput> = {
       });
     }
 
+    // Concurrency guard (gap 7): re-count the fix commits right before we write.
+    // If another invocation committed between our budget read and now, abort -
+    // the budget it consumed must be respected, not raced past into a double
+    // commit. Re-invoke to re-evaluate the new state.
+    const nowCount = await countBranchCommitsMatching(client, input.repo, base, input.branch, "factory ci-fix:");
+    if (nowCount > priorFixCommits) {
+      return result("require_human", `Another fix was committed to this branch concurrently (${priorFixCommits} -> ${nowCount}); not racing a second commit. Re-invoke to re-evaluate.`, ctx, {
+        checksRun: [...authorChecks, "concurrency-guard"], dataSeen: "the PR's CI status + failing files, sent to your model", modelInvoked,
+        output: { failedChecks: ci.failedChecks }, ruleId: "GATE-ci-autofix-concurrent",
+      });
+    }
+
     // Fail-closed on unauditable: record the decision to the tamper-evident
     // ledger BEFORE the irreversible commit. No audit, no action. The route sees
     // recordedSeq on the result and skips its post-hoc audit (no duplicate row).
@@ -171,7 +183,26 @@ export const ciAutofixGate: GateDefinition<CiAutofixInput, CiAutofixOutput> = {
         output: { failedChecks: ci.failedChecks }, ruleId: "GATE-ci-autofix-unauditable",
       });
     }
-    const committed = await commitFileChanges({ client, repoFullName: input.repo, branch: input.branch, base: input.branch, changes, message: `factory ci-fix: ${ref}` });
+
+    // Can't-commit (gap 6): the branch may be protected, or the head may have
+    // moved (conflict / non-fast-forward). Never fail opaquely - diagnose and
+    // escalate. The decision is already audited; the failed commit is the outcome.
+    let committed: string[];
+    try {
+      committed = await commitFileChanges({ client, repoFullName: input.repo, branch: input.branch, base: input.branch, changes, message: `factory ci-fix: ${ref}` });
+    } catch (e) {
+      const msg = (e as Error).message;
+      const why = /protected|required status|branch protection|not permitted|403/i.test(msg)
+        ? "the branch is protected (branch protection / required reviews)"
+        : /conflict|not a fast-forward|non-fast-forward|409|is at/i.test(msg)
+          ? "the branch head moved (a merge conflict / non-fast-forward)"
+          : `a write error (${msg.slice(0, 120)})`;
+      return result("require_human", `The fix cleared the gate and was audited, but it could not be committed: ${why}. A human should resolve it.`, ctx, {
+        checksRun: [...authorChecks, "commit"], dataSeen: "the PR's CI status + failing files, sent to your model", modelInvoked,
+        findings: [{ id: "commit-blocked", severity: "high", detail: why }],
+        output: { failedChecks: ci.failedChecks }, ruleId: "GATE-ci-autofix-commit-failed",
+      });
+    }
     const out = result("auto_fix", `Authored and committed a fix for the failing checks (${committed.length} file(s)); CI will re-run.`, ctx, {
       checksRun: authorChecks, dataSeen: "the PR's CI status + failing files, sent to your model; the fix was gated before commit", modelInvoked,
       output: { committedFiles: committed, failedChecks: ci.failedChecks }, ruleId: "GATE-ci-autofix-committed",
