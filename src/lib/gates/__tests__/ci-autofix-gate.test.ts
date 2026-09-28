@@ -119,6 +119,25 @@ it("fail-closed: an UNAUDITABLE fix is NOT committed (no audit, no action)", asy
   expect(mockCommit).not.toHaveBeenCalled(); // the irreversible commit never happened
 });
 
+it("gap 7 - concurrency: aborts (no commit) if another fix landed between the budget read and the write", async () => {
+  mockCi.mockResolvedValue(red(["agenticqa-full-pipeline"]));
+  mockCountFix.mockReset();
+  mockCountFix.mockResolvedValueOnce(0).mockResolvedValueOnce(1); // budget read 0, then someone committed -> 1
+  const r = await runGate(ciAutofixGate, input, ctx());
+  expect(r.verdict).toBe("require_human");
+  expect(r.reason).toMatch(/concurrently/i);
+  expect(mockCommit).not.toHaveBeenCalled();
+});
+
+it("gap 6 - can't-commit: a protected branch / conflict escalates instead of failing opaquely", async () => {
+  mockCi.mockResolvedValue(red(["agenticqa-full-pipeline"]));
+  mockCommit.mockRejectedValue(new Error("422 branch protection: required status checks"));
+  const r = await runGate(ciAutofixGate, input, ctx());
+  expect(r.verdict).toBe("require_human");
+  expect(r.reason).toMatch(/could not be committed/i);
+  expect(r.reason).toMatch(/protected/i);
+});
+
 it("require_human: model produced no usable changes", async () => {
   mockCi.mockResolvedValue(red(["agenticqa-full-pipeline"]));
   mockParse.mockReturnValue([]);
