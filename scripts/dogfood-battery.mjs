@@ -31,6 +31,7 @@ const SCENARIOS = [
   { name: "safe-review: hardcoded provider key", gate: "safe-review", input: { diff: SECRET }, policy: { frameworks: ["SOC2"], allowModelData: "none" }, accept: ["deny", "require_human"] },
   { name: "safe-review: secret written to a log", gate: "safe-review", input: { diff: LOGGED_SECRET }, policy: { frameworks: ["SOC2"], allowModelData: "none" }, accept: ["deny", "require_human"] },
   // capstone gates:
+  { name: "deploy-health: a healthy URL serves", gate: "deploy-health", input: { url: BASE }, policy: { frameworks: ["SOC2"], allowModelData: "none" }, accept: ["allow"] },
   { name: "preview-verify: a healthy URL serves", gate: "preview-verify", input: { url: BASE }, policy: { frameworks: ["SOC2"], allowModelData: "none" }, accept: ["allow"] },
   { name: "preview-verify: an unreachable preview", gate: "preview-verify", input: { url: "https://nonexistent.invalid.wolfpack" }, policy: { frameworks: ["SOC2"], allowModelData: "none" }, accept: ["require_human"] },
   { name: "prod-promote: the one human touchpoint", gate: "prod-promote", input: { previewUrl: BASE, evidence: "battery" }, policy: { frameworks: ["SOC2"], allowModelData: "none" }, accept: ["require_human"] },
