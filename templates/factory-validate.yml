@@ -1,0 +1,27 @@
+# factory-validate - PRE-PR test execution. The factory pushes an authored change
+# to a throwaway validation/* branch and dispatches this workflow; it runs the
+# repo's OWN test suite in GitHub's isolation (a fresh ephemeral VM with deps +
+# configs). The result tells the factory whether the change's OWN authored tests
+# pass BEFORE a real PR is ever opened - so a self-inconsistent artifact (e.g. a
+# model authoring a test whose expected value is wrong) is caught at the source,
+# not after a looping PR. Install at .github/workflows/factory-validate.yml and set
+# PREPR_VALIDATE_WORKFLOW=factory-validate.yml for the workspace.
+name: factory-validate
+on:
+  workflow_dispatch: {}
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install
+        run: npm ci || npm install
+      - name: Run the authored tests (the gate reads this job's conclusion)
+        run: npm test

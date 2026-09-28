@@ -12,6 +12,7 @@ import { listGates } from "@/lib/gates/registry";
 /** Gates that cannot run in the FAST battery (they need a live red PR + multiple
  *  CI cycles). Each is verified another way; the reason is recorded here. */
 const BATTERY_EXEMPT: Record<string, string> = {
+  "pre-pr-validate": "Needs a real repo + a pushed validation branch + a live factory-validate run to exercise. Verified by pre-pr-validate-gate.test.ts (every verdict path) + the pre-pr-validation module test, not the fast battery.",
   "ci-autofix": "Needs a live red PR + multiple CI cycles to reach auto_fix. Verified by ci-autofix-gate.test.ts (every verdict path) + live scripts/dogfood-ci-fix.mjs runs, not the fast battery.",
 };
 
