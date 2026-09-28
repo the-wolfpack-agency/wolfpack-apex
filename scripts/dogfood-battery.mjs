@@ -34,6 +34,9 @@ const SCENARIOS = [
   { name: "preview-verify: a healthy URL serves", gate: "preview-verify", input: { url: BASE }, policy: { frameworks: ["SOC2"], allowModelData: "none" }, accept: ["allow"] },
   { name: "preview-verify: an unreachable preview", gate: "preview-verify", input: { url: "https://nonexistent.invalid.wolfpack" }, policy: { frameworks: ["SOC2"], allowModelData: "none" }, accept: ["require_human"] },
   { name: "prod-promote: the one human touchpoint", gate: "prod-promote", input: { previewUrl: BASE, evidence: "battery" }, policy: { frameworks: ["SOC2"], allowModelData: "none" }, accept: ["require_human"] },
+  // generality: a NON-code gate on the same runtime
+  { name: "data-egress: clean text is safe to send", gate: "data-egress", input: { text: "summarize the roadmap" }, policy: { frameworks: ["GDPR"], allowModelData: "none" }, accept: ["allow"] },
+  { name: "data-egress: PII/secret stops for a human", gate: "data-egress", input: { text: "email a@b.com key sk-ant-abcdefghijklmnopqrstuvwxyz1234567890", destination: "OpenAI" }, policy: { frameworks: ["GDPR"], allowModelData: "none" }, accept: ["require_human"] },
 ];
 
 async function login() {
