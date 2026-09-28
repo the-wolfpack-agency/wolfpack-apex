@@ -194,3 +194,17 @@ test("does NOT stall when the failing test is NOT part of the change (pre-existi
   expect(body.stalledOnAuthoredTest).toBeUndefined();
 });
 
+test("stall diagnosis fires even when the fix budget is already spent (not the generic 'after N attempts')", async () => {
+  mockFetchCiStatus.mockResolvedValue(red);
+  mockFetchAttribution.mockResolvedValue({ introduced: ["unit"], preexisting: [], indeterminate: [], fixed: [], baselineKnown: true, baselineHealthy: false, clean: false, reason: "introduced unit" });
+  mockCountFixCommits.mockResolvedValue(12); // budget (maxAttempts:3) long since spent
+  mockGather.mockResolvedValue({ detail: "FAIL src/lib/__tests__/averageWordLength.test.ts", files: [] });
+  mockListChangedFiles.mockResolvedValue(["src/lib/averageWordLength.ts", "src/lib/__tests__/averageWordLength.test.ts"]);
+  const body = await (await POST(post({ repo: "o/r", ref: "b", branch: "factory/b-abc", base: "main", attempt: 0, maxAttempts: 3 }))).json();
+  expect(body.decision.action).toBe("escalate_human");
+  expect(body.stalledOnAuthoredTest).toEqual({ testFiles: ["src/lib/__tests__/averageWordLength.test.ts"] });
+  expect(body.decision.reason).toMatch(/authored is still failing/i); // the useful diagnosis...
+  expect(body.decision.reason).not.toMatch(/after 3 fix attempt/i);    // ...not the generic budget message
+  expect(mockCommit).not.toHaveBeenCalled();
+});
+
