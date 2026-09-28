@@ -122,6 +122,7 @@ test("400 on a malformed repo (owner/name)", async () => {
 
 test("with a branch + red CI: authors and commits the fix to the PR branch", async () => {
   mockFetchCiStatus.mockResolvedValue(red);
+  mockGather.mockResolvedValue({ detail: "FAIL src/x.test.ts\n  Expected 1 Received 2", files: [] }); // a real code error to act on
   const res = await POST(post({ repo: "o/r", ref: "b", branch: "factory/b-abc", attempt: 0, maxAttempts: 3 }));
   const body = await res.json();
   expect(body.decision.action).toBe("author_fix");
@@ -133,6 +134,7 @@ test("with a branch + red CI: authors and commits the fix to the PR branch", asy
 
 test("with a branch + red CI + a fix that FAILS the gate: escalates, does NOT commit", async () => {
   mockFetchCiStatus.mockResolvedValue(red);
+  mockGather.mockResolvedValue({ detail: "FAIL src/x.test.ts\n  Expected 1 Received 2", files: [] }); // a real code error to act on
   // The autonomously re-authored fix carries a critical finding; the gate refuses it.
   mockAssessChange.mockResolvedValue({ securityOutcome: "block", invariantRuleId: "", invariantBlocked: false, deepScanCritical: 1, deepScanBlocking: true, handoffAllowed: false, blockedBy: "security" });
   const body = await (await POST(post({ repo: "o/r", ref: "b", branch: "factory/b-abc", attempt: 0, maxAttempts: 3 }))).json();
@@ -328,7 +330,9 @@ test("no anchor at all (empty log, unknown changed files): refuses to author bli
   mockListChangedFiles.mockResolvedValue([]); // and no changed-file anchor available
   const body = await (await POST(post({ repo: "o/r", ref: "b", branch: "factory/b-abc", base: "main", attempt: 0, maxAttempts: 3 }))).json();
   expect(body.decision.action).toBe("escalate_human");
-  expect(body.decision.reason).toMatch(/no fix|refusing to author blind|anchor/i);
+  // Empty detail with no code-level error escalates (deploy/setup/infra signature);
+  // the reauthor-time fail-closed guard is the belt-and-suspenders behind it.
+  expect(body.decision.reason).toMatch(/no readable code-level error|no fix|refusing to author blind|anchor/i);
   expect(mockCommit).not.toHaveBeenCalled(); // never commits a blind guess
 });
 
@@ -346,15 +350,51 @@ test("fixer hallucinates a wrong-path file: rejected, escalates, does NOT commit
   expect(mockCommit).not.toHaveBeenCalled();
 });
 
-test("empty log but changed files known: anchors to them and authors a real fix (converges)", async () => {
+test("deploy/setup/infra failure (empty detail, past the flake re-run): escalates, does NOT author", async () => {
+  // The deepMerge-2 live run: e2e / vercel-deploy / agenticqa-full-pipeline all
+  // fail at setup in ~3s, so the log has no code-level error (detailChars:0). The
+  // fixer must not burn attempts re-authoring source for an infra failure.
+  const infraRed = { total: 3, passed: 0, failed: 3, pending: 0, complete: true, ciComplete: false, failedChecks: ["e2e", "vercel-deploy", "agenticqa-full-pipeline"], failedDetails: [{ name: "e2e", summary: "" }] };
+  mockFetchCiStatus.mockResolvedValue(infraRed);
+  mockFetchAttribution.mockResolvedValue({ introduced: ["e2e", "vercel-deploy", "agenticqa-full-pipeline"], preexisting: [], indeterminate: [], fixed: [], baselineKnown: true, baselineHealthy: false, clean: false, reason: "introduced" });
+  mockCountFixCommits.mockResolvedValue(1); // past the flake pre-filter
+  mockGather.mockResolvedValue({ detail: "", files: [] }); // no readable code error
+  mockListChangedFiles.mockResolvedValue(["src/lib/deepMerge.ts"]);
+  mockListRuns.mockResolvedValue([]); // no flake candidates
+  const body = await (await POST(post({ repo: "o/r", ref: "b", branch: "factory/b-abc", base: "main", attempt: 0, maxAttempts: 3 }))).json();
+  expect(body.decision.action).toBe("escalate_human");
+  expect(body.decision.reason).toMatch(/no readable code-level error/i);
+  expect(body.unfixableNoDetail).toEqual({ checks: ["e2e", "vercel-deploy", "agenticqa-full-pipeline"] });
+  expect(mockAuthorFiles).not.toHaveBeenCalled();
+  expect(mockCommit).not.toHaveBeenCalled();
+});
+
+test("empty detail on the FIRST attempt still re-runs once to rule out a flake before escalating", async () => {
+  mockFetchCiStatus.mockResolvedValue(red);
+  mockFetchAttribution.mockResolvedValue({ introduced: ["unit"], preexisting: [], indeterminate: [], fixed: [], baselineKnown: true, baselineHealthy: false, clean: false, reason: "introduced unit" });
+  mockCountFixCommits.mockResolvedValue(0); // first attempt
+  mockGather.mockResolvedValue({ detail: "", files: [] });
+  mockListChangedFiles.mockResolvedValue(["src/lib/deepMerge.ts"]);
+  mockListRuns.mockResolvedValue([{ id: 77, name: "unit", conclusion: "failure", runAttempt: 1 }]);
+  const body = await (await POST(post({ repo: "o/r", ref: "b", branch: "factory/b-abc", base: "main", attempt: 0, maxAttempts: 3 }))).json();
+  expect(mockRerun).toHaveBeenCalledWith(expect.anything(), "o/r", 77); // flake re-run gets its chance first
+  expect(body.decision.action).toBe("wait");
+  expect(body.unfixableNoDetail).toBeUndefined(); // not escalated while the re-run is in flight
+});
+
+test("real code failure whose log names only the TEST file: authors, anchored to the changed source file", async () => {
+  // A genuine jest failure (detail present) where the error names the test, not
+  // the source. The fixer authors, and the changed-files anchor keeps it editing
+  // the real source (src/lib/deepMerge.ts), never a hallucinated path.
   mockFetchCiStatus.mockResolvedValue(red);
   mockFetchAttribution.mockResolvedValue({ introduced: ["unit"], preexisting: [], indeterminate: [], fixed: [], baselineKnown: true, baselineHealthy: false, clean: false, reason: "introduced unit" });
   mockCountFixCommits.mockResolvedValue(1);
-  mockGather.mockResolvedValue({ detail: "", files: [] }); // no log detail...
-  mockListChangedFiles.mockResolvedValue(["src/lib/deepMerge.ts"]); // ...but the change's file is known
+  mockGather.mockResolvedValue({ detail: "FAIL src/lib/__tests__/deepMerge.test.ts\n  Expected {a:1} Received {}", files: [] });
+  mockListChangedFiles.mockResolvedValue(["src/lib/deepMerge.ts", "src/lib/__tests__/deepMerge.test.ts"]);
   mockAuthorFiles.mockResolvedValue({ changes: [{ path: "src/lib/deepMerge.ts", content: "export function deepMerge(){/*fixed*/}" }], author: "model-b", error: null });
   const body = await (await POST(post({ repo: "o/r", ref: "b", branch: "factory/b-abc", base: "main", attempt: 0, maxAttempts: 3 }))).json();
   expect(body.decision.action).toBe("author_fix");
+  expect(body.unfixableNoDetail).toBeUndefined(); // there IS readable detail -> author
   expect(mockCommit).toHaveBeenCalled();
   expect(body.terminal).toBe(false);
 });

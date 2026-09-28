@@ -54,6 +54,16 @@ export interface FixLoopState {
    *  repair a lint/format failure with NO model. The decision waits for it to
    *  commit + re-trigger CI - cheaper and safer than authoring a fix. */
   deterministicFixDispatched?: boolean;
+  /** Set when the failing checks produced NO readable code-level error to act on
+   *  (empty failure detail after a flake re-run had its chance). This is the
+   *  signature of a deploy / setup / infra step that fails before any test runs
+   *  (e.g. a preflight gate, a Vercel deploy, an e2e harness that never starts) -
+   *  the fixer cannot author a source change to repair it, and authoring blind
+   *  just burns the attempt budget re-writing unrelated files. Escalate with the
+   *  failing check names so a human fixes the config/infra. Found by dogfooding:
+   *  the fixer spent all 3 attempts re-authoring deepMerge.ts to "fix" a
+   *  vercel-deploy/preflight failure that had nothing to do with the code. */
+  unfixableNoDetail?: { checks: readonly string[] };
 }
 
 /**
@@ -115,6 +125,12 @@ export function decideFixAction(state: FixLoopState): FixDecision {
     return {
       action: "wait",
       reason: "Re-ran the failed job(s) once to rule out a flake; waiting for the re-run to settle before authoring a fix.",
+    };
+  }
+  if (state.unfixableNoDetail) {
+    return {
+      action: "escalate_human",
+      reason: `CI failed (${state.unfixableNoDetail.checks.join(", ")}) but produced no readable code-level error to act on - the signature of a deploy / setup / infra step that fails before any test runs (a preflight gate, a Vercel deploy, an e2e harness that never starts). A source fix cannot repair that; authoring one blind would only churn unrelated files. Handed to a human to check the CI config / secrets / infra.`,
     };
   }
   if (state.attempt < state.maxAttempts) {

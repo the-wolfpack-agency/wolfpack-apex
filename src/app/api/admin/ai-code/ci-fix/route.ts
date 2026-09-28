@@ -114,6 +114,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   let flakeRecheckTriggered = false;
   let deterministicFixDispatched = false;
   let snapshotFailure = false;
+  let unfixableNoDetail: { checks: readonly string[] } | undefined;
   let mechanicalSubtype: string | undefined;
   // Gather whenever there is an INTRODUCED failure to act on - i.e. CI is
   // readable, complete, not green, and this change introduced at least one of the
@@ -177,6 +178,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           flakeRecheckTriggered = true;
         }
       }
+      // No readable code-level error to act on, and we are not waiting on a flake
+      // re-run: this is the signature of a deploy / setup / infra step that fails
+      // before any test runs (a preflight gate, a Vercel deploy, an e2e harness
+      // that never starts). Authoring a source fix cannot repair it - escalate
+      // rather than burn the attempt budget re-writing unrelated files (dogfooding
+      // found the fixer spent all 3 attempts re-authoring deepMerge.ts to "fix" a
+      // vercel-deploy/preflight failure that had nothing to do with the code).
+      if (!snapshotFailure && !deterministicFixDispatched && !flakeRecheckTriggered && gathered.detail.trim() === "") {
+        unfixableNoDetail = { checks: ci.failedChecks ?? [] };
+      }
     }
     // Non-progress on an authored test: if a fix was ALREADY committed and a test
     // THIS change added/changed is still failing, the test's expected value is the
@@ -203,6 +214,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     flakeRecheckTriggered,
     deterministicFixDispatched,
     snapshotFailure,
+    unfixableNoDetail,
     briefDetails,
     reauthor: async (brief) => {
       // Reuse the context gathered above (never re-fetch). Empty only if the
@@ -236,5 +248,5 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       commitFileChanges({ client, repoFullName: repo, branch, base: branch, changes, message: `factory ci-fix: ${ref}` }),
   });
 
-  return NextResponse.json({ ...result, context: contextSummary, budget: { attempt: effectiveAttempt, priorFixCommits, maxAttempts }, ...(stalledOnAuthoredTest ? { stalledOnAuthoredTest } : {}), ...(governanceFailure ? { governanceFailure } : {}), ...(transientFailure ? { transientFailure } : {}), ...(flakeRecheckTriggered ? { flakeRecheckTriggered: true } : {}), ...(snapshotFailure ? { snapshotFailure: true } : {}), ...(deterministicFixDispatched ? { deterministicFixDispatched: true } : {}), ...(mechanicalSubtype ? { subtype: mechanicalSubtype } : {}) });
+  return NextResponse.json({ ...result, context: contextSummary, budget: { attempt: effectiveAttempt, priorFixCommits, maxAttempts }, ...(stalledOnAuthoredTest ? { stalledOnAuthoredTest } : {}), ...(governanceFailure ? { governanceFailure } : {}), ...(transientFailure ? { transientFailure } : {}), ...(flakeRecheckTriggered ? { flakeRecheckTriggered: true } : {}), ...(snapshotFailure ? { snapshotFailure: true } : {}), ...(deterministicFixDispatched ? { deterministicFixDispatched: true } : {}), ...(unfixableNoDetail ? { unfixableNoDetail } : {}), ...(mechanicalSubtype ? { subtype: mechanicalSubtype } : {}) });
 }
