@@ -125,7 +125,18 @@ async function resolveChangeWithFallback(
   let attempts = 1;
   const manualDiff = args.diff.trim().length > 0;
   if (!manualDiff && badDraft(resolved)) {
-    const retry = await resolveChange({ ...args, tier: "premium" });
+    // Tell the escalated model WHAT was wrong, don't just re-run the same prompt
+    // at a higher tier. A blind retry repeats the same mistake; feeding back the
+    // deterministic reason (the parse errors, or "produced nothing usable") is the
+    // same "give the model the real error" principle the CI-fixer uses, and it is
+    // what turns a needs_human hold into a converged draft. Found by dogfooding:
+    // authoring a guardrail test failed syntax on BOTH the standard and premium
+    // passes because the premium pass never learned why the first one was invalid.
+    const issues = checkSyntax(resolvedFiles(resolved)).issues;
+    const feedback = issues.length > 0
+      ? `The previous attempt did NOT parse. Fix these exact syntax errors and return the COMPLETE, valid file(s):\n${issues.map((i) => `- ${i.path}:${i.line} ${i.message}`).join("\n")}`
+      : "The previous attempt produced no usable output (empty or errored). Return the COMPLETE file(s) that satisfy the request.";
+    const retry = await resolveChange({ ...args, tier: "premium", prompt: `${args.prompt}\n\n${feedback}` });
     attempts++;
     resolved = retry; // the escalated attempt is the final draft (its evidence is what a human sees if it too failed)
   }

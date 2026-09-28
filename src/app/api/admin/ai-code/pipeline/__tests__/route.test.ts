@@ -157,6 +157,24 @@ describe("POST /api/admin/ai-code/pipeline", () => {
     expect(mockRunPipeline).toHaveBeenCalled();
   });
 
+  it("escalation retry carries the PARSE ERROR as feedback (not a blind re-run)", async () => {
+    // The apex dogfooding case: the first author produces an unparseable file. The
+    // premium retry must be TOLD what failed to parse, not just re-run the same
+    // prompt at a higher tier - that is what turns a needs_human hold into a
+    // converged draft.
+    mockComplete
+      .mockResolvedValueOnce(authorResp("```diff\n" + TRUNCATED_DIFF + "\n```")) // does not parse
+      .mockResolvedValue(authorResp("```diff\n" + AUTHORED_DIFF + "\n```"));      // premium retry: valid
+    const res = await POST(post({ ref: "pr-fb3", prompt: "add slugify", answers: { tests: "all" } }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.executorAttempts).toBe(2);
+    // The SECOND author call's user message must include the deterministic parse error.
+    const retryPrompt = mockComplete.mock.calls[1][0].messages[0].content as string;
+    expect(retryPrompt).toMatch(/did NOT parse/i);
+    expect(retryPrompt).toMatch(/src\/lib\/slug\.ts/); // the offending file is named
+  });
+
   it("only a TRUE failure surfaces: both the draft and the escalated retry are empty -> 422", async () => {
     mockComplete.mockResolvedValue(authorResp("no code here, just prose"));
     const res = await POST(post({ ref: "pr-fb2", prompt: "add k", answers: { tests: "all" } }));
