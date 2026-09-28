@@ -12,6 +12,7 @@ jest.mock("@/lib/ai-code/ci-status", () => ({
 }));
 const mockWorkspaceClient = jest.fn();
 const mockCountFixCommits = jest.fn();
+const mockListChangedFiles = jest.fn();
 const mockCommit = jest.fn();
 const mockAuthorFiles = jest.fn();
 const mockAssessChange = jest.fn();
@@ -19,10 +20,14 @@ jest.mock("@/lib/github-client", () => ({
   workspaceGithubClient: (...a: unknown[]) => mockWorkspaceClient(...a),
   getBranchHead: async () => "headsha123",
   countBranchCommitsMatching: (...a: unknown[]) => mockCountFixCommits(...a),
+  listChangedFiles: (...a: unknown[]) => mockListChangedFiles(...a),
 }));
+const mockGather = jest.fn();
 jest.mock("@/lib/ai-code/ci-failure-detail", () => ({
-  gatherFailureContext: async () => ({ detail: "", files: [] }),
+  gatherFailureContext: (...a: unknown[]) => mockGather(...a),
   buildEnrichedFixPrompt: (a: { brief: string }) => a.brief,
+  extractFailingTestFiles: (text: string) =>
+    Array.from(text.matchAll(/FAIL\s+(\S+)/g)).map((m) => m[1]),
 }));
 jest.mock("@/lib/ai-code/file-changes", () => ({
   commitFileChanges: (...a: unknown[]) => mockCommit(...a),
@@ -50,6 +55,8 @@ beforeEach(() => {
   mockGate.mockResolvedValue(null);
   mockWorkspaceClient.mockResolvedValue({ token: "t", fetch: jest.fn() });
   mockCountFixCommits.mockResolvedValue(0);
+  mockListChangedFiles.mockResolvedValue([]);
+  mockGather.mockResolvedValue({ detail: "", files: [] });
   mockAuthorFiles.mockResolvedValue({ changes: [{ path: "src/x.ts", content: "export const x = 2;" }], author: "model-b", error: null });
   mockCommit.mockResolvedValue(["src/x.ts"]);
   // Default: the re-authored fix clears the combined gate.
@@ -159,5 +166,31 @@ test("auto-fix budget is floored by the branch's OWN fix-commit history (attempt
   expect(body.decision.action).toBe("escalate_human");
   expect(body.budget).toEqual({ attempt: 3, priorFixCommits: 3, maxAttempts: 3 });
   expect(mockCommit).not.toHaveBeenCalled(); // a runaway autonomous loop is exactly what this prevents
+});
+
+test("stalls on an authored test: prior fix + authored test still failing -> escalate, no new commit", async () => {
+  mockFetchCiStatus.mockResolvedValue(red);
+  mockFetchAttribution.mockResolvedValue({ introduced: ["unit"], preexisting: [], indeterminate: [], fixed: [], baselineKnown: true, baselineHealthy: false, clean: false, reason: "introduced unit" });
+  mockCountFixCommits.mockResolvedValue(1); // a fix was already committed
+  mockGather.mockResolvedValue({ detail: "FAIL src/lib/__tests__/averageWordLength.test.ts\n  Expected 2.33 Received 2", files: [] });
+  mockListChangedFiles.mockResolvedValue(["src/lib/averageWordLength.ts", "src/lib/__tests__/averageWordLength.test.ts"]);
+  const body = await (await POST(post({ repo: "o/r", ref: "b", branch: "factory/b-abc", base: "main", attempt: 0, maxAttempts: 3 }))).json();
+  expect(body.decision.action).toBe("escalate_human");
+  expect(body.decision.reason).toMatch(/authored is still failing/i);
+  expect(body.stalledOnAuthoredTest).toEqual({ testFiles: ["src/lib/__tests__/averageWordLength.test.ts"] });
+  expect(body.terminal).toBe(true);
+  expect(mockCommit).not.toHaveBeenCalled();
+  expect(mockAuthorFiles).not.toHaveBeenCalled(); // no wasted author call on a wrong-test loop
+});
+
+test("does NOT stall when the failing test is NOT part of the change (pre-existing test file)", async () => {
+  mockFetchCiStatus.mockResolvedValue(red);
+  mockFetchAttribution.mockResolvedValue({ introduced: ["unit"], preexisting: [], indeterminate: [], fixed: [], baselineKnown: true, baselineHealthy: false, clean: false, reason: "introduced unit" });
+  mockCountFixCommits.mockResolvedValue(1);
+  mockGather.mockResolvedValue({ detail: "FAIL src/lib/__tests__/somethingElse.test.ts", files: [] });
+  mockListChangedFiles.mockResolvedValue(["src/lib/averageWordLength.ts"]); // failing test not authored here
+  const body = await (await POST(post({ repo: "o/r", ref: "b", branch: "factory/b-abc", base: "main", attempt: 0, maxAttempts: 3 }))).json();
+  expect(body.decision.action).toBe("author_fix"); // proceeds to fix the source
+  expect(body.stalledOnAuthoredTest).toBeUndefined();
 });
 

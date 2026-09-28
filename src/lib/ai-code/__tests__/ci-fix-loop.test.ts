@@ -80,3 +80,23 @@ describe("decideFixAction, unreadable CI", () => {
     expect(d.reason).toMatch(/Checks: read|cannot read CI/i);
   });
 });
+
+describe("stalled on an authored test", () => {
+  const redComplete = { total: 2, passed: 1, failed: 1, pending: 0, complete: true, ciComplete: false, readable: true, failedChecks: ["agenticqa-full-pipeline"], failedDetails: [{ name: "agenticqa-full-pipeline", summary: "a test failed" }] };
+
+  it("escalates with a wrong-test diagnosis even when budget remains", () => {
+    const d = decideFixAction({
+      ci: redComplete as never, attempt: 1, maxAttempts: 3, introducedFailing: 1,
+      stalledOnAuthoredTest: { testFiles: ["src/lib/__tests__/averageWordLength.test.ts"] },
+    });
+    expect(d.action).toBe("escalate_human");
+    expect(d.reason).toMatch(/authored is still failing/i);
+    expect(d.reason).toMatch(/averageWordLength\.test\.ts/);
+    expect(d.reason).toMatch(/must not resolve by weakening the test/i);
+  });
+
+  it("still authors a fix when NOT stalled (empty testFiles)", () => {
+    const d = decideFixAction({ ci: redComplete as never, attempt: 1, maxAttempts: 3, introducedFailing: 1, stalledOnAuthoredTest: { testFiles: [] } });
+    expect(d.action).toBe("author_fix");
+  });
+});

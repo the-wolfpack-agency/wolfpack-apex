@@ -19,8 +19,8 @@ import { requireEntitlement } from "@/lib/tenancy/require-entitlement";
 import { fetchCiStatus, fetchCiAttribution } from "@/lib/ai-code/ci-status";
 import { decideFixAction, buildFixBrief } from "@/lib/ai-code/ci-fix-loop";
 import { runCiFixStep } from "@/lib/ai-code/ci-fix-driver";
-import { workspaceGithubClient, getBranchHead, countBranchCommitsMatching } from "@/lib/github-client";
-import { gatherFailureContext, buildEnrichedFixPrompt } from "@/lib/ai-code/ci-failure-detail";
+import { workspaceGithubClient, getBranchHead, countBranchCommitsMatching, listChangedFiles } from "@/lib/github-client";
+import { gatherFailureContext, buildEnrichedFixPrompt, extractFailingTestFiles } from "@/lib/ai-code/ci-failure-detail";
 import { commitFileChanges, filesToDiff } from "@/lib/ai-code/file-changes";
 import { assessChange } from "@/lib/ai-code/assess";
 import { authorFileChanges } from "@/lib/ai-code/author";
@@ -96,28 +96,46 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ decision, ci, terminal: decision.action !== "author_fix", note: "no GitHub token; decision only" });
   }
 
-  // Observability: what failure context the fixer actually gathered (so a "no fix"
-  // is diagnosable - did it see the error + files, or nothing?).
+  // The failing detail powers BOTH the re-author prompt and the non-progress
+  // diagnosis. Gather it ONCE, and only when the deterministic decision would
+  // actually be to author a fix (green / pending / pre-existing-only never reach
+  // here), so we never pay for a log fetch we will not use.
   let contextSummary: { detailChars: number; files: string[] } | null = null;
+  let gathered: Awaited<ReturnType<typeof gatherFailureContext>> | null = null;
+  let stalledOnAuthoredTest: { testFiles: string[] } | undefined;
+  const prelim = decideFixAction({ ci, attempt: effectiveAttempt, maxAttempts, introducedFailing });
+  if (prelim.action === "author_fix") {
+    const headSha = await getBranchHead(client, repo, branch).catch(() => branch);
+    // Scope to the INTRODUCED failures (when a baseline is known) so the fixer
+    // never tries to repair pre-existing red it did not cause.
+    gathered = await gatherFailureContext(client, repo, headSha, branch, { onlyRunNames: attribution?.introduced });
+    contextSummary = { detailChars: gathered.detail.length, files: gathered.files.map((f) => f.path) };
+    // Non-progress on an authored test: if a fix was ALREADY committed and a test
+    // THIS change added/changed is still failing, the test's expected value is the
+    // likely culprit (a wrong-test the fixer must not weaken). Diagnose + escalate
+    // rather than authoring another source fix that cannot converge (found by
+    // dogfooding the averageWordLength case).
+    if (priorFixCommits >= 1) {
+      const failingTests = extractFailingTestFiles(gathered.detail);
+      if (failingTests.length > 0) {
+        const changed = new Set(await listChangedFiles(client, repo, base || "main", branch));
+        const authoredFailing = failingTests.filter((f) => changed.has(f));
+        if (authoredFailing.length > 0) stalledOnAuthoredTest = { testFiles: authoredFailing };
+      }
+    }
+  }
+
   const result = await runCiFixStep({
     ci,
     attempt: effectiveAttempt,
     maxAttempts,
     introducedFailing,
+    stalledOnAuthoredTest,
     briefDetails,
     reauthor: async (brief) => {
-      // Enrich the re-author with what a human would look at: the branch head's
-      // ACTUAL failure detail (the failing job's error lines) and the current
-      // contents of the files that error points at. Without this the model has
-      // only a check name and produces nothing usable (found by dogfooding).
-      const headSha = await getBranchHead(client, repo, branch).catch(() => branch);
-      // Scope the gathered context to the INTRODUCED failures (when a baseline is
-      // known), so the fixer never tries to repair pre-existing red it did not
-      // cause - it fixes only what this change broke.
-      const context = await gatherFailureContext(client, repo, headSha, branch, {
-        onlyRunNames: attribution?.introduced,
-      });
-      contextSummary = { detailChars: context.detail.length, files: context.files.map((f) => f.path) };
+      // Reuse the context gathered above (never re-fetch). Empty only if the
+      // decision changed under us; buildEnrichedFixPrompt degrades to the brief.
+      const context = gathered ?? { detail: "", files: [] };
       const prompt = buildEnrichedFixPrompt({ repo, branch, brief, context });
       const authored = await authorFileChanges(
         { prompt, feature: "ai-code-ci-fix" },
@@ -136,5 +154,5 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       commitFileChanges({ client, repoFullName: repo, branch, base: branch, changes, message: `factory ci-fix: ${ref}` }),
   });
 
-  return NextResponse.json({ ...result, context: contextSummary, budget: { attempt: effectiveAttempt, priorFixCommits, maxAttempts } });
+  return NextResponse.json({ ...result, context: contextSummary, budget: { attempt: effectiveAttempt, priorFixCommits, maxAttempts }, ...(stalledOnAuthoredTest ? { stalledOnAuthoredTest } : {}) });
 }

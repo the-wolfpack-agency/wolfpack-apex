@@ -279,6 +279,28 @@ export async function countBranchCommitsMatching(
   }
 }
 
+/** The files a branch adds/changes on top of `base` (compare base...branch).
+ *  Used to tell whether a failing test is one THIS change authored (so a fix
+ *  that cannot make its own test pass is diagnosed, not looped). Best-effort:
+ *  returns [] if the compare cannot be read. */
+export async function listChangedFiles(
+  client: GithubClient,
+  repoFullName: string,
+  base: string,
+  branch: string,
+): Promise<string[]> {
+  try {
+    const cmp = await gh<{ files?: { filename?: string }[] }>(
+      client,
+      "GET",
+      `/repos/${repoFullName}/compare/${encodeRef(base)}...${encodeRef(branch)}?per_page=100`,
+    );
+    return (cmp.files ?? []).map((f) => f.filename ?? "").filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
 /** Force a branch back to a known-good SHA (the revert mechanism). Callers MUST
  *  restrict this to factory-created branches (see ai-code/revert.ts) so it can
  *  never rewrite a human branch, a release branch, or main. */
