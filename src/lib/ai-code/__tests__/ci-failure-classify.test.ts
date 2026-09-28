@@ -91,3 +91,20 @@ describe("transient/infra failures re-run, never auto-fix", () => {
     expect(classifyCiFailure("Expected 5 Received 4", ["unit"]).kind).toBe("mechanical");
   });
 });
+
+describe("mechanical subtypes (route each shape)", () => {
+  const { mechanicalSubtype } = jest.requireActual("@/lib/ai-code/ci-failure-classify");
+  it.each([
+    ["type", "error TS2322: Type 'string' is not assignable to type 'number'"],
+    ["type", "Parameter 'file' implicitly has an 'any' type."],
+    ["import", "Cannot find module '@/lib/x' or its corresponding type declarations"],
+    ["snapshot", "1 snapshot failed. Inspect your code changes or press `u` to update them."],
+    ["coverage", "Jest: Coverage for lines (78%) does not meet threshold (80%)"],
+    ["lint", "error  'x' is assigned a value but never used  @typescript-eslint/no-unused-vars"],
+    ["build", "Failed to compile."],
+    ["test", "Expected 5 Received 4"],
+  ])("classifies subtype %s", (subtype, detail) => {
+    expect(mechanicalSubtype(detail)).toBe(subtype);
+    expect(classifyCiFailure(detail, []).subtype).toBe(subtype);
+  });
+});

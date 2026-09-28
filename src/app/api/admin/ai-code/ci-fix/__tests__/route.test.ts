@@ -251,3 +251,15 @@ test("no re-run once a fix has already been attempted (priorFixCommits > 0)", as
   expect(body.decision.action).toBe("author_fix");
 });
 
+test("snapshot failure escalates (never auto-updates the snapshot), no author", async () => {
+  mockFetchCiStatus.mockResolvedValue(red);
+  mockFetchAttribution.mockResolvedValue({ introduced: ["unit"], preexisting: [], indeterminate: [], fixed: [], baselineKnown: true, baselineHealthy: false, clean: false, reason: "introduced unit" });
+  mockCountFixCommits.mockResolvedValue(0);
+  mockGather.mockResolvedValue({ detail: "1 snapshot failed. press `u` to update them.", files: [] });
+  const body = await (await POST(post({ repo: "o/r", ref: "b", branch: "factory/b-abc", base: "main", attempt: 0, maxAttempts: 3 }))).json();
+  expect(body.decision.action).toBe("escalate_human");
+  expect(body.decision.reason).toMatch(/SNAPSHOT/);
+  expect(body.snapshotFailure).toBe(true);
+  expect(mockAuthorFiles).not.toHaveBeenCalled();
+});
+

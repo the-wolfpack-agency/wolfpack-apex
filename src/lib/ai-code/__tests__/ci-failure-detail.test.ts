@@ -147,3 +147,19 @@ describe("extractFailingTestFiles", () => {
     expect(extractFailingTestFiles("all green, no FAIL lines")).toEqual([]);
   });
 });
+
+describe("subtype-aware fix prompt", () => {
+  it("adds a TYPE-error hint that forbids casting to any", () => {
+    const p = buildEnrichedFixPrompt({ repo: "o/r", branch: "b", brief: "x", context: { detail: "error TS2322", files: [] }, subtype: "type" });
+    expect(p).toMatch(/TYPE error/);
+    expect(p).toMatch(/do not cast to any/i);
+  });
+  it("adds an IMPORT hint", () => {
+    const p = buildEnrichedFixPrompt({ repo: "o/r", branch: "b", brief: "x", context: { detail: "Cannot find module", files: [] }, subtype: "import" });
+    expect(p).toMatch(/IMPORT \/ module-resolution/);
+  });
+  it("no hint for a plain test subtype", () => {
+    const p = buildEnrichedFixPrompt({ repo: "o/r", branch: "b", brief: "x", context: { detail: "", files: [] }, subtype: "test" });
+    expect(p).not.toMatch(/TYPE error|IMPORT \//);
+  });
+});

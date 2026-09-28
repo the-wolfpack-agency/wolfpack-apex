@@ -105,8 +105,9 @@ export const ciAutofixGate: GateDefinition<CiAutofixInput, CiAutofixOutput> = {
     const cls = classifyCiFailure(gathered.detail, ci.failedChecks);
     const governanceFailure = cls.kind === "governance" ? { signal: cls.signal } : undefined;
     const transientFailure = cls.kind === "transient" ? { signal: cls.signal } : undefined;
+    const snapshotFailure = cls.kind === "mechanical" && cls.subtype === "snapshot";
 
-    const decision = decideFixAction({ ci, attempt: priorFixCommits, maxAttempts: MAX_ATTEMPTS, introducedFailing, governanceFailure, transientFailure });
+    const decision = decideFixAction({ ci, attempt: priorFixCommits, maxAttempts: MAX_ATTEMPTS, introducedFailing, governanceFailure, transientFailure, snapshotFailure });
 
     if (decision.action === "escalate_human" || decision.action === "wait") {
       return result("require_human", decision.reason, ctx, {
@@ -132,7 +133,7 @@ export const ciAutofixGate: GateDefinition<CiAutofixInput, CiAutofixOutput> = {
       const authored = failingTests.filter((f) => changed.has(f));
       if (authored.length > 0) authoredTestStillFailing = authored;
     }
-    const prompt = buildEnrichedFixPrompt({ repo: input.repo, branch: input.branch, brief: decision.reason, context: gathered, authoredTestStillFailing });
+    const prompt = buildEnrichedFixPrompt({ repo: input.repo, branch: input.branch, brief: decision.reason, context: gathered, authoredTestStillFailing, subtype: cls.kind === "mechanical" ? cls.subtype : undefined });
     const reply = await ctx.agent.complete({ prompt, feature: "gate-ci-autofix" });
     const modelInvoked = reply.model_used ?? "client-model";
     const changes = parseFileChanges(reply.content);
