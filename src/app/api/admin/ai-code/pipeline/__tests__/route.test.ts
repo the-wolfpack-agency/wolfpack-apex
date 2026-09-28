@@ -367,3 +367,14 @@ describe("files mode (edit-support)", () => {
     expect((await res.json()).error).toMatch(/no change/);
   });
 });
+
+test("persists the diff + verdict reason on the pipeline_run event so history can show the code", async () => {
+  await POST(post(VALID));
+  const call = mockTrackEvent.mock.calls.find((c: unknown[]) => c[0] === "ai_code.pipeline_run");
+  expect(call).toBeDefined();
+  const meta = (call as unknown[])[3] as Record<string, unknown>;
+  expect(meta.diff).toBe("d");             // the run's diff, persisted (capped)
+  expect(meta.diff_truncated).toBe(false); // "d" is well under the cap
+  expect(meta).toHaveProperty("verdict_reason");
+});
+

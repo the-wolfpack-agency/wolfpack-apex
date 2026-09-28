@@ -348,6 +348,39 @@ test("run history panel shows grade, drift, and recent runs when history has dat
   expect(screen.getByTestId("history-runs")).toHaveTextContent("pr-9");
 });
 
+test("history rows expand to show the actual code change, with clear status pills", async () => {
+  historyResp = resp(200, {
+    runs: [
+      { ref: "feat-wordstats-1", model: "gpt-4o-mini", status: "ready_for_pr", attempts: 0, finalOutcome: "allow", deepScanCritical: 0, conforms: true, createdAt: "2026-09-27T10:00:00Z", reason: "no findings", diff: "diff --git a/src/lib/x.ts b/src/lib/x.ts\n+export const x = 1;" },
+    ],
+    grade: { total: 1, readyRate: 1, firstPassRate: 1, blockRate: 0, escalationRate: 0, byModel: [] },
+    drift: [],
+  });
+  render(<CodeFactoryPage />);
+  await waitFor(() => expect(screen.getByTestId("history-runs")).toBeInTheDocument());
+  // ready/allow render as status pills (not dead buttons): the label text is present.
+  expect(screen.getByTestId("history-runs")).toHaveTextContent("Ready for PR");
+  expect(screen.getByTestId("history-runs")).toHaveTextContent(/Allowed|allow/i);
+  // the row is clickable and reveals the actual code change on expand.
+  expect(screen.queryByTestId("history-run-detail-0")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByTestId("history-run-0"));
+  const detail = await screen.findByTestId("history-run-detail-0");
+  expect(detail).toHaveTextContent("export const x = 1;");
+  expect(detail).toHaveTextContent(/Gate verdict:.*no findings/i);
+});
+
+test("a history run with no stored diff says so instead of a dead click", async () => {
+  historyResp = resp(200, {
+    runs: [{ ref: "old-run", model: "claude", status: "ready_for_pr", attempts: 0, finalOutcome: "allow", deepScanCritical: 0, conforms: true, createdAt: "2026-09-20T10:00:00Z" }],
+    grade: { total: 1, readyRate: 1, firstPassRate: 1, blockRate: 0, escalationRate: 0, byModel: [] },
+    drift: [],
+  });
+  render(<CodeFactoryPage />);
+  await waitFor(() => expect(screen.getByTestId("history-run-0")).toBeInTheDocument());
+  fireEvent.click(screen.getByTestId("history-run-0"));
+  expect(await screen.findByTestId("history-run-detail-0")).toHaveTextContent(/No stored code change/i);
+});
+
 test("run history panel is hidden when there are no runs", async () => {
   render(<CodeFactoryPage />);
   await waitFor(() => expect(screen.getByTestId("ai-code-page")).toBeInTheDocument());
