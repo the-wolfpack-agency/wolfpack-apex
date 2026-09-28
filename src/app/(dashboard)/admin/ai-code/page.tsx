@@ -111,6 +111,9 @@ interface RunSummary {
   deepScanCritical: number;
   conforms: boolean;
   createdAt: string;
+  diff?: string;
+  diffTruncated?: boolean;
+  reason?: string;
 }
 interface ModelGrade { model: string; n: number; readyRate: number; firstPassRate: number; blockRate: number }
 interface Grade { total: number; readyRate: number; firstPassRate: number; blockRate: number; escalationRate: number; byModel: ModelGrade[] }
@@ -233,6 +236,7 @@ export default function CodeFactoryPage() {
   const [error, setError] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
   const [history, setHistory] = useState<HistoryData | null>(null);
+  const [openRun, setOpenRun] = useState<number | null>(null);
   const [audit, setAudit] = useState<AuditData | null>(null);
   const [auditLoading, setAuditLoading] = useState(false);
   const [auditError, setAuditError] = useState<string | null>(null);
@@ -964,15 +968,51 @@ export default function CodeFactoryPage() {
           )}
 
           <div data-testid="history-runs" style={{ marginTop: "0.9rem", display: "grid", gap: "0.35rem" }}>
-            {history.runs.slice(0, 15).map((r, i) => (
-              <div key={`${r.ref}-${i}`} style={{ display: "flex", alignItems: "center", gap: "0.6rem", flexWrap: "wrap", fontSize: "0.82rem", padding: "0.4rem 0.55rem", borderRadius: 6, background: "var(--wp-surface-2, #171a21)", border: "1px solid var(--wp-border, #2a2f3a)" }}>
-                <span style={{ fontWeight: 600, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.ref}</span>
-                <span style={{ color: "var(--wp-text-dim)" }}>{r.model}</span>
-                <span style={{ marginLeft: "auto", color: r.status === "ready_for_pr" ? "var(--wp-success, #30a46c)" : "var(--wp-warning, #f5a623)" }}>{r.status === "ready_for_pr" ? "ready" : "needs human"}</span>
-                <span style={{ color: r.finalOutcome === "block" ? "var(--wp-error, #ef4444)" : "var(--wp-text-dim)" }}>{r.finalOutcome}</span>
-                {r.attempts > 0 ? <span style={{ color: "var(--wp-text-dim)" }}>{r.attempts} repair{r.attempts === 1 ? "" : "s"}</span> : null}
-              </div>
-            ))}
+            {history.runs.slice(0, 15).map((r, i) => {
+              const oc = OUTCOME[r.finalOutcome];
+              const open = openRun === i;
+              const canOpen = Boolean(r.diff);
+              return (
+                <div key={`${r.ref}-${i}`} style={{ borderRadius: 6, background: "var(--wp-surface-2, #171a21)", border: "1px solid var(--wp-border, #2a2f3a)", overflow: "hidden" }}>
+                  <button
+                    type="button"
+                    data-testid={`history-run-${i}`}
+                    aria-expanded={open}
+                    onClick={() => setOpenRun(open ? null : i)}
+                    title={canOpen ? "Show the code change" : "No stored diff for this run"}
+                    style={{ width: "100%", display: "flex", alignItems: "center", gap: "0.6rem", flexWrap: "wrap", fontSize: "0.82rem", padding: "0.45rem 0.6rem", background: "transparent", border: "none", color: "var(--wp-text, #e6e9ef)", cursor: "pointer", textAlign: "left" }}
+                  >
+                    <span aria-hidden style={{ color: "var(--wp-text-dim)", transform: open ? "rotate(90deg)" : "none", transition: "transform 0.12s", display: "inline-block" }}>&rsaquo;</span>
+                    <span style={{ fontWeight: 600, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.ref}</span>
+                    <span style={{ color: "var(--wp-text-dim)" }}>{r.model}</span>
+                    <span style={{ marginLeft: "auto", display: "inline-flex", gap: "0.4rem", alignItems: "center" }}>
+                      <StatusPill status={r.status} tone={r.status === "ready_for_pr" ? "success" : "warning"} label={r.status === "ready_for_pr" ? "Ready for PR" : "Needs human"} size="sm" />
+                      <StatusPill status={r.finalOutcome} tone={oc.tone} label={oc.label} size="sm" />
+                      {r.attempts > 0 ? <span style={{ color: "var(--wp-text-dim)", fontSize: "0.76rem" }}>{r.attempts} repair{r.attempts === 1 ? "" : "s"}</span> : null}
+                    </span>
+                  </button>
+                  {open && (
+                    <div data-testid={`history-run-detail-${i}`} style={{ borderTop: "1px solid var(--wp-border, #2a2f3a)", padding: "0.6rem 0.7rem" }}>
+                      {r.reason && <p style={{ margin: "0 0 0.5rem", fontSize: "0.8rem", color: "var(--wp-text-dim)", lineHeight: 1.45 }}><strong style={{ color: "var(--wp-text, #e6e9ef)" }}>Gate verdict:</strong> {r.reason}</p>}
+                      {r.diff ? (
+                        <>
+                          <div style={{ margin: 0, padding: "0.5rem 0", background: "#0d1117", border: "1px solid var(--wp-border, #2a2f3a)", borderRadius: 8, overflowX: "auto", maxHeight: 360, fontSize: "0.78rem", fontFamily: "ui-monospace, SFMono-Regular, monospace", lineHeight: 1.5 }}>
+                            {r.diff.split("\n").map((line, li) => (
+                              <div key={li} style={{ padding: "0 0.8rem", whiteSpace: "pre", color: diffLineColor(line), background: line.startsWith("+") && !line.startsWith("+++") ? "rgba(63,185,80,0.08)" : line.startsWith("-") && !line.startsWith("---") ? "rgba(248,81,73,0.08)" : "transparent" }}>
+                                {line || " "}
+                              </div>
+                            ))}
+                          </div>
+                          {r.diffTruncated && <p style={{ margin: "0.4rem 0 0", fontSize: "0.72rem", color: "var(--wp-text-dim)" }}>Diff truncated for display; the full change is on the pull request.</p>}
+                        </>
+                      ) : (
+                        <p style={{ margin: 0, fontSize: "0.78rem", color: "var(--wp-text-dim)" }}>No stored code change for this run (recorded before diffs were persisted).</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </GlassPanel>
       )}

@@ -45,6 +45,10 @@ import { ensureCodeGateAgent } from "@/lib/agents/store";
 import type { CodeReviewResult } from "@/lib/ai-code/types";
 
 const MAX_DIFF = 2_000_000; // chars
+/** How much of the diff to persist on the run event so the history UI can show
+ *  the actual code change. Capped so a huge diff never bloats the event row; the
+ *  full diff still lives on the run response + (for ready runs) the approval. */
+const HISTORY_DIFF_CAP = 120_000;
 const MAX_ATTEMPTS_CAP = 4;
 /** The fixed answer-key allowlist. The route always runs the default questions,
  *  so a valid answer names one of these; anything else is dropped, never used as
@@ -344,6 +348,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     executor_attempts: executorAttempts,
     repo_context_files: repoContextFiles.length,
     deep_scan_critical: deepScan.critical,
+    // Persist the actual change so "Run history" can show the code, not just the
+    // grade (found by dogfooding: history rows had no way to see the diff). Capped.
+    diff: run.diff.slice(0, HISTORY_DIFF_CAP),
+    diff_truncated: run.diff.length > HISTORY_DIFF_CAP,
+    verdict_reason: run.review.verdict.reason,
   });
 
   // Protection evidence: one finding_detected per issue the gate caught, so the

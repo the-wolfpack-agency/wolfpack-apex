@@ -18,6 +18,14 @@ export interface RunSummary {
   deepScanCritical: number;
   conforms: boolean;
   createdAt: string;
+  /** The actual code change (unified diff) this run produced, so the history UI
+   *  can show what was built - not just its grade. Capped at authoring time;
+   *  `diffTruncated` flags when the stored diff was cut. Absent for runs recorded
+   *  before diffs were persisted. */
+  diff?: string;
+  diffTruncated?: boolean;
+  /** The gate verdict's reason, so a history row explains WHY it was graded. */
+  reason?: string;
 }
 
 interface EventRow {
@@ -68,6 +76,9 @@ export async function listPipelineRuns(workspaceId: string, limit = 50): Promise
       deepScanCritical: asNum(m.deep_scan_critical),
       conforms: m.conforms === true || m.conforms === "true",
       createdAt: r.timestamp,
+      ...(typeof m.diff === "string" && m.diff.length > 0 ? { diff: m.diff } : {}),
+      ...(m.diff_truncated === true || m.diff_truncated === "true" ? { diffTruncated: true } : {}),
+      ...(typeof m.verdict_reason === "string" && m.verdict_reason.length > 0 ? { reason: m.verdict_reason } : {}),
     };
   });
 }

@@ -22,6 +22,20 @@ test("maps metadata rows to run summaries, newest-first", async () => {
   expect(runs[1]).toMatchObject({ ref: "pr-1", status: "needs_human", attempts: 2, finalOutcome: "block", deepScanCritical: 1, conforms: false });
 });
 
+test("maps the persisted diff, truncation flag, and verdict reason for the history code view", async () => {
+  mockSafeQuery.mockResolvedValue({
+    rows: [
+      { metadata: { workspace_id: "w1", ref: "pr-3", model: "gpt-4o-mini", status: "ready_for_pr", final_outcome: "allow", diff: "diff --git a/x b/x\n+const k=1;", diff_truncated: true, verdict_reason: "no findings" }, timestamp: "2026-09-27T11:00:00Z" },
+      { metadata: { workspace_id: "w1", ref: "pr-old", model: "claude", status: "ready_for_pr", final_outcome: "allow" }, timestamp: "2026-09-27T08:00:00Z" },
+    ],
+  });
+  const runs = await listPipelineRuns("w1", 50);
+  expect(runs[0]).toMatchObject({ ref: "pr-3", diff: expect.stringContaining("const k=1;"), diffTruncated: true, reason: "no findings" });
+  // A run recorded before diffs were persisted carries no diff (undefined, not "").
+  expect(runs[1].diff).toBeUndefined();
+  expect(runs[1].diffTruncated).toBeUndefined();
+});
+
 test("returns [] on a read failure (never throws)", async () => {
   mockSafeQuery.mockResolvedValue({ rows: [] });
   expect(await listPipelineRuns("w1")).toEqual([]);
