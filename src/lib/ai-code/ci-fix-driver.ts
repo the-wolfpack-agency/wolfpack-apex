@@ -36,6 +36,9 @@ export async function runCiFixStep(args: {
   /** Set when the failure is a governance/policy gate - the decision escalates to
    *  a human instead of authoring a mechanical fix. */
   governanceFailure?: { signal: string };
+  /** Set when the failure is infra/transient - the decision escalates to re-run
+   *  rather than authoring a code fix. */
+  transientFailure?: { signal: string };
   /** The failed-check details to brief the re-author with. Defaults to every
    *  failing check; the route narrows this to only the INTRODUCED checks so the
    *  fixer never tries to repair pre-existing red. */
@@ -51,7 +54,7 @@ export async function runCiFixStep(args: {
    *  but the route always supplies the real combined gate. */
   gate?: (changes: FileChange[]) => Promise<{ cleared: boolean; blockedBy: string | null }>;
 }): Promise<CiFixStepResult> {
-  const decision = decideFixAction({ ci: args.ci, attempt: args.attempt, maxAttempts: args.maxAttempts, introducedFailing: args.introducedFailing, governanceFailure: args.governanceFailure });
+  const decision = decideFixAction({ ci: args.ci, attempt: args.attempt, maxAttempts: args.maxAttempts, introducedFailing: args.introducedFailing, governanceFailure: args.governanceFailure, transientFailure: args.transientFailure });
 
   // Only author_fix does work. merge_ready / escalate_human are terminal; wait is
   // non-terminal (poll again) but changes nothing.

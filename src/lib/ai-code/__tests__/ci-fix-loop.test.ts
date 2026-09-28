@@ -94,3 +94,13 @@ describe("governance failure escalates (not auto-fixed)", () => {
     expect(d.action).toBe("author_fix");
   });
 });
+
+describe("transient/infra failure re-runs (escalates), never authored", () => {
+  const redComplete = { total: 2, passed: 1, failed: 1, pending: 0, complete: true, ciComplete: false, readable: true, failedChecks: ["unit"], failedDetails: [{ name: "unit", summary: "x" }] };
+  it("escalates with the infra reason", () => {
+    const d = decideFixAction({ ci: redComplete as never, attempt: 0, maxAttempts: 3, introducedFailing: 1, transientFailure: { signal: "ETIMEDOUT" } });
+    expect(d.action).toBe("escalate_human");
+    expect(d.reason).toMatch(/infrastructure\/transient/i);
+    expect(d.reason).toMatch(/ETIMEDOUT/);
+  });
+});

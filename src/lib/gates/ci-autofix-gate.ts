@@ -103,8 +103,9 @@ export const ciAutofixGate: GateDefinition<CiAutofixInput, CiAutofixOutput> = {
     const gathered = await gatherFailureContext(client, input.repo, headSha, input.branch, { onlyRunNames: attribution?.introduced });
     const cls = classifyCiFailure(gathered.detail, ci.failedChecks);
     const governanceFailure = cls.kind === "governance" ? { signal: cls.signal } : undefined;
+    const transientFailure = cls.kind === "transient" ? { signal: cls.signal } : undefined;
 
-    const decision = decideFixAction({ ci, attempt: priorFixCommits, maxAttempts: MAX_ATTEMPTS, introducedFailing, governanceFailure });
+    const decision = decideFixAction({ ci, attempt: priorFixCommits, maxAttempts: MAX_ATTEMPTS, introducedFailing, governanceFailure, transientFailure });
 
     if (decision.action === "escalate_human" || decision.action === "wait") {
       return result("require_human", decision.reason, ctx, {
