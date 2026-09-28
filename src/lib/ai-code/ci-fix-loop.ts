@@ -32,6 +32,12 @@ export interface FixLoopState {
    *  fault, and the fixer must not touch what it did not break. Undefined keeps
    *  the baseline-unaware behavior (fix any red). */
   introducedFailing?: number;
+  /** Set when the failure is a GOVERNANCE/policy gate (a guardrail, a security
+   *  scan, an RLS/coverage rule) whose resolution is a human policy decision, not
+   *  a mechanical patch. The fixer must NOT try to auto-repair it - making a
+   *  governance gate pass by editing code around it is the exact trust failure
+   *  this system prevents. Escalate with the signal instead. */
+  governanceFailure?: { signal: string };
 }
 
 /**
@@ -63,6 +69,12 @@ export function decideFixAction(state: FixLoopState): FixDecision {
     return {
       action: "escalate_human",
       reason: `CI failed (${state.ci.failedChecks.join(", ")}), but every failing check was already failing on the base branch (pre-existing). This change introduced none, so it is handed to a human rather than auto-fixed.`,
+    };
+  }
+  if (state.governanceFailure) {
+    return {
+      action: "escalate_human",
+      reason: `CI failed on a governance/policy gate (${state.governanceFailure.signal}). Resolving it is a human policy decision, not a mechanical fix - the fixer will not edit code to make a guardrail pass. A human should decide.`,
     };
   }
   if (state.attempt < state.maxAttempts) {

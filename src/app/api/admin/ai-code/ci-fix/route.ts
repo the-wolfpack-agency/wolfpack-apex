@@ -21,6 +21,7 @@ import { decideFixAction, buildFixBrief } from "@/lib/ai-code/ci-fix-loop";
 import { runCiFixStep } from "@/lib/ai-code/ci-fix-driver";
 import { workspaceGithubClient, getBranchHead, countBranchCommitsMatching, listChangedFiles } from "@/lib/github-client";
 import { gatherFailureContext, buildEnrichedFixPrompt, extractFailingTestFiles } from "@/lib/ai-code/ci-failure-detail";
+import { classifyCiFailure } from "@/lib/ai-code/ci-failure-classify";
 import { commitFileChanges, filesToDiff } from "@/lib/ai-code/file-changes";
 import { assessChange } from "@/lib/ai-code/assess";
 import { authorFileChanges } from "@/lib/ai-code/author";
@@ -103,6 +104,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   let contextSummary: { detailChars: number; files: string[] } | null = null;
   let gathered: Awaited<ReturnType<typeof gatherFailureContext>> | null = null;
   let stalledOnAuthoredTest: { testFiles: string[] } | undefined;
+  let governanceFailure: { signal: string } | undefined;
   // Gather whenever there is an INTRODUCED failure to act on - i.e. CI is
   // readable, complete, not green, and this change introduced at least one of the
   // failures. That covers BOTH the author-a-fix case and the budget-exhausted
@@ -121,6 +123,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // never tries to repair pre-existing red it did not cause.
     gathered = await gatherFailureContext(client, repo, headSha, branch, { onlyRunNames: attribution?.introduced });
     contextSummary = { detailChars: gathered.detail.length, files: gathered.files.map((f) => f.path) };
+    // Governance/policy gate? A guardrail / security-scan / RLS / coverage failure
+    // is a human policy decision, not a mechanical fix - do not let the fixer edit
+    // code to make a governance gate pass. Classify from the check names + detail.
+    const cls = classifyCiFailure(gathered.detail, ci.failedChecks);
+    if (cls.kind === "governance") governanceFailure = { signal: cls.signal };
     // Non-progress on an authored test: if a fix was ALREADY committed and a test
     // THIS change added/changed is still failing, the test's expected value is the
     // likely culprit. We do NOT escalate - we tell the re-author to correct the
@@ -141,6 +148,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     attempt: effectiveAttempt,
     maxAttempts,
     introducedFailing,
+    governanceFailure,
     briefDetails,
     reauthor: async (brief) => {
       // Reuse the context gathered above (never re-fetch). Empty only if the
@@ -164,5 +172,5 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       commitFileChanges({ client, repoFullName: repo, branch, base: branch, changes, message: `factory ci-fix: ${ref}` }),
   });
 
-  return NextResponse.json({ ...result, context: contextSummary, budget: { attempt: effectiveAttempt, priorFixCommits, maxAttempts }, ...(stalledOnAuthoredTest ? { stalledOnAuthoredTest } : {}) });
+  return NextResponse.json({ ...result, context: contextSummary, budget: { attempt: effectiveAttempt, priorFixCommits, maxAttempts }, ...(stalledOnAuthoredTest ? { stalledOnAuthoredTest } : {}), ...(governanceFailure ? { governanceFailure } : {}) });
 }
