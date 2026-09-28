@@ -207,3 +207,17 @@ test("budget spent: escalates to a human (bounded), no further commit", async ()
   expect(mockCommit).not.toHaveBeenCalled();
 });
 
+test("governance failure (guardrail/security check) escalates to a human, does NOT author or commit", async () => {
+  const gov = { ...red, failedChecks: ["CodeQL"], failedDetails: [{ name: "CodeQL", summary: "alert" }] };
+  mockFetchCiStatus.mockResolvedValue(gov);
+  mockFetchAttribution.mockResolvedValue({ introduced: ["CodeQL"], preexisting: [], indeterminate: [], fixed: [], baselineKnown: true, baselineHealthy: false, clean: false, reason: "introduced CodeQL" });
+  mockCountFixCommits.mockResolvedValue(0);
+  mockGather.mockResolvedValue({ detail: "CodeQL alert: injection", files: [] });
+  const body = await (await POST(post({ repo: "o/r", ref: "b", branch: "factory/b-abc", base: "main", attempt: 0, maxAttempts: 3 }))).json();
+  expect(body.decision.action).toBe("escalate_human");
+  expect(body.decision.reason).toMatch(/governance\/policy gate/i);
+  expect(body.governanceFailure).toEqual({ signal: "check:CodeQL" });
+  expect(mockAuthorFiles).not.toHaveBeenCalled();
+  expect(mockCommit).not.toHaveBeenCalled();
+});
+

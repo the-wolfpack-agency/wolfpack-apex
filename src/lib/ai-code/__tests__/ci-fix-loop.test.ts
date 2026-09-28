@@ -80,3 +80,17 @@ describe("decideFixAction, unreadable CI", () => {
     expect(d.reason).toMatch(/Checks: read|cannot read CI/i);
   });
 });
+
+describe("governance failure escalates (not auto-fixed)", () => {
+  const redComplete = { total: 2, passed: 1, failed: 1, pending: 0, complete: true, ciComplete: false, readable: true, failedChecks: ["CodeQL"], failedDetails: [{ name: "CodeQL", summary: "alert" }] };
+  it("escalates with the governance signal even with budget remaining", () => {
+    const d = decideFixAction({ ci: redComplete as never, attempt: 0, maxAttempts: 3, introducedFailing: 1, governanceFailure: { signal: "check:CodeQL" } });
+    expect(d.action).toBe("escalate_human");
+    expect(d.reason).toMatch(/governance\/policy gate/i);
+    expect(d.reason).toMatch(/check:CodeQL/);
+  });
+  it("authors a fix when the failure is NOT governance", () => {
+    const d = decideFixAction({ ci: redComplete as never, attempt: 0, maxAttempts: 3, introducedFailing: 1 });
+    expect(d.action).toBe("author_fix");
+  });
+});
