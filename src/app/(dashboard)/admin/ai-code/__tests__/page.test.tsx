@@ -381,6 +381,32 @@ test("a history run with no stored diff says so instead of a dead click", async 
   expect(await screen.findByTestId("history-run-detail-0")).toHaveTextContent(/No stored code change/i);
 });
 
+test("the 'How we kept you safe' panel renders the gate-safety metrics + a verifiable decision list", async () => {
+  historyResp = resp(200, {
+    runs: [], grade: { total: 0, readyRate: 0, firstPassRate: 0, blockRate: 0, escalationRate: 0, byModel: [] }, drift: [],
+    gateSafety: {
+      total: 3, allowed: 1, autoFixed: 1, escalatedToHuman: 1, badChangesPrevented: 1, dataKeptFromModel: 2,
+      frameworks: ["SOC2", "GDPR"],
+      recent: [
+        { gate: "safe-review", verdict: "deny", modelInvoked: null, findings: 1, recordedSeq: 11, createdAt: "2026-09-28T10:00:00Z" },
+        { gate: "ci-autofix", verdict: "auto_fix", modelInvoked: "gpt-4o-mini", findings: 0, recordedSeq: 12, createdAt: "2026-09-28T09:00:00Z" },
+      ],
+    },
+  });
+  render(<CodeFactoryPage />);
+  await waitFor(() => expect(screen.getByTestId("gate-safety")).toBeInTheDocument());
+  const panel = screen.getByTestId("gate-safety");
+  expect(panel).toHaveTextContent("Data kept from the LLM");
+  expect(panel).toHaveTextContent("Bad changes prevented");
+  expect(screen.getByTestId("gate-safety-frameworks")).toHaveTextContent(/SOC2, GDPR/);
+  // a rejection IS shown, with its verdict pill + that no model saw the data + the ledger seq
+  const recent = screen.getByTestId("gate-safety-recent");
+  expect(recent).toHaveTextContent("safe-review");
+  expect(recent).toHaveTextContent(/Blocked/);
+  expect(recent).toHaveTextContent(/no model - data kept in/);
+  expect(recent).toHaveTextContent(/ledger #11/);
+});
+
 test("run history panel is hidden when there are no runs", async () => {
   render(<CodeFactoryPage />);
   await waitFor(() => expect(screen.getByTestId("ai-code-page")).toBeInTheDocument());
