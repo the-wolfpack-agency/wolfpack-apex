@@ -12,8 +12,11 @@ const agent: GateAgent = { complete: agentSpy };
 beforeEach(() => jest.clearAllMocks());
 
 describe("redactPrompt", () => {
-  it("strips configured patterns, tolerates a bad regex", () => {
-    expect(redactPrompt("token=abc123 and email a@b.com", ["token=\\w+", "["])).toBe("[REDACTED] and email a@b.com");
+  it("strips configured LITERAL terms (not a regex - ReDoS-safe)", () => {
+    // literal substrings are replaced; a regex-looking term matches only literally.
+    expect(redactPrompt("the widget-x codename and email a@b.com", ["widget-x codename"])).toBe("the [REDACTED] and email a@b.com");
+    // a regex metacharacter string is treated literally, never compiled.
+    expect(redactPrompt("a (a+)+ b", ["(a+)+"])).toBe("a [REDACTED] b");
   });
   it("no-ops with no patterns", () => {
     expect(redactPrompt("hello", [])).toBe("hello");

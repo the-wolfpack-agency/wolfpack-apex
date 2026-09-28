@@ -24,6 +24,7 @@ import { recordGateDecision } from "@/lib/gates/audit";
 import { DEFAULT_COMPLIANCE_POLICY, type CompliancePolicy, type GateAgent } from "@/lib/gates/types";
 import { getAIClient } from "@/lib/ai";
 import { trackEvent } from "@/lib/analytics";
+import { checkRateLimit } from "@/lib/ogiam/gate-rate-limit";
 
 /** Build the client's compliance policy from the request, falling back to the
  *  safe default (deterministic only, no data to any model). Only recognized
@@ -72,6 +73,13 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ gate: stri
   if (entitlement) {
     const gateResp = await requireEntitlement(auth.user.workspaceId, entitlement);
     if (gateResp) return gateResp;
+  }
+
+  // Per-workspace rate limit on the deployable gate surface: an authenticated,
+  // entitled caller still cannot hammer it. Fail-closed (a store error denies).
+  const rl = await checkRateLimit(`gate:${auth.user.workspaceId ?? "default"}`);
+  if (!rl.ok) {
+    return NextResponse.json({ error: "rate limit exceeded for gate calls; retry shortly", remaining: 0 }, { status: 429 });
   }
 
   let body: { input?: unknown; policy?: unknown };

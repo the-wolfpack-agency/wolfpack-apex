@@ -28,6 +28,10 @@ export interface AuditAllowlistEntry {
 
 export const AUDIT_ALLOWLIST: ReadonlyArray<AuditAllowlistEntry> = [
   {
+    route: "src/app/api/gate/chain/route.ts",
+    reason: "Runs a chain of Agent Gates; each gate decision is audited to the OGIAM hash-chained ledger (recordGateDecision, per step) - the stronger, tamper-evident home for a chain of allow/transform/escalate/deny verdicts. Same rationale as the single-gate endpoint; a recordAudit row would be redundant.",
+  },
+  {
     route: "src/app/api/gate/[gate]/route.ts",
     reason: "An Agent Gate decision IS an authorization decision, so it is audited to the OGIAM hash-chained ledger (recordGateDecision -> recordDecision in src/lib/gates/audit.ts), not the recordAudit log - the stronger, tamper-evident home for an allow/transform/escalate/deny verdict, and the one the client verifies. Adding a second recordAudit row would be redundant. Delegated-to-a-downstream-library-that-already-audits case.",
   },

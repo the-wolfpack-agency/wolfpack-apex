@@ -56,13 +56,20 @@ export interface ChainRunResult {
 export async function runChain(
   steps: readonly ChainStep[],
   ctx: GateContext,
-  startInput: unknown = undefined,
+  opts: {
+    /** Seed for the first step's input(). */
+    startInput?: unknown;
+    /** Called after each gate runs, with its full result - so a caller can audit
+     *  every decision in the chain (each is a real gate decision, ledger-worthy). */
+    onStep?: (gate: string, result: Awaited<ReturnType<typeof runGate>>) => void | Promise<void>;
+  } = {},
 ): Promise<ChainRunResult> {
   const ran: ChainStepRecord[] = [];
-  let carry = startInput;
+  let carry = opts.startInput;
 
   for (const step of steps) {
     const result = await runGate(step.gate, step.input(carry), ctx);
+    if (opts.onStep) await opts.onStep(step.gate.name, result);
     ran.push({ gate: step.gate.name, verdict: result.verdict, reason: result.reason });
 
     switch (result.verdict) {

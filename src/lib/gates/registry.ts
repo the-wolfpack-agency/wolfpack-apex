@@ -15,6 +15,7 @@ import { promptInjectionGate } from "./prompt-injection-gate";
 import { migrationSafetyGate } from "./migration-safety-gate";
 import { responseReviewGate } from "./response-review-gate";
 import { prePrValidateGate } from "./pre-pr-validate-gate";
+import { licenseReviewGate } from "./license-review-gate";
 
 const REGISTRY = new Map<string, GateDefinition<unknown, unknown>>();
 
@@ -33,6 +34,7 @@ register(promptInjectionGate as GateDefinition<unknown, unknown>);
 register(migrationSafetyGate as GateDefinition<unknown, unknown>);
 register(responseReviewGate as GateDefinition<unknown, unknown>);
 register(prePrValidateGate as GateDefinition<unknown, unknown>);
+register(licenseReviewGate as GateDefinition<unknown, unknown>);
 
 /** Look up a gate by name, or undefined if not registered (the route 404s). */
 export function getGate(name: string): GateDefinition<unknown, unknown> | undefined {

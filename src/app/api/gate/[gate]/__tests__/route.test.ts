@@ -4,6 +4,7 @@ const mockGate = jest.fn();
 const mockRunGate = jest.fn();
 const mockGetGate = jest.fn();
 const mockRecord = jest.fn();
+const mockRateLimit = jest.fn();
 
 jest.mock("@/lib/auth/require-capability", () => ({ requireCapability: (...a: unknown[]) => mockRequireCapability(...a) }));
 jest.mock("@/lib/tenancy/require-entitlement", () => ({ requireEntitlement: (...a: unknown[]) => mockGate(...a) }));
@@ -11,6 +12,7 @@ jest.mock("@/lib/gates/registry", () => ({ getGate: (...a: unknown[]) => mockGet
 jest.mock("@/lib/gates/run-gate", () => ({ runGate: (...a: unknown[]) => mockRunGate(...a) }));
 jest.mock("@/lib/gates/audit", () => ({ recordGateDecision: (...a: unknown[]) => mockRecord(...a) }));
 jest.mock("@/lib/ai", () => ({ getAIClient: () => ({ complete: jest.fn() }) }));
+jest.mock("@/lib/ogiam/gate-rate-limit", () => ({ checkRateLimit: (...a: unknown[]) => mockRateLimit(...a) }));
 
 import { NextRequest } from "next/server";
 import { POST } from "../route";
@@ -37,6 +39,7 @@ beforeEach(() => {
   mockGetGate.mockReturnValue(DEF);
   mockRunGate.mockResolvedValue(ALLOW_RESULT);
   mockRecord.mockResolvedValue({ recordedSeq: 42 });
+  mockRateLimit.mockResolvedValue({ ok: true, remaining: 100 });
 });
 
 test("401 when the capability check fails", async () => {
@@ -85,3 +88,11 @@ test("defaults to a no-model policy when none is supplied (safe by default)", as
   await post("safe-review", { input: { diff: "d" } });
   expect(mockRunGate).toHaveBeenCalledWith(DEF, { diff: "d" }, expect.objectContaining({ policy: expect.objectContaining({ allowModelData: "none" }) }));
 });
+
+test("429 when the workspace exceeds its gate rate limit", async () => {
+  mockRateLimit.mockResolvedValue({ ok: false, remaining: 0 });
+  const res = await post("safe-review", { input: { diff: "d" } });
+  expect(res.status).toBe(429);
+  expect(mockRunGate).not.toHaveBeenCalled(); // the gate never ran
+});
+
