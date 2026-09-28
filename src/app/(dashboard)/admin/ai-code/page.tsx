@@ -119,8 +119,9 @@ interface ModelGrade { model: string; n: number; readyRate: number; firstPassRat
 interface Grade { total: number; readyRate: number; firstPassRate: number; blockRate: number; escalationRate: number; byModel: ModelGrade[] }
 interface DriftFlag { model: string; priorReadyRate: number; recentReadyRate: number; drop: number; priorN: number; recentN: number }
 interface ProtectionSummary { totalCaught: number; byClass: { klass: string; label: string; count: number }[]; changesBlocked: number; sentForReview: number; criticalsCaught: number; windowDays: number }
-interface GateDecisionRow { gate: string; verdict: "allow" | "auto_fix" | "require_human" | "deny"; modelInvoked: string | null; findings: number; recordedSeq: number | null; createdAt: string }
-interface GateSafety { total: number; allowed: number; autoFixed: number; escalatedToHuman: number; badChangesPrevented: number; dataKeptFromModel: number; frameworks: string[]; recent: GateDecisionRow[] }
+interface GateDecisionRow { gate: string; verdict: "allow" | "auto_fix" | "require_human" | "deny"; modelInvoked: string | null; findings: number; recordedSeq: number | null; createdAt: string; previewUrl: string | null }
+interface AwaitingProd { previewUrl: string | null; recordedSeq: number | null; createdAt: string }
+interface GateSafety { total: number; allowed: number; autoFixed: number; escalatedToHuman: number; badChangesPrevented: number; dataKeptFromModel: number; frameworks: string[]; recent: GateDecisionRow[]; awaitingProd: AwaitingProd[] }
 interface HistoryData { runs: RunSummary[]; grade: Grade; drift: DriftFlag[]; protected?: ProtectionSummary; gateSafety?: GateSafety }
 
 interface AuditVerification { ok: boolean; verifiedCount: number; legacyCount: number; brokenAtSeq: number | null; headSeq: number; headHash: string | null }
@@ -911,6 +912,22 @@ export default function CodeFactoryPage() {
 
       {history?.gateSafety && history.gateSafety.total > 0 && (
         <GlassPanel title="How we kept you safe" subtitle="Every change - AI- or human-authored - runs through the gate. This is what the gate did on your behalf, and it is verifiable.">
+          {history.gateSafety.awaitingProd.length > 0 && (
+            <div data-testid="awaiting-prod" style={{ marginBottom: "0.9rem", padding: "0.75rem 0.9rem", borderRadius: 10, border: "1px solid var(--wp-gold, #e8b528)", background: "color-mix(in srgb, var(--wp-gold, #e8b528) 10%, transparent)" }}>
+              <div style={{ fontSize: "0.78rem", fontWeight: 700, color: "var(--wp-gold, #e8b528)", textTransform: "uppercase", letterSpacing: "0.03em" }}>Awaiting your production decision</div>
+              <p style={{ margin: "0.3rem 0 0.5rem", fontSize: "0.82rem", color: "var(--wp-text-dim)" }}>Everything before production is automated and verified. Review the preview, then promote - the one human step.</p>
+              {history.gateSafety.awaitingProd.map((a, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: "0.6rem", flexWrap: "wrap", fontSize: "0.85rem", padding: "0.35rem 0" }}>
+                  {a.previewUrl ? (
+                    <a href={a.previewUrl} target="_blank" rel="noreferrer" style={{ color: "var(--wp-gold, #e8b528)", fontWeight: 600, wordBreak: "break-all" }}>{a.previewUrl}</a>
+                  ) : (
+                    <span style={{ color: "var(--wp-text-dim)" }}>(no preview URL recorded)</span>
+                  )}
+                  {a.recordedSeq != null ? <span style={{ marginLeft: "auto", color: "var(--wp-text-dim)", fontVariantNumeric: "tabular-nums" }}>ledger #{a.recordedSeq}</span> : null}
+                </div>
+              ))}
+            </div>
+          )}
           <div data-testid="gate-safety" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "0.75rem" }}>
             {[
               { k: "Data kept from the LLM", v: history.gateSafety.dataKeptFromModel, hint: "decisions where your data never went to a model", c: "var(--wp-gold, #e8b528)" },
@@ -938,6 +955,7 @@ export default function CodeFactoryPage() {
                   <span style={{ fontWeight: 600 }}>{d.gate}</span>
                   <StatusPill status={d.verdict} tone={d.verdict === "deny" ? "error" : d.verdict === "require_human" ? "warning" : "success"} label={d.verdict === "allow" ? "Allowed" : d.verdict === "auto_fix" ? "Auto-fixed" : d.verdict === "require_human" ? "Sent to human" : "Blocked"} size="sm" />
                   <span style={{ color: d.modelInvoked ? "var(--wp-text-dim)" : "var(--wp-gold, #e8b528)" }}>{d.modelInvoked ? `model: ${d.modelInvoked}` : "no model - data kept in"}</span>
+                  {d.previewUrl ? <a href={d.previewUrl} target="_blank" rel="noreferrer" style={{ color: "var(--wp-gold, #e8b528)", wordBreak: "break-all" }}>preview</a> : null}
                   {d.recordedSeq != null ? <span style={{ marginLeft: "auto", color: "var(--wp-text-dim)", fontVariantNumeric: "tabular-nums" }}>ledger #{d.recordedSeq}</span> : null}
                 </div>
               ))}

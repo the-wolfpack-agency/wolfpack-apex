@@ -369,6 +369,21 @@ test("history rows expand to show the actual code change, with clear status pill
   expect(detail).toHaveTextContent(/Gate verdict:.*no findings/i);
 });
 
+test("the 'awaiting your production decision' callout shows a clickable preview URL", async () => {
+  historyResp = resp(200, {
+    runs: [], grade: { total: 0, readyRate: 0, firstPassRate: 0, blockRate: 0, escalationRate: 0, byModel: [] }, drift: [],
+    gateSafety: {
+      total: 1, allowed: 0, autoFixed: 0, escalatedToHuman: 1, badChangesPrevented: 0, dataKeptFromModel: 1,
+      frameworks: [], recent: [], awaitingProd: [{ previewUrl: "https://preview-abc.vercel.app", recordedSeq: 21, createdAt: "2026-09-28T10:00:00Z" }],
+    },
+  });
+  render(<CodeFactoryPage />);
+  await waitFor(() => expect(screen.getByTestId("awaiting-prod")).toBeInTheDocument());
+  const link = screen.getByRole("link", { name: /preview-abc\.vercel\.app/ });
+  expect(link).toHaveAttribute("href", "https://preview-abc.vercel.app");
+  expect(screen.getByTestId("awaiting-prod")).toHaveTextContent(/ledger #21/);
+});
+
 test("a history run with no stored diff says so instead of a dead click", async () => {
   historyResp = resp(200, {
     runs: [{ ref: "old-run", model: "claude", status: "ready_for_pr", attempts: 0, finalOutcome: "allow", deepScanCritical: 0, conforms: true, createdAt: "2026-09-20T10:00:00Z" }],
@@ -388,9 +403,10 @@ test("the 'How we kept you safe' panel renders the gate-safety metrics + a verif
       total: 3, allowed: 1, autoFixed: 1, escalatedToHuman: 1, badChangesPrevented: 1, dataKeptFromModel: 2,
       frameworks: ["SOC2", "GDPR"],
       recent: [
-        { gate: "safe-review", verdict: "deny", modelInvoked: null, findings: 1, recordedSeq: 11, createdAt: "2026-09-28T10:00:00Z" },
-        { gate: "ci-autofix", verdict: "auto_fix", modelInvoked: "gpt-4o-mini", findings: 0, recordedSeq: 12, createdAt: "2026-09-28T09:00:00Z" },
+        { gate: "safe-review", verdict: "deny", modelInvoked: null, findings: 1, recordedSeq: 11, createdAt: "2026-09-28T10:00:00Z", previewUrl: null },
+        { gate: "ci-autofix", verdict: "auto_fix", modelInvoked: "gpt-4o-mini", findings: 0, recordedSeq: 12, createdAt: "2026-09-28T09:00:00Z", previewUrl: null },
       ],
+      awaitingProd: [],
     },
   });
   render(<CodeFactoryPage />);
