@@ -1,0 +1,1 @@
+      const lines = src.split("\n"); // Split source code into lines
