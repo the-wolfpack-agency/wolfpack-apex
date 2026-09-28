@@ -10,6 +10,7 @@ import { deployHealthGate } from "./deploy-health-gate";
 import { previewVerifyGate } from "./preview-verify-gate";
 import { prodPromoteGate } from "./prod-promote-gate";
 import { dataEgressGate } from "./data-egress-gate";
+import { dependencyReviewGate } from "./dependency-review-gate";
 
 const REGISTRY = new Map<string, GateDefinition<unknown, unknown>>();
 
@@ -23,6 +24,7 @@ register(deployHealthGate as GateDefinition<unknown, unknown>);
 register(previewVerifyGate as GateDefinition<unknown, unknown>);
 register(prodPromoteGate as GateDefinition<unknown, unknown>);
 register(dataEgressGate as GateDefinition<unknown, unknown>);
+register(dependencyReviewGate as GateDefinition<unknown, unknown>);
 
 /** Look up a gate by name, or undefined if not registered (the route 404s). */
 export function getGate(name: string): GateDefinition<unknown, unknown> | undefined {
