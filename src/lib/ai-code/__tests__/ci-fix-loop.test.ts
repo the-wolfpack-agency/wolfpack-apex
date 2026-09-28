@@ -123,3 +123,13 @@ describe("snapshot failures escalate (never auto-update)", () => {
     expect(d.reason).toMatch(/mask a regression/i);
   });
 });
+
+describe("deterministic fix dispatched -> waits (no model)", () => {
+  const redComplete = { total: 2, passed: 1, failed: 1, pending: 0, complete: true, ciComplete: false, readable: true, failedChecks: ["lint"], failedDetails: [{ name: "lint", summary: "x" }] };
+  it("waits for the deterministic fixer instead of authoring", () => {
+    const d = decideFixAction({ ci: redComplete as never, attempt: 0, maxAttempts: 3, introducedFailing: 1, deterministicFixDispatched: true });
+    expect(d.action).toBe("wait");
+    expect(d.reason).toMatch(/deterministic fixer/i);
+    expect(d.reason).toMatch(/eslint --fix/);
+  });
+});

@@ -15,6 +15,7 @@ const mockCountFixCommits = jest.fn();
 const mockListChangedFiles = jest.fn();
 const mockListRuns = jest.fn();
 const mockRerun = jest.fn();
+const mockTriggerWorkflow = jest.fn();
 const mockCommit = jest.fn();
 const mockAuthorFiles = jest.fn();
 const mockAssessChange = jest.fn();
@@ -25,6 +26,7 @@ jest.mock("@/lib/github-client", () => ({
   listChangedFiles: (...a: unknown[]) => mockListChangedFiles(...a),
   listWorkflowRunsRaw: (...a: unknown[]) => mockListRuns(...a),
   rerunFailedRun: (...a: unknown[]) => mockRerun(...a),
+  triggerWorkflow: (...a: unknown[]) => mockTriggerWorkflow(...a),
 }));
 const mockGather = jest.fn();
 jest.mock("@/lib/ai-code/ci-failure-detail", () => ({
@@ -62,6 +64,7 @@ beforeEach(() => {
   mockListChangedFiles.mockResolvedValue([]);
   mockListRuns.mockResolvedValue([]);
   mockRerun.mockResolvedValue(true);
+  mockTriggerWorkflow.mockResolvedValue({ run_id: null });
   mockGather.mockResolvedValue({ detail: "", files: [] });
   mockAuthorFiles.mockResolvedValue({ changes: [{ path: "src/x.ts", content: "export const x = 2;" }], author: "model-b", error: null });
   mockCommit.mockResolvedValue(["src/x.ts"]);
@@ -261,5 +264,36 @@ test("snapshot failure escalates (never auto-updates the snapshot), no author", 
   expect(body.decision.reason).toMatch(/SNAPSHOT/);
   expect(body.snapshotFailure).toBe(true);
   expect(mockAuthorFiles).not.toHaveBeenCalled();
+});
+
+test("lint failure with a deterministic-fix workflow configured: dispatches it + waits (NO model)", async () => {
+  const orig = process.env.DETERMINISTIC_FIX_WORKFLOW;
+  process.env.DETERMINISTIC_FIX_WORKFLOW = "factory-deterministic-fix.yml";
+  try {
+    mockFetchCiStatus.mockResolvedValue(red);
+    mockFetchAttribution.mockResolvedValue({ introduced: ["lint"], preexisting: [], indeterminate: [], fixed: [], baselineKnown: true, baselineHealthy: false, clean: false, reason: "introduced lint" });
+    mockCountFixCommits.mockResolvedValue(0);
+    mockGather.mockResolvedValue({ detail: "eslint: 'x' is assigned a value but never used  @typescript-eslint/no-unused-vars", files: [] });
+    const body = await (await POST(post({ repo: "o/r", ref: "b", branch: "factory/b-abc", base: "main", attempt: 0, maxAttempts: 3 }))).json();
+    expect(mockTriggerWorkflow).toHaveBeenCalledWith(expect.anything(), "o/r", "factory-deterministic-fix.yml", "factory/b-abc");
+    expect(body.decision.action).toBe("wait");
+    expect(body.deterministicFixDispatched).toBe(true);
+    expect(mockAuthorFiles).not.toHaveBeenCalled();  // the model was NOT used for a lint fix
+    expect(mockRerun).not.toHaveBeenCalled();          // and no flake re-run either
+  } finally {
+    if (orig === undefined) delete process.env.DETERMINISTIC_FIX_WORKFLOW; else process.env.DETERMINISTIC_FIX_WORKFLOW = orig;
+  }
+});
+
+test("lint failure WITHOUT the workflow configured: falls through to the model path (unchanged)", async () => {
+  delete process.env.DETERMINISTIC_FIX_WORKFLOW;
+  mockFetchCiStatus.mockResolvedValue(red);
+  mockFetchAttribution.mockResolvedValue({ introduced: ["lint"], preexisting: [], indeterminate: [], fixed: [], baselineKnown: true, baselineHealthy: false, clean: false, reason: "introduced lint" });
+  mockCountFixCommits.mockResolvedValue(0);
+  mockGather.mockResolvedValue({ detail: "eslint: no-unused-vars", files: [] });
+  mockListRuns.mockResolvedValue([]); // no flake candidates -> author path
+  const body = await (await POST(post({ repo: "o/r", ref: "b", branch: "factory/b-abc", base: "main", attempt: 0, maxAttempts: 3 }))).json();
+  expect(mockTriggerWorkflow).not.toHaveBeenCalled();
+  expect(body.decision.action).toBe("author_fix");
 });
 
