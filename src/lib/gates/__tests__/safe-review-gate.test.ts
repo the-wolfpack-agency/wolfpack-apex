@@ -47,7 +47,7 @@ it("require_human: an engineering-invariant block asks a person to look (not a h
 
 describe("test-fixture allowlist (secret-in-fixture downgrades deny -> require_human)", () => {
   const SECRET_LINE = 'const key = "sk-ant-abcdefghijklmnopqrstuvwxyz1234567890";';
-  const diffIn = (file) => `diff --git a/${file} b/${file}\n--- /dev/null\n+++ b/${file}\n@@ -0,0 +1 @@\n+${SECRET_LINE}\n`;
+  const diffIn = (file: string) => `diff --git a/${file} b/${file}\n--- /dev/null\n+++ b/${file}\n@@ -0,0 +1 @@\n+${SECRET_LINE}\n`;
 
   it("a secret only in a __tests__ file -> require_human (confirm test data), not deny", async () => {
     mockAssess.mockResolvedValue({ ...clean, securityOutcome: "block", handoffAllowed: false, blockedBy: "security" });
