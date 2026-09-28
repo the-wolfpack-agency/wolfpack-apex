@@ -9,10 +9,17 @@
  * thin poll loop: call ci-fix, print the verdict, stop when `terminal`, otherwise
  * wait for CI and go again.
  *
+ * With --prompt it runs the WHOLE dogfood cycle: build (pipeline authors + the
+ * deterministic gate) -> approve (opens the PR) -> drive the CI-fix loop. Without
+ * --prompt it just drives an existing --branch.
+ *
  *   FACTORY_EMAIL=... FACTORY_PASSWORD=... \
  *   node scripts/dogfood-ci-fix.mjs \
  *     --repo the-wolfpack-agency/wolfpack-cayenne-e4 \
- *     --branch factory/feat-x-abc --base main [--ref task-id] [--max 3]
+ *     --ref feat-x-1 --prompt "Add ..." [--base main] [--max 3]
+ *
+ *   # or drive an already-open factory branch:
+ *   node scripts/dogfood-ci-fix.mjs --repo <o/r> --branch factory/feat-x-abc
  *
  * No credentials are baked in; they come from the environment.
  */
@@ -25,15 +32,18 @@ function arg(name, def) {
   return i >= 0 && process.argv[i + 1] ? process.argv[i + 1] : def;
 }
 const repo = arg("repo");
-const branch = arg("branch");
+let branch = arg("branch");
 const base = arg("base", "main");
+const prompt = arg("prompt");
 const ref = arg("ref", branch);
 const maxAttempts = Number(arg("max", "3"));
 const pollSeconds = Number(arg("poll", "30"));
 const ceiling = Number(arg("ceiling", "40")); // hard stop on total loop iterations
 
 if (!EMAIL || !PASSWORD) { console.error("set FACTORY_EMAIL and FACTORY_PASSWORD"); process.exit(2); }
-if (!repo || !branch) { console.error("--repo and --branch are required"); process.exit(2); }
+if (!repo) { console.error("--repo is required"); process.exit(2); }
+if (!branch && !prompt) { console.error("either --branch (drive) or --prompt (build+drive) is required"); process.exit(2); }
+if (prompt && !ref) { console.error("--ref is required with --prompt (it names the branch + PR)"); process.exit(2); }
 
 const sleep = (s) => new Promise((r) => setTimeout(r, s * 1000));
 
@@ -58,8 +68,35 @@ async function driveOnce(token) {
   return { status: r.status, body };
 }
 
+/** Build phase: author + gate the change, then approve to open the PR. Returns
+ *  the opened branch. Uses response.json() throughout (robust to newlines in the
+ *  diff that broke the earlier ad-hoc jq). */
+async function buildAndOpen(token) {
+  const pr = await fetch(`${BASE}/api/admin/ai-code/pipeline`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+    body: JSON.stringify({ ref, prompt, repo, maxAttempts }),
+  });
+  const run = await pr.json().catch(() => ({}));
+  console.log(`build: status=${run?.run?.status} approvalId=${run.approvalId || "(none)"} syntaxOk=${run?.syntax?.ok} outcome=${run?.run?.review?.verdict?.outcome}`);
+  if (!run.approvalId) {
+    throw new Error(`pipeline did not produce an approval (status=${run?.run?.status}); gate blocked or needs_human`);
+  }
+  const ap = await fetch(`${BASE}/api/admin/agents/approvals/${run.approvalId}`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+    body: JSON.stringify({ action: "approve" }),
+  });
+  const out = await ap.json().catch(() => ({}));
+  const b = out?.outcome?.branch;
+  if (!b) throw new Error(`approve did not open a PR: ${out?.outcome?.reason || out?.error || "unknown"}`);
+  console.log(`opened PR ${out?.outcome?.url} on ${b}\n`);
+  return b;
+}
+
 (async () => {
   let token = await login();
+  if (prompt) branch = await buildAndOpen(token);
   console.log(`driving ${repo} ${branch} (base ${base}), max ${maxAttempts} fix attempts\n`);
   for (let i = 1; i <= ceiling; i++) {
     let { status, body } = await driveOnce(token);
