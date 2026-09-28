@@ -123,9 +123,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     contextSummary = { detailChars: gathered.detail.length, files: gathered.files.map((f) => f.path) };
     // Non-progress on an authored test: if a fix was ALREADY committed and a test
     // THIS change added/changed is still failing, the test's expected value is the
-    // likely culprit (a wrong-test the fixer must not weaken). Diagnose + escalate
-    // rather than authoring another source fix that cannot converge (found by
-    // dogfooding the averageWordLength case).
+    // likely culprit. We do NOT escalate - we tell the re-author to correct the
+    // wrong test expectation so the loop CONVERGES to green (a human still reviews
+    // + merges). Found by dogfooding the averageWordLength / parseDuration cases.
     if (priorFixCommits >= 1) {
       const failingTests = extractFailingTestFiles(gathered.detail);
       if (failingTests.length > 0) {
@@ -141,13 +141,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     attempt: effectiveAttempt,
     maxAttempts,
     introducedFailing,
-    stalledOnAuthoredTest,
     briefDetails,
     reauthor: async (brief) => {
       // Reuse the context gathered above (never re-fetch). Empty only if the
       // decision changed under us; buildEnrichedFixPrompt degrades to the brief.
       const context = gathered ?? { detail: "", files: [] };
-      const prompt = buildEnrichedFixPrompt({ repo, branch, brief, context });
+      const prompt = buildEnrichedFixPrompt({ repo, branch, brief, context, authoredTestStillFailing: stalledOnAuthoredTest?.testFiles });
       const authored = await authorFileChanges(
         { prompt, feature: "ai-code-ci-fix" },
         { complete: (r) => ai.complete(r) },

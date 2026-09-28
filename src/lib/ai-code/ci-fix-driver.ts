@@ -33,10 +33,6 @@ export async function runCiFixStep(args: {
    *  zero, the fixer does not author (the red is pre-existing). Threaded to the
    *  deterministic decision. */
   introducedFailing?: number;
-  /** Non-progress signal: a fix was already committed but a test THIS change
-   *  authored is still failing. Threaded to the decision so it escalates with a
-   *  wrong-test diagnosis rather than authoring a fix that cannot converge. */
-  stalledOnAuthoredTest?: { testFiles: string[] };
   /** The failed-check details to brief the re-author with. Defaults to every
    *  failing check; the route narrows this to only the INTRODUCED checks so the
    *  fixer never tries to repair pre-existing red. */
@@ -52,7 +48,7 @@ export async function runCiFixStep(args: {
    *  but the route always supplies the real combined gate. */
   gate?: (changes: FileChange[]) => Promise<{ cleared: boolean; blockedBy: string | null }>;
 }): Promise<CiFixStepResult> {
-  const decision = decideFixAction({ ci: args.ci, attempt: args.attempt, maxAttempts: args.maxAttempts, introducedFailing: args.introducedFailing, stalledOnAuthoredTest: args.stalledOnAuthoredTest });
+  const decision = decideFixAction({ ci: args.ci, attempt: args.attempt, maxAttempts: args.maxAttempts, introducedFailing: args.introducedFailing });
 
   // Only author_fix does work. merge_ready / escalate_human are terminal; wait is
   // non-terminal (poll again) but changes nothing.

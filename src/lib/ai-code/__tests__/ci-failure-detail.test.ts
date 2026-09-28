@@ -65,7 +65,19 @@ test("buildEnrichedFixPrompt carries the error detail + file contents + a fix-th
   expect(prompt).toMatch(/did not throw/);
   expect(prompt).toMatch(/FILE: src\/lib\/readingTime\.ts/);
   expect(prompt).toMatch(/export function readingTime/);
-  expect(prompt).toMatch(/do NOT weaken, delete, or trivially satisfy any test/i);
+  expect(prompt).toMatch(/Never delete, disable, skip, or otherwise weaken a test/i);
+  expect(prompt).toMatch(/correct that test.s expected value/i);
+});
+
+test("buildEnrichedFixPrompt adds a correct-the-wrong-test hint when an authored test keeps failing", () => {
+  const prompt = buildEnrichedFixPrompt({
+    repo: "o/r", branch: "factory/x", brief: "unit failed",
+    context: { detail: "FAIL x.test.ts\nExpected 194400\nReceived 187200", files: [] },
+    authoredTestStillFailing: ["src/lib/__tests__/parseDuration.test.ts"],
+  });
+  expect(prompt).toContain("STILL failing: src/lib/__tests__/parseDuration.test.ts");
+  expect(prompt).toMatch(/correct the expected value/i);
+  expect(prompt).toMatch(/"Received" is the source.s actual result/i);
 });
 
 test("buildEnrichedFixPrompt degrades gracefully with no context (just the brief)", () => {
