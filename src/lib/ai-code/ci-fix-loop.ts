@@ -38,6 +38,10 @@ export interface FixLoopState {
    *  governance gate pass by editing code around it is the exact trust failure
    *  this system prevents. Escalate with the signal instead. */
   governanceFailure?: { signal: string };
+  /** Set when the failure looks like INFRA/TRANSIENT (a timeout, OOM, lost runner,
+   *  network blip) rather than a code bug. Authoring a code fix is pointless - the
+   *  right move is to re-run CI. Escalated to a human with that reason. */
+  transientFailure?: { signal: string };
 }
 
 /**
@@ -75,6 +79,12 @@ export function decideFixAction(state: FixLoopState): FixDecision {
     return {
       action: "escalate_human",
       reason: `CI failed on a governance/policy gate (${state.governanceFailure.signal}). Resolving it is a human policy decision, not a mechanical fix - the fixer will not edit code to make a guardrail pass. A human should decide.`,
+    };
+  }
+  if (state.transientFailure) {
+    return {
+      action: "escalate_human",
+      reason: `CI failed on what looks like an infrastructure/transient error (${state.transientFailure.signal}), not a code bug. Re-run CI or check the infra - a code fix would not help. Handed to a human.`,
     };
   }
   if (state.attempt < state.maxAttempts) {

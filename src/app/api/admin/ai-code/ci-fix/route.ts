@@ -105,6 +105,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   let gathered: Awaited<ReturnType<typeof gatherFailureContext>> | null = null;
   let stalledOnAuthoredTest: { testFiles: string[] } | undefined;
   let governanceFailure: { signal: string } | undefined;
+  let transientFailure: { signal: string } | undefined;
   // Gather whenever there is an INTRODUCED failure to act on - i.e. CI is
   // readable, complete, not green, and this change introduced at least one of the
   // failures. That covers BOTH the author-a-fix case and the budget-exhausted
@@ -128,6 +129,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // code to make a governance gate pass. Classify from the check names + detail.
     const cls = classifyCiFailure(gathered.detail, ci.failedChecks);
     if (cls.kind === "governance") governanceFailure = { signal: cls.signal };
+    else if (cls.kind === "transient") transientFailure = { signal: cls.signal };
     // Non-progress on an authored test: if a fix was ALREADY committed and a test
     // THIS change added/changed is still failing, the test's expected value is the
     // likely culprit. We do NOT escalate - we tell the re-author to correct the
@@ -149,6 +151,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     maxAttempts,
     introducedFailing,
     governanceFailure,
+    transientFailure,
     briefDetails,
     reauthor: async (brief) => {
       // Reuse the context gathered above (never re-fetch). Empty only if the
@@ -172,5 +175,5 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       commitFileChanges({ client, repoFullName: repo, branch, base: branch, changes, message: `factory ci-fix: ${ref}` }),
   });
 
-  return NextResponse.json({ ...result, context: contextSummary, budget: { attempt: effectiveAttempt, priorFixCommits, maxAttempts }, ...(stalledOnAuthoredTest ? { stalledOnAuthoredTest } : {}), ...(governanceFailure ? { governanceFailure } : {}) });
+  return NextResponse.json({ ...result, context: contextSummary, budget: { attempt: effectiveAttempt, priorFixCommits, maxAttempts }, ...(stalledOnAuthoredTest ? { stalledOnAuthoredTest } : {}), ...(governanceFailure ? { governanceFailure } : {}), ...(transientFailure ? { transientFailure } : {}) });
 }
