@@ -432,19 +432,35 @@ export interface WorkflowRunRef {
   id: number;
   name: string;
   conclusion: string | null;
+  /** Which attempt this run is on. 1 = original; >=2 = it was re-run. Used to
+   *  rule out a flake: re-run a failing job ONCE, and only trust a failure that
+   *  survives the re-run. */
+  runAttempt: number;
 }
 
 /** Workflow runs for a commit, with their run IDs (needed to reach the jobs +
  *  logs that carry the actual failure detail). */
 export async function listWorkflowRunsRaw(client: GithubClient, repoFullName: string, sha: string): Promise<WorkflowRunRef[]> {
-  const res = await gh<{ workflow_runs?: { id?: number; name?: string; display_title?: string; conclusion?: string | null }[] }>(
+  const res = await gh<{ workflow_runs?: { id?: number; name?: string; display_title?: string; conclusion?: string | null; run_attempt?: number }[] }>(
     client,
     "GET",
     `/repos/${repoFullName}/actions/runs?head_sha=${encodeURIComponent(sha)}&per_page=100`,
   );
   return (res.workflow_runs ?? [])
     .filter((w) => typeof w.id === "number")
-    .map((w) => ({ id: w.id as number, name: w.name || w.display_title || "workflow", conclusion: w.conclusion ?? null }));
+    .map((w) => ({ id: w.id as number, name: w.name || w.display_title || "workflow", conclusion: w.conclusion ?? null, runAttempt: typeof w.run_attempt === "number" ? w.run_attempt : 1 }));
+}
+
+/** Re-run the FAILED jobs of a workflow run once (increments its run_attempt), to
+ *  rule out a flake before the fixer authors a code fix. Best-effort: returns
+ *  false if the re-run could not be triggered (never throws). */
+export async function rerunFailedRun(client: GithubClient, repoFullName: string, runId: number): Promise<boolean> {
+  try {
+    await gh(client, "POST", `/repos/${repoFullName}/actions/runs/${runId}/rerun-failed-jobs`);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export interface WorkflowJobRef {

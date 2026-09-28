@@ -42,6 +42,10 @@ export interface FixLoopState {
    *  network blip) rather than a code bug. Authoring a code fix is pointless - the
    *  right move is to re-run CI. Escalated to a human with that reason. */
   transientFailure?: { signal: string };
+  /** Set when the failed job(s) were just re-run ONCE to rule out a flake. The
+   *  decision is to WAIT for that re-run before authoring - a flake will clear,
+   *  a real failure survives and is fixed on the next pass. */
+  flakeRecheckTriggered?: boolean;
 }
 
 /**
@@ -85,6 +89,12 @@ export function decideFixAction(state: FixLoopState): FixDecision {
     return {
       action: "escalate_human",
       reason: `CI failed on what looks like an infrastructure/transient error (${state.transientFailure.signal}), not a code bug. Re-run CI or check the infra - a code fix would not help. Handed to a human.`,
+    };
+  }
+  if (state.flakeRecheckTriggered) {
+    return {
+      action: "wait",
+      reason: "Re-ran the failed job(s) once to rule out a flake; waiting for the re-run to settle before authoring a fix.",
     };
   }
   if (state.attempt < state.maxAttempts) {

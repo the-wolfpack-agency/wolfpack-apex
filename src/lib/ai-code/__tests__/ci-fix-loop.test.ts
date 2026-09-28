@@ -104,3 +104,12 @@ describe("transient/infra failure re-runs (escalates), never authored", () => {
     expect(d.reason).toMatch(/ETIMEDOUT/);
   });
 });
+
+describe("flake recheck waits before authoring", () => {
+  const redComplete = { total: 2, passed: 1, failed: 1, pending: 0, complete: true, ciComplete: false, readable: true, failedChecks: ["unit"], failedDetails: [{ name: "unit", summary: "x" }] };
+  it("waits (does not author) right after a re-run was triggered", () => {
+    const d = decideFixAction({ ci: redComplete as never, attempt: 0, maxAttempts: 3, introducedFailing: 1, flakeRecheckTriggered: true });
+    expect(d.action).toBe("wait");
+    expect(d.reason).toMatch(/rule out a flake/i);
+  });
+});
