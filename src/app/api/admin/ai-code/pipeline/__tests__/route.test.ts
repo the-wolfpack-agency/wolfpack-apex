@@ -32,7 +32,11 @@ const mockComplete = jest.fn();
 jest.mock("@/lib/ai", () => ({ getAIClient: () => ({ complete: (...a: unknown[]) => mockComplete(...a) }) }));
 const mockWorkspaceClient = jest.fn();
 const mockBuildContext = jest.fn();
-jest.mock("@/lib/github-client", () => ({ workspaceGithubClient: (...a: unknown[]) => mockWorkspaceClient(...a) }));
+const mockFetchFile = jest.fn();
+jest.mock("@/lib/github-client", () => ({
+  workspaceGithubClient: (...a: unknown[]) => mockWorkspaceClient(...a),
+  fetchFileContent: (...a: unknown[]) => mockFetchFile(...a),
+}));
 jest.mock("@/lib/ai-code/repo-context", () => ({
   buildRepoContext: (...a: unknown[]) => mockBuildContext(...a),
   withRepoContext: (prompt: string, block: string) => (block ? block + "\n" + prompt : prompt),
@@ -81,6 +85,7 @@ beforeEach(() => {
   mockComplete.mockResolvedValue(authorResp("```diff\n" + AUTHORED_DIFF + "\n```"));
   mockWorkspaceClient.mockResolvedValue({ token: "t", fetch: jest.fn() });
   mockBuildContext.mockResolvedValue({ block: "", files: [] });
+  mockFetchFile.mockResolvedValue(null); // no package.json by default -> phantom check is a no-op
 });
 
 describe("POST /api/admin/ai-code/pipeline", () => {
@@ -173,6 +178,39 @@ describe("POST /api/admin/ai-code/pipeline", () => {
     const retryPrompt = mockComplete.mock.calls[1][0].messages[0].content as string;
     expect(retryPrompt).toMatch(/did NOT parse/i);
     expect(retryPrompt).toMatch(/src\/lib\/slug\.ts/); // the offending file is named
+  });
+
+  const NOOKIES_DIFF = 'diff --git a/src/x.ts b/src/x.ts\n--- /dev/null\n+++ b/src/x.ts\n@@ -0,0 +1,2 @@\n+import { parseCookies } from "nookies";\n+export const x = 1;';
+  const CLEAN_NEW_DIFF = "diff --git a/src/x.ts b/src/x.ts\n--- /dev/null\n+++ b/src/x.ts\n@@ -0,0 +1 @@\n+export const x = 1;";
+
+  it("phantom dependency: escalation retry is told the import is not in package.json, and it never hands off", async () => {
+    // The apex `nookies` hallucination: an import of a package not in package.json.
+    // installedRoots comes from the package.json fetch, so a repo must be supplied.
+    mockFetchFile.mockResolvedValue(JSON.stringify({ dependencies: { next: "1" }, devDependencies: { jest: "1" } }));
+    mockComplete.mockResolvedValue(authorResp("```diff\n" + NOOKIES_DIFF + "\n```")); // both attempts import nookies
+    mockRunPipeline.mockResolvedValue({ ...RUN, status: "ready_for_pr", diff: NOOKIES_DIFF });
+    const res = await POST(post({ ref: "pr-phantom", prompt: "add x", repo: "acme/app", answers: { tests: "all" } }));
+    const body = await res.json();
+    expect(body.executorAttempts).toBe(2); // phantom import made the first draft "bad" -> retried
+    const retryPrompt = mockComplete.mock.calls[1][0].messages[0].content as string;
+    expect(retryPrompt).toMatch(/nookies/);
+    expect(retryPrompt).toMatch(/not in package\.json/i);
+    // Still phantom after the retry -> never hands off (no PR), and the phantom is surfaced.
+    expect(body.approvalId).toBeNull();
+    expect(body.phantomImports).toEqual(expect.arrayContaining([expect.objectContaining({ module: "nookies" })]));
+  });
+
+  it("phantom dependency self-corrects: the retry drops the bad import -> clean, hands off", async () => {
+    mockFetchFile.mockResolvedValue(JSON.stringify({ dependencies: { next: "1" } }));
+    mockComplete
+      .mockResolvedValueOnce(authorResp("```diff\n" + NOOKIES_DIFF + "\n```"))
+      .mockResolvedValue(authorResp("```diff\n" + CLEAN_NEW_DIFF + "\n```"));
+    mockRunPipeline.mockResolvedValue({ ...RUN, status: "ready_for_pr", diff: CLEAN_NEW_DIFF });
+    const res = await POST(post({ ref: "pr-phantom-fix", prompt: "add x", repo: "acme/app", answers: { tests: "all" } }));
+    const body = await res.json();
+    expect(body.executorAttempts).toBe(2);
+    expect(body.phantomImports).toEqual([]); // converged - no phantom in the final draft
+    expect(body.approvalId).toBe("appr-1"); // clean -> handed off
   });
 
   it("only a TRUE failure surfaces: both the draft and the escalated retry are empty -> 422", async () => {
