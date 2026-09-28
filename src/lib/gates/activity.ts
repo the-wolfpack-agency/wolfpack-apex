@@ -24,6 +24,9 @@ export interface GateSafetySummary {
   frameworks: string[];
   /** Most recent decisions for the panel's list. */
   recent: GateDecisionRow[];
+  /** Changes waiting on a human production decision (prod-promote require_human),
+   *  each with the preview URL to review - the ONE human touchpoint, surfaced. */
+  awaitingProd: { previewUrl: string | null; recordedSeq: number | null; createdAt: string }[];
 }
 
 export interface GateDecisionRow {
@@ -33,6 +36,9 @@ export interface GateDecisionRow {
   findings: number;
   recordedSeq: number | null;
   createdAt: string;
+  /** A preview URL the gate handed off (preview-verify / prod-promote), so a
+   *  human can open the exact build their production decision is about. */
+  previewUrl: string | null;
 }
 
 interface EventRow {
@@ -52,7 +58,7 @@ const asVerdict = (v: unknown): GateDecisionRow["verdict"] =>
 
 const EMPTY: GateSafetySummary = {
   total: 0, allowed: 0, autoFixed: 0, escalatedToHuman: 0, badChangesPrevented: 0,
-  dataKeptFromModel: 0, frameworks: [], recent: [],
+  dataKeptFromModel: 0, frameworks: [], recent: [], awaitingProd: [],
 };
 
 export async function gateSafetySummary(workspaceId: string | null | undefined, limit = 200): Promise<GateSafetySummary> {
@@ -70,6 +76,7 @@ export async function gateSafetySummary(workspaceId: string | null | undefined, 
 
   const frameworks = new Set<string>();
   const recent: GateDecisionRow[] = [];
+  const awaitingProd: GateSafetySummary["awaitingProd"] = [];
   let allowed = 0, autoFixed = 0, escalatedToHuman = 0, badChangesPrevented = 0, dataKeptFromModel = 0;
 
   for (const r of rows) {
@@ -92,6 +99,9 @@ export async function gateSafetySummary(workspaceId: string | null | undefined, 
     if (typeof fw === "string") for (const f of fw.split(",").filter(Boolean)) frameworks.add(f);
     else if (Array.isArray(fw)) for (const f of fw) if (typeof f === "string") frameworks.add(f);
 
+    if (verdict === "require_human" && typeof m.gate === "string" && m.gate === "prod-promote" && awaitingProd.length < 10) {
+      awaitingProd.push({ previewUrl: typeof m.preview_url === "string" && m.preview_url.length > 0 ? m.preview_url : null, recordedSeq: m.recorded_seq == null ? null : Number(m.recorded_seq), createdAt: r.timestamp });
+    }
     if (recent.length < 15) {
       recent.push({
         gate: typeof m.gate === "string" ? m.gate : "(unknown)",
@@ -100,6 +110,7 @@ export async function gateSafetySummary(workspaceId: string | null | undefined, 
         findings,
         recordedSeq: Number(m.recorded_seq) || null,
         createdAt: r.timestamp,
+        previewUrl: typeof m.preview_url === "string" && m.preview_url.length > 0 ? m.preview_url : null,
       });
     }
   }
@@ -109,5 +120,6 @@ export async function gateSafetySummary(workspaceId: string | null | undefined, 
     allowed, autoFixed, escalatedToHuman, badChangesPrevented, dataKeptFromModel,
     frameworks: [...frameworks],
     recent,
+    awaitingProd,
   };
 }

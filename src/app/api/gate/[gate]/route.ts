@@ -106,10 +106,15 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ gate: stri
   // aggregate it. model_invoked null = the client's data never went to an LLM for
   // this decision - the headline safety metric. Governs AI- and human-authored
   // changes alike: system safety, not just safe AI.
+  // Surface a preview URL a gate handed off (e.g. preview-verify / prod-promote),
+  // so the human's production decision can SEE the preview at /admin/ai-code.
+  const out = result.output as { previewUrl?: unknown } | undefined;
+  const previewUrl = out && typeof out.previewUrl === "string" ? out.previewUrl : "";
   trackEvent("ai_gate.decision", auth.user.id, auth.user.role, {
     workspace_id: auth.user.workspaceId ?? "default",
     gate: gateName,
     verdict: result.verdict,
+    preview_url: previewUrl,
     // primitives only (metadata type). data_kept_from_model is the headline
     // metric; model_used is "" when no model saw the data.
     data_kept_from_model: result.transparency.modelInvoked === null,
