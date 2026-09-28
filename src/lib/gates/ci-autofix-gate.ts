@@ -28,6 +28,7 @@ import { gatherFailureContext, buildEnrichedFixPrompt, extractFailingTestFiles }
 import { classifyCiFailure } from "@/lib/ai-code/ci-failure-classify";
 import { assessChange } from "@/lib/ai-code/assess";
 import { commitFileChanges, filesToDiff, parseFileChanges } from "@/lib/ai-code/file-changes";
+import { recordGateDecision } from "./audit";
 import type { GateDefinition, GateResult, GateContext } from "./types";
 
 const MAX_ATTEMPTS = 3;
@@ -156,10 +157,26 @@ export const ciAutofixGate: GateDefinition<CiAutofixInput, CiAutofixOutput> = {
       });
     }
 
+    // Fail-closed on unauditable: record the decision to the tamper-evident
+    // ledger BEFORE the irreversible commit. No audit, no action. The route sees
+    // recordedSeq on the result and skips its post-hoc audit (no duplicate row).
+    const pending = result("auto_fix", "Authored a gated fix for the failing checks; committing.", ctx, {
+      checksRun: authorChecks, dataSeen: "the PR's CI status + failing files, sent to your model; the fix was gated before commit", modelInvoked,
+      output: { failedChecks: ci.failedChecks }, ruleId: "GATE-ci-autofix-committed",
+    });
+    const { recordedSeq } = await recordGateDecision("ci-autofix", pending, ctx, input);
+    if (recordedSeq === null) {
+      return result("require_human", "The fix cleared the safety gate, but the decision could not be written to the tamper-evident ledger. Refusing to commit an unaudited change (no audit, no action); retry when the ledger is available.", ctx, {
+        checksRun: [...authorChecks, "audit-ledger"], dataSeen: "the PR's CI status + failing files, sent to your model", modelInvoked,
+        output: { failedChecks: ci.failedChecks }, ruleId: "GATE-ci-autofix-unauditable",
+      });
+    }
     const committed = await commitFileChanges({ client, repoFullName: input.repo, branch: input.branch, base: input.branch, changes, message: `factory ci-fix: ${ref}` });
-    return result("auto_fix", `Authored and committed a fix for the failing checks (${committed.length} file(s)); CI will re-run.`, ctx, {
+    const out = result("auto_fix", `Authored and committed a fix for the failing checks (${committed.length} file(s)); CI will re-run.`, ctx, {
       checksRun: authorChecks, dataSeen: "the PR's CI status + failing files, sent to your model; the fix was gated before commit", modelInvoked,
       output: { committedFiles: committed, failedChecks: ci.failedChecks }, ruleId: "GATE-ci-autofix-committed",
     });
+    out.recordedSeq = recordedSeq;
+    return out;
   },
 };

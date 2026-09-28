@@ -26,6 +26,8 @@ jest.mock("@/lib/ai-code/ci-failure-detail", () => ({
 const mockAssess = jest.fn();
 jest.mock("@/lib/ai-code/assess", () => ({ assessChange: (...a: unknown[]) => mockAssess(...a) }));
 const mockCommit = jest.fn();
+const mockRecordAudit = jest.fn();
+jest.mock("@/lib/gates/audit", () => ({ recordGateDecision: (...a: unknown[]) => mockRecordAudit(...a) }));
 const mockParse = jest.fn();
 jest.mock("@/lib/ai-code/file-changes", () => ({
   commitFileChanges: (...a: unknown[]) => mockCommit(...a),
@@ -53,6 +55,7 @@ beforeEach(() => {
   mockParse.mockReturnValue([{ path: "src/x.ts", content: "export const x = 1;" }]);
   mockAssess.mockResolvedValue({ handoffAllowed: true, blockedBy: null });
   mockCommit.mockResolvedValue(["src/x.ts"]);
+  mockRecordAudit.mockResolvedValue({ recordedSeq: 99 });
 });
 
 it("allow: green CI", async () => {
@@ -103,6 +106,17 @@ it("auto_fix: mechanical + clean fix -> authored with the client's model, gated,
   expect(mockCommit).toHaveBeenCalledWith(expect.objectContaining({ repoFullName: "o/r", branch: "factory/x" }));
   expect(r.output?.committedFiles).toEqual(["src/x.ts"]);
   expect(r.transparency.modelInvoked).toBe("client-model");
+  expect(r.recordedSeq).toBe(99);           // self-audited before commit
+  expect(mockRecordAudit).toHaveBeenCalled();
+});
+
+it("fail-closed: an UNAUDITABLE fix is NOT committed (no audit, no action)", async () => {
+  mockCi.mockResolvedValue(red(["agenticqa-full-pipeline"]));
+  mockRecordAudit.mockResolvedValue({ recordedSeq: null }); // ledger write failed
+  const r = await runGate(ciAutofixGate, input, ctx());
+  expect(r.verdict).toBe("require_human");
+  expect(r.reason).toMatch(/could not be written to the tamper-evident ledger/i);
+  expect(mockCommit).not.toHaveBeenCalled(); // the irreversible commit never happened
 });
 
 it("require_human: model produced no usable changes", async () => {
