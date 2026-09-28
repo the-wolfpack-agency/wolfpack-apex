@@ -7,6 +7,8 @@ import type { GateDefinition } from "./types";
 import { safeReviewGate } from "./safe-review-gate";
 import { ciAutofixGate } from "./ci-autofix-gate";
 import { deployHealthGate } from "./deploy-health-gate";
+import { previewVerifyGate } from "./preview-verify-gate";
+import { prodPromoteGate } from "./prod-promote-gate";
 
 const REGISTRY = new Map<string, GateDefinition<unknown, unknown>>();
 
@@ -17,6 +19,8 @@ function register(def: GateDefinition<unknown, unknown>): void {
 register(safeReviewGate as GateDefinition<unknown, unknown>);
 register(ciAutofixGate as GateDefinition<unknown, unknown>);
 register(deployHealthGate as GateDefinition<unknown, unknown>);
+register(previewVerifyGate as GateDefinition<unknown, unknown>);
+register(prodPromoteGate as GateDefinition<unknown, unknown>);
 
 /** Look up a gate by name, or undefined if not registered (the route 404s). */
 export function getGate(name: string): GateDefinition<unknown, unknown> | undefined {
