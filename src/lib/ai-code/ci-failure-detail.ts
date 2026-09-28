@@ -20,7 +20,7 @@ import {
 } from "@/lib/github-client";
 
 const TS_PREFIX = /^\d{4}-\d\d-\d\dT[\d:.]+Z\s+/;
-const ERROR_LINE = /(?:^|[^\w])(FAIL |✕|✘|●|error TS\d|Type error|Expected|Received|Error:|Cannot\b|not found|Module not found|assert|exit code [1-9]|Tests:\s)/i;
+const ERROR_LINE = /(?:^|[^\w])(FAIL |✕|✘|●|error TS\d|Type error|Expected|Received|Error:|Cannot\b|not found|Module not found|assert|exit code [1-9]|Tests:\s|must contain at least one test|No tests found|Test suite failed to run|npm ERR!|error \w+\(|does not (?:exist|satisfy)|Parsing error)/i;
 
 /** Pull the error-relevant lines out of a raw job log: strip the ISO timestamp
  *  each Actions log line carries, keep the lines that describe a failure, cap the

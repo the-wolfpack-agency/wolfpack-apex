@@ -5,7 +5,25 @@
  * case (an autofixer editing code to make a guardrail pass), so the tests pin the
  * governance signals hard.
  */
-import { classifyCiFailure } from "@/lib/ai-code/ci-failure-classify";
+import { classifyCiFailure, isDeployInfraCheck, failuresAreInfraOnly } from "@/lib/ai-code/ci-failure-classify";
+
+describe("deploy/infra vs code check typing (for empty-detail escalation)", () => {
+  it.each(["e2e", "vercel-deploy", "preflight", "canary-deploy", "Playwright", "Vercel"])("treats %s as deploy/infra", (name) => {
+    expect(isDeployInfraCheck(name)).toBe(true);
+  });
+  it.each(["unit (3/4)", "lint-types", "type-check", "tsc", "build", "jest", "agenticqa-full-pipeline", "CodeQL"])("does NOT treat %s as deploy/infra", (name) => {
+    expect(isDeployInfraCheck(name)).toBe(false);
+  });
+  it("code wins ties: a check named for both code and deploy is code", () => {
+    expect(isDeployInfraCheck("unit-e2e")).toBe(false); // has 'unit' -> code
+  });
+  it("failuresAreInfraOnly: true only when EVERY failing check is infra", () => {
+    expect(failuresAreInfraOnly(["e2e", "vercel-deploy"])).toBe(true);
+    expect(failuresAreInfraOnly(["e2e", "unit (3/4)"])).toBe(false); // a code check is present
+    expect(failuresAreInfraOnly(["unit (3/4)", "lint-types"])).toBe(false);
+    expect(failuresAreInfraOnly([])).toBe(false); // nothing failing -> not "infra-only"
+  });
+});
 
 describe("governance failures escalate (never auto-fixed)", () => {
   it("classifies a guardrail-test detail as governance", () => {

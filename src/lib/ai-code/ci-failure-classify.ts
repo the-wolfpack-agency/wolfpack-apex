@@ -79,6 +79,37 @@ const TRANSIENT_PATTERNS: RegExp[] = [
   /rate limit(?:ed| exceeded)/i,
 ];
 
+/** Check NAMES that run CODE (a compiler, a linter, a test runner). A failure
+ *  here is code-fixable even if our log extractor happened to miss the error
+ *  text, so empty detail on one of these must NOT be treated as "infra". */
+const CODE_CHECK_NAMES = ["unit", "test", "jest", "lint", "type", "tsc", "typecheck", "build", "compile", "vitest", "coverage"];
+
+/** Check NAMES that are deploy / setup / infra by nature - they fail before any
+ *  code assertion runs (a deploy, a preview, an e2e harness that never starts, a
+ *  preflight gate). Empty detail on one of THESE means infra failed, not that we
+ *  missed a code error. */
+const INFRA_CHECK_NAMES = ["e2e", "deploy", "vercel", "preflight", "canary", "playwright", "lighthouse", "smoke", "provision"];
+
+/** True when a failing check is a deploy/infra check and NOT a code check. Code
+ *  wins ties (a "unit-e2e" check is code), so this is conservative: it only calls
+ *  a check infra when it clearly is. Pure. */
+export function isDeployInfraCheck(name: string): boolean {
+  const lc = name.toLowerCase();
+  if (CODE_CHECK_NAMES.some((c) => lc.includes(c))) return false;
+  return INFRA_CHECK_NAMES.some((i) => lc.includes(i));
+}
+
+/** True when EVERY failing check is a deploy/infra check (none code-oriented), so
+ *  an empty failure detail means "infra failed before any code ran", not "our
+ *  extractor missed a code error". Only then is escalate-without-authoring right;
+ *  otherwise the fixer should still try (anchored to the change's files). Found by
+ *  dogfooding apex: a `unit`/`lint-types` failure with empty detail must NOT be
+ *  escalated as infra - it is a real code failure whose log we simply did not
+ *  parse. Pure. */
+export function failuresAreInfraOnly(checks: readonly string[]): boolean {
+  return checks.length > 0 && checks.every(isDeployInfraCheck);
+}
+
 export type CiFailureKind = "mechanical" | "governance" | "transient";
 
 /** The specific shape of a MECHANICAL failure, so the fixer can route it: a

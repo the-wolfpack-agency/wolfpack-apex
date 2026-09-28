@@ -350,13 +350,13 @@ test("fixer hallucinates a wrong-path file: rejected, escalates, does NOT commit
   expect(mockCommit).not.toHaveBeenCalled();
 });
 
-test("deploy/setup/infra failure (empty detail, past the flake re-run): escalates, does NOT author", async () => {
-  // The deepMerge-2 live run: e2e / vercel-deploy / agenticqa-full-pipeline all
-  // fail at setup in ~3s, so the log has no code-level error (detailChars:0). The
-  // fixer must not burn attempts re-authoring source for an infra failure.
-  const infraRed = { total: 3, passed: 0, failed: 3, pending: 0, complete: true, ciComplete: false, failedChecks: ["e2e", "vercel-deploy", "agenticqa-full-pipeline"], failedDetails: [{ name: "e2e", summary: "" }] };
+test("deploy/setup/infra failure (empty detail, INFRA-ONLY checks, past the flake re-run): escalates, does NOT author", async () => {
+  // Infra checks (e2e, vercel-deploy, preflight) fail at setup so the log has no
+  // code-level error (detailChars:0). The fixer must not burn attempts
+  // re-authoring source for a deploy/infra failure it cannot repair.
+  const infraRed = { total: 3, passed: 0, failed: 3, pending: 0, complete: true, ciComplete: false, failedChecks: ["e2e", "vercel-deploy", "preflight"], failedDetails: [{ name: "e2e", summary: "" }] };
   mockFetchCiStatus.mockResolvedValue(infraRed);
-  mockFetchAttribution.mockResolvedValue({ introduced: ["e2e", "vercel-deploy", "agenticqa-full-pipeline"], preexisting: [], indeterminate: [], fixed: [], baselineKnown: true, baselineHealthy: false, clean: false, reason: "introduced" });
+  mockFetchAttribution.mockResolvedValue({ introduced: ["e2e", "vercel-deploy", "preflight"], preexisting: [], indeterminate: [], fixed: [], baselineKnown: true, baselineHealthy: false, clean: false, reason: "introduced" });
   mockCountFixCommits.mockResolvedValue(1); // past the flake pre-filter
   mockGather.mockResolvedValue({ detail: "", files: [] }); // no readable code error
   mockListChangedFiles.mockResolvedValue(["src/lib/deepMerge.ts"]);
@@ -364,9 +364,27 @@ test("deploy/setup/infra failure (empty detail, past the flake re-run): escalate
   const body = await (await POST(post({ repo: "o/r", ref: "b", branch: "factory/b-abc", base: "main", attempt: 0, maxAttempts: 3 }))).json();
   expect(body.decision.action).toBe("escalate_human");
   expect(body.decision.reason).toMatch(/no readable code-level error/i);
-  expect(body.unfixableNoDetail).toEqual({ checks: ["e2e", "vercel-deploy", "agenticqa-full-pipeline"] });
+  expect(body.unfixableNoDetail).toEqual({ checks: ["e2e", "vercel-deploy", "preflight"] });
   expect(mockAuthorFiles).not.toHaveBeenCalled();
   expect(mockCommit).not.toHaveBeenCalled();
+});
+
+test("empty detail on a CODE check (unit/lint) is NOT mis-escalated as infra: authors, anchored", async () => {
+  // The apex #969 misfire: `unit (3/4)` + `lint-types` failed with empty detail
+  // (our extractor missed jest's message). That is a real code failure, not infra
+  // - the fixer must still try (anchored to the change), never escalate as infra.
+  const codeRed = { total: 3, passed: 1, failed: 2, pending: 0, complete: true, ciComplete: false, failedChecks: ["unit (3/4)", "lint-types"], failedDetails: [{ name: "unit (3/4)", summary: "" }] };
+  mockFetchCiStatus.mockResolvedValue(codeRed);
+  mockFetchAttribution.mockResolvedValue({ introduced: ["unit (3/4)", "lint-types"], preexisting: [], indeterminate: [], fixed: [], baselineKnown: true, baselineHealthy: false, clean: false, reason: "introduced" });
+  mockCountFixCommits.mockResolvedValue(1); // past the flake pre-filter
+  mockGather.mockResolvedValue({ detail: "", files: [] }); // extractor missed the code error
+  mockListChangedFiles.mockResolvedValue(["src/__tests__/no-direct-auth-cookie.test.ts"]);
+  mockListRuns.mockResolvedValue([]);
+  mockAuthorFiles.mockResolvedValue({ changes: [{ path: "src/__tests__/no-direct-auth-cookie.test.ts", content: "// real test" }], author: "model-b", error: null });
+  const body = await (await POST(post({ repo: "o/r", ref: "b", branch: "factory/b-abc", base: "main", attempt: 0, maxAttempts: 3 }))).json();
+  expect(body.decision.action).toBe("author_fix"); // NOT escalate_human
+  expect(body.unfixableNoDetail).toBeUndefined();
+  expect(mockAuthorFiles).toHaveBeenCalled();
 });
 
 test("empty detail on the FIRST attempt still re-runs once to rule out a flake before escalating", async () => {

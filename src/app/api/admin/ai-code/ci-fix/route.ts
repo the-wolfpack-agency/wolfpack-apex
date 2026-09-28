@@ -21,7 +21,7 @@ import { decideFixAction, buildFixBrief } from "@/lib/ai-code/ci-fix-loop";
 import { runCiFixStep } from "@/lib/ai-code/ci-fix-driver";
 import { workspaceGithubClient, getBranchHead, countBranchCommitsMatching, listChangedFiles, listWorkflowRunsRaw, rerunFailedRun, triggerWorkflow } from "@/lib/github-client";
 import { gatherFailureContext, buildEnrichedFixPrompt, extractFailingTestFiles, fetchFilesContent, hasFixAnchor, guardAuthoredFix } from "@/lib/ai-code/ci-failure-detail";
-import { classifyCiFailure } from "@/lib/ai-code/ci-failure-classify";
+import { classifyCiFailure, failuresAreInfraOnly } from "@/lib/ai-code/ci-failure-classify";
 import { flakeRecheckCandidates } from "@/lib/ai-code/flake";
 import { commitFileChanges, filesToDiff } from "@/lib/ai-code/file-changes";
 import { assessChange } from "@/lib/ai-code/assess";
@@ -179,14 +179,26 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         }
       }
       // No readable code-level error to act on, and we are not waiting on a flake
-      // re-run: this is the signature of a deploy / setup / infra step that fails
-      // before any test runs (a preflight gate, a Vercel deploy, an e2e harness
-      // that never starts). Authoring a source fix cannot repair it - escalate
-      // rather than burn the attempt budget re-writing unrelated files (dogfooding
-      // found the fixer spent all 3 attempts re-authoring deepMerge.ts to "fix" a
-      // vercel-deploy/preflight failure that had nothing to do with the code).
-      if (!snapshotFailure && !deterministicFixDispatched && !flakeRecheckTriggered && gathered.detail.trim() === "") {
-        unfixableNoDetail = { checks: ci.failedChecks ?? [] };
+      // re-run: escalate ONLY when every failing check we are responsible for is a
+      // deploy / setup / infra check (a preflight gate, a Vercel deploy, an e2e
+      // harness that never starts) - those fail before any code runs, so a source
+      // fix cannot repair them. A code check (unit / lint / type / build) with
+      // empty detail is NOT infra - it is a real code failure whose log our
+      // extractor simply did not parse, so the fixer should still try (anchored to
+      // the change's files). Dogfooding apex surfaced this: a `unit (3/4)` /
+      // `lint-types` failure with empty detail must not be mis-escalated as infra.
+      const responsibleFailing =
+        attribution && attribution.introduced.length > 0
+          ? (ci.failedChecks ?? []).filter((c) => attribution.introduced.includes(c))
+          : (ci.failedChecks ?? []);
+      if (
+        !snapshotFailure &&
+        !deterministicFixDispatched &&
+        !flakeRecheckTriggered &&
+        gathered.detail.trim() === "" &&
+        failuresAreInfraOnly(responsibleFailing)
+      ) {
+        unfixableNoDetail = { checks: responsibleFailing };
       }
     }
     // Non-progress on an authored test: if a fix was ALREADY committed and a test
