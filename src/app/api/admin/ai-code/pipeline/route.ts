@@ -34,9 +34,10 @@ import { chooseIndependentJudge } from "@/lib/ai/judge-selection";
 import { evaluateChangeInvariants } from "@/lib/ai-code/change-facts";
 import { deepScanChange } from "@/lib/ai-code/deep-scan";
 import { buildRunCost } from "@/lib/ai-code/cost";
-import { workspaceGithubClient } from "@/lib/github-client";
+import { workspaceGithubClient, fetchFileContent } from "@/lib/github-client";
 import { buildRepoContext, withRepoContext } from "@/lib/ai-code/repo-context";
 import { fetchRepoGrounding } from "@/lib/ai-code/repo-grounding";
+import { findPhantomImports, parseInstalledRoots, phantomImportFeedback } from "@/lib/ai-code/imports";
 import { getAIClient } from "@/lib/ai";
 import type { AIModelTier } from "@/lib/ai/types";
 import { DEFAULT_SPEC_QUESTIONS } from "@/lib/ai-code/intake";
@@ -114,28 +115,33 @@ type ResolveArgs = Parameters<typeof resolveChange>[0];
  */
 async function resolveChangeWithFallback(
   args: ResolveArgs,
+  installedRoots: ReadonlySet<string> = new Set(),
 ): Promise<Awaited<ReturnType<typeof resolveChange>> & { executorAttempts: number }> {
   const emptyOrError = (r: Awaited<ReturnType<typeof resolveChange>>) => !r.diff.trim() || Boolean(r.executor?.error);
-  // A draft is bad if it is empty/errored OR does not PARSE. Diff-mode authoring
-  // can truncate a file (a wrong hunk line-count drops the closing brace), which
-  // produces code that will not compile - retry once on a stronger model rather
-  // than hand a human unparseable output. Found by dogfooding.
-  const badDraft = (r: Awaited<ReturnType<typeof resolveChange>>) => emptyOrError(r) || !checkSyntax(resolvedFiles(r)).ok;
+  // Deterministic reasons a draft is bad, each fed back to the escalation retry:
+  //  - empty / errored output
+  //  - does not PARSE (diff-mode truncation drops a closing brace)
+  //  - imports a PHANTOM dependency (a package not in package.json) - it compiles
+  //    in the model's head but always fails CI ("Cannot find module"); the apex
+  //    dogfooding `nookies` hallucination. Grounding only ADVISES against this;
+  //    here it is enforced and self-corrected.
+  const draftFeedback = (r: Awaited<ReturnType<typeof resolveChange>>): string | null => {
+    if (emptyOrError(r)) return "The previous attempt produced no usable output (empty or errored). Return the COMPLETE file(s) that satisfy the request.";
+    const files = resolvedFiles(r);
+    const issues = checkSyntax(files).issues;
+    if (issues.length > 0) return `The previous attempt did NOT parse. Fix these exact syntax errors and return the COMPLETE, valid file(s):\n${issues.map((i) => `- ${i.path}:${i.line} ${i.message}`).join("\n")}`;
+    const phantoms = findPhantomImports(files, installedRoots);
+    if (phantoms.length > 0) return phantomImportFeedback(phantoms);
+    return null;
+  };
   let resolved = await resolveChange(args);
   let attempts = 1;
   const manualDiff = args.diff.trim().length > 0;
-  if (!manualDiff && badDraft(resolved)) {
+  const feedback = manualDiff ? null : draftFeedback(resolved);
+  if (feedback) {
     // Tell the escalated model WHAT was wrong, don't just re-run the same prompt
-    // at a higher tier. A blind retry repeats the same mistake; feeding back the
-    // deterministic reason (the parse errors, or "produced nothing usable") is the
-    // same "give the model the real error" principle the CI-fixer uses, and it is
-    // what turns a needs_human hold into a converged draft. Found by dogfooding:
-    // authoring a guardrail test failed syntax on BOTH the standard and premium
-    // passes because the premium pass never learned why the first one was invalid.
-    const issues = checkSyntax(resolvedFiles(resolved)).issues;
-    const feedback = issues.length > 0
-      ? `The previous attempt did NOT parse. Fix these exact syntax errors and return the COMPLETE, valid file(s):\n${issues.map((i) => `- ${i.path}:${i.line} ${i.message}`).join("\n")}`
-      : "The previous attempt produced no usable output (empty or errored). Return the COMPLETE file(s) that satisfy the request.";
+    // at a higher tier - the "give the model the real error" principle that turns
+    // a needs_human hold into a converged draft (found by dogfooding).
     const retry = await resolveChange({ ...args, tier: "premium", prompt: `${args.prompt}\n\n${feedback}` });
     attempts++;
     resolved = retry; // the escalated attempt is the final draft (its evidence is what a human sees if it too failed)
@@ -220,6 +226,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // (that is governed as-is). Uses the `repo` already validated above.
   let authorPrompt = prompt;
   let repoContextFiles: string[] = [];
+  // The repo's installed packages (package.json), so a phantom-import (a package
+  // not installed) can be DETERMINISTICALLY caught and self-corrected - grounding
+  // only advises against it. Empty set => unknown deps => the phantom check is a
+  // no-op (fail-open).
+  let installedRoots = new Set<string>();
   if (repo && !diff.trim()) {
     try {
       const ghClient = await workspaceGithubClient(workspaceId);
@@ -228,20 +239,22 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         // existing modules, test convention, installed deps) so the author never
         // invents an import, plus the named-file context for edits. Both are
         // best-effort and prepend to the author prompt.
-        const [grounding, ctx] = await Promise.all([
+        const [grounding, ctx, pkgJson] = await Promise.all([
           fetchRepoGrounding(ghClient, repo),
           buildRepoContext({ client: ghClient, repo, prompt }),
+          fetchFileContent(ghClient, repo, "package.json").catch(() => null),
         ]);
         const block = [grounding, ctx.block].filter(Boolean).join("\n\n---\n\n");
         authorPrompt = withRepoContext(prompt, block);
         repoContextFiles = ctx.files;
+        if (pkgJson) installedRoots = parseInstalledRoots(pkgJson);
       }
     } catch {
       /* best-effort context; author from the prompt alone on any failure */
     }
   }
 
-  const resolved = await resolveChangeWithFallback({ mode, diff, prompt: authorPrompt, authorModel, executorProviderPin });
+  const resolved = await resolveChangeWithFallback({ mode, diff, prompt: authorPrompt, authorModel, executorProviderPin }, installedRoots);
   const executorAttempts = resolved.executorAttempts;
   const executor = resolved.executor;
   let effectiveDiff = resolved.diff;
@@ -393,10 +406,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // otherwise be marked ready. Code that does not parse can never hand off - it
   // is needs_human, with the parse errors surfaced. (Found by dogfooding: a
   // diff-truncated file missing its closing brace was marked allow / ready.)
-  const syntax = checkSyntax(resolvedFiles({ diff: run.diff, changes }));
+  const finalFiles = resolvedFiles({ diff: run.diff, changes });
+  const syntax = checkSyntax(finalFiles);
+  // Phantom-dependency gate: a change that imports a package not in package.json
+  // always fails CI ("Cannot find module") - it can never hand off. Enforced, not
+  // just advised by grounding. No-op when installedRoots is empty (unknown deps).
+  const phantomImports = findPhantomImports(finalFiles, installedRoots);
 
   let approvalId: string | null = null;
-  if (run.status === "ready_for_pr" && !invariants.wouldBlock && !deepScan.blocking && filesModeHandoffOk && syntax.ok) {
+  if (run.status === "ready_for_pr" && !invariants.wouldBlock && !deepScan.blocking && filesModeHandoffOk && syntax.ok && phantomImports.length === 0) {
     // Provision the factory's own governed principal (active + revocable) and hand
     // the approval its REAL agent id, so the human-in-the-gate approval's
     // kill-switch re-check finds an active agent instead of auto-rejecting. A null
@@ -442,5 +460,5 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   // A change that does not parse is never "ready_for_pr", whatever the gate said.
   const effectiveRun = syntax.ok ? run : { ...run, status: "needs_human" as const };
-  return NextResponse.json({ run: effectiveRun, approvalId, executor, invariants, changeFacts, deepScan, syntax, mode, executorAttempts, repoContext: { files: repoContextFiles }, cost });
+  return NextResponse.json({ run: effectiveRun, approvalId, executor, invariants, changeFacts, deepScan, syntax, phantomImports, mode, executorAttempts, repoContext: { files: repoContextFiles }, cost });
 }
