@@ -15,7 +15,7 @@ jest.mock("@/lib/github-client", () => ({
   fetchFileContent: (...a: unknown[]) => mockFile(...a),
 }));
 
-import { extractErrorLines, extractFilePaths, buildEnrichedFixPrompt, gatherFailureContext } from "@/lib/ai-code/ci-failure-detail";
+import { extractErrorLines, extractFilePaths, buildEnrichedFixPrompt, gatherFailureContext, fetchFilesContent, hasFixAnchor, guardAuthoredFix } from "@/lib/ai-code/ci-failure-detail";
 
 // A slice of a real jest job log (with the ISO timestamp prefix Actions adds).
 const LOG = [
@@ -85,6 +85,97 @@ test("buildEnrichedFixPrompt degrades gracefully with no context (just the brief
   expect(prompt).toMatch(/unit-tests failed/);
   expect(prompt).not.toMatch(/ACTUAL CI failure/);
   expect(prompt).not.toMatch(/FILE:/);
+});
+
+test("buildEnrichedFixPrompt anchors to the change's files and forbids inventing a new path", () => {
+  // Dogfooding regression: with empty failure context the fixer authored a new
+  // file at an invented path (src/lib/utils/deepMerge.js) instead of editing the
+  // real changed file. The changedFiles anchor must be stated explicitly.
+  const prompt = buildEnrichedFixPrompt({
+    repo: "o/r",
+    branch: "factory/deepmerge",
+    brief: "unit-tests failed",
+    context: { detail: "", files: [] },
+    changedFiles: ["src/lib/deepMerge.ts", "src/lib/__tests__/deepMerge.test.ts"],
+  });
+  expect(prompt).toMatch(/consists of EXACTLY these file\(s\): src\/lib\/deepMerge\.ts/);
+  expect(prompt).toMatch(/Do NOT create a new file at a different path or with a different extension/i);
+  expect(prompt).toMatch(/modify it in place/i);
+});
+
+test("buildEnrichedFixPrompt omits the changed-files anchor when none are known", () => {
+  const prompt = buildEnrichedFixPrompt({ repo: "o/r", branch: "b", brief: "x", context: { detail: "", files: [] }, changedFiles: [] });
+  expect(prompt).not.toMatch(/consists of EXACTLY these/i);
+});
+
+describe("hasFixAnchor (fail-closed pre-check)", () => {
+  it("false when there is no detail, no files, and no known changed files", () => {
+    expect(hasFixAnchor({ detail: "", files: [] }, [])).toBe(false);
+  });
+  it("true from failure detail alone", () => {
+    expect(hasFixAnchor({ detail: "FAIL x", files: [] }, [])).toBe(true);
+  });
+  it("true from the change's file list alone (the empty-log case)", () => {
+    expect(hasFixAnchor({ detail: "", files: [] }, ["src/lib/deepMerge.ts"])).toBe(true);
+  });
+  it("true from fetched file contents alone", () => {
+    expect(hasFixAnchor({ detail: "", files: [{ path: "a.ts", content: "x" }] }, [])).toBe(true);
+  });
+});
+
+describe("guardAuthoredFix (anti-hallucination)", () => {
+  it("rejects a fix that edits none of the change's files and only invents new paths", () => {
+    // The exact dogfooding failure: change is deepMerge.ts, fix wrote utils/*.js.
+    const r = guardAuthoredFix({
+      changes: [{ path: "src/lib/utils/deepMerge.js" }, { path: "src/lib/utils/deepMerge.test.js" }],
+      authorError: null,
+      changedFiles: ["src/lib/deepMerge.ts", "src/lib/__tests__/deepMerge.test.ts"],
+    });
+    expect(r.changes).toEqual([]);
+    expect(r.error).toMatch(/refusing to commit a parallel file/i);
+    expect(r.error).toMatch(/src\/lib\/utils\/deepMerge\.js/);
+  });
+
+  it("accepts a fix that edits a real changed file (and keeps any added helper)", () => {
+    const r = guardAuthoredFix({
+      changes: [{ path: "src/lib/deepMerge.ts" }, { path: "src/lib/deepMerge.helper.ts" }],
+      authorError: null,
+      changedFiles: ["src/lib/deepMerge.ts"],
+    });
+    expect(r.changes.map((c) => c.path)).toEqual(["src/lib/deepMerge.ts", "src/lib/deepMerge.helper.ts"]);
+    expect(r.error).toBeNull();
+  });
+
+  it("passes through when the change's files are unknown (no anchor to enforce)", () => {
+    const r = guardAuthoredFix({ changes: [{ path: "anything.ts" }], authorError: null, changedFiles: [] });
+    expect(r.changes.map((c) => c.path)).toEqual(["anything.ts"]);
+    expect(r.error).toBeNull();
+  });
+
+  it("propagates an author error and drops changes", () => {
+    const r = guardAuthoredFix({ changes: [{ path: "a.ts" }], authorError: "model failed", changedFiles: ["a.ts"] });
+    expect(r.changes).toEqual([]);
+    expect(r.error).toBe("model failed");
+  });
+});
+
+describe("fetchFilesContent", () => {
+  beforeEach(() => mockFile.mockReset());
+
+  it("fetches content for each path, caps per-file length, and skips 404s", async () => {
+    mockFile.mockImplementation((_c, _r, path: string) =>
+      path === "gone.ts" ? Promise.reject(new Error("404")) : Promise.resolve("X".repeat(9000)),
+    );
+    const files = await fetchFilesContent({} as never, "o/r", ["a.ts", "gone.ts", "b.ts"], "branch", { maxCharsPerFile: 100 });
+    expect(files.map((f) => f.path)).toEqual(["a.ts", "b.ts"]); // 404 skipped
+    expect(files[0].content.length).toBe(100); // capped
+  });
+
+  it("respects the maxFiles cap", async () => {
+    mockFile.mockResolvedValue("ok");
+    const files = await fetchFilesContent({} as never, "o/r", ["a", "b", "c", "d"], "branch", { maxFiles: 2 });
+    expect(files).toHaveLength(2);
+  });
 });
 
 describe("source-of-failing-test derivation", () => {

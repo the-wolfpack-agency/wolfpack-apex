@@ -29,12 +29,22 @@ jest.mock("@/lib/github-client", () => ({
   triggerWorkflow: (...a: unknown[]) => mockTriggerWorkflow(...a),
 }));
 const mockGather = jest.fn();
-jest.mock("@/lib/ai-code/ci-failure-detail", () => ({
-  gatherFailureContext: (...a: unknown[]) => mockGather(...a),
-  buildEnrichedFixPrompt: (a: { brief: string }) => a.brief,
-  extractFailingTestFiles: (text: string) =>
-    Array.from(text.matchAll(/FAIL\s+(\S+)/g)).map((m) => m[1]),
-}));
+const mockFetchFiles = jest.fn();
+jest.mock("@/lib/ai-code/ci-failure-detail", () => {
+  // The pure guards (hasFixAnchor / guardAuthoredFix) are exercised for REAL so
+  // the anti-hallucination + fail-closed behavior is verified end-to-end; only
+  // the IO functions are mocked.
+  const actual = jest.requireActual("@/lib/ai-code/ci-failure-detail");
+  return {
+    gatherFailureContext: (...a: unknown[]) => mockGather(...a),
+    buildEnrichedFixPrompt: (a: { brief: string }) => a.brief,
+    extractFailingTestFiles: (text: string) =>
+      Array.from(text.matchAll(/FAIL\s+(\S+)/g)).map((m) => m[1]),
+    fetchFilesContent: (...a: unknown[]) => mockFetchFiles(...a),
+    hasFixAnchor: actual.hasFixAnchor,
+    guardAuthoredFix: actual.guardAuthoredFix,
+  };
+});
 jest.mock("@/lib/ai-code/file-changes", () => ({
   commitFileChanges: (...a: unknown[]) => mockCommit(...a),
   filesToDiff: (changes: { path: string; content: string }[]) =>
@@ -61,7 +71,11 @@ beforeEach(() => {
   mockGate.mockResolvedValue(null);
   mockWorkspaceClient.mockResolvedValue({ token: "t", fetch: jest.fn() });
   mockCountFixCommits.mockResolvedValue(0);
-  mockListChangedFiles.mockResolvedValue([]);
+  // The change's files are the fixer's anchor. Default to the file the default
+  // authored fix edits, so hasFixAnchor is satisfied and guardAuthoredFix passes
+  // (the fix edits a real changed file) unless a test overrides both.
+  mockListChangedFiles.mockResolvedValue(["src/x.ts"]);
+  mockFetchFiles.mockResolvedValue([]);
   mockListRuns.mockResolvedValue([]);
   mockRerun.mockResolvedValue(true);
   mockTriggerWorkflow.mockResolvedValue({ run_id: null });
@@ -183,6 +197,7 @@ test("stalls on an authored test (budget left): authors a fix to CORRECT the wro
   mockCountFixCommits.mockResolvedValue(1); // a fix was already committed, budget (max 3) remains
   mockGather.mockResolvedValue({ detail: "FAIL src/lib/__tests__/averageWordLength.test.ts\n  Expected 2.33 Received 2", files: [] });
   mockListChangedFiles.mockResolvedValue(["src/lib/averageWordLength.ts", "src/lib/__tests__/averageWordLength.test.ts"]);
+  mockAuthorFiles.mockResolvedValue({ changes: [{ path: "src/lib/averageWordLength.ts", content: "export const x = 1;" }], author: "model-b", error: null });
   const body = await (await POST(post({ repo: "o/r", ref: "b", branch: "factory/b-abc", base: "main", attempt: 0, maxAttempts: 3 }))).json();
   // No longer escalates: it authors a fix (which may correct the wrong test) so the loop converges.
   expect(body.decision.action).toBe("author_fix");
@@ -198,6 +213,7 @@ test("does NOT stall when the failing test is NOT part of the change (pre-existi
   mockCountFixCommits.mockResolvedValue(1);
   mockGather.mockResolvedValue({ detail: "FAIL src/lib/__tests__/somethingElse.test.ts", files: [] });
   mockListChangedFiles.mockResolvedValue(["src/lib/averageWordLength.ts"]); // failing test not authored here
+  mockAuthorFiles.mockResolvedValue({ changes: [{ path: "src/lib/averageWordLength.ts", content: "export const x = 1;" }], author: "model-b", error: null });
   const body = await (await POST(post({ repo: "o/r", ref: "b", branch: "factory/b-abc", base: "main", attempt: 0, maxAttempts: 3 }))).json();
   expect(body.decision.action).toBe("author_fix"); // proceeds to fix the source
   expect(body.stalledOnAuthoredTest).toBeUndefined();
@@ -295,5 +311,51 @@ test("lint failure WITHOUT the workflow configured: falls through to the model p
   const body = await (await POST(post({ repo: "o/r", ref: "b", branch: "factory/b-abc", base: "main", attempt: 0, maxAttempts: 3 }))).json();
   expect(mockTriggerWorkflow).not.toHaveBeenCalled();
   expect(body.decision.action).toBe("author_fix");
+});
+
+// --- Dogfooding regression: the deepMerge run ---------------------------------
+// A live build of a deepMerge feature escalated after the fixer, given EMPTY
+// failure context, hallucinated a wrong-path file (src/lib/utils/deepMerge.js)
+// instead of editing the real changed file (src/lib/deepMerge.ts). These lock in
+// both halves of the fix: fail-closed when there is no anchor, and reject a fix
+// that edits none of the change's files.
+
+test("no anchor at all (empty log, unknown changed files): refuses to author blind, escalates", async () => {
+  mockFetchCiStatus.mockResolvedValue(red);
+  mockFetchAttribution.mockResolvedValue({ introduced: ["unit"], preexisting: [], indeterminate: [], fixed: [], baselineKnown: true, baselineHealthy: false, clean: false, reason: "introduced unit" });
+  mockCountFixCommits.mockResolvedValue(1); // past the flake pre-filter, so it would author
+  mockGather.mockResolvedValue({ detail: "", files: [] }); // blob expired -> empty context
+  mockListChangedFiles.mockResolvedValue([]); // and no changed-file anchor available
+  const body = await (await POST(post({ repo: "o/r", ref: "b", branch: "factory/b-abc", base: "main", attempt: 0, maxAttempts: 3 }))).json();
+  expect(body.decision.action).toBe("escalate_human");
+  expect(body.decision.reason).toMatch(/no fix|refusing to author blind|anchor/i);
+  expect(mockCommit).not.toHaveBeenCalled(); // never commits a blind guess
+});
+
+test("fixer hallucinates a wrong-path file: rejected, escalates, does NOT commit a parallel file", async () => {
+  mockFetchCiStatus.mockResolvedValue(red);
+  mockFetchAttribution.mockResolvedValue({ introduced: ["unit"], preexisting: [], indeterminate: [], fixed: [], baselineKnown: true, baselineHealthy: false, clean: false, reason: "introduced unit" });
+  mockCountFixCommits.mockResolvedValue(1);
+  mockGather.mockResolvedValue({ detail: "FAIL src/lib/__tests__/deepMerge.test.ts", files: [] });
+  mockListChangedFiles.mockResolvedValue(["src/lib/deepMerge.ts", "src/lib/__tests__/deepMerge.test.ts"]);
+  // The exact hallucination from the live run: a parallel .js at an invented path.
+  mockAuthorFiles.mockResolvedValue({ changes: [{ path: "src/lib/utils/deepMerge.js", content: "export function deepMerge(){}" }], author: "model-b", error: null });
+  const body = await (await POST(post({ repo: "o/r", ref: "b", branch: "factory/b-abc", base: "main", attempt: 0, maxAttempts: 3 }))).json();
+  expect(body.decision.action).toBe("escalate_human");
+  expect(body.decision.reason).toMatch(/parallel file|none of this change|no fix/i);
+  expect(mockCommit).not.toHaveBeenCalled();
+});
+
+test("empty log but changed files known: anchors to them and authors a real fix (converges)", async () => {
+  mockFetchCiStatus.mockResolvedValue(red);
+  mockFetchAttribution.mockResolvedValue({ introduced: ["unit"], preexisting: [], indeterminate: [], fixed: [], baselineKnown: true, baselineHealthy: false, clean: false, reason: "introduced unit" });
+  mockCountFixCommits.mockResolvedValue(1);
+  mockGather.mockResolvedValue({ detail: "", files: [] }); // no log detail...
+  mockListChangedFiles.mockResolvedValue(["src/lib/deepMerge.ts"]); // ...but the change's file is known
+  mockAuthorFiles.mockResolvedValue({ changes: [{ path: "src/lib/deepMerge.ts", content: "export function deepMerge(){/*fixed*/}" }], author: "model-b", error: null });
+  const body = await (await POST(post({ repo: "o/r", ref: "b", branch: "factory/b-abc", base: "main", attempt: 0, maxAttempts: 3 }))).json();
+  expect(body.decision.action).toBe("author_fix");
+  expect(mockCommit).toHaveBeenCalled();
+  expect(body.terminal).toBe(false);
 });
 
