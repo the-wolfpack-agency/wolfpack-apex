@@ -213,6 +213,34 @@ describe("POST /api/admin/ai-code/pipeline", () => {
     expect(body.approvalId).toBe("appr-1"); // clean -> handed off
   });
 
+  const FRAGMENT_TEST_DIFF = 'diff --git a/src/x.test.ts b/src/x.test.ts\n--- /dev/null\n+++ b/src/x.test.ts\n@@ -0,0 +1 @@\n+const lines = data.split("x");';
+  const REAL_TEST_DIFF = 'diff --git a/src/x.test.ts b/src/x.test.ts\n--- /dev/null\n+++ b/src/x.test.ts\n@@ -0,0 +1 @@\n+describe("x", () => { it("works", () => { expect(1).toBe(1); }); });';
+
+  it("incomplete test file (no test case): retry is told, and it never hands off", async () => {
+    // The apex fragment: a *.test.ts that PARSES but has no test -> jest fails it.
+    mockComplete.mockResolvedValue(authorResp("```diff\n" + FRAGMENT_TEST_DIFF + "\n```"));
+    mockRunPipeline.mockResolvedValue({ ...RUN, status: "ready_for_pr", diff: FRAGMENT_TEST_DIFF });
+    const res = await POST(post({ ref: "pr-frag", prompt: "add a test", repo: "acme/app", answers: { tests: "all" } }));
+    const body = await res.json();
+    expect(body.executorAttempts).toBe(2); // fragment is a bad draft -> retried
+    const retryPrompt = mockComplete.mock.calls[1][0].messages[0].content as string;
+    expect(retryPrompt).toMatch(/INCOMPLETE|no test case/i);
+    expect(body.approvalId).toBeNull(); // still incomplete -> no handoff
+    expect(body.incompleteFiles).toEqual(expect.arrayContaining([expect.objectContaining({ path: "src/x.test.ts" })]));
+  });
+
+  it("incomplete test file self-corrects: retry adds real test cases -> hands off", async () => {
+    mockComplete
+      .mockResolvedValueOnce(authorResp("```diff\n" + FRAGMENT_TEST_DIFF + "\n```"))
+      .mockResolvedValue(authorResp("```diff\n" + REAL_TEST_DIFF + "\n```"));
+    mockRunPipeline.mockResolvedValue({ ...RUN, status: "ready_for_pr", diff: REAL_TEST_DIFF });
+    const res = await POST(post({ ref: "pr-frag-fix", prompt: "add a test", repo: "acme/app", answers: { tests: "all" } }));
+    const body = await res.json();
+    expect(body.executorAttempts).toBe(2);
+    expect(body.incompleteFiles).toEqual([]);
+    expect(body.approvalId).toBe("appr-1");
+  });
+
   it("only a TRUE failure surfaces: both the draft and the escalated retry are empty -> 422", async () => {
     mockComplete.mockResolvedValue(authorResp("no code here, just prose"));
     const res = await POST(post({ ref: "pr-fb2", prompt: "add k", answers: { tests: "all" } }));
