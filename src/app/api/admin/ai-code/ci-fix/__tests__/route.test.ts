@@ -13,6 +13,8 @@ jest.mock("@/lib/ai-code/ci-status", () => ({
 const mockWorkspaceClient = jest.fn();
 const mockCountFixCommits = jest.fn();
 const mockListChangedFiles = jest.fn();
+const mockListRuns = jest.fn();
+const mockRerun = jest.fn();
 const mockCommit = jest.fn();
 const mockAuthorFiles = jest.fn();
 const mockAssessChange = jest.fn();
@@ -21,6 +23,8 @@ jest.mock("@/lib/github-client", () => ({
   getBranchHead: async () => "headsha123",
   countBranchCommitsMatching: (...a: unknown[]) => mockCountFixCommits(...a),
   listChangedFiles: (...a: unknown[]) => mockListChangedFiles(...a),
+  listWorkflowRunsRaw: (...a: unknown[]) => mockListRuns(...a),
+  rerunFailedRun: (...a: unknown[]) => mockRerun(...a),
 }));
 const mockGather = jest.fn();
 jest.mock("@/lib/ai-code/ci-failure-detail", () => ({
@@ -56,6 +60,8 @@ beforeEach(() => {
   mockWorkspaceClient.mockResolvedValue({ token: "t", fetch: jest.fn() });
   mockCountFixCommits.mockResolvedValue(0);
   mockListChangedFiles.mockResolvedValue([]);
+  mockListRuns.mockResolvedValue([]);
+  mockRerun.mockResolvedValue(true);
   mockGather.mockResolvedValue({ detail: "", files: [] });
   mockAuthorFiles.mockResolvedValue({ changes: [{ path: "src/x.ts", content: "export const x = 2;" }], author: "model-b", error: null });
   mockCommit.mockResolvedValue(["src/x.ts"]);
@@ -219,5 +225,29 @@ test("governance failure (guardrail/security check) escalates to a human, does N
   expect(body.governanceFailure).toEqual({ signal: "check:CodeQL" });
   expect(mockAuthorFiles).not.toHaveBeenCalled();
   expect(mockCommit).not.toHaveBeenCalled();
+});
+
+test("flake pre-filter: first attempt re-runs the failed job once and WAITS (does not author yet)", async () => {
+  mockFetchCiStatus.mockResolvedValue(red);
+  mockFetchAttribution.mockResolvedValue({ introduced: ["unit"], preexisting: [], indeterminate: [], fixed: [], baselineKnown: true, baselineHealthy: false, clean: false, reason: "introduced unit" });
+  mockCountFixCommits.mockResolvedValue(0);           // first attempt
+  mockGather.mockResolvedValue({ detail: "Expected 5 Received 4", files: [] }); // mechanical
+  mockListRuns.mockResolvedValue([{ id: 55, name: "unit", conclusion: "failure", runAttempt: 1 }]);
+  const body = await (await POST(post({ repo: "o/r", ref: "b", branch: "factory/b-abc", base: "main", attempt: 0, maxAttempts: 3 }))).json();
+  expect(mockRerun).toHaveBeenCalledWith(expect.anything(), "o/r", 55); // re-ran the failed job
+  expect(body.decision.action).toBe("wait");
+  expect(body.flakeRecheckTriggered).toBe(true);
+  expect(mockAuthorFiles).not.toHaveBeenCalled(); // no fix authored until the re-run settles
+});
+
+test("no re-run once a fix has already been attempted (priorFixCommits > 0)", async () => {
+  mockFetchCiStatus.mockResolvedValue(red);
+  mockFetchAttribution.mockResolvedValue({ introduced: ["unit"], preexisting: [], indeterminate: [], fixed: [], baselineKnown: true, baselineHealthy: false, clean: false, reason: "introduced unit" });
+  mockCountFixCommits.mockResolvedValue(1);           // already fixing
+  mockGather.mockResolvedValue({ detail: "Expected 5 Received 4", files: [] });
+  mockListRuns.mockResolvedValue([{ id: 55, name: "unit", conclusion: "failure", runAttempt: 1 }]);
+  const body = await (await POST(post({ repo: "o/r", ref: "b", branch: "factory/b-abc", base: "main", attempt: 0, maxAttempts: 3 }))).json();
+  expect(mockRerun).not.toHaveBeenCalled();
+  expect(body.decision.action).toBe("author_fix");
 });
 
