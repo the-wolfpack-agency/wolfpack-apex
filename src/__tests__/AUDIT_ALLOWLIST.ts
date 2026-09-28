@@ -28,6 +28,10 @@ export interface AuditAllowlistEntry {
 
 export const AUDIT_ALLOWLIST: ReadonlyArray<AuditAllowlistEntry> = [
   {
+    route: "src/app/api/gate/[gate]/route.ts",
+    reason: "An Agent Gate decision IS an authorization decision, so it is audited to the OGIAM hash-chained ledger (recordGateDecision -> recordDecision in src/lib/gates/audit.ts), not the recordAudit log - the stronger, tamper-evident home for an allow/transform/escalate/deny verdict, and the one the client verifies. Adding a second recordAudit row would be redundant. Delegated-to-a-downstream-library-that-already-audits case.",
+  },
+  {
     route: "src/app/api/forcefield/observe/route.ts",
     reason: "Central Forcefield engine: one call per inbound request across every connected site is a high-volume observability event, recorded via recordSiteEvent (the site.* analytics event) for the protection/learning rollup, not a durable state mutation. A per-request hash-chained audit row would flood the ledger without compliance value; classification and the block decision are deterministic and reconstructable from the recorded signals. This is the unified central form of forcefield/edge/decide, allowlisted for the same reason; the operator-block CHANGES that govern it ARE audited at their admin endpoints.",
   },
