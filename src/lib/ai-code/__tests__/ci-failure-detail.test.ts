@@ -123,3 +123,15 @@ describe("gatherFailureContext scopes to introduced runs", () => {
     expect(mockListJobs).toHaveBeenCalledWith(expect.anything(), "o/r", 2);
   });
 });
+
+describe("extractFailingTestFiles", () => {
+  const { extractFailingTestFiles } = jest.requireActual("@/lib/ai-code/ci-failure-detail");
+  it("pulls the FAIL <path> test files, deduped", () => {
+    const log = "FAIL src/lib/__tests__/averageWordLength.test.ts\n  some detail\nFAIL src/lib/__tests__/averageWordLength.test.ts\nPASS src/lib/__tests__/ok.test.ts";
+    const out = extractFailingTestFiles(log);
+    expect(out).toEqual(["src/lib/__tests__/averageWordLength.test.ts"]);
+  });
+  it("returns [] when nothing failed", () => {
+    expect(extractFailingTestFiles("all green, no FAIL lines")).toEqual([]);
+  });
+});

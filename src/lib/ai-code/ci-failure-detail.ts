@@ -40,6 +40,24 @@ export function extractErrorLines(log: string, maxLines = 50): string {
 
 const FILE_PATH = /(?:src|tests|app|lib|pages|components)\/[\w./-]+\.(?:tsx?|jsx?)/g;
 
+/** The TEST files named as FAILING in a jest/CI log (the "FAIL <path>" lines).
+ *  Used to detect non-progress on a test THIS change authored. Pure: deduped,
+ *  order preserved. */
+export function extractFailingTestFiles(text: string, max = 8): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  // "FAIL src/lib/__tests__/x.test.ts" (optionally after a stripped timestamp).
+  for (const m of text.matchAll(/(?:^|\s)FAIL\s+((?:src|tests|app|lib|pages|components)\/[\w./-]+\.(?:tsx?|jsx?))/g)) {
+    const p = m[1];
+    if (!seen.has(p)) {
+      seen.add(p);
+      out.push(p);
+      if (out.length >= max) break;
+    }
+  }
+  return out;
+}
+
 /** A failing jest error names the TEST file, not the source under test. To fix
  *  the source (never the test), derive the likely source path(s) from a test
  *  path: drop the `__tests__/` segment and the `.test`/`.spec` suffix. Returns []
