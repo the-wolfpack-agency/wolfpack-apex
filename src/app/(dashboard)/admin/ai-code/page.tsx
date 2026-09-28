@@ -119,7 +119,9 @@ interface ModelGrade { model: string; n: number; readyRate: number; firstPassRat
 interface Grade { total: number; readyRate: number; firstPassRate: number; blockRate: number; escalationRate: number; byModel: ModelGrade[] }
 interface DriftFlag { model: string; priorReadyRate: number; recentReadyRate: number; drop: number; priorN: number; recentN: number }
 interface ProtectionSummary { totalCaught: number; byClass: { klass: string; label: string; count: number }[]; changesBlocked: number; sentForReview: number; criticalsCaught: number; windowDays: number }
-interface HistoryData { runs: RunSummary[]; grade: Grade; drift: DriftFlag[]; protected?: ProtectionSummary }
+interface GateDecisionRow { gate: string; verdict: "allow" | "auto_fix" | "require_human" | "deny"; modelInvoked: string | null; findings: number; recordedSeq: number | null; createdAt: string }
+interface GateSafety { total: number; allowed: number; autoFixed: number; escalatedToHuman: number; badChangesPrevented: number; dataKeptFromModel: number; frameworks: string[]; recent: GateDecisionRow[] }
+interface HistoryData { runs: RunSummary[]; grade: Grade; drift: DriftFlag[]; protected?: ProtectionSummary; gateSafety?: GateSafety }
 
 interface AuditVerification { ok: boolean; verifiedCount: number; legacyCount: number; brokenAtSeq: number | null; headSeq: number; headHash: string | null }
 interface AuditEntry { seq: number; created_at: string; principal_agent: string; intended_outcome: string; effective_outcome: string; would_block: boolean; rule_id: string; reason: string | null }
@@ -905,6 +907,43 @@ export default function CodeFactoryPage() {
           )}
 
         </>
+      )}
+
+      {history?.gateSafety && history.gateSafety.total > 0 && (
+        <GlassPanel title="How we kept you safe" subtitle="Every change - AI- or human-authored - runs through the gate. This is what the gate did on your behalf, and it is verifiable.">
+          <div data-testid="gate-safety" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "0.75rem" }}>
+            {[
+              { k: "Data kept from the LLM", v: history.gateSafety.dataKeptFromModel, hint: "decisions where your data never went to a model", c: "var(--wp-gold, #e8b528)" },
+              { k: "Bad changes prevented", v: history.gateSafety.badChangesPrevented, hint: "blocked or escalated before they could land", c: "var(--wp-error, #ef4444)" },
+              { k: "Auto-fixed", v: history.gateSafety.autoFixed, hint: "repaired without a human", c: "var(--wp-success, #30a46c)" },
+              { k: "Sent for human review", v: history.gateSafety.escalatedToHuman, hint: "stopped for a person, as intended", c: "var(--wp-warning, #f5a623)" },
+              { k: "Decisions", v: history.gateSafety.total, hint: "gate decisions, all on the verifiable ledger", c: "var(--wp-text, #e6e9ef)" },
+            ].map((t) => (
+              <div key={t.k} title={t.hint} style={{ background: "var(--wp-surface-2, #171a21)", border: "1px solid var(--wp-border, #2a2f3a)", borderRadius: 8, padding: "0.6rem 0.75rem" }}>
+                <div style={{ fontSize: "0.68rem", textTransform: "uppercase", letterSpacing: "0.03em", color: "var(--wp-text-dim)" }}>{t.k}</div>
+                <div style={{ fontSize: "1.4rem", fontWeight: 700, marginTop: "0.2rem", color: t.v > 0 ? t.c : "var(--wp-text, #e6e9ef)" }}>{t.v.toLocaleString()}</div>
+                <div style={{ fontSize: "0.68rem", color: "var(--wp-text-dim)", marginTop: "0.15rem" }}>{t.hint}</div>
+              </div>
+            ))}
+          </div>
+          {history.gateSafety.frameworks.length > 0 && (
+            <p data-testid="gate-safety-frameworks" style={{ margin: "0.8rem 0 0", fontSize: "0.8rem", color: "var(--wp-text-dim)" }}>
+              Compliance frameworks enforced on every decision: <strong style={{ color: "var(--wp-text, #e6e9ef)" }}>{history.gateSafety.frameworks.join(", ")}</strong>
+            </p>
+          )}
+          {history.gateSafety.recent.length > 0 && (
+            <div data-testid="gate-safety-recent" style={{ marginTop: "0.9rem", display: "grid", gap: "0.35rem" }}>
+              {history.gateSafety.recent.map((d, i) => (
+                <div key={`${d.gate}-${i}`} style={{ display: "flex", alignItems: "center", gap: "0.6rem", flexWrap: "wrap", fontSize: "0.82rem", padding: "0.4rem 0.55rem", borderRadius: 6, background: "var(--wp-surface-2, #171a21)", border: "1px solid var(--wp-border, #2a2f3a)" }}>
+                  <span style={{ fontWeight: 600 }}>{d.gate}</span>
+                  <StatusPill status={d.verdict} tone={d.verdict === "deny" ? "error" : d.verdict === "require_human" ? "warning" : "success"} label={d.verdict === "allow" ? "Allowed" : d.verdict === "auto_fix" ? "Auto-fixed" : d.verdict === "require_human" ? "Sent to human" : "Blocked"} size="sm" />
+                  <span style={{ color: d.modelInvoked ? "var(--wp-text-dim)" : "var(--wp-gold, #e8b528)" }}>{d.modelInvoked ? `model: ${d.modelInvoked}` : "no model - data kept in"}</span>
+                  {d.recordedSeq != null ? <span style={{ marginLeft: "auto", color: "var(--wp-text-dim)", fontVariantNumeric: "tabular-nums" }}>ledger #{d.recordedSeq}</span> : null}
+                </div>
+              ))}
+            </div>
+          )}
+        </GlassPanel>
       )}
 
       {history?.protected && (history.protected.totalCaught > 0 || history.protected.changesBlocked > 0 || history.protected.criticalsCaught > 0) && (

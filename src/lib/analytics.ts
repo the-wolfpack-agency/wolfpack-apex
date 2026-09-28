@@ -684,6 +684,11 @@ export type InstinctEventType =
   // ai_code.pipeline_run { ref, spec_hash, status, attempts, final_outcome,
   //   open_questions } - one governed run chaining intake -> gate -> repair.
   | "ai_code.pipeline_run"
+  // ai_gate.decision { gate, verdict, model_invoked, frameworks, findings,
+  //   recorded_seq } - one Agent Gate decision, the data behind the client-facing
+  //   "kept you safe" panel. model_invoked null = the client's data never went to
+  //   an LLM for this decision (the headline safety metric).
+  | "ai_gate.decision"
   // ai_code.model_key_set { workspace_id, provider } - a workspace stored/rotated
   //   its own model key (BYO); the key value is never in analytics.
   | "ai_code.model_key_set"

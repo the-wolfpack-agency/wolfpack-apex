@@ -23,6 +23,7 @@ import { runGate } from "@/lib/gates/run-gate";
 import { recordGateDecision } from "@/lib/gates/audit";
 import { DEFAULT_COMPLIANCE_POLICY, type CompliancePolicy, type GateAgent } from "@/lib/gates/types";
 import { getAIClient } from "@/lib/ai";
+import { trackEvent } from "@/lib/analytics";
 
 /** Build the client's compliance policy from the request, falling back to the
  *  safe default (deterministic only, no data to any model). Only recognized
@@ -96,6 +97,23 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ gate: stri
     actorId: auth.user.id,
     policy,
   }, body.input);
+
+  // Persist the client-facing safety summary so the "kept you safe" panel can
+  // aggregate it. model_invoked null = the client's data never went to an LLM for
+  // this decision - the headline safety metric. Governs AI- and human-authored
+  // changes alike: system safety, not just safe AI.
+  trackEvent("ai_gate.decision", auth.user.id, auth.user.role, {
+    workspace_id: auth.user.workspaceId ?? "default",
+    gate: gateName,
+    verdict: result.verdict,
+    // primitives only (metadata type). data_kept_from_model is the headline
+    // metric; model_used is "" when no model saw the data.
+    data_kept_from_model: result.transparency.modelInvoked === null,
+    model_used: result.transparency.modelInvoked ?? "",
+    frameworks: result.transparency.frameworksApplied.join(","),
+    findings: result.findings.length,
+    recorded_seq: recordedSeq ?? 0,
+  });
 
   return NextResponse.json({
     gate: gateName,
