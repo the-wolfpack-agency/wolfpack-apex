@@ -15,7 +15,18 @@
  * It never auto-fixes - it is a guard, not an author.
  */
 import { assessChange, type ChangeAssessment } from "@/lib/ai-code/assess";
+import { reviewDiff } from "@/lib/ai-code/detect";
 import type { GateDefinition, GateResult, GateFinding } from "./types";
+
+/** A genuine test / fixture file, where a secret-shaped value is very likely
+ *  intentional test data. Deliberately NARROW - scripts/, config, and source are
+ *  NOT here, because a secret in those is a real concern that keeps the hard deny. */
+const FIXTURE_PATH =
+  /(?:^|\/)(?:__tests__|__mocks__|__fixtures__|fixtures|mocks|e2e)\/|\.(?:test|spec|stories|fixture)\.[jt]sx?$|\.(?:example|sample)$/i;
+
+export function isTestFixturePath(file: string): boolean {
+  return FIXTURE_PATH.test(file);
+}
 
 export interface SafeReviewInput {
   /** The unified diff to assess. */
@@ -43,14 +54,30 @@ export const safeReviewGate: GateDefinition<SafeReviewInput, SafeReviewOutput> =
   purpose: "Deterministically screen an AI-authored change (secrets, injection, unsafe patterns, engineering invariants) before it reaches a human or the next gate.",
   async evaluate(input, ctx): Promise<GateResult<SafeReviewOutput>> {
     const a = await assessChange(input.diff);
-    const verdict = a.handoffAllowed
+    let verdict: GateResult["verdict"] = a.handoffAllowed
       ? "allow"
       : a.securityOutcome === "block" || a.deepScanBlocking
         ? "deny"
         : "require_human";
-    const reason = a.handoffAllowed
+    let reason = a.handoffAllowed
       ? "Every deterministic layer cleared the change."
       : `Stopped by ${a.blockedBy}: ${a.blockedBy === "security" ? `security scan ${a.securityOutcome}` : a.blockedBy === "deep-scan" ? `${a.deepScanCritical} critical finding(s)` : `engineering invariant ${a.invariantRuleId}`}.`;
+
+    // Test-fixture allowlist: a hard deny driven ONLY by secret-shaped values, all
+    // in genuine test/fixture files, is downgraded to require_human - a person
+    // confirms they're intentional test data, not a real credential. A secret in
+    // ANY non-fixture file (source, scripts, config) keeps the hard deny. This is
+    // safe: the downgrade only ever moves deny -> a human review, never -> allow.
+    if (verdict === "deny") {
+      const criticals = reviewDiff(input.diff).filter((f) => f.severity === "critical");
+      const secretCriticals = criticals.filter((f) => f.klass === "secret");
+      const otherCriticals = criticals.filter((f) => f.klass !== "secret");
+      if (secretCriticals.length > 0 && otherCriticals.length === 0 && secretCriticals.every((f) => isTestFixturePath(f.file))) {
+        verdict = "require_human";
+        const files = [...new Set(secretCriticals.map((f) => f.file))].join(", ");
+        reason = `Secret-shaped value(s) found only in test-fixture file(s): ${files}. A human should confirm these are intentional test data, not a real credential (not a hard block, because production files are clean).`;
+      }
+    }
     return {
       verdict,
       output: verdict === "allow" ? { diff: input.diff, assessment: a } : undefined,

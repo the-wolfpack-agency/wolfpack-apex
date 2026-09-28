@@ -44,3 +44,27 @@ it("require_human: an engineering-invariant block asks a person to look (not a h
   expect(r.verdict).toBe("require_human");
   expect(r.reason).toMatch(/INV-1/);
 });
+
+describe("test-fixture allowlist (secret-in-fixture downgrades deny -> require_human)", () => {
+  const SECRET_LINE = 'const key = "sk-ant-abcdefghijklmnopqrstuvwxyz1234567890";';
+  const diffIn = (file) => `diff --git a/${file} b/${file}\n--- /dev/null\n+++ b/${file}\n@@ -0,0 +1 @@\n+${SECRET_LINE}\n`;
+
+  it("a secret only in a __tests__ file -> require_human (confirm test data), not deny", async () => {
+    mockAssess.mockResolvedValue({ ...clean, securityOutcome: "block", handoffAllowed: false, blockedBy: "security" });
+    const r = await runGate(safeReviewGate, { diff: diffIn("src/lib/__tests__/x.test.ts") }, ctx);
+    expect(r.verdict).toBe("require_human");
+    expect(r.reason).toMatch(/test-fixture file/i);
+  });
+
+  it("a secret in a PRODUCTION source file stays a hard deny", async () => {
+    mockAssess.mockResolvedValue({ ...clean, securityOutcome: "block", handoffAllowed: false, blockedBy: "security" });
+    const r = await runGate(safeReviewGate, { diff: diffIn("src/lib/client.ts") }, ctx);
+    expect(r.verdict).toBe("deny");
+  });
+
+  it("a secret in scripts/ stays a hard deny (scripts are NOT allowlisted)", async () => {
+    mockAssess.mockResolvedValue({ ...clean, securityOutcome: "block", handoffAllowed: false, blockedBy: "security" });
+    const r = await runGate(safeReviewGate, { diff: diffIn("scripts/tool.mjs") }, ctx);
+    expect(r.verdict).toBe("deny");
+  });
+});
