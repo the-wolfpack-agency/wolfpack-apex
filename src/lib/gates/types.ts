@@ -99,6 +99,11 @@ export interface GateResult<O = unknown> {
   reason: string;
   transparency: GateTransparency;
   audit: GateAuditPayload;
+  /** Set by a gate that took an IRREVERSIBLE action (a commit) and therefore
+   *  recorded its decision to the tamper-evident ledger ITSELF, before acting
+   *  (fail-closed: no audit, no action). The route then skips the post-hoc audit
+   *  to avoid a duplicate row. Absent for gates whose decision the route audits. */
+  recordedSeq?: number;
 }
 
 export interface GateContext {
