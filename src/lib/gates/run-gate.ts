@@ -21,12 +21,14 @@ import { scrubForModel } from "./scrub";
 export function redactPrompt(prompt: string, patterns: readonly string[] | undefined): string {
   if (!patterns || patterns.length === 0) return prompt;
   let out = prompt;
-  for (const src of patterns) {
-    try {
-      out = out.replace(new RegExp(src, "g"), "[REDACTED]");
-    } catch {
-      /* a malformed pattern is skipped, not fatal */
-    }
+  for (const term of patterns) {
+    // LITERAL substring redaction - deliberately NOT a regex. Building a RegExp
+    // from a client-provided string is a ReDoS + injection risk (a client could
+    // pass a catastrophic-backtracking pattern that hangs the gate). A literal
+    // split/join is linear-time and cannot be weaponized. The default scrub
+    // (scrubForModel) already covers secret/PII SHAPES we control; client
+    // redactions are for specific literal terms (codenames, internal ids).
+    if (term) out = out.split(term).join("[REDACTED]");
   }
   return out;
 }
