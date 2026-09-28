@@ -14,6 +14,7 @@ import { dependencyReviewGate } from "./dependency-review-gate";
 import { promptInjectionGate } from "./prompt-injection-gate";
 import { migrationSafetyGate } from "./migration-safety-gate";
 import { responseReviewGate } from "./response-review-gate";
+import { browserCheckGate } from "./browser-check-gate";
 import { prePrValidateGate } from "./pre-pr-validate-gate";
 import { licenseReviewGate } from "./license-review-gate";
 
@@ -33,6 +34,7 @@ register(dependencyReviewGate as GateDefinition<unknown, unknown>);
 register(promptInjectionGate as GateDefinition<unknown, unknown>);
 register(migrationSafetyGate as GateDefinition<unknown, unknown>);
 register(responseReviewGate as GateDefinition<unknown, unknown>);
+register(browserCheckGate as GateDefinition<unknown, unknown>);
 register(prePrValidateGate as GateDefinition<unknown, unknown>);
 register(licenseReviewGate as GateDefinition<unknown, unknown>);
 
