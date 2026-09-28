@@ -103,8 +103,19 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   let contextSummary: { detailChars: number; files: string[] } | null = null;
   let gathered: Awaited<ReturnType<typeof gatherFailureContext>> | null = null;
   let stalledOnAuthoredTest: { testFiles: string[] } | undefined;
-  const prelim = decideFixAction({ ci, attempt: effectiveAttempt, maxAttempts, introducedFailing });
-  if (prelim.action === "author_fix") {
+  // Gather whenever there is an INTRODUCED failure to act on - i.e. CI is
+  // readable, complete, not green, and this change introduced at least one of the
+  // failures. That covers BOTH the author-a-fix case and the budget-exhausted
+  // case, so the wrong-test diagnosis is produced even after the fix budget is
+  // spent (found by dogfooding: an already-stalled branch was otherwise escalated
+  // with the generic "after N attempts" reason instead of the useful one).
+  const introducedRed =
+    ci.readable !== false &&
+    ci.complete === true &&
+    ci.ciComplete !== true &&
+    (ci.failedChecks?.length ?? 0) > 0 &&
+    (introducedFailing === undefined || introducedFailing > 0);
+  if (introducedRed) {
     const headSha = await getBranchHead(client, repo, branch).catch(() => branch);
     // Scope to the INTRODUCED failures (when a baseline is known) so the fixer
     // never tries to repair pre-existing red it did not cause.
