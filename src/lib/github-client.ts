@@ -252,6 +252,33 @@ export async function getBranchHead(
   return ref.object.sha;
 }
 
+/** Count commits on `branch` (ahead of `base`) whose message starts with
+ *  `prefix`. Used to derive the auto-fix budget from the branch's OWN history:
+ *  the number of fixes already committed cannot be under-reported by a caller
+ *  that resets its attempt counter, so an autonomous trigger can never loop past
+ *  the ceiling. Best-effort: returns 0 if the compare cannot be read. */
+export async function countBranchCommitsMatching(
+  client: GithubClient,
+  repoFullName: string,
+  base: string,
+  branch: string,
+  prefix: string,
+): Promise<number> {
+  try {
+    // base...branch: only the commits `branch` adds on top of `base`. The refs
+    // are encoded individually; the "..." separator is literal (encodeRef would
+    // reject a string containing "..").
+    const cmp = await gh<{ commits?: { commit?: { message?: string } }[] }>(
+      client,
+      "GET",
+      `/repos/${repoFullName}/compare/${encodeRef(base)}...${encodeRef(branch)}?per_page=100`,
+    );
+    return (cmp.commits ?? []).filter((c) => (c.commit?.message ?? "").startsWith(prefix)).length;
+  } catch {
+    return 0;
+  }
+}
+
 /** Force a branch back to a known-good SHA (the revert mechanism). Callers MUST
  *  restrict this to factory-created branches (see ai-code/revert.ts) so it can
  *  never rewrite a human branch, a release branch, or main. */
