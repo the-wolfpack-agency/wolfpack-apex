@@ -31,6 +31,7 @@ import {
   createPrComment,
 } from "@/lib/github-client";
 import { gatePullRequestDiff, PR_GATE_CHECK_NAME } from "@/lib/ai-code/pr-gate";
+import { isOurRepo, selfHostMode } from "@/lib/ai-code/selfhost-mode";
 import { authorize } from "@/lib/ogiam/authorize";
 import { recordActionOutcome } from "@/lib/ogiam/ledger";
 import { trackEvent } from "@/lib/analytics";
@@ -86,6 +87,14 @@ export async function POST(req: NextRequest) {
     return ack({ ok: true, ignored: "incomplete_payload" });
   }
 
+  // Self-host (the tool guarding the tool): our OWN repos roll out in stages.
+  // "off" (default) skips them entirely, so nothing changes until we raise the
+  // mode. "comment" runs the gate non-blocking. Client repos are unaffected.
+  const selfHostObserve = isOurRepo(repo) && selfHostMode() === "comment";
+  if (isOurRepo(repo) && selfHostMode() === "off") {
+    return ack({ ok: true, ignored: "selfhost_off" });
+  }
+
   // Resolve the tenant from the installation. Unknown installation = not ours.
   const install = await getWorkspaceByInstallation(installationId);
   if (!install) return ack({ ok: true, ignored: "unknown_installation" });
@@ -136,17 +145,30 @@ export async function POST(req: NextRequest) {
     const diff = await fetchPullRequestDiff(client, repo, prNumber);
     const verdict = await gatePullRequestDiff(diff);
 
+    // Self-host observe: post the would-be verdict as a NEUTRAL, non-blocking
+    // check so we watch it on our own live PRs without ever blocking a merge.
     await createCheckRun(client, repo, {
       headSha,
       name: PR_GATE_CHECK_NAME,
-      conclusion: verdict.conclusion,
-      title: verdict.title,
-      summary: verdict.summary,
+      conclusion: selfHostObserve ? "neutral" : verdict.conclusion,
+      title: selfHostObserve ? `[observe] ${verdict.title}` : verdict.title,
+      summary: selfHostObserve
+        ? `Self-host OBSERVE (comment-only, non-blocking). The gate WOULD conclude: **${verdict.conclusion}**.\n\n${verdict.summary}`
+        : verdict.summary,
     });
 
-    // On a block, also leave one comment so the signal is visible even without
-    // branch protection (value from just the install). Best effort.
-    if (verdict.conclusion !== "success") {
+    if (selfHostObserve) {
+      // In observe mode, always leave the verdict as a comment (not just on block)
+      // so we can watch the gate's decisions on our own PRs. Non-blocking.
+      await createPrComment(
+        client,
+        repo,
+        prNumber,
+        `**Secure Agent (self-host observe - non-blocking).** The gate would conclude: **${verdict.conclusion}**.\n\n${verdict.summary}`,
+      ).catch(() => {});
+    } else if (verdict.conclusion !== "success") {
+      // On a block, also leave one comment so the signal is visible even without
+      // branch protection (value from just the install). Best effort.
       await createPrComment(
         client,
         repo,

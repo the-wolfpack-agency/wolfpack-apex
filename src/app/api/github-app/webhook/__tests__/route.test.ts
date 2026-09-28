@@ -144,3 +144,38 @@ it("never 500s when the GitHub call throws", async () => {
   expect((await res.json()).error).toBe("gate_error");
   expect(mockRecordOutcome).toHaveBeenCalledWith(expect.objectContaining({ code: "gate_error" }));
 });
+
+describe("self-host (our own repo) graduated rollout", () => {
+  const ourPr = () => prPayload({ repository: { full_name: "the-wolfpack-agency/wolfpack-apex" } });
+  const orig = process.env.SELFHOST_GATE_MODE;
+  afterEach(() => { if (orig === undefined) delete process.env.SELFHOST_GATE_MODE; else process.env.SELFHOST_GATE_MODE = orig; });
+
+  it("off (default): our own PR is skipped entirely - no check posted", async () => {
+    delete process.env.SELFHOST_GATE_MODE;
+    const res = await POST(post(ourPr()));
+    expect((await res.json()).ignored).toBe("selfhost_off");
+    expect(mockCreateCheck).not.toHaveBeenCalled();
+  });
+
+  it("comment: posts a NEUTRAL (non-blocking) check + a comment, even on a would-be block", async () => {
+    process.env.SELFHOST_GATE_MODE = "comment";
+    mockGate.mockResolvedValue({ assessment: { blockedBy: "security" }, conclusion: "action_required", title: "Blocked", summary: "secret" });
+    await POST(post(ourPr()));
+    expect(mockCreateCheck).toHaveBeenCalledWith(expect.anything(), "the-wolfpack-agency/wolfpack-apex", expect.objectContaining({ conclusion: "neutral" })); // never blocks
+    expect(mockCreateComment).toHaveBeenCalled(); // the observe comment is always posted
+  });
+
+  it("enforce: our own PR gates for real (action_required on a block, like a client repo)", async () => {
+    process.env.SELFHOST_GATE_MODE = "enforce";
+    mockGate.mockResolvedValue({ assessment: { blockedBy: "security" }, conclusion: "action_required", title: "Blocked", summary: "secret" });
+    await POST(post(ourPr()));
+    expect(mockCreateCheck).toHaveBeenCalledWith(expect.anything(), "the-wolfpack-agency/wolfpack-apex", expect.objectContaining({ conclusion: "action_required" }));
+  });
+
+  it("a CLIENT repo is unaffected by the self-host flag (always enforces)", async () => {
+    process.env.SELFHOST_GATE_MODE = "off";
+    await POST(post(prPayload())); // acme/app
+    expect(mockCreateCheck).toHaveBeenCalledWith(expect.anything(), "acme/app", expect.objectContaining({ conclusion: "success" }));
+  });
+});
+
