@@ -10,8 +10,10 @@
  * validation branch (commitFileChanges), dispatch factory-validate, then poll
  * readValidationOutcome until it settles.
  */
+import { createHash } from "node:crypto";
 import type { GithubClient, WorkflowRunRef } from "@/lib/github-client";
-import { listWorkflowRunsRaw } from "@/lib/github-client";
+import { listWorkflowRunsRaw, getBranchHead } from "@/lib/github-client";
+import { commitFileChanges, filesToDiff, type FileChange } from "@/lib/ai-code/file-changes";
 
 /** A throwaway branch name for validating a change before the real PR. Stable per
  *  (ref, content hash) so a retry reuses it. */
@@ -48,4 +50,26 @@ export async function readValidationOutcome(
   if (validate.some((r) => r.conclusion == null)) return { status: "pending", failing: [] };
   const failing = validate.filter((r) => r.conclusion === "failure").map((r) => r.name);
   return failing.length > 0 ? { status: "fail", failing } : { status: "pass", failing: [] };
+}
+
+/**
+ * Push an authored change to a throwaway validation branch so factory-validate can
+ * run its tests before a real PR exists. Idempotent: the branch is content-hashed,
+ * and if it already exists (a re-poll), the existing branch is reused - the change
+ * is pushed ONCE. Returns the branch name.
+ */
+export async function pushValidationBranch(
+  client: GithubClient,
+  repoFullName: string,
+  changes: readonly FileChange[],
+  base: string,
+  ref: string,
+): Promise<string> {
+  const hash = createHash("sha256").update(filesToDiff(changes)).digest("hex");
+  const branch = validationBranchName(ref, hash);
+  const exists = await getBranchHead(client, repoFullName, branch).then(() => true).catch(() => false);
+  if (!exists) {
+    await commitFileChanges({ client, repoFullName, branch, base, changes: [...changes], message: `factory validate: ${ref}` });
+  }
+  return branch;
 }

@@ -28,6 +28,10 @@ export interface AuditAllowlistEntry {
 
 export const AUDIT_ALLOWLIST: ReadonlyArray<AuditAllowlistEntry> = [
   {
+    route: "src/app/api/admin/ai-code/pre-pr-validate/route.ts",
+    reason: "Pushes a validation branch + runs the pre-pr-validate gate; the gate decision is audited to the OGIAM hash-chained ledger (recordGateDecision), the stronger tamper-evident home. Same rationale as the gate endpoints; a recordAudit row would be redundant.",
+  },
+  {
     route: "src/app/api/gate/chain/route.ts",
     reason: "Runs a chain of Agent Gates; each gate decision is audited to the OGIAM hash-chained ledger (recordGateDecision, per step) - the stronger, tamper-evident home for a chain of allow/transform/escalate/deny verdicts. Same rationale as the single-gate endpoint; a recordAudit row would be redundant.",
   },
