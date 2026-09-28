@@ -114,6 +114,39 @@ export interface FailureContext {
   files: { path: string; content: string }[];
 }
 
+/** True when the fixer has SOMETHING to anchor a fix to: real failure detail,
+ *  file contents, or the change's known file list. With none of these, authoring
+ *  is blind - the model invents a wrong-path file (dogfooding: it wrote
+ *  src/lib/utils/deepMerge.js). The route uses this to refuse rather than guess. */
+export function hasFixAnchor(context: FailureContext, changedFiles: readonly string[]): boolean {
+  return Boolean(context.detail) || context.files.length > 0 || changedFiles.length > 0;
+}
+
+/** Post-author anti-hallucination guard. When this change's files are known, a
+ *  fix that edits NONE of them and only produces new paths is the hallucination
+ *  caught by dogfooding (a parallel src/lib/utils/deepMerge.js instead of editing
+ *  the real src/lib/deepMerge.ts). Reject it (escalate) rather than commit a
+ *  parallel file. A fix that edits at least one real changed file is trusted
+ *  as-is (it may legitimately add a helper alongside). Pure. */
+export function guardAuthoredFix<T extends { path: string }>(args: {
+  changes: readonly T[];
+  authorError: string | null;
+  changedFiles: readonly string[];
+}): { changes: T[]; error: string | null } {
+  if (args.authorError) return { changes: [], error: args.authorError };
+  const changed = new Set(args.changedFiles);
+  const touchesChange = args.changes.some((c) => changed.has(c.path));
+  if (args.changedFiles.length > 0 && args.changes.length > 0 && !touchesChange) {
+    return {
+      changes: [],
+      error: `re-author edited none of this change's files and only produced new paths (${args.changes
+        .map((c) => c.path)
+        .join(", ")}); refusing to commit a parallel file`,
+    };
+  }
+  return { changes: [...args.changes], error: null };
+}
+
 /** Gather the real failure detail + the files it references for a commit's CI.
  *  Never throws: any failure yields empty context, so the fixer degrades to the
  *  thin brief rather than erroring. */
@@ -151,17 +184,34 @@ export async function gatherFailureContext(
       }
     }
     const detail = parts.join("\n\n").slice(0, maxDetailChars);
-    const files: { path: string; content: string }[] = [];
     // Fetch the files the error names AND the source behind any failing test, so
     // the re-author can fix the SOURCE (the error only names the test file).
-    for (const path of withSourcePaths(extractFilePaths(detail))) {
-      const content = await fetchFileContent(client, repoFullName, path, ref).catch(() => null);
-      if (content) files.push({ path, content: content.slice(0, 6000) });
-    }
+    const files = await fetchFilesContent(client, repoFullName, withSourcePaths(extractFilePaths(detail)), ref);
     return { detail, files };
   } catch {
     return { detail: "", files: [] };
   }
+}
+
+/** Fetch the current contents of a set of paths at a ref, capped per file and in
+ *  count, skipping any that 404. Shared by the failure-context gatherer and the
+ *  route's changed-file anchor fallback so both fetch identically. Never throws. */
+export async function fetchFilesContent(
+  client: GithubClient,
+  repoFullName: string,
+  paths: readonly string[],
+  ref: string,
+  opts: { maxFiles?: number; maxCharsPerFile?: number } = {},
+): Promise<{ path: string; content: string }[]> {
+  const maxFiles = opts.maxFiles ?? 6;
+  const maxChars = opts.maxCharsPerFile ?? 6000;
+  const out: { path: string; content: string }[] = [];
+  for (const path of paths) {
+    if (out.length >= maxFiles) break;
+    const content = await fetchFileContent(client, repoFullName, path, ref).catch(() => null);
+    if (content) out.push({ path, content: content.slice(0, maxChars) });
+  }
+  return out;
 }
 
 /** Build the enriched re-author prompt from the thin brief + the real failure
@@ -184,17 +234,28 @@ export function buildEnrichedFixPrompt(args: {
   context: FailureContext;
   authoredTestStillFailing?: string[];
   subtype?: string;
+  /** The files this change actually consists of (the PR's diff vs base). The
+   *  authoritative anchor: the fix must edit THESE files. Prevents the fixer,
+   *  when it has thin/empty failure context, from hallucinating a brand-new file
+   *  at an invented path/extension (dogfooding found it authored
+   *  `src/lib/utils/deepMerge.js` instead of editing the real
+   *  `src/lib/deepMerge.ts`). */
+  changedFiles?: readonly string[];
 }): string {
   const subtypeHint = args.subtype ? SUBTYPE_HINT[args.subtype] : undefined;
   const fileBlocks = args.context.files
     .map((f) => `FILE: ${f.path}\n\`\`\`\n${f.content}\n\`\`\``)
     .join("\n\n");
   const stalled = args.authoredTestStillFailing && args.authoredTestStillFailing.length > 0;
+  const changed = args.changedFiles && args.changedFiles.length > 0 ? args.changedFiles : undefined;
   return [
     `The pull request on branch ${args.branch} of ${args.repo} is failing CI.`,
     args.brief,
     args.context.detail ? `The ACTUAL CI failure:\n${args.context.detail}` : "",
     subtypeHint ?? "",
+    changed
+      ? `This change consists of EXACTLY these file(s): ${changed.join(", ")}. Fix the failure by editing the EXISTING file(s) listed here. Do NOT create a new file at a different path or with a different extension (for example, do not add a parallel .js file for a .ts module, and do not invent a new directory) - the module under test already exists in this list, so modify it in place.`
+      : "",
     fileBlocks ? `Current contents of the files involved:\n\n${fileBlocks}` : "",
     stalled
       ? `A fix was already attempted and these test file(s) this change authored are STILL failing: ${args.authoredTestStillFailing!.join(", ")}. When the source correctly implements the described behavior, that means the TEST's expected value is wrong - correct the expected value(s) to match the source's correct output (each failing assertion shows "Expected" vs "Received"; "Received" is the source's actual result).`

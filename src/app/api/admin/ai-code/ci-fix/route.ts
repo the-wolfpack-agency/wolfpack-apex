@@ -20,7 +20,7 @@ import { fetchCiStatus, fetchCiAttribution } from "@/lib/ai-code/ci-status";
 import { decideFixAction, buildFixBrief } from "@/lib/ai-code/ci-fix-loop";
 import { runCiFixStep } from "@/lib/ai-code/ci-fix-driver";
 import { workspaceGithubClient, getBranchHead, countBranchCommitsMatching, listChangedFiles, listWorkflowRunsRaw, rerunFailedRun, triggerWorkflow } from "@/lib/github-client";
-import { gatherFailureContext, buildEnrichedFixPrompt, extractFailingTestFiles } from "@/lib/ai-code/ci-failure-detail";
+import { gatherFailureContext, buildEnrichedFixPrompt, extractFailingTestFiles, fetchFilesContent, hasFixAnchor, guardAuthoredFix } from "@/lib/ai-code/ci-failure-detail";
 import { classifyCiFailure } from "@/lib/ai-code/ci-failure-classify";
 import { flakeRecheckCandidates } from "@/lib/ai-code/flake";
 import { commitFileChanges, filesToDiff } from "@/lib/ai-code/file-changes";
@@ -104,6 +104,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // here), so we never pay for a log fetch we will not use.
   let contextSummary: { detailChars: number; files: string[] } | null = null;
   let gathered: Awaited<ReturnType<typeof gatherFailureContext>> | null = null;
+  // The files this change actually consists of (its diff vs base). The
+  // authoritative anchor for the re-author: fix THESE files, never invent a new
+  // path. Computed once when there is an introduced failure to act on.
+  let changedFiles: string[] = [];
   let stalledOnAuthoredTest: { testFiles: string[] } | undefined;
   let governanceFailure: { signal: string } | undefined;
   let transientFailure: { signal: string } | undefined;
@@ -128,6 +132,18 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // Scope to the INTRODUCED failures (when a baseline is known) so the fixer
     // never tries to repair pre-existing red it did not cause.
     gathered = await gatherFailureContext(client, repo, headSha, branch, { onlyRunNames: attribution?.introduced });
+    // The change's own files, always - the fixer's authoritative anchor. Even
+    // when the log is unavailable (blob expired, no matching error lines), the
+    // fixer must edit the files THIS change contains, never hallucinate a new
+    // path (dogfooding: it authored src/lib/utils/deepMerge.js instead of the
+    // real src/lib/deepMerge.ts because it had zero anchor).
+    changedFiles = await listChangedFiles(client, repo, base || "main", branch);
+    // When the failure log yielded no file contents, fall back to the changed
+    // files themselves so the re-author still sees the real code to edit.
+    if (gathered.files.length === 0 && changedFiles.length > 0) {
+      const anchor = await fetchFilesContent(client, repo, changedFiles, branch);
+      if (anchor.length > 0) gathered = { detail: gathered.detail, files: anchor };
+    }
     contextSummary = { detailChars: gathered.detail.length, files: gathered.files.map((f) => f.path) };
     // Governance/policy gate? A guardrail / security-scan / RLS / coverage failure
     // is a human policy decision, not a mechanical fix - do not let the fixer edit
@@ -170,7 +186,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     if (priorFixCommits >= 1) {
       const failingTests = extractFailingTestFiles(gathered.detail);
       if (failingTests.length > 0) {
-        const changed = new Set(await listChangedFiles(client, repo, base || "main", branch));
+        const changed = new Set(changedFiles);
         const authoredFailing = failingTests.filter((f) => changed.has(f));
         if (authoredFailing.length > 0) stalledOnAuthoredTest = { testFiles: authoredFailing };
       }
@@ -192,12 +208,22 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       // Reuse the context gathered above (never re-fetch). Empty only if the
       // decision changed under us; buildEnrichedFixPrompt degrades to the brief.
       const context = gathered ?? { detail: "", files: [] };
-      const prompt = buildEnrichedFixPrompt({ repo, branch, brief, context, authoredTestStillFailing: stalledOnAuthoredTest?.testFiles, subtype: mechanicalSubtype });
+      // Fail-closed: with NO anchor at all - no failure detail, no file contents,
+      // and no known changed files - the model would author blind and hallucinate
+      // a wrong-path file (dogfooding: src/lib/utils/deepMerge.js). Refuse; the
+      // driver escalates to a human instead of committing a guess.
+      if (!hasFixAnchor(context, changedFiles)) {
+        return { changes: [], author: "", error: "no failure context or changed-file anchor; refusing to author blind" };
+      }
+      const prompt = buildEnrichedFixPrompt({ repo, branch, brief, context, authoredTestStillFailing: stalledOnAuthoredTest?.testFiles, subtype: mechanicalSubtype, changedFiles });
       const authored = await authorFileChanges(
         { prompt, feature: "ai-code-ci-fix" },
         { complete: (r) => ai.complete(r) },
       );
-      return { changes: authored.changes, author: authored.author, error: authored.error };
+      // Anti-hallucination guard (pure, tested): reject a fix that edits none of
+      // this change's files and only invents new paths.
+      const guarded = guardAuthoredFix({ changes: authored.changes, authorError: authored.error, changedFiles });
+      return { changes: guarded.changes, author: authored.author, error: guarded.error };
     },
     // The autonomous fix clears the SAME combined gate as the front door before it
     // is committed. A fix carrying a secret / injection / critical finding is never
