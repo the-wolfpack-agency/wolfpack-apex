@@ -19,7 +19,7 @@ import { requireEntitlement } from "@/lib/tenancy/require-entitlement";
 import { fetchCiStatus, fetchCiAttribution } from "@/lib/ai-code/ci-status";
 import { decideFixAction, buildFixBrief } from "@/lib/ai-code/ci-fix-loop";
 import { runCiFixStep } from "@/lib/ai-code/ci-fix-driver";
-import { workspaceGithubClient, getBranchHead, countBranchCommitsMatching, listChangedFiles, listWorkflowRunsRaw, rerunFailedRun } from "@/lib/github-client";
+import { workspaceGithubClient, getBranchHead, countBranchCommitsMatching, listChangedFiles, listWorkflowRunsRaw, rerunFailedRun, triggerWorkflow } from "@/lib/github-client";
 import { gatherFailureContext, buildEnrichedFixPrompt, extractFailingTestFiles } from "@/lib/ai-code/ci-failure-detail";
 import { classifyCiFailure } from "@/lib/ai-code/ci-failure-classify";
 import { flakeRecheckCandidates } from "@/lib/ai-code/flake";
@@ -108,6 +108,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   let governanceFailure: { signal: string } | undefined;
   let transientFailure: { signal: string } | undefined;
   let flakeRecheckTriggered = false;
+  let deterministicFixDispatched = false;
   let snapshotFailure = false;
   let mechanicalSubtype: string | undefined;
   // Gather whenever there is an INTRODUCED failure to act on - i.e. CI is
@@ -141,9 +142,18 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       // a snapshot (never auto-update - masks a regression) or, on the FIRST
       // attempt, re-run once to rule out a flake before authoring.
       mechanicalSubtype = cls.subtype;
+      const detWorkflow = process.env.DETERMINISTIC_FIX_WORKFLOW;
       if (cls.subtype === "snapshot") {
         snapshotFailure = true;
-      } else if (priorFixCommits === 0) {
+      } else if (cls.subtype === "lint" && detWorkflow && priorFixCommits === 0) {
+        // Deterministic lint/format fix (eslint --fix / prettier) via a GitHub
+        // Action - runs in GitHub's isolation, no model, cheaper + safer. Dispatch
+        // it and wait for it to commit + re-run CI. Opt-in via env; without the
+        // workflow configured, lint falls through to the model path below.
+        const ok = await triggerWorkflow(client, repo, detWorkflow, branch).then(() => true).catch(() => false);
+        if (ok) deterministicFixDispatched = true;
+      }
+      if (!snapshotFailure && !deterministicFixDispatched && priorFixCommits === 0) {
         const runs = await listWorkflowRunsRaw(client, repo, headSha).catch(() => []);
         const candidates = flakeRecheckCandidates(runs, attribution?.introduced);
         if (candidates.length > 0) {
@@ -175,6 +185,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     governanceFailure,
     transientFailure,
     flakeRecheckTriggered,
+    deterministicFixDispatched,
     snapshotFailure,
     briefDetails,
     reauthor: async (brief) => {
@@ -199,5 +210,5 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       commitFileChanges({ client, repoFullName: repo, branch, base: branch, changes, message: `factory ci-fix: ${ref}` }),
   });
 
-  return NextResponse.json({ ...result, context: contextSummary, budget: { attempt: effectiveAttempt, priorFixCommits, maxAttempts }, ...(stalledOnAuthoredTest ? { stalledOnAuthoredTest } : {}), ...(governanceFailure ? { governanceFailure } : {}), ...(transientFailure ? { transientFailure } : {}), ...(flakeRecheckTriggered ? { flakeRecheckTriggered: true } : {}), ...(snapshotFailure ? { snapshotFailure: true } : {}), ...(mechanicalSubtype ? { subtype: mechanicalSubtype } : {}) });
+  return NextResponse.json({ ...result, context: contextSummary, budget: { attempt: effectiveAttempt, priorFixCommits, maxAttempts }, ...(stalledOnAuthoredTest ? { stalledOnAuthoredTest } : {}), ...(governanceFailure ? { governanceFailure } : {}), ...(transientFailure ? { transientFailure } : {}), ...(flakeRecheckTriggered ? { flakeRecheckTriggered: true } : {}), ...(snapshotFailure ? { snapshotFailure: true } : {}), ...(deterministicFixDispatched ? { deterministicFixDispatched: true } : {}), ...(mechanicalSubtype ? { subtype: mechanicalSubtype } : {}) });
 }

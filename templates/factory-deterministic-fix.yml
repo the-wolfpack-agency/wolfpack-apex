@@ -1,0 +1,43 @@
+# factory-deterministic-fix - the deterministic (no-model) fixer the Agent Gate
+# dispatches for a LINT / FORMAT CI failure. It runs in GitHub's isolation (a
+# fresh, ephemeral VM with the repo + deps + configs checked out), applies the
+# repo's OWN eslint --fix / prettier, and commits with a "factory ci-fix:" message
+# so the auto-fix budget counts it. Install this file at
+# .github/workflows/factory-deterministic-fix.yml in a target repo, then set
+# DETERMINISTIC_FIX_WORKFLOW=factory-deterministic-fix.yml for that workspace.
+#
+# Safe by construction: it only runs static fixers (eslint/prettier analyse, they
+# do not execute the code), on the factory branch, and pushes only if something
+# changed. No model is involved.
+name: factory-deterministic-fix
+on:
+  workflow_dispatch: {}
+permissions:
+  contents: write
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install
+        run: npm ci || npm install
+      - name: Deterministic fixers (static analysis, no code execution)
+        run: |
+          npx eslint . --fix || true
+          npx prettier --write . || true
+      - name: Commit + push if anything was fixed
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            git config user.name "agentgate-ai[bot]"
+            git config user.email "agentgate-ai[bot]@users.noreply.github.com"
+            git add -A
+            git commit -m "factory ci-fix: deterministic lint/format (eslint --fix + prettier)"
+            git push
+          else
+            echo "no deterministic fixes to apply"
+          fi

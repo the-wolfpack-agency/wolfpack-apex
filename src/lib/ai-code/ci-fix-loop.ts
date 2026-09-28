@@ -50,6 +50,10 @@ export interface FixLoopState {
    *  changed; blindly updating the snapshot would mask a regression (the same trap
    *  as a wrong test). Escalate so a human confirms the new output is intended. */
   snapshotFailure?: boolean;
+  /** Set when a DETERMINISTIC fixer (eslint --fix / prettier) was dispatched to
+   *  repair a lint/format failure with NO model. The decision waits for it to
+   *  commit + re-trigger CI - cheaper and safer than authoring a fix. */
+  deterministicFixDispatched?: boolean;
 }
 
 /**
@@ -99,6 +103,12 @@ export function decideFixAction(state: FixLoopState): FixDecision {
     return {
       action: "escalate_human",
       reason: `CI failed on a SNAPSHOT test. The rendered output changed; auto-updating the snapshot would mask a regression, so the fixer will not. A human should confirm the new output is intended (then update the snapshot) or fix the code that changed it.`,
+    };
+  }
+  if (state.deterministicFixDispatched) {
+    return {
+      action: "wait",
+      reason: "Dispatched the deterministic fixer (eslint --fix / prettier) to repair the lint/format failure with no model; waiting for it to commit and re-run CI.",
     };
   }
   if (state.flakeRecheckTriggered) {
