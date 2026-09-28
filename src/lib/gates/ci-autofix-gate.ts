@@ -21,7 +21,7 @@
  * (allowModelData: "none") gets no agent, so the gate cannot auto-fix and returns
  * require_human - their code is never sent to a model, and the gate says so.
  */
-import { workspaceGithubClient, getBranchHead, countBranchCommitsMatching, listChangedFiles } from "@/lib/github-client";
+import { workspaceGithubClient, getBranchHead, countBranchCommitsMatching, listChangedFiles, triggerWorkflow } from "@/lib/github-client";
 import { fetchCiStatus, fetchCiAttribution } from "@/lib/ai-code/ci-status";
 import { decideFixAction } from "@/lib/ai-code/ci-fix-loop";
 import { gatherFailureContext, buildEnrichedFixPrompt, extractFailingTestFiles } from "@/lib/ai-code/ci-failure-detail";
@@ -106,6 +106,22 @@ export const ciAutofixGate: GateDefinition<CiAutofixInput, CiAutofixOutput> = {
     const governanceFailure = cls.kind === "governance" ? { signal: cls.signal } : undefined;
     const transientFailure = cls.kind === "transient" ? { signal: cls.signal } : undefined;
     const snapshotFailure = cls.kind === "mechanical" && cls.subtype === "snapshot";
+
+    // Deterministic lint/format fix (no model): on the first attempt at a LINT
+    // failure, if a deterministic-fix workflow is configured, dispatch it (runs
+    // eslint --fix / prettier in GitHub's isolation and commits) and return
+    // auto_fix - the chain pauses "fixing", CI re-runs, and we re-evaluate. Opt-in
+    // via env; without it, lint falls through to the model path below.
+    const detWorkflow = process.env.DETERMINISTIC_FIX_WORKFLOW;
+    if (cls.kind === "mechanical" && cls.subtype === "lint" && detWorkflow && priorFixCommits === 0 && (introducedFailing === undefined || introducedFailing > 0)) {
+      const ok = await triggerWorkflow(client, input.repo, detWorkflow, input.branch).then(() => true).catch(() => false);
+      if (ok) {
+        return result("auto_fix", "Dispatched the deterministic fixer (eslint --fix / prettier) for the lint/format failure - no model. CI will re-run on its commit.", ctx, {
+          checksRun: [...checks, "deterministic-fix-dispatch"], dataSeen: "the PR's CI status + failing checks. No model invoked (a deterministic fixer runs in GitHub's isolation).", modelInvoked: null,
+          output: { failedChecks: ci.failedChecks }, ruleId: "GATE-ci-autofix-deterministic",
+        });
+      }
+    }
 
     const decision = decideFixAction({ ci, attempt: priorFixCommits, maxAttempts: MAX_ATTEMPTS, introducedFailing, governanceFailure, transientFailure, snapshotFailure });
 
