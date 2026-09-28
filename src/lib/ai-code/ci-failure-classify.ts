@@ -81,11 +81,36 @@ const TRANSIENT_PATTERNS: RegExp[] = [
 
 export type CiFailureKind = "mechanical" | "governance" | "transient";
 
+/** The specific shape of a MECHANICAL failure, so the fixer can route it: a
+ *  snapshot must NOT be blindly updated (it masks a regression), a type/import
+ *  error gets a tailored fix, a lint/format issue is a mechanical cleanup. */
+export type MechanicalSubtype = "lint" | "type" | "import" | "snapshot" | "coverage" | "build" | "test";
+
 export interface CiFailureClass {
   kind: CiFailureKind;
   /** The specific signal that classified it (a check name or a matched phrase),
    *  for the escalation reason + the transparency record. Empty for mechanical. */
   signal: string;
+  /** For a mechanical failure, its shape (so the fixer routes it). Undefined for
+   *  governance/transient. */
+  subtype?: MechanicalSubtype;
+}
+
+/** Patterns that identify a mechanical failure's SUBTYPE from the log detail.
+ *  Order matters: the most specific/dangerous (snapshot) is checked first. */
+const SUBTYPE_PATTERNS: { subtype: MechanicalSubtype; re: RegExp }[] = [
+  { subtype: "snapshot", re: /\bsnapshot\b|toMatchSnapshot|obsolete snapshot|snapshots? (?:failed|obsolete)|to update them/i },
+  { subtype: "coverage", re: /coverage threshold|does not meet.*coverage|Jest:.*coverage|Coverage for \w+ \(/i },
+  { subtype: "type", re: /error TS\d|Type error:|is not assignable to|implicitly has an? '?any|Property '[^']+' does not exist on type|Object is possibly/i },
+  { subtype: "import", re: /Cannot find module|Module not found|has no exported member|Cannot find name '[^']+'/i },
+  { subtype: "lint", re: /\beslint\b|prettier|Parsing error:|no-unused-vars|prefer-const|@typescript-eslint\/|Insert `|Delete `|Replace `/i },
+  { subtype: "build", re: /Failed to compile|Build error|next build|webpack (?:error|compiled with)/i },
+];
+
+/** Identify a mechanical failure's subtype from the detail (default "test"). Pure. */
+export function mechanicalSubtype(detail: string): MechanicalSubtype {
+  for (const { subtype, re } of SUBTYPE_PATTERNS) if (re.test(detail)) return subtype;
+  return "test";
 }
 
 /**
@@ -113,5 +138,5 @@ export function classifyCiFailure(detail: string, failingChecks: readonly string
     const m = detail.match(re);
     if (m) return { kind: "transient", signal: m[0] };
   }
-  return { kind: "mechanical", signal: "" };
+  return { kind: "mechanical", signal: "", subtype: mechanicalSubtype(detail) };
 }

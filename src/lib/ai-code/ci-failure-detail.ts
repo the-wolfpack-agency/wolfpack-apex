@@ -170,13 +170,22 @@ export async function gatherFailureContext(
  *  escalating. `authoredTestStillFailing` names the change's own test files that
  *  are STILL failing after a prior fix - a strong signal the test's expected
  *  value is the wrong one. */
+const SUBTYPE_HINT: Record<string, string> = {
+  type: "This is a TYPE error. Fix the type mismatch itself (add/correct a type, a generic, or a narrow) - do not cast to any or weaken types to silence it.",
+  import: "This is an IMPORT / module-resolution error. Add or correct the import (right path, named vs default, install-free); do not stub the module.",
+  lint: "This is a LINT / formatting issue. Apply the mechanical fix (unused vars, quotes, semicolons, spacing) without changing behavior.",
+  build: "This is a BUILD/compile error. Fix the compile error at its source.",
+};
+
 export function buildEnrichedFixPrompt(args: {
   repo: string;
   branch: string;
   brief: string;
   context: FailureContext;
   authoredTestStillFailing?: string[];
+  subtype?: string;
 }): string {
+  const subtypeHint = args.subtype ? SUBTYPE_HINT[args.subtype] : undefined;
   const fileBlocks = args.context.files
     .map((f) => `FILE: ${f.path}\n\`\`\`\n${f.content}\n\`\`\``)
     .join("\n\n");
@@ -185,6 +194,7 @@ export function buildEnrichedFixPrompt(args: {
     `The pull request on branch ${args.branch} of ${args.repo} is failing CI.`,
     args.brief,
     args.context.detail ? `The ACTUAL CI failure:\n${args.context.detail}` : "",
+    subtypeHint ?? "",
     fileBlocks ? `Current contents of the files involved:\n\n${fileBlocks}` : "",
     stalled
       ? `A fix was already attempted and these test file(s) this change authored are STILL failing: ${args.authoredTestStillFailing!.join(", ")}. When the source correctly implements the described behavior, that means the TEST's expected value is wrong - correct the expected value(s) to match the source's correct output (each failing assertion shows "Expected" vs "Received"; "Received" is the source's actual result).`

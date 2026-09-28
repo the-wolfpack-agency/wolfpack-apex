@@ -113,3 +113,13 @@ describe("flake recheck waits before authoring", () => {
     expect(d.reason).toMatch(/rule out a flake/i);
   });
 });
+
+describe("snapshot failures escalate (never auto-update)", () => {
+  const redComplete = { total: 2, passed: 1, failed: 1, pending: 0, complete: true, ciComplete: false, readable: true, failedChecks: ["unit"], failedDetails: [{ name: "unit", summary: "x" }] };
+  it("escalates a snapshot failure with budget remaining", () => {
+    const d = decideFixAction({ ci: redComplete as never, attempt: 0, maxAttempts: 3, introducedFailing: 1, snapshotFailure: true });
+    expect(d.action).toBe("escalate_human");
+    expect(d.reason).toMatch(/SNAPSHOT/);
+    expect(d.reason).toMatch(/mask a regression/i);
+  });
+});

@@ -108,6 +108,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   let governanceFailure: { signal: string } | undefined;
   let transientFailure: { signal: string } | undefined;
   let flakeRecheckTriggered = false;
+  let snapshotFailure = false;
+  let mechanicalSubtype: string | undefined;
   // Gather whenever there is an INTRODUCED failure to act on - i.e. CI is
   // readable, complete, not green, and this change introduced at least one of the
   // failures. That covers BOTH the author-a-fix case and the budget-exhausted
@@ -130,17 +132,24 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // is a human policy decision, not a mechanical fix - do not let the fixer edit
     // code to make a governance gate pass. Classify from the check names + detail.
     const cls = classifyCiFailure(gathered.detail, ci.failedChecks);
-    if (cls.kind === "governance") governanceFailure = { signal: cls.signal };
-    else if (cls.kind === "transient") transientFailure = { signal: cls.signal };
-    // Flake pre-filter: before authoring on the FIRST attempt, re-run the failed
-    // job(s) once. A flake clears; a real failure survives (run_attempt >= 2) and
-    // is fixed next pass. Bounded to one extra CI cycle per PR.
-    else if (priorFixCommits === 0) {
-      const runs = await listWorkflowRunsRaw(client, repo, headSha).catch(() => []);
-      const candidates = flakeRecheckCandidates(runs, attribution?.introduced);
-      if (candidates.length > 0) {
-        await Promise.all(candidates.map((id) => rerunFailedRun(client, repo, id)));
-        flakeRecheckTriggered = true;
+    if (cls.kind === "governance") {
+      governanceFailure = { signal: cls.signal };
+    } else if (cls.kind === "transient") {
+      transientFailure = { signal: cls.signal };
+    } else {
+      // Mechanical: record the subtype (routes the fix prompt), and either escalate
+      // a snapshot (never auto-update - masks a regression) or, on the FIRST
+      // attempt, re-run once to rule out a flake before authoring.
+      mechanicalSubtype = cls.subtype;
+      if (cls.subtype === "snapshot") {
+        snapshotFailure = true;
+      } else if (priorFixCommits === 0) {
+        const runs = await listWorkflowRunsRaw(client, repo, headSha).catch(() => []);
+        const candidates = flakeRecheckCandidates(runs, attribution?.introduced);
+        if (candidates.length > 0) {
+          await Promise.all(candidates.map((id) => rerunFailedRun(client, repo, id)));
+          flakeRecheckTriggered = true;
+        }
       }
     }
     // Non-progress on an authored test: if a fix was ALREADY committed and a test
@@ -166,12 +175,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     governanceFailure,
     transientFailure,
     flakeRecheckTriggered,
+    snapshotFailure,
     briefDetails,
     reauthor: async (brief) => {
       // Reuse the context gathered above (never re-fetch). Empty only if the
       // decision changed under us; buildEnrichedFixPrompt degrades to the brief.
       const context = gathered ?? { detail: "", files: [] };
-      const prompt = buildEnrichedFixPrompt({ repo, branch, brief, context, authoredTestStillFailing: stalledOnAuthoredTest?.testFiles });
+      const prompt = buildEnrichedFixPrompt({ repo, branch, brief, context, authoredTestStillFailing: stalledOnAuthoredTest?.testFiles, subtype: mechanicalSubtype });
       const authored = await authorFileChanges(
         { prompt, feature: "ai-code-ci-fix" },
         { complete: (r) => ai.complete(r) },
@@ -189,5 +199,5 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       commitFileChanges({ client, repoFullName: repo, branch, base: branch, changes, message: `factory ci-fix: ${ref}` }),
   });
 
-  return NextResponse.json({ ...result, context: contextSummary, budget: { attempt: effectiveAttempt, priorFixCommits, maxAttempts }, ...(stalledOnAuthoredTest ? { stalledOnAuthoredTest } : {}), ...(governanceFailure ? { governanceFailure } : {}), ...(transientFailure ? { transientFailure } : {}), ...(flakeRecheckTriggered ? { flakeRecheckTriggered: true } : {}) });
+  return NextResponse.json({ ...result, context: contextSummary, budget: { attempt: effectiveAttempt, priorFixCommits, maxAttempts }, ...(stalledOnAuthoredTest ? { stalledOnAuthoredTest } : {}), ...(governanceFailure ? { governanceFailure } : {}), ...(transientFailure ? { transientFailure } : {}), ...(flakeRecheckTriggered ? { flakeRecheckTriggered: true } : {}), ...(snapshotFailure ? { snapshotFailure: true } : {}), ...(mechanicalSubtype ? { subtype: mechanicalSubtype } : {}) });
 }

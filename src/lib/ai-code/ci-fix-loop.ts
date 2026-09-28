@@ -46,6 +46,10 @@ export interface FixLoopState {
    *  decision is to WAIT for that re-run before authoring - a flake will clear,
    *  a real failure survives and is fixed on the next pass. */
   flakeRecheckTriggered?: boolean;
+  /** Set when the failure is a SNAPSHOT test. A snapshot failure means the output
+   *  changed; blindly updating the snapshot would mask a regression (the same trap
+   *  as a wrong test). Escalate so a human confirms the new output is intended. */
+  snapshotFailure?: boolean;
 }
 
 /**
@@ -89,6 +93,12 @@ export function decideFixAction(state: FixLoopState): FixDecision {
     return {
       action: "escalate_human",
       reason: `CI failed on what looks like an infrastructure/transient error (${state.transientFailure.signal}), not a code bug. Re-run CI or check the infra - a code fix would not help. Handed to a human.`,
+    };
+  }
+  if (state.snapshotFailure) {
+    return {
+      action: "escalate_human",
+      reason: `CI failed on a SNAPSHOT test. The rendered output changed; auto-updating the snapshot would mask a regression, so the fixer will not. A human should confirm the new output is intended (then update the snapshot) or fix the code that changed it.`,
     };
   }
   if (state.flakeRecheckTriggered) {
