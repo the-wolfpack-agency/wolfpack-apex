@@ -165,22 +165,31 @@ export async function gatherFailureContext(
 }
 
 /** Build the enriched re-author prompt from the thin brief + the real failure
- *  context. Pure. Instructs the model to fix the SOURCE, never weaken tests. */
+ *  context. Pure. Instructs the model to fix WHICHEVER side is wrong (source or a
+ *  wrong test expectation), so the loop converges to green instead of looping or
+ *  escalating. `authoredTestStillFailing` names the change's own test files that
+ *  are STILL failing after a prior fix - a strong signal the test's expected
+ *  value is the wrong one. */
 export function buildEnrichedFixPrompt(args: {
   repo: string;
   branch: string;
   brief: string;
   context: FailureContext;
+  authoredTestStillFailing?: string[];
 }): string {
   const fileBlocks = args.context.files
     .map((f) => `FILE: ${f.path}\n\`\`\`\n${f.content}\n\`\`\``)
     .join("\n\n");
+  const stalled = args.authoredTestStillFailing && args.authoredTestStillFailing.length > 0;
   return [
     `The pull request on branch ${args.branch} of ${args.repo} is failing CI.`,
     args.brief,
     args.context.detail ? `The ACTUAL CI failure:\n${args.context.detail}` : "",
     fileBlocks ? `Current contents of the files involved:\n\n${fileBlocks}` : "",
-    "Author the FULL corrected file contents that make the failing checks pass. Fix the SOURCE that is wrong; do NOT weaken, delete, or trivially satisfy any test or gate.",
+    stalled
+      ? `A fix was already attempted and these test file(s) this change authored are STILL failing: ${args.authoredTestStillFailing!.join(", ")}. When the source correctly implements the described behavior, that means the TEST's expected value is wrong - correct the expected value(s) to match the source's correct output (each failing assertion shows "Expected" vs "Received"; "Received" is the source's actual result).`
+      : "",
+    'Author the FULL corrected file contents that make the failing checks pass. Determine which side is wrong from the failure (every assertion shows "Expected" vs "Received"): if the SOURCE does not implement the described behavior, fix the source; if the source is correct and a TEST asserts a value that contradicts the source\'s correct output, correct that test\'s expected value. Never delete, disable, skip, or otherwise weaken a test or reduce its coverage - only correct a demonstrably wrong expected value. A human reviews and merges the result.',
   ]
     .filter(Boolean)
     .join("\n\n");

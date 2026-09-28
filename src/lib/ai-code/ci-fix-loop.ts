@@ -32,12 +32,6 @@ export interface FixLoopState {
    *  fault, and the fixer must not touch what it did not break. Undefined keeps
    *  the baseline-unaware behavior (fix any red). */
   introducedFailing?: number;
-  /** Set when a fix was ALREADY committed on this branch and a test THIS change
-   *  authored is STILL failing. That is non-progress on a test we wrote: the
-   *  likely cause is a wrong expected value in the test, not the source - which
-   *  the fixer must NOT resolve by weakening the test. Escalate with that
-   *  diagnosis instead of authoring yet another source fix that cannot converge. */
-  stalledOnAuthoredTest?: { testFiles: string[] };
 }
 
 /**
@@ -69,13 +63,6 @@ export function decideFixAction(state: FixLoopState): FixDecision {
     return {
       action: "escalate_human",
       reason: `CI failed (${state.ci.failedChecks.join(", ")}), but every failing check was already failing on the base branch (pre-existing). This change introduced none, so it is handed to a human rather than auto-fixed.`,
-    };
-  }
-  if (state.stalledOnAuthoredTest && state.stalledOnAuthoredTest.testFiles.length > 0) {
-    const files = state.stalledOnAuthoredTest.testFiles.join(", ");
-    return {
-      action: "escalate_human",
-      reason: `A fix was already committed, but a test this change authored is still failing (${files}). This usually means the TEST's expected value is wrong, not the source - which the fixer must not resolve by weakening the test. A human should confirm the intended values before merge.`,
     };
   }
   if (state.attempt < state.maxAttempts) {

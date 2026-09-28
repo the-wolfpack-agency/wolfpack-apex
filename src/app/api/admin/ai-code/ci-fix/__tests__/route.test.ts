@@ -168,19 +168,19 @@ test("auto-fix budget is floored by the branch's OWN fix-commit history (attempt
   expect(mockCommit).not.toHaveBeenCalled(); // a runaway autonomous loop is exactly what this prevents
 });
 
-test("stalls on an authored test: prior fix + authored test still failing -> escalate, no new commit", async () => {
+test("stalls on an authored test (budget left): authors a fix to CORRECT the wrong test, converging", async () => {
   mockFetchCiStatus.mockResolvedValue(red);
   mockFetchAttribution.mockResolvedValue({ introduced: ["unit"], preexisting: [], indeterminate: [], fixed: [], baselineKnown: true, baselineHealthy: false, clean: false, reason: "introduced unit" });
-  mockCountFixCommits.mockResolvedValue(1); // a fix was already committed
+  mockCountFixCommits.mockResolvedValue(1); // a fix was already committed, budget (max 3) remains
   mockGather.mockResolvedValue({ detail: "FAIL src/lib/__tests__/averageWordLength.test.ts\n  Expected 2.33 Received 2", files: [] });
   mockListChangedFiles.mockResolvedValue(["src/lib/averageWordLength.ts", "src/lib/__tests__/averageWordLength.test.ts"]);
   const body = await (await POST(post({ repo: "o/r", ref: "b", branch: "factory/b-abc", base: "main", attempt: 0, maxAttempts: 3 }))).json();
-  expect(body.decision.action).toBe("escalate_human");
-  expect(body.decision.reason).toMatch(/authored is still failing/i);
+  // No longer escalates: it authors a fix (which may correct the wrong test) so the loop converges.
+  expect(body.decision.action).toBe("author_fix");
   expect(body.stalledOnAuthoredTest).toEqual({ testFiles: ["src/lib/__tests__/averageWordLength.test.ts"] });
-  expect(body.terminal).toBe(true);
-  expect(mockCommit).not.toHaveBeenCalled();
-  expect(mockAuthorFiles).not.toHaveBeenCalled(); // no wasted author call on a wrong-test loop
+  expect(mockAuthorFiles).toHaveBeenCalled();
+  expect(mockCommit).toHaveBeenCalled();
+  expect(body.terminal).toBe(false); // committed; poll again after CI re-runs
 });
 
 test("does NOT stall when the failing test is NOT part of the change (pre-existing test file)", async () => {
@@ -194,17 +194,16 @@ test("does NOT stall when the failing test is NOT part of the change (pre-existi
   expect(body.stalledOnAuthoredTest).toBeUndefined();
 });
 
-test("stall diagnosis fires even when the fix budget is already spent (not the generic 'after N attempts')", async () => {
+test("budget spent: escalates to a human (bounded), no further commit", async () => {
   mockFetchCiStatus.mockResolvedValue(red);
   mockFetchAttribution.mockResolvedValue({ introduced: ["unit"], preexisting: [], indeterminate: [], fixed: [], baselineKnown: true, baselineHealthy: false, clean: false, reason: "introduced unit" });
   mockCountFixCommits.mockResolvedValue(12); // budget (maxAttempts:3) long since spent
   mockGather.mockResolvedValue({ detail: "FAIL src/lib/__tests__/averageWordLength.test.ts", files: [] });
   mockListChangedFiles.mockResolvedValue(["src/lib/averageWordLength.ts", "src/lib/__tests__/averageWordLength.test.ts"]);
   const body = await (await POST(post({ repo: "o/r", ref: "b", branch: "factory/b-abc", base: "main", attempt: 0, maxAttempts: 3 }))).json();
+  // After the bounded attempts it hands to a human rather than looping forever.
   expect(body.decision.action).toBe("escalate_human");
-  expect(body.stalledOnAuthoredTest).toEqual({ testFiles: ["src/lib/__tests__/averageWordLength.test.ts"] });
-  expect(body.decision.reason).toMatch(/authored is still failing/i); // the useful diagnosis...
-  expect(body.decision.reason).not.toMatch(/after 3 fix attempt/i);    // ...not the generic budget message
+  expect(body.decision.reason).toMatch(/after 3 fix attempt/i);
   expect(mockCommit).not.toHaveBeenCalled();
 });
 
