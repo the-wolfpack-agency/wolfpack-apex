@@ -75,6 +75,7 @@ describe("every registered gate returns a contract-valid result through runGate"
     "dependency-review": { diff: "diff --git a/x b/x\n+ok" },
     "prompt-injection": { text: "hello there" },
     "migration-safety": { diff: "diff --git a/x b/x\n+ok" },
+    "response-review": { text: "a clean answer" },
   };
 
   for (const { name } of listGates()) {
