@@ -19,7 +19,7 @@ import { requireEntitlement } from "@/lib/tenancy/require-entitlement";
 import { fetchCiStatus, fetchCiAttribution } from "@/lib/ai-code/ci-status";
 import { decideFixAction, buildFixBrief } from "@/lib/ai-code/ci-fix-loop";
 import { runCiFixStep } from "@/lib/ai-code/ci-fix-driver";
-import { workspaceGithubClient, getBranchHead } from "@/lib/github-client";
+import { workspaceGithubClient, getBranchHead, countBranchCommitsMatching } from "@/lib/github-client";
 import { gatherFailureContext, buildEnrichedFixPrompt } from "@/lib/ai-code/ci-failure-detail";
 import { commitFileChanges, filesToDiff } from "@/lib/ai-code/file-changes";
 import { assessChange } from "@/lib/ai-code/assess";
@@ -82,9 +82,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // Drive it: author the fix and commit to the PR branch.
   const ai = getAIClient();
   const client = await workspaceGithubClient(workspaceId ?? "default");
+  // Tamper-proof auto-fix budget: the branch's OWN count of prior "factory
+  // ci-fix:" commits is a floor on attempts already made. A caller (or an
+  // autonomous trigger) that passes attempt=0 cannot loop past the ceiling,
+  // because the real history, not the request, sets the effective attempt.
+  const priorFixCommits = client.token
+    ? await countBranchCommitsMatching(client, repo, base || "main", branch, "factory ci-fix:")
+    : 0;
+  const effectiveAttempt = Math.max(attempt, priorFixCommits);
   if (!client.token) {
     // Cannot commit without a token; fall back to a decision the caller can act on.
-    const decision = decideFixAction({ ci, attempt, maxAttempts, introducedFailing });
+    const decision = decideFixAction({ ci, attempt: effectiveAttempt, maxAttempts, introducedFailing });
     return NextResponse.json({ decision, ci, terminal: decision.action !== "author_fix", note: "no GitHub token; decision only" });
   }
 
@@ -93,7 +101,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   let contextSummary: { detailChars: number; files: string[] } | null = null;
   const result = await runCiFixStep({
     ci,
-    attempt,
+    attempt: effectiveAttempt,
     maxAttempts,
     introducedFailing,
     briefDetails,
@@ -128,5 +136,5 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       commitFileChanges({ client, repoFullName: repo, branch, base: branch, changes, message: `factory ci-fix: ${ref}` }),
   });
 
-  return NextResponse.json({ ...result, context: contextSummary });
+  return NextResponse.json({ ...result, context: contextSummary, budget: { attempt: effectiveAttempt, priorFixCommits, maxAttempts } });
 }

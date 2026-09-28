@@ -11,12 +11,14 @@ jest.mock("@/lib/ai-code/ci-status", () => ({
   fetchCiAttribution: (...a: unknown[]) => mockFetchAttribution(...a),
 }));
 const mockWorkspaceClient = jest.fn();
+const mockCountFixCommits = jest.fn();
 const mockCommit = jest.fn();
 const mockAuthorFiles = jest.fn();
 const mockAssessChange = jest.fn();
 jest.mock("@/lib/github-client", () => ({
   workspaceGithubClient: (...a: unknown[]) => mockWorkspaceClient(...a),
   getBranchHead: async () => "headsha123",
+  countBranchCommitsMatching: (...a: unknown[]) => mockCountFixCommits(...a),
 }));
 jest.mock("@/lib/ai-code/ci-failure-detail", () => ({
   gatherFailureContext: async () => ({ detail: "", files: [] }),
@@ -47,6 +49,7 @@ beforeEach(() => {
   mockRequireCapability.mockResolvedValue(OK);
   mockGate.mockResolvedValue(null);
   mockWorkspaceClient.mockResolvedValue({ token: "t", fetch: jest.fn() });
+  mockCountFixCommits.mockResolvedValue(0);
   mockAuthorFiles.mockResolvedValue({ changes: [{ path: "src/x.ts", content: "export const x = 2;" }], author: "model-b", error: null });
   mockCommit.mockResolvedValue(["src/x.ts"]);
   // Default: the re-authored fix clears the combined gate.
@@ -144,3 +147,17 @@ test("reads CI for the BRANCH (PR head), not the task-id ref (dogfooding find)",
   // The task-id "pr-1" is not a git ref; the CI read must use the branch.
   expect(mockFetchCiStatus).toHaveBeenCalledWith("o/r", "factory/pr-1-abc", "w1");
 });
+
+test("auto-fix budget is floored by the branch's OWN fix-commit history (attempt=0 cannot bypass it)", async () => {
+  mockFetchCiStatus.mockResolvedValue(red);
+  // The caller passes attempt:0, but the branch already carries maxAttempts
+  // worth of "factory ci-fix:" commits. The real history wins: out of budget.
+  mockCountFixCommits.mockResolvedValue(3);
+  const res = await POST(post({ repo: "o/r", ref: "b", branch: "factory/b-abc", base: "main", attempt: 0, maxAttempts: 3 }));
+  const body = await res.json();
+  expect(mockCountFixCommits).toHaveBeenCalledWith(expect.anything(), "o/r", "main", "factory/b-abc", "factory ci-fix:");
+  expect(body.decision.action).toBe("escalate_human");
+  expect(body.budget).toEqual({ attempt: 3, priorFixCommits: 3, maxAttempts: 3 });
+  expect(mockCommit).not.toHaveBeenCalled(); // a runaway autonomous loop is exactly what this prevents
+});
+
