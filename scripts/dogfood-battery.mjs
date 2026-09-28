@@ -45,6 +45,8 @@ const SCENARIOS = [
   { name: "migration-safety: an additive idempotent migration clears", gate: "migration-safety", input: { diff: 'diff --git a/src/db/migrations/031_y.sql b/src/db/migrations/031_y.sql\n--- /dev/null\n+++ b/src/db/migrations/031_y.sql\n@@ -0,0 +1 @@\n+CREATE TABLE IF NOT EXISTS t (id uuid);\n' }, policy: { frameworks: ["SOC2"], allowModelData: "none" }, accept: ["allow"] },
   { name: "response-review: a clean model answer passes", gate: "response-review", input: { text: "revenue grew 12% last quarter" }, policy: { frameworks: ["GDPR"], allowModelData: "none" }, accept: ["allow"] },
   { name: "response-review: a leaked secret in the output stops for a human", gate: "response-review", input: { text: "the key is sk-ant-abcdefghijklmnopqrstuvwxyz1234567890" }, policy: { frameworks: ["GDPR"], allowModelData: "none" }, accept: ["require_human"] },
+  { name: "license-review: a permissive license clears", gate: "license-review", input: { diff: 'diff --git a/package.json b/package.json\n--- /dev/null\n+++ b/package.json\n@@ -0,0 +1 @@\n+  "license": "MIT",\n' }, policy: { frameworks: ["SOC2"], allowModelData: "none" }, accept: ["allow"] },
+  { name: "license-review: a copyleft license stops for a human", gate: "license-review", input: { diff: 'diff --git a/src/x.ts b/src/x.ts\n--- /dev/null\n+++ b/src/x.ts\n@@ -0,0 +1 @@\n+// SPDX-License-Identifier: GPL-3.0-or-later\n' }, policy: { frameworks: ["SOC2"], allowModelData: "none" }, accept: ["require_human"] },
 ];
 
 async function login() {
