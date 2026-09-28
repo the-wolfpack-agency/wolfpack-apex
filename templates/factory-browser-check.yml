@@ -1,0 +1,32 @@
+# factory-browser-check - run END-TO-END + ACCESSIBILITY checks against a deployed
+# preview URL, in GitHub's isolation. The factory dispatches this with the preview
+# url as an input; the browser-check gate reads the run's conclusion. Install at
+# .github/workflows/factory-browser-check.yml and set
+# BROWSER_CHECK_WORKFLOW=factory-browser-check.yml for the workspace. The repo
+# provides the actual specs (npm run test:e2e / test:a11y); this just runs them
+# against the preview, isolated.
+name: factory-browser-check
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: The preview URL to test against
+        required: true
+permissions:
+  contents: read
+jobs:
+  browser-check:
+    runs-on: ubuntu-latest
+    env:
+      PREVIEW_URL: ${{ github.event.inputs.url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci || npm install
+      - name: Playwright e2e + axe a11y against the preview
+        run: |
+          npx playwright install --with-deps chromium || true
+          npm run test:e2e || exit 1
+          npm run test:a11y || exit 1
