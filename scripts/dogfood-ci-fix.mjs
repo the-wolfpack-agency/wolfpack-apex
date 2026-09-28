@@ -35,6 +35,12 @@ const repo = arg("repo");
 let branch = arg("branch");
 const base = arg("base", "main");
 const prompt = arg("prompt");
+// Authoring mode. Default "files" (full file contents) - dogfooding proved it is
+// far more reliable than "diff" for authoring NEW files: diff mode makes the
+// model emit an exact unified diff, which cheap models garble (a bogus
+// modification / a wrong hunk line-count) into unparseable output. Files mode has
+// no diff-reconstruction ambiguity.
+const mode = arg("mode", "files");
 const ref = arg("ref", branch);
 const maxAttempts = Number(arg("max", "3"));
 const pollSeconds = Number(arg("poll", "30"));
@@ -75,7 +81,7 @@ async function buildAndOpen(token) {
   const pr = await fetch(`${BASE}/api/admin/ai-code/pipeline`, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
-    body: JSON.stringify({ ref, prompt, repo, maxAttempts }),
+    body: JSON.stringify({ ref, prompt, repo, maxAttempts, mode }),
   });
   const run = await pr.json().catch(() => ({}));
   console.log(`build: status=${run?.run?.status} approvalId=${run.approvalId || "(none)"} syntaxOk=${run?.syntax?.ok} outcome=${run?.run?.review?.verdict?.outcome}`);
