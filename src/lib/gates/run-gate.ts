@@ -14,6 +14,7 @@
  * framework stays pure and testable.
  */
 import type { GateAgent, GateContext, GateDefinition, GateResult } from "./types";
+import { scrubForModel } from "./scrub";
 
 /** Redact the client's configured patterns from a prompt before it reaches a
  *  model. Invalid regex sources are skipped (never throw from the hot path). */
@@ -32,13 +33,20 @@ export function redactPrompt(prompt: string, patterns: readonly string[] | undef
 
 /** Wrap the client's agent to enforce `policy.allowModelData`. Returns undefined
  *  when the policy forbids any model use, so the gate sees "no agent available"
- *  and must decide deterministically. */
+ *  and must decide deterministically.
+ *
+ *  A DEFAULT secret/PII scrub runs on EVERY prompt before it leaves - even under
+ *  "full" - because a client who allows model data still never means "send our
+ *  keys / a customer's SSN to the LLM". The client's own redactions layer on top. */
 export function policyEnforcedAgent(agent: GateAgent | undefined, policy: GateContext["policy"]): GateAgent | undefined {
   if (!agent || policy.allowModelData === "none") return undefined;
-  if (policy.allowModelData === "full") return agent;
-  // "redacted": scrub every prompt before it leaves.
   return {
-    complete: (req) => agent.complete({ ...req, prompt: redactPrompt(req.prompt, policy.redactions) }),
+    complete: (req) => {
+      // 1) always scrub recognizable secrets/PII, 2) then the client's redactions.
+      const scrubbed = scrubForModel(req.prompt).text;
+      const prompt = policy.allowModelData === "redacted" ? redactPrompt(scrubbed, policy.redactions) : scrubbed;
+      return agent.complete({ ...req, prompt });
+    },
   };
 }
 

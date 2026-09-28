@@ -24,15 +24,22 @@ describe("policyEnforcedAgent", () => {
   it("returns undefined when the policy forbids any model data (none)", () => {
     expect(policyEnforcedAgent(agent, { frameworks: [], allowModelData: "none" })).toBeUndefined();
   });
-  it("passes the agent through on full", async () => {
+  it("passes ordinary text through on full, but still scrubs recognizable secrets", async () => {
     const a = policyEnforcedAgent(agent, { frameworks: [], allowModelData: "full" });
-    await a!.complete({ prompt: "secret=xyz", feature: "t" });
-    expect(agentSpy).toHaveBeenCalledWith({ prompt: "secret=xyz", feature: "t" });
+    await a!.complete({ prompt: "fix the reading time helper", feature: "t" });
+    expect(agentSpy).toHaveBeenCalledWith({ prompt: "fix the reading time helper", feature: "t" });
+    agentSpy.mockClear();
+    // even under "full", a provider key never reaches the model.
+    await a!.complete({ prompt: "here is the key sk-ant-abcdefghijklmnopqrstuvwxyz12345 fix it", feature: "t" });
+    expect(agentSpy.mock.calls[0][0].prompt).toContain("[REDACTED]");
+    expect(agentSpy.mock.calls[0][0].prompt).not.toContain("sk-ant-abcde");
   });
-  it("redacts prompts before the model on redacted", async () => {
-    const a = policyEnforcedAgent(agent, { frameworks: [], allowModelData: "redacted", redactions: ["secret=\\w+"] });
-    await a!.complete({ prompt: "secret=xyz please fix", feature: "t" });
-    expect(agentSpy).toHaveBeenCalledWith({ prompt: "[REDACTED] please fix", feature: "t" });
+  it("redacts prompts before the model on redacted (default scrub + client patterns)", async () => {
+    const a = policyEnforcedAgent(agent, { frameworks: [], allowModelData: "redacted", redactions: ["internalCodeName"] });
+    await a!.complete({ prompt: "the internalCodeName project, email a@b.com", feature: "t" });
+    const sent = agentSpy.mock.calls[0][0].prompt;
+    expect(sent).not.toContain("internalCodeName"); // client pattern
+    expect(sent).not.toContain("a@b.com");           // default PII scrub
   });
 });
 

@@ -92,11 +92,15 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ gate: stri
     policy,
   });
 
-  const { recordedSeq } = await recordGateDecision(gateName, result, {
-    workspaceId: auth.user.workspaceId ?? "default",
-    actorId: auth.user.id,
-    policy,
-  }, body.input);
+  // A gate that took an irreversible action already recorded its decision to the
+  // ledger BEFORE acting (fail-closed). Only audit post-hoc when it did not.
+  const recordedSeq =
+    result.recordedSeq ??
+    (await recordGateDecision(gateName, result, {
+      workspaceId: auth.user.workspaceId ?? "default",
+      actorId: auth.user.id,
+      policy,
+    }, body.input)).recordedSeq;
 
   // Persist the client-facing safety summary so the "kept you safe" panel can
   // aggregate it. model_invoked null = the client's data never went to an LLM for
