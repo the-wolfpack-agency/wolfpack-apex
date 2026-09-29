@@ -72,7 +72,15 @@ export function buildGroundingBlock(paths: readonly string[], packageJsonRaw: st
     if (!deps.has("@testing-library/react") && !deps.has("@testing-library/dom")) {
       parts.push("React Testing Library is NOT installed: do not write component-render tests; test pure logic and API handlers instead.");
     }
-    if (deps.has("@playwright/test") || deps.has("playwright")) parts.push("End-to-end tests use Playwright.");
+    if (deps.has("@playwright/test") || deps.has("playwright") || deps.has("cypress")) {
+      parts.push(`End-to-end tests use ${deps.has("cypress") ? "Cypress" : "Playwright"}.`);
+    } else {
+      // No e2e framework installed: writing an e2e test imports a package that is
+      // not a dependency, which fails CI ("Cannot find module") and is blocked by
+      // the phantom-import guard. Tell the model up front so it does not over-reach
+      // (found by dogfooding a web page on a repo with no Playwright installed).
+      parts.push("No end-to-end framework (Playwright/Cypress) is installed: do NOT write e2e/browser tests; cover the change with unit tests only.");
+    }
     lines.push(parts.join(" "));
   } else {
     lines.push("- No unit-test runner is installed; do not add tests that require one.");
