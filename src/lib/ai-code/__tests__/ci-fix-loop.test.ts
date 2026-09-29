@@ -124,6 +124,20 @@ describe("unresolved contradiction escalates (ambiguous spec: source vs test)", 
     expect(d.reason).toMatch(/parseRange\.test\.ts/);
     expect(d.reason).toMatch(/clarify/i);
   });
+
+  it("does NOT escalate on the first contradiction: the premium tier retries before a human (dogfooding: escalation pre-empted the stronger model)", () => {
+    // attempt 1 = the cheap fix already failed, but the premium tier (fixAuthorTier
+    // escalates at attempt>=1) has not run yet. Author a fix (it will be premium),
+    // do not escalate.
+    const d = decideFixAction({ ci: redComplete as never, attempt: 1, maxAttempts: 3, introducedFailing: 1, unresolvedContradiction: { testFiles: ["src/lib/__tests__/parseRange.test.ts"] } });
+    expect(d.action).toBe("author_fix");
+  });
+
+  it("escalates only once the STRONGER model has also failed (reason says so)", () => {
+    const d = decideFixAction({ ci: redComplete as never, attempt: 2, maxAttempts: 3, introducedFailing: 1, unresolvedContradiction: { testFiles: ["src/lib/__tests__/parseRange.test.ts"] } });
+    expect(d.action).toBe("escalate_human");
+    expect(d.reason).toMatch(/stronger model/i);
+  });
 });
 
 describe("unfixable-no-detail escalates (deploy/setup/infra failure, no code error)", () => {
