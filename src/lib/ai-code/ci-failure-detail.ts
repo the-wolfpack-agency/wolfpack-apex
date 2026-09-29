@@ -176,9 +176,18 @@ export async function gatherFailureContext(
     for (const run of failedRuns) {
       let jobs: Awaited<ReturnType<typeof listRunJobs>> = [];
       try {
-        jobs = (await listRunJobs(client, repoFullName, run.id)).filter(
-          (j) => j.conclusion === "failure" && (!only || only.has(j.name))
+        const failedJobs = (await listRunJobs(client, repoFullName, run.id)).filter(
+          (j) => j.conclusion === "failure"
         );
+        // `only` may hold the workflow RUN name (e.g. "ci") rather than the JOB
+        // name (e.g. "unit-tests"); filtering jobs by it then drops every job and
+        // leaves the fixer blind (detailChars:0). Mirror the run-level fallback one
+        // level down: prefer jobs whose name is in `only`, but within an already
+        // in-scope run, if that selects nothing read ALL its failed jobs. Found by
+        // dogfooding vitest-lab PR #3 (run "ci" / job "unit-tests"); #988 fixed
+        // only the run level and left this identical bug at the job level.
+        const named = only ? failedJobs.filter((j) => only.has(j.name)) : failedJobs;
+        jobs = named.length > 0 ? named : failedJobs;
       } catch {
         jobs = [];
       }
