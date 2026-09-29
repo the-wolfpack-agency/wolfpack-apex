@@ -56,6 +56,14 @@ test("React Testing Library present -> does NOT forbid component tests", () => {
 test("Playwright dep -> notes e2e uses Playwright", () => {
   const block = buildGroundingBlock(["src/lib/x.ts"], pkg({ next: "15" }, { jest: "30", "@playwright/test": "1" }));
   expect(block).toMatch(/Playwright/);
+  expect(block).not.toMatch(/do NOT write e2e/i);
+});
+
+test("no e2e framework installed -> forbids e2e tests (avoids the phantom @playwright/test import)", () => {
+  // Dogfooding a web page: the model wrote a Playwright e2e test on a repo with no
+  // Playwright -> phantom import -> blocked. Grounding must forbid it up front.
+  const block = buildGroundingBlock(["app/page.tsx"], pkg({ next: "15", react: "18" }, { jest: "30" }));
+  expect(block).toMatch(/No end-to-end framework .* installed: do NOT write e2e/i);
 });
 
 test("no test runner installed -> says so, does not tell it to add tests needing one", () => {
