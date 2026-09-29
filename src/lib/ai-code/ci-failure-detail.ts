@@ -170,7 +170,9 @@ export async function gatherFailureContext(
     for (const run of failedRuns) {
       let jobs: Awaited<ReturnType<typeof listRunJobs>> = [];
       try {
-        jobs = (await listRunJobs(client, repoFullName, run.id)).filter((j) => j.conclusion === "failure");
+        jobs = (await listRunJobs(client, repoFullName, run.id)).filter(
+          (j) => j.conclusion === "failure" && (!only || only.has(j.name))
+        );
       } catch {
         jobs = [];
       }
