@@ -64,6 +64,9 @@ export interface ReadinessProbes {
   ciPresent: boolean;
   /** Count of checks already failing on the base branch (the baseline). */
   baselineFailingCount: number;
+  /** Names of the checks already failing on the base branch, so the operator sees
+   *  exactly which parts of the repo are red BEFORE any factory change. */
+  baselineFailingNames?: string[];
   /** The GitHub App install URL, for the one-click fix. */
   installUrl?: string;
 }
@@ -132,10 +135,10 @@ export function buildReadinessChecks(p: ReadinessProbes): ReadinessCheck[] {
     !p.repoReachable
       ? { id: "baseline-health", label: "Baseline health", status: "warn", detail: "Baseline could not be measured because the repository is unreachable." }
       : !p.ciReadable || !p.ciPresent
-        ? { id: "baseline-health", label: "Baseline health", status: "warn", detail: "No measured CI on the base branch yet, so there is no baseline to compare against. It is not verified-clean, just unmeasured." }
+        ? { id: "baseline-health", label: "Baseline health", status: "warn", detail: "No measured CI on the base branch yet, so there is no baseline to compare against. It is not verified-clean, just unmeasured.", fix: { label: "Establish a baseline by running CI on the base branch" } }
         : p.baselineFailingCount === 0
           ? { id: "baseline-health", label: "Baseline health", status: "pass", detail: "The base branch is green: a measured, clean starting point." }
-          : { id: "baseline-health", label: "Baseline health", status: "warn", detail: `The base branch already has ${p.baselineFailingCount} failing check(s). These will appear on every pull request as PRE-EXISTING and are not caused by your changes.` },
+          : { id: "baseline-health", label: "Baseline health", status: "warn", detail: `The base branch already has ${p.baselineFailingCount} failing check(s)${p.baselineFailingNames && p.baselineFailingNames.length ? ` (${p.baselineFailingNames.join(", ")})` : ""}. These will appear on every pull request as PRE-EXISTING and are not caused by your changes.` },
   );
 
   return checks;
@@ -172,6 +175,7 @@ export async function assessReadiness(
   let ciReadable = false;
   let ciPresent = false;
   let baselineFailingCount = 0;
+  let baselineFailingNames: string[] = [];
 
   if (client?.token) {
     try {
@@ -188,6 +192,7 @@ export async function assessReadiness(
       ciReadable = ci.readable !== false;
       ciPresent = ciReadable && ci.total > 0;
       baselineFailingCount = ci.failed;
+      baselineFailingNames = ci.failedChecks;
     } catch {
       repoReachable = false;
     }
@@ -204,6 +209,7 @@ export async function assessReadiness(
     defaultBranch,
     ciPresent,
     baselineFailingCount,
+    baselineFailingNames,
     installUrl,
   });
   return summarizeReadiness(checks);

@@ -684,6 +684,9 @@ export type InstinctEventType =
   // ai_code.pipeline_run { ref, spec_hash, status, attempts, final_outcome,
   //   open_questions } - one governed run chaining intake -> gate -> repair.
   | "ai_code.pipeline_run"
+  // ai_code.baseline_established { repo, workflow, dispatched } - the onboarding
+  // step that runs CI on a base branch that had none, so its health is measurable.
+  | "ai_code.baseline_established"
   // ai_gate.decision { gate, verdict, model_invoked, frameworks, findings,
   //   recorded_seq } - one Agent Gate decision, the data behind the client-facing
   //   "kept you safe" panel. model_invoked null = the client's data never went to

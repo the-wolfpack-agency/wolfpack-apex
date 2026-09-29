@@ -10,7 +10,7 @@
  * every check has completed, and none failed. No checks yet -> NOT complete
  * (nothing verified is not the same as verified).
  */
-import { listCheckRuns, listWorkflowRunChecks, workspaceGithubClient, type CheckRun, type GithubClient } from "@/lib/github-client";
+import { listCheckRuns, listWorkflowRunChecks, workspaceGithubClient, triggerWorkflow, type CheckRun, type GithubClient } from "@/lib/github-client";
 
 /** Read a ref's CI checks, tolerant of the token's permission shape: try the
  *  Checks API (per-job check-runs) first; if that is forbidden (the shared token
@@ -310,5 +310,32 @@ export async function fetchCiAttribution(
     return attributeChecks(baseline, head);
   } catch {
     return attributeChecks([], []);
+  }
+}
+
+/** Establish a baseline when the base branch has no measured CI: dispatch a
+ *  workflow on the base ref so it produces the checks a baseline is made of.
+ *  This is the "there would be no other way to know the initial state" step -
+ *  measuring requires a run to have happened, and some repos have never run CI
+ *  on their base. Defaults to the factory's own validate workflow (which runs the
+ *  repo's tests); any dispatchable workflow file can be named. Never throws: a
+ *  dispatch failure returns { dispatched:false, reason } so onboarding surfaces
+ *  the real reason (e.g. the workflow is not workflow_dispatch-enabled) rather
+ *  than silently proceeding without a baseline. */
+export async function establishBaseline(
+  repoFullName: string,
+  baseRef: string,
+  opts: { workflowFile?: string; workspaceId?: string } = {},
+): Promise<{ dispatched: boolean; runId: string | null; workflowFile: string; reason?: string }> {
+  const workflowFile = opts.workflowFile ?? "factory-validate.yml";
+  try {
+    const client: GithubClient = await workspaceGithubClient(opts.workspaceId);
+    if (!client.token) {
+      return { dispatched: false, runId: null, workflowFile, reason: "no GitHub credential for this workspace" };
+    }
+    const { run_id } = await triggerWorkflow(client, repoFullName, workflowFile, baseRef);
+    return { dispatched: true, runId: run_id, workflowFile };
+  } catch (e) {
+    return { dispatched: false, runId: null, workflowFile, reason: (e as Error).message.slice(0, 200) };
   }
 }
