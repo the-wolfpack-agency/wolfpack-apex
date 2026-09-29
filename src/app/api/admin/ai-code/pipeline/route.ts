@@ -129,6 +129,16 @@ async function resolveChangeWithFallback(
   const draftFeedback = (r: Awaited<ReturnType<typeof resolveChange>>): string | null => {
     if (emptyOrError(r)) return "The previous attempt produced no usable output (empty or errored). Return the COMPLETE file(s) that satisfy the request.";
     const files = resolvedFiles(r);
+    // A non-empty diff that yields NO committable full-file changes is a
+    // modification-only diff (it edits existing lines rather than creating files).
+    // Our commit path commits full files, not patches, so such a draft is
+    // ready-looking but UNCOMMITTABLE ("no file changes to commit"). Recover in
+    // files mode, where the model returns the COMPLETE edited file. Found by
+    // dogfooding the edit-existing class: the factory could create new files but
+    // never EDIT one, because a modification diff has no full files to commit.
+    if (files.length === 0 && r.diff.trim()) {
+      return "The previous attempt was a modification-only diff, which cannot be committed (the commit path writes full files, not patches). Return the COMPLETE contents of every file you change - including your edits merged into the existing code - not a diff.";
+    }
     const issues = checkSyntax(files).issues;
     if (issues.length > 0) return `The previous attempt did NOT parse. Fix these exact syntax errors and return the COMPLETE, valid file(s):\n${issues.map((i) => `- ${i.path}:${i.line} ${i.message}`).join("\n")}`;
     const phantoms = findPhantomImports(files, installedRoots);
