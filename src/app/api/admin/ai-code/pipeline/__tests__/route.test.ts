@@ -153,6 +153,18 @@ describe("POST /api/admin/ai-code/pipeline", () => {
     expect(body.repoContext.files).toEqual(["src/x.ts"]);
   });
 
+  it("the frozen spec GOVERNS authoring: directives are prepended to the author prompt", async () => {
+    // Root-cause fix for the parseRange contradiction - the author now sees the
+    // consistency directive + the resolved error-handling / strictness directives.
+    mockComplete.mockResolvedValue(authorResp("```diff\n" + AUTHORED_DIFF + "\n```"));
+    await POST(post({ ref: "pr-spec", prompt: "add parseRange", answers: { error_handling: "throw", input_strictness: "strict" } }));
+    const authorMsg = mockComplete.mock.calls[0][0].messages[0].content as string;
+    expect(authorMsg).toMatch(/Spec directives \(follow exactly\)/);
+    expect(authorMsg).toMatch(/ONE consistent interpretation/i); // the consistency directive
+    expect(authorMsg).toMatch(/THROW an error/i);                 // error_handling: throw
+    expect(authorMsg).toMatch(/STRICTLY/i);                        // input_strictness: strict
+  });
+
   it("governed fallback: an empty first draft is retried at a higher tier and the run proceeds", async () => {
     // First author returns prose (no diff); the escalated retry returns a real diff.
     mockComplete

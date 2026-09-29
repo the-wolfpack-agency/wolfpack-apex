@@ -41,7 +41,7 @@ import { findPhantomImports, parseInstalledRoots, phantomImportFeedback } from "
 import { findIncompleteFiles, completenessFeedback } from "@/lib/ai-code/completeness";
 import { getAIClient } from "@/lib/ai";
 import type { AIModelTier } from "@/lib/ai/types";
-import { DEFAULT_SPEC_QUESTIONS } from "@/lib/ai-code/intake";
+import { DEFAULT_SPEC_QUESTIONS, resolveIntake, specDirectives, withSpecDirectives } from "@/lib/ai-code/intake";
 import { createPendingApproval } from "@/lib/agents/approvals/store";
 import { ensureCodeGateAgent } from "@/lib/agents/store";
 import type { CodeReviewResult } from "@/lib/ai-code/types";
@@ -261,6 +261,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     } catch {
       /* best-effort context; author from the prompt alone on any failure */
     }
+  }
+
+  // Make the frozen spec GOVERN authoring, not just get recorded: prepend the
+  // consistency directive + the resolved spec directives (error-handling,
+  // input-strictness, ...) to the author prompt. This closes the root cause the
+  // scored matrix found - authoring happened blind and a spec was recorded after,
+  // so an ambiguous point was read two ways (source vs test). Only when authoring
+  // from a prompt (a supplied diff is governed as-is).
+  if (!diff.trim()) {
+    const { answers: resolvedSpec } = resolveIntake(DEFAULT_SPEC_QUESTIONS, answers);
+    authorPrompt = withSpecDirectives(authorPrompt, specDirectives(DEFAULT_SPEC_QUESTIONS, resolvedSpec));
   }
 
   const resolved = await resolveChangeWithFallback({ mode, diff, prompt: authorPrompt, authorModel, executorProviderPin }, installedRoots);

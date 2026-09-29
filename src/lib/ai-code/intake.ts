@@ -25,6 +25,11 @@ import { createHash } from "node:crypto";
 export interface SpecOption {
   id: string;
   label: string;
+  /** Imperative guidance the AUTHOR must follow when this option is the resolved
+   *  answer. Optional: a spec-record-only question (no authoring impact) omits it.
+   *  Present on the ambiguity-resolving questions so the frozen spec actually
+   *  GOVERNS what is authored, instead of being recorded and ignored. */
+  directive?: string;
 }
 export interface SpecQuestion {
   id: string;
@@ -78,6 +83,30 @@ export const DEFAULT_SPEC_QUESTIONS: readonly SpecQuestion[] = [
     ],
     default: "reversible",
   },
+  // Ambiguity-resolving questions (these carry AUTHOR directives). The scored
+  // dogfood matrix found the factory author a source and a test from two different
+  // readings of an ambiguous prompt (parseRange: is '1 - 3' valid? is '1,,2'
+  // malformed?), so they could never both pass. Pinning ONE reading up front and
+  // feeding it to the author is the root-cause fix.
+  {
+    id: "error_handling",
+    prompt: "How should invalid or malformed input be handled?",
+    options: [
+      { id: "throw", label: "Throw an error", directive: "On invalid or malformed input, THROW an error - do not silently return a default, null, or a partial result. The tests must assert the throw." },
+      { id: "empty", label: "Return an empty/neutral value", directive: "On invalid or malformed input, return an empty or neutral value (e.g. [] or null); do NOT throw. The tests must assert that returned value, not a throw." },
+      { id: "best_effort", label: "Best-effort (skip bad parts)", directive: "On invalid or malformed input, be best-effort: skip the bad portion and continue; do NOT throw. The tests must assert the skipping behavior." },
+    ],
+    default: "throw",
+  },
+  {
+    id: "input_strictness",
+    prompt: "How strictly is input format parsed?",
+    options: [
+      { id: "strict", label: "Strict (reject unexpected formatting)", directive: "Parse input STRICTLY: reject unexpected formatting (e.g. stray whitespace inside a token) as invalid. Source and tests must follow this same strict reading." },
+      { id: "lenient", label: "Lenient (tolerate incidental whitespace)", directive: "Parse input LENIENTLY: tolerate incidental whitespace/formatting. Source and tests must follow this same lenient reading." },
+    ],
+    default: "strict",
+  },
 ];
 
 /**
@@ -108,6 +137,40 @@ export function resolveIntake(
     }
   }
   return { answers: resolved, open };
+}
+
+/** A general anti-contradiction directive prepended to EVERY author prompt. The
+ *  scored dogfood matrix found the #1 non-convergence cause is a source and a test
+ *  authored from two different readings of an ambiguous point; this instructs the
+ *  author to pick ONE reading and apply it to both. Task-agnostic, so it never
+ *  over-engineers a simple task. */
+export const AUTHOR_CONSISTENCY_DIRECTIVE =
+  "Author the implementation and its tests from ONE consistent interpretation of the spec. For any input whose validity or behavior is ambiguous, pick a single reading and make BOTH the source and the tests follow it - never let a test assert behavior the source does not implement.";
+
+/** The AUTHOR directives implied by the resolved answers: for each answer whose
+ *  chosen option carries a `directive`, that directive. This is what makes the
+ *  frozen spec GOVERN authoring (not just get recorded). Pure; order follows the
+ *  question list. */
+export function specDirectives(
+  questions: readonly SpecQuestion[],
+  answers: Record<string, string>,
+): string[] {
+  const out: string[] = [];
+  for (const q of questions) {
+    const oid = answers[q.id];
+    if (!oid) continue;
+    const opt = q.options.find((o) => o.id === oid);
+    if (opt?.directive) out.push(opt.directive);
+  }
+  return out;
+}
+
+/** Prepend the consistency directive + the resolved spec directives to an author
+ *  prompt, so the model authors UNDER the governed spec. Returns the prompt
+ *  unchanged shape (just enriched). Pure. */
+export function withSpecDirectives(prompt: string, directives: readonly string[]): string {
+  const block = ["Spec directives (follow exactly):", `- ${AUTHOR_CONSISTENCY_DIRECTIVE}`, ...directives.map((d) => `- ${d}`)].join("\n");
+  return `${block}\n\n${prompt}`;
 }
 
 /** Canonical, order-independent serialization for hashing. */
