@@ -239,6 +239,22 @@ describe("gatherFailureContext scopes to introduced runs", () => {
     expect(mockListJobs).toHaveBeenCalledWith(expect.anything(), "o/r", 5); // the run was NOT excluded by its name
     expect(r.detail).toMatch(/error TS1005/); // its failing lint-types job's log was read
   });
+
+  it("reads the failing job when onlyRunNames holds the RUN name but the JOB name differs (vitest-lab PR #3; #988 left this at the job level)", async () => {
+    // The loop passed the workflow RUN name ("ci") as onlyRunNames, but the failing
+    // JOB is named "unit-tests". The run-level fallback (#988) keeps the run, but the
+    // job filter did only.has("unit-tests") -> false -> every job dropped ->
+    // detailChars:0 -> three blind fix attempts -> escalate_human. Red-before-green:
+    // FAILS on the job-name-only filter, PASSES once the job-level fallback is added.
+    mockListRuns.mockResolvedValue([{ id: 7, name: "ci", conclusion: "failure" }]);
+    mockListJobs.mockResolvedValue([{ id: 70, name: "unit-tests", conclusion: "failure" }]);
+    mockLog.mockResolvedValue(
+      "2026-09-29T16:43:15Z FAIL source/parseQueryString.test.ts\n2026-09-29T16:43:15Z Error: Invalid query string format: missing '=' in \"key2\"",
+    );
+    const r = await gatherFailureContext({} as never, "o/r", "sha", "ref", { onlyRunNames: ["ci"] });
+    expect(mockListJobs).toHaveBeenCalledWith(expect.anything(), "o/r", 7);
+    expect(r.detail).toMatch(/Invalid query string format/); // the job log was actually read
+  });
 });
 
 describe("extractFailingTestFiles", () => {
