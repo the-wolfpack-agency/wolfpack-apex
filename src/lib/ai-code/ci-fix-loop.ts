@@ -12,6 +12,21 @@
  * off to a human, never loop forever burning money on the same red check.
  */
 import type { CiSummary } from "./ci-status";
+import type { AIModelTier } from "@/lib/ai/types";
+
+/** The model tier a fix should be authored at, given how many attempts have
+ *  already failed. Cheap-first: the initial fix runs at the standard tier, but a
+ *  model that could NOT converge earns a stronger one before the loop spends a
+ *  human's time. Found by dogfooding: gpt-4o-mini oscillated on a trivial uniform
+ *  fix (a stray space before an ellipsis) across attempts, and the loop mislabeled
+ *  a cheap-model capability gap as an "ambiguous spec" and escalated to a human.
+ *  Escalating the tier turns a capability gap into an automatic retry with a
+ *  stronger model - and it also sharpens the human escalation: reaching it after
+ *  the premium tier also failed is real evidence the spec is ambiguous, not just
+ *  that the cheap model was outmatched. Pure. */
+export function fixAuthorTier(attempt: number): AIModelTier {
+  return attempt >= 1 ? "premium" : "standard";
+}
 
 export type FixAction = "merge_ready" | "wait" | "author_fix" | "escalate_human";
 

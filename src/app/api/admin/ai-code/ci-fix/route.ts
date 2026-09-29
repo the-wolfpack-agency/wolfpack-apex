@@ -17,7 +17,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { requireEntitlement } from "@/lib/tenancy/require-entitlement";
 import { fetchCiStatus, fetchCiAttribution } from "@/lib/ai-code/ci-status";
-import { decideFixAction, buildFixBrief } from "@/lib/ai-code/ci-fix-loop";
+import { decideFixAction, buildFixBrief, fixAuthorTier } from "@/lib/ai-code/ci-fix-loop";
 import { runCiFixStep } from "@/lib/ai-code/ci-fix-driver";
 import { workspaceGithubClient, getBranchHead, countBranchCommitsMatching, listChangedFiles, listWorkflowRunsRaw, rerunFailedRun, triggerWorkflow } from "@/lib/github-client";
 import { gatherFailureContext, buildEnrichedFixPrompt, extractFailingTestFiles, fetchFilesContent, hasFixAnchor, guardAuthoredFix } from "@/lib/ai-code/ci-failure-detail";
@@ -252,8 +252,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         return { changes: [], author: "", error: "no failure context or changed-file anchor; refusing to author blind" };
       }
       const prompt = buildEnrichedFixPrompt({ repo, branch, brief, context, authoredTestStillFailing: stalledOnAuthoredTest?.testFiles, subtype: mechanicalSubtype, changedFiles });
+      // Escalate the model tier once the cheap attempt has failed: a stronger model
+      // gets a shot BEFORE the loop escalates to a human (dogfooding: the cheap
+      // model oscillated on a trivial uniform fix; a capability gap, not a spec one).
       const authored = await authorFileChanges(
-        { prompt, feature: "ai-code-ci-fix" },
+        { prompt, feature: "ai-code-ci-fix", tier: fixAuthorTier(effectiveAttempt) },
         { complete: (r) => ai.complete(r) },
       );
       // Anti-hallucination guard (pure, tested): reject a fix that edits none of

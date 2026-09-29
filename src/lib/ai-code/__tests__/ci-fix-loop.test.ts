@@ -3,8 +3,18 @@
  * green, running, failed-with-budget, failed-out-of-budget. Bounded so it can
  * never loop forever.
  */
-import { decideFixAction, buildFixBrief } from "../ci-fix-loop";
+import { decideFixAction, buildFixBrief, fixAuthorTier } from "../ci-fix-loop";
 import type { CiSummary } from "../ci-status";
+
+describe("fixAuthorTier: escalate the model once the cheap attempt fails", () => {
+  it("first attempt (0) authors at the standard tier (cheap-first)", () => {
+    expect(fixAuthorTier(0)).toBe("standard");
+  });
+  it("a second+ attempt escalates to premium, so a stronger model tries before a human", () => {
+    expect(fixAuthorTier(1)).toBe("premium");
+    expect(fixAuthorTier(2)).toBe("premium");
+  });
+});
 
 const ci = (over: Partial<CiSummary>): CiSummary => ({
   total: 3, passed: 3, failed: 0, pending: 0, complete: true, ciComplete: true, failedChecks: [], failedDetails: [], ...over,
