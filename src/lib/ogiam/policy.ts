@@ -52,6 +52,13 @@ const HIGH_RISK_FRAGMENTS = [
   "provision",
   "impersonate",
   "admin",
+  "deploy",
+  "promote",
+  "publish",
+  "repository",
+  "rename",
+  "domain",
+  "dns",
 ];
 
 /** Tools that send PII outbound and should redact rather than block. */
