@@ -23,10 +23,10 @@ import type {
 
 /** Bump on any rule or tiering change so decisions stay reproducible against a
  *  known policy. Date plus a same-day revision counter. */
-export const POLICY_VERSION = "ogiam-2026-06-24.1";
+export const POLICY_VERSION = "ogiam-2026-06-24.2";
 
-/** Injection score at or above which a mutation is escalated. Advisory PIP. */
-export const INJECTION_ESCALATE_THRESHOLD = 0.8;
+/** Injection score at or above which a mutation is escalated to critical. */
+export const INJECTION_CRITICAL_THRESHOLD = 0.8;
 
 /**
  * Capabilities and tool-name fragments that mark an action as high risk: money
@@ -72,6 +72,13 @@ function matchesAny(haystacks: string[], fragments: string[]): boolean {
 /** Deterministic risk tier for an action. */
 export function riskTierFor(action: OgiamAction): OgiamRiskTier {
   if (action.signals.secretDetected) return "critical";
+  if (
+    action.isMutation &&
+    typeof action.signals.injectionScore === "number" &&
+    action.signals.injectionScore >= INJECTION_CRITICAL_THRESHOLD
+  ) {
+    return "critical";
+  }
   if (!action.isMutation) return "low";
   if (matchesAny([action.capability, action.tool], HIGH_RISK_FRAGMENTS)) {
     return "high";
@@ -121,7 +128,7 @@ export const POLICY_RULES: readonly PolicyRule[] = [
     test: (a) =>
       a.isMutation &&
       typeof a.signals.injectionScore === "number" &&
-      a.signals.injectionScore >= INJECTION_ESCALATE_THRESHOLD
+      a.signals.injectionScore >= INJECTION_CRITICAL_THRESHOLD
         ? { reason: "a likely prompt injection is driving a state-changing action", intendedOutcome: "escalate" }
         : null,
   },
@@ -159,4 +166,7 @@ export const POLICY_RULES: readonly PolicyRule[] = [
     id: "R-PENTEST-SCOPED-ALLOW",
     // By the time a pentest action reaches here the harness has already verified an
     // admin-issued scope token, budget, kill switch, allowed host + technique, and
-    //
+    rationale: "Pentest actions are allowed if they meet pre-verified scope and safety criteria.",
+    test: () => null, // Placeholder for pentest-specific logic
+  },
+];
