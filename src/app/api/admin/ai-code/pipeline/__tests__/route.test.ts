@@ -177,6 +177,22 @@ describe("POST /api/admin/ai-code/pipeline", () => {
     expect(mockRunPipeline).toHaveBeenCalled();
   });
 
+  it("modification-only diff (an EDIT) recovers in files mode so it is committable", async () => {
+    // The edit-existing dogfood gap: a diff that only MODIFIES existing lines
+    // yields no committable full files, so it is ready-looking but uncommittable.
+    // It must recover in files mode (full edited contents).
+    const MOD_DIFF = "diff --git a/src/x.ts b/src/x.ts\n--- a/src/x.ts\n+++ b/src/x.ts\n@@ -1 +1 @@\n-export const x = 1;\n+export const x = 2;";
+    mockComplete
+      .mockResolvedValueOnce(authorResp("```diff\n" + MOD_DIFF + "\n```")) // modification-only: no committable files
+      .mockResolvedValue(filesResp("src/x.ts", "export const x = 2;"));    // recovery: full contents
+    const res = await POST(post({ ref: "pr-edit", prompt: "change x to 2", answers: { tests: "unit" } }));
+    const body = await res.json();
+    expect(body.executorAttempts).toBe(2);
+    expect(body.mode).toBe("files"); // recovered to files -> committable
+    const retryPrompt = mockComplete.mock.calls[1][0].messages[0].content as string;
+    expect(retryPrompt).toMatch(/modification-only diff/i);
+  });
+
   it("escalation retry recovers in FILES mode (full contents), even when the first attempt was diff", async () => {
     // Diff mode garbles new-file authoring; the recovery switches to files mode.
     mockComplete
