@@ -51,4 +51,24 @@ describe("riskTierFor", () => {
     };
     expect(riskTierFor(action)).toBe("critical");
   });
+
+  it("classifies a mutation with a high injection score as critical risk", () => {
+    const action: OgiamAction = {
+      capability: "update.database",
+      tool: "dbTool",
+      isMutation: true,
+      signals: { injectionScore: 0.9 },
+    };
+    expect(riskTierFor(action)).toBe("critical");
+  });
+
+  it("classifies a mutation with an injection score below threshold as high risk if it contains high-risk fragments", () => {
+    const action: OgiamAction = {
+      capability: "delete.user",
+      tool: "userManager",
+      isMutation: true,
+      signals: { injectionScore: 0.5 },
+    };
+    expect(riskTierFor(action)).toBe("high");
+  });
 });
