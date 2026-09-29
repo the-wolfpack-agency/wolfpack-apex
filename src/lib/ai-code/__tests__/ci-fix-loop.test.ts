@@ -105,6 +105,17 @@ describe("transient/infra failure re-runs (escalates), never authored", () => {
   });
 });
 
+describe("unresolved contradiction escalates (ambiguous spec: source vs test)", () => {
+  const redComplete = { total: 2, passed: 1, failed: 1, pending: 0, complete: true, ciComplete: false, readable: true, failedChecks: ["unit"], failedDetails: [{ name: "unit", summary: "x" }] };
+  it("escalates with the specific tests + an ambiguous-spec explanation", () => {
+    const d = decideFixAction({ ci: redComplete as never, attempt: 2, maxAttempts: 3, introducedFailing: 1, unresolvedContradiction: { testFiles: ["src/lib/__tests__/parseRange.test.ts"] } });
+    expect(d.action).toBe("escalate_human");
+    expect(d.reason).toMatch(/ambiguous spec/i);
+    expect(d.reason).toMatch(/parseRange\.test\.ts/);
+    expect(d.reason).toMatch(/clarify/i);
+  });
+});
+
 describe("unfixable-no-detail escalates (deploy/setup/infra failure, no code error)", () => {
   const redComplete = { total: 3, passed: 0, failed: 3, pending: 0, complete: true, ciComplete: false, readable: true, failedChecks: ["e2e", "vercel-deploy", "preflight"], failedDetails: [{ name: "e2e", summary: "" }] };
   it("escalates with the failing check names when there is no readable code error", () => {

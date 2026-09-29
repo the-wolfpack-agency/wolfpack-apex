@@ -109,6 +109,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // path. Computed once when there is an introduced failure to act on.
   let changedFiles: string[] = [];
   let stalledOnAuthoredTest: { testFiles: string[] } | undefined;
+  let unresolvedContradiction: { testFiles: string[] } | undefined;
   let governanceFailure: { signal: string } | undefined;
   let transientFailure: { signal: string } | undefined;
   let flakeRecheckTriggered = false;
@@ -211,7 +212,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       if (failingTests.length > 0) {
         const changed = new Set(changedFiles);
         const authoredFailing = failingTests.filter((f) => changed.has(f));
-        if (authoredFailing.length > 0) stalledOnAuthoredTest = { testFiles: authoredFailing };
+        if (authoredFailing.length > 0) {
+          // First stall: tell the re-author to correct the wrong test expectation
+          // (converges the averageWordLength / parseDuration cases). But if the
+          // authored test is STILL failing on a SECOND+ attempt, that guidance did
+          // not converge - source and test disagree from an ambiguous spec and the
+          // fixer is oscillating. Escalate with the specific tests rather than
+          // burn the rest of the budget silently (scored-matrix finding:
+          // parseRange). priorFixCommits >= 2 means >= 1 prior "fix the test" pass.
+          if (priorFixCommits >= 2) unresolvedContradiction = { testFiles: authoredFailing };
+          else stalledOnAuthoredTest = { testFiles: authoredFailing };
+        }
       }
     }
   }
@@ -227,6 +238,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     deterministicFixDispatched,
     snapshotFailure,
     unfixableNoDetail,
+    unresolvedContradiction,
     briefDetails,
     reauthor: async (brief) => {
       // Reuse the context gathered above (never re-fetch). Empty only if the
@@ -260,5 +272,5 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       commitFileChanges({ client, repoFullName: repo, branch, base: branch, changes, message: `factory ci-fix: ${ref}` }),
   });
 
-  return NextResponse.json({ ...result, context: contextSummary, budget: { attempt: effectiveAttempt, priorFixCommits, maxAttempts }, ...(stalledOnAuthoredTest ? { stalledOnAuthoredTest } : {}), ...(governanceFailure ? { governanceFailure } : {}), ...(transientFailure ? { transientFailure } : {}), ...(flakeRecheckTriggered ? { flakeRecheckTriggered: true } : {}), ...(snapshotFailure ? { snapshotFailure: true } : {}), ...(deterministicFixDispatched ? { deterministicFixDispatched: true } : {}), ...(unfixableNoDetail ? { unfixableNoDetail } : {}), ...(mechanicalSubtype ? { subtype: mechanicalSubtype } : {}) });
+  return NextResponse.json({ ...result, context: contextSummary, budget: { attempt: effectiveAttempt, priorFixCommits, maxAttempts }, ...(stalledOnAuthoredTest ? { stalledOnAuthoredTest } : {}), ...(unresolvedContradiction ? { unresolvedContradiction } : {}), ...(governanceFailure ? { governanceFailure } : {}), ...(transientFailure ? { transientFailure } : {}), ...(flakeRecheckTriggered ? { flakeRecheckTriggered: true } : {}), ...(snapshotFailure ? { snapshotFailure: true } : {}), ...(deterministicFixDispatched ? { deterministicFixDispatched: true } : {}), ...(unfixableNoDetail ? { unfixableNoDetail } : {}), ...(mechanicalSubtype ? { subtype: mechanicalSubtype } : {}) });
 }

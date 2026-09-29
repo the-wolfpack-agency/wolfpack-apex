@@ -54,6 +54,15 @@ export interface FixLoopState {
    *  repair a lint/format failure with NO model. The decision waits for it to
    *  commit + re-trigger CI - cheaper and safer than authoring a fix. */
   deterministicFixDispatched?: boolean;
+  /** Set when the change's own SOURCE and its TEST keep disagreeing after the
+   *  "correct the wrong test" guidance was already given (the authored test is
+   *  STILL failing on a second+ fix attempt). That is an unresolvable contradiction
+   *  from an ambiguous spec - the model oscillates between two self-consistent
+   *  readings and can never make both pass. Escalate with the specific tests so a
+   *  human clarifies the intended behavior, instead of silently burning the budget.
+   *  Found by the scored dogfood matrix (parseRange: is '1 - 3' valid? is '1,,2'
+   *  malformed?). */
+  unresolvedContradiction?: { testFiles: readonly string[] };
   /** Set when the failing checks produced NO readable code-level error to act on
    *  (empty failure detail after a flake re-run had its chance). This is the
    *  signature of a deploy / setup / infra step that fails before any test runs
@@ -125,6 +134,12 @@ export function decideFixAction(state: FixLoopState): FixDecision {
     return {
       action: "wait",
       reason: "Re-ran the failed job(s) once to rule out a flake; waiting for the re-run to settle before authoring a fix.",
+    };
+  }
+  if (state.unresolvedContradiction) {
+    return {
+      action: "escalate_human",
+      reason: `The change's source and its test(s) keep disagreeing after a fix already tried to reconcile them (${state.unresolvedContradiction.testFiles.join(", ")} still failing). This is the signature of an AMBIGUOUS SPEC - the author wrote the source and the test from two different but self-consistent readings, so no edit makes both pass and the fixer oscillates. Escalating for a human to clarify the intended behavior (which inputs are valid vs an error) rather than burn more attempts.`,
     };
   }
   if (state.unfixableNoDetail) {
