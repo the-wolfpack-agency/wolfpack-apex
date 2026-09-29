@@ -1,0 +1,67 @@
+# factory-red-green - PRE-MERGE proof that a FIX is real, not plausible.
+#
+# A bug fix is only proven if its test FAILS on the unfixed code and PASSES on the
+# fix. Dogfooding found why this matters: the factory once shipped a plausible-but-
+# wrong fix (it patched the wrong filter) with no test, and it passed CI green by
+# omission. This workflow runs the change's reproducing test(s) against the BASE
+# with ONLY the test applied (the fix withheld) - which MUST fail, proving the test
+# reproduces the bug - and then against the HEAD - which MUST pass. Green requires
+# BOTH. That defeats the self-consistency trap too: a test that passes on the base
+# does not reproduce the bug and fails this check no matter how green it looks after.
+#
+# The factory selects the reproducing test path(s) (selectReproducingTests: the
+# test files the change adds/edits) and dispatches this with base_ref, head_ref,
+# and test_paths. Install at .github/workflows/factory-red-green.yml.
+name: factory-red-green
+on:
+  workflow_dispatch:
+    inputs:
+      base_ref:
+        description: "The base commit/branch (the unfixed code)"
+        required: true
+      head_ref:
+        description: "The head commit/branch (the fix + its test)"
+        required: true
+      test_paths:
+        description: "Space-separated reproducing test path(s)"
+        required: true
+      test_command:
+        description: "How to run a test path (the path is appended)"
+        required: false
+        default: "npm test --"
+permissions:
+  contents: read
+jobs:
+  red-then-green:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # RED: the reproducing test on the BASE, with ONLY the test applied and the
+      # fix withheld. It MUST fail - that is what proves it reproduces the bug.
+      - name: Red on base (test without the fix must FAIL)
+        run: |
+          set -u
+          git checkout "${{ github.event.inputs.base_ref }}"
+          # bring ONLY the test file(s) from head onto the base, not the fix
+          git checkout "${{ github.event.inputs.head_ref }}" -- ${{ github.event.inputs.test_paths }}
+          npm ci || npm install
+          if ${{ github.event.inputs.test_command }} ${{ github.event.inputs.test_paths }} ; then
+            echo "::error::The test PASSES on the unfixed base - it does not reproduce the bug and cannot prove a fix."
+            exit 1
+          fi
+          echo "Red confirmed: the test fails on the unfixed base."
+
+      # GREEN: the full change (fix + test) on the HEAD. It MUST pass.
+      - name: Green on head (fix + test must PASS)
+        run: |
+          set -u
+          git checkout -f "${{ github.event.inputs.head_ref }}"
+          npm ci || npm install
+          ${{ github.event.inputs.test_command }} ${{ github.event.inputs.test_paths }}
+          echo "Green confirmed: the fix makes the reproducing test pass. Red -> green proven."
