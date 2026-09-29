@@ -50,6 +50,15 @@ export function evaluateRedGreen(e: RedGreenEvidence): RedGreenVerdict {
   return { ok: false, reason: "The test fails both before and after the fix: it is broken or unrelated to the change, and proves nothing." };
 }
 
+import { isTestFile } from "./completeness";
+
+/** The reproducing test(s) to run red-before-green on: the test files this change
+ *  adds or edits. These are what must FAIL on the unfixed base and PASS on the
+ *  fix. Pure; reuses the shared test-path recognizer (DRY). */
+export function selectReproducingTests(changedFiles: readonly string[]): string[] {
+  return changedFiles.filter((f) => isTestFile(f));
+}
+
 /** Feedback for the authoring retry when red-before-green is not satisfied. Pure. */
 export function redGreenFeedback(v: RedGreenVerdict): string {
   return `The fix is not proven by a red-to-green test. ${v.reason} Return the change with a test that fails on the current code and passes only after your fix.`;
