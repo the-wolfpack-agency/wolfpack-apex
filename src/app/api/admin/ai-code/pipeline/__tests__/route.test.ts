@@ -48,6 +48,9 @@ const AUTHORED_DIFF = "diff --git a/src/k.ts b/src/k.ts\n--- /dev/null\n+++ b/sr
 // A new file truncated before its closing brace - the exact dogfooding failure.
 const TRUNCATED_DIFF = "diff --git a/src/lib/slug.ts b/src/lib/slug.ts\n--- /dev/null\n+++ b/src/lib/slug.ts\n@@ -0,0 +1,2 @@\n+export function slugify(s: string): string {\n+  return s.toLowerCase();";
 const authorResp = (content: string) => ({ content, model_used: "azure-gpt-4o", provider_used: "azure-openai", input_tokens: 1, output_tokens: 1, cost_usd: 0.0001, latency_ms: 100 });
+// The escalation retry authors in FILES mode (full contents), so a retry response
+// must be in the files-mode format (`FILE: path` + fenced content), not a diff.
+const filesResp = (path: string, content: string) => authorResp(`FILE: ${path}\n\`\`\`\n${content}\n\`\`\``);
 
 const OK_USER = { ok: true, user: { id: "u1", role: "admin", workspaceId: "w1" } };
 const deny = (status: number) => ({ ok: false, response: new Response("{}", { status }) });
@@ -154,12 +157,26 @@ describe("POST /api/admin/ai-code/pipeline", () => {
     // First author returns prose (no diff); the escalated retry returns a real diff.
     mockComplete
       .mockResolvedValueOnce(authorResp("I would add a function called k."))
-      .mockResolvedValue(authorResp("```diff\n" + AUTHORED_DIFF + "\n```"));
+      .mockResolvedValue(filesResp("src/k.ts", "export const k = 1;"));
     const res = await POST(post({ ref: "pr-fb", prompt: "add k", answers: { tests: "all" } }));
     expect(res.status).toBe(200); // did NOT dead-end on the first empty draft
     const body = await res.json();
     expect(body.executorAttempts).toBe(2); // the agent was tagged in a second time
     expect(mockRunPipeline).toHaveBeenCalled();
+  });
+
+  it("escalation retry recovers in FILES mode (full contents), even when the first attempt was diff", async () => {
+    // Diff mode garbles new-file authoring; the recovery switches to files mode.
+    mockComplete
+      .mockResolvedValueOnce(authorResp("```diff\n" + TRUNCATED_DIFF + "\n```")) // diff, unparseable
+      .mockResolvedValue(filesResp("src/lib/slug.ts", "export const slug = 1;"));   // recovery: files mode
+    const res = await POST(post({ ref: "pr-recover", prompt: "add slug", answers: { tests: "all" } }));
+    const body = await res.json();
+    expect(body.executorAttempts).toBe(2);
+    expect(body.mode).toBe("files"); // effective mode reflects the files-mode recovery
+    // The retry hit the files-mode authoring system prompt, not the diff one.
+    const retrySystem = mockComplete.mock.calls[1][0].system as string;
+    expect(retrySystem).not.toBe(mockComplete.mock.calls[0][0].system);
   });
 
   it("escalation retry carries the PARSE ERROR as feedback (not a blind re-run)", async () => {
@@ -169,7 +186,7 @@ describe("POST /api/admin/ai-code/pipeline", () => {
     // converged draft.
     mockComplete
       .mockResolvedValueOnce(authorResp("```diff\n" + TRUNCATED_DIFF + "\n```")) // does not parse
-      .mockResolvedValue(authorResp("```diff\n" + AUTHORED_DIFF + "\n```"));      // premium retry: valid
+      .mockResolvedValue(filesResp("src/lib/slug.ts", "export function slugify(s: string): string { return s.toLowerCase(); }")); // premium retry: valid (files mode)
     const res = await POST(post({ ref: "pr-fb3", prompt: "add slugify", answers: { tests: "all" } }));
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -187,7 +204,9 @@ describe("POST /api/admin/ai-code/pipeline", () => {
     // The apex `nookies` hallucination: an import of a package not in package.json.
     // installedRoots comes from the package.json fetch, so a repo must be supplied.
     mockFetchFile.mockResolvedValue(JSON.stringify({ dependencies: { next: "1" }, devDependencies: { jest: "1" } }));
-    mockComplete.mockResolvedValue(authorResp("```diff\n" + NOOKIES_DIFF + "\n```")); // both attempts import nookies
+    mockComplete
+      .mockResolvedValueOnce(authorResp("```diff\n" + NOOKIES_DIFF + "\n```")) // first (diff) imports nookies
+      .mockResolvedValue(filesResp("src/x.ts", 'import { parseCookies } from "nookies";\nexport const x = 1;')); // retry (files) still imports it
     mockRunPipeline.mockResolvedValue({ ...RUN, status: "ready_for_pr", diff: NOOKIES_DIFF });
     const res = await POST(post({ ref: "pr-phantom", prompt: "add x", repo: "acme/app", answers: { tests: "all" } }));
     const body = await res.json();
@@ -204,7 +223,7 @@ describe("POST /api/admin/ai-code/pipeline", () => {
     mockFetchFile.mockResolvedValue(JSON.stringify({ dependencies: { next: "1" } }));
     mockComplete
       .mockResolvedValueOnce(authorResp("```diff\n" + NOOKIES_DIFF + "\n```"))
-      .mockResolvedValue(authorResp("```diff\n" + CLEAN_NEW_DIFF + "\n```"));
+      .mockResolvedValue(filesResp("src/x.ts", "export const x = 1;")); // retry drops the phantom import
     mockRunPipeline.mockResolvedValue({ ...RUN, status: "ready_for_pr", diff: CLEAN_NEW_DIFF });
     const res = await POST(post({ ref: "pr-phantom-fix", prompt: "add x", repo: "acme/app", answers: { tests: "all" } }));
     const body = await res.json();
@@ -218,7 +237,9 @@ describe("POST /api/admin/ai-code/pipeline", () => {
 
   it("incomplete test file (no test case): retry is told, and it never hands off", async () => {
     // The apex fragment: a *.test.ts that PARSES but has no test -> jest fails it.
-    mockComplete.mockResolvedValue(authorResp("```diff\n" + FRAGMENT_TEST_DIFF + "\n```"));
+    mockComplete
+      .mockResolvedValueOnce(authorResp("```diff\n" + FRAGMENT_TEST_DIFF + "\n```")) // first (diff) fragment
+      .mockResolvedValue(filesResp("src/x.test.ts", 'const lines = data.split("x");')); // retry (files) still no test
     mockRunPipeline.mockResolvedValue({ ...RUN, status: "ready_for_pr", diff: FRAGMENT_TEST_DIFF });
     const res = await POST(post({ ref: "pr-frag", prompt: "add a test", repo: "acme/app", answers: { tests: "all" } }));
     const body = await res.json();
@@ -232,7 +253,7 @@ describe("POST /api/admin/ai-code/pipeline", () => {
   it("incomplete test file self-corrects: retry adds real test cases -> hands off", async () => {
     mockComplete
       .mockResolvedValueOnce(authorResp("```diff\n" + FRAGMENT_TEST_DIFF + "\n```"))
-      .mockResolvedValue(authorResp("```diff\n" + REAL_TEST_DIFF + "\n```"));
+      .mockResolvedValue(filesResp("src/x.test.ts", 'describe("x", () => { it("works", () => { expect(1).toBe(1); }); });')); // retry adds a real test
     mockRunPipeline.mockResolvedValue({ ...RUN, status: "ready_for_pr", diff: REAL_TEST_DIFF });
     const res = await POST(post({ ref: "pr-frag-fix", prompt: "add a test", repo: "acme/app", answers: { tests: "all" } }));
     const body = await res.json();
