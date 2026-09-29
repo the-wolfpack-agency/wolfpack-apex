@@ -117,7 +117,7 @@ type ResolveArgs = Parameters<typeof resolveChange>[0];
 async function resolveChangeWithFallback(
   args: ResolveArgs,
   installedRoots: ReadonlySet<string> = new Set(),
-): Promise<Awaited<ReturnType<typeof resolveChange>> & { executorAttempts: number }> {
+): Promise<Awaited<ReturnType<typeof resolveChange>> & { executorAttempts: number; effectiveMode: "diff" | "files" }> {
   const emptyOrError = (r: Awaited<ReturnType<typeof resolveChange>>) => !r.diff.trim() || Boolean(r.executor?.error);
   // Deterministic reasons a draft is bad, each fed back to the escalation retry:
   //  - empty / errored output
@@ -139,17 +139,23 @@ async function resolveChangeWithFallback(
   };
   let resolved = await resolveChange(args);
   let attempts = 1;
+  let effectiveMode = args.mode;
   const manualDiff = args.diff.trim().length > 0;
   const feedback = manualDiff ? null : draftFeedback(resolved);
   if (feedback) {
-    // Tell the escalated model WHAT was wrong, don't just re-run the same prompt
-    // at a higher tier - the "give the model the real error" principle that turns
-    // a needs_human hold into a converged draft (found by dogfooding).
-    const retry = await resolveChange({ ...args, tier: "premium", prompt: `${args.prompt}\n\n${feedback}` });
+    // Recover on a stronger model, WITH the deterministic reason fed back, AND in
+    // FILES mode. Two dogfooding lessons combined: (1) "give the model the real
+    // error" turns a needs_human hold into a converged draft; (2) files authoring
+    // (full contents) has no diff-reconstruction ambiguity, the #1 cause of a bad
+    // draft - diff mode garbled the same new-file task 3x, files landed it green
+    // first try. Diff stays the FIRST attempt (better for targeted edits); files
+    // is the recovery, so edits are unaffected and new-file garbles self-heal.
+    const retry = await resolveChange({ ...args, mode: "files", tier: "premium", prompt: `${args.prompt}\n\n${feedback}` });
     attempts++;
     resolved = retry; // the escalated attempt is the final draft (its evidence is what a human sees if it too failed)
+    effectiveMode = "files";
   }
-  return { ...resolved, executorAttempts: attempts };
+  return { ...resolved, executorAttempts: attempts, effectiveMode };
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
@@ -258,6 +264,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   const resolved = await resolveChangeWithFallback({ mode, diff, prompt: authorPrompt, authorModel, executorProviderPin }, installedRoots);
+  // The mode the draft ACTUALLY ended on: a bad first draft recovers in files
+  // mode, so downstream files-mode handling (repair loop, handoff, response) must
+  // key on the effective mode, not the requested one.
+  const effectiveMode = resolved.effectiveMode;
   const executorAttempts = resolved.executorAttempts;
   const executor = resolved.executor;
   let effectiveDiff = resolved.diff;
@@ -274,7 +284,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // DIFFERENT lineage), bounded, until they pass or a human is needed. This is the
   // gate-level half of the auto-fix loop; the CI-level half runs post-PR.
   let filesRepairStatus: "clean" | "needs_human" | "n/a" = "n/a";
-  if (mode === "files" && changes && changes.length > 0) {
+  if (effectiveMode === "files" && changes && changes.length > 0) {
     const client = getAIClient();
     const indep = chooseIndependentJudge(
       { provider: executor?.provider ?? "", model: effectiveAuthor },
@@ -402,7 +412,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // Files mode hands off when the files-native repair cleared the change (its final
   // files pass the gate). needs_human means the auto-fix could not clear it after
   // its bounded attempts. Diff mode is unaffected.
-  const filesModeHandoffOk = mode !== "files" || filesRepairStatus === "clean";
+  const filesModeHandoffOk = effectiveMode !== "files" || filesRepairStatus === "clean";
 
   // Syntax gate: the change must PARSE. The security gate scans for secrets /
   // injection, not "does this compile", so a truncated/malformed draft could
@@ -467,5 +477,5 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   // A change that does not parse is never "ready_for_pr", whatever the gate said.
   const effectiveRun = syntax.ok ? run : { ...run, status: "needs_human" as const };
-  return NextResponse.json({ run: effectiveRun, approvalId, executor, invariants, changeFacts, deepScan, syntax, phantomImports, incompleteFiles, mode, executorAttempts, repoContext: { files: repoContextFiles }, cost });
+  return NextResponse.json({ run: effectiveRun, approvalId, executor, invariants, changeFacts, deepScan, syntax, phantomImports, incompleteFiles, mode: effectiveMode, executorAttempts, repoContext: { files: repoContextFiles }, cost });
 }
