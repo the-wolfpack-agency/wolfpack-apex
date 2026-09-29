@@ -163,9 +163,15 @@ export async function gatherFailureContext(
     // Scope to the INTRODUCED runs when we know them, so the fixer is never asked
     // to repair a pre-existing failure it did not cause (e.g. a broken e2e suite).
     const only = opts.onlyRunNames && opts.onlyRunNames.length > 0 ? new Set(opts.onlyRunNames) : null;
-    const failedRuns = runs
-      .filter((r) => r.conclusion === "failure" && (!only || only.has(r.name)))
-      .slice(0, 3);
+    // Scope to introduced failures by name. `only` holds CHECK names, which on
+    // some repos equal the workflow RUN names (scoping by r.name works) but on most
+    // real repos do NOT (a run "Verify" produces a "lint-types" check). If matching
+    // run names yields nothing, fall back to ALL failed runs and rely on the
+    // job-name filter below (jobs correspond to checks) so a run whose NAME differs
+    // is still read. Found by dogfooding: run-name-only scoping returned empty
+    // detail on apex (detailChars:0) and left the fixer blind (#986 did not fix it).
+    const byRunName = runs.filter((r) => r.conclusion === "failure" && (!only || only.has(r.name)));
+    const failedRuns = (byRunName.length > 0 ? byRunName : runs.filter((r) => r.conclusion === "failure")).slice(0, 3);
     const parts: string[] = [];
     for (const run of failedRuns) {
       let jobs: Awaited<ReturnType<typeof listRunJobs>> = [];

@@ -225,6 +225,20 @@ describe("gatherFailureContext scopes to introduced runs", () => {
     expect(mockListJobs).toHaveBeenCalledWith(expect.anything(), "o/r", 1);
     expect(mockListJobs).toHaveBeenCalledWith(expect.anything(), "o/r", 2);
   });
+
+  it("reads a failing job even when the workflow RUN name differs from the CHECK name (the apex bug #986 did not fix)", async () => {
+    // Real repos name the workflow RUN differently from the CHECK: a run "Verify"
+    // contains a failing "lint-types" job. onlyRunNames holds CHECK/job names, so
+    // scoping by run name alone excluded everything -> detailChars:0 and a blind
+    // fixer. This is the red-before-green reproducing test: it FAILS on the code
+    // that only matches run names, and PASSES once job names are matched too.
+    mockListRuns.mockResolvedValue([{ id: 5, name: "Verify", conclusion: "failure" }]);
+    mockListJobs.mockResolvedValue([{ id: 50, name: "lint-types", conclusion: "failure" }]);
+    mockLog.mockResolvedValue("2026-09-29T00:00:00Z ##[error]src/lib/ogiam/policy.ts(162,7): error TS1005: '}' expected.");
+    const r = await gatherFailureContext({} as never, "o/r", "sha", "ref", { onlyRunNames: ["lint-types"] });
+    expect(mockListJobs).toHaveBeenCalledWith(expect.anything(), "o/r", 5); // the run was NOT excluded by its name
+    expect(r.detail).toMatch(/error TS1005/); // its failing lint-types job's log was read
+  });
 });
 
 describe("extractFailingTestFiles", () => {
