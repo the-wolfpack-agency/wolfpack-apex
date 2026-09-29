@@ -90,6 +90,19 @@ test("red baseline -> WARN that discloses pre-existing failures up front, does n
   expect(summarizeReadiness(Object.values(checks)).ready).toBe(true);
 });
 
+test("red baseline NAMES the failing checks so the operator sees exactly what is already red", () => {
+  const checks = byId({ ...base, baselineFailingCount: 2, baselineFailingNames: ["e2e-smoke", "lint-types"] });
+  expect(checks["baseline-health"].status).toBe("warn");
+  expect(checks["baseline-health"].detail).toMatch(/e2e-smoke, lint-types/);
+  expect(checks["baseline-health"].detail).toMatch(/2 failing check/i);
+});
+
+test("red baseline without names still reads cleanly (no empty parens)", () => {
+  const checks = byId({ ...base, baselineFailingCount: 2 });
+  expect(checks["baseline-health"].detail).toMatch(/2 failing check\(s\)\./);
+  expect(checks["baseline-health"].detail).not.toMatch(/\(\)/);
+});
+
 test("summarizeReadiness takes the worst status as overall", () => {
   expect(summarizeReadiness([
     { id: "a", label: "A", status: "pass", detail: "" },
