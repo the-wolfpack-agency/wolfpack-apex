@@ -135,7 +135,7 @@ export function buildReadinessChecks(p: ReadinessProbes): ReadinessCheck[] {
     !p.repoReachable
       ? { id: "baseline-health", label: "Baseline health", status: "warn", detail: "Baseline could not be measured because the repository is unreachable." }
       : !p.ciReadable || !p.ciPresent
-        ? { id: "baseline-health", label: "Baseline health", status: "warn", detail: "No measured CI on the base branch yet, so there is no baseline to compare against. It is not verified-clean, just unmeasured." }
+        ? { id: "baseline-health", label: "Baseline health", status: "warn", detail: "No measured CI on the base branch yet, so there is no baseline to compare against. It is not verified-clean, just unmeasured.", fix: { label: "Establish a baseline by running CI on the base branch" } }
         : p.baselineFailingCount === 0
           ? { id: "baseline-health", label: "Baseline health", status: "pass", detail: "The base branch is green: a measured, clean starting point." }
           : { id: "baseline-health", label: "Baseline health", status: "warn", detail: `The base branch already has ${p.baselineFailingCount} failing check(s)${p.baselineFailingNames && p.baselineFailingNames.length ? ` (${p.baselineFailingNames.join(", ")})` : ""}. These will appear on every pull request as PRE-EXISTING and are not caused by your changes.` },
