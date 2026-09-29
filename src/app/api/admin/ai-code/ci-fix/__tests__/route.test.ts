@@ -209,6 +209,24 @@ test("stalls on an authored test (budget left): authors a fix to CORRECT the wro
   expect(body.terminal).toBe(false); // committed; poll again after CI re-runs
 });
 
+test("PERSISTENT stall (authored test still failing after reconciliation): escalates as an ambiguous-spec contradiction, does NOT author again", async () => {
+  // The scored-matrix parseRange finding: the "fix the test" guidance already ran
+  // (priorFixCommits >= 2) and the authored test is STILL failing -> source and
+  // test disagree from an ambiguous spec; escalate instead of oscillating.
+  mockFetchCiStatus.mockResolvedValue(red);
+  mockFetchAttribution.mockResolvedValue({ introduced: ["unit"], preexisting: [], indeterminate: [], fixed: [], baselineKnown: true, baselineHealthy: false, clean: false, reason: "introduced unit" });
+  mockCountFixCommits.mockResolvedValue(2); // >= 1 prior "fix the test" pass already made
+  mockGather.mockResolvedValue({ detail: "FAIL src/lib/__tests__/parseRange.test.ts\n  Expected [1,2] Received [1,3]", files: [] });
+  mockListChangedFiles.mockResolvedValue(["src/lib/parseRange.ts", "src/lib/__tests__/parseRange.test.ts"]);
+  const body = await (await POST(post({ repo: "o/r", ref: "b", branch: "factory/b-abc", base: "main", attempt: 0, maxAttempts: 3 }))).json();
+  expect(body.decision.action).toBe("escalate_human");
+  expect(body.decision.reason).toMatch(/ambiguous spec/i);
+  expect(body.unresolvedContradiction).toEqual({ testFiles: ["src/lib/__tests__/parseRange.test.ts"] });
+  expect(body.stalledOnAuthoredTest).toBeUndefined();
+  expect(mockAuthorFiles).not.toHaveBeenCalled(); // no more oscillating
+  expect(mockCommit).not.toHaveBeenCalled();
+});
+
 test("does NOT stall when the failing test is NOT part of the change (pre-existing test file)", async () => {
   mockFetchCiStatus.mockResolvedValue(red);
   mockFetchAttribution.mockResolvedValue({ introduced: ["unit"], preexisting: [], indeterminate: [], fixed: [], baselineKnown: true, baselineHealthy: false, clean: false, reason: "introduced unit" });
@@ -225,8 +243,10 @@ test("budget spent: escalates to a human (bounded), no further commit", async ()
   mockFetchCiStatus.mockResolvedValue(red);
   mockFetchAttribution.mockResolvedValue({ introduced: ["unit"], preexisting: [], indeterminate: [], fixed: [], baselineKnown: true, baselineHealthy: false, clean: false, reason: "introduced unit" });
   mockCountFixCommits.mockResolvedValue(12); // budget (maxAttempts:3) long since spent
-  mockGather.mockResolvedValue({ detail: "FAIL src/lib/__tests__/averageWordLength.test.ts", files: [] });
-  mockListChangedFiles.mockResolvedValue(["src/lib/averageWordLength.ts", "src/lib/__tests__/averageWordLength.test.ts"]);
+  // A plain source failure (not a stalled AUTHORED test), so it exercises the
+  // budget-exhaustion path, not the ambiguous-spec contradiction path.
+  mockGather.mockResolvedValue({ detail: "Expected 5 Received 4", files: [] });
+  mockListChangedFiles.mockResolvedValue(["src/lib/averageWordLength.ts"]);
   const body = await (await POST(post({ repo: "o/r", ref: "b", branch: "factory/b-abc", base: "main", attempt: 0, maxAttempts: 3 }))).json();
   // After the bounded attempts it hands to a human rather than looping forever.
   expect(body.decision.action).toBe("escalate_human");
