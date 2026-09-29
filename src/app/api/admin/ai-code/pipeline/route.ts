@@ -38,6 +38,7 @@ import { workspaceGithubClient, fetchFileContent } from "@/lib/github-client";
 import { buildRepoContext, withRepoContext } from "@/lib/ai-code/repo-context";
 import { fetchRepoGrounding } from "@/lib/ai-code/repo-grounding";
 import { findPhantomImports, parseInstalledRoots, phantomImportFeedback } from "@/lib/ai-code/imports";
+import { findIncompleteFiles, completenessFeedback } from "@/lib/ai-code/completeness";
 import { getAIClient } from "@/lib/ai";
 import type { AIModelTier } from "@/lib/ai/types";
 import { DEFAULT_SPEC_QUESTIONS } from "@/lib/ai-code/intake";
@@ -132,6 +133,8 @@ async function resolveChangeWithFallback(
     if (issues.length > 0) return `The previous attempt did NOT parse. Fix these exact syntax errors and return the COMPLETE, valid file(s):\n${issues.map((i) => `- ${i.path}:${i.line} ${i.message}`).join("\n")}`;
     const phantoms = findPhantomImports(files, installedRoots);
     if (phantoms.length > 0) return phantomImportFeedback(phantoms);
+    const incomplete = findIncompleteFiles(files);
+    if (incomplete.length > 0) return completenessFeedback(incomplete);
     return null;
   };
   let resolved = await resolveChange(args);
@@ -412,9 +415,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // always fails CI ("Cannot find module") - it can never hand off. Enforced, not
   // just advised by grounding. No-op when installedRoots is empty (unknown deps).
   const phantomImports = findPhantomImports(finalFiles, installedRoots);
+  // Completeness gate: a test file with no test case parses but jest fails it
+  // ("must contain at least one test") - it can never go green, so it never hands
+  // off (the apex fragment that slipped past the syntax gate).
+  const incompleteFiles = findIncompleteFiles(finalFiles);
 
   let approvalId: string | null = null;
-  if (run.status === "ready_for_pr" && !invariants.wouldBlock && !deepScan.blocking && filesModeHandoffOk && syntax.ok && phantomImports.length === 0) {
+  if (run.status === "ready_for_pr" && !invariants.wouldBlock && !deepScan.blocking && filesModeHandoffOk && syntax.ok && phantomImports.length === 0 && incompleteFiles.length === 0) {
     // Provision the factory's own governed principal (active + revocable) and hand
     // the approval its REAL agent id, so the human-in-the-gate approval's
     // kill-switch re-check finds an active agent instead of auto-rejecting. A null
@@ -460,5 +467,5 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   // A change that does not parse is never "ready_for_pr", whatever the gate said.
   const effectiveRun = syntax.ok ? run : { ...run, status: "needs_human" as const };
-  return NextResponse.json({ run: effectiveRun, approvalId, executor, invariants, changeFacts, deepScan, syntax, phantomImports, mode, executorAttempts, repoContext: { files: repoContextFiles }, cost });
+  return NextResponse.json({ run: effectiveRun, approvalId, executor, invariants, changeFacts, deepScan, syntax, phantomImports, incompleteFiles, mode, executorAttempts, repoContext: { files: repoContextFiles }, cost });
 }
