@@ -2,7 +2,7 @@
  * Intake engine: fixed multiple-choice resolution, deferred/batched open
  * questions, off-menu answers rejected, and a stable order-independent spec hash.
  */
-import { resolveIntake, freezeSpec, canonicalSpec, DEFAULT_SPEC_QUESTIONS, type SpecQuestion } from "../intake";
+import { resolveIntake, freezeSpec, canonicalSpec, DEFAULT_SPEC_QUESTIONS, specDirectives, withSpecDirectives, AUTHOR_CONSISTENCY_DIRECTIVE, type SpecQuestion } from "../intake";
 
 const QS: SpecQuestion[] = [
   { id: "a", prompt: "A?", options: [{ id: "x", label: "X" }, { id: "y", label: "Y" }], default: "x" },
@@ -29,8 +29,8 @@ describe("resolveIntake", () => {
 
   it("the default catalog resolves with no answers", () => {
     const r = resolveIntake(DEFAULT_SPEC_QUESTIONS, {});
-    expect(r.answers).toEqual({ tests: "all", data: "analytics", reversibility: "reversible" });
-    expect(r.open).toHaveLength(3);
+    expect(r.answers).toEqual({ tests: "all", data: "analytics", reversibility: "reversible", error_handling: "throw", input_strictness: "strict" });
+    expect(r.open).toHaveLength(5);
   });
 });
 
@@ -50,5 +50,49 @@ describe("freezeSpec", () => {
 
   it("canonicalSpec is whitespace-normalized on the prompt", () => {
     expect(canonicalSpec("  build X  ", { a: "x" })).toBe(canonicalSpec("build X", { a: "x" }));
+  });
+});
+
+describe("specDirectives (the frozen spec governs authoring)", () => {
+  it("emits the directive for each resolved answer's chosen option", () => {
+    const { answers } = resolveIntake(DEFAULT_SPEC_QUESTIONS, { error_handling: "throw", input_strictness: "strict" });
+    const ds = specDirectives(DEFAULT_SPEC_QUESTIONS, answers);
+    expect(ds.some((d) => /THROW an error/i.test(d))).toBe(true);
+    expect(ds.some((d) => /STRICTLY/i.test(d))).toBe(true);
+  });
+
+  it("uses defaults (throw + strict) when the ambiguity questions are unanswered", () => {
+    const { answers } = resolveIntake(DEFAULT_SPEC_QUESTIONS, { tests: "all" });
+    expect(answers.error_handling).toBe("throw");
+    expect(answers.input_strictness).toBe("strict");
+    const ds = specDirectives(DEFAULT_SPEC_QUESTIONS, answers);
+    expect(ds.some((d) => /THROW/i.test(d))).toBe(true);
+  });
+
+  it("emits nothing for spec-record-only questions (no directive)", () => {
+    // tests/data/reversibility carry no directive -> no author guidance from them.
+    const ds = specDirectives(DEFAULT_SPEC_QUESTIONS, { tests: "all", data: "durable", reversibility: "irreversible" });
+    expect(ds).toEqual([]);
+  });
+
+  it("lenient/best-effort options carry their own directives", () => {
+    const ds = specDirectives(DEFAULT_SPEC_QUESTIONS, { error_handling: "best_effort", input_strictness: "lenient" });
+    expect(ds.some((d) => /best-effort/i.test(d))).toBe(true);
+    expect(ds.some((d) => /LENIENTLY/i.test(d))).toBe(true);
+  });
+});
+
+describe("withSpecDirectives", () => {
+  it("prepends the consistency directive + the resolved directives above the prompt", () => {
+    const out = withSpecDirectives("Build parseRange.", ["On invalid input, THROW."]);
+    expect(out).toMatch(/Spec directives \(follow exactly\):/);
+    expect(out).toContain(AUTHOR_CONSISTENCY_DIRECTIVE);
+    expect(out).toMatch(/On invalid input, THROW\./);
+    expect(out.indexOf("Spec directives")).toBeLessThan(out.indexOf("Build parseRange.")); // directives come first
+  });
+
+  it("always includes the consistency directive even with no spec directives", () => {
+    const out = withSpecDirectives("Build X.", []);
+    expect(out).toContain(AUTHOR_CONSISTENCY_DIRECTIVE);
   });
 });

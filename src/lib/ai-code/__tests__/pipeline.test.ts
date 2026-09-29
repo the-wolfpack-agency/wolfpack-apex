@@ -58,21 +58,21 @@ describe("runPipeline", () => {
     const run = await runPipeline({
       ...base,
       diff: CLEAN_INPUT,
-      answers: { tests: "all", data: "analytics", reversibility: "reversible" },
+      answers: { tests: "all", data: "analytics", reversibility: "reversible", error_handling: "throw", input_strictness: "strict" },
       repair: scriptedRepair(["unused"]),
     });
     expect(run.status).toBe("ready_for_pr");
     expect(run.openQuestions).toHaveLength(0);
     expect(run.remediation.attempts).toHaveLength(0);
     expect(run.spec.hash).toMatch(/^spec_/);
-    expect(run.spec.answers).toEqual({ tests: "all", data: "analytics", reversibility: "reversible" });
+    expect(run.spec.answers).toEqual({ tests: "all", data: "analytics", reversibility: "reversible", error_handling: "throw", input_strictness: "strict" });
   });
 
   it("freezes a spec from DEFAULTS and returns the defaulted questions to confirm", async () => {
     const run = await runPipeline({ ...base, diff: CLEAN_INPUT, repair: scriptedRepair(["unused"]) });
     // Every default question is unanswered -> all come back as open, defaulted.
-    expect(run.openQuestions.map((q) => q.id).sort()).toEqual(["data", "reversibility", "tests"]);
-    expect(run.spec.answers).toEqual({ tests: "all", data: "analytics", reversibility: "reversible" });
+    expect(run.openQuestions.map((q) => q.id).sort()).toEqual(["data", "error_handling", "input_strictness", "reversibility", "tests"]);
+    expect(run.spec.answers).toEqual({ tests: "all", data: "analytics", reversibility: "reversible", error_handling: "throw", input_strictness: "strict" });
     expect(run.status).toBe("ready_for_pr");
   });
 
