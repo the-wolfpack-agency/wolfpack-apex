@@ -290,6 +290,35 @@ describe("POST /api/admin/ai-code/pipeline", () => {
     expect(body.approvalId).toBe("appr-1");
   });
 
+  it("removed export blocks handoff (the deleted-decide regression): escalates, no PR", async () => {
+    // The edit rewrites an existing file and drops a public export. The base file
+    // has `decide` + `riskTierFor`; the authored file keeps only `riskTierFor`.
+    const EDIT_DROPS_EXPORT = "diff --git a/src/lib/ogiam/policy.ts b/src/lib/ogiam/policy.ts\n--- /dev/null\n+++ b/src/lib/ogiam/policy.ts\n@@ -0,0 +1 @@\n+export function riskTierFor() { return \"low\"; }";
+    mockComplete.mockResolvedValue(authorResp("```diff\n" + EDIT_DROPS_EXPORT + "\n```"));
+    mockRunPipeline.mockResolvedValue({ ...RUN, status: "ready_for_pr", diff: EDIT_DROPS_EXPORT });
+    // Base file content (the "before") still exports decide.
+    mockFetchFile.mockImplementation((_c: unknown, _r: unknown, path: string) =>
+      Promise.resolve(path === "src/lib/ogiam/policy.ts" ? "export function decide(){}\nexport function riskTierFor(){}" : null),
+    );
+    const res = await POST(post({ ref: "pr-dropexport", prompt: "tidy policy.ts", repo: "acme/app", answers: { tests: "unit" } }));
+    const body = await res.json();
+    expect(body.approvalId).toBeNull(); // removed export -> no handoff
+    expect(body.removedExports).toEqual(expect.arrayContaining([expect.objectContaining({ path: "src/lib/ogiam/policy.ts", name: "decide" })]));
+  });
+
+  it("preserving all exports while editing hands off normally", async () => {
+    const EDIT_KEEPS_EXPORTS = "diff --git a/src/lib/ogiam/policy.ts b/src/lib/ogiam/policy.ts\n--- /dev/null\n+++ b/src/lib/ogiam/policy.ts\n@@ -0,0 +1,2 @@\n+export function decide(){ return 2; }\n+export function riskTierFor(){}";
+    mockComplete.mockResolvedValue(authorResp("```diff\n" + EDIT_KEEPS_EXPORTS + "\n```"));
+    mockRunPipeline.mockResolvedValue({ ...RUN, status: "ready_for_pr", diff: EDIT_KEEPS_EXPORTS });
+    mockFetchFile.mockImplementation((_c: unknown, _r: unknown, path: string) =>
+      Promise.resolve(path === "src/lib/ogiam/policy.ts" ? "export function decide(){}\nexport function riskTierFor(){}" : null),
+    );
+    const res = await POST(post({ ref: "pr-keepexport", prompt: "edit policy.ts", repo: "acme/app", answers: { tests: "unit" } }));
+    const body = await res.json();
+    expect(body.removedExports).toEqual([]);
+    expect(body.approvalId).toBe("appr-1");
+  });
+
   it("only a TRUE failure surfaces: both the draft and the escalated retry are empty -> 422", async () => {
     mockComplete.mockResolvedValue(authorResp("no code here, just prose"));
     const res = await POST(post({ ref: "pr-fb2", prompt: "add k", answers: { tests: "all" } }));

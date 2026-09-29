@@ -39,6 +39,7 @@ import { buildRepoContext, withRepoContext } from "@/lib/ai-code/repo-context";
 import { fetchRepoGrounding } from "@/lib/ai-code/repo-grounding";
 import { findPhantomImports, parseInstalledRoots, phantomImportFeedback } from "@/lib/ai-code/imports";
 import { findIncompleteFiles, completenessFeedback } from "@/lib/ai-code/completeness";
+import { findRemovedExports, type RemovedExport } from "@/lib/ai-code/exports-preservation";
 import { getAIClient } from "@/lib/ai";
 import type { AIModelTier } from "@/lib/ai/types";
 import { DEFAULT_SPEC_QUESTIONS, resolveIntake, specDirectives, withSpecDirectives } from "@/lib/ai-code/intake";
@@ -450,9 +451,30 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // ("must contain at least one test") - it can never go green, so it never hands
   // off (the apex fragment that slipped past the syntax gate).
   const incompleteFiles = findIncompleteFiles(finalFiles);
+  // Export/API-preservation gate: an edit that DROPS a public export breaks every
+  // importer (the apex `decide` deletion that broke five modules and passed the
+  // syntax check, since the file still parsed). Compare each edited file's exports
+  // on the repo's base vs the authored version; a removed export blocks handoff
+  // and escalates to a human (a real refactor sometimes removes one, so it is
+  // escalate-not-deny). New files have no "before" and never flag. Best-effort +
+  // no-op without a repo/token; absence of before-content never blocks a handoff.
+  const removedExports: RemovedExport[] = [];
+  if (repo) {
+    try {
+      const gh = await workspaceGithubClient(workspaceId);
+      if (gh.token) {
+        for (const f of finalFiles) {
+          const before = await fetchFileContent(gh, repo, f.path).catch(() => null);
+          if (before) for (const name of findRemovedExports(before, f.content)) removedExports.push({ path: f.path, name });
+        }
+      }
+    } catch {
+      /* best-effort: if we cannot read the base file, do not block on it */
+    }
+  }
 
   let approvalId: string | null = null;
-  if (run.status === "ready_for_pr" && !invariants.wouldBlock && !deepScan.blocking && filesModeHandoffOk && syntax.ok && phantomImports.length === 0 && incompleteFiles.length === 0) {
+  if (run.status === "ready_for_pr" && !invariants.wouldBlock && !deepScan.blocking && filesModeHandoffOk && syntax.ok && phantomImports.length === 0 && incompleteFiles.length === 0 && removedExports.length === 0) {
     // Provision the factory's own governed principal (active + revocable) and hand
     // the approval its REAL agent id, so the human-in-the-gate approval's
     // kill-switch re-check finds an active agent instead of auto-rejecting. A null
@@ -498,5 +520,5 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   // A change that does not parse is never "ready_for_pr", whatever the gate said.
   const effectiveRun = syntax.ok ? run : { ...run, status: "needs_human" as const };
-  return NextResponse.json({ run: effectiveRun, approvalId, executor, invariants, changeFacts, deepScan, syntax, phantomImports, incompleteFiles, mode: effectiveMode, executorAttempts, repoContext: { files: repoContextFiles }, cost });
+  return NextResponse.json({ run: effectiveRun, approvalId, executor, invariants, changeFacts, deepScan, syntax, phantomImports, incompleteFiles, removedExports, mode: effectiveMode, executorAttempts, repoContext: { files: repoContextFiles }, cost });
 }
