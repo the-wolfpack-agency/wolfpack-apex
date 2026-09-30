@@ -299,6 +299,7 @@ export async function driveCiFixStep(input: DriveCiFixInput): Promise<DriveCiFix
             ? "preexisting_only"
             : mechanicalSubtype ?? "other";
     trackEvent("ai_code.ci_fix_resolved", actor.userId, actor.role, {
+      workspace_id: workspaceId ?? "unknown",
       repo,
       ref,
       action: result.decision.action,
