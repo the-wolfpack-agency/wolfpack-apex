@@ -394,6 +394,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   trackEvent("ai_code.pipeline_run", auth.user.id, auth.user.role, {
     // workspace_id scopes the run history + grading read (multi-tenant safe).
     workspace_id: workspaceId,
+    // The target repo, so the history groups per-site once the factory builds
+    // across repos ("(self)" = the self-hosted apex/Instinct executor default).
+    repo: repo ?? "(self)",
     ref,
     spec_hash: run.spec.hash,
     status: run.status,

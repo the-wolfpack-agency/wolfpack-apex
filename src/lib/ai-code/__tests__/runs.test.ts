@@ -5,7 +5,7 @@
 const mockSafeQuery = jest.fn();
 jest.mock("@/lib/db", () => ({ safeQuery: (...a: unknown[]) => mockSafeQuery(...a) }));
 
-import { listPipelineRuns, toRunRecords } from "@/lib/ai-code/runs";
+import { listPipelineRuns, toRunRecords, listRunRepos } from "@/lib/ai-code/runs";
 
 beforeEach(() => jest.clearAllMocks());
 
@@ -48,4 +48,49 @@ test("toRunRecords flips to oldest-first with parsed ts", () => {
   ]);
   expect(recs.map((r) => r.attempts)).toEqual([1, 0]); // oldest (a) first
   expect(recs[0].ts).toBe(Date.parse("2026-09-27T09:00:00Z"));
+});
+
+test("attributes each run to its target repo; missing repo is null (pre-attribution)", async () => {
+  mockSafeQuery.mockResolvedValue({
+    rows: [
+      { metadata: { workspace_id: "w1", ref: "pr-ford", repo: "the-wolfpack-agency/wolfpack-ford", status: "ready_for_pr", final_outcome: "allow" }, timestamp: "2026-09-30T10:00:00Z" },
+      { metadata: { workspace_id: "w1", ref: "pr-self", status: "ready_for_pr", final_outcome: "allow" }, timestamp: "2026-09-30T09:00:00Z" },
+    ],
+  });
+  const runs = await listPipelineRuns("w1", 50);
+  expect(runs[0].repo).toBe("the-wolfpack-agency/wolfpack-ford");
+  expect(runs[1].repo).toBeNull();
+});
+
+test("a repo filter scopes the query to one site (adds the repo predicate + param)", async () => {
+  mockSafeQuery.mockResolvedValue({ rows: [] });
+  await listPipelineRuns("w1", 50, "the-wolfpack-agency/wolfpack-ford");
+  const [sql, params] = mockSafeQuery.mock.calls[0];
+  expect(sql).toContain("metadata->>'repo' = $2");
+  expect(params).toEqual(["w1", "the-wolfpack-agency/wolfpack-ford"]);
+});
+
+test("no repo filter omits the repo predicate (all sites)", async () => {
+  mockSafeQuery.mockResolvedValue({ rows: [] });
+  await listPipelineRuns("w1", 50);
+  const [sql, params] = mockSafeQuery.mock.calls[0];
+  expect(sql).not.toContain("metadata->>'repo'");
+  expect(params).toEqual(["w1"]);
+});
+
+test("listRunRepos returns the distinct sites, self-default surfaced as (self), sorted", async () => {
+  mockSafeQuery.mockResolvedValue({
+    rows: [{ repo: "the-wolfpack-agency/wolfpack-ford" }, { repo: null }, { repo: "the-wolfpack-agency/wolfpack-cayenne-e4" }],
+  });
+  const repos = await listRunRepos("w1");
+  expect(repos).toEqual([
+    "(self)",
+    "the-wolfpack-agency/wolfpack-cayenne-e4",
+    "the-wolfpack-agency/wolfpack-ford",
+  ]);
+});
+
+test("listRunRepos never throws on a read failure", async () => {
+  mockSafeQuery.mockResolvedValue({ rows: [] });
+  expect(await listRunRepos("w1")).toEqual([]);
 });
