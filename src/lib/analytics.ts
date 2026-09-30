@@ -693,6 +693,9 @@ export type InstinctEventType =
   //   needed. Aggregating the escalations by class IS the automation backlog that
   //   dogfooding surfaces - the data that tells us what to automate next.
   | "ai_code.ci_fix_resolved"
+  // ai_code.watched_repo_set { workspace_id, repo, enabled } - a workspace enrolled,
+  // paused, or removed a repo from the autonomous watcher (SaaS config, per workspace).
+  | "ai_code.watched_repo_set"
   // ai_gate.decision { gate, verdict, model_invoked, frameworks, findings,
   //   recorded_seq } - one Agent Gate decision, the data behind the client-facing
   //   "kept you safe" panel. model_invoked null = the client's data never went to
