@@ -30,6 +30,16 @@ const GOVERNANCE_CHECK_NAMES = [
   "license",
 ];
 
+/** True when a failing check is the dependency-audit gate specifically. It is a
+ *  governance gate (never let a model hack it), but UNLIKE a guardrail - whose fix
+ *  is a human policy decision - a dependency advisory with a patched version has a
+ *  DETERMINISTIC remediation (a targeted lockfile bump). So the loop can dispatch a
+ *  no-model dep-fixer instead of spending a human, and only escalate when no fix is
+ *  available. Pure. */
+export function isDependencyAuditFailure(failedChecks: readonly string[]): boolean {
+  return failedChecks.some((n) => /dependency audit/i.test(n));
+}
+
 /** A FAILING TEST FILE whose path is a guardrail by NAME - our repo-wide policy /
  *  coverage / architecture rules. Matched against the "FAIL <path>" lines in the
  *  detail. This is the CLASS, so a guardrail we ADD later is covered without

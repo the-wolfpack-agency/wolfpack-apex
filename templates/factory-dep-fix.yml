@@ -1,0 +1,60 @@
+# factory-dep-fix - DETERMINISTIC, no-model remediation for a dependency-audit
+# failure. A dependency advisory is a governance gate the factory must never let a
+# model hack green - but a patched version usually EXISTS, and applying it is a
+# mechanical, deterministic step, not a judgement call. The ci-fix loop dispatches
+# this (env DEP_FIX_WORKFLOW) on a "Dependency Audit" failure instead of spending a
+# human: it runs a TARGETED lockfile-only `npm audit fix`, proves the audit is
+# clean and the tests still pass (a red->green analog), and commits ONLY the
+# lockfile. If no fix is available, it commits nothing and exits non-zero, so the
+# loop falls back to escalating to a human (no fix could be applied).
+#
+# Removes the manual remediation a human did by hand: find the advisory, run the
+# bump, verify, push. Install at .github/workflows/factory-dep-fix.yml and set
+# DEP_FIX_WORKFLOW=factory-dep-fix.yml for the workspace.
+name: factory-dep-fix
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: "The factory PR branch to remediate"
+        required: true
+permissions:
+  contents: write
+jobs:
+  dep-fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Targeted lockfile-only audit fix (no package.json changes)
+        run: npm audit fix --package-lock-only --omit=dev || true
+
+      - name: Stop if nothing changed (no fix available -> let a human decide)
+        run: |
+          if git diff --quiet -- package-lock.json; then
+            echo "::error::No lockfile change - no patched version is available for the advisory. A human must decide (major bump / override / accept)."
+            exit 1
+          fi
+          echo "Lockfile updated by the targeted audit fix."
+
+      - name: Prove the fix - audit clean AND install stays consistent
+        run: |
+          npm install --no-audit --no-fund
+          # the audit must now be clean for production deps (the gate's scope)
+          npm audit --omit=dev
+
+      - name: Prove no regression - the repo's own tests still pass
+        run: npm test
+
+      - name: Commit the patched lockfile back to the PR branch
+        run: |
+          git config user.name "agentgate-ai[bot]"
+          git config user.email "agentgate-ai[bot]@users.noreply.github.com"
+          git add package-lock.json
+          git commit -m "factory ci-fix: patch dependency advisories (targeted lockfile bump)"
+          git push origin HEAD:${{ github.event.inputs.branch }}

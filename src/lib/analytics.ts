@@ -687,6 +687,12 @@ export type InstinctEventType =
   // ai_code.baseline_established { repo, workflow, dispatched } - the onboarding
   // step that runs CI on a base branch that had none, so its health is measurable.
   | "ai_code.baseline_established"
+  // ai_code.ci_fix_resolved { repo, ref, action, reason, attempts, introduced_failing,
+  //   class } - a TERMINAL ci-fix outcome. action=merge_ready is an autonomous win;
+  //   action=escalate_human with its reason/class is a spot where a human is STILL
+  //   needed. Aggregating the escalations by class IS the automation backlog that
+  //   dogfooding surfaces - the data that tells us what to automate next.
+  | "ai_code.ci_fix_resolved"
   // ai_gate.decision { gate, verdict, model_invoked, frameworks, findings,
   //   recorded_seq } - one Agent Gate decision, the data behind the client-facing
   //   "kept you safe" panel. model_invoked null = the client's data never went to
