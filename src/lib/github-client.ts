@@ -321,6 +321,24 @@ export interface OpenedPullRequest {
   number: number;
 }
 
+export interface OpenPullRequestRef {
+  number: number;
+  headRef: string;
+  baseRef: string;
+  title: string;
+}
+
+/** List a repo's OPEN pull requests (head/base branch + number). Used by the
+ *  autonomous watcher to find the factory's own PRs to drive. Read-only. */
+export async function listOpenPullRequests(client: GithubClient, repoFullName: string): Promise<OpenPullRequestRef[]> {
+  const raw = await gh<Array<{ number: number; title: string; head: { ref: string }; base: { ref: string } }>>(
+    client,
+    "GET",
+    `/repos/${repoFullName}/pulls?state=open&per_page=100`,
+  );
+  return raw.map((p) => ({ number: p.number, headRef: p.head.ref, baseRef: p.base.ref, title: p.title }));
+}
+
 /** Open a pull request. NEVER merges: a PR is the human-review checkpoint. */
 export async function openPullRequest(
   client: GithubClient,
