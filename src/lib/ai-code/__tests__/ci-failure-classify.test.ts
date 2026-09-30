@@ -5,7 +5,20 @@
  * case (an autofixer editing code to make a guardrail pass), so the tests pin the
  * governance signals hard.
  */
-import { classifyCiFailure, isDeployInfraCheck, failuresAreInfraOnly } from "@/lib/ai-code/ci-failure-classify";
+import { classifyCiFailure, isDeployInfraCheck, failuresAreInfraOnly, isDependencyAuditFailure } from "@/lib/ai-code/ci-failure-classify";
+
+describe("dependency-audit is a governance gate with a DETERMINISTIC fix (dispatch, do not model-fix)", () => {
+  it("recognizes the dependency-audit check so the loop can dispatch the no-model dep-fixer", () => {
+    expect(isDependencyAuditFailure(["Dependency Audit"])).toBe(true);
+    expect(isDependencyAuditFailure(["unit-tests", "Dependency Audit"])).toBe(true);
+  });
+  it("is still classified governance (a model must never hack a security gate)", () => {
+    expect(classifyCiFailure("1 high severity vulnerability", ["Dependency Audit"]).kind).toBe("governance");
+  });
+  it("does not fire on unrelated checks", () => {
+    expect(isDependencyAuditFailure(["unit-tests", "lint-types"])).toBe(false);
+  });
+});
 
 describe("deploy/infra vs code check typing (for empty-detail escalation)", () => {
   it.each(["e2e", "vercel-deploy", "preflight", "canary-deploy", "Playwright", "Vercel"])("treats %s as deploy/infra", (name) => {

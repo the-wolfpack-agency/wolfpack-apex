@@ -21,7 +21,7 @@ import { decideFixAction, buildFixBrief, fixAuthorTier } from "@/lib/ai-code/ci-
 import { runCiFixStep } from "@/lib/ai-code/ci-fix-driver";
 import { workspaceGithubClient, getBranchHead, countBranchCommitsMatching, listChangedFiles, listWorkflowRunsRaw, rerunFailedRun, triggerWorkflow } from "@/lib/github-client";
 import { gatherFailureContext, buildEnrichedFixPrompt, extractFailingTestFiles, fetchFilesContent, hasFixAnchor, guardAuthoredFix } from "@/lib/ai-code/ci-failure-detail";
-import { classifyCiFailure, failuresAreInfraOnly } from "@/lib/ai-code/ci-failure-classify";
+import { classifyCiFailure, failuresAreInfraOnly, isDependencyAuditFailure } from "@/lib/ai-code/ci-failure-classify";
 import { flakeRecheckCandidates } from "@/lib/ai-code/flake";
 import { commitFileChanges, filesToDiff } from "@/lib/ai-code/file-changes";
 import { assessChange } from "@/lib/ai-code/assess";
@@ -152,7 +152,21 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // code to make a governance gate pass. Classify from the check names + detail.
     const cls = classifyCiFailure(gathered.detail, ci.failedChecks);
     if (cls.kind === "governance") {
-      governanceFailure = { signal: cls.signal };
+      // A dependency-audit advisory is a governance gate we must never let a model
+      // hack - but a patched version usually EXISTS, and that fix is deterministic
+      // (a targeted `npm audit fix --package-lock-only`). Dispatch a no-model
+      // dep-fixer workflow (same pattern as lint) instead of spending a human; only
+      // escalate when no fix workflow is configured or the dispatch fails. This
+      // removes the manual remediation step (a human ran the bump by hand this
+      // session). Opt-in via env, and first-attempt only (mirrors the lint fixer).
+      const depFixWorkflow = process.env.DEP_FIX_WORKFLOW;
+      if (isDependencyAuditFailure(ci.failedChecks) && depFixWorkflow && priorFixCommits === 0) {
+        const ok = await triggerWorkflow(client, repo, depFixWorkflow, branch).then(() => true).catch(() => false);
+        if (ok) deterministicFixDispatched = true;
+        else governanceFailure = { signal: cls.signal };
+      } else {
+        governanceFailure = { signal: cls.signal };
+      }
     } else if (cls.kind === "transient") {
       transientFailure = { signal: cls.signal };
     } else {
