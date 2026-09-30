@@ -27,6 +27,7 @@ import { commitFileChanges, filesToDiff } from "@/lib/ai-code/file-changes";
 import { assessChange } from "@/lib/ai-code/assess";
 import { authorFileChanges } from "@/lib/ai-code/author";
 import { getAIClient } from "@/lib/ai";
+import { trackEvent } from "@/lib/analytics";
 
 const MAX_ATTEMPTS_CEILING = 5;
 
@@ -289,5 +290,31 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       commitFileChanges({ client, repoFullName: repo, branch, base: branch, changes, message: `factory ci-fix: ${ref}` }),
   });
 
+  // Record every TERMINAL outcome so the factory surfaces its own gaps: merge_ready
+  // is an autonomous win; escalate_human with its reason/class is a spot a human is
+  // STILL needed. Aggregating the escalations IS the automation backlog - the thing
+  // dogfooding is meant to reveal. Non-terminal (wait/author_fix) is in-flight, not
+  // an outcome, so it is not recorded here.
+  if (result.terminal) {
+    const cls = governanceFailure
+      ? "governance"
+      : unresolvedContradiction
+        ? "ambiguous_spec"
+        : unfixableNoDetail
+          ? "infra_no_detail"
+          : introducedFailing === 0
+            ? "preexisting_only"
+            : mechanicalSubtype ?? "other";
+    trackEvent("ai_code.ci_fix_resolved", auth.user.id, auth.user.role, {
+      repo,
+      ref,
+      action: result.decision.action,
+      reason: result.decision.reason,
+      attempts: effectiveAttempt,
+      introduced_failing: introducedFailing ?? "baseline_unaware",
+      class: cls,
+      deterministic_fix: deterministicFixDispatched,
+    });
+  }
   return NextResponse.json({ ...result, context: contextSummary, budget: { attempt: effectiveAttempt, priorFixCommits, maxAttempts }, ...(stalledOnAuthoredTest ? { stalledOnAuthoredTest } : {}), ...(unresolvedContradiction ? { unresolvedContradiction } : {}), ...(governanceFailure ? { governanceFailure } : {}), ...(transientFailure ? { transientFailure } : {}), ...(flakeRecheckTriggered ? { flakeRecheckTriggered: true } : {}), ...(snapshotFailure ? { snapshotFailure: true } : {}), ...(deterministicFixDispatched ? { deterministicFixDispatched: true } : {}), ...(unfixableNoDetail ? { unfixableNoDetail } : {}), ...(mechanicalSubtype ? { subtype: mechanicalSubtype } : {}) });
 }
