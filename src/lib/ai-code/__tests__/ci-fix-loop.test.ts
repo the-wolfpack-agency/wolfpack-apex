@@ -53,10 +53,15 @@ describe("decideFixAction, baseline-aware", () => {
     const d = decideFixAction({ ci: red, attempt: 0, maxAttempts: 3, introducedFailing: 1 });
     expect(d.action).toBe("author_fix");
   });
-  it("does NOT author a fix when every failure is pre-existing (introduced = 0)", () => {
+  it("a clean change on a red baseline is READY (disclosed), not escalated - never authors a fix for pre-existing red", () => {
+    // The factory's own backlog ranked this the #1 human-toil source: escalating a
+    // change that broke nothing just because the repo was already red. It is now a
+    // positive terminal (a human still approves the merge), never author_fix.
     const d = decideFixAction({ ci: red, attempt: 0, maxAttempts: 3, introducedFailing: 0 });
-    expect(d.action).toBe("escalate_human");
-    expect(d.reason).toMatch(/already failing on the base branch|pre-existing/i);
+    expect(d.action).toBe("merge_ready");
+    expect(d.reason).toMatch(/introduced no failing checks/i);
+    expect(d.reason).toMatch(/pre-existing/i);
+    expect(d.reason).toMatch(/disclosed/i);
   });
   it("without attribution (undefined) keeps the baseline-unaware behavior: fix any red", () => {
     const d = decideFixAction({ ci: red, attempt: 0, maxAttempts: 3 });

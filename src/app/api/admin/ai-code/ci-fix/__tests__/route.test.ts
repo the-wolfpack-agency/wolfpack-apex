@@ -153,13 +153,15 @@ test("with a branch + green CI: merge_ready, terminal, no commit", async () => {
   expect(mockCommit).not.toHaveBeenCalled();
 });
 
-test("with base + all failures PRE-EXISTING (introduced 0): does NOT author, escalates to human", async () => {
+test("with base + all failures PRE-EXISTING (introduced 0): does NOT author; READY with the pre-existing red disclosed", async () => {
   mockFetchCiStatus.mockResolvedValue(red);
   mockFetchAttribution.mockResolvedValue({ introduced: [], preexisting: ["unit"], indeterminate: [], fixed: [], baselineKnown: true, baselineHealthy: false, clean: true, reason: "pre-existing" });
   const body = await (await POST(post({ repo: "o/r", ref: "b", base: "main", attempt: 0, maxAttempts: 3 }))).json();
   expect(mockFetchAttribution).toHaveBeenCalledWith("o/r", "main", "b", "w1");
-  expect(body.decision.action).toBe("escalate_human");
-  expect(body.decision.reason).toMatch(/pre-existing|already failing on the base/i);
+  // The change broke nothing; it is ready for human merge approval, not escalated.
+  expect(body.decision.action).toBe("merge_ready");
+  expect(body.decision.reason).toMatch(/pre-existing/i);
+  expect(body.decision.reason).toMatch(/disclosed/i);
   expect(body.brief).toBeUndefined(); // nothing to author
 });
 

@@ -111,14 +111,20 @@ export function decideFixAction(state: FixLoopState): FixDecision {
     return { action: "wait", reason: `CI still running (${state.ci.pending} check(s) pending)` };
   }
   // complete but not green => there are failures.
-  // Baseline-aware: if we know NONE of the failures were introduced by this
-  // change (they were already failing on the base branch), the fixer must not
-  // author a fix - it did not break them and cannot be blamed for them. Hand to a
-  // human to decide whether to merge despite the pre-existing red.
+  // Baseline-aware: if we know NONE of the failures were introduced by this change
+  // (they were already failing on the base branch), the change itself is clean - so
+  // it is READY for the human merge approval, with the pre-existing red disclosed,
+  // NOT escalated as a problem. The factory's own backlog proved this: clean-change-
+  // on-red-baseline was the #1 source of human escalation (15 of 29), pure toil -
+  // escalating a change that broke nothing just because the repo was already red.
+  // A human still approves the merge, so surfacing it as ready (not a failure) is
+  // both safe and what makes the factory usable on brownfield repos (most have some
+  // pre-existing red). The fixer still never touches pre-existing red it did not break.
   if (state.introducedFailing === 0) {
+    const preexisting = state.ci.failedChecks;
     return {
-      action: "escalate_human",
-      reason: `CI failed (${state.ci.failedChecks.join(", ")}), but every failing check was already failing on the base branch (pre-existing). This change introduced none, so it is handed to a human rather than auto-fixed.`,
+      action: "merge_ready",
+      reason: `This change introduced no failing checks. ${preexisting.length} pre-existing failure(s) (${preexisting.join(", ")}) were already red on the base branch and are NOT caused by this change. Ready for human merge approval; the pre-existing red is disclosed, not this change's to fix.`,
     };
   }
   if (state.governanceFailure) {
