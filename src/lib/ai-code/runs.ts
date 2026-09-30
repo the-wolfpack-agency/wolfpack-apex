@@ -12,6 +12,10 @@ import type { PipelineRunRecord } from "./grading";
 export interface RunSummary {
   ref: string;
   model: string;
+  /** The target repo this run built against; null for the self-hosted
+   *  (apex/Instinct) executor default. Absent for runs recorded before per-site
+   *  attribution shipped - those surface as "unattributed". */
+  repo?: string | null;
   status: "ready_for_pr" | "needs_human";
   attempts: number;
   finalOutcome: "allow" | "escalate" | "block";
@@ -54,16 +58,25 @@ const asNum = (v: unknown): number => {
  * filtered by the workspace_id carried in the event metadata, so it is
  * tenant-scoped. NEVER throws (safeQuery); returns [] on any read failure.
  */
-export async function listPipelineRuns(workspaceId: string, limit = 50): Promise<RunSummary[]> {
+export async function listPipelineRuns(
+  workspaceId: string,
+  limit = 50,
+  /** Optional per-site filter: only runs whose target repo matches. Runs
+   *  recorded before per-site attribution (no repo in metadata) are excluded
+   *  from a repo filter, included when unfiltered. */
+  repo?: string,
+): Promise<RunSummary[]> {
   const lim = Math.min(Math.max(Math.trunc(limit), 1), 500);
+  const repoFilter = repo && repo.trim() ? repo.trim() : null;
   const { rows } = await safeQuery<EventRow>(
     `SELECT metadata, timestamp::text AS timestamp
        FROM instinct_events
       WHERE event_type = 'ai_code.pipeline_run'
         AND metadata->>'workspace_id' = $1
+        ${repoFilter ? "AND metadata->>'repo' = $2" : ''}
       ORDER BY timestamp DESC
       LIMIT ${lim}`,
-    [workspaceId],
+    repoFilter ? [workspaceId, repoFilter] : [workspaceId],
   );
   return rows.map((r) => {
     const m = asObj(r.metadata);
@@ -76,6 +89,7 @@ export async function listPipelineRuns(workspaceId: string, limit = 50): Promise
       deepScanCritical: asNum(m.deep_scan_critical),
       conforms: m.conforms === true || m.conforms === "true",
       createdAt: r.timestamp,
+      repo: typeof m.repo === "string" ? m.repo : null,
       ...(typeof m.diff === "string" && m.diff.length > 0 ? { diff: m.diff } : {}),
       ...(m.diff_truncated === true || m.diff_truncated === "true" ? { diffTruncated: true } : {}),
       ...(typeof m.verdict_reason === "string" && m.verdict_reason.length > 0 ? { reason: m.verdict_reason } : {}),
@@ -95,4 +109,21 @@ export function toRunRecords(runs: readonly RunSummary[]): PipelineRunRecord[] {
       deepScanCritical: r.deepScanCritical,
       ts: Date.parse(r.createdAt) || undefined,
     }));
+}
+
+/**
+ * The distinct set of target repos the workspace's runs have built against,
+ * newest-activity first, so the history UI can offer a per-site selector.
+ * null (self-hosted default) surfaces as the literal "(self)" so it is a
+ * selectable, stable key. NEVER throws.
+ */
+export async function listRunRepos(workspaceId: string): Promise<string[]> {
+  const { rows } = await safeQuery<{ repo: string | null }>(
+    `SELECT DISTINCT metadata->>'repo' AS repo
+       FROM instinct_events
+      WHERE event_type = 'ai_code.pipeline_run'
+        AND metadata->>'workspace_id' = $1`,
+    [workspaceId],
+  );
+  return rows.map((r) => r.repo ?? "(self)").sort((a, b) => a.localeCompare(b));
 }

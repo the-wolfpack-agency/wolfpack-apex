@@ -519,3 +519,29 @@ test("in-app help: a How it works guide explains the flow for a new user", async
   expect(help).toHaveTextContent(/build & deploy checkpoints/i);
   expect(help).toHaveTextContent(/tamper-evident audit/i);
 });
+
+test("per-site selector: lists the sites the factory built against and scopes history to one", async () => {
+  historyResp = resp(200, {
+    runs: [
+      { ref: "feat-alloc-1", model: "gpt-4o-mini", status: "ready_for_pr", attempts: 0, finalOutcome: "allow", deepScanCritical: 0, conforms: true, createdAt: "2026-09-30T10:00:00Z", repo: "the-wolfpack-agency/wolfpack-ford" },
+    ],
+    repos: ["(self)", "the-wolfpack-agency/wolfpack-ford"],
+    repo: null,
+    grade: { total: 1, readyRate: 1, firstPassRate: 1, blockRate: 0, escalationRate: 0, byModel: [] },
+    drift: [],
+  });
+  render(<CodeFactoryPage />);
+  // the selector renders with every site, and a run shows its site chip
+  await waitFor(() => expect(screen.getByTestId("site-select")).toBeInTheDocument());
+  expect(screen.getByTestId("site-select")).toHaveTextContent("wolfpack-ford");
+  expect(screen.getByTestId("history-run-repo-0")).toHaveTextContent("wolfpack-ford");
+  // choosing a site re-pulls history scoped to that repo
+  await act(async () => {
+    fireEvent.change(screen.getByTestId("site-select"), { target: { value: "the-wolfpack-agency/wolfpack-ford" } });
+  });
+  await waitFor(() =>
+    expect(
+      mockFetch.mock.calls.some((c) => String(c[0]).includes("/ai-code/history") && String(c[0]).includes("repo=the-wolfpack-agency%2Fwolfpack-ford")),
+    ).toBe(true),
+  );
+});

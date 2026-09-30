@@ -11,7 +11,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { requireEntitlement } from "@/lib/tenancy/require-entitlement";
-import { listPipelineRuns, toRunRecords } from "@/lib/ai-code/runs";
+import { listPipelineRuns, toRunRecords, listRunRepos } from "@/lib/ai-code/runs";
 import { gradeRuns, detectDrift } from "@/lib/ai-code/grading";
 import { listProtections } from "@/lib/ai-code/protections";
 import { gateSafetySummary } from "@/lib/gates/activity";
@@ -22,15 +22,23 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const gate = await requireEntitlement(auth.user.workspaceId, "secure_agent");
   if (gate) return gate;
 
-  const limParam = Number(new URL(req.url).searchParams.get("limit"));
+  const url = new URL(req.url);
+  const limParam = Number(url.searchParams.get("limit"));
   const limit = Number.isFinite(limParam) && limParam > 0 ? Math.min(limParam, 200) : 50;
+  // Optional per-site filter. "(self)" selects the self-hosted default; any
+  // other value is an owner/name repo the factory built against.
+  const repoParam = (url.searchParams.get("repo") || "").trim();
+  const repo = repoParam || undefined;
 
-  const runs = await listPipelineRuns(auth.user.workspaceId, limit);
+  // The distinct site list is always the UNFILTERED set, so the selector keeps
+  // every site even while one is focused.
+  const repos = await listRunRepos(auth.user.workspaceId);
+  const runs = await listPipelineRuns(auth.user.workspaceId, limit, repo);
   const records = toRunRecords(runs);
   const grade = gradeRuns(records);
   const drift = detectDrift(records);
   const protected_ = await listProtections(auth.user.workspaceId, 30);
   const gateSafety = await gateSafetySummary(auth.user.workspaceId, 200);
 
-  return NextResponse.json({ runs, grade, drift, protected: protected_, gateSafety });
+  return NextResponse.json({ runs, repos, repo: repo ?? null, grade, drift, protected: protected_, gateSafety });
 }

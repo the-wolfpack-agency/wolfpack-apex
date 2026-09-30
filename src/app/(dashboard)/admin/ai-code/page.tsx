@@ -111,6 +111,7 @@ interface RunSummary {
   deepScanCritical: number;
   conforms: boolean;
   createdAt: string;
+  repo?: string | null;
   diff?: string;
   diffTruncated?: boolean;
   reason?: string;
@@ -122,7 +123,7 @@ interface ProtectionSummary { totalCaught: number; byClass: { klass: string; lab
 interface GateDecisionRow { gate: string; verdict: "allow" | "auto_fix" | "require_human" | "deny"; modelInvoked: string | null; findings: number; recordedSeq: number | null; createdAt: string; previewUrl: string | null }
 interface AwaitingProd { previewUrl: string | null; recordedSeq: number | null; createdAt: string }
 interface GateSafety { total: number; allowed: number; autoFixed: number; escalatedToHuman: number; badChangesPrevented: number; dataKeptFromModel: number; frameworks: string[]; recent: GateDecisionRow[]; awaitingProd: AwaitingProd[] }
-interface HistoryData { runs: RunSummary[]; grade: Grade; drift: DriftFlag[]; protected?: ProtectionSummary; gateSafety?: GateSafety }
+interface HistoryData { runs: RunSummary[]; repos?: string[]; repo?: string | null; grade: Grade; drift: DriftFlag[]; protected?: ProtectionSummary; gateSafety?: GateSafety }
 
 interface AuditVerification { ok: boolean; verifiedCount: number; legacyCount: number; brokenAtSeq: number | null; headSeq: number; headHash: string | null }
 interface AuditEntry { seq: number; created_at: string; principal_agent: string; intended_outcome: string; effective_outcome: string; would_block: boolean; rule_id: string; reason: string | null }
@@ -239,6 +240,9 @@ export default function CodeFactoryPage() {
   const [error, setError] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
   const [history, setHistory] = useState<HistoryData | null>(null);
+  // Per-site history filter ("" = all sites). The factory now builds across repos;
+  // this scopes the run history + grade + diffs to one site.
+  const [repoFilter, setRepoFilter] = useState<string>("");
   const [openRun, setOpenRun] = useState<number | null>(null);
   const [audit, setAudit] = useState<AuditData | null>(null);
   const [auditLoading, setAuditLoading] = useState(false);
@@ -305,9 +309,11 @@ export default function CodeFactoryPage() {
     }
   }, [repo]);
 
-  const loadHistory = useCallback(async () => {
+  const loadHistory = useCallback(async (repoArg?: string) => {
     try {
-      const res = await fetchWithRefresh("/api/admin/ai-code/history?limit=50");
+      const rf = (repoArg ?? "").trim();
+      const qs = rf ? `&repo=${encodeURIComponent(rf)}` : "";
+      const res = await fetchWithRefresh(`/api/admin/ai-code/history?limit=50${qs}`);
       if (res.ok) setHistory((await res.json()) as HistoryData);
     } catch {
       /* history is a read-only panel; a failed load just leaves it empty */
@@ -996,6 +1002,26 @@ export default function CodeFactoryPage() {
         </GlassPanel>
       )}
 
+      {history?.repos && history.repos.length > 0 && (
+        <div data-testid="site-selector" style={{ display: "flex", alignItems: "center", gap: "0.6rem", flexWrap: "wrap", marginBottom: "0.75rem" }}>
+          <label htmlFor="ai-code-site" style={{ fontSize: "0.72rem", textTransform: "uppercase", letterSpacing: "0.03em", color: "var(--wp-text-dim)" }}>Site</label>
+          <select
+            id="ai-code-site"
+            data-testid="site-select"
+            value={repoFilter}
+            onChange={(e) => { setRepoFilter(e.target.value); void loadHistory(e.target.value); }}
+            style={{ fontSize: "0.82rem", padding: "0.3rem 0.5rem", borderRadius: 6, background: "var(--wp-surface-2, #171a21)", border: "1px solid var(--wp-border, #2a2f3a)", color: "var(--wp-text, #e6e9ef)" }}
+          >
+            <option value="">All sites</option>
+            {history.repos.map((rp) => (
+              <option key={rp} value={rp}>{rp}</option>
+            ))}
+          </select>
+          {repoFilter && history.runs.length === 0 && (
+            <span style={{ fontSize: "0.8rem", color: "var(--wp-text-dim)" }}>No factory runs yet for this site.</span>
+          )}
+        </div>
+      )}
       {(history?.grade?.total ?? 0) > 0 && history && (
         <GlassPanel title="Run history & quality" subtitle="How the factory is performing over time - grades are measured, not guaranteed">
           <div data-testid="history-grade" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))", gap: "0.75rem" }}>
@@ -1042,6 +1068,11 @@ export default function CodeFactoryPage() {
                     <span aria-hidden style={{ color: "var(--wp-text-dim)", transform: open ? "rotate(90deg)" : "none", transition: "transform 0.12s", display: "inline-block" }}>&rsaquo;</span>
                     <span style={{ fontWeight: 600, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.ref}</span>
                     <span style={{ color: "var(--wp-text-dim)" }}>{r.model}</span>
+                    {r.repo && (
+                      <span data-testid={`history-run-repo-${i}`} title={`Built against ${r.repo}`} style={{ fontSize: "0.7rem", padding: "0.05rem 0.4rem", borderRadius: 4, background: "var(--wp-surface-1, #12141a)", border: "1px solid var(--wp-border, #2a2f3a)", color: "var(--wp-text-dim)" }}>
+                        {r.repo === "(self)" ? "self" : r.repo.split("/").pop()}
+                      </span>
+                    )}
                     <span style={{ marginLeft: "auto", display: "inline-flex", gap: "0.4rem", alignItems: "center" }}>
                       <StatusPill status={r.status} tone={r.status === "ready_for_pr" ? "success" : "warning"} label={r.status === "ready_for_pr" ? "Ready for PR" : "Needs human"} size="sm" />
                       <StatusPill status={r.finalOutcome} tone={oc.tone} label={oc.label} size="sm" />
