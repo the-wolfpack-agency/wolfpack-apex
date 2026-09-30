@@ -151,10 +151,18 @@ export function decideFixAction(state: FixLoopState): FixDecision {
       reason: "Re-ran the failed job(s) once to rule out a flake; waiting for the re-run to settle before authoring a fix.",
     };
   }
-  if (state.unresolvedContradiction) {
+  // A source/test contradiction is only escalated as an ambiguous SPEC once the
+  // STRONGER (premium) model has also failed to reconcile it - otherwise we would
+  // hand a human a problem the premium tier could have fixed. Found by dogfooding:
+  // the cheap model oscillated on a trivial fix, the contradiction fired at
+  // attempt 1, and it escalated BEFORE the premium retry (which fixAuthorTier only
+  // reaches at attempt >= 1) ever ran. Gate on "the previous attempt already used
+  // premium" so the premium tier gets its turn first; this stays correct if the
+  // tier ladder changes. Before then, fall through to author_fix (now premium).
+  if (state.unresolvedContradiction && fixAuthorTier(state.attempt - 1) === "premium") {
     return {
       action: "escalate_human",
-      reason: `The change's source and its test(s) keep disagreeing after a fix already tried to reconcile them (${state.unresolvedContradiction.testFiles.join(", ")} still failing). This is the signature of an AMBIGUOUS SPEC - the author wrote the source and the test from two different but self-consistent readings, so no edit makes both pass and the fixer oscillates. Escalating for a human to clarify the intended behavior (which inputs are valid vs an error) rather than burn more attempts.`,
+      reason: `The change's source and its test(s) keep disagreeing even after a stronger model tried to reconcile them (${state.unresolvedContradiction.testFiles.join(", ")} still failing). This is the signature of an AMBIGUOUS SPEC - the author wrote the source and the test from two different but self-consistent readings, so no edit makes both pass and the fixer oscillates. Escalating for a human to clarify the intended behavior (which inputs are valid vs an error) rather than burn more attempts.`,
     };
   }
   if (state.unfixableNoDetail) {
