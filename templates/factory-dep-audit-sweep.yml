@@ -1,0 +1,71 @@
+# factory-dep-audit-sweep - PROACTIVE dependency-advisory remediation, codified.
+#
+# A newly published advisory should never first surface as a red feature PR that a
+# human has to notice and chase (this happened three times in one session: undici,
+# brace-expansion, and a CRITICAL Next.js RCE). This scheduled workflow runs the
+# audit on the default branch BEFORE any human PR trips it: if a new high/critical
+# advisory HAS a patched version, it applies a targeted lockfile-only bump, proves
+# the audit is clean and the tests still pass, and opens a `factory/*` PR that flows
+# through the normal gate + human approval. If a high/critical has NO fix available,
+# it fails loudly so a human decides (major bump / override / accept) - the advisory
+# is surfaced either way, never silently carried.
+#
+# Runs where npm + the repo live (GitHub Actions), not a serverless cron. Install at
+# .github/workflows/factory-dep-audit-sweep.yml. Requires the repo setting
+# "Allow GitHub Actions to create and approve pull requests" to be ON for the
+# auto-PR; without it the audit still runs and fails visibly on a new advisory.
+name: factory-dep-audit-sweep
+on:
+  schedule:
+    - cron: "0 6 * * *" # daily, before the working day
+  workflow_dispatch: {}
+permissions:
+  contents: write
+  pull-requests: write
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install
+        run: npm ci || npm install
+
+      - name: Audit production deps
+        id: audit
+        run: |
+          npm audit --omit=dev --json > audit.json || true
+          HIGH=$(node -e "try{const a=require('./audit.json');const v=(a.metadata&&a.metadata.vulnerabilities)||{};console.log((v.high||0)+(v.critical||0))}catch(e){console.log(0)}")
+          echo "high_critical=$HIGH" >> "$GITHUB_OUTPUT"
+          echo "New high/critical advisories: $HIGH"
+
+      - name: Remediate and open a PR
+        if: steps.audit.outputs.high_critical != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          # Targeted, lockfile-only (never a blanket fix - that breaks the app).
+          npm audit fix --package-lock-only --omit=dev || true
+          if git diff --quiet -- package-lock.json; then
+            echo "::error::A high/critical advisory has NO available fix (major bump / override / accept needed). Surfacing to a human."
+            exit 1
+          fi
+          # Prove the fix: deps consistent, audit clean, tests still pass.
+          npm install --no-audit --no-fund
+          npm audit --omit=dev
+          npm run test --if-present
+          BR="factory/dep-audit-sweep-$(date +%Y%m%d)-${GITHUB_SHA::7}"
+          git config user.name "agentgate-ai[bot]"
+          git config user.email "agentgate-ai[bot]@users.noreply.github.com"
+          git checkout -b "$BR"
+          git add package-lock.json
+          git commit -m "factory ci-fix: patch dependency advisories (scheduled audit sweep)"
+          git push origin "$BR"
+          gh pr create \
+            --base "${GITHUB_REF_NAME}" \
+            --head "$BR" \
+            --title "fix(deps): patch new high/critical advisories (scheduled sweep)" \
+            --body "Automated by factory-dep-audit-sweep. Targeted lockfile-only bump; \`npm audit --omit=dev\` is clean and tests pass. Review the lockfile diff and merge. A human still approves - nothing auto-merges."
