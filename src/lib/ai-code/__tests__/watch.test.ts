@@ -1,8 +1,8 @@
 /**
- * The autonomous watcher. The safety properties are the product: opt-in repos
- * only, factory/* PRs only, one bad PR never stalls the sweep.
+ * The autonomous watcher. The safety properties are the product: enrolled targets
+ * only, factory/* PRs only, per-workspace, one bad PR never stalls the sweep.
  */
-import { parseWatchRepos, runAiCodeWatch, type WatchPr } from "@/lib/ai-code/watch";
+import { runAiCodeWatch, type WatchPr, type WatchTarget } from "@/lib/ai-code/watch";
 import { isFactoryBranch } from "@/lib/ai-code/revert";
 
 describe("isFactoryBranch is the reused safety predicate (never touch a human's branch)", () => {
@@ -14,34 +14,31 @@ describe("isFactoryBranch is the reused safety predicate (never touch a human's 
   });
 });
 
-describe("parseWatchRepos (opt-in allowlist)", () => {
-  it("parses valid owner/repo entries and drops junk", () => {
-    expect(parseWatchRepos("a/b, c/d")).toEqual(["a/b", "c/d"]);
-    expect(parseWatchRepos("not a repo, x/y")).toEqual(["x/y"]);
-  });
-  it("unset/empty => disabled (no repos)", () => {
-    expect(parseWatchRepos(undefined)).toEqual([]);
-    expect(parseWatchRepos("")).toEqual([]);
-  });
-});
-
+const t = (workspaceId: string, repo: string): WatchTarget => ({ workspaceId, repo });
 const pr = (number: number, headRef: string, baseRef = "main"): WatchPr => ({ number, headRef, baseRef });
 
 describe("runAiCodeWatch", () => {
-  it("disabled when no repos are enrolled (never touches anything)", async () => {
+  it("disabled when no targets are enrolled (never touches anything)", async () => {
     const drive = jest.fn();
-    const s = await runAiCodeWatch({ repos: [], listPRs: jest.fn(), drive });
+    const s = await runAiCodeWatch({ targets: [], listPRs: jest.fn(), drive });
     expect(s.enabled).toBe(false);
     expect(drive).not.toHaveBeenCalled();
   });
 
-  it("drives ONLY factory/* PRs, never a human's PR", async () => {
+  it("drives ONLY factory/* PRs, never a human's PR, and carries the workspace", async () => {
     const drive = jest.fn().mockResolvedValue({ action: "merge_ready", terminal: true });
     const listPRs = jest.fn().mockResolvedValue([pr(1, "factory/feat-a"), pr(2, "feature/human-work"), pr(3, "factory/feat-b")]);
-    const s = await runAiCodeWatch({ repos: ["o/r"], listPRs, drive });
+    const s = await runAiCodeWatch({ targets: [t("w1", "o/r")], listPRs, drive });
     expect(drive).toHaveBeenCalledTimes(2);
     expect(s.driven.map((d) => d.pr).sort()).toEqual([1, 3]);
-    expect(s.driven.every((d) => d.terminal)).toBe(true);
+    expect(s.driven.every((d) => d.workspaceId === "w1" && d.terminal)).toBe(true);
+  });
+
+  it("drives multiple workspaces, each with its own target", async () => {
+    const drive = jest.fn().mockResolvedValue({ action: "wait", terminal: false });
+    const listPRs = jest.fn().mockResolvedValue([pr(1, "factory/a")]);
+    const s = await runAiCodeWatch({ targets: [t("w1", "o/r1"), t("w2", "o/r2")], listPRs, drive });
+    expect(s.driven.map((d) => d.workspaceId).sort()).toEqual(["w1", "w2"]);
   });
 
   it("isolates a per-PR failure so one bad PR never stalls the sweep", async () => {
@@ -50,17 +47,17 @@ describe("runAiCodeWatch", () => {
       .mockRejectedValueOnce(new Error("boom"))
       .mockResolvedValueOnce({ action: "wait", terminal: false });
     const listPRs = jest.fn().mockResolvedValue([pr(1, "factory/a"), pr(2, "factory/b")]);
-    const s = await runAiCodeWatch({ repos: ["o/r"], listPRs, drive });
-    expect(s.errors).toEqual([{ repo: "o/r", pr: 1, error: "boom" }]);
-    expect(s.driven).toEqual([{ repo: "o/r", pr: 2, action: "wait", terminal: false }]);
+    const s = await runAiCodeWatch({ targets: [t("w1", "o/r")], listPRs, drive });
+    expect(s.errors).toEqual([{ workspaceId: "w1", repo: "o/r", pr: 1, error: "boom" }]);
+    expect(s.driven).toEqual([{ workspaceId: "w1", repo: "o/r", pr: 2, action: "wait", terminal: false }]);
   });
 
-  it("a repo it cannot read is skipped, not fatal", async () => {
+  it("a target it cannot read is skipped, not fatal", async () => {
     const drive = jest.fn().mockResolvedValue({ action: "wait", terminal: false });
     const listPRs = jest.fn()
       .mockRejectedValueOnce(new Error("403"))
       .mockResolvedValueOnce([pr(9, "factory/z")]);
-    const s = await runAiCodeWatch({ repos: ["o/bad", "o/good"], listPRs, drive });
+    const s = await runAiCodeWatch({ targets: [t("w1", "o/bad"), t("w1", "o/good")], listPRs, drive });
     expect(s.driven.map((d) => d.pr)).toEqual([9]);
   });
 });
