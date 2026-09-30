@@ -17,6 +17,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getInstinctUser, fetchWithRefresh } from "@/lib/client-auth";
 import { GlassPanel, MetricTile, StatusPill, SectionHeader, type SeverityTone } from "@/components/console";
+import BacklogPanel from "@/components/ai-code/BacklogPanel";
 
 type Outcome = "allow" | "escalate" | "block";
 
@@ -167,6 +168,10 @@ export default function CodeGovernancePage() {
           </div>
         )}
       </GlassPanel>
+
+      <div style={{ marginTop: "1.25rem" }}>
+        <BacklogPanel />
+      </div>
     </div>
   );
 }
