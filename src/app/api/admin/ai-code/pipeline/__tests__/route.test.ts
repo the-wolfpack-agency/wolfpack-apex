@@ -40,7 +40,10 @@ jest.mock("@/lib/github-client", () => ({
 jest.mock("@/lib/ai-code/repo-context", () => ({
   buildRepoContext: (...a: unknown[]) => mockBuildContext(...a),
   withRepoContext: (prompt: string, block: string) => (block ? block + "\n" + prompt : prompt),
+  extractMentionedPaths: () => [],
 }));
+const mockReuseScout = jest.fn(async (..._a: unknown[]) => ({ block: "", candidates: [] as Array<{ path: string; score: number }> }));
+jest.mock("@/lib/ai-code/reuse-scout", () => ({ findReuseCandidates: (...a: unknown[]) => mockReuseScout(...a) }));
 
 import { POST } from "../route";
 
@@ -151,6 +154,21 @@ describe("POST /api/admin/ai-code/pipeline", () => {
     expect(mockWorkspaceClient).toHaveBeenCalledWith("w1");
     expect(mockBuildContext).toHaveBeenCalledWith(expect.objectContaining({ repo: "acme/app", prompt: "edit src/x.ts" }));
     expect(body.repoContext.files).toEqual(["src/x.ts"]);
+  });
+
+  it("reuse scout: surfaced existing-capability candidates are prepended to the author prompt", async () => {
+    // The anti-duplication control: an intent task ("add a cost counter") gets the
+    // existing cost files injected so the author reuses instead of re-implementing.
+    mockReuseScout.mockResolvedValueOnce({
+      block: "REUSE CHECK - read these before writing new code:\n- src/lib/ai-code/cost.ts",
+      candidates: [{ path: "src/lib/ai-code/cost.ts", score: 4 }],
+    });
+    mockBuildContext.mockResolvedValue({ block: "", files: [] });
+    mockComplete.mockResolvedValue(authorResp("```diff\n" + AUTHORED_DIFF + "\n```"));
+    await POST(post({ ref: "pr-reuse", prompt: "add a cost counter", answers: { tests: "all" }, repo: "acme/app" }));
+    const authorMsg = mockComplete.mock.calls[0][0].messages[0].content as string;
+    expect(authorMsg).toMatch(/REUSE CHECK/);
+    expect(authorMsg).toMatch(/src\/lib\/ai-code\/cost\.ts/);
   });
 
   it("the frozen spec GOVERNS authoring: directives are prepended to the author prompt", async () => {
