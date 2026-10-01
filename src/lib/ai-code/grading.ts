@@ -23,35 +23,86 @@ export interface PipelineRunRecord {
   attempts: number;
   finalOutcome: "allow" | "escalate" | "block";
   deepScanCritical?: number;
+  /** The author retry recovered a fixable mistake given the exact feedback. */
+  selfHealed?: boolean;
+  /** USD cost of the run. */
+  costUsd?: number;
+  /** Which deterministic gate the FINAL draft tripped (counts; 0 = clean). The
+   *  model's failure fingerprint, the raw material for a capability profile. */
+  phantomImports?: number;
+  brokenLocalImports?: number;
+  incompleteFiles?: number;
+  removedExports?: number;
+  anchorFailures?: number;
   /** Ordering key (epoch ms). Optional; array order is used when absent. */
   ts?: number;
 }
 
-export interface ModelGrade {
-  model: string;
+/** Fraction of a model's runs that tripped each deterministic gate. A model's
+ *  "where does it fail" signature - a cheap model might trip broken-local-import
+ *  often while a strong one trips nothing. */
+export interface FailureProfile {
+  phantomImports: number;
+  brokenLocalImports: number;
+  incompleteFiles: number;
+  removedExports: number;
+  anchorFailures: number;
+  deepScanCritical: number;
+}
+
+export interface GradeMetrics {
   n: number;
   readyRate: number;
   firstPassRate: number;
   blockRate: number;
+  /** Of the runs a model got into trouble on (self-healed OR needs_human), the
+   *  fraction feedback rescued. "When it errs, can it recover?" - the signal that
+   *  separates a usable-with-guardrails model from one that cannot be nudged. */
+  recoveryRate: number;
+  /** Mean USD per run - value-per-dollar when read next to readyRate. */
+  avgCostUsd: number;
+  failureProfile: FailureProfile;
 }
 
-export interface Grade {
+export interface ModelGrade extends GradeMetrics {
+  model: string;
+}
+
+export interface Grade extends GradeMetrics {
   total: number;
-  readyRate: number;
-  firstPassRate: number;
-  blockRate: number;
   escalationRate: number;
   byModel: ModelGrade[];
 }
 
 const rate = (num: number, denom: number): number => (denom === 0 ? 0 : num / denom);
 
-function gradeSet(records: readonly PipelineRunRecord[]): Omit<ModelGrade, "model"> {
+function gradeSet(records: readonly PipelineRunRecord[]): GradeMetrics {
   const n = records.length;
   const ready = records.filter((r) => r.status === "ready_for_pr").length;
   const firstPass = records.filter((r) => r.status === "ready_for_pr" && r.attempts === 0).length;
   const blocked = records.filter((r) => r.finalOutcome === "block").length;
-  return { n, readyRate: rate(ready, n), firstPassRate: rate(firstPass, n), blockRate: rate(blocked, n) };
+  const selfHealed = records.filter((r) => r.selfHealed === true).length;
+  const needsHuman = records.filter((r) => r.status === "needs_human").length;
+  const totalCost = records.reduce((sum, r) => sum + (r.costUsd ?? 0), 0);
+  const incidence = (pred: (r: PipelineRunRecord) => boolean) => rate(records.filter(pred).length, n);
+  return {
+    n,
+    readyRate: rate(ready, n),
+    firstPassRate: rate(firstPass, n),
+    blockRate: rate(blocked, n),
+    // Denominator is runs that HIT trouble, not all runs: a model that rarely
+    // errs but always recovers should read 1.0, not be diluted by its clean runs.
+    recoveryRate: rate(selfHealed, selfHealed + needsHuman),
+    avgCostUsd: rate(totalCost, n),
+    failureProfile: {
+      phantomImports: incidence((r) => (r.phantomImports ?? 0) > 0),
+      brokenLocalImports: incidence((r) => (r.brokenLocalImports ?? 0) > 0),
+      incompleteFiles: incidence((r) => (r.incompleteFiles ?? 0) > 0),
+      removedExports: incidence((r) => (r.removedExports ?? 0) > 0),
+      anchorFailures: incidence((r) => (r.anchorFailures ?? 0) > 0),
+      deepScanCritical: incidence((r) => (r.deepScanCritical ?? 0) > 0),
+    },
+  };
 }
 
 /** Overall + per-model grades. */
@@ -69,10 +120,8 @@ export function gradeRuns(records: readonly PipelineRunRecord[]): Grade {
     .map(([model, rs]) => ({ model, ...gradeSet(rs) }))
     .sort((a, b) => b.n - a.n);
   return {
+    ...base,
     total,
-    readyRate: base.readyRate,
-    firstPassRate: base.firstPassRate,
-    blockRate: base.blockRate,
     escalationRate: rate(escalated, total),
     byModel,
   };

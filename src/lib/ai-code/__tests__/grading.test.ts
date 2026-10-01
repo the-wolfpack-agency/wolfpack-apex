@@ -44,6 +44,52 @@ describe("gradeRuns", () => {
   });
 });
 
+describe("model capability profile (recovery, cost, failure fingerprint)", () => {
+  it("recoveryRate = self-healed / (self-healed + needs_human), ignoring clean runs", () => {
+    const g = gradeRuns([
+      run({ selfHealed: true, attempts: 1 }),   // erred, recovered
+      run({ selfHealed: true, attempts: 1 }),   // erred, recovered
+      run({ status: "needs_human", attempts: 1, finalOutcome: "block" }), // erred, stuck
+      run({}),                                   // clean first-pass (must NOT dilute)
+    ]);
+    // 2 recovered of 3 that hit trouble
+    expect(g.recoveryRate).toBeCloseTo(2 / 3);
+  });
+
+  it("avgCostUsd averages the per-run cost", () => {
+    const g = gradeRuns([run({ costUsd: 0.02 }), run({ costUsd: 0.04 })]);
+    expect(g.avgCostUsd).toBeCloseTo(0.03);
+  });
+
+  it("failureProfile is the fraction of runs that trip each gate (the fingerprint)", () => {
+    const g = gradeRuns([
+      run({ brokenLocalImports: 2 }),
+      run({ brokenLocalImports: 1, removedExports: 1 }),
+      run({}),
+      run({}),
+    ]);
+    expect(g.failureProfile.brokenLocalImports).toBeCloseTo(0.5); // 2 of 4
+    expect(g.failureProfile.removedExports).toBeCloseTo(0.25);    // 1 of 4
+    expect(g.failureProfile.phantomImports).toBe(0);
+  });
+
+  it("separates two models' fingerprints: cheap trips imports, premium is clean", () => {
+    const g = gradeRuns([
+      run({ model: "cheap", brokenLocalImports: 1, status: "needs_human", finalOutcome: "block" }),
+      run({ model: "cheap", selfHealed: true, attempts: 1, brokenLocalImports: 0 }),
+      run({ model: "premium" }),
+      run({ model: "premium" }),
+    ]);
+    const cheap = g.byModel.find((m) => m.model === "cheap")!;
+    const premium = g.byModel.find((m) => m.model === "premium")!;
+    expect(cheap.failureProfile.brokenLocalImports).toBeCloseTo(0.5);
+    expect(cheap.recoveryRate).toBeCloseTo(0.5); // 1 recovered of 2 troubled
+    expect(premium.failureProfile.brokenLocalImports).toBe(0);
+    expect(premium.recoveryRate).toBe(0); // never hit trouble -> 0/0 -> 0
+    expect(premium.readyRate).toBe(1);
+  });
+});
+
 describe("detectDrift", () => {
   it("flags a model whose recent readyRate dropped materially", () => {
     // prior 6 all ready, recent 6 all needs_human -> a clear drop.

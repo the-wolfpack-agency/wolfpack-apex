@@ -12,6 +12,17 @@ import type { PipelineRunRecord } from "./grading";
 export interface RunSummary {
   ref: string;
   model: string;
+  /** Per-run failure taxonomy for model-capability grading. Optional: runs
+   *  recorded before it shipped omit these (read as clean). */
+  selfHealed?: boolean;
+  handedOff?: boolean;
+  mode?: string;
+  costUsd?: number;
+  phantomImports?: number;
+  brokenLocalImports?: number;
+  incompleteFiles?: number;
+  removedExports?: number;
+  anchorFailures?: number;
   /** The target repo this run built against; null for the self-hosted
    *  (apex/Instinct) executor default. Absent for runs recorded before per-site
    *  attribution shipped - those surface as "unattributed". */
@@ -90,6 +101,17 @@ export async function listPipelineRuns(
       conforms: m.conforms === true || m.conforms === "true",
       createdAt: r.timestamp,
       repo: typeof m.repo === "string" ? m.repo : null,
+      // Per-run failure taxonomy (added for model-capability grading). Absent on
+      // runs recorded before it shipped; those read as 0 / undefined (clean).
+      selfHealed: m.self_healed === true || m.self_healed === "true",
+      handedOff: m.handed_off === true || m.handed_off === "true",
+      mode: typeof m.mode === "string" ? m.mode : undefined,
+      costUsd: asNum(m.cost_usd),
+      phantomImports: asNum(m.phantom_imports),
+      brokenLocalImports: asNum(m.broken_local_imports),
+      incompleteFiles: asNum(m.incomplete_files),
+      removedExports: asNum(m.removed_exports),
+      anchorFailures: asNum(m.anchor_failures),
       ...(typeof m.diff === "string" && m.diff.length > 0 ? { diff: m.diff } : {}),
       ...(m.diff_truncated === true || m.diff_truncated === "true" ? { diffTruncated: true } : {}),
       ...(typeof m.verdict_reason === "string" && m.verdict_reason.length > 0 ? { reason: m.verdict_reason } : {}),
@@ -107,6 +129,13 @@ export function toRunRecords(runs: readonly RunSummary[]): PipelineRunRecord[] {
       attempts: r.attempts,
       finalOutcome: r.finalOutcome,
       deepScanCritical: r.deepScanCritical,
+      selfHealed: r.selfHealed,
+      costUsd: r.costUsd,
+      phantomImports: r.phantomImports,
+      brokenLocalImports: r.brokenLocalImports,
+      incompleteFiles: r.incompleteFiles,
+      removedExports: r.removedExports,
+      anchorFailures: r.anchorFailures,
       ts: Date.parse(r.createdAt) || undefined,
     }));
 }
