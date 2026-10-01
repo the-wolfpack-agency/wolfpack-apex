@@ -36,11 +36,19 @@ import { chooseIndependentJudge } from "@/lib/ai/judge-selection";
 import { evaluateChangeInvariants } from "@/lib/ai-code/change-facts";
 import { deepScanChange } from "@/lib/ai-code/deep-scan";
 import { buildRunCost } from "@/lib/ai-code/cost";
-import { workspaceGithubClient, fetchFileContent } from "@/lib/github-client";
+import { workspaceGithubClient, fetchFileContent, fetchRepoTree } from "@/lib/github-client";
 import { buildRepoContext, withRepoContext, extractMentionedPaths } from "@/lib/ai-code/repo-context";
 import { findReuseCandidates } from "@/lib/ai-code/reuse-scout";
 import { fetchRepoGrounding } from "@/lib/ai-code/repo-grounding";
 import { findPhantomImports, parseInstalledRoots, phantomImportFeedback } from "@/lib/ai-code/imports";
+import {
+  findBrokenLocalImports,
+  extractLocalImports,
+  resolveLocalCandidates,
+  parseAliasMap,
+  type ModuleResolver,
+  type BrokenLocalImport,
+} from "@/lib/ai-code/imports";
 import { findIncompleteFiles, completenessFeedback } from "@/lib/ai-code/completeness";
 import { findRemovedExports, type RemovedExport } from "@/lib/ai-code/exports-preservation";
 import { getAIClient } from "@/lib/ai";
@@ -277,6 +285,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // only advises against it. Empty set => unknown deps => the phantom check is a
   // no-op (fail-open).
   let installedRoots = new Set<string>();
+  // Repo file tree + tsconfig path aliases: the authority for whether a LOCAL
+  // import (`@/…` / relative) resolves to a real file, and for checking a name
+  // a real local module actually exports. The tree (one call) is authoritative
+  // for existence; content fetches read exports. Empty tree => the local-import
+  // gate is a no-op (fail-open), exactly like installedRoots for the phantom gate.
+  let repoTree = new Set<string>();
+  let aliasMap: Record<string, string> = {};
   if (repo && !diff.trim()) {
     try {
       const ghClient = await workspaceGithubClient(workspaceId);
@@ -289,11 +304,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         // (path-only) defers. For an intent-described task it surfaces existing files
         // that already do it, so the author reuses instead of re-implementing. Runs in
         // the same Promise.all (no added latency); excludes files the prompt already named.
-        const [grounding, ctx, reuse, pkgJson] = await Promise.all([
+        const [grounding, ctx, reuse, pkgJson, tree, tsconfig] = await Promise.all([
           fetchRepoGrounding(ghClient, repo),
           buildRepoContext({ client: ghClient, repo, prompt }),
           findReuseCandidates({ client: ghClient, repo, prompt, excludePaths: extractMentionedPaths(prompt) }),
           fetchFileContent(ghClient, repo, "package.json").catch(() => null),
+          fetchRepoTree(ghClient, repo).catch(() => [] as string[]),
+          fetchFileContent(ghClient, repo, "tsconfig.json").catch(() => null),
         ]);
         reuseCandidates = reuse.candidates.length;
         // REUSE block first: the author should read existing capability before anything else.
@@ -301,6 +318,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         authorPrompt = withRepoContext(prompt, block);
         repoContextFiles = ctx.files;
         if (pkgJson) installedRoots = parseInstalledRoots(pkgJson);
+        repoTree = new Set(tree);
+        if (tsconfig) aliasMap = parseAliasMap(tsconfig);
       }
     } catch {
       /* best-effort context; author from the prompt alone on any failure */
@@ -526,8 +545,51 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
   }
 
+  // Local-import gate: an import of a `@/`-alias or relative module that resolves
+  // to NO file, or of a named symbol a readable local module does NOT export,
+  // always fails CI ("Cannot find module" / "has no exported member"). It slips
+  // past the phantom gate (bare packages only) AND the syntax gate (it parses).
+  // This is the exact hole that shipped a red WWP guest-export PR: `listAllGuests`
+  // from a real module that does not export it, `recordEvent` from the WRONG
+  // module, and a non-existent `@/lib/test-helpers`. Existence is judged against
+  // the repo tree (authoritative, one call); a name is judged against the target
+  // module's fetched source and FAILS OPEN when the source is unread or the module
+  // re-exports with `export *`. No-op without a repo tree (unknown => never flag).
+  const brokenLocalImports: BrokenLocalImport[] = [];
+  if (repo && repoTree.size > 0) {
+    try {
+      const changeset = new Map(finalFiles.map((f) => [f.path, f.content]));
+      const repoCache = new Map<string, string | null>();
+      const wanted = new Set<string>();
+      for (const f of finalFiles) {
+        for (const li of extractLocalImports(f.path, f.content)) {
+          const cands = resolveLocalCandidates(f.path, li.spec, aliasMap);
+          if (cands.some((c) => changeset.has(c))) continue; // authored in THIS change
+          for (const c of cands) if (repoTree.has(c)) { wanted.add(c); break; }
+        }
+      }
+      if (wanted.size > 0) {
+        const gh = await workspaceGithubClient(workspaceId);
+        for (const path of wanted) {
+          const c = await fetchFileContent(gh, repo, path).catch(() => null);
+          repoCache.set(path, typeof c === "string" ? c : null);
+        }
+      }
+      const resolver: ModuleResolver = (fromPath, spec) => {
+        for (const cand of resolveLocalCandidates(fromPath, spec, aliasMap)) {
+          if (changeset.has(cand)) return { exists: true, content: changeset.get(cand) ?? null };
+          if (repoTree.has(cand)) return { exists: true, content: repoCache.get(cand) ?? null };
+        }
+        return { exists: false, content: null };
+      };
+      brokenLocalImports.push(...findBrokenLocalImports(finalFiles, resolver));
+    } catch {
+      /* best-effort: never block a handoff on a resolver/fetch failure */
+    }
+  }
+
   let approvalId: string | null = null;
-  if (run.status === "ready_for_pr" && !invariants.wouldBlock && !deepScan.blocking && filesModeHandoffOk && syntax.ok && phantomImports.length === 0 && incompleteFiles.length === 0 && removedExports.length === 0 && anchorFailures.length === 0) {
+  if (run.status === "ready_for_pr" && !invariants.wouldBlock && !deepScan.blocking && filesModeHandoffOk && syntax.ok && phantomImports.length === 0 && incompleteFiles.length === 0 && removedExports.length === 0 && anchorFailures.length === 0 && brokenLocalImports.length === 0) {
     // Provision the factory's own governed principal (active + revocable) and hand
     // the approval its REAL agent id, so the human-in-the-gate approval's
     // kill-switch re-check finds an active agent instead of auto-rejecting. A null
@@ -571,7 +633,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     repairAttempts: run.remediation.attempts.length,
   });
 
-  // A change that does not parse is never "ready_for_pr", whatever the gate said.
-  const effectiveRun = syntax.ok ? run : { ...run, status: "needs_human" as const };
-  return NextResponse.json({ run: effectiveRun, approvalId, executor, invariants, changeFacts, deepScan, syntax, phantomImports, incompleteFiles, removedExports, anchorFailures, mode: effectiveMode, executorAttempts, repoContext: { files: repoContextFiles }, cost });
+  // A change that does not parse, or imports a local symbol that does not exist,
+  // is never "ready_for_pr" whatever the gate said - both always fail CI.
+  const effectiveRun = syntax.ok && brokenLocalImports.length === 0 ? run : { ...run, status: "needs_human" as const };
+  return NextResponse.json({ run: effectiveRun, approvalId, executor, invariants, changeFacts, deepScan, syntax, phantomImports, incompleteFiles, removedExports, anchorFailures, brokenLocalImports, mode: effectiveMode, executorAttempts, repoContext: { files: repoContextFiles }, cost });
 }
