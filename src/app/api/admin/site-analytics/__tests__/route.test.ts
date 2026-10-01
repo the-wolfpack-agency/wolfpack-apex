@@ -67,3 +67,35 @@ describe("GET /api/admin/site-analytics", () => {
     expect(body.permissions.viewIntel).toBe(true);
   });
 });
+
+  it("returns deep intel only to forcefield.view holders; strips it for everyone else", async () => {
+    const full = {
+      rangeDays: 30, surfaces: ["all"], totalPageViews: 5, collectsPageViews: true, totalEvents: 9,
+      byHour: [], byPage: [], byCountry: [], byType: [],
+      forcefield: { welcomed: 1, flagged: 0, trapped: 0, blocked: 0, hostileOperators: 0, hostileEvents: 0, topAgents: [] },
+      agentOrigins: [],
+      // deep intel:
+      learnedSignatures: { shadow: 1, enforcing: 2, autoBlocked: 3 },
+      agentIntel: { operators: 4 },
+      journeys: [{ key: "j1" }],
+      probeIntel: [{ path: "/x" }],
+      payloadIntel: [{ attack: "sqli", count: 1 }],
+    };
+
+    // with forcefield.view -> full intel
+    mockGetSummary.mockResolvedValue(full);
+    mockRequireCapability.mockResolvedValueOnce({ ok: true, user: { id: "u1", role: "cto", workspaceId: "w1" }, capabilities: new Set(["analytics.view", "forcefield.view"]) });
+    let body = await (await GET(mkReq())).json();
+    expect(body.summary.agentIntel).toBeDefined();
+    expect(body.summary.journeys).toHaveLength(1);
+    expect(body.summary.learnedSignatures).toBeDefined();
+
+    // without it -> usage kept, every deep-intel key absent
+    mockRequireCapability.mockResolvedValueOnce({ ok: true, user: { id: "u2", role: "sales", workspaceId: "w1" }, capabilities: new Set(["analytics.view"]) });
+    body = await (await GET(mkReq())).json();
+    expect(body.summary.totalPageViews).toBe(5);
+    expect(body.summary.forcefield).toBeDefined();   // high-level summary stays
+    for (const k of ["agentIntel", "journeys", "learnedSignatures", "probeIntel", "payloadIntel"]) {
+      expect(body.summary[k]).toBeUndefined();
+    }
+  });
