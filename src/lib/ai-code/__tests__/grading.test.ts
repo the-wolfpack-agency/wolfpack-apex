@@ -56,9 +56,25 @@ describe("model capability profile (recovery, cost, failure fingerprint)", () =>
     expect(g.recoveryRate).toBeCloseTo(2 / 3);
   });
 
-  it("avgCostUsd averages the per-run cost", () => {
+  it("avgCostUsd averages the per-run cost; pricedShare is 1 when all priced", () => {
     const g = gradeRuns([run({ costUsd: 0.02 }), run({ costUsd: 0.04 })]);
     expect(g.avgCostUsd).toBeCloseTo(0.03);
+    expect(g.pricedShare).toBe(1);
+  });
+
+  it("a $0 / absent cost is UNPRICED, not free: excluded from avgCostUsd, dropped pricedShare", () => {
+    // An unpriced Foundry model (no price env) records cost 0; it must not read
+    // as infinitely cost-effective. One priced run at 0.02 among three.
+    const g = gradeRuns([run({ costUsd: 0.02 }), run({ costUsd: 0 }), run({})]);
+    expect(g.avgCostUsd).toBeCloseTo(0.02); // averaged over the ONE priced run
+    expect(g.pricedShare).toBeCloseTo(1 / 3);
+  });
+
+  it("a fully unpriced model reports pricedShare 0 (avgCostUsd is not meaningful)", () => {
+    const g = gradeRuns([run({ model: "DeepSeek", costUsd: 0 }), run({ model: "DeepSeek", costUsd: 0 })]);
+    const ds = g.byModel.find((m) => m.model === "DeepSeek")!;
+    expect(ds.pricedShare).toBe(0);
+    expect(ds.avgCostUsd).toBe(0); // 0 priced runs -> rate() guards to 0, read via pricedShare
   });
 
   it("failureProfile is the fraction of runs that trip each gate (the fingerprint)", () => {
