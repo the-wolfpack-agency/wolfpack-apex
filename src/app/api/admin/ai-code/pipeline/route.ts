@@ -35,7 +35,8 @@ import { evaluateChangeInvariants } from "@/lib/ai-code/change-facts";
 import { deepScanChange } from "@/lib/ai-code/deep-scan";
 import { buildRunCost } from "@/lib/ai-code/cost";
 import { workspaceGithubClient, fetchFileContent } from "@/lib/github-client";
-import { buildRepoContext, withRepoContext } from "@/lib/ai-code/repo-context";
+import { buildRepoContext, withRepoContext, extractMentionedPaths } from "@/lib/ai-code/repo-context";
+import { findReuseCandidates } from "@/lib/ai-code/reuse-scout";
 import { fetchRepoGrounding } from "@/lib/ai-code/repo-grounding";
 import { findPhantomImports, parseInstalledRoots, phantomImportFeedback } from "@/lib/ai-code/imports";
 import { findIncompleteFiles, completenessFeedback } from "@/lib/ai-code/completeness";
@@ -246,6 +247,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // (that is governed as-is). Uses the `repo` already validated above.
   let authorPrompt = prompt;
   let repoContextFiles: string[] = [];
+  let reuseCandidates = 0;
   // The repo's installed packages (package.json), so a phantom-import (a package
   // not installed) can be DETERMINISTICALLY caught and self-corrected - grounding
   // only advises against it. Empty set => unknown deps => the phantom check is a
@@ -259,12 +261,19 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         // existing modules, test convention, installed deps) so the author never
         // invents an import, plus the named-file context for edits. Both are
         // best-effort and prepend to the author prompt.
-        const [grounding, ctx, pkgJson] = await Promise.all([
+        // Third layer: REUSE SCOUT - the semantic/whole-repo retrieval buildRepoContext
+        // (path-only) defers. For an intent-described task it surfaces existing files
+        // that already do it, so the author reuses instead of re-implementing. Runs in
+        // the same Promise.all (no added latency); excludes files the prompt already named.
+        const [grounding, ctx, reuse, pkgJson] = await Promise.all([
           fetchRepoGrounding(ghClient, repo),
           buildRepoContext({ client: ghClient, repo, prompt }),
+          findReuseCandidates({ client: ghClient, repo, prompt, excludePaths: extractMentionedPaths(prompt) }),
           fetchFileContent(ghClient, repo, "package.json").catch(() => null),
         ]);
-        const block = [grounding, ctx.block].filter(Boolean).join("\n\n---\n\n");
+        reuseCandidates = reuse.candidates.length;
+        // REUSE block first: the author should read existing capability before anything else.
+        const block = [grounding, reuse.block, ctx.block].filter(Boolean).join("\n\n---\n\n");
         authorPrompt = withRepoContext(prompt, block);
         repoContextFiles = ctx.files;
         if (pkgJson) installedRoots = parseInstalledRoots(pkgJson);
@@ -409,6 +418,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     cost_usd: executor?.costUsd ?? 0,
     executor_attempts: executorAttempts,
     repo_context_files: repoContextFiles.length,
+    reuse_candidates: reuseCandidates,
     deep_scan_critical: deepScan.critical,
     // Persist the actual change so "Run history" can show the code, not just the
     // grade (found by dogfooding: history rows had no way to see the diff). Capped.
