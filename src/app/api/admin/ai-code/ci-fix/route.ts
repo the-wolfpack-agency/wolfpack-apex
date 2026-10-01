@@ -17,12 +17,12 @@
  * Returns: 200 { decision, ci, fix?, terminal?, brief? } | 400 | 401/403
  */
 import { NextRequest, NextResponse } from "next/server";
-import { requireCapability } from "@/lib/auth/require-capability";
+import { requireFactoryServiceOrCapability } from "@/lib/ai-code/factory-service-auth";
 import { requireEntitlement } from "@/lib/tenancy/require-entitlement";
 import { driveCiFixStep } from "@/lib/ai-code/ci-fix-runner";
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
-  const auth = await requireCapability(req, "settings.manage_team");
+  const auth = await requireFactoryServiceOrCapability(req, "settings.manage_team");
   if (!auth.ok) return auth.response;
   const gate = await requireEntitlement(auth.user.workspaceId, "secure_agent");
   if (gate) return gate;

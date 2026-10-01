@@ -44,6 +44,7 @@ Any missing value = production crash loop. Flag at the top of a handoff, not the
 | `QDRANT_URL` / `QDRANT_API_KEY` | Vector store for triple-write |
 | `NEO4J_URI` / `NEO4J_USER` / `NEO4J_PASSWORD` | Graph store. Optional, and unset in production today. Absence degrades the triple write to Postgres + Qdrant and is reported, not silent |
 | `PROD_DOMAIN` | Enables the TLS hybrid posture CI assertion |
+| `FACTORY_SERVICE_TOKEN` | OPTIONAL (>=16 chars). Lets the code factory run non-interactively (the driver presents it instead of a user login); accepted only by the ai-code pipeline + ci-fix routes, scoped to the factory workspace. Unset = service path OFF (user login required). `FACTORY_SERVICE_WORKSPACE` overrides the default workspace. |
 
 ## Messaging guardrails
 
