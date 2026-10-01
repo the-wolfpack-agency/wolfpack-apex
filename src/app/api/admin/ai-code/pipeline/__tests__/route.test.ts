@@ -37,9 +37,11 @@ jest.mock("@/lib/ai", () => ({ getAIClient: () => ({ complete: (...a: unknown[])
 const mockWorkspaceClient = jest.fn();
 const mockBuildContext = jest.fn();
 const mockFetchFile = jest.fn();
+const mockFetchTree = jest.fn();
 jest.mock("@/lib/github-client", () => ({
   workspaceGithubClient: (...a: unknown[]) => mockWorkspaceClient(...a),
   fetchFileContent: (...a: unknown[]) => mockFetchFile(...a),
+  fetchRepoTree: (...a: unknown[]) => mockFetchTree(...a),
 }));
 jest.mock("@/lib/ai-code/repo-context", () => ({
   buildRepoContext: (...a: unknown[]) => mockBuildContext(...a),
@@ -96,6 +98,7 @@ beforeEach(() => {
   mockWorkspaceClient.mockResolvedValue({ token: "t", fetch: jest.fn() });
   mockBuildContext.mockResolvedValue({ block: "", files: [] });
   mockFetchFile.mockResolvedValue(null); // no package.json by default -> phantom check is a no-op
+  mockFetchTree.mockResolvedValue([]); // empty repo tree by default -> local-import gate is a no-op
 });
 
 describe("POST /api/admin/ai-code/pipeline", () => {
@@ -279,6 +282,46 @@ describe("POST /api/admin/ai-code/pipeline", () => {
     const body = await res.json();
     expect(body.executorAttempts).toBe(2);
     expect(body.phantomImports).toEqual([]); // converged - no phantom in the final draft
+    expect(body.approvalId).toBe("appr-1"); // clean -> handed off
+  });
+
+  // The exact hole that shipped a red WWP guest-export PR (#229): an import of a
+  // NAMED symbol a REAL local module does not export. It passes the phantom gate
+  // (not a bare package) and the syntax gate (it parses), but always fails CI
+  // ("has no exported member"). The gate must now catch it and refuse handoff.
+  const BROKEN_LOCAL_DIFF = 'diff --git a/src/app/r/route.ts b/src/app/r/route.ts\n--- /dev/null\n+++ b/src/app/r/route.ts\n@@ -0,0 +1,2 @@\n+import { missingFn } from "@/lib/real";\n+export const GET = () => missingFn();';
+
+  it("broken local import (#229): a name a real module does not export blocks handoff, surfaced to the human", async () => {
+    mockFetchTree.mockResolvedValue(["src/lib/real.ts"]); // @/lib/real resolves to a real file...
+    mockFetchFile.mockImplementation(async (_c: unknown, _r: unknown, path: string) => {
+      if (path === "tsconfig.json") return JSON.stringify({ compilerOptions: { paths: { "@/*": ["./src/*"] } } });
+      if (path === "src/lib/real.ts") return "export function realFn() {}"; // ...but it has NO missingFn
+      return null;
+    });
+    mockComplete.mockResolvedValue(authorResp("```diff\n" + BROKEN_LOCAL_DIFF + "\n```"));
+    mockRunPipeline.mockResolvedValue({ ...RUN, status: "ready_for_pr", diff: BROKEN_LOCAL_DIFF });
+    const res = await POST(post({ ref: "pr-broken-local", prompt: "add route", repo: "acme/app", answers: { tests: "all" } }));
+    const body = await res.json();
+    expect(body.approvalId).toBeNull(); // never handed off
+    expect(body.run.status).toBe("needs_human"); // never a misleading "ready"
+    expect(body.brokenLocalImports).toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: "missing_export", spec: "@/lib/real", name: "missingFn" })]),
+    );
+  });
+
+  it("valid local import against a real repo module hands off cleanly (no false-positive)", async () => {
+    mockFetchTree.mockResolvedValue(["src/lib/real.ts"]);
+    mockFetchFile.mockImplementation(async (_c: unknown, _r: unknown, path: string) => {
+      if (path === "tsconfig.json") return JSON.stringify({ compilerOptions: { paths: { "@/*": ["./src/*"] } } });
+      if (path === "src/lib/real.ts") return "export function realFn() {}";
+      return null;
+    });
+    const GOOD_LOCAL_DIFF = 'diff --git a/src/app/r/route.ts b/src/app/r/route.ts\n--- /dev/null\n+++ b/src/app/r/route.ts\n@@ -0,0 +1,2 @@\n+import { realFn } from "@/lib/real";\n+export const GET = () => realFn();';
+    mockComplete.mockResolvedValue(authorResp("```diff\n" + GOOD_LOCAL_DIFF + "\n```"));
+    mockRunPipeline.mockResolvedValue({ ...RUN, status: "ready_for_pr", diff: GOOD_LOCAL_DIFF });
+    const res = await POST(post({ ref: "pr-good-local", prompt: "add route", repo: "acme/app", answers: { tests: "all" } }));
+    const body = await res.json();
+    expect(body.brokenLocalImports).toEqual([]);
     expect(body.approvalId).toBe("appr-1"); // clean -> handed off
   });
 

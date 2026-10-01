@@ -9,6 +9,12 @@ import {
   parseInstalledRoots,
   findPhantomImports,
   phantomImportFeedback,
+  extractLocalImports,
+  extractExportedNames,
+  parseAliasMap,
+  resolveLocalCandidates,
+  findBrokenLocalImports,
+  brokenLocalImportFeedback,
 } from "@/lib/ai-code/imports";
 
 describe("packageRoot", () => {
@@ -103,5 +109,145 @@ describe("phantomImportFeedback", () => {
     expect(fb).toMatch(/nookies/);
     expect(fb).toMatch(/not in package\.json/i);
     expect(fb).toMatch(/Cannot find module/);
+  });
+});
+
+describe("extractLocalImports", () => {
+  it("captures named members (pre-`as`), default, and namespace; ignores bare packages", () => {
+    const content = [
+      `import { recordEvent } from "@/lib/admin/analytics";`,
+      `import { listAllGuests as g } from "@/lib/admin/guest-profile";`,
+      `import Default, { type Foo, bar } from "../x";`,
+      `import * as ns from "@/lib/ns";`,
+      `import { nothingLocal } from "zod";`,
+      `import "./side-effect";`,
+    ].join("\n");
+    const li = extractLocalImports("app/r/route.ts", content);
+    const bySpec = Object.fromEntries(li.map((l) => [l.spec, l]));
+    expect(bySpec["@/lib/admin/analytics"].names).toEqual(["recordEvent"]);
+    expect(bySpec["@/lib/admin/guest-profile"].names).toEqual(["listAllGuests"]); // original name, not alias
+    expect(bySpec["../x"].names.sort()).toEqual(["Foo", "bar"]);
+    expect(bySpec["../x"].hasDefault).toBe(true);
+    expect(bySpec["@/lib/ns"].hasNamespace).toBe(true);
+    expect(bySpec["zod"]).toBeUndefined(); // bare package -> not a local import
+  });
+});
+
+describe("extractExportedNames", () => {
+  it("collects declarations, re-exports (post-`as`), default, and the wildcard flag", () => {
+    const content = [
+      `export function guestPreferenceProfile() {}`,
+      `export const GUEST_EXPORT_HEADER = [];`,
+      `export type GuestExportRow = { a: 1 };`,
+      `export { internalThing as publicName };`,
+      `export default function Page() {}`,
+    ].join("\n");
+    const e = extractExportedNames(content);
+    expect(e.names.has("guestPreferenceProfile")).toBe(true);
+    expect(e.names.has("GUEST_EXPORT_HEADER")).toBe(true);
+    expect(e.names.has("GuestExportRow")).toBe(true);
+    expect(e.names.has("publicName")).toBe(true);
+    expect(e.names.has("internalThing")).toBe(false); // the private side of a rename is not exported
+    expect(e.hasDefault).toBe(true);
+    expect(e.hasWildcard).toBe(false);
+  });
+  it("sets hasWildcard on `export * from` (names become unprovable)", () => {
+    expect(extractExportedNames(`export * from "./barrel";`).hasWildcard).toBe(true);
+    expect(extractExportedNames(`export * as ns from "./barrel";`).hasWildcard).toBe(false);
+  });
+});
+
+describe("parseAliasMap + resolveLocalCandidates", () => {
+  it("parses @/* -> src/ and resolves an alias import to repo file candidates", () => {
+    const map = parseAliasMap(`{ "compilerOptions": { "paths": { "@/*": ["./src/*"] } } }`);
+    expect(map["@/"]).toBe("src/");
+    const cands = resolveLocalCandidates("src/app/r/route.ts", "@/lib/admin/analytics", map);
+    expect(cands).toContain("src/lib/admin/analytics.ts");
+  });
+  it("resolves @/* -> repo root (WWP shape, no src dir)", () => {
+    const map = parseAliasMap(`{ "compilerOptions": { "paths": { "@/*": ["./*"] } } }`);
+    const cands = resolveLocalCandidates("app/api/x/route.ts", "@/lib/admin/analytics", map);
+    expect(cands).toContain("lib/admin/analytics.ts");
+  });
+  it("resolves a relative import, collapsing ..", () => {
+    const cands = resolveLocalCandidates("app/api/admin/guests/export/route.ts", "../../../../lib/x", {});
+    expect(cands).toContain("app/lib/x.ts");
+  });
+});
+
+describe("findBrokenLocalImports (the #229 gap)", () => {
+  // The WWP admin modules as they actually are.
+  const repo: Record<string, string> = {
+    "lib/admin/analytics.ts": `export async function recordEvent() {}`,
+    "lib/admin/guest-profile.ts": `export function guestPreferenceProfile() {}`, // NO listAllGuests
+    "lib/admin/guest-export.ts": `export function guestsToCsv() {} export function guestExportFilename() {} export type GuestExportRow = {};`,
+  };
+  const aliasMap = { "@/": "" };
+  const resolve = (fromPath: string, spec: string) => {
+    for (const cand of resolveLocalCandidates(fromPath, spec, aliasMap)) {
+      if (cand in repo) return { exists: true, content: repo[cand] };
+    }
+    return { exists: false, content: null };
+  };
+
+  it("reproduces #229: flags the wrong-path import, the missing export, and the missing module", () => {
+    const route = {
+      path: "app/api/admin/guests/export/route.ts",
+      content: [
+        `import { recordEvent } from "@/lib/analytics";`,            // wrong module: @/lib/analytics has no file here
+        `import { listAllGuests } from "@/lib/admin/guest-profile";`, // real module, missing export
+        `import { x } from "@/lib/test-helpers";`,                    // module does not exist
+        `import { guestsToCsv } from "@/lib/admin/guest-export";`,    // valid - must NOT be flagged
+      ].join("\n"),
+    };
+    const broken = findBrokenLocalImports([route], resolve);
+    const keys = broken.map((b) => `${b.kind}:${b.spec}${b.name ? ":" + b.name : ""}`);
+    expect(keys).toContain("missing_module:@/lib/analytics");
+    expect(keys).toContain("missing_export:@/lib/admin/guest-profile:listAllGuests");
+    expect(keys).toContain("missing_module:@/lib/test-helpers");
+    // the one correct import is not flagged
+    expect(keys.some((k) => k.includes("guest-export"))).toBe(false);
+  });
+
+  it("a module authored in the SAME change is readable and validated", () => {
+    const files = [
+      { path: "app/api/x/route.ts", content: `import { listProgramGuestRows } from "@/lib/admin/guest-export-data";` },
+      { path: "lib/admin/guest-export-data.ts", content: `export async function listProgramGuestRows() { return []; }` },
+    ];
+    const withChange: ModuleResolverTest = (fromPath, spec) => {
+      for (const cand of resolveLocalCandidates(fromPath, spec, aliasMap)) {
+        const f = files.find((x) => x.path === cand);
+        if (f) return { exists: true, content: f.content };
+        if (cand in repo) return { exists: true, content: repo[cand] };
+      }
+      return { exists: false, content: null };
+    };
+    expect(findBrokenLocalImports(files, withChange)).toEqual([]);
+  });
+
+  it("fails open: a module that exists but is unreadable (content null) is not name-checked", () => {
+    const r = () => ({ exists: true, content: null });
+    const files = [{ path: "a.ts", content: `import { whoKnows } from "@/lib/opaque";` }];
+    expect(findBrokenLocalImports(files, r)).toEqual([]);
+  });
+
+  it("fails open on `export *` re-export barrels", () => {
+    const r = () => ({ exists: true, content: `export * from "./somewhere";` });
+    const files = [{ path: "a.ts", content: `import { couldBeReexported } from "@/lib/barrel";` }];
+    expect(findBrokenLocalImports(files, r)).toEqual([]);
+  });
+});
+
+type ModuleResolverTest = (fromPath: string, spec: string) => { exists: boolean; content: string | null };
+
+describe("brokenLocalImportFeedback", () => {
+  it("names the bad path and the bad symbol for the retry", () => {
+    const fb = brokenLocalImportFeedback([
+      { path: "r.ts", spec: "@/lib/test-helpers", kind: "missing_module" },
+      { path: "r.ts", spec: "@/lib/admin/guest-profile", kind: "missing_export", name: "listAllGuests" },
+    ]);
+    expect(fb).toMatch(/@\/lib\/test-helpers/);
+    expect(fb).toMatch(/listAllGuests/);
+    expect(fb).toMatch(/has no exported member|NOT exported/i);
   });
 });

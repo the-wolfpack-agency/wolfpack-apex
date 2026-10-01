@@ -23,6 +23,16 @@
  *
  * No credentials are baked in; they come from the environment.
  */
+import { readFileSync } from "node:fs";
+// Load .env.local (where FACTORY_SERVICE_TOKEN / creds live) before reading env,
+// so headless runs pick up the token without it being exported in every shell.
+try {
+  for (const line of readFileSync(new URL("../.env.local", import.meta.url), "utf8").split("\n")) {
+    const m = /^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/.exec(line);
+    if (m && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^["']|["']$/g, "");
+  }
+} catch { /* no .env.local; rely on the real environment */ }
+
 const BASE = process.env.INSTINCT_URL || "https://wolfpack-instinct.vercel.app";
 const EMAIL = process.env.FACTORY_EMAIL;
 const PASSWORD = process.env.FACTORY_PASSWORD;
@@ -99,6 +109,7 @@ async function buildAndOpen(token) {
     if (run.removedExports?.length) why.push(`removedExports=${JSON.stringify(run.removedExports)}`);
     if (run.incompleteFiles?.length) why.push(`incompleteFiles=${JSON.stringify(run.incompleteFiles.map((f) => f.path ?? f))}`);
     if (run.phantomImports?.length) why.push(`phantomImports=${JSON.stringify(run.phantomImports.map((f) => f.module ?? f))}`);
+    if (run.brokenLocalImports?.length) why.push(`brokenLocalImports=${JSON.stringify(run.brokenLocalImports.map((b) => `${b.kind}:${b.spec}${b.name ? ":" + b.name : ""}`))}`);
     if (run.invariants?.wouldBlock) why.push(`invariant=${run.invariants.reason}`);
     if (run.deepScan?.blocking) why.push(`deepScanCritical=${run.deepScan.critical}`);
     if (run.syntax && run.syntax.ok === false) why.push(`syntax=${JSON.stringify(run.syntax.issues)}`);

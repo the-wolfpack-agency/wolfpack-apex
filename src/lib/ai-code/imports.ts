@@ -118,3 +118,217 @@ export function phantomImportFeedback(phantoms: readonly PhantomImport[]): strin
   const mods = [...new Set(phantoms.map((p) => p.module))].join(", ");
   return `The previous attempt imported package(s) that are NOT in package.json and will fail CI ("Cannot find module"): ${mods}. Do NOT import a package that is not already a dependency - use an installed package or a Node builtin (fs, path, crypto, ...), or implement it without the import.`;
 }
+
+/* ========================================================================
+ * Local-import validation: a REAL module, a name that isn't there.
+ *
+ * findPhantomImports only sees bare external packages. The gap that shipped
+ * a red WWP PR (#229): the author imported `listAllGuests` from a real local
+ * module that does not export it, `recordEvent` from the WRONG local module,
+ * and a `@/lib/test-helpers` alias that does not resolve to any file. All three
+ * are alias/relative specifiers, which extractBareImports deliberately skips,
+ * so the phantom gate never looked. tsc/CI catches them ("has no exported
+ * member" / "Cannot find module"); this makes the gate catch them first.
+ *
+ * Deterministic + fail-OPEN: parsers are pure strings (unit-tested without a
+ * repo); the pipeline supplies module contents via a resolver. When a target
+ * module's content is unknown, or it re-exports with `export *`, we do NOT
+ * flag a name (we cannot prove absence) - only a module that resolves to no
+ * file at all, and a name provably absent from a module we can read, are flagged.
+ * ====================================================================== */
+
+export interface LocalImport {
+  /** The importing file. */
+  path: string;
+  /** The specifier as written, e.g. "@/lib/admin/analytics" or "../x". */
+  spec: string;
+  /** Named members imported, as the ORIGINAL exported name (before any `as`). */
+  names: string[];
+  /** `import X from "..."` present. */
+  hasDefault: boolean;
+  /** `import * as ns from "..."` present - names unknowable, not checked. */
+  hasNamespace: boolean;
+}
+
+/** Parse LOCAL (relative or `@/`,`~/` alias) imports and the named members each
+ *  pulls. Bare-package imports are ignored (findPhantomImports covers those).
+ *  Matches static `import`/`export … from`; side-effect `import "x"` carries no
+ *  names. Pure. */
+export function extractLocalImports(path: string, content: string): LocalImport[] {
+  const out: LocalImport[] = [];
+  const re = /\b(?:import|export)\b([\s\S]*?)\bfrom\s*['"]([^'"]+)['"]/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(content)) !== null) {
+    const clause = m[1];
+    const spec = m[2];
+    if (!isLocalSpecifier(spec)) continue;
+    const names: string[] = [];
+    let hasDefault = false;
+    let hasNamespace = false;
+    // Namespace: `* as ns`
+    if (/\*\s+as\s+[A-Za-z_$][\w$]*/.test(clause)) hasNamespace = true;
+    // Named block: `{ a, b as c, type D }`
+    const brace = clause.match(/\{([\s\S]*?)\}/);
+    if (brace) {
+      for (const raw of brace[1].split(",")) {
+        const part = raw.trim();
+        if (!part) continue;
+        // drop a leading `type`/`typeof` modifier, keep the imported (pre-`as`) name
+        const name = part.replace(/^type\s+/, "").replace(/^typeof\s+/, "").split(/\s+as\s+/)[0].trim();
+        if (/^[A-Za-z_$][\w$]*$/.test(name)) names.push(name);
+      }
+    }
+    // Default: a bare identifier in the clause OUTSIDE the brace block, not `* as`.
+    const outside = (brace ? clause.slice(0, brace.index) : clause).replace(/\*\s+as\s+[A-Za-z_$][\w$]*/, "");
+    if (/(^|,)\s*[A-Za-z_$][\w$]*\s*(,|$)/.test(outside) && /[A-Za-z_$]/.test(outside)) hasDefault = true;
+    out.push({ path, spec, names, hasDefault, hasNamespace });
+  }
+  return out;
+}
+
+export interface ModuleExports {
+  names: Set<string>;
+  /** `export * from "…"` present - the module re-exports unknown names. */
+  hasWildcard: boolean;
+  hasDefault: boolean;
+}
+
+/** The set of names a module exports: declarations, `export { … }` (the name
+ *  AFTER `as`), default, and a wildcard flag for `export *`. Pure. */
+export function extractExportedNames(content: string): ModuleExports {
+  const names = new Set<string>();
+  let hasWildcard = false;
+  let hasDefault = false;
+
+  // export [default] (async) function|class|const|let|var|interface|type|enum NAME
+  const declRe = /\bexport\s+(?:default\s+)?(?:declare\s+)?(?:abstract\s+)?(?:async\s+)?(?:function\*?|class|const|let|var|interface|type|enum)\s+([A-Za-z_$][\w$]*)/g;
+  let m: RegExpExecArray | null;
+  while ((m = declRe.exec(content)) !== null) names.add(m[1]);
+
+  // export { a, b as c, type D as E }  -> exported name is AFTER `as` (or the bare name)
+  const braceRe = /\bexport\s*\{([\s\S]*?)\}(?!\s*from\s*['"][^'"]*['"]\s*;?\s*\n?)?/g;
+  // handle both `export { … }` and `export { … } from "x"` the same (names are explicit either way)
+  const anyBrace = /\bexport\s*\{([\s\S]*?)\}/g;
+  while ((m = anyBrace.exec(content)) !== null) {
+    for (const raw of m[1].split(",")) {
+      const part = raw.trim();
+      if (!part) continue;
+      const seg = part.replace(/^type\s+/, "");
+      const name = (seg.includes(" as ") ? seg.split(/\s+as\s+/)[1] : seg).trim();
+      if (name === "default") { hasDefault = true; continue; }
+      if (/^[A-Za-z_$][\w$]*$/.test(name)) names.add(name);
+    }
+  }
+  void braceRe;
+
+  if (/\bexport\s+default\b/.test(content)) hasDefault = true;
+  if (/\bexport\s*\*\s*(?:as\s+[A-Za-z_$][\w$]*\s*)?from\s*['"][^'"]+['"]/.test(content)) {
+    // `export * from` re-exports unknown names; `export * as ns from` is a named ns (add it)
+    const nsm = content.match(/\bexport\s*\*\s*as\s+([A-Za-z_$][\w$]*)\s*from/);
+    if (nsm) names.add(nsm[1]); else hasWildcard = true;
+  }
+  return { names, hasWildcard, hasDefault };
+}
+
+/** `@/*` -> `src/` style map from a tsconfig's compilerOptions.paths. Strips a
+ *  trailing `/*` and a leading `./`. Tolerates JSONC comments; {} on error. Pure. */
+export function parseAliasMap(tsconfigText: string): Record<string, string> {
+  const map: Record<string, string> = {};
+  try {
+    const stripped = tsconfigText
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/(^|[^:])\/\/.*$/gm, "$1");
+    const cfg = JSON.parse(stripped) as { compilerOptions?: { paths?: Record<string, string[]> } };
+    const paths = cfg.compilerOptions?.paths ?? {};
+    for (const [alias, targets] of Object.entries(paths)) {
+      if (!Array.isArray(targets) || targets.length === 0) continue;
+      const from = alias.replace(/\*$/, "");
+      const to = String(targets[0]).replace(/^\.\//, "").replace(/\*$/, "");
+      map[from] = to;
+    }
+  } catch {
+    /* malformed/absent tsconfig -> no alias map (relative imports still resolve) */
+  }
+  return map;
+}
+
+/** Candidate repo paths a local specifier could resolve to, best first. Pure.
+ *  `fromPath` is the importing file's repo path; `aliasMap` from parseAliasMap. */
+export function resolveLocalCandidates(fromPath: string, spec: string, aliasMap: Record<string, string>): string[] {
+  let base: string;
+  if (spec.startsWith(".")) {
+    const dir = fromPath.includes("/") ? fromPath.slice(0, fromPath.lastIndexOf("/")) : "";
+    const segs = (dir ? dir.split("/") : []).concat(spec.split("/"));
+    const stack: string[] = [];
+    for (const s of segs) {
+      if (s === "" || s === ".") continue;
+      if (s === "..") stack.pop();
+      else stack.push(s);
+    }
+    base = stack.join("/");
+  } else {
+    // alias: longest matching prefix wins
+    const pref = Object.keys(aliasMap).filter((p) => spec.startsWith(p)).sort((a, b) => b.length - a.length)[0];
+    if (!pref) return [];
+    base = (aliasMap[pref] + spec.slice(pref.length)).replace(/^\.\//, "");
+  }
+  if (/\.(tsx?|jsx?|mjs|cjs|json)$/.test(base)) return [base];
+  const exts = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".d.ts"];
+  const out: string[] = [];
+  for (const e of exts) out.push(base + e);
+  for (const e of exts) out.push(`${base}/index${e}`);
+  return out;
+}
+
+export interface BrokenLocalImport {
+  path: string;
+  spec: string;
+  kind: "missing_module" | "missing_export";
+  name?: string;
+}
+
+/** Resolve one local specifier to a module the pipeline can read. `exists` is
+ *  whether ANY candidate path is a file in the repo/changeset; `content` is that
+ *  file's source when known (null when it exists but was not fetched). */
+export type ModuleResolver = (fromPath: string, spec: string) => { exists: boolean; content: string | null };
+
+/** Imports of a local module that does not exist, or of a name a readable local
+ *  module does not export. Fail-open everywhere else. Pure (resolver is injected). */
+export function findBrokenLocalImports(
+  files: readonly { path: string; content: string }[],
+  resolve: ModuleResolver,
+): BrokenLocalImport[] {
+  const broken: BrokenLocalImport[] = [];
+  const changeset = new Set(files.map((f) => f.path));
+  for (const file of files) {
+    for (const li of extractLocalImports(file.path, file.content)) {
+      const r = resolve(file.path, li.spec);
+      if (!r.exists) { broken.push({ path: file.path, spec: li.spec, kind: "missing_module" }); continue; }
+      if (r.content == null) continue; // exists, unreadable names -> module existence only
+      const exp = extractExportedNames(r.content);
+      if (exp.hasWildcard) continue; // re-exports unknown names -> cannot prove absence
+      for (const name of li.names) {
+        if (!exp.names.has(name)) broken.push({ path: file.path, spec: li.spec, kind: "missing_export", name });
+      }
+      if (li.hasDefault && !exp.hasDefault) broken.push({ path: file.path, spec: li.spec, kind: "missing_export", name: "default" });
+    }
+  }
+  void changeset;
+  return broken;
+}
+
+/** Feedback for the authoring retry: name each bad local import precisely so the
+ *  model fixes the path or the symbol. Pure. */
+export function brokenLocalImportFeedback(broken: readonly BrokenLocalImport[]): string {
+  const lines = broken.map((b) =>
+    b.kind === "missing_module"
+      ? `- "${b.spec}" (in ${b.path}) does not resolve to any file in the repo. Import from the correct path, or do not import it.`
+      : `- "${b.name}" is NOT exported by "${b.spec}" (imported in ${b.path}). Use a symbol that module actually exports, or import from the module that defines "${b.name}".`,
+  );
+  return [
+    "The previous attempt imported local symbols that do not exist and will fail CI",
+    '("has no exported member" / "Cannot find module"):',
+    ...lines,
+    "Only import names that are actually exported by the referenced local module.",
+  ].join("\n");
+}
