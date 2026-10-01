@@ -57,6 +57,14 @@ const prompt = arg("prompt");
 // modification / a wrong hunk line-count) into unparseable output. Files mode has
 // no diff-reconstruction ambiguity.
 const mode = arg("mode", "files");
+// Pin the authoring model/provider so the SAME task can be run across models and
+// their capability fingerprints (recovery, cost, which gate they trip) compared.
+// --provider: "anthropic" | "azure-openai" | "auto". --model: a specific id.
+const provider = arg("provider");
+const model = arg("model");
+// Author capability tier: "cheap" | "standard" | "premium". Pins which model
+// authors (Azure cheap=gpt-4o-mini, standard=gpt-4o), for cross-model grading.
+const tier = arg("tier");
 const ref = arg("ref", branch);
 const maxAttempts = Number(arg("max", "3"));
 const pollSeconds = Number(arg("poll", "30"));
@@ -97,7 +105,12 @@ async function buildAndOpen(token) {
   const pr = await fetch(`${BASE}/api/admin/ai-code/pipeline`, {
     method: "POST",
     headers: { "content-type": "application/json", ...authHeaders(token) },
-    body: JSON.stringify({ ref, prompt, repo, maxAttempts, mode }),
+    body: JSON.stringify({
+      ref, prompt, repo, maxAttempts, mode,
+      ...(provider ? { executorProviderPin: provider } : {}),
+      ...(model ? { authorModel: model } : {}),
+      ...(tier ? { authorTier: tier } : {}),
+    }),
   });
   const run = await pr.json().catch(() => ({}));
   console.log(`build: status=${run?.run?.status} approvalId=${run.approvalId || "(none)"} syntaxOk=${run?.syntax?.ok} outcome=${run?.run?.review?.verdict?.outcome}`);

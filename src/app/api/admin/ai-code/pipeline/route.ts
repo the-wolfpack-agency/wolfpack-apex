@@ -281,6 +281,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     diff?: unknown;
     author?: unknown;
     authorModel?: unknown;
+    authorTier?: unknown;
     executorProviderPin?: unknown;
     repo?: unknown;
     mode?: unknown;
@@ -317,6 +318,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const author = typeof b.author === "string" && b.author.trim() ? b.author.trim() : "unknown";
   const authorModel = typeof b.authorModel === "string" && b.authorModel.trim() ? b.authorModel.trim() : author;
+  // Pin the authoring capability tier so the SAME task can be run at each tier and
+  // the resulting model (e.g. Azure cheap=gpt-4o-mini vs standard=gpt-4o) compared.
+  // Only the first attempt uses it; the escalation retry still goes one tier up.
+  const authorTier: AIModelTier | undefined =
+    b.authorTier === "cheap" || b.authorTier === "standard" || b.authorTier === "premium" ? b.authorTier : undefined;
   const maxAttempts =
     typeof b.maxAttempts === "number" && Number.isFinite(b.maxAttempts)
       ? Math.max(1, Math.min(MAX_ATTEMPTS_CAP, Math.floor(b.maxAttempts)))
@@ -414,7 +420,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // local import with it, and the final gate re-checks with the SAME logic.
   const localImportCtx: LocalImportCtx = { repo: repo ?? null, workspaceId, repoTree, aliasMap };
   const resolved = await resolveChangeWithFallback(
-    { mode, diff, prompt: authorPrompt, authorModel, executorProviderPin, fetchFiles: fetchFilesForAnchor },
+    { mode, diff, prompt: authorPrompt, authorModel, executorProviderPin, tier: authorTier, fetchFiles: fetchFilesForAnchor },
     installedRoots,
     (files) => checkLocalImports(files, localImportCtx),
   );
@@ -433,7 +439,19 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // Fail-closed: the executor ran but produced nothing usable. Never a 500, and
   // never a fabricated change - the gate has nothing to govern.
   if (executor && !effectiveDiff.trim()) {
-    return NextResponse.json({ error: "executor produced no change", executor, anchorFailures }, { status: 422 });
+    // Surface WHY, not just THAT: an unconfigured pinned provider (e.g. anthropic
+    // on an Azure-only deployment) otherwise reads as an opaque "no change". The
+    // real reason lives in executor.error; put it in the message the caller sees.
+    return NextResponse.json(
+      {
+        error: executor?.error
+          ? `executor produced no change (${executor.error})`
+          : "executor produced no change",
+        executor,
+        anchorFailures,
+      },
+      { status: 422 },
+    );
   }
 
   // Files-native AUTO-FIX: in files mode, if the authored files do not clear the
