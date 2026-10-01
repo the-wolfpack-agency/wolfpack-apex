@@ -54,11 +54,16 @@ describe("GET /api/admin/site-analytics", () => {
     mockRequireCapability.mockResolvedValueOnce({ ok: true, user: { id: "u1", role: "cto", workspaceId: "w1" }, capabilities: new Set(["analytics.view", "analytics.triage", "settings.manage_team"]) });
     mockGetSummary.mockResolvedValue({ rangeDays: 30, totalPageViews: 0, totalEvents: 0, byHour: [], byPage: [], byCountry: [], byType: [] });
     let body = await (await GET(mkReq())).json();
-    expect(body.permissions).toEqual({ triage: true, manageOperators: true });
+    expect(body.permissions).toEqual({ triage: true, manageOperators: true, viewIntel: false });
 
     // A read-only viewer (has analytics.view via SELF_SERVICE, no write scopes).
     mockRequireCapability.mockResolvedValueOnce({ ok: true, user: { id: "u2", role: "sales", workspaceId: "w1" }, capabilities: new Set(["analytics.view"]) });
     body = await (await GET(mkReq())).json();
-    expect(body.permissions).toEqual({ triage: false, manageOperators: false });
+    expect(body.permissions).toEqual({ triage: false, manageOperators: false, viewIntel: false });
+
+    // a holder of forcefield.view sees the deep agent-defense intel
+    mockRequireCapability.mockResolvedValueOnce({ ok: true, user: { id: "u3", role: "cto", workspaceId: "w1" }, capabilities: new Set(["analytics.view", "forcefield.view"]) });
+    body = await (await GET(mkReq())).json();
+    expect(body.permissions.viewIntel).toBe(true);
   });
 });

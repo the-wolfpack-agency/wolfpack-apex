@@ -33,6 +33,10 @@ export async function GET(req: NextRequest) {
   const permissions = {
     triage: auth.capabilities.has("analytics.triage"),
     manageOperators: auth.capabilities.has("settings.manage_team"),
+    // The deep agent-defense intel (operator dossiers, campaigns, tradecraft,
+    // reputation network, probe/payload) is scoped to forcefield.view. Site usage
+    // + the high-level Forcefield summary stay org-wide (analytics.view) by design.
+    viewIntel: auth.capabilities.has("forcefield.view"),
   };
   return NextResponse.json({ summary, permissions });
 }
