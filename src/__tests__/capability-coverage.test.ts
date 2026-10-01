@@ -2,8 +2,7 @@
  * Capability coverage guardrail.
  *
  * Walks every route.ts under the "protected" API module dirs and asserts
- * the file contains a call to `requireCapability(` (or the service-auth wrapper
- * `requireFactoryServiceOrCapability(`) or is in the
+ * the file contains a call to `requireCapability(` or is in the
  * explicit allowlist. Fails loudly with the list of missing files so a
  * new route can't silently ship without gating.
  */
@@ -63,9 +62,7 @@ describe("capability coverage", () => {
         const rel = posixRelative(routePath);
         if (CAPABILITY_ALLOWLIST.includes(rel)) continue;
         const source = readFileSync(routePath, "utf8");
-        // requireFactoryServiceOrCapability wraps requireCapability (service token OR user
-        // capability), so a route using it is still capability-gated.
-        if (!/require(Capability|FactoryServiceOrCapability)\s*\(/.test(source)) {
+        if (!/requireCapability\s*\(/.test(source)) {
           missing.push(rel);
         }
       }

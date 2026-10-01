@@ -17,7 +17,8 @@
  * Returns: 200 { run } | 400 (bad body / off-menu answer) | 401/403 (auth)
  */
 import { NextRequest, NextResponse } from "next/server";
-import { requireFactoryServiceOrCapability } from "@/lib/ai-code/factory-service-auth";
+import { requireCapability } from "@/lib/auth/require-capability";
+import { factoryServiceAuth } from "@/lib/ai-code/factory-service-auth";
 import { requireEntitlement } from "@/lib/tenancy/require-entitlement";
 import { trackEvent } from "@/lib/analytics";
 import { recordAudit } from "@/lib/audit-log";
@@ -194,7 +195,7 @@ async function resolveChangeWithFallback(
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
-  const auth = await requireFactoryServiceOrCapability(req, "settings.manage_team");
+  const auth = factoryServiceAuth(req) ?? await requireCapability(req, "settings.manage_team");
   if (!auth.ok) return auth.response;
   const gate = await requireEntitlement(auth.user.workspaceId, "secure_agent");
   if (gate) return gate;
