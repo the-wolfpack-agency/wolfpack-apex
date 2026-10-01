@@ -52,7 +52,7 @@ const SUMMARY = {
   blockedOperators: [],
 };
 
-const PERMS = { triage: true, manageOperators: true };
+const PERMS = { triage: true, manageOperators: true, viewIntel: true };
 
 beforeEach(() => {
   mockFetchWithRefresh.mockReset();
@@ -342,7 +342,7 @@ test("sub-actors (B): a coarse operator with two distinct targeting profiles sho
 });
 
 test("a read-only viewer sees the triage board but no journey triage controls", async () => {
-  mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: SUMMARY, permissions: { triage: false, manageOperators: false } }) });
+  mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: SUMMARY, permissions: { triage: false, manageOperators: false, viewIntel: true } }) });
   render(<SiteAnalyticsPage />);
   await waitFor(() => expect(screen.getByTestId("ff-journeys-triage")).toBeInTheDocument());
   fireEvent.click(screen.getByTestId("journey-view-severity"));
@@ -354,7 +354,7 @@ test("a read-only viewer sees the triage board but no journey triage controls", 
 });
 
 test("a read-only viewer sees the operator board but no operator controls", async () => {
-  mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: SUMMARY, permissions: { triage: false, manageOperators: false } }) });
+  mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: SUMMARY, permissions: { triage: false, manageOperators: false, viewIntel: true } }) });
   render(<SiteAnalyticsPage />);
   await waitFor(() => expect(screen.getByTestId("ff-journeys-triage")).toBeInTheDocument());
   fireEvent.click(screen.getByTestId("journey-view-severity"));
@@ -369,7 +369,7 @@ test("a read-only viewer sees the operator board but no operator controls", asyn
 });
 
 test("a triage-capable but non-manager sees triage + promote, but not block", async () => {
-  mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: SUMMARY, permissions: { triage: true, manageOperators: false } }) });
+  mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: SUMMARY, permissions: { triage: true, manageOperators: false, viewIntel: true } }) });
   render(<SiteAnalyticsPage />);
   await waitFor(() => expect(screen.getByTestId("ff-journeys-triage")).toBeInTheDocument());
   fireEvent.click(screen.getByTestId("journey-view-severity"));
@@ -516,7 +516,7 @@ test("reputation opt-in toggle reflects saved state and POSTs the change", async
 });
 
 test("reputation opt-in panel is hidden for a viewer who cannot manage operators", async () => {
-  mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: SUMMARY, permissions: { triage: true, manageOperators: false } }) });
+  mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: SUMMARY, permissions: { triage: true, manageOperators: false, viewIntel: true } }) });
   render(<SiteAnalyticsPage />);
   await waitFor(() => expect(screen.getByTestId("ff-journeys-triage")).toBeInTheDocument());
   fireEvent.click(screen.getByTestId("journey-view-severity"));
@@ -887,4 +887,29 @@ test("a monitored property (agent events, no page views) explains why the page-v
   expect(empty).toHaveTextContent(/agent traffic/i);
   // and NOT the misleading "no page views yet" (which implies missing data)
   expect(empty).not.toHaveTextContent(/No page views recorded in this window yet/i);
+});
+
+test("audience split: default Site usage tab is visible; the Agent defense panel is gated + hidden until selected", async () => {
+  mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: SUMMARY, permissions: PERMS }) });
+  render(<SiteAnalyticsPage />);
+  await waitFor(() => expect(screen.getByTestId("console-tabs")).toBeInTheDocument());
+
+  // Usage panel shown by default, Forcefield panel present (viewIntel) but hidden.
+  expect(screen.getByTestId("tab-panel-usage")).not.toHaveAttribute("hidden");
+  expect(screen.getByTestId("tab-panel-forcefield")).toHaveAttribute("hidden");
+
+  // Selecting Agent defense reveals the intel panel and hides usage.
+  fireEvent.click(screen.getByTestId("tab-forcefield"));
+  await waitFor(() => expect(screen.getByTestId("tab-panel-forcefield")).not.toHaveAttribute("hidden"));
+  expect(screen.getByTestId("tab-panel-usage")).toHaveAttribute("hidden");
+});
+
+test("a seat without forcefield.view gets no Agent defense tab and no intel panel in the DOM", async () => {
+  mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: SUMMARY, permissions: { triage: false, manageOperators: false, viewIntel: false } }) });
+  render(<SiteAnalyticsPage />);
+  await waitFor(() => expect(screen.getByTestId("tab-panel-usage")).toBeInTheDocument());
+  expect(screen.queryByTestId("tab-forcefield")).toBeNull();
+  expect(screen.queryByTestId("tab-panel-forcefield")).toBeNull();
+  // the deep-intel sections are simply absent (also stripped server-side)
+  expect(screen.queryByTestId("ff-learned-signatures")).toBeNull();
 });

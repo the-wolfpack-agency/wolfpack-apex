@@ -26,7 +26,8 @@ export async function GET(req: NextRequest) {
   const surfaceRaw = sp.get("surface");
   const surface = surfaceRaw && /^[a-z0-9.\-_]{1,64}$/i.test(surfaceRaw) ? surfaceRaw : "all";
 
-  const summary = await getSiteAnalyticsSummary(days, auth.user.workspaceId, surface);
+  const full = await getSiteAnalyticsSummary(days, auth.user.workspaceId, surface);
+  const viewIntel = auth.capabilities.has("forcefield.view");
   // The read is now org-wide (analytics.view is in SELF_SERVICE), but the write
   // actions on the page stay gated. Tell the client which controls the caller
   // may use so a viewer never sees a button that would 403 (a UI defect).
@@ -36,7 +37,25 @@ export async function GET(req: NextRequest) {
     // The deep agent-defense intel (operator dossiers, campaigns, tradecraft,
     // reputation network, probe/payload) is scoped to forcefield.view. Site usage
     // + the high-level Forcefield summary stay org-wide (analytics.view) by design.
-    viewIntel: auth.capabilities.has("forcefield.view"),
+    viewIntel,
   };
+  // Deep intel is returned ONLY to forcefield.view holders. Everyone else gets an
+  // allowlist of site usage + the high-level Forcefield summary - allowlist, not
+  // denylist, so a future intel field can never leak by being forgotten here.
+  const summary = viewIntel
+    ? full
+    : {
+        rangeDays: full.rangeDays,
+        surfaces: full.surfaces,
+        totalPageViews: full.totalPageViews,
+        collectsPageViews: full.collectsPageViews,
+        totalEvents: full.totalEvents,
+        byHour: full.byHour,
+        byPage: full.byPage,
+        byCountry: full.byCountry,
+        byType: full.byType,
+        forcefield: full.forcefield,
+        agentOrigins: full.agentOrigins,
+      };
   return NextResponse.json({ summary, permissions });
 }
