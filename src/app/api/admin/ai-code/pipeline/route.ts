@@ -20,7 +20,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { factoryServiceAuth } from "@/lib/ai-code/factory-service-auth";
 import { requireEntitlement } from "@/lib/tenancy/require-entitlement";
-import { trackEvent } from "@/lib/analytics";
+import { trackEvent, trackEventAwait } from "@/lib/analytics";
 import { recordAudit } from "@/lib/audit-log";
 import { runCodeReview } from "@/lib/ai-code/scan";
 import { liveRepairComplete } from "@/lib/ai-code/repair";
@@ -440,7 +440,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     },
   });
 
-  trackEvent("ai_code.pipeline_run", auth.user.id, auth.user.role, {
+  // AWAITED: this row backs the Run history UI. Fire-and-forget loses it when
+  // Vercel freezes the lambda after the response (the "only one run shows" bug).
+  await trackEventAwait("ai_code.pipeline_run", auth.user.id, auth.user.role, {
     // workspace_id scopes the run history + grading read (multi-tenant safe).
     workspace_id: workspaceId,
     // The target repo, so the history groups per-site once the factory builds
