@@ -162,6 +162,10 @@ export interface SiteAnalyticsSummary {
      principal that stepped outside its granted scope is flagged mandateExceeded -
      the strongest hostile signal, an authorized agent abusing its grant. */
   principalByOperator: Record<string, PrincipalSummary>;
+  /* The trust check on the intel: hostile verdicts analysts marked FALSE POSITIVE
+     in the window (from forcefield.verdict_false_positive learning events), so a
+     "confirmed hostile" board's error rate is visible, never taken on faith. */
+  verdictFeedback: { falsePositives: number };
 }
 
 /** Per-operator principal verdict surfaced to the board. "verified" = the
@@ -405,6 +409,14 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
     ? await getNetworkReputation(workspaceId, Array.from(new Set(journeys.map((j) => j.profile.operatorKey))))
     : {};
   const networkTradecraft = workspaceId ? await getNetworkTradecraft(workspaceId) : [];
+  const fpRows = await safeQuery<{ n: string }>(
+    `SELECT count(*)::text AS n FROM instinct_events
+      WHERE event_type = 'forcefield.verdict_false_positive'
+        AND metadata->>'workspace_id' = $1
+        AND created_at > NOW() - ($2::int * INTERVAL '1 day')`,
+    [workspaceId ?? "", rangeDays],
+  );
+  const falsePositives = fpRows?.rows?.[0] ? Number(fpRows.rows[0].n) : 0;
   // Aggregate the per-session principal verdicts up to the operator. When an
   // operator has multiple sessions, the most security-relevant wins: a mandate
   // violation outranks a bare claimed credential, which outranks a clean verify.
@@ -458,6 +470,7 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
     blockedOperators,
     networkReputation,
     networkTradecraft,
+    verdictFeedback: { falsePositives },
     principalByOperator,
     agentOrigins: agentOriginRows.rows.map((r) => ({
       country: r.country,

@@ -11,8 +11,6 @@
 
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
 import { fetchWithRefresh, jsonHeaders } from "@/lib/client-auth";
-import { HourHeatmap } from "@/components/HourHeatmap";
-import { AgentOriginMap } from "@/components/AgentOriginMap";
 import { SiteUsagePanel } from "@/components/site-analytics/SiteUsagePanel";
 import { LearnedSignaturesPanel } from "@/components/site-analytics/LearnedSignaturesPanel";
 import { AgentIntelPanel } from "@/components/site-analytics/AgentIntelPanel";
@@ -28,6 +26,7 @@ import { ProbeIntelPanel } from "@/components/forcefield/ProbeIntelPanel";
 import { PayloadIntelPanel } from "@/components/forcefield/PayloadIntelPanel";
 
 interface Summary {
+  verdictFeedback?: { falsePositives: number };
   rangeDays: number;
   surfaces?: string[];
   surface?: string;
@@ -163,6 +162,8 @@ export default function SiteAnalyticsPage() {
   const [operatorTriageOverride, setOperatorTriageOverride] = useState<Record<string, TriageStatus>>({});
   const [blockedOverride, setBlockedOverride] = useState<Record<string, boolean>>({});
   const [promotedOps, setPromotedOps] = useState<Record<string, boolean>>({});
+  // Analyst feedback: verdicts marked false-positive this session (keyed by finding).
+  const [fpMarked, setFpMarked] = useState<Record<string, boolean>>({});
   // The page is org-wide readable; write controls render only for callers who
   // hold the capability, so a viewer never sees a button that would 403. Least
   // privilege until the server tells us otherwise.
@@ -218,6 +219,23 @@ export default function SiteAnalyticsPage() {
       if (!res.ok) setBlockedOverride((prev) => ({ ...prev, [opKey]: !block })); // revert (e.g. 403: needs admin)
     } catch {
       setBlockedOverride((prev) => ({ ...prev, [opKey]: !block }));
+    }
+  }, []);
+
+  // The trust loop: record that a hostile verdict was wrong. Optimistic; reverts on
+  // failure (e.g. 403). The server audits it + emits a learning event so detection
+  // improves and the false-positive rate becomes measurable.
+  const markFalsePositive = useCallback(async (opKey: string, findingKey: string) => {
+    setFpMarked((prev) => ({ ...prev, [findingKey]: true }));
+    try {
+      const res = await fetchWithRefresh("/api/admin/site-analytics/verdict-feedback", {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: JSON.stringify({ operatorKey: opKey, findingKey }),
+      });
+      if (!res.ok) setFpMarked((prev) => ({ ...prev, [findingKey]: false }));
+    } catch {
+      setFpMarked((prev) => ({ ...prev, [findingKey]: false }));
     }
   }, []);
 
@@ -449,6 +467,16 @@ export default function SiteAnalyticsPage() {
           {triageBtn(j, "acknowledged", "Acknowledge", "var(--wp-text-muted, #9ca3af)")}
           {triageBtn(j, "escalated", "Escalate", "var(--wp-error, #ef4444)")}
           {triageBtn(j, "dismissed", "Dismiss", "var(--wp-text-muted, #6b7280)")}
+          <button
+            type="button"
+            data-testid={`ff-mark-fp-${j.key}`}
+            onClick={() => void markFalsePositive(j.profile.operatorKey, j.key)}
+            disabled={!!fpMarked[j.key]}
+            title="Mark this hostile verdict a false positive. Records analyst feedback that trains detection and makes the false-positive rate visible - a 'confirmed hostile' label you can correct."
+            style={{ fontSize: "0.68rem", padding: "0.2rem 0.5rem", borderRadius: 5, cursor: fpMarked[j.key] ? "default" : "pointer", background: "transparent", border: "1px solid var(--wp-dark-border, #333)", color: fpMarked[j.key] ? "var(--wp-success, #30a46c)" : "var(--wp-text-muted, #9ca3af)" }}
+          >
+            {fpMarked[j.key] ? "\u2713 Marked not hostile" : "Not hostile"}
+          </button>
         </div>
       )}
     </li>
@@ -629,6 +657,12 @@ export default function SiteAnalyticsPage() {
 
           {/* Audience split: site usage vs agent-defense intel. The Forcefield tab
               exists only for forcefield.view holders; the data is gated server-side too. */}
+          {summary.totalEvents < 50 && (
+            <div data-testid="low-data-banner" style={{ fontSize: "0.74rem", color: "var(--wp-text-muted, #9ca3af)", padding: "0.5rem 0.7rem", borderRadius: 7, border: "1px dashed var(--wp-dark-border, #333)", background: "var(--wp-dark-2, rgba(255,255,255,0.03))" }}>
+              Low data volume: {summary.totalEvents.toLocaleString()} event{summary.totalEvents === 1 ? "" : "s"} over {summary.rangeDays}d. Read these trends and verdicts as directional, not conclusive.
+            </div>
+          )}
+
           <div data-testid="console-tabs" role="tablist" style={{ display: "flex", gap: "0.4rem", borderBottom: "1px solid var(--wp-dark-border, #262a33)" }}>
             <button type="button" role="tab" data-testid="tab-usage" aria-selected={activeTab === "usage"} onClick={() => setActiveTab("usage")} style={tabStyle(activeTab === "usage")}>Site usage</button>
             {permissions.viewIntel && (
@@ -642,6 +676,11 @@ export default function SiteAnalyticsPage() {
 
           {permissions.viewIntel && (
           <div data-testid="tab-panel-forcefield" hidden={activeTab !== "forcefield"} style={{ display: "grid", gap: "1.25rem" }}>
+          {(summary.verdictFeedback?.falsePositives ?? 0) > 0 && (
+            <div data-testid="ff-fp-rate" style={{ fontSize: "0.74rem", color: "var(--wp-text-muted, #9ca3af)", padding: "0.5rem 0.7rem", borderRadius: 7, border: "1px solid var(--wp-dark-border, #262a33)", background: "var(--wp-dark-2, rgba(255,255,255,0.03))" }}>
+              {summary.verdictFeedback!.falsePositives.toLocaleString()} hostile verdict{summary.verdictFeedback!.falsePositives === 1 ? "" : "s"} marked <strong style={{ color: "var(--wp-success, #30a46c)" }}>not hostile</strong> by analysts in the last {summary.rangeDays}d. Every verdict is correctable; this feedback trains detection and keeps the false-positive rate honest.
+            </div>
+          )}
           {/* Learned hostile-tradecraft signatures: combos mined from agents we've
               already caught, used to catch new ones by their methods. Shadow =
               still proving itself (would-block only); Enforcing = earned auto-block
