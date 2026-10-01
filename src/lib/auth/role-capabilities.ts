@@ -265,6 +265,7 @@ const DEV: readonly Capability[] = [
   "emails.view",
   "analytics.view",
   "analytics.triage",
+  "forcefield.view",     // dev does security triage of agent intel
   "tasks.view",
   "tasks.view_team",
   "tasks.edit",

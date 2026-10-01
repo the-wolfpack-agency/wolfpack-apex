@@ -149,6 +149,7 @@ export const CAPABILITIES = {
   // Analytics
   "analytics.view": "View analytics dashboards",
   "analytics.triage": "Triage agent-journey findings (acknowledge / escalate / dismiss)",
+  "forcefield.view": "View agent-defense threat intelligence (operator dossiers, campaigns, tradecraft, reputation network)",
 
   // Tools
   "tools.view": "View the tools dashboard",
