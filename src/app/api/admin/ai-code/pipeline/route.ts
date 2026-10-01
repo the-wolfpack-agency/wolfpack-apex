@@ -39,6 +39,7 @@ import { buildRunCost } from "@/lib/ai-code/cost";
 import { workspaceGithubClient, fetchFileContent, fetchRepoTree } from "@/lib/github-client";
 import { buildRepoContext, withRepoContext, extractMentionedPaths } from "@/lib/ai-code/repo-context";
 import { findReuseCandidates } from "@/lib/ai-code/reuse-scout";
+import { buildKnownExportsBlock, exportsEntries } from "@/lib/ai-code/export-grounding";
 import { fetchRepoGrounding } from "@/lib/ai-code/repo-grounding";
 import { findPhantomImports, parseInstalledRoots, phantomImportFeedback } from "@/lib/ai-code/imports";
 import {
@@ -379,13 +380,34 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           fetchFileContent(ghClient, repo, "tsconfig.json").catch(() => null),
         ]);
         reuseCandidates = reuse.candidates.length;
-        // REUSE block first: the author should read existing capability before anything else.
-        const block = [grounding, reuse.block, ctx.block].filter(Boolean).join("\n\n---\n\n");
+        repoTree = new Set(tree);
+        if (tsconfig) aliasMap = parseAliasMap(tsconfig);
+
+        // EXPORT GROUNDING: the exact exported symbols of the modules this task is
+        // most likely to import from (the reuse candidates + the files the prompt
+        // named), so the author imports a REAL name instead of inventing one - the
+        // #229 class, made impossible for any model at the source. Best-effort,
+        // capped, and only when we could read the alias map (so specifiers are right).
+        let exportsBlock = "";
+        if (Object.keys(aliasMap).length > 0) {
+          const wantPaths = [
+            ...reuse.candidates.map((c) => c.path),
+            ...extractMentionedPaths(prompt),
+          ].filter((p) => /\.(tsx?|jsx?|mjs|cjs)$/.test(p));
+          const uniquePaths = [...new Set(wantPaths)].slice(0, 8);
+          const fetched: { path: string; content: string }[] = [];
+          for (const p of uniquePaths) {
+            const c = await fetchFileContent(ghClient, repo, p).catch(() => null);
+            if (typeof c === "string") fetched.push({ path: p, content: c });
+          }
+          exportsBlock = buildKnownExportsBlock(exportsEntries(fetched, aliasMap));
+        }
+
+        // REUSE block first (read existing capability), then the exact exports.
+        const block = [grounding, reuse.block, exportsBlock, ctx.block].filter(Boolean).join("\n\n---\n\n");
         authorPrompt = withRepoContext(prompt, block);
         repoContextFiles = ctx.files;
         if (pkgJson) installedRoots = parseInstalledRoots(pkgJson);
-        repoTree = new Set(tree);
-        if (tsconfig) aliasMap = parseAliasMap(tsconfig);
       }
     } catch {
       /* best-effort context; author from the prompt alone on any failure */
