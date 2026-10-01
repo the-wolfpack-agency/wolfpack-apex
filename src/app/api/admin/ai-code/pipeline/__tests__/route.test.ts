@@ -429,6 +429,22 @@ describe("POST /api/admin/ai-code/pipeline", () => {
     expect(mockRunPipeline).not.toHaveBeenCalled();
   });
 
+  it("the 422 surfaces WHY (executor error), e.g. an unconfigured pinned provider", async () => {
+    // The author never throws; a failed complete() becomes an empty diff + error.
+    mockComplete.mockRejectedValue(new Error("anthropic: ANTHROPIC_API_KEY not set"));
+    const res = await POST(post({ ref: "pr-nocfg", prompt: "add k", answers: { tests: "all" }, executorProviderPin: "anthropic" }));
+    expect(res.status).toBe(422);
+    const body = await res.json();
+    expect(body.error).toMatch(/no change/);
+    expect(body.error).toMatch(/ANTHROPIC_API_KEY not set/); // the real reason, not just "no change"
+  });
+
+  it("authorTier pins the capability tier the executor authors at (for cross-model grading)", async () => {
+    await POST(post({ ref: "pr-tier", prompt: "add k", answers: { tests: "all" }, authorTier: "premium" }));
+    // First author call carries the pinned tier (the retry, if any, escalates further).
+    expect(mockComplete.mock.calls[0][0].model_tier).toBe("premium");
+  });
+
   it("400 (not 500) on an off-menu intake answer", async () => {
     mockRunPipeline.mockRejectedValue(new Error('unknown option "eventually" for question "tests"'));
     const res = await POST(post({ ...VALID, answers: { tests: "eventually" } }));
