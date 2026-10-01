@@ -9,7 +9,7 @@
  * All fetches go through fetchWithRefresh (15-min access TTL) per repo policy.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
 import { fetchWithRefresh, jsonHeaders } from "@/lib/client-auth";
 import { HourHeatmap } from "@/components/HourHeatmap";
 import { AgentOriginMap } from "@/components/AgentOriginMap";
@@ -131,8 +131,21 @@ type TriageStatus = "new" | "acknowledged" | "escalated" | "dismissed";
 
 const RANGES = [7, 30, 90] as const;
 
+const tabStyle = (active: boolean): CSSProperties => ({
+  padding: "0.4rem 0.9rem",
+  fontSize: "0.8rem",
+  fontWeight: active ? 800 : 600,
+  cursor: "pointer",
+  border: "none",
+  borderBottom: active ? "2px solid var(--wp-gold, #e8b528)" : "2px solid transparent",
+  background: "transparent",
+  color: active ? "var(--wp-text, #eee)" : "var(--wp-text-muted, #9ca3af)",
+});
+
 export default function SiteAnalyticsPage() {
   const [days, setDays] = useState<number>(30);
+  // Audience split: site usage vs agent-defense intel.
+  const [activeTab, setActiveTab] = useState<"usage" | "forcefield">("usage");
   const [surface, setSurface] = useState<string>("all");
   const [summary, setSummary] = useState<Summary | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
@@ -150,7 +163,7 @@ export default function SiteAnalyticsPage() {
   // The page is org-wide readable; write controls render only for callers who
   // hold the capability, so a viewer never sees a button that would 403. Least
   // privilege until the server tells us otherwise.
-  const [permissions, setPermissions] = useState<{ triage: boolean; manageOperators: boolean }>({ triage: false, manageOperators: false });
+  const [permissions, setPermissions] = useState<{ triage: boolean; manageOperators: boolean; viewIntel: boolean }>({ triage: false, manageOperators: false, viewIntel: false });
   const [repOptIn, setRepOptIn] = useState<{ contribute: boolean; consume: boolean } | null>(null);
   const [edgeMode, setEdgeMode] = useState<EdgeMode>("monitor");
   const [edgeAutoBlock, setEdgeAutoBlock] = useState(false);
@@ -269,7 +282,7 @@ export default function SiteAnalyticsPage() {
         setState("error");
         return;
       }
-      const body = (await res.json()) as { summary: Summary; permissions?: { triage: boolean; manageOperators: boolean } };
+      const body = (await res.json()) as { summary: Summary; permissions?: { triage: boolean; manageOperators: boolean; viewIntel: boolean } };
       setSummary(body.summary);
       if (body.permissions) setPermissions(body.permissions);
       // The reputation-network opt-in lives behind a manage capability; a 403 just
@@ -611,6 +624,16 @@ export default function SiteAnalyticsPage() {
 
           {permissions.manageOperators && <ForcefieldAssurance />}
 
+          {/* Audience split: site usage vs agent-defense intel. The Forcefield tab
+              exists only for forcefield.view holders; the data is gated server-side too. */}
+          <div data-testid="console-tabs" role="tablist" style={{ display: "flex", gap: "0.4rem", borderBottom: "1px solid var(--wp-dark-border, #262a33)" }}>
+            <button type="button" role="tab" data-testid="tab-usage" aria-selected={activeTab === "usage"} onClick={() => setActiveTab("usage")} style={tabStyle(activeTab === "usage")}>Site usage</button>
+            {permissions.viewIntel && (
+              <button type="button" role="tab" data-testid="tab-forcefield" aria-selected={activeTab === "forcefield"} onClick={() => setActiveTab("forcefield")} style={tabStyle(activeTab === "forcefield")}>Agent defense</button>
+            )}
+          </div>
+
+          <div data-testid="tab-panel-usage" hidden={activeTab !== "usage"} style={{ display: "grid", gap: "1.25rem" }}>
           {/* Totals */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "1rem" }}>
             <div style={card}>
@@ -795,6 +818,10 @@ export default function SiteAnalyticsPage() {
             </div>
           </div>
 
+          </div>{/* /tab-panel-usage */}
+
+          {permissions.viewIntel && (
+          <div data-testid="tab-panel-forcefield" hidden={activeTab !== "forcefield"} style={{ display: "grid", gap: "1.25rem" }}>
           {/* Learned hostile-tradecraft signatures: combos mined from agents we've
               already caught, used to catch new ones by their methods. Shadow =
               still proving itself (would-block only); Enforcing = earned auto-block
@@ -1427,6 +1454,7 @@ export default function SiteAnalyticsPage() {
               })()}
             </div>
           </div>
+          </div>)}{/* /tab-panel-forcefield */}
         </>
       )}
     </div>
