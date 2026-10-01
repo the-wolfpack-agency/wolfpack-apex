@@ -59,8 +59,14 @@ export interface GradeMetrics {
    *  fraction feedback rescued. "When it errs, can it recover?" - the signal that
    *  separates a usable-with-guardrails model from one that cannot be nudged. */
   recoveryRate: number;
-  /** Mean USD per run - value-per-dollar when read next to readyRate. */
+  /** Mean USD per PRICED run - value-per-dollar when read next to readyRate.
+   *  Averaged over priced runs only (see pricedShare): a recorded $0 means the
+   *  model is unpriced, not free, and must not read as infinitely cost-effective. */
   avgCostUsd: number;
+  /** Fraction of runs with a known (>0) cost. 0 => the model is unpriced
+   *  (e.g. a Foundry/compatible model with no price configured) and avgCostUsd is
+   *  not meaningful - wire its pricing before trusting value-per-dollar. */
+  pricedShare: number;
   failureProfile: FailureProfile;
 }
 
@@ -83,7 +89,11 @@ function gradeSet(records: readonly PipelineRunRecord[]): GradeMetrics {
   const blocked = records.filter((r) => r.finalOutcome === "block").length;
   const selfHealed = records.filter((r) => r.selfHealed === true).length;
   const needsHuman = records.filter((r) => r.status === "needs_human").length;
-  const totalCost = records.reduce((sum, r) => sum + (r.costUsd ?? 0), 0);
+  // A real model call always costs > 0; a recorded 0 (or absent) means UNPRICED,
+  // not free. Average over priced runs only so an unpriced model (a Foundry model
+  // with no price env) does not read as infinitely cost-effective.
+  const priced = records.filter((r) => typeof r.costUsd === "number" && r.costUsd > 0);
+  const totalCost = priced.reduce((sum, r) => sum + (r.costUsd as number), 0);
   const incidence = (pred: (r: PipelineRunRecord) => boolean) => rate(records.filter(pred).length, n);
   return {
     n,
@@ -93,7 +103,8 @@ function gradeSet(records: readonly PipelineRunRecord[]): GradeMetrics {
     // Denominator is runs that HIT trouble, not all runs: a model that rarely
     // errs but always recovers should read 1.0, not be diluted by its clean runs.
     recoveryRate: rate(selfHealed, selfHealed + needsHuman),
-    avgCostUsd: rate(totalCost, n),
+    avgCostUsd: rate(totalCost, priced.length),
+    pricedShare: rate(priced.length, n),
     failureProfile: {
       phantomImports: incidence((r) => (r.phantomImports ?? 0) > 0),
       brokenLocalImports: incidence((r) => (r.brokenLocalImports ?? 0) > 0),
