@@ -558,3 +558,31 @@ test("persists the diff + verdict reason on the pipeline_run event so history ca
   expect(meta).toHaveProperty("verdict_reason");
 });
 
+
+describe("anchor mode (large-file edits)", () => {
+  it("applies a matching SEARCH/REPLACE to the fetched file and hands off cleanly", async () => {
+    mockFetchFile.mockImplementation((_c: unknown, _r: unknown, path: string) =>
+      Promise.resolve(path === "src/x.ts" ? "export const a = 1;\nexport const b = 2;" : null));
+    mockComplete.mockResolvedValue(authorResp(
+      "EDIT src/x.ts\n<<<<<<< SEARCH\nexport const a = 1;\n=======\nexport const a = 2;\n>>>>>>> REPLACE"));
+    const res = await POST(post({ ref: "pr-anchor", prompt: "change a to 2", answers: { tests: "all" }, repo: "acme/app", mode: "anchor" }));
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.anchorFailures).toEqual([]);
+    // the edited full-file content flows to the gate; a benign change is handed off
+    expect(body.approvalId).toBe("appr-1");
+  });
+
+  it("reports a non-matching anchor and does NOT hand off (never a bad or partial auto-PR)", async () => {
+    mockFetchFile.mockImplementation((_c: unknown, _r: unknown, path: string) =>
+      Promise.resolve(path === "src/x.ts" ? "export const a = 1;" : null));
+    mockComplete.mockResolvedValue(authorResp(
+      "EDIT src/x.ts\n<<<<<<< SEARCH\nexport const NOPE = 9;\n=======\nx\n>>>>>>> REPLACE"));
+    const res = await POST(post({ ref: "pr-anchor-fail", prompt: "edit", answers: { tests: "all" }, repo: "acme/app", mode: "anchor" }));
+    const body = await res.json();
+    // no change applied -> 422, with the anchor failure surfaced so it is diagnosable
+    expect(res.status).toBe(422);
+    expect(body.anchorFailures).toEqual([{ path: "src/x.ts", reason: "anchor_not_found" }]);
+    expect(mockCreateApproval).not.toHaveBeenCalled();
+  });
+});

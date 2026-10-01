@@ -24,8 +24,9 @@ import { recordAudit } from "@/lib/audit-log";
 import { runCodeReview } from "@/lib/ai-code/scan";
 import { liveRepairComplete } from "@/lib/ai-code/repair";
 import { runPipeline } from "@/lib/ai-code/pipeline";
-import { authorDiff, authorFileChanges } from "@/lib/ai-code/author";
+import { authorDiff, authorFileChanges, authorAnchorEdits } from "@/lib/ai-code/author";
 import { filesToDiff, type FileChange } from "@/lib/ai-code/file-changes";
+import { applyAnchorEdits, type AnchorFailure } from "@/lib/ai-code/anchor-edit";
 import { newFilesFromDiff } from "@/lib/ai-code/oracle";
 import { checkSyntax } from "@/lib/ai-code/syntax-check";
 import { remediateFileChanges } from "@/lib/ai-code/repair-files";
@@ -80,13 +81,32 @@ function resolvedFiles(r: { diff: string; changes: FileChange[] | null }): { pat
  *  - diff mode (default): the executor authors a unified diff (new files)
  */
 async function resolveChange(args: {
-  mode: "diff" | "files";
+  mode: "diff" | "files" | "anchor";
   diff: string;
   prompt: string;
   authorModel: string;
   executorProviderPin?: string;
   tier?: AIModelTier;
-}): Promise<{ diff: string; author: string; executor: ExecutorEvidence | null; changes: FileChange[] | null }> {
+  /** For anchor mode: fetch the live content of the files being edited (apply needs it). */
+  fetchFiles?: (paths: string[]) => Promise<Record<string, string>>;
+}): Promise<{ diff: string; author: string; executor: ExecutorEvidence | null; changes: FileChange[] | null; anchorFailures?: AnchorFailure[] }> {
+  if (args.mode === "anchor") {
+    // Large-file edit mode: author emits exact SEARCH/REPLACE blocks, we fetch the
+    // live files and apply deterministically (a wrong anchor escalates, never a bad
+    // edit). The applied result is full-file content -> same gate + CI path.
+    const client = getAIClient();
+    const authored = await authorAnchorEdits(
+      { prompt: args.prompt, executorProviderPin: args.executorProviderPin, feature: "ai-code-pipeline-author-anchor", tier: args.tier },
+      { complete: (r) => client.complete(r) },
+    );
+    const paths = Array.from(new Set(authored.edits.map((e) => e.path)));
+    const files = args.fetchFiles ? await args.fetchFiles(paths) : {};
+    const applied = applyAnchorEdits(files, authored.edits);
+    const newOnly = authored.newFiles.filter((nf) => !applied.changes.some((c) => c.path === nf.path));
+    const changes = [...applied.changes, ...newOnly];
+    const ev: ExecutorEvidence = { author: authored.author, provider: authored.provider, costUsd: authored.costUsd, latencyMs: authored.latencyMs, inputTokens: authored.inputTokens ?? null, outputTokens: authored.outputTokens ?? null, error: authored.error };
+    return { diff: filesToDiff(changes), author: authored.author, executor: ev, changes, anchorFailures: applied.failures };
+  }
   if (args.mode === "files") {
     const client = getAIClient();
     const authored = await authorFileChanges(
@@ -119,7 +139,7 @@ type ResolveArgs = Parameters<typeof resolveChange>[0];
 async function resolveChangeWithFallback(
   args: ResolveArgs,
   installedRoots: ReadonlySet<string> = new Set(),
-): Promise<Awaited<ReturnType<typeof resolveChange>> & { executorAttempts: number; effectiveMode: "diff" | "files" }> {
+): Promise<Awaited<ReturnType<typeof resolveChange>> & { executorAttempts: number; effectiveMode: "diff" | "files" | "anchor" }> {
   const emptyOrError = (r: Awaited<ReturnType<typeof resolveChange>>) => !r.diff.trim() || Boolean(r.executor?.error);
   // Deterministic reasons a draft is bad, each fed back to the escalation retry:
   //  - empty / errored output
@@ -153,7 +173,10 @@ async function resolveChangeWithFallback(
   let attempts = 1;
   let effectiveMode = args.mode;
   const manualDiff = args.diff.trim().length > 0;
-  const feedback = manualDiff ? null : draftFeedback(resolved);
+  // Anchor mode never falls back to files mode: files mode can't fit the large file
+  // anchor mode exists for, and the retry would erase the anchor-failure diagnostics.
+  // An anchor failure stands and escalates to a human with the exact reason.
+  const feedback = (manualDiff || args.mode === "anchor") ? null : draftFeedback(resolved);
   if (feedback) {
     // Recover on a stronger model, WITH the deterministic reason fed back, AND in
     // FILES mode. Two dogfooding lessons combined: (1) "give the model the real
@@ -238,7 +261,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // evidence, never a 500 and never a fabricated diff.
   const executorProviderPin =
     typeof b.executorProviderPin === "string" && b.executorProviderPin.trim() ? b.executorProviderPin.trim() : undefined;
-  const mode: "diff" | "files" = b.mode === "files" ? "files" : "diff";
+  const mode: "diff" | "files" | "anchor" = b.mode === "files" ? "files" : b.mode === "anchor" ? "anchor" : "diff";
 
   // Repo-aware context: when a target repo is set, fetch the current contents of
   // the files the prompt NAMES and prepend them so the executor MODIFIES existing
@@ -294,7 +317,20 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     authorPrompt = withSpecDirectives(authorPrompt, specDirectives(DEFAULT_SPEC_QUESTIONS, resolvedSpec));
   }
 
-  const resolved = await resolveChangeWithFallback({ mode, diff, prompt: authorPrompt, authorModel, executorProviderPin }, installedRoots);
+  // Anchor mode needs the live content of the files it edits, fetched on demand.
+  const fetchFilesForAnchor = async (paths: string[]): Promise<Record<string, string>> => {
+    if (!repo) return {};
+    const out: Record<string, string> = {};
+    try {
+      const client = await workspaceGithubClient(workspaceId);
+      for (const path of paths) {
+        const c = await fetchFileContent(client, repo, path).catch(() => null);
+        if (typeof c === "string") out[path] = c;
+      }
+    } catch { /* best-effort; a missing file becomes an anchor failure, which escalates */ }
+    return out;
+  };
+  const resolved = await resolveChangeWithFallback({ mode, diff, prompt: authorPrompt, authorModel, executorProviderPin, fetchFiles: fetchFilesForAnchor }, installedRoots);
   // The mode the draft ACTUALLY ended on: a bad first draft recovers in files
   // mode, so downstream files-mode handling (repair loop, handoff, response) must
   // key on the effective mode, not the requested one.
@@ -304,10 +340,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   let effectiveDiff = resolved.diff;
   let effectiveAuthor = resolved.author;
   let changes = resolved.changes;
+  // Anchor edits that did not apply cleanly (missing/ambiguous anchor). A non-empty
+  // list blocks handoff: an edit that did not fully apply is never auto-PR'd.
+  const anchorFailures = resolved.anchorFailures ?? [];
   // Fail-closed: the executor ran but produced nothing usable. Never a 500, and
   // never a fabricated change - the gate has nothing to govern.
   if (executor && !effectiveDiff.trim()) {
-    return NextResponse.json({ error: "executor produced no change", executor }, { status: 422 });
+    return NextResponse.json({ error: "executor produced no change", executor, anchorFailures }, { status: 422 });
   }
 
   // Files-native AUTO-FIX: in files mode, if the authored files do not clear the
@@ -487,7 +526,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   let approvalId: string | null = null;
-  if (run.status === "ready_for_pr" && !invariants.wouldBlock && !deepScan.blocking && filesModeHandoffOk && syntax.ok && phantomImports.length === 0 && incompleteFiles.length === 0 && removedExports.length === 0) {
+  if (run.status === "ready_for_pr" && !invariants.wouldBlock && !deepScan.blocking && filesModeHandoffOk && syntax.ok && phantomImports.length === 0 && incompleteFiles.length === 0 && removedExports.length === 0 && anchorFailures.length === 0) {
     // Provision the factory's own governed principal (active + revocable) and hand
     // the approval its REAL agent id, so the human-in-the-gate approval's
     // kill-switch re-check finds an active agent instead of auto-rejecting. A null
@@ -533,5 +572,5 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   // A change that does not parse is never "ready_for_pr", whatever the gate said.
   const effectiveRun = syntax.ok ? run : { ...run, status: "needs_human" as const };
-  return NextResponse.json({ run: effectiveRun, approvalId, executor, invariants, changeFacts, deepScan, syntax, phantomImports, incompleteFiles, removedExports, mode: effectiveMode, executorAttempts, repoContext: { files: repoContextFiles }, cost });
+  return NextResponse.json({ run: effectiveRun, approvalId, executor, invariants, changeFacts, deepScan, syntax, phantomImports, incompleteFiles, removedExports, anchorFailures, mode: effectiveMode, executorAttempts, repoContext: { files: repoContextFiles }, cost });
 }
