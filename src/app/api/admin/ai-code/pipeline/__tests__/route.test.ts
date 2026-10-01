@@ -12,6 +12,7 @@ import { NextRequest } from "next/server";
 const mockRequireCapability = jest.fn();
 const mockRunPipeline = jest.fn();
 const mockTrackEvent = jest.fn();
+const mockTrackEventAwait = jest.fn(async (..._a: unknown[]) => {});
 const mockRecordAudit = jest.fn();
 const mockCreateApproval = jest.fn();
 
@@ -21,7 +22,10 @@ jest.mock("@/lib/auth/require-capability", () => ({
 jest.mock("@/lib/ai-code/pipeline", () => ({ runPipeline: (...a: unknown[]) => mockRunPipeline(...a) }));
 jest.mock("@/lib/ai-code/repair", () => ({ liveRepairComplete: () => async () => "" }));
 jest.mock("@/lib/ai-code/scan", () => ({ runCodeReview: jest.fn() }));
-jest.mock("@/lib/analytics", () => ({ trackEvent: (...a: unknown[]) => mockTrackEvent(...a) }));
+jest.mock("@/lib/analytics", () => ({
+  trackEvent: (...a: unknown[]) => mockTrackEvent(...a),
+  trackEventAwait: (...a: unknown[]) => mockTrackEventAwait(...a),
+}));
 jest.mock("@/lib/audit-log", () => ({ recordAudit: (...a: unknown[]) => mockRecordAudit(...a) }));
 jest.mock("@/lib/agents/approvals/store", () => ({ createPendingApproval: (...a: unknown[]) => mockCreateApproval(...a) }));
 const mockEnsureCodeGateAgent = jest.fn();
@@ -422,12 +426,17 @@ describe("POST /api/admin/ai-code/pipeline", () => {
     expect(mockRecordAudit).toHaveBeenCalledWith(
       expect.objectContaining({ action: "ai_code.pipeline_run" }),
     );
-    expect(mockTrackEvent).toHaveBeenCalledWith(
+    // AWAITED so the Run history row survives the serverless freeze.
+    expect(mockTrackEventAwait).toHaveBeenCalledWith(
       "ai_code.pipeline_run",
       "u1",
       "admin",
       expect.objectContaining({ ref: "pr-1", spec_hash: "spec_abc123", status: "ready_for_pr", conforms: true }),
     );
+    // Regression guard: the run event must NOT go through the fire-and-forget
+    // path, or it is lost when the lambda freezes (the "only one run" bug).
+    const fireAndForgetRun = mockTrackEvent.mock.calls.find((c: unknown[]) => c[0] === "ai_code.pipeline_run");
+    expect(fireAndForgetRun).toBeUndefined();
   });
 
   it("clamps maxAttempts to the ceiling", async () => {
@@ -550,7 +559,7 @@ describe("files mode (edit-support)", () => {
 
 test("persists the diff + verdict reason on the pipeline_run event so history can show the code", async () => {
   await POST(post(VALID));
-  const call = mockTrackEvent.mock.calls.find((c: unknown[]) => c[0] === "ai_code.pipeline_run");
+  const call = mockTrackEventAwait.mock.calls.find((c: unknown[]) => c[0] === "ai_code.pipeline_run");
   expect(call).toBeDefined();
   const meta = (call as unknown[])[3] as Record<string, unknown>;
   expect(meta.diff).toBe("d");             // the run's diff, persisted (capped)

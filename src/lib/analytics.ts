@@ -3256,22 +3256,33 @@ export interface InstinctEvent {
 /**
  * Track an event. Fire-and-forget - never blocks, never throws.
  */
-export function trackEvent(
+/**
+ * Like trackEvent, but AWAITS the primary instinct_events write. Use when the
+ * event MUST be durable before a serverless response returns - e.g. the ai-code
+ * run-history row. Vercel freezes the lambda once the response is sent, so a
+ * fire-and-forget insert is frequently dropped mid-flight (the cause of "Run
+ * history shows only one run" - most pipeline_run events never landed). Awaiting
+ * guarantees the row is committed. The secondary triple-write stays
+ * fire-and-forget. Never throws.
+ */
+export async function trackEventAwait(
   event: InstinctEventType,
   userId: string,
   userRole: string,
   metadata: Record<string, string | number | boolean> = {},
-): void {
+): Promise<void> {
   if (!process.env.DATABASE_URL) return;
 
   const ts = new Date().toISOString();
-  query(
-    `INSERT INTO instinct_events (event_type, user_id, user_role, metadata, timestamp)
-     VALUES ($1, $2, $3, $4, $5)`,
-    [event, userId, userRole, JSON.stringify({ ...metadata, ts }), ts],
-  ).catch((err) => {
+  try {
+    await query(
+      `INSERT INTO instinct_events (event_type, user_id, user_role, metadata, timestamp)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [event, userId, userRole, JSON.stringify({ ...metadata, ts }), ts],
+    );
+  } catch (err) {
     console.warn("[analytics] Failed to track:", (err as Error).message);
-  });
+  }
 
   // Fire-and-forget: secondary writes to Qdrant + Neo4j
   tripleWriteEvent({
@@ -3280,6 +3291,21 @@ export function trackEvent(
     user_role: userRole,
     metadata,
   }).catch(() => {});
+}
+
+/**
+ * Fire-and-forget analytics. Delegates to trackEventAwait without awaiting, so
+ * there is a single insert implementation (DRY). Fine for high-volume,
+ * non-critical events; when an event must survive a serverless freeze, await
+ * trackEventAwait directly.
+ */
+export function trackEvent(
+  event: InstinctEventType,
+  userId: string,
+  userRole: string,
+  metadata: Record<string, string | number | boolean> = {},
+): void {
+  void trackEventAwait(event, userId, userRole, metadata);
 }
 
 /**
