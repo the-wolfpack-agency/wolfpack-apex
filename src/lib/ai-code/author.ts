@@ -17,7 +17,9 @@
 import type { AICompleteRequest, AICompleteResponse, AIModelTier } from "@/lib/ai/types";
 import { AI_CODE_AUTHOR_PROMPT } from "@/lib/prompts/definitions/ai-code-author";
 import { AI_CODE_AUTHOR_FILES_PROMPT } from "@/lib/prompts/definitions/ai-code-author-files";
+import { AI_CODE_AUTHOR_ANCHOR_PROMPT } from "@/lib/prompts/definitions/ai-code-author-anchor";
 import { parseFileChanges, type FileChange } from "./file-changes";
+import { parseAnchorEdits, type AnchorEdit } from "./anchor-edit";
 
 export interface AuthorInput {
   /** What to build, in the words a person would use. */
@@ -148,6 +150,55 @@ export async function authorFileChanges(input: AuthorInput, deps: AuthorDeps): P
   } catch (e) {
     // silent-ok: recorded to result.error and returned; an unavailable executor
     // reads as "no files authored", never as a thrown request.
+    result.error = errText(e);
+  }
+  return result;
+}
+
+
+export interface AuthorAnchorResult {
+  /** Parsed anchor edits (SEARCH/REPLACE). Applied by the caller, which has the
+   *  live file contents. Also carries any brand-new FILE blocks as full files. */
+  edits: AnchorEdit[];
+  newFiles: FileChange[];
+  author: string;
+  provider: string | null;
+  costUsd: number | null;
+  latencyMs: number | null;
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  error: string | null;
+}
+
+/**
+ * Author a change as exact SEARCH/REPLACE ANCHOR edits (for large existing files).
+ * Parses both anchor EDIT blocks and any FILE blocks (brand-new files). Never
+ * throws: an unavailable executor is an empty result + a recorded error. The
+ * CALLER fetches the live files and applies the edits deterministically
+ * (applyAnchorEdits), so this function does no IO beyond the model call.
+ */
+export async function authorAnchorEdits(input: AuthorInput, deps: AuthorDeps): Promise<AuthorAnchorResult> {
+  const maxTokens = input.maxTokens ?? 4000;
+  const feature = input.feature ?? "ai-code-author-anchor";
+  const result: AuthorAnchorResult = { edits: [], newFiles: [], author: input.executorProviderPin ?? "unknown", provider: null, costUsd: null, latencyMs: null, inputTokens: null, outputTokens: null, error: null };
+  try {
+    const resp = await deps.complete({
+      system: AI_CODE_AUTHOR_ANCHOR_PROMPT.render({}),
+      messages: [{ role: "user", content: input.prompt }],
+      max_tokens: maxTokens,
+      model_tier: input.tier ?? "standard",
+      ...(input.executorProviderPin ? { provider_pin: input.executorProviderPin } : {}),
+      metadata: { feature },
+    });
+    result.edits = parseAnchorEdits(resp.content);
+    result.newFiles = parseFileChanges(resp.content); // brand-new files via FILE blocks
+    result.author = resp.model_used || resp.provider_used || result.author;
+    result.provider = resp.provider_used;
+    result.costUsd = resp.cost_usd;
+    result.latencyMs = resp.latency_ms;
+    result.inputTokens = resp.input_tokens;
+    result.outputTokens = resp.output_tokens;
+  } catch (e) {
     result.error = errText(e);
   }
   return result;

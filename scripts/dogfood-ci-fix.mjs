@@ -86,7 +86,19 @@ async function buildAndOpen(token) {
   const run = await pr.json().catch(() => ({}));
   console.log(`build: status=${run?.run?.status} approvalId=${run.approvalId || "(none)"} syntaxOk=${run?.syntax?.ok} outcome=${run?.run?.review?.verdict?.outcome}`);
   if (!run.approvalId) {
-    throw new Error(`pipeline did not produce an approval (status=${run?.run?.status}); gate blocked or needs_human`);
+    // Surface WHY handoff was blocked. The response carries these; printing them
+    // is the difference between "it didn't work" and an actionable reason.
+    const why = [];
+    if (run.anchorFailures?.length) why.push(`anchorFailures=${JSON.stringify(run.anchorFailures)}`);
+    if (run.removedExports?.length) why.push(`removedExports=${JSON.stringify(run.removedExports)}`);
+    if (run.incompleteFiles?.length) why.push(`incompleteFiles=${JSON.stringify(run.incompleteFiles.map((f) => f.path ?? f))}`);
+    if (run.phantomImports?.length) why.push(`phantomImports=${JSON.stringify(run.phantomImports.map((f) => f.module ?? f))}`);
+    if (run.invariants?.wouldBlock) why.push(`invariant=${run.invariants.reason}`);
+    if (run.deepScan?.blocking) why.push(`deepScanCritical=${run.deepScan.critical}`);
+    if (run.syntax && run.syntax.ok === false) why.push(`syntax=${JSON.stringify(run.syntax.issues)}`);
+    if (run?.run?.status === "needs_human") why.push(`verdict=${run?.run?.review?.verdict?.reason ?? "needs_human"}`);
+    console.log(`no handoff - block reason(s): ${why.join(" | ") || "unknown (no known gate flagged; status=" + run?.run?.status + ")"}`);
+    throw new Error(`pipeline did not produce an approval (status=${run?.run?.status}); see block reason above`);
   }
   const ap = await fetch(`${BASE}/api/admin/agents/approvals/${run.approvalId}`, {
     method: "POST",
