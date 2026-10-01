@@ -913,3 +913,39 @@ test("a seat without forcefield.view gets no Agent defense tab and no intel pane
   // the deep-intel sections are simply absent (also stripped server-side)
   expect(screen.queryByTestId("ff-learned-signatures")).toBeNull();
 });
+
+test("analyst can mark a hostile verdict a false positive; it posts operator + finding and confirms", async () => {
+  mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: SUMMARY, permissions: PERMS }) });
+  render(<SiteAnalyticsPage />);
+  await waitFor(() => expect(screen.getByTestId("ff-journey-fp1")).toBeInTheDocument());
+  fireEvent.click(screen.getByTestId("tab-forcefield"));
+  const btn = await screen.findByTestId("ff-mark-fp-fp1");
+  fireEvent.click(btn);
+  await waitFor(() => {
+    const call = mockFetchWithRefresh.mock.calls.find((c) => String(c[0]).includes("/verdict-feedback"));
+    expect(call).toBeTruthy();
+    expect(String(call![1]?.body)).toContain("fp1");
+  });
+  await waitFor(() => expect(screen.getByTestId("ff-mark-fp-fp1")).toHaveTextContent(/marked not hostile/i));
+});
+
+test("the false-positive rate is surfaced when analysts have flagged verdicts (trust check on the intel)", async () => {
+  mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: { ...SUMMARY, verdictFeedback: { falsePositives: 3 } }, permissions: PERMS }) });
+  render(<SiteAnalyticsPage />);
+  await waitFor(() => expect(screen.getByTestId("ff-fp-rate")).toBeInTheDocument());
+  expect(screen.getByTestId("ff-fp-rate")).toHaveTextContent("3");
+  expect(screen.getByTestId("ff-fp-rate")).toHaveTextContent(/not hostile/i);
+});
+
+test("low-data honesty: a banner shows on thin volume and is absent on healthy volume", async () => {
+  mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: { ...SUMMARY, totalEvents: 12 }, permissions: PERMS }) });
+  const { unmount } = render(<SiteAnalyticsPage />);
+  await waitFor(() => expect(screen.getByTestId("low-data-banner")).toBeInTheDocument());
+  expect(screen.getByTestId("low-data-banner")).toHaveTextContent("12");
+  unmount();
+
+  mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: { ...SUMMARY, totalEvents: 500 }, permissions: PERMS }) });
+  render(<SiteAnalyticsPage />);
+  await waitFor(() => expect(screen.getByTestId("site-analytics-page")).toBeInTheDocument());
+  expect(screen.queryByTestId("low-data-banner")).toBeNull();
+});

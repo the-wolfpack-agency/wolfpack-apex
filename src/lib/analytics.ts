@@ -711,6 +711,10 @@ export type InstinctEventType =
   | "ai_code.pr_gated"
   // forcefield.canary_seeded { workspace_id, kind, seeded_in } - a decoy was
   //   registered; the decoy VALUE is never in analytics.
+  // forcefield.verdict_false_positive { workspace_id, operatorKey, findingKey, reason }
+  // - an analyst marked a hostile verdict WRONG. Feeds the detection learning loop
+  // and makes the false-positive rate measurable (the trust check on the intel).
+  | "forcefield.verdict_false_positive"
   | "forcefield.canary_seeded"
   // forcefield.canary_retired { workspace_id } - a decoy was soft-disabled so
   //   it no longer trips. No value, no id-to-value linkage.
