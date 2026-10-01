@@ -43,6 +43,7 @@ import { fetchRepoGrounding } from "@/lib/ai-code/repo-grounding";
 import { findPhantomImports, parseInstalledRoots, phantomImportFeedback } from "@/lib/ai-code/imports";
 import {
   findBrokenLocalImports,
+  brokenLocalImportFeedback,
   extractLocalImports,
   resolveLocalCandidates,
   parseAliasMap,
@@ -137,6 +138,53 @@ async function resolveChange(args: {
 
 type ResolveArgs = Parameters<typeof resolveChange>[0];
 
+/** Context a local-import check needs: the repo tree (authoritative for module
+ *  existence) + tsconfig path aliases. */
+type LocalImportCtx = { repo: string | null; workspaceId: string; repoTree: Set<string>; aliasMap: Record<string, string> };
+
+/**
+ * Resolve + name-check every LOCAL import in `files` against the repo tree and
+ * the (fetched) source of each target module. Shared by the author-retry (so a
+ * hallucinated local import SELF-CORRECTS) and the final gate (so it blocks if
+ * the retry still did not fix it). Fail-open: unknown tree or a fetch failure
+ * returns []. The retry and the gate therefore apply the exact same rule.
+ */
+async function checkLocalImports(
+  files: readonly { path: string; content: string }[],
+  ctx: LocalImportCtx,
+): Promise<BrokenLocalImport[]> {
+  if (!ctx.repo || ctx.repoTree.size === 0) return [];
+  try {
+    const changeset = new Map(files.map((f) => [f.path, f.content]));
+    const repoCache = new Map<string, string | null>();
+    const wanted = new Set<string>();
+    for (const f of files) {
+      for (const li of extractLocalImports(f.path, f.content)) {
+        const cands = resolveLocalCandidates(f.path, li.spec, ctx.aliasMap);
+        if (cands.some((c) => changeset.has(c))) continue; // authored in THIS change
+        for (const c of cands) if (ctx.repoTree.has(c)) { wanted.add(c); break; }
+      }
+    }
+    if (wanted.size > 0) {
+      const gh = await workspaceGithubClient(ctx.workspaceId);
+      for (const path of wanted) {
+        const c = await fetchFileContent(gh, ctx.repo, path).catch(() => null);
+        repoCache.set(path, typeof c === "string" ? c : null);
+      }
+    }
+    const resolver: ModuleResolver = (fromPath, spec) => {
+      for (const cand of resolveLocalCandidates(fromPath, spec, ctx.aliasMap)) {
+        if (changeset.has(cand)) return { exists: true, content: changeset.get(cand) ?? null };
+        if (ctx.repoTree.has(cand)) return { exists: true, content: repoCache.get(cand) ?? null };
+      }
+      return { exists: false, content: null };
+    };
+    return findBrokenLocalImports(files, resolver);
+  } catch {
+    return []; // best-effort: never block a handoff on a resolver/fetch failure
+  }
+}
+
 /**
  * Author with a GOVERNED fallback so a simple authoring failure does not end the
  * run. If the first executor produces nothing usable (and no manual diff was
@@ -148,6 +196,10 @@ type ResolveArgs = Parameters<typeof resolveChange>[0];
 async function resolveChangeWithFallback(
   args: ResolveArgs,
   installedRoots: ReadonlySet<string> = new Set(),
+  /** Optional async check for hallucinated LOCAL imports. When it finds any, the
+   *  draft self-corrects (escalate + exact feedback) instead of only blocking at
+   *  the gate - the #229 class (a name a real module doesn't export). */
+  localImportCheck?: (files: readonly { path: string; content: string }[]) => Promise<BrokenLocalImport[]>,
 ): Promise<Awaited<ReturnType<typeof resolveChange>> & { executorAttempts: number; effectiveMode: "diff" | "files" | "anchor" }> {
   const emptyOrError = (r: Awaited<ReturnType<typeof resolveChange>>) => !r.diff.trim() || Boolean(r.executor?.error);
   // Deterministic reasons a draft is bad, each fed back to the escalation retry:
@@ -185,7 +237,15 @@ async function resolveChangeWithFallback(
   // Anchor mode never falls back to files mode: files mode can't fit the large file
   // anchor mode exists for, and the retry would erase the anchor-failure diagnostics.
   // An anchor failure stands and escalates to a human with the exact reason.
-  const feedback = (manualDiff || args.mode === "anchor") ? null : draftFeedback(resolved);
+  const selfHealable = !(manualDiff || args.mode === "anchor");
+  let feedback = selfHealable ? draftFeedback(resolved) : null;
+  // Then the async check: a hallucinated LOCAL import (resolves to no file, or a
+  // name a real module does not export - the #229 class). Same self-heal path:
+  // give the model the exact failure and re-author, instead of only blocking.
+  if (!feedback && selfHealable && localImportCheck) {
+    const broken = await localImportCheck(resolvedFiles(resolved));
+    if (broken.length > 0) feedback = brokenLocalImportFeedback(broken);
+  }
   if (feedback) {
     // Recover on a stronger model, WITH the deterministic reason fed back, AND in
     // FILES mode. Two dogfooding lessons combined: (1) "give the model the real
@@ -350,7 +410,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     } catch { /* best-effort; a missing file becomes an anchor failure, which escalates */ }
     return out;
   };
-  const resolved = await resolveChangeWithFallback({ mode, diff, prompt: authorPrompt, authorModel, executorProviderPin, fetchFiles: fetchFilesForAnchor }, installedRoots);
+  // Shared local-import context: the author-retry self-corrects a hallucinated
+  // local import with it, and the final gate re-checks with the SAME logic.
+  const localImportCtx: LocalImportCtx = { repo: repo ?? null, workspaceId, repoTree, aliasMap };
+  const resolved = await resolveChangeWithFallback(
+    { mode, diff, prompt: authorPrompt, authorModel, executorProviderPin, fetchFiles: fetchFilesForAnchor },
+    installedRoots,
+    (files) => checkLocalImports(files, localImportCtx),
+  );
   // The mode the draft ACTUALLY ended on: a bad first draft recovers in files
   // mode, so downstream files-mode handling (repair loop, handoff, response) must
   // key on the effective mode, not the requested one.
@@ -459,35 +526,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     },
   });
 
-  // AWAITED: this row backs the Run history UI. Fire-and-forget loses it when
-  // Vercel freezes the lambda after the response (the "only one run shows" bug).
-  await trackEventAwait("ai_code.pipeline_run", auth.user.id, auth.user.role, {
-    // workspace_id scopes the run history + grading read (multi-tenant safe).
-    workspace_id: workspaceId,
-    // The target repo, so the history groups per-site once the factory builds
-    // across repos ("(self)" = the self-hosted apex/Instinct executor default).
-    repo: repo ?? "(self)",
-    ref,
-    spec_hash: run.spec.hash,
-    status: run.status,
-    attempts: run.remediation.attempts.length,
-    final_outcome: run.review.verdict.outcome,
-    open_questions: run.openQuestions.length,
-    conforms: run.conformance.conforms,
-    // Attribution for grading + per-model drift (src/lib/ai-code/grading.ts).
-    model: effectiveAuthor,
-    cost_usd: executor?.costUsd ?? 0,
-    executor_attempts: executorAttempts,
-    repo_context_files: repoContextFiles.length,
-    reuse_candidates: reuseCandidates,
-    deep_scan_critical: deepScan.critical,
-    // Persist the actual change so "Run history" can show the code, not just the
-    // grade (found by dogfooding: history rows had no way to see the diff). Capped.
-    diff: run.diff.slice(0, HISTORY_DIFF_CAP),
-    diff_truncated: run.diff.length > HISTORY_DIFF_CAP,
-    verdict_reason: run.review.verdict.reason,
-  });
-
   // Protection evidence: one finding_detected per issue the gate caught, so the
   // "protected you from production issues" panel can show what class of problem
   // was stopped (secrets, injection, unsafe patterns) before it reached a human.
@@ -557,38 +595,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // the repo tree (authoritative, one call); a name is judged against the target
   // module's fetched source and FAILS OPEN when the source is unread or the module
   // re-exports with `export *`. No-op without a repo tree (unknown => never flag).
-  const brokenLocalImports: BrokenLocalImport[] = [];
-  if (repo && repoTree.size > 0) {
-    try {
-      const changeset = new Map(finalFiles.map((f) => [f.path, f.content]));
-      const repoCache = new Map<string, string | null>();
-      const wanted = new Set<string>();
-      for (const f of finalFiles) {
-        for (const li of extractLocalImports(f.path, f.content)) {
-          const cands = resolveLocalCandidates(f.path, li.spec, aliasMap);
-          if (cands.some((c) => changeset.has(c))) continue; // authored in THIS change
-          for (const c of cands) if (repoTree.has(c)) { wanted.add(c); break; }
-        }
-      }
-      if (wanted.size > 0) {
-        const gh = await workspaceGithubClient(workspaceId);
-        for (const path of wanted) {
-          const c = await fetchFileContent(gh, repo, path).catch(() => null);
-          repoCache.set(path, typeof c === "string" ? c : null);
-        }
-      }
-      const resolver: ModuleResolver = (fromPath, spec) => {
-        for (const cand of resolveLocalCandidates(fromPath, spec, aliasMap)) {
-          if (changeset.has(cand)) return { exists: true, content: changeset.get(cand) ?? null };
-          if (repoTree.has(cand)) return { exists: true, content: repoCache.get(cand) ?? null };
-        }
-        return { exists: false, content: null };
-      };
-      brokenLocalImports.push(...findBrokenLocalImports(finalFiles, resolver));
-    } catch {
-      /* best-effort: never block a handoff on a resolver/fetch failure */
-    }
-  }
+  // Same check the author-retry used, re-run on the FINAL draft: if a self-heal
+  // attempt still left a broken local import, it blocks here (needs_human).
+  const brokenLocalImports = await checkLocalImports(finalFiles, localImportCtx);
 
   let approvalId: string | null = null;
   if (run.status === "ready_for_pr" && !invariants.wouldBlock && !deepScan.blocking && filesModeHandoffOk && syntax.ok && phantomImports.length === 0 && incompleteFiles.length === 0 && removedExports.length === 0 && anchorFailures.length === 0 && brokenLocalImports.length === 0) {
@@ -638,5 +647,51 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // A change that does not parse, or imports a local symbol that does not exist,
   // is never "ready_for_pr" whatever the gate said - both always fail CI.
   const effectiveRun = syntax.ok && brokenLocalImports.length === 0 ? run : { ...run, status: "needs_human" as const };
-  return NextResponse.json({ run: effectiveRun, approvalId, executor, invariants, changeFacts, deepScan, syntax, phantomImports, incompleteFiles, removedExports, anchorFailures, brokenLocalImports, mode: effectiveMode, executorAttempts, repoContext: { files: repoContextFiles }, cost });
+
+  // A retry happened AND the final draft is clean of every self-healable class:
+  // the model RECOVERED from its own mistake given the exact feedback. The single
+  // most valuable per-model signal - it separates "got it right first try" from
+  // "needed a nudge" from "could not be nudged".
+  const selfHealed =
+    executorAttempts > 1 && syntax.ok && phantomImports.length === 0 && incompleteFiles.length === 0 && brokenLocalImports.length === 0;
+
+  // AWAITED (backs Run history) + the per-run FAILURE TAXONOMY, so every run is a
+  // labeled datapoint for grading a model's real limits as we switch models:
+  // which deterministic gate each model trips, how often, and whether it recovers
+  // from feedback. This is the dataset the dogfooding generates; record all of it.
+  await trackEventAwait("ai_code.pipeline_run", auth.user.id, auth.user.role, {
+    workspace_id: workspaceId, // scopes the run history + grading read (multi-tenant safe)
+    repo: repo ?? "(self)",
+    ref,
+    spec_hash: run.spec.hash,
+    status: effectiveRun.status, // the EFFECTIVE outcome (a gate block downgrades to needs_human)
+    attempts: run.remediation.attempts.length,
+    final_outcome: run.review.verdict.outcome,
+    open_questions: run.openQuestions.length,
+    conforms: run.conformance.conforms,
+    // Per-model attribution (src/lib/ai-code/grading.ts).
+    model: effectiveAuthor,
+    mode: effectiveMode,
+    cost_usd: executor?.costUsd ?? 0,
+    executor_attempts: executorAttempts,
+    self_healed: selfHealed,
+    handed_off: approvalId !== null,
+    repo_context_files: repoContextFiles.length,
+    reuse_candidates: reuseCandidates,
+    // The failure taxonomy: which deterministic gate fired on the FINAL draft.
+    syntax_ok: syntax.ok,
+    phantom_imports: phantomImports.length,
+    broken_local_imports: brokenLocalImports.length,
+    incomplete_files: incompleteFiles.length,
+    removed_exports: removedExports.length,
+    anchor_failures: anchorFailures.length,
+    deep_scan_critical: deepScan.critical,
+    deep_scan_high: deepScan.high,
+    // The change itself, so history shows the code, not just the grade. Capped.
+    diff: run.diff.slice(0, HISTORY_DIFF_CAP),
+    diff_truncated: run.diff.length > HISTORY_DIFF_CAP,
+    verdict_reason: run.review.verdict.reason,
+  });
+
+  return NextResponse.json({ run: effectiveRun, approvalId, executor, invariants, changeFacts, deepScan, syntax, phantomImports, incompleteFiles, removedExports, anchorFailures, brokenLocalImports, selfHealed, mode: effectiveMode, executorAttempts, repoContext: { files: repoContextFiles }, cost });
 }

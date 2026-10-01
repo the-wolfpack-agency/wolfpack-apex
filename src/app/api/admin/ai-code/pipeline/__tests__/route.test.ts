@@ -291,17 +291,46 @@ describe("POST /api/admin/ai-code/pipeline", () => {
   // ("has no exported member"). The gate must now catch it and refuse handoff.
   const BROKEN_LOCAL_DIFF = 'diff --git a/src/app/r/route.ts b/src/app/r/route.ts\n--- /dev/null\n+++ b/src/app/r/route.ts\n@@ -0,0 +1,2 @@\n+import { missingFn } from "@/lib/real";\n+export const GET = () => missingFn();';
 
-  it("broken local import (#229): a name a real module does not export blocks handoff, surfaced to the human", async () => {
+  const realRepoMocks = () => {
     mockFetchTree.mockResolvedValue(["src/lib/real.ts"]); // @/lib/real resolves to a real file...
     mockFetchFile.mockImplementation(async (_c: unknown, _r: unknown, path: string) => {
       if (path === "tsconfig.json") return JSON.stringify({ compilerOptions: { paths: { "@/*": ["./src/*"] } } });
       if (path === "src/lib/real.ts") return "export function realFn() {}"; // ...but it has NO missingFn
       return null;
     });
-    mockComplete.mockResolvedValue(authorResp("```diff\n" + BROKEN_LOCAL_DIFF + "\n```"));
+  };
+  const ROUTE_PATH = "src/app/r/route.ts";
+  const brokenFiles = `import { missingFn } from "@/lib/real";\nexport const GET = () => missingFn();`;
+  const fixedFiles = `import { realFn } from "@/lib/real";\nexport const GET = () => realFn();`;
+
+  it("broken local import (#229) SELF-HEALS: a stronger model gets the exact failure and fixes it", async () => {
+    realRepoMocks();
+    // First draft hallucinates the import; the escalation retry (files mode) fixes it.
+    mockComplete
+      .mockResolvedValueOnce(authorResp("```diff\n" + BROKEN_LOCAL_DIFF + "\n```"))
+      .mockResolvedValue(filesResp(ROUTE_PATH, fixedFiles));
+    mockRunPipeline.mockResolvedValue({ ...RUN, status: "ready_for_pr", diff: BROKEN_LOCAL_DIFF });
+    const res = await POST(post({ ref: "pr-selfheal", prompt: "add route", repo: "acme/app", answers: { tests: "all" } }));
+    const body = await res.json();
+    expect(body.executorAttempts).toBe(2); // the broken import triggered a retry
+    // The retry was told exactly what was wrong.
+    const retryPrompt = mockComplete.mock.calls[1][0].messages[0].content as string;
+    expect(retryPrompt).toMatch(/missingFn/);
+    expect(body.brokenLocalImports).toEqual([]); // converged
+    expect(body.selfHealed).toBe(true);
+    expect(body.approvalId).toBe("appr-1"); // clean -> handed off, no human needed
+  });
+
+  it("broken local import that the retry does NOT fix still blocks handoff (needs_human)", async () => {
+    realRepoMocks();
+    mockComplete
+      .mockResolvedValueOnce(authorResp("```diff\n" + BROKEN_LOCAL_DIFF + "\n```"))
+      .mockResolvedValue(filesResp(ROUTE_PATH, brokenFiles)); // retry still broken
     mockRunPipeline.mockResolvedValue({ ...RUN, status: "ready_for_pr", diff: BROKEN_LOCAL_DIFF });
     const res = await POST(post({ ref: "pr-broken-local", prompt: "add route", repo: "acme/app", answers: { tests: "all" } }));
     const body = await res.json();
+    expect(body.executorAttempts).toBe(2);
+    expect(body.selfHealed).toBe(false);
     expect(body.approvalId).toBeNull(); // never handed off
     expect(body.run.status).toBe("needs_human"); // never a misleading "ready"
     expect(body.brokenLocalImports).toEqual(
