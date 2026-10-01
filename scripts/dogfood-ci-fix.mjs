@@ -26,6 +26,12 @@
 const BASE = process.env.INSTINCT_URL || "https://wolfpack-instinct.vercel.app";
 const EMAIL = process.env.FACTORY_EMAIL;
 const PASSWORD = process.env.FACTORY_PASSWORD;
+// Preferred: a non-interactive SERVICE TOKEN (no login, no provisioning, no Manual).
+// Falls back to FACTORY_EMAIL/PASSWORD login only when the token is absent.
+const SERVICE_TOKEN = process.env.FACTORY_SERVICE_TOKEN;
+function authHeaders(token) {
+  return SERVICE_TOKEN ? { "x-factory-token": SERVICE_TOKEN } : { authorization: `Bearer ${token}` };
+}
 
 function arg(name, def) {
   const i = process.argv.indexOf(`--${name}`);
@@ -46,7 +52,7 @@ const maxAttempts = Number(arg("max", "3"));
 const pollSeconds = Number(arg("poll", "30"));
 const ceiling = Number(arg("ceiling", "40")); // hard stop on total loop iterations
 
-if (!EMAIL || !PASSWORD) { console.error("set FACTORY_EMAIL and FACTORY_PASSWORD"); process.exit(2); }
+if (!SERVICE_TOKEN && (!EMAIL || !PASSWORD)) { console.error("set FACTORY_SERVICE_TOKEN (preferred, non-interactive) or FACTORY_EMAIL + FACTORY_PASSWORD"); process.exit(2); }
 if (!repo) { console.error("--repo is required"); process.exit(2); }
 if (!branch && !prompt) { console.error("either --branch (drive) or --prompt (build+drive) is required"); process.exit(2); }
 if (prompt && !ref) { console.error("--ref is required with --prompt (it names the branch + PR)"); process.exit(2); }
@@ -67,7 +73,7 @@ async function login() {
 async function driveOnce(token) {
   const r = await fetch(`${BASE}/api/admin/ai-code/ci-fix`, {
     method: "POST",
-    headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+    headers: { "content-type": "application/json", ...authHeaders(token) },
     body: JSON.stringify({ repo, ref, branch, base, attempt: 0, maxAttempts }),
   });
   const body = await r.json().catch(() => ({}));
@@ -80,7 +86,7 @@ async function driveOnce(token) {
 async function buildAndOpen(token) {
   const pr = await fetch(`${BASE}/api/admin/ai-code/pipeline`, {
     method: "POST",
-    headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+    headers: { "content-type": "application/json", ...authHeaders(token) },
     body: JSON.stringify({ ref, prompt, repo, maxAttempts, mode }),
   });
   const run = await pr.json().catch(() => ({}));
@@ -102,7 +108,7 @@ async function buildAndOpen(token) {
   }
   const ap = await fetch(`${BASE}/api/admin/agents/approvals/${run.approvalId}`, {
     method: "POST",
-    headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+    headers: { "content-type": "application/json", ...authHeaders(token) },
     body: JSON.stringify({ action: "approve" }),
   });
   const out = await ap.json().catch(() => ({}));
@@ -113,12 +119,12 @@ async function buildAndOpen(token) {
 }
 
 (async () => {
-  let token = await login();
+  let token = SERVICE_TOKEN ? null : await login();
   if (prompt) branch = await buildAndOpen(token);
   console.log(`driving ${repo} ${branch} (base ${base}), max ${maxAttempts} fix attempts\n`);
   for (let i = 1; i <= ceiling; i++) {
     let { status, body } = await driveOnce(token);
-    if (status === 401) { token = await login(); ({ status, body } = await driveOnce(token)); }
+    if (status === 401 && !SERVICE_TOKEN) { token = await login(); ({ status, body } = await driveOnce(token)); }
     const d = body.decision || {};
     const line = {
       iter: i, action: d.action, reason: d.reason,
