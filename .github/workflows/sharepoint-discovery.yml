@@ -44,12 +44,4 @@ jobs:
           echo "$BODY" | python3 -c 'import json,sys; [print("[discover]", l) for l in json.load(sys.stdin).get("lines", [])]'
           # An account that could not be asked makes the gap look smaller than
           # it is, so it fails the run rather than being a line nobody reads.
-          echo "$BODY" | python3 -c '
-import json,sys
-d = json.load(sys.stdin)
-blocked = d.get("couldNotAsk") or []
-if blocked:
-    for b in blocked:
-        print(f"::error::Could not search as {b[\"email\"]}: {b[\"reason\"]}. The reported gap is incomplete.")
-    sys.exit(1)
-'
+          echo "$BODY" | python3 -c 'import json,sys; d=json.load(sys.stdin); blocked=d.get("couldNotAsk") or []; [print("::error::Could not search as {}: {}. The reported gap is incomplete.".format(b["email"], b["reason"])) for b in blocked]; sys.exit(1 if blocked else 0)'
