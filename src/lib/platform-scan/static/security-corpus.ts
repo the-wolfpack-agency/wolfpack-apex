@@ -65,6 +65,9 @@ export const CRED_CONTEXT =
 /** TLS certificate validation turned off - MITM exposure. */
 export const TLS_DISABLED = /rejectUnauthorized\s*:\s*false|NODE_TLS_REJECT_UNAUTHORIZED\s*=\s*['"]?0/;
 
+/** A broken hash algorithm (MD5 / SHA-1) passed to crypto.createHash. */
+export const WEAK_HASH = /\bcreateHash\s*\(\s*['"](?:md5|sha-?1)['"]/i;
+
 /**
  * Provider API-key formats shared by the general secret scanner
  * (platform-scan SECRET_PROVIDERS) and the AI-surface key detector

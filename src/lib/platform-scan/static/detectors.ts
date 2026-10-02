@@ -32,6 +32,7 @@ import {
   SECRET_ANTHROPIC,
   SECRET_OPENAI,
   SECRET_GOOGLE,
+  WEAK_HASH,
 } from "@/lib/platform-scan/static/security-corpus";
 
 interface SourceFile {
@@ -874,6 +875,40 @@ export function prototypePollution(file: SourceFile): ScanFinding[] {
   return findings;
 }
 
+/**
+ * weakHash: a broken hash algorithm (MD5 / SHA-1) passed to createHash (CWE-328).
+ * MD5 and SHA-1 are collision-broken and far too fast for hashing credentials.
+ * HIGH when a credential context sits nearby (hashing a password/token with MD5 is
+ * a real vulnerability); MEDIUM otherwise (a weak checksum - still switch to
+ * SHA-256). A password specifically should use a slow KDF (bcrypt/scrypt/argon2),
+ * not a raw hash.
+ */
+export function weakHash(file: SourceFile): ScanFinding[] {
+  const lines = file.content.split("\n");
+  const findings: ScanFinding[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = codeOnly(lines[i]);
+    if (!WEAK_HASH.test(line)) continue;
+    if (/(audit-safe|eslint-disable)/i.test(`${lines[i - 1] ?? ""}\n${line}`)) continue;
+    const ctx = `${codeOnly(lines[i - 2] ?? "")}\n${codeOnly(lines[i - 1] ?? "")}\n${line}\n${codeOnly(lines[i + 1] ?? "")}\n${codeOnly(lines[i + 2] ?? "")}`;
+    const credContext = CRED_CONTEXT.test(ctx);
+    findings.push({
+      route: file.path,
+      severity: credContext ? "high" : "medium",
+      category: "security",
+      title: credContext ? "Weak hash (MD5/SHA-1) of a credential" : "Weak hash algorithm (MD5/SHA-1)",
+      detail: credContext
+        ? "A credential is hashed with MD5/SHA-1 - collision-broken and far too fast, " +
+          "so it is brute-forceable (CWE-328). Hash passwords with a slow KDF " +
+          "(bcrypt/scrypt/argon2); for other secrets use SHA-256+."
+        : "MD5/SHA-1 is a broken hash (CWE-328). Even for a non-security checksum, " +
+          "prefer SHA-256; never use it for anything security-relevant.",
+      evidence: { line: i + 1, snippet: lines[i].trim() },
+    });
+  }
+  return findings;
+}
+
 /** Compose every detector over one file. */
 export function runDetectors(file: SourceFile): ScanFinding[] {
   return [
@@ -892,5 +927,6 @@ export function runDetectors(file: SourceFile): ScanFinding[] {
     ...dynamicModuleLoad(file),
     ...insecureRandomToken(file),
     ...prototypePollution(file),
+    ...weakHash(file),
   ];
 }

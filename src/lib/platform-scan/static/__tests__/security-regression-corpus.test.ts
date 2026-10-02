@@ -168,6 +168,14 @@ const MUST_CATCH: BadSample[] = [
     minSeverity: "high",
     titleIncludes: /xss/i,
   },
+  {
+    name: "weak hash (MD5) of a password",
+    cwe: "CWE-328",
+    path: "src/lib/hashpw.ts",
+    code: `import { createHash } from "crypto";\nexport const hashPassword = (password: string) => createHash("md5").update(password).digest("hex");`,
+    minSeverity: "high",
+    titleIncludes: /weak hash/i,
+  },
 ];
 
 /**
@@ -236,6 +244,11 @@ const CLEAN: { name: string; path: string; code: string }[] = [
     path: "src/components/Ld.tsx",
     code: `export const Ld = (d: object) => <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(d) }} />;`,
   },
+  {
+    name: "strong hash (SHA-256) of a password",
+    path: "src/lib/hashpw-safe.ts",
+    code: `import { createHash } from "crypto";\nexport const h = (password: string) => createHash("sha256").update(password).digest("hex");`,
+  },
 ];
 
 describe("security regression corpus - MUST-CATCH (a drop here means the gate stopped catching a real exploit)", () => {
@@ -286,6 +299,7 @@ describe("security regression corpus - handoff gate coverage", () => {
       /hardcoded secret/i,
       /credential written to a log/i,
       /xss/i,
+      /weak hash/i,
     ];
     for (const fam of requiredFamilies) {
       expect(titles.some((t) => t.source === fam.source)).toBe(true);
