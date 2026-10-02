@@ -36,6 +36,7 @@ const SHARED_SIGNATURES: { name: string; fragment: string }[] = [
   { name: "Math.random()", fragment: "Math\\s*\\.\\s*random\\s*\\(\\s*\\)" },
   { name: "SQL keywords", fragment: "select|insert\\s+into|update|delete\\s+from|where|from" },
   { name: "TLS verify off", fragment: "rejectUnauthorized\\s*:\\s*false" },
+  { name: "weak hash (MD5/SHA-1)", fragment: "createHash\\s*\\(\\s*['\"](?:md5|sha-?1)" },
   { name: "dangerouslySetInnerHTML sink", fragment: "\\bdangerouslySetInnerHTML\\b" },
   { name: "Anthropic key format", fragment: "sk-ant-[A-Za-z0-9_-]{24,}" },
   { name: "OpenAI key format", fragment: "sk-(?!ant-)(?:proj-)?[A-Za-z0-9_-]{32,}" },
