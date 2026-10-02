@@ -40,6 +40,7 @@ import { workspaceGithubClient, fetchFileContent, fetchRepoTree } from "@/lib/gi
 import { buildRepoContext, withRepoContext, extractMentionedPaths } from "@/lib/ai-code/repo-context";
 import { findReuseCandidates } from "@/lib/ai-code/reuse-scout";
 import { buildKnownExportsBlock, exportsEntries } from "@/lib/ai-code/export-grounding";
+import { duplicationSignal } from "@/lib/ai-code/reuse-enforcement";
 import { fetchRepoGrounding } from "@/lib/ai-code/repo-grounding";
 import { findPhantomImports, parseInstalledRoots, phantomImportFeedback } from "@/lib/ai-code/imports";
 import {
@@ -356,6 +357,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   let authorPrompt = prompt;
   let repoContextFiles: string[] = [];
   let reuseCandidates = 0;
+  // The reuse-scout candidates (path + score), kept for the SHADOW duplication
+  // signal recorded on the run event (did the change reuse the top candidate?).
+  let reuseCandidatesList: { path: string; score: number }[] = [];
   // The repo's installed packages (package.json), so a phantom-import (a package
   // not installed) can be DETERMINISTICALLY caught and self-corrected - grounding
   // only advises against it. Empty set => unknown deps => the phantom check is a
@@ -389,6 +393,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           fetchFileContent(ghClient, groundingRepo, "tsconfig.json").catch(() => null),
         ]);
         reuseCandidates = reuse.candidates.length;
+        reuseCandidatesList = reuse.candidates.map((c) => ({ path: c.path, score: c.score }));
         repoTree = new Set(tree);
         if (tsconfig) aliasMap = parseAliasMap(tsconfig);
 
@@ -704,6 +709,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const selfHealed =
     executorAttempts > 1 && syntax.ok && phantomImports.length === 0 && incompleteFiles.length === 0 && brokenLocalImports.length === 0;
 
+  // SHADOW duplication signal: did the change reuse the top module the scout found?
+  const dupSignal = duplicationSignal(reuseCandidatesList, finalFiles, aliasMap);
+
   // AWAITED (backs Run history) + the per-run FAILURE TAXONOMY, so every run is a
   // labeled datapoint for grading a model's real limits as we switch models:
   // which deterministic gate each model trips, how often, and whether it recovers
@@ -727,6 +735,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     handed_off: approvalId !== null,
     repo_context_files: repoContextFiles.length,
     reuse_candidates: reuseCandidates,
+    // SHADOW duplication signal (reuse-enforcement.ts): the top existing module
+    // the scout surfaced + whether the change reused it. Recorded, NOT enforced -
+    // a high score that went unreused is likely a re-implementation, and this
+    // data is what sets the escalation threshold before we turn enforcement on.
+    reuse_top_score: dupSignal.topScore,
+    ...(dupSignal.topReused !== null ? { reuse_top_reused: dupSignal.topReused } : {}),
     // The failure taxonomy: which deterministic gate fired on the FINAL draft.
     syntax_ok: syntax.ok,
     phantom_imports: phantomImports.length,
