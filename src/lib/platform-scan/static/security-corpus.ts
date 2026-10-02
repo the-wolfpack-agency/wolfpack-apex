@@ -38,7 +38,9 @@ export const SQL_CONCAT = /['"]\s*\+|\+\s*['"]/;
 /** $1,$2 placeholders - the SAFE parameterized form, never flagged. */
 export const SQL_PARAMETERIZED = /\$\d+\b/;
 
-/** The React/DOM raw-HTML injection sinks. */
+/** The React raw-HTML injection sink (narrow: the JSX prop only). */
+export const DANGEROUS_INNER_HTML = /\bdangerouslySetInnerHTML\b/;
+/** The full raw-HTML injection sink set: the JSX prop OR a .innerHTML assignment. */
 export const DANGEROUS_HTML = /\bdangerouslySetInnerHTML\b|\.innerHTML\s*=/;
 
 /** Math.random() - not a CSPRNG. */
@@ -62,6 +64,26 @@ export const CRED_CONTEXT =
 
 /** TLS certificate validation turned off - MITM exposure. */
 export const TLS_DISABLED = /rejectUnauthorized\s*:\s*false|NODE_TLS_REJECT_UNAUTHORIZED\s*=\s*['"]?0/;
+
+/**
+ * Provider API-key formats shared by the general secret scanner
+ * (platform-scan SECRET_PROVIDERS) and the AI-surface key detector
+ * (ai-surface KEY_SIGNATURES). Defined once so they can't drift - they already
+ * HAD drifted: the AI-surface OpenAI regex carried a `(?!ant-)` negative-lookahead
+ * (so an Anthropic key isn't also counted as OpenAI) that the platform-scan copy
+ * lacked. This is the single, correct definition.
+ */
+export const SECRET_ANTHROPIC = /\bsk-ant-[A-Za-z0-9_-]{24,}\b/;
+export const SECRET_OPENAI = /\bsk-(?!ant-)(?:proj-)?[A-Za-z0-9_-]{32,}\b/;
+export const SECRET_GOOGLE = /\bAIza[0-9A-Za-z_-]{35}\b/;
+
+/** The AI-provider key signatures (slug + regex) - the AI-surface subset of the
+ *  shared provider list. */
+export const AI_PROVIDER_KEY_SIGNATURES: ReadonlyArray<{ re: RegExp; provider: string }> = [
+  { re: SECRET_ANTHROPIC, provider: "anthropic" },
+  { re: SECRET_OPENAI, provider: "openai" },
+  { re: SECRET_GOOGLE, provider: "google" },
+];
 
 /** Permissive CORS: Allow-Origin: * or cors origin:true/'*'. */
 export const OPEN_CORS = /access-control-allow-origin['"]?\s*[:,]\s*['"]\*/i;
