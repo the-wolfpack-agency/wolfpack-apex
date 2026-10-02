@@ -80,6 +80,7 @@ jobs:
 
       - name: Upload results
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        continue-on-error: true # diagnostic upload; a transient artifact-service timeout must not fail the job
         if: always()
         with:
           name: tool-results-${{ inputs.tool }}-${{ github.run_id }}

@@ -224,6 +224,7 @@ jobs:
       - name: Upload scan results
         if: steps.pat-check.outputs.configured == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        continue-on-error: true # diagnostic upload; a transient artifact-service timeout must not fail the job
         with:
           name: scan-results
           path: scan-results.json
@@ -437,6 +438,7 @@ jobs:
       - name: Upload pentest results
         if: steps.pat-check.outputs.configured == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        continue-on-error: true # diagnostic upload; a transient artifact-service timeout must not fail the job
         with:
           name: pentest-results
           path: pentest-results.json
@@ -531,6 +533,7 @@ jobs:
 
       - name: Upload audit results
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        continue-on-error: true # diagnostic upload; a transient artifact-service timeout must not fail the job
         with:
           name: npm-audit
           path: npm-audit.json
