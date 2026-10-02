@@ -27,11 +27,11 @@ import { liveRepairComplete } from "@/lib/ai-code/repair";
 import { runPipeline } from "@/lib/ai-code/pipeline";
 import { authorDiff, authorFileChanges, authorAnchorEdits } from "@/lib/ai-code/author";
 import { filesToDiff, type FileChange } from "@/lib/ai-code/file-changes";
-import { applyAnchorEdits, type AnchorFailure } from "@/lib/ai-code/anchor-edit";
+import { applyAnchorEdits, anchorFailureFeedback, type AnchorFailure } from "@/lib/ai-code/anchor-edit";
 import { newFilesFromDiff } from "@/lib/ai-code/oracle";
 import { checkSyntax } from "@/lib/ai-code/syntax-check";
 import { remediateFileChanges } from "@/lib/ai-code/repair-files";
-import { buildRegistry, judgeCandidates } from "@/lib/ai/router";
+import { buildRegistry, judgeCandidates, betterTier } from "@/lib/ai/router";
 import { chooseIndependentJudge } from "@/lib/ai/judge-selection";
 import { evaluateChangeInvariants } from "@/lib/ai-code/change-facts";
 import { deepScanChange } from "@/lib/ai-code/deep-scan";
@@ -242,10 +242,32 @@ async function resolveChangeWithFallback(
   let attempts = 1;
   let effectiveMode = args.mode;
   const manualDiff = args.diff.trim().length > 0;
-  // Anchor mode never falls back to files mode: files mode can't fit the large file
-  // anchor mode exists for, and the retry would erase the anchor-failure diagnostics.
-  // An anchor failure stands and escalates to a human with the exact reason.
-  const selfHealable = !(manualDiff || args.mode === "anchor");
+
+  // ANCHOR TIER-ESCALATION (the tool's core cheap-first-then-route-up design):
+  // a failed anchor edit means the model at this tier could not locate the exact
+  // spans in a (often large) file. Route the SAME anchor task UP to a stronger
+  // model with the exact failure fed back, climbing the tier ladder until the
+  // anchors apply cleanly or the best tier has tried. Only then is it a genuine
+  // needs_human. It STAYS in anchor mode - never a lossy whole-file rewrite - so
+  // the deterministic apply + diagnostics are preserved. This is why a client's
+  // complex task is not answered with "we only ran a cheap model": it escalates.
+  if (args.mode === "anchor" && !manualDiff) {
+    let tier: AIModelTier = args.tier ?? "standard";
+    while ((resolved.anchorFailures?.length ?? 0) > 0) {
+      const up = betterTier(tier);
+      if (!up) break; // the strongest tier still could not place the anchors
+      tier = up;
+      resolved = await resolveChange({
+        ...args,
+        tier,
+        prompt: `${args.prompt}\n\n${anchorFailureFeedback(resolved.anchorFailures ?? [])}`,
+      });
+      attempts++;
+    }
+    return { ...resolved, executorAttempts: attempts, effectiveMode: "anchor" };
+  }
+
+  const selfHealable = !manualDiff; // anchor is handled above; diff/files self-heal below
   let feedback = selfHealable ? draftFeedback(resolved) : null;
   // Then the async check: a hallucinated LOCAL import (resolves to no file, or a
   // name a real module does not export - the #229 class). Same self-heal path:

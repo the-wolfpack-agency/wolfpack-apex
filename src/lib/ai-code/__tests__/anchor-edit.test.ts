@@ -98,3 +98,16 @@ describe("applyAnchorEdits — whitespace-tolerant fallback (the large-file resc
     expect(r.changes[0].content).toBe("const a = 2;\n");
   });
 });
+
+describe("anchorFailureFeedback (the tier-escalation retry prompt)", () => {
+  it("names the failures and demands verbatim SEARCH text", () => {
+    const { anchorFailureFeedback } = require("@/lib/ai-code/anchor-edit");
+    const msg = anchorFailureFeedback([
+      { path: "src/big.tsx", reason: "anchor_not_found" },
+      { path: "src/big.tsx", reason: "anchor_not_found" },
+    ]);
+    expect(msg).toMatch(/2 anchor failure/);
+    expect(msg).toContain("src/big.tsx");
+    expect(msg).toMatch(/CHARACTER-FOR-CHARACTER|verbatim/);
+  });
+});

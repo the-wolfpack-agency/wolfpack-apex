@@ -85,6 +85,22 @@ export function parseAnchorEdits(reply: string): AnchorEdit[] {
  * fails and is reported (never applied as a guess). Edits to the same file apply in
  * order. Returns full-file changes for the existing commit path.
  */
+/**
+ * Feedback for a tier-escalation retry when SEARCH blocks did not match the live
+ * file. The cheaper model could not reproduce the exact spans; a stronger model
+ * gets this exact reason so it copies them verbatim instead of paraphrasing.
+ */
+export function anchorFailureFeedback(failures: readonly AnchorFailure[]): string {
+  const paths = [...new Set(failures.map((f) => f.path))];
+  return (
+    `The previous attempt's SEARCH blocks did not match the live file ` +
+    `(${failures.length} anchor failure(s) in ${paths.join(", ")}). Every SEARCH block ` +
+    `must be copied CHARACTER-FOR-CHARACTER from the current file content shown above ` +
+    `- exact indentation, quotes, and punctuation - with enough surrounding lines to be ` +
+    `unique. Re-emit the anchor edits using SEARCH text that appears verbatim in the file.`
+  );
+}
+
 const trimEnd = (s: string): string => s.replace(/\s+$/, "");
 
 /**
