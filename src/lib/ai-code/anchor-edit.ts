@@ -85,6 +85,36 @@ export function parseAnchorEdits(reply: string): AnchorEdit[] {
  * fails and is reported (never applied as a guess). Edits to the same file apply in
  * order. Returns full-file changes for the existing commit path.
  */
+const trimEnd = (s: string): string => s.replace(/\s+$/, "");
+
+/**
+ * Find the char range of the UNIQUE contiguous line-span of `content` whose lines
+ * equal `search`'s lines after trimming per-line TRAILING whitespace. Returns the
+ * {start,end} char offsets (over the original content), "ambiguous" when more than
+ * one span matches, or null when none does. Deterministic; never a partial guess.
+ */
+function uniqueTrailingTrimmedSpan(content: string, search: string): { start: number; end: number } | "ambiguous" | null {
+  const fileLines = content.split("\n");
+  const searchLines = search.split("\n");
+  const n = searchLines.length;
+  if (n === 0 || n > fileLines.length) return null;
+  const wanted = searchLines.map(trimEnd);
+  // Char offset of the start of each file line (line i starts at lineStart[i]).
+  const lineStart: number[] = [0];
+  for (let i = 0; i < fileLines.length; i++) lineStart.push(lineStart[i] + fileLines[i].length + 1); // +1 for "\n"
+  let found: { start: number; end: number } | null = null;
+  for (let i = 0; i + n <= fileLines.length; i++) {
+    let ok = true;
+    for (let j = 0; j < n; j++) { if (trimEnd(fileLines[i + j]) !== wanted[j]) { ok = false; break; } }
+    if (!ok) continue;
+    const start = lineStart[i];
+    const end = lineStart[i] + fileLines.slice(i, i + n).join("\n").length; // span covers the n lines, not the trailing newline
+    if (found) return "ambiguous";
+    found = { start, end };
+  }
+  return found;
+}
+
 export function applyAnchorEdits(files: Readonly<Record<string, string>>, edits: readonly AnchorEdit[]): AnchorApplyResult {
   const working: Record<string, string> = { ...files };
   const failures: AnchorFailure[] = [];
@@ -95,9 +125,22 @@ export function applyAnchorEdits(files: Readonly<Record<string, string>>, edits:
     const content = working[e.path];
     if (content == null) { failures.push({ path: e.path, reason: "file_not_provided" }); continue; }
     const first = content.indexOf(e.search);
-    if (first < 0) { failures.push({ path: e.path, reason: "anchor_not_found" }); continue; }
-    if (content.indexOf(e.search, first + 1) >= 0) { failures.push({ path: e.path, reason: "anchor_ambiguous" }); continue; }
-    working[e.path] = content.slice(0, first) + e.replace + content.slice(first + e.search.length);
+    if (first >= 0) {
+      // Exact match (the fast path). Still require it to be unambiguous.
+      if (content.indexOf(e.search, first + 1) >= 0) { failures.push({ path: e.path, reason: "anchor_ambiguous" }); continue; }
+      working[e.path] = content.slice(0, first) + e.replace + content.slice(first + e.search.length);
+      appliedCount += 1;
+      continue;
+    }
+    // Whitespace-tolerant fallback: the dominant anchor_not_found cause on large
+    // files is a model reproducing the span with trailing-whitespace / line-ending
+    // drift. Match line-by-line ignoring per-line TRAILING whitespace; apply ONLY
+    // when exactly one contiguous line-span matches (same exactly-once determinism,
+    // never a guess). The REPLACE text is spliced over the ORIGINAL span verbatim.
+    const span = uniqueTrailingTrimmedSpan(content, e.search);
+    if (span === "ambiguous") { failures.push({ path: e.path, reason: "anchor_ambiguous" }); continue; }
+    if (span === null) { failures.push({ path: e.path, reason: "anchor_not_found" }); continue; }
+    working[e.path] = content.slice(0, span.start) + e.replace + content.slice(span.end);
     appliedCount += 1;
   }
 
