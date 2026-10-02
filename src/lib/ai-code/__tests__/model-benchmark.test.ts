@@ -7,6 +7,7 @@ import {
   availableBenchmarkModels,
   runModelBenchmark,
   rankModels,
+  escalationModelPins,
   type BenchmarkModel,
 } from "@/lib/ai-code/model-benchmark";
 import type { PipelineRunRecord } from "@/lib/ai-code/grading";
@@ -123,5 +124,45 @@ describe("rankModels", () => {
       grade({ model: "priced", readyRate: 0.8, firstPassRate: 0.8, pricedShare: 1, avgCostUsd: 0.01 }),
     ]);
     expect(ranked[0].model).toBe("priced");
+  });
+});
+
+describe("escalationModelPins (route-to-a-model-that-can-do-it)", () => {
+  // Env where the genuinely-distinct Foundry models + Anthropic + OpenAI are all
+  // configured, so the available set spans every tier.
+  const FULL_ENV = {
+    OPENAI_API_KEY: "sk-test",
+    ANTHROPIC_API_KEY: "sk-ant",
+    AZURE_AI_FOUNDRY_ENDPOINT: "https://x.services.ai.azure.com",
+    AZURE_AI_FOUNDRY_API_KEY: "fk",
+    AZURE_FOUNDRY_DEPLOYMENT_DEEPSEEK: "deepseek-v3",
+    AZURE_FOUNDRY_DEPLOYMENT_LLAMA: "llama-3.3",
+  };
+
+  it("orders stronger tier first (reasoning before large before small)", () => {
+    const pins = escalationModelPins({ env: FULL_ENV });
+    const rank = (p: string) =>
+      p.includes("o4-mini") || p.includes("opus") ? 3 : p.includes("mini") || p.includes("haiku") ? 1 : 2;
+    const ranks = pins.map(rank);
+    // Non-increasing: a weaker-tier pin never precedes a stronger-tier one.
+    for (let i = 1; i < ranks.length; i++) expect(ranks[i]).toBeLessThanOrEqual(ranks[i - 1]);
+  });
+
+  it("excludes pins already tried (the current executor + author)", () => {
+    const all = escalationModelPins({ env: FULL_ENV });
+    expect(all.length).toBeGreaterThan(1);
+    const excluded = escalationModelPins({ env: FULL_ENV, excludePins: [all[0], ""] });
+    expect(excluded).not.toContain(all[0]);
+    expect(excluded.length).toBe(all.length - 1);
+  });
+
+  it("surfaces the genuinely-distinct Foundry models by pin", () => {
+    const pins = escalationModelPins({ env: FULL_ENV });
+    expect(pins).toContain("azure-deepseek-v3");
+    expect(pins).toContain("azure-llama-3.3-70b");
+  });
+
+  it("returns nothing when no model is configured (honest needs_human, never a guess)", () => {
+    expect(escalationModelPins({ env: {} })).toEqual([]);
   });
 });
