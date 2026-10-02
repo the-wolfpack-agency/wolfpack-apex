@@ -27,7 +27,11 @@ import {
   SQL_PARAMETERIZED as PARAMETERIZED,
   MATH_RANDOM,
   CRED_NAME as SECRET_NAME,
+  DANGEROUS_INNER_HTML,
   CRED_CONTEXT,
+  SECRET_ANTHROPIC,
+  SECRET_OPENAI,
+  SECRET_GOOGLE,
 } from "@/lib/platform-scan/static/security-corpus";
 
 interface SourceFile {
@@ -291,7 +295,6 @@ export function unvalidatedNumericInput(file: SourceFile): ScanFinding[] {
   return findings;
 }
 
-const DANGEROUS_INNER_HTML = /\bdangerouslySetInnerHTML\b/;
 
 /**
  * dangerousInnerHtml: any use of dangerouslySetInnerHTML — a real XSS surface
@@ -376,10 +379,10 @@ const SECRET_PROVIDERS: ReadonlyArray<{ provider: string; re: RegExp }> = [
   { provider: "Stripe live secret", re: /\b(?:sk|rk)_live_[0-9a-zA-Z]{16,}/ },
   { provider: "GitHub token", re: /\b(?:ghp|gho|ghu|ghs|ghr)_[0-9A-Za-z]{36,}\b/ },
   { provider: "GitHub token", re: /\bgithub_pat_[0-9A-Za-z_]{22,}\b/ },
-  { provider: "Google API key", re: /\bAIza[0-9A-Za-z_\-]{35}\b/ },
+  { provider: "Google API key", re: SECRET_GOOGLE },
   { provider: "Slack token", re: /\bxox[baprs]-[0-9A-Za-z-]{10,}/ },
-  { provider: "OpenAI key", re: /\bsk-(?:proj-)?[A-Za-z0-9_-]{32,}\b/ },
-  { provider: "Anthropic key", re: /\bsk-ant-[A-Za-z0-9_-]{24,}\b/ },
+  { provider: "OpenAI key", re: SECRET_OPENAI },
+  { provider: "Anthropic key", re: SECRET_ANTHROPIC },
   { provider: "SendGrid key", re: /\bSG\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}\b/ },
   { provider: "Twilio account SID", re: /\bAC[0-9a-f]{32}\b/ },
   { provider: "npm token", re: /\bnpm_[A-Za-z0-9]{36}\b/ },

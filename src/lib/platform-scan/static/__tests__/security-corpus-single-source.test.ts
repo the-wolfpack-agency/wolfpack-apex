@@ -28,12 +28,18 @@ const CORPUS = "src/lib/platform-scan/static/security-corpus.ts";
  * Distinctive source fragments of each single-sourced regex. Each must appear in
  * the corpus and in NEITHER engine (both reference the exported pattern instead).
  */
+const AI_SURFACE = "src/lib/ai-surface/detect.ts";
+
 const SHARED_SIGNATURES: { name: string; fragment: string }[] = [
   { name: "eval() call", fragment: "(?<![.\\w$])eval\\s*\\(" },
   { name: "new Function()", fragment: "new\\s+Function\\s*\\(" },
   { name: "Math.random()", fragment: "Math\\s*\\.\\s*random\\s*\\(\\s*\\)" },
   { name: "SQL keywords", fragment: "select|insert\\s+into|update|delete\\s+from|where|from" },
   { name: "TLS verify off", fragment: "rejectUnauthorized\\s*:\\s*false" },
+  { name: "dangerouslySetInnerHTML sink", fragment: "\\bdangerouslySetInnerHTML\\b" },
+  { name: "Anthropic key format", fragment: "sk-ant-[A-Za-z0-9_-]{24,}" },
+  { name: "OpenAI key format", fragment: "sk-(?!ant-)(?:proj-)?[A-Za-z0-9_-]{32,}" },
+  { name: "Google API key format", fragment: "AIza[0-9A-Za-z_-]{35}" },
 ];
 
 describe("security signatures are single-sourced in security-corpus.ts", () => {
@@ -57,8 +63,16 @@ describe("security signatures are single-sourced in security-corpus.ts", () => {
     expect(reDeclared).toEqual([]);
   });
 
-  it("both engines import from the shared corpus", () => {
+  it("ai-surface/detect.ts does NOT re-declare the shared provider key formats", () => {
+    const aiSurface = read(AI_SURFACE);
+    const providerKeyFormats = SHARED_SIGNATURES.filter((s) => s.name.endsWith("key format"));
+    const reDeclared = providerKeyFormats.filter((s) => aiSurface.includes(s.fragment)).map((s) => s.name);
+    expect(reDeclared).toEqual([]);
+  });
+
+  it("every engine imports from the shared corpus", () => {
     expect(detectors).toMatch(/from "@\/lib\/platform-scan\/static\/security-corpus"/);
     expect(detect).toMatch(/from "@\/lib\/platform-scan\/static\/security-corpus"/);
+    expect(read(AI_SURFACE)).toMatch(/from "@\/lib\/platform-scan\/static\/security-corpus"/);
   });
 });

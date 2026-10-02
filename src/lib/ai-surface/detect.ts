@@ -8,6 +8,7 @@
  * SourceFile returning AiSurface[]. False positives erode the whole "here is
  * every AI touchpoint" claim, so the bar is signature-grade.
  */
+import { AI_PROVIDER_KEY_SIGNATURES } from "@/lib/platform-scan/static/security-corpus";
 import type { AiSurface, AiSurfaceRisk } from "./types";
 
 export interface SourceFile {
@@ -50,13 +51,12 @@ const PROVIDER_ENDPOINTS: ReadonlyArray<{ re: RegExp; provider: string }> = [
 
 /** Provider API-key signatures (reuses the precision-first secret philosophy:
  *  a real provider token format, never a generic high-entropy guess). */
-export const KEY_SIGNATURES: ReadonlyArray<{ re: RegExp; provider: string }> = [
-  { re: /\bsk-ant-[A-Za-z0-9_-]{24,}\b/, provider: "anthropic" },
-  // Negative lookahead so an Anthropic key (sk-ant-...) is not double-counted as
-  // OpenAI: sk-ant- is otherwise a syntactic subset of the OpenAI sk- format.
-  { re: /\bsk-(?!ant-)(?:proj-)?[A-Za-z0-9_-]{32,}\b/, provider: "openai" },
-  { re: /\bAIza[0-9A-Za-z_-]{35}\b/, provider: "google" },
-];
+// The provider key signatures are defined ONCE in security-corpus and shared with
+// the general secret scanner (platform-scan SECRET_PROVIDERS), so the two can't
+// drift (the OpenAI (?!ant-) lookahead that avoids double-counting an Anthropic key
+// used to live only here). Imported + re-exported under the existing name so all
+// callers (and this module's own aiApiKey detector) keep working unchanged.
+export const KEY_SIGNATURES = AI_PROVIDER_KEY_SIGNATURES;
 
 function maskKey(match: string): string {
   return match.length <= 8 ? "****" : `${match.slice(0, 4)}…${match.slice(-2)}`;
