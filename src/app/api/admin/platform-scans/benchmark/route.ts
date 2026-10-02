@@ -24,6 +24,7 @@
  * effort so a transient DB hiccup never loses the scored result.
  */
 import { NextRequest, NextResponse } from "next/server";
+import { isAuthorizedBearer } from "@/lib/auth/bearer-auth";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { recordAudit, extractRequestMetadata } from "@/lib/audit-log";
 import { listFindings } from "@/lib/platform-scan/store";
@@ -44,7 +45,7 @@ import { trackEvent } from "@/lib/analytics";
 function isAuthorizedCron(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET;
   if (!secret) return false;
-  return (req.headers.get("authorization") ?? "") === `Bearer ${secret}`;
+  return isAuthorizedBearer(req.headers.get("authorization"), secret);
 }
 
 /** The scorer only reads category + title off a finding (findingClassKey), but

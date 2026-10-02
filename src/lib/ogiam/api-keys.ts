@@ -30,7 +30,8 @@
  * `not_found` so the gate never sees an exception.
  */
 
-import { randomBytes, createHash, timingSafeEqual } from "node:crypto";
+import { randomBytes, createHash } from "node:crypto";
+import { timingSafeEqualStr } from "@/lib/crypto/timing-safe";
 import { query } from "@/lib/db";
 
 /** Human-facing key prefix. Lets a leaked string be grep'd + recognized. */
@@ -91,14 +92,10 @@ function hashKey(plaintext: string): string {
   return createHash("sha256").update(plaintext, "utf8").digest("hex");
 }
 
-/** Constant-time compare of two hex hash strings. Length-safe (timingSafeEqual
- *  throws on length mismatch, so guard first - a length difference is itself a
- *  mismatch and returning false early leaks no per-byte timing). */
+/** Constant-time compare of two hex hash strings, via the one timing-safe
+ *  primitive (length-safe: a length difference is itself a mismatch). */
 function constantTimeHexEqual(a: string, b: string): boolean {
-  const ab = Buffer.from(a, "utf8");
-  const bb = Buffer.from(b, "utf8");
-  if (ab.length !== bb.length) return false;
-  return timingSafeEqual(ab, bb);
+  return timingSafeEqualStr(a, b);
 }
 
 /** Generate an opaque, app-side id for a key row. */

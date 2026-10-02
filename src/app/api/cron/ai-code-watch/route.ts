@@ -11,6 +11,7 @@
  * scheduler, capability fallback for a manual run. Returns: 200 { summary } | 401.
  */
 import { NextRequest, NextResponse } from "next/server";
+import { isAuthorizedBearer } from "@/lib/auth/bearer-auth";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { workspaceGithubClient, listOpenPullRequests, type GithubClient } from "@/lib/github-client";
 import { resolveEntitlement } from "@/lib/tenancy/entitlements";
@@ -21,7 +22,7 @@ import { runAiCodeWatch, type WatchTarget } from "@/lib/ai-code/watch";
 function isAuthorizedCron(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET;
   if (!secret) return false;
-  return (req.headers.get("authorization") ?? "") === `Bearer ${secret}`;
+  return isAuthorizedBearer(req.headers.get("authorization"), secret);
 }
 
 const SYSTEM_ACTOR = { userId: "system:ai-code-watch", role: "system" };

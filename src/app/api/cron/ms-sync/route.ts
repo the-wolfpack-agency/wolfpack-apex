@@ -12,6 +12,7 @@
  * configuration rather than a default: see sync/selection.ts.
  */
 import { NextRequest, NextResponse } from "next/server";
+import { isAuthorizedBearer } from "@/lib/auth/bearer-auth";
 import { safeQuery } from "@/lib/db";
 import { trackEvent } from "@/lib/analytics";
 import { syncAllEntities } from "@/lib/ms-graph/sync";
@@ -25,7 +26,7 @@ export const maxDuration = 300;
 function isAuthorizedCron(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET;
   if (!secret) return false;
-  return (req.headers.get("authorization") ?? "") === `Bearer ${secret}`;
+  return isAuthorizedBearer(req.headers.get("authorization"), secret);
 }
 
 export async function GET(req: NextRequest) {

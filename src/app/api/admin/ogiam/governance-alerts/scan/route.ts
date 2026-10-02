@@ -21,13 +21,14 @@
  * reason, same posture as the ai-redteam run and the ai-surfaces scan.
  */
 import { NextRequest, NextResponse } from "next/server";
+import { isAuthorizedBearer } from "@/lib/auth/bearer-auth";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { scanAndDispatch } from "@/lib/ogiam/governance-alerts";
 
 function isAuthorizedCron(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET;
   if (!secret) return false;
-  return (req.headers.get("authorization") ?? "") === `Bearer ${secret}`;
+  return isAuthorizedBearer(req.headers.get("authorization"), secret);
 }
 
 async function run(

@@ -23,6 +23,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { isAuthorizedBearer } from "@/lib/auth/bearer-auth";
 import { safeQuery } from "@/lib/db";
 import { trackEvent } from "@/lib/analytics";
 import {
@@ -47,7 +48,7 @@ import type { TeamMember } from "@/lib/auth";
 function isAuthorizedCron(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET;
   if (!secret) return false;
-  return (req.headers.get("authorization") ?? "") === `Bearer ${secret}`;
+  return isAuthorizedBearer(req.headers.get("authorization"), secret);
 }
 
 /** Capability that gates the platform-scan admin surface; the admins we alert. */

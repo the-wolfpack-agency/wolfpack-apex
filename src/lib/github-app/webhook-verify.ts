@@ -10,7 +10,8 @@
  * The secret lives on OUR App (GITHUB_APP_WEBHOOK_SECRET), never on the client:
  * a tenant installs the App and configures nothing.
  */
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac } from "node:crypto";
+import { timingSafeEqualStr } from "@/lib/crypto/timing-safe";
 
 export function verifyWebhookSignature(
   rawBody: string,
@@ -22,10 +23,7 @@ export function verifyWebhookSignature(
   if (!secret || !signatureHeader) return false;
   const expected =
     "sha256=" + createHmac("sha256", secret).update(rawBody, "utf8").digest("hex");
-  const a = Buffer.from(signatureHeader);
-  const b = Buffer.from(expected);
-  // timingSafeEqual throws on a length mismatch, so a wrong-length header is a
-  // plain false rather than an exception.
-  if (a.length !== b.length) return false;
-  return timingSafeEqual(a, b);
+  // Length-safe constant-time compare (the one primitive): a wrong-length header
+  // is a plain false, never an exception.
+  return timingSafeEqualStr(signatureHeader, expected);
 }

@@ -18,6 +18,7 @@
  * post step stays green and the run is not lost to a transient store hiccup.
  */
 import { NextRequest, NextResponse } from "next/server";
+import { isAuthorizedBearer } from "@/lib/auth/bearer-auth";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { recordAudit, extractRequestMetadata } from "@/lib/audit-log";
 import { recordScan } from "@/lib/platform-scan/store";
@@ -82,7 +83,7 @@ const MAX_INGEST_ITEM_BYTES = 64 * 1024;
 function isAuthorizedCron(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET;
   if (!secret) return false;
-  return (req.headers.get("authorization") ?? "") === `Bearer ${secret}`;
+  return isAuthorizedBearer(req.headers.get("authorization"), secret);
 }
 
 /** True if any element of `arr` serializes to more than MAX_INGEST_ITEM_BYTES. */

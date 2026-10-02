@@ -28,6 +28,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { isAuthorizedBearer } from "@/lib/auth/bearer-auth";
 import { getUserFromRequest } from "@/lib/auth";
 import {
   buildGoalsDigest,
@@ -59,7 +60,7 @@ export function currentWeekOfMonday(now: Date = new Date()): string {
 function isAuthorized(req: NextRequest): boolean {
   const auth = req.headers.get("authorization") ?? "";
   const secret = process.env.INSTINCT_CRON_SECRET;
-  if (secret && auth === `Bearer ${secret}`) return true;
+  if (secret && isAuthorizedBearer(auth, secret)) return true;
   const user = getUserFromRequest(auth);
   return Boolean(user && (user.role === "ceo" || user.role === "cto" || user.role === "evp"));
 }

@@ -15,6 +15,7 @@
  * amounts to one person's routine having a bad morning.
  */
 import { NextRequest, NextResponse } from "next/server";
+import { isAuthorizedBearer } from "@/lib/auth/bearer-auth";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { sweepDueRoutines } from "@/lib/assistant/routines/sweep";
 import { trackEvent } from "@/lib/analytics";
@@ -25,7 +26,7 @@ export const dynamic = "force-dynamic";
 function isAuthorizedCron(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET;
   if (!secret) return false;
-  return (req.headers.get("authorization") ?? "") === `Bearer ${secret}`;
+  return isAuthorizedBearer(req.headers.get("authorization"), secret);
 }
 
 async function runSweep(actorId: string, actorRole: string): Promise<NextResponse> {
