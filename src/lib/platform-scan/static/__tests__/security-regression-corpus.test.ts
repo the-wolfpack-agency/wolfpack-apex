@@ -245,6 +245,11 @@ const CLEAN: { name: string; path: string; code: string }[] = [
     code: `export const Ld = (d: object) => <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(d) }} />;`,
   },
   {
+    name: "DOMPurify-sanitized dangerouslySetInnerHTML (provably cleaned)",
+    path: "src/components/SafeBio.tsx",
+    code: `import DOMPurify from "dompurify";\nexport const SafeBio = ({ html }: { html: string }) => <div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(html) }} />;`,
+  },
+  {
     name: "strong hash (SHA-256) of a password",
     path: "src/lib/hashpw-safe.ts",
     code: `import { createHash } from "crypto";\nexport const h = (password: string) => createHash("sha256").update(password).digest("hex");`,
