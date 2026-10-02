@@ -264,3 +264,23 @@ describe("logModelSelection analytics shape", () => {
     );
   });
 });
+
+describe("value-aware selection (modelValue hint)", () => {
+  it("prefers the highest-value model at the tier over the cheapest when scores are given", () => {
+    const cheapest = selectModel({ requiredTier: "large" }, FULL_ENV).model.id;
+    const other = cheapest === "gpt-4o" ? "azure-gpt-4o" : "gpt-4o";
+    const sel = selectModel({ requiredTier: "large", modelValue: { [other]: 10 } }, FULL_ENV);
+    expect(sel.model.id).toBe(other); // the value hint overrode the cheapest tie-break
+  });
+
+  it("falls back to cheapest when no scores are given (behavior unchanged)", () => {
+    const a = selectModel({ requiredTier: "large" }, FULL_ENV).model.id;
+    const b = selectModel({ requiredTier: "large", modelValue: {} }, FULL_ENV).model.id;
+    expect(b).toBe(a);
+  });
+
+  it("a scored model is preferred over an unscored one (measured value beats unknown)", () => {
+    const sel = selectModel({ requiredTier: "large", modelValue: { "gpt-4o": 1 } }, FULL_ENV);
+    expect(sel.model.id).toBe("gpt-4o");
+  });
+});
