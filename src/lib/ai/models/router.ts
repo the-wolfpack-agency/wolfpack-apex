@@ -98,6 +98,19 @@ function cheaperFirst(
   b: ModelSpec,
   opts: SelectOptions,
 ): number {
+  // VALUE first when the caller supplied learned scores: a higher value score
+  // (e.g. readyRate per dollar) wins; a scored model beats an unscored one (we
+  // trust measured value over the unknown — exploration of new models is the
+  // benchmark's job, not the router's). Deterministic: same inputs, same order.
+  if (opts.modelValue) {
+    const va = opts.modelValue[a.id];
+    const vb = opts.modelValue[b.id];
+    const ha = typeof va === "number";
+    const hb = typeof vb === "number";
+    if (ha && hb && va !== vb) return vb - va; // higher value first
+    if (ha !== hb) return ha ? -1 : 1; // a scored model sorts before an unscored one
+    // both scored-equal or both unscored -> fall through to price/tier/id.
+  }
   const pa = blendedPrice(a, opts);
   const pb = blendedPrice(b, opts);
   if (pa !== pb) return pa - pb;

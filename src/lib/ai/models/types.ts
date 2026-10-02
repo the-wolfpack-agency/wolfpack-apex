@@ -114,6 +114,17 @@ export interface SelectOptions {
   estInputTokens?: number;
   /** Estimated output tokens, used to weight the cost blend + estimate cost. */
   estOutputTokens?: number;
+  /**
+   * VALUE ranking hint (model id -> value score, higher is better), learned from
+   * real outcomes (e.g. readyRate per dollar from the factory's grading). When
+   * present, selection among capable models at the tier prefers the HIGHEST value
+   * score, falling back to cheapest for ties and for models with no score. A soft
+   * preference, NOT a pin: it ranks WITHIN the tier, so it composes with tier
+   * escalation (a harder task still routes up a tier, then value-ranks there). The
+   * caller supplies it from its own domain data; absent it, selection is cheapest,
+   * exactly as before.
+   */
+  modelValue?: Record<string, number>;
 }
 
 /**
