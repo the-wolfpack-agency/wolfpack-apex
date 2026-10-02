@@ -79,4 +79,23 @@ test.describe("code factory - LIVE UI journeys (real model)", () => {
       "Edit the existing file src/lib/ai-code/imports.ts: add one exported function importCount(content: string): number that returns the number of bare imports by calling the existing extractBareImports. Keep every existing export.",
     );
   });
+
+  test("4) a RE-IMPLEMENTATION is flagged by the DRY gate + withheld (the duplication story)", async ({ page }) => {
+    await openFactory(page);
+    // Intent that strongly matches an existing module by name (reuse-scout.ts) but
+    // authored as a NEW module -> the DRY gate must escalate, not hand off.
+    await submit(
+      page,
+      "Add a new reuse scout module that scores repo file paths against prompt intent keywords and returns the top candidate files.",
+    );
+    // The UI must SHOW the reuse/duplication finding + withhold the handoff.
+    await expect(page.getByTestId("duplication-reason"), "the UI explains the likely duplication").toContainText(
+      /re-implement|reuse|already exists/i,
+      { timeout: 15_000 },
+    );
+    await expect(page.getByTestId("handoff-status"), "a likely duplication is not auto-handed-off").toContainText(
+      /withheld|did not allow|needs human/i,
+    );
+    await expect(page.getByTestId("pr-link"), "a withheld duplication never produces a PR link").toHaveCount(0);
+  });
 });
