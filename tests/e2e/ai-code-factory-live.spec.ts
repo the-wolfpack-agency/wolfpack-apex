@@ -130,20 +130,16 @@ test.describe("code factory - LIVE UI journeys (real model)", () => {
   // ─── Operator-journey hardening: the scenarios a real user hits around the
   // happy path, where a client would otherwise find the rough edges first. ───
 
-  test("6) an UNAUTHENTICATED visit redirects to /login (never a blank admin page)", async ({ page }, testInfo) => {
+  test("6) an UNAUTHENTICATED visit redirects to /login (never a blank admin page)", async ({ page }) => {
     // No login: the client's #1 bad first impression is a blank 401 admin page.
     await page.goto(u("/admin/ai-code"), { waitUntil: "domcontentloaded" });
     await expect
       .poll(() => new URL(page.url()).pathname, { timeout: 15_000 })
       .toBe("/login");
-    // OBSERVATION (not a hard gate): the redirect should preserve ?next= so login
-    // returns the operator to where they were headed. The source does push
-    // ?next=/admin/ai-code; if it is absent live, record it as a finding to chase
-    // (login-page query handling / a competing redirect) rather than failing the
-    // critical no-blank-page guarantee above.
-    if (!new URL(page.url()).search.includes("next=")) {
-      testInfo.annotations.push({ type: "finding", description: "auth redirect did not preserve ?next= (post-login return path lost)" });
-    }
+    // And it preserves ?next= so login returns the operator where they were
+    // headed (fixed in the (dashboard) layout guard; the login page honors it).
+    expect(new URL(page.url()).search, "the redirect preserves ?next=<path>").toContain("next=");
+    expect(decodeURIComponent(new URL(page.url()).search), "next points back to the factory").toContain("/admin/ai-code");
   });
 
   test("7) an EMPTY prompt is guarded with an honest message (no silent no-op, no model call)", async ({ page }) => {
