@@ -16,6 +16,7 @@
  * 400 with a concrete fix.
  */
 
+import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { trackEvent } from "@/lib/analytics";
@@ -76,7 +77,9 @@ export async function GET(
     v: 1,
     workspace_id: auth.user.workspaceId,
     provider: providerName,
-    nonce: Math.random().toString(36).slice(2),
+    // CSPRNG, not Math.random(): the nonce is the anti-replay/anti-tamper value
+    // for the OAuth state, so it must be unguessable (CWE-330).
+    nonce: randomUUID(),
     return_to: returnTo,
   };
   const state = signToken(stateClaims, { ttlSeconds: STATE_TTL_SECONDS });

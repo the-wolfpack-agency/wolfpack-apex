@@ -440,7 +440,7 @@ const LOG_CALL =
  * account, and logging one was the exact defect this detector was written for.
  */
 const SECRET_NAME =
-  /\b(?:pass(?:word|wd)?|pwd|secret|token|api[_-]?key|apikey|access[_-]?token|refresh[_-]?token|client[_-]?secret|private[_-]?key|priv[_-]?key|session[_-]?id|jwt|bearer|credentials?|otp|(?:reset|verify|verification|invite|confirm|activation|magic)[_-]?(?:link|url|token))\b/i;
+  /\b(?:pass(?:word|wd)?|pwd|secret|token|api[_-]?key|apikey|access[_-]?token|refresh[_-]?token|client[_-]?secret|private[_-]?key|priv[_-]?key|session[_-]?id|jwt|bearer|credentials?|otp|(?:reset|verify|verification|invite|confirm|activation|magic)[_-]?(?:link|url|token))\b|\b[A-Za-z]+(?:Token|Secret|Password|Passwd|ApiKey|PrivateKey|SessionId|AccessToken|RefreshToken|ClientSecret|Otp|Jwt|Credential)\b/i;
 
 /** A log call whose args are already redacted/masked is not a leak. */
 const REDACTED_MARK = /redact|mask|\*{3,}|\[hidden\]|\[redacted\]/i;
@@ -603,6 +603,272 @@ export function sqlInjection(file: SourceFile): ScanFinding[] {
   return findings;
 }
 
+// A filesystem read/write sink. The path argument is the first arg.
+const FS_SINK =
+  /\bfs(?:\.promises)?\s*\.\s*(readFile|readFileSync|writeFile|writeFileSync|appendFile|appendFileSync|createReadStream|createWriteStream|readdir|readdirSync|unlink|unlinkSync|rm|rmSync)\s*\(/;
+// A ${...} interpolation whose content is NOT a benign build-time constant.
+const DYNAMIC_INTERP = /\$\{\s*(?!__dirname\b|__filename\b|process\.cwd\(\))[^}]+\}/;
+// A string literal joined to an identifier, or `+ ident` - a dynamic path segment.
+const PATH_CONCAT = /['"`][^'"`]*['"`]\s*\+|\+\s*[A-Za-z_$][\w$.]*/;
+// path.basename() strips the directory portion, neutralizing traversal.
+const BASENAME_GUARD = /\bbasename\s*\(/;
+
+/**
+ * pathTraversal: a filesystem read/write whose path is built by interpolating or
+ * concatenating a value into it (CWE-22). `fs.readFileSync('./uploads/' + name)`
+ * lets `name = '../../etc/passwd'` escape the intended directory. A call whose
+ * path is a static literal, or where the name is reduced with path.basename(), is
+ * never flagged. Found by the factory security dogfood: this exact shape was
+ * authored and handed off un-flagged.
+ */
+export function pathTraversal(file: SourceFile): ScanFinding[] {
+  const lines = file.content.split("\n");
+  const findings: ScanFinding[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = codeOnly(lines[i]);
+    const m = FS_SINK.exec(line);
+    if (!m) continue;
+    const args = line.slice(line.indexOf("(", m.index) + 1);
+    if (!DYNAMIC_INTERP.test(args) && !PATH_CONCAT.test(args)) continue; // static path -> safe
+    if (BASENAME_GUARD.test(line)) continue; // name reduced to its base -> safe
+    if (/(audit-safe|eslint-disable)/i.test(`${lines[i - 1] ?? ""}\n${line}`)) continue;
+    findings.push({
+      route: file.path,
+      severity: "critical",
+      category: "security",
+      title: "Path traversal: user-influenced value built into a file path",
+      detail:
+        "A filesystem path is built by interpolating/concatenating a value, so a " +
+        "value like '../../etc/passwd' escapes the intended directory (CWE-22). " +
+        "Resolve against a fixed base and reject the result if it leaves that base, " +
+        "or reduce the name with path.basename().",
+      evidence: { line: i + 1, snippet: line.trim() },
+    });
+  }
+  return findings;
+}
+
+// An outbound-request sink. The URL is the first argument.
+const NET_SINK =
+  /\b(?:fetch|axios|got|superagent)\s*(?:\.\s*(?:get|post|put|delete|patch|request|head))?\s*\(|\bhttps?\s*\.\s*(?:get|request)\s*\(/;
+// Request-derived input: the URL came from the inbound request.
+const REQ_SOURCE = /\b(?:req|request)\s*\.\s*(?:query|body|params|url)\b|searchParams\s*\.\s*get\s*\(|nextUrl\b/;
+// A URL built by concatenating a scheme/empty literal to an identifier -> dynamic host.
+const SCHEME_CONCAT = /^\s*(['"`])(?:https?:)?\/\/?\1\s*\+\s*[A-Za-z_$]|^\s*(['"`])\2\s*\+\s*[A-Za-z_$]/;
+// A bare first-arg identifier whose NAME is a URL -> an externally-influenced host.
+const URL_NAMED_IDENT =
+  /^\s*(?:url|uri|endpoint|target|link|href|webhook|callback|dest|destination|redirect(?:Url)?)\s*[,)]/i;
+
+/** The text of the first call argument (depth-aware up to the first top-level comma). */
+function firstArg(afterParen: string): string {
+  let depth = 0;
+  for (let i = 0; i < afterParen.length; i++) {
+    const c = afterParen[i];
+    if (c === "(" || c === "[" || c === "{") depth++;
+    else if (c === ")" || c === "]" || c === "}") {
+      if (depth === 0) return afterParen.slice(0, i);
+      depth--;
+    } else if (c === "," && depth === 0) return afterParen.slice(0, i);
+  }
+  return afterParen;
+}
+
+/** True when a call's argument list has a top-level comma (i.e. a 2nd argument). */
+function hasSecondArg(afterParen: string): boolean {
+  return firstArg(afterParen).length < afterParen.replace(/\)\s*$/, "").length && /,/.test(afterParen);
+}
+
+/**
+ * The CODE portion of a line: empty for a comment-only line (// , *, /*), and
+ * with any trailing `//` line comment removed (but NOT the `//` inside a URL like
+ * https://). The code detectors below must not match patterns that appear only in
+ * prose/JSDoc - "a hallucinated import (...)" in a comment is not an import() call.
+ */
+function codeOnly(line: string): string {
+  const t = line.trimStart();
+  if (t.startsWith("//") || t.startsWith("*") || t.startsWith("/*")) return "";
+  return line.replace(/(?<!:)\/\/.*$/, "");
+}
+
+/**
+ * codeOnly, plus string-literal contents blanked out. For detectors that key on a
+ * CALL (require()/import(), Math.random()), a pattern that appears only inside a
+ * string - a `detail: "...uses Math.random()..."` or a `title: "...require()..."` -
+ * is documentation, not a call, and must not match. Blanking string bodies leaves
+ * `require("fs")` as `require("")` (still recognized as a safe literal specifier)
+ * while a genuine `require(name)` is untouched.
+ */
+function codeNoStrings(line: string): string {
+  return codeOnly(line)
+    .replace(/`(?:\\.|[^`\\])*`/g, "``")
+    .replace(/'(?:\\.|[^'\\])*'/g, "''")
+    .replace(/"(?:\\.|[^"\\])*"/g, '""');
+}
+
+/**
+ * ssrf: an outbound request whose URL/host is attacker-influenced (CWE-918) -
+ * request-derived (req.query.url, searchParams.get), concatenated onto a bare
+ * scheme ('http://' + host), or a first-arg identifier whose name IS a URL
+ * (fetch(url)). A constant-host call (fetch('https://api.x/users'), or a template
+ * with a fixed host and only a path interpolation) is NOT flagged - a dynamic host
+ * is the SSRF shape, a dynamic path is not. Precise by design: a bare local
+ * variable that is not url-named is left to the judge, not flagged here.
+ */
+export function ssrf(file: SourceFile): ScanFinding[] {
+  const lines = file.content.split("\n");
+  const findings: ScanFinding[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = codeOnly(lines[i]);
+    const m = NET_SINK.exec(line);
+    if (!m) continue;
+    const afterParen = line.slice(line.indexOf("(", m.index) + 1);
+    const arg = firstArg(afterParen);
+    // A bare url-named identifier is only SSRF-shaped when it is the SOLE argument
+    // (`fetch(url)`); `fetch(url, { headers })` is the normal trusted-URL call and
+    // must not be flagged (that heuristic produced 66 false positives on real code).
+    const soleUrlArg = !hasSecondArg(afterParen) && URL_NAMED_IDENT.test(`${arg})`);
+    const dynamicHost = REQ_SOURCE.test(arg) || SCHEME_CONCAT.test(arg) || soleUrlArg;
+    if (!dynamicHost) continue;
+    if (/(audit-safe|eslint-disable)/i.test(`${lines[i - 1] ?? ""}\n${line}`)) continue;
+    findings.push({
+      route: file.path,
+      severity: "critical",
+      category: "security",
+      title: "SSRF: outbound request to an attacker-influenced host",
+      detail:
+        "The host of an outbound request is built from input, so an attacker can " +
+        "point it at internal services or a cloud metadata endpoint (CWE-918). " +
+        "Validate the URL against an allowlist of hosts before the request.",
+      evidence: { line: i + 1, snippet: line.trim() },
+    });
+  }
+  return findings;
+}
+
+// require(...) / dynamic import(...). The module specifier is the first arg.
+const MODULE_LOAD = /(?<![.\w$])require\s*\(|(?<![.\w$])import\s*\(/;
+// A single static string-literal argument (the only safe form).
+const STATIC_SPECIFIER = /^\s*(['"`])(?:(?!\1)[^\\])*\1\s*$/;
+
+/**
+ * dynamicModuleLoad: require()/import() with a non-literal specifier (CWE-98/829).
+ * require(name) loads whatever module path the caller supplies - arbitrary code
+ * execution if the value is influenced by input. A static specifier
+ * (require('fs'), import('./Chart')) is the normal, safe form and is never
+ * flagged. Found by the factory security dogfood: require(name) was handed off.
+ */
+export function dynamicModuleLoad(file: SourceFile): ScanFinding[] {
+  const lines = file.content.split("\n");
+  const findings: ScanFinding[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = codeNoStrings(lines[i]);
+    const m = MODULE_LOAD.exec(line);
+    if (!m) continue;
+    const afterParen = line.slice(line.indexOf("(", m.index) + 1);
+    let arg = firstArg(afterParen);
+    if (arg.trim() === "") {
+      // Empty parens (`require()`) is never a module load - it is prose (e.g. a
+      // wrapped block-comment line mentioning "require()"). Only look to the next
+      // line when the call is genuinely open (the line ends with the "(").
+      if (!/\(\s*$/.test(line)) continue;
+      arg = firstArg(codeNoStrings(lines[i + 1] ?? "").trim());
+    }
+    if (arg.trim() === "" || STATIC_SPECIFIER.test(arg)) continue; // literal/absent module path -> safe
+    if (/(audit-safe|eslint-disable)/i.test(`${lines[i - 1] ?? ""}\n${line}`)) continue;
+    findings.push({
+      route: file.path,
+      severity: "critical",
+      category: "security",
+      title: "Dynamic module load: require()/import() of a non-literal path",
+      detail:
+        "A module is loaded from a computed specifier, so a value influenced by " +
+        "input decides which code runs - arbitrary code execution (CWE-98/829). " +
+        "Load from a fixed set of literal module paths, or map input through an " +
+        "explicit allowlist.",
+      evidence: { line: i + 1, snippet: line.trim() },
+    });
+  }
+  return findings;
+}
+
+const MATH_RANDOM = /\bMath\s*\.\s*random\s*\(\s*\)/;
+// Credential / single-use-token context near a Math.random() call.
+const CRED_CONTEXT =
+  /\b(?:token|secret|pass(?:word|wd)?|pwd|otp|nonce|salt|api[_-]?key|apikey|session[_-]?id|csrf|verification|verify|reset|invite|activation|magic|auth[_-]?code|access[_-]?code|private[_-]?key)\b|\b[A-Za-z]+(?:Token|Secret|Password|Passwd|ApiKey|PrivateKey|SessionId|Otp|Nonce|Salt|Csrf)\b/i;
+
+/**
+ * insecureRandomToken: Math.random() used to mint a credential (CWE-330).
+ * Math.random is not cryptographically secure - its output is predictable, so a
+ * token/password/OTP built from it can be guessed. Gated on a credential-named
+ * context within the surrounding 3 lines (so Math.random for jitter/animation/ids
+ * is not flagged). Use crypto.randomBytes / crypto.randomUUID instead.
+ */
+export function insecureRandomToken(file: SourceFile): ScanFinding[] {
+  const lines = file.content.split("\n");
+  const findings: ScanFinding[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = codeNoStrings(lines[i]);
+    if (!MATH_RANDOM.test(line)) continue;
+    const ctx = `${codeNoStrings(lines[i - 2] ?? "")}\n${codeNoStrings(lines[i - 1] ?? "")}\n${line}`;
+    if (!CRED_CONTEXT.test(ctx)) continue; // not a credential context -> benign randomness
+    if (/(audit-safe|eslint-disable)/i.test(`${lines[i - 1] ?? ""}\n${line}`)) continue;
+    findings.push({
+      route: file.path,
+      severity: "critical",
+      category: "security",
+      title: "Insecure randomness: Math.random() minting a credential",
+      detail:
+        "Math.random() is not cryptographically secure; its output is predictable, " +
+        "so a token/password/OTP built from it can be guessed (CWE-330). Use " +
+        "crypto.randomBytes() or crypto.randomUUID().",
+      evidence: { line: i + 1, snippet: line.trim() },
+    });
+  }
+  return findings;
+}
+
+const FOR_IN = /\bfor\s*\(\s*(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s+in\s+[A-Za-z_$]/;
+// A guard that makes a copy loop prototype-safe.
+const PROTO_GUARD = /__proto__|hasOwnProperty|constructor|\bprototype\b|Object\.keys|Object\.entries|Object\.create\s*\(\s*null/;
+
+/**
+ * prototypePollution: a for..in copy loop that writes target[key] = source[key]
+ * with no key guard (CWE-1321). An attacker-supplied key of "__proto__" walks up
+ * to Object.prototype and pollutes every object. A loop that guards the key
+ * (hasOwnProperty, an explicit __proto__/constructor check, or iterating
+ * Object.keys) is not flagged. Found by the factory security dogfood: an
+ * unguarded `merge(target, source)` was handed off.
+ */
+export function prototypePollution(file: SourceFile): ScanFinding[] {
+  const lines = file.content.split("\n");
+  const findings: ScanFinding[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const fm = FOR_IN.exec(codeOnly(lines[i]));
+    if (!fm) continue;
+    const key = fm[1];
+    const body = lines.slice(i, Math.min(lines.length, i + 7)).map(codeOnly).join("\n");
+    // A computed assignment keyed by the loop variable: target[key] = ...
+    const assign = new RegExp(`[A-Za-z_$][\\w$]*\\s*\\[\\s*${key}\\s*\\]\\s*=(?!=)`);
+    if (!assign.test(body)) continue;
+    if (PROTO_GUARD.test(body)) continue; // guarded -> safe
+    if (/(audit-safe|eslint-disable)/i.test(`${lines[i - 1] ?? ""}\n${lines[i]}`)) continue;
+    findings.push({
+      route: file.path,
+      severity: "critical",
+      category: "security",
+      title: "Prototype pollution: unguarded for..in copy into a keyed target",
+      detail:
+        "A for..in loop copies source[key] into target[key] without rejecting " +
+        "'__proto__'/'constructor', so an attacker-supplied key pollutes " +
+        "Object.prototype and affects every object (CWE-1321). Guard the key " +
+        "(skip __proto__/constructor/prototype) or copy via Object.keys + a plain " +
+        "target created with Object.create(null).",
+      evidence: { line: i + 1, snippet: lines[i].trim() },
+    });
+  }
+  return findings;
+}
+
 /** Compose every detector over one file. */
 export function runDetectors(file: SourceFile): ScanFinding[] {
   return [
@@ -616,5 +882,10 @@ export function runDetectors(file: SourceFile): ScanFinding[] {
     ...secretInLogs(file),
     ...codeInjection(file),
     ...sqlInjection(file),
+    ...pathTraversal(file),
+    ...ssrf(file),
+    ...dynamicModuleLoad(file),
+    ...insecureRandomToken(file),
+    ...prototypePollution(file),
   ];
 }
