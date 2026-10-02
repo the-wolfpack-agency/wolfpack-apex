@@ -133,9 +133,15 @@ jobs:
       - name: Install OS libraries for Chromium
         if: steps.pw-cache.outputs.cache-hit != 'true'
         timeout-minutes: 6
+        # Best-effort + fail-fast: each attempt is bounded by `timeout` so a stuck
+        # apt mirror fails quickly and the `||` fallback actually runs, and the step
+        # is continue-on-error so a mirror hiccup can never fail the job. The GitHub
+        # ubuntu image already ships what chromium needs; a genuinely missing library
+        # surfaces as a browser-launch failure in the next step (the honest signal).
+        continue-on-error: true
         run: |
-          npx playwright install-deps chromium \
-            || (echo "retrying once" && sleep 15 && npx playwright install-deps chromium) \
+          timeout 150 npx playwright install-deps chromium \
+            || (echo "retrying once" && sleep 10 && timeout 150 npx playwright install-deps chromium) \
             || echo "::warning::playwright install-deps failed (apt mirror). Continuing: the GitHub runner image ships these libraries, and a genuinely missing one surfaces as a browser launch failure in the next step."
       - name: Run verify (e2e)
         env:
