@@ -3,7 +3,13 @@
  * reuse-scout found, or re-implement it? Recorded (not enforced) to tune the
  * escalation threshold from real data.
  */
-import { changeImportsPath, changeImportSpecifiers, duplicationSignal } from "@/lib/ai-code/reuse-enforcement";
+import {
+  changeImportsPath,
+  changeImportSpecifiers,
+  duplicationSignal,
+  duplicationGate,
+  STRONG_DUPLICATION_SCORE,
+} from "@/lib/ai-code/reuse-enforcement";
 
 const aliasMap = { "@/": "src/" };
 
@@ -51,5 +57,34 @@ describe("duplicationSignal", () => {
   it("topReused is null when the scout found no candidate (nothing to reuse)", () => {
     const s = duplicationSignal([], reimplemented, aliasMap);
     expect(s).toEqual({ topCandidatePath: null, topScore: 0, topReused: null });
+  });
+});
+
+describe("duplicationGate (the DRY gate - this is what should have caught the detector-duplication incident)", () => {
+  it("ESCALATES when a strong existing module was NOT reused (likely re-implementation)", () => {
+    const g = duplicationGate({ topCandidatePath: "src/lib/cost-summary.ts", topScore: 8, topReused: false });
+    expect(g.escalate).toBe(true);
+    expect(g.candidatePath).toBe("src/lib/cost-summary.ts");
+    expect(g.reason).toMatch(/re-implement|reuse/i);
+  });
+
+  it("does NOT escalate when the strong candidate WAS reused (imported)", () => {
+    const g = duplicationGate({ topCandidatePath: "src/lib/cost-summary.ts", topScore: 12, topReused: true });
+    expect(g.escalate).toBe(false);
+    expect(g.reason).toBeNull();
+  });
+
+  it("does NOT escalate on a weak/coarse score below the threshold (precision - no noise)", () => {
+    const g = duplicationGate({ topCandidatePath: "src/lib/thing.ts", topScore: STRONG_DUPLICATION_SCORE - 1, topReused: false });
+    expect(g.escalate).toBe(false);
+  });
+
+  it("does NOT escalate when there was no candidate at all", () => {
+    const g = duplicationGate({ topCandidatePath: null, topScore: 0, topReused: null });
+    expect(g.escalate).toBe(false);
+  });
+
+  it("fires exactly at the threshold boundary", () => {
+    expect(duplicationGate({ topCandidatePath: "a.ts", topScore: STRONG_DUPLICATION_SCORE, topReused: false }).escalate).toBe(true);
   });
 });
