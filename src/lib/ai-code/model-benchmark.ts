@@ -85,6 +85,29 @@ export async function runModelBenchmark(args: {
   };
 }
 
+/** Minimum graded runs before a model's value score is trusted (below it, the
+ *  rate is too noisy to route on; the router falls back to cheapest). */
+export const MIN_RUNS_FOR_VALUE = 3;
+
+/**
+ * Learned VALUE score per model (model id -> number, higher is better), for the
+ * router's value-aware selection. Value = "ready output per dollar", nudged by
+ * first-pass rate (a model that needs fewer repair attempts is worth more at the
+ * same readyRate). Only scores models with enough data AND a known price - an
+ * under-sampled or unpriced model is OMITTED (the router then treats it as
+ * unscored and falls back to cheapest), so a $0-recorded Foundry model never reads
+ * as "infinite value". Pure.
+ */
+export function modelValueScores(perModel: readonly ModelGrade[], minRuns: number = MIN_RUNS_FOR_VALUE): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const m of perModel) {
+    if (m.n < minRuns) continue; // too little data to trust
+    if (m.pricedShare <= 0 || m.avgCostUsd <= 0) continue; // unpriced -> value-per-dollar is undefined
+    out[m.model] = (m.readyRate * (0.5 + 0.5 * m.firstPassRate)) / m.avgCostUsd;
+  }
+  return out;
+}
+
 /**
  * Rank the per-model grades for a "best usable model" read: highest readyRate
  * first, then first-pass, then (when priced) cheapest. Pure. A model with no

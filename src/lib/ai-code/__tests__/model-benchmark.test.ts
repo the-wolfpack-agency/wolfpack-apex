@@ -7,6 +7,7 @@ import {
   availableBenchmarkModels,
   runModelBenchmark,
   rankModels,
+  modelValueScores,
   type BenchmarkModel,
 } from "@/lib/ai-code/model-benchmark";
 import type { PipelineRunRecord } from "@/lib/ai-code/grading";
@@ -123,5 +124,24 @@ describe("rankModels", () => {
       grade({ model: "priced", readyRate: 0.8, firstPassRate: 0.8, pricedShare: 1, avgCostUsd: 0.01 }),
     ]);
     expect(ranked[0].model).toBe("priced");
+  });
+});
+
+describe("modelValueScores (the router's value hint)", () => {
+  const g = (over: Partial<ModelGrade>): ModelGrade => ({
+    model: "m", n: 5, readyRate: 1, firstPassRate: 1, blockRate: 0, recoveryRate: 0,
+    avgCostUsd: 0.01, pricedShare: 1,
+    failureProfile: { phantomImports: 0, brokenLocalImports: 0, incompleteFiles: 0, removedExports: 0, anchorFailures: 0, deepScanCritical: 0 },
+    ...over,
+  });
+  it("scores ready-output-per-dollar: cheaper + better scores higher", () => {
+    const s = modelValueScores([g({ model: "cheapgood", avgCostUsd: 0.001 }), g({ model: "pricey", avgCostUsd: 0.02 })]);
+    expect(s["cheapgood"]).toBeGreaterThan(s["pricey"]);
+  });
+  it("omits a model with too few runs (noisy rate not trusted)", () => {
+    expect(modelValueScores([g({ model: "new", n: 1 })])).toEqual({});
+  });
+  it("omits an unpriced model (no value-per-dollar; $0 != infinite value)", () => {
+    expect(modelValueScores([g({ model: "foundry", pricedShare: 0, avgCostUsd: 0 })])).toEqual({});
   });
 });
