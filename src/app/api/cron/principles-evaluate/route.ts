@@ -12,6 +12,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { isAuthorizedBearer } from "@/lib/auth/bearer-auth";
 import { listActivePrinciples } from "@/lib/principles/store";
 import { evaluatePrinciples } from "@/lib/principles/evaluate-runner";
 
@@ -19,7 +20,7 @@ function requireCron(req: NextRequest): boolean {
   const expected = process.env.CRON_SECRET;
   if (!expected) return false;
   const auth = req.headers.get("authorization") || "";
-  return auth === `Bearer ${expected}`;
+  return isAuthorizedBearer(auth, expected);
 }
 
 export async function GET(req: NextRequest) {

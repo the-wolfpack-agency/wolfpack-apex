@@ -22,6 +22,7 @@
  * is best effort so a transient DB hiccup never loses a scored result.
  */
 import { NextRequest, NextResponse } from "next/server";
+import { isAuthorizedBearer } from "@/lib/auth/bearer-auth";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { recordAudit, extractRequestMetadata } from "@/lib/audit-log";
 import { trackEvent } from "@/lib/analytics";
@@ -48,7 +49,7 @@ import {
 function isAuthorizedCron(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET;
   if (!secret) return false;
-  return (req.headers.get("authorization") ?? "") === `Bearer ${secret}`;
+  return isAuthorizedBearer(req.headers.get("authorization"), secret);
 }
 
 const VALID_TOOLS: CompetitorTool[] = ["zap", "nuclei"];

@@ -19,6 +19,7 @@
  * top-level throw returns a zeroed 200 so the cron health-monitor stays green.
  */
 import { NextRequest, NextResponse } from "next/server";
+import { isAuthorizedBearer } from "@/lib/auth/bearer-auth";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { sweepAllWorkspaces } from "@/lib/health/integration-probes";
 import { runAssistantSelfCheck } from "@/lib/health/assistant-selfcheck";
@@ -29,7 +30,7 @@ import { trackEvent } from "@/lib/analytics";
 function isAuthorizedCron(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET;
   if (!secret) return false;
-  return (req.headers.get("authorization") ?? "") === `Bearer ${secret}`;
+  return isAuthorizedBearer(req.headers.get("authorization"), secret);
 }
 
 async function runSweep(actorId: string, actorRole: string): Promise<NextResponse> {

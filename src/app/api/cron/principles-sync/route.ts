@@ -28,6 +28,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { isAuthorizedBearer } from "@/lib/auth/bearer-auth";
 import { trackEvent } from "@/lib/analytics";
 import { fetchSharePointDocx } from "@/lib/principles/sharepoint-fetch";
 import { parseDocxBuffer } from "@/lib/principles/parser";
@@ -42,7 +43,7 @@ function requireCron(req: NextRequest): boolean {
   const expected = process.env.CRON_SECRET;
   if (!expected) return false;
   const auth = req.headers.get("authorization") || "";
-  return auth === `Bearer ${expected}`;
+  return isAuthorizedBearer(auth, expected);
 }
 
 export async function GET(req: NextRequest) {

@@ -17,6 +17,7 @@
  * 200 (skipped:true) so a CI post never loses the run to a transient failure.
  */
 import { NextRequest, NextResponse } from "next/server";
+import { isAuthorizedBearer } from "@/lib/auth/bearer-auth";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { recordAudit, extractRequestMetadata } from "@/lib/audit-log";
 import { recordScan } from "@/lib/platform-scan/store";
@@ -25,7 +26,7 @@ import { parseSarif } from "@/lib/platform-scan/sarif";
 function isAuthorizedCron(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET;
   if (!secret) return false;
-  return (req.headers.get("authorization") ?? "") === `Bearer ${secret}`;
+  return isAuthorizedBearer(req.headers.get("authorization"), secret);
 }
 
 interface SarifIngestBody {

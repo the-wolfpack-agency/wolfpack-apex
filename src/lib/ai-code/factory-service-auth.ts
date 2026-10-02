@@ -12,7 +12,7 @@
  * human access is unchanged. Revoke by rotating the env var.
  */
 import type { NextRequest } from "next/server";
-import { timingSafeEqual } from "crypto";
+import { timingSafeEqualStr } from "@/lib/crypto/timing-safe";
 import type { TeamMember } from "@/lib/auth";
 import type { Capability } from "@/lib/auth/capabilities";
 import type { RequireCapabilityResult } from "@/lib/auth/require-capability";
@@ -35,10 +35,7 @@ function presentedToken(req: NextRequest): string | null {
 export function factoryTokenMatches(presented: string | null): boolean {
   const secret = process.env.FACTORY_SERVICE_TOKEN;
   if (!secret || secret.length < 16 || !presented) return false;
-  const a = Buffer.from(presented);
-  const b = Buffer.from(secret);
-  if (a.length !== b.length) return false;
-  return timingSafeEqual(a, b);
+  return timingSafeEqualStr(presented, secret);
 }
 
 /** The synthetic factory service identity (scoped workspace + factory caps only). */

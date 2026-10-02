@@ -15,6 +15,7 @@
  * connected account is not something a viewer should be able to set off.
  */
 import { NextRequest, NextResponse } from "next/server";
+import { isAuthorizedBearer } from "@/lib/auth/bearer-auth";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { query } from "@/lib/db";
 import { getValidToken } from "@/lib/microsoft-graph";
@@ -33,7 +34,7 @@ export const maxDuration = 120;
 function isAuthorizedCron(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET;
   if (!secret) return false;
-  return req.headers.get("authorization") === `Bearer ${secret}`;
+  return isAuthorizedBearer(req.headers.get("authorization"), secret);
 }
 
 export async function GET(req: NextRequest): Promise<NextResponse> {

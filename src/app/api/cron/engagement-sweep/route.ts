@@ -19,6 +19,7 @@
  * health monitor stays green - but a broken sweep now surfaces immediately.
  */
 import { NextRequest, NextResponse } from "next/server";
+import { isAuthorizedBearer } from "@/lib/auth/bearer-auth";
 import { runDueEngagements } from "@/lib/platform-scan/engage/orchestrator";
 import { trackEvent } from "@/lib/analytics";
 import { requireCapability } from "@/lib/auth/require-capability";
@@ -27,7 +28,7 @@ import { runSweepWithHealth, engagementOutcome } from "@/lib/platform-scan/sweep
 function isAuthorizedCron(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET;
   if (!secret) return false;
-  return (req.headers.get("authorization") ?? "") === `Bearer ${secret}`;
+  return isAuthorizedBearer(req.headers.get("authorization"), secret);
 }
 
 async function runSweep(actorId: string, actorRole: string): Promise<NextResponse> {

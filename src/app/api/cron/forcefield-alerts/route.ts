@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isAuthorizedBearer } from "@/lib/auth/bearer-auth";
 import { scanForcefieldWebAlerts, liveForcefieldAlertDeps } from "@/lib/forcefield-web/alerts";
 
 /**
@@ -12,7 +13,7 @@ export async function GET(req: Request) {
   const secret = process.env.CRON_SECRET;
   if (secret) {
     const auth = req.headers.get("authorization");
-    if (auth !== `Bearer ${secret}`) return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
+    if (!isAuthorizedBearer(auth, secret)) return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
   }
   try {
     const result = await scanForcefieldWebAlerts(liveForcefieldAlertDeps());

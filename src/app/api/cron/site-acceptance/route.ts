@@ -19,6 +19,7 @@
  * result is read from the payload rather than from an HTTP status.
  */
 import { NextRequest, NextResponse } from "next/server";
+import { isAuthorizedBearer } from "@/lib/auth/bearer-auth";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { drainAcceptanceQueue } from "@/lib/site-acceptance/service";
 
@@ -34,7 +35,7 @@ const BATCH = 3;
 function isAuthorizedCron(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET;
   if (!secret) return false;
-  return (req.headers.get("authorization") ?? "") === `Bearer ${secret}`;
+  return isAuthorizedBearer(req.headers.get("authorization"), secret);
 }
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
