@@ -106,7 +106,12 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
       }
       if (cancelled) return;
       if (!token || !parsed) {
-        router.push("/login");
+        // Preserve where they were headed so login returns them here, not a
+        // default page (the directive's /login?next=<current>). The dashboard
+        // layout guards EVERY authed page, so this fixes the post-login return
+        // path for all of them, not just one. A bare "/" carries no next=.
+        const next = pathname && pathname !== "/" ? `?next=${encodeURIComponent(pathname)}` : "";
+        router.push(`/login${next}`);
         return;
       }
       setUser(parsed);
