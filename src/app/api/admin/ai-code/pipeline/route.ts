@@ -31,7 +31,7 @@ import { applyAnchorEdits, anchorFailureFeedback, type AnchorFailure } from "@/l
 import { newFilesFromDiff } from "@/lib/ai-code/oracle";
 import { checkSyntax } from "@/lib/ai-code/syntax-check";
 import { remediateFileChanges } from "@/lib/ai-code/repair-files";
-import { buildRegistry, judgeCandidates, betterTier } from "@/lib/ai/router";
+import { buildRegistry, judgeCandidates } from "@/lib/ai/router";
 import { chooseIndependentJudge } from "@/lib/ai/judge-selection";
 import { evaluateChangeInvariants } from "@/lib/ai-code/change-facts";
 import { deepScanChange } from "@/lib/ai-code/deep-scan";
@@ -41,6 +41,7 @@ import { buildRepoContext, withRepoContext, extractMentionedPaths } from "@/lib/
 import { findReuseCandidates } from "@/lib/ai-code/reuse-scout";
 import { buildKnownExportsBlock, exportsEntries } from "@/lib/ai-code/export-grounding";
 import { duplicationSignal, duplicationGate } from "@/lib/ai-code/reuse-enforcement";
+import { escalationModelPins } from "@/lib/ai-code/model-benchmark";
 import { pickAuthorMode } from "@/lib/ai-code/author-mode";
 import { fetchRepoGrounding } from "@/lib/ai-code/repo-grounding";
 import { findPhantomImports, parseInstalledRoots, phantomImportFeedback } from "@/lib/ai-code/imports";
@@ -243,23 +244,24 @@ async function resolveChangeWithFallback(
   let effectiveMode = args.mode;
   const manualDiff = args.diff.trim().length > 0;
 
-  // ANCHOR TIER-ESCALATION (the tool's core cheap-first-then-route-up design):
-  // a failed anchor edit means the model at this tier could not locate the exact
-  // spans in a (often large) file. Route the SAME anchor task UP to a stronger
-  // model with the exact failure fed back, climbing the tier ladder until the
-  // anchors apply cleanly or the best tier has tried. Only then is it a genuine
-  // needs_human. It STAYS in anchor mode - never a lossy whole-file rewrite - so
-  // the deterministic apply + diagnostics are preserved. This is why a client's
-  // complex task is not answered with "we only ran a cheap model": it escalates.
+  // ANCHOR MODEL-ESCALATION (the tool's core cheap-first-then-route-to-a-model-that-
+  // -can-do-it design): a failed anchor edit means the current model could not locate
+  // the exact spans in a (often large) file. A TIER bump does not help here - in a
+  // single-deployment Azure environment every tier resolves to the same cheap model -
+  // so we escalate by PINNING a DIFFERENT available model (strongest first; the
+  // Foundry models are genuinely distinct and reachable by pin), re-authoring the SAME
+  // anchor task with the exact failure fed back, until the anchors apply cleanly or the
+  // available models are exhausted. Only then is it a genuine needs_human. It STAYS in
+  // anchor mode (never a lossy whole-file rewrite). This is why a client's complex task
+  // is not answered with "we only ran a cheap model": it routes to one that can.
   if (args.mode === "anchor" && !manualDiff) {
-    let tier: AIModelTier = args.tier ?? "standard";
-    while ((resolved.anchorFailures?.length ?? 0) > 0) {
-      const up = betterTier(tier);
-      if (!up) break; // the strongest tier still could not place the anchors
-      tier = up;
+    const candidates = escalationModelPins({ excludePins: [args.executorProviderPin ?? "", resolved.author ?? ""] });
+    for (const pin of candidates) {
+      if ((resolved.anchorFailures?.length ?? 0) === 0) break; // applied cleanly
+      if (attempts >= MAX_ATTEMPTS_CAP) break; // bounded cost
       resolved = await resolveChange({
         ...args,
-        tier,
+        executorProviderPin: pin,
         prompt: `${args.prompt}\n\n${anchorFailureFeedback(resolved.anchorFailures ?? [])}`,
       });
       attempts++;

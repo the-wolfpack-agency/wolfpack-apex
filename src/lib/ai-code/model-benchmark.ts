@@ -125,3 +125,24 @@ export function rankModels(perModel: readonly ModelGrade[]): ModelGrade[] {
     return a.model.localeCompare(b.model);
   });
 }
+
+const TIER_RANK: Record<string, number> = { reasoning: 3, large: 2, small: 1 };
+
+/**
+ * The ordered list of model PINS to try when escalating a task the current model
+ * couldn't do - stronger tier first, excluding ones already tried. Pins route to a
+ * SPECIFIC model (what the benchmark proved), unlike a tier bump, which in a
+ * single-deployment Azure environment resolves to the same cheap model. So this is
+ * how "route hard work to a model that can actually do it" works with whatever is
+ * deployed: try the genuinely-distinct available models (e.g. the Foundry ones) by
+ * pin. Pure; reads only availability.
+ */
+export function escalationModelPins(
+  opts: { excludePins?: readonly string[]; env?: Record<string, string | undefined> } = {},
+): string[] {
+  const exclude = new Set((opts.excludePins ?? []).filter(Boolean));
+  return availableBenchmarkModels(opts.env ?? process.env)
+    .filter((m) => !exclude.has(m.pin))
+    .sort((a, b) => (TIER_RANK[b.tier] ?? 0) - (TIER_RANK[a.tier] ?? 0) || a.label.localeCompare(b.label))
+    .map((m) => m.pin);
+}

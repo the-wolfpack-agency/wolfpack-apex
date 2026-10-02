@@ -50,6 +50,8 @@ jest.mock("@/lib/ai-code/repo-context", () => ({
 }));
 const mockReuseScout = jest.fn(async (..._a: unknown[]) => ({ block: "", candidates: [] as Array<{ path: string; score: number }> }));
 jest.mock("@/lib/ai-code/reuse-scout", () => ({ findReuseCandidates: (...a: unknown[]) => mockReuseScout(...a) }));
+const mockEscalationPins = jest.fn((..._a: unknown[]) => [] as string[]);
+jest.mock("@/lib/ai-code/model-benchmark", () => ({ escalationModelPins: (...a: unknown[]) => mockEscalationPins(...a) }));
 
 import { POST } from "../route";
 
@@ -700,5 +702,39 @@ describe("anchor mode (large-file edits)", () => {
     expect(res.status).toBe(422);
     expect(body.anchorFailures).toEqual([{ path: "src/x.ts", reason: "anchor_not_found" }]);
     expect(mockCreateApproval).not.toHaveBeenCalled();
+  });
+
+  it("escalates a failed anchor to a DIFFERENT model by pin, which lands the edit (the route-to-a-model-that-can design)", async () => {
+    mockFetchFile.mockImplementation((_c: unknown, _r: unknown, path: string) =>
+      Promise.resolve(path === "src/x.ts" ? "export const a = 1;" : null));
+    // A genuinely-distinct available model exists to escalate to (what the benchmark proved).
+    mockEscalationPins.mockReturnValue(["azure-deepseek-v3"]);
+    // First (default-model) author MISSES the anchor; the escalated author - pinned to
+    // deepseek, with the exact failure fed back - copies it verbatim and it applies.
+    mockComplete
+      .mockResolvedValueOnce(authorResp("EDIT src/x.ts\n<<<<<<< SEARCH\nexport const NOPE = 9;\n=======\nx\n>>>>>>> REPLACE"))
+      .mockResolvedValueOnce(authorResp("EDIT src/x.ts\n<<<<<<< SEARCH\nexport const a = 1;\n=======\nexport const a = 2;\n>>>>>>> REPLACE"));
+    const res = await POST(post({ ref: "pr-anchor-escalate", prompt: "change a to 2", answers: { tests: "all" }, repo: "acme/app", mode: "anchor" }));
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.anchorFailures).toEqual([]);
+    expect(body.approvalId).toBe("appr-1"); // the escalated edit was clean -> handed off
+    expect(body.executorAttempts).toBe(2); // re-authored once on the stronger model
+    expect(mockComplete).toHaveBeenCalledTimes(2);
+    // the retry was PINNED to the escalation model, not the original
+    expect(mockComplete).toHaveBeenLastCalledWith(expect.objectContaining({ provider_pin: "azure-deepseek-v3" }));
+  });
+
+  it("exhausts the available models then honestly reaches needs_human (never a bad auto-PR)", async () => {
+    mockFetchFile.mockImplementation((_c: unknown, _r: unknown, path: string) =>
+      Promise.resolve(path === "src/x.ts" ? "export const a = 1;" : null));
+    mockEscalationPins.mockReturnValue(["azure-deepseek-v3", "azure-llama-3.3-70b"]);
+    // Every model misses the anchor -> no edit is ever applied.
+    mockComplete.mockResolvedValue(authorResp("EDIT src/x.ts\n<<<<<<< SEARCH\nexport const NOPE = 9;\n=======\nx\n>>>>>>> REPLACE"));
+    const res = await POST(post({ ref: "pr-anchor-exhaust", prompt: "edit", answers: { tests: "all" }, repo: "acme/app", mode: "anchor" }));
+    const body = await res.json();
+    expect(res.status).toBe(422);
+    expect(body.anchorFailures).toEqual([{ path: "src/x.ts", reason: "anchor_not_found" }]);
+    expect(mockCreateApproval).not.toHaveBeenCalled(); // never a partial/guessed PR
   });
 });
