@@ -17,6 +17,7 @@ import { useCallback, useEffect, useState, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import { getInstinctUser, fetchWithRefresh, jsonHeaders } from "@/lib/client-auth";
 import { GlassPanel, MetricTile, StatusPill, SectionHeader, type SeverityTone } from "@/components/console";
+import WatchedReposPanel from "@/components/ai-code/WatchedReposPanel";
 import PipelineDashboard, { type CiDashboard } from "@/components/ai-code/PipelineDashboard";
 
 type Outcome = "allow" | "escalate" | "block";
@@ -1128,6 +1129,8 @@ export default function CodeFactoryPage() {
           </div>
         </GlassPanel>
       )}
+
+      <WatchedReposPanel />
 
       <GlassPanel title="Audit evidence" subtitle="Verifiable, not just visible - re-check the tamper-evident record of every gate decision">
         <div style={{ display: "flex", gap: "0.6rem", flexWrap: "wrap", alignItems: "center", marginBottom: audit ? "0.85rem" : 0 }}>
