@@ -67,3 +67,34 @@ describe("applyAnchorEdits (deterministic + fail-closed)", () => {
     expect(r.failures).toEqual([{ path: "a.ts", reason: "anchor_not_found" }]);
   });
 });
+
+describe("applyAnchorEdits — whitespace-tolerant fallback (the large-file rescue)", () => {
+  it("applies when the SEARCH differs only by per-line TRAILING whitespace", () => {
+    // The live file has trailing spaces the model did not reproduce.
+    const file = "function f() {\n  const x = 1;   \n  return x;\n}\n";
+    const edits = [{ path: "a.ts", search: "  const x = 1;\n  return x;", replace: "  const x = 2;\n  return x * 2;" }];
+    const r = applyAnchorEdits({ "a.ts": file }, edits);
+    expect(r.failures).toEqual([]);
+    expect(r.appliedCount).toBe(1);
+    expect(r.changes[0].content).toBe("function f() {\n  const x = 2;\n  return x * 2;\n}\n");
+  });
+
+  it("stays fail-closed: an ambiguous trailing-trimmed match NEVER edits", () => {
+    const file = "a = 1;\nb = 2;\n\na = 1;\nb = 2;\n"; // two identical spans
+    const r = applyAnchorEdits({ "a.ts": file }, [{ path: "a.ts", search: "a = 1;\nb = 2;", replace: "X" }]);
+    expect(r.appliedCount).toBe(0);
+    expect(r.failures).toEqual([{ path: "a.ts", reason: "anchor_ambiguous" }]);
+  });
+
+  it("still reports anchor_not_found when nothing matches even trimmed", () => {
+    const r = applyAnchorEdits({ "a.ts": "const a = 1;\n" }, [{ path: "a.ts", search: "const z = 9;", replace: "X" }]);
+    expect(r.appliedCount).toBe(0);
+    expect(r.failures).toEqual([{ path: "a.ts", reason: "anchor_not_found" }]);
+  });
+
+  it("prefers the exact match (fast path) and leaves exact behavior unchanged", () => {
+    const r = applyAnchorEdits({ "a.ts": "const a = 1;\n" }, [{ path: "a.ts", search: "const a = 1;", replace: "const a = 2;" }]);
+    expect(r.appliedCount).toBe(1);
+    expect(r.changes[0].content).toBe("const a = 2;\n");
+  });
+});
