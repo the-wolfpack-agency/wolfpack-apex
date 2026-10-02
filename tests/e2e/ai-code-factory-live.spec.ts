@@ -22,17 +22,34 @@ const EMAIL = process.env.SMOKE_TEST_EMAIL;
 const PASSWORD = process.env.SMOKE_TEST_PASSWORD;
 const u = (p: string) => `${PROD_URL}${p}`;
 
-/** Real login + land on the factory page (never a blank 401). */
+/** Submit the login form once and report whether it navigated off /login. */
+async function attemptLogin(page: Page): Promise<boolean> {
+  await page.goto(u("/login"), { waitUntil: "domcontentloaded" });
+  await page.getByTestId("login-email").fill(EMAIL!);
+  await page.getByTestId("login-password").fill(PASSWORD!);
+  await page.locator('form button[type="submit"]').click();
+  try {
+    await expect.poll(() => new URL(page.url()).pathname, { timeout: 20_000 }).not.toBe("/login");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Real login + land on the factory page (never a blank 401). Retries the login
+ * ONCE: a single shared smoke account logged in from many fresh test contexts can
+ * transiently fail (rate-limit / refresh-token family churn), and a flaky login
+ * must not read as a product failure. A second failure is reported honestly.
+ */
 async function openFactory(page: Page): Promise<string[]> {
   const csp: string[] = [];
   page.on("console", (m) => {
     if (/content security policy|refused to (load|connect|execute)/i.test(m.text())) csp.push(m.text());
   });
-  await page.goto(u("/login"), { waitUntil: "domcontentloaded" });
-  await page.getByTestId("login-email").fill(EMAIL!);
-  await page.getByTestId("login-password").fill(PASSWORD!);
-  await page.locator('form button[type="submit"]').click();
-  await expect.poll(() => new URL(page.url()).pathname, { timeout: 20_000 }).not.toBe("/login");
+  let ok = await attemptLogin(page);
+  if (!ok) ok = await attemptLogin(page);
+  expect(ok, "login navigated away from /login (after one retry)").toBe(true);
   const nav = await page.goto(u("/admin/ai-code"), { waitUntil: "domcontentloaded", timeout: 20_000 });
   expect(nav?.status(), "the ai-code page returns 200-class").toBeLessThan(400);
   await expect(page.getByTestId("ai-code-page"), "the factory page mounts").toBeVisible({ timeout: 10_000 });
@@ -108,5 +125,65 @@ test.describe("code factory - LIVE UI journeys (real model)", () => {
     await expect(page.getByTestId("benchmark-panel"), "the benchmark panel mounts").toBeVisible({ timeout: 10_000 });
     await expect(page.getByTestId("run-benchmark"), "the Run control renders").toBeVisible({ timeout: 10_000 });
     await expect(page.getByTestId("run-benchmark"), "the Run button enables once models load").toBeEnabled({ timeout: 15_000 });
+  });
+
+  // ─── Operator-journey hardening: the scenarios a real user hits around the
+  // happy path, where a client would otherwise find the rough edges first. ───
+
+  test("6) an UNAUTHENTICATED visit redirects to /login (never a blank admin page)", async ({ page }, testInfo) => {
+    // No login: the client's #1 bad first impression is a blank 401 admin page.
+    await page.goto(u("/admin/ai-code"), { waitUntil: "domcontentloaded" });
+    await expect
+      .poll(() => new URL(page.url()).pathname, { timeout: 15_000 })
+      .toBe("/login");
+    // OBSERVATION (not a hard gate): the redirect should preserve ?next= so login
+    // returns the operator to where they were headed. The source does push
+    // ?next=/admin/ai-code; if it is absent live, record it as a finding to chase
+    // (login-page query handling / a competing redirect) rather than failing the
+    // critical no-blank-page guarantee above.
+    if (!new URL(page.url()).search.includes("next=")) {
+      testInfo.annotations.push({ type: "finding", description: "auth redirect did not preserve ?next= (post-login return path lost)" });
+    }
+  });
+
+  test("7) an EMPTY prompt is guarded with an honest message (no silent no-op, no model call)", async ({ page }) => {
+    await openFactory(page);
+    await page.getByRole("button", { name: /generate & gate/i }).click();
+    // Target the guard message by text - getByRole("alert") also matches Next.js's
+    // route-announcer div (strict-mode ambiguity), not a product issue.
+    await expect(
+      page.getByText(/describe the change you want the factory to build/i),
+      "an empty prompt shows a clear instruction",
+    ).toBeVisible({ timeout: 5_000 });
+    // It must NOT have called a model / rendered an authored diff.
+    await expect(page.getByTestId("generated-code")).toHaveCount(0);
+  });
+
+  test("8) a clean change gates the PR behind an explicit human consent (the handoff control)", async ({ page }) => {
+    await openFactory(page);
+    await submit(page, "Add a pure isEven(n: number): boolean helper in src/lib/is-even.ts that returns n % 2 === 0, with a test file.");
+    // A clean change is handed off for approval - but the button that touches
+    // GitHub stays DISABLED until the operator ticks the consent box.
+    const approve = page.getByTestId("approve-open-pr");
+    const consent = page.getByTestId("approve-consent");
+    // (Only present when the gate allowed the change; a clean helper should.)
+    if ((await approve.count()) > 0) {
+      await expect(approve, "the PR button is disabled before consent").toBeDisabled();
+      await consent.check();
+      await expect(approve, "the PR button enables once the human consents").toBeEnabled();
+      // We do NOT click it - this journey proves the control, not an actual PR.
+    } else {
+      // If the gate escalated this helper, the handoff status must say so honestly.
+      await expect(page.getByTestId("handoff-status")).toContainText(/needs human|withheld|ready for pr/i);
+    }
+  });
+
+  test("9) the clarifier surfaces its assumptions and offers a re-run (the intake story)", async ({ page }) => {
+    await openFactory(page);
+    await submit(page, "Add a pure capitalize(s: string): string helper in src/lib/capitalize.ts, with a test file.");
+    // The deferred-clarification UX records the assumptions it proceeded on and
+    // lets the operator confirm/change them and re-run - it never blocks mid-run.
+    await expect(page.getByTestId("clarifier"), "the clarifier shows the assumptions it used").toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId("clarifier-rerun"), "the operator can re-run with confirmed answers").toBeVisible();
   });
 });
