@@ -19,6 +19,7 @@ import { getInstinctUser, fetchWithRefresh, jsonHeaders } from "@/lib/client-aut
 import { GlassPanel, MetricTile, StatusPill, SectionHeader, type SeverityTone } from "@/components/console";
 import BenchmarkPanel from "@/components/ai-code/BenchmarkPanel";
 import WatchedReposPanel from "@/components/ai-code/WatchedReposPanel";
+import { capabilitiesForRole } from "@/lib/auth/role-capabilities";
 import PipelineDashboard, { type CiDashboard } from "@/components/ai-code/PipelineDashboard";
 
 type Outcome = "allow" | "escalate" | "block";
@@ -336,6 +337,14 @@ export default function CodeFactoryPage() {
     const u = getInstinctUser<{ role: string }>();
     if (!u) {
       router.push("/login?next=/admin/ai-code");
+      return;
+    }
+    // Gate by CAPABILITY, not just authentication. The factory's APIs all require
+    // settings.manage_team; without it, a non-admin otherwise saw the full admin
+    // shell with every data call silently 403ing (a "control shown to a role that
+    // can't use it" defect). Send them to their home instead of a dead surface.
+    if (!capabilitiesForRole(u.role).has("settings.manage_team")) {
+      router.push("/assistant");
       return;
     }
     setReady(true);

@@ -110,6 +110,15 @@ test("redirects an unauthenticated user to login, never a blank page", () => {
   expect(mockPush).toHaveBeenCalledWith("/login?next=/admin/ai-code");
 });
 
+test("redirects an authenticated but NON-privileged role away (no dead admin shell with 403s)", () => {
+  // A role without settings.manage_team must not land on the factory and watch
+  // every data call 403 - send them home. (Found by dogfooding /admin/ai-code as
+  // a 'sales' user: the page rendered, every admin API 403'd.)
+  user = { role: "sales" };
+  render(<CodeFactoryPage />);
+  expect(mockPush).toHaveBeenCalledWith("/assistant");
+});
+
 test("sends the chosen target repo in the pipeline request", async () => {
   pipelineResp = resp(200, runResp({ outcome: "allow" }));
   render(<CodeFactoryPage />);
