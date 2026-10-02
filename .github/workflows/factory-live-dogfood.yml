@@ -1,0 +1,122 @@
+name: Factory Live Dogfood
+
+# Drives the REAL code factory UI at /admin/ai-code against the DEPLOYED app, as a
+# client does: logs in with the smoke account, submits a LARGE existing-file edit,
+# and asserts the run reaches a terminal honest state - authored (ready_for_pr) or
+# an explicit human hold (needs_human) - and NEVER the "we only ran a cheap model"
+# dead-end. The scenario captures the real pipeline response, so the model that
+# landed the edit and how many passes it took are in the run artifact.
+#
+# WHY a dedicated workflow: this makes a REAL (cheap) model call, so it must not sit
+# on the PR critical path for every change. It runs:
+#   * on demand   (workflow_dispatch) - once this file is on main,
+#   * on a schedule (daily)           - the "verify the tool regularly" guarantee,
+#   * on a PR that touches the factory (paths filter) - so a factory change
+#     re-dogfoods itself before merge.
+#
+# Needs PROD_URL + SMOKE_TEST_EMAIL + SMOKE_TEST_PASSWORD in repo secrets (already
+# set). If PROD_URL is unset the job SKIPS loudly rather than booting a local dev
+# server (which cold-compiles routes and flakes on dev-mode CSP).
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 13 * * *" # daily ~13:17 UTC
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "tests/e2e/ai-code-factory-live.spec.ts"
+      - ".github/workflows/factory-live-dogfood.yml"
+      - "src/app/api/admin/ai-code/**"
+      - "src/lib/ai-code/**"
+      - "src/lib/ai/**"
+      - "src/app/(dashboard)/admin/ai-code/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: factory-live-dogfood-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dogfood:
+    # On PRs only once ready for review, never on a draft commit (real model spend).
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CI: "true"
+      PROD_URL: ${{ secrets.PROD_URL }}
+      SMOKE_TEST_EMAIL: ${{ secrets.SMOKE_TEST_EMAIL }}
+      SMOKE_TEST_PASSWORD: ${{ secrets.SMOKE_TEST_PASSWORD }}
+
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Require PROD_URL (the dogfood targets the live deployment)
+        id: cfg
+        run: |
+          if [ -z "${PROD_URL}" ]; then
+            echo "configured=false" >> $GITHUB_OUTPUT
+            echo "::warning::PROD_URL secret not set - factory live dogfood SKIPPED. It must target the deployed app. Add PROD_URL + SMOKE_TEST_EMAIL + SMOKE_TEST_PASSWORD in Settings -> Secrets -> Actions."
+          else
+            echo "configured=true" >> $GITHUB_OUTPUT
+          fi
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v4.0.4
+        if: steps.cfg.outputs.configured == 'true'
+        with:
+          node-version: 20
+          cache: "npm"
+
+      - name: Install dependencies
+        if: steps.cfg.outputs.configured == 'true'
+        run: npm ci
+
+      - name: Cache Playwright browsers
+        if: steps.cfg.outputs.configured == 'true'
+        id: pw-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Install Playwright browser
+        if: steps.cfg.outputs.configured == 'true' && steps.pw-cache.outputs.cache-hit != 'true'
+        timeout-minutes: 8
+        run: npx playwright install chromium
+
+      - name: Install OS libraries for Chromium
+        if: steps.cfg.outputs.configured == 'true'
+        timeout-minutes: 6
+        # Best-effort: a hanging apt mirror must NEVER fail the job (mirrors the
+        # reality-check workflow). A genuinely missing library surfaces as a
+        # browser-launch failure in the next step.
+        continue-on-error: true
+        run: |
+          timeout 150 npx playwright install-deps chromium \
+            || (echo "retrying once" && sleep 10 && timeout 150 npx playwright install-deps chromium) \
+            || echo "::warning::playwright install-deps failed (apt mirror). Continuing: a missing library surfaces as a browser launch failure next."
+
+      - name: Dogfood the factory through the live UI (large-file routing journey)
+        if: steps.cfg.outputs.configured == 'true'
+        run: >-
+          npx playwright test
+          tests/e2e/ai-code-factory-live.spec.ts
+          --grep "LARGE existing-file"
+          --config=playwright.config.ts
+          --reporter=github
+
+      - name: Upload Playwright report (incl. run-summary - model + passes)
+        if: always()
+        continue-on-error: true # diagnostic upload must not fail the job
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: factory-live-dogfood-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 14
+          if-no-files-found: ignore

@@ -182,4 +182,57 @@ test.describe("code factory - LIVE UI journeys (real model)", () => {
     await expect(page.getByTestId("clarifier"), "the clarifier shows the assumptions it used").toBeVisible({ timeout: 10_000 });
     await expect(page.getByTestId("clarifier-rerun"), "the operator can re-run with confirmed answers").toBeVisible();
   });
+
+  // ─── The ROUTING story: a large existing file the cheap model may not be able
+  // to edit in one pass. This is the scenario the pin-escalation was built for -
+  // a failed cheap-model anchor edit must route UP to a genuinely-distinct model
+  // (prod has the Foundry deepseek/llama deployments), NEVER dead-end as "we only
+  // ran a cheap model". Drives the real UI AND captures the real pipeline response
+  // so the model that landed it + how many passes it took are auditable. ───
+  test("10) a LARGE existing-file edit completes - routing UP if the cheap model can't (never a cheap-only dead-end)", async ({ page }, testInfo) => {
+    const csp = await openFactory(page);
+    const pipelineResp = page.waitForResponse(
+      (r) => r.url().includes("/api/admin/ai-code/pipeline") && r.request().method() === "POST",
+      { timeout: 175_000 },
+    );
+    await page.getByLabel("Prompt").fill(
+      "Edit the existing large file src/app/(dashboard)/admin/site-analytics/page.tsx: add an aria-label=\"Site analytics\" attribute to the page's top-level container element. Make only that single minimal edit and keep every existing export.",
+    );
+    await page.getByRole("button", { name: /generate & gate/i }).click();
+    const resp = await pipelineResp;
+    expect(resp.status(), "the pipeline responds 200-class (never a 500 or blank)").toBeLessThan(400);
+    const body = await resp.json().catch(() => ({}));
+    // The pipeline returns run + executor + executorAttempts + anchorFailures as
+    // TOP-LEVEL siblings (not nested under run); only status lives on run.
+    const run = body.run ?? body;
+    const executor = body.executor ?? run.executor ?? null;
+    const executorAttempts = body.executorAttempts ?? run.executorAttempts ?? null;
+    const anchorFailures = body.anchorFailures ?? run.anchorFailures ?? [];
+    // Observability: record WHICH model landed it + HOW MANY passes, so escalation
+    // (attempts > 1, a model stronger than gpt-4o-mini) is visible in the artifact.
+    await testInfo.attach("run-summary.json", {
+      body: JSON.stringify(
+        { status: run.status, executorAttempts, effectiveMode: body.effectiveMode, model: executor?.author, anchorFailures },
+        null,
+        2,
+      ),
+      contentType: "application/json",
+    });
+    // THE CLIENT GUARANTEE: a large-file edit reaches a terminal, honest state -
+    // authored (ready_for_pr) or an explicit human hold (needs_human) - and is
+    // NEVER the "model did not produce a usable change" cheap-only dead-end.
+    expect(["ready_for_pr", "needs_human"], `terminal status, got "${run.status}"`).toContain(run.status);
+    // Whatever model authored it is recorded (never blank), so the route is auditable.
+    expect(String(executor?.author ?? ""), "the executor model is recorded").not.toBe("");
+    // If any anchor failed, escalation must have been attempted (attempts > 1) -
+    // a failed anchor must NEVER be the terminal state without trying another model.
+    if ((anchorFailures as unknown[]).length > 0) {
+      expect(Number(executorAttempts), "a failed anchor escalated to another model").toBeGreaterThan(1);
+    }
+    // The UI shows a terminal surface a client can read (authored code OR an honest handoff), not a hang.
+    const rendered =
+      (await page.getByTestId("generated-code").count()) > 0 || (await page.getByTestId("handoff-status").count()) > 0;
+    expect(rendered, "the UI renders a terminal result, not a spinner").toBe(true);
+    expect(csp, "no CSP violations during the large-file journey").toEqual([]);
+  });
 });

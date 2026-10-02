@@ -54,9 +54,9 @@ const HARD_GATES = [
  * for weeks with five assertions obsoleted by #279 and nothing to report it.
  */
 const KNOWN_UNRUN: string[] = [
-  // On-demand reality check: makes a real model call + needs SMOKE_TEST creds,
-  // so it is run manually against prod, never in CI (no spend). Skips otherwise.
-  "tests/e2e/ai-code-factory-live.spec.ts",
+  // NOTE: ai-code-factory-live.spec.ts was HERE until it was wired into
+  // .github/workflows/factory-live-dogfood.yml (runs its large-file routing
+  // scenario against prod on a schedule + factory PRs, using SMOKE_TEST creds).
   "tests/e2e/agent-control-plane.spec.ts",
   "tests/e2e/agent-deployments-pipeline.spec.ts",
   "tests/e2e/agent-detail-console.spec.ts",
