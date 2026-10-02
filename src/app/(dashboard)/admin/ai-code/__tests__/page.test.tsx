@@ -30,7 +30,7 @@ const FINDING = {
 };
 const EXECUTOR = { diff: "diff --git a/lib/x.ts b/lib/x.ts", author: "gpt-4o-mini", provider: "azure-openai", costUsd: 0.0003, latencyMs: 800, error: null };
 
-function runResp(over: Partial<{ outcome: string; status: string; findings: unknown[]; judgments?: unknown[]; invariants: unknown; deepScan: unknown; approvalId: string | null; openQuestions: unknown[] }> = {}) {
+function runResp(over: Partial<{ outcome: string; status: string; findings: unknown[]; judgments?: unknown[]; invariants: unknown; deepScan: unknown; duplication: unknown; approvalId: string | null; openQuestions: unknown[] }> = {}) {
   const outcome = over.outcome ?? "allow";
   return {
     run: {
@@ -50,6 +50,7 @@ function runResp(over: Partial<{ outcome: string; status: string; findings: unkn
     executor: EXECUTOR,
     invariants: over.invariants ?? { ruleId: "R-MUTATION-ALLOW", intendedOutcome: "allow", wouldBlock: false, reason: "ok" },
     deepScan: over.deepScan ?? { scanned: 1, critical: 0, high: 0, blocking: false },
+    duplication: over.duplication ?? { escalate: false, candidatePath: null, score: 0, reason: null },
     cost: { actualUsd: 0.0003, inputTokens: 500, outputTokens: 800, attempts: 1, comparison: [{ model: "gpt-4o-mini", provider: "openai", tier: "small", costUsd: 0.000555 }, { model: "gpt-4o", provider: "openai", tier: "large", costUsd: 0.00925 }] },
   };
 }
@@ -205,6 +206,27 @@ test("governance panel: a critical deep-scan finding -> withheld from handoff", 
   await submitPrompt();
   await waitFor(() => expect(screen.getByText(/Deep scan: 1 critical/)).toBeInTheDocument());
   expect(screen.getByTestId("handoff-status")).toHaveTextContent(/critical security finding/);
+});
+
+test("governance panel: the DRY gate flags a likely duplication -> withheld from handoff", async () => {
+  pipelineResp = resp(200, runResp({
+      outcome: "allow",
+      status: "needs_human",
+      approvalId: null,
+      duplication: {
+        escalate: true,
+        candidatePath: "src/lib/cost-summary.ts",
+        score: 8,
+        reason: "This change does not import src/lib/cost-summary.ts, whose name strongly matches the task. It likely re-implements capability that already exists - reuse or extend it.",
+      },
+    }));
+  render(<CodeFactoryPage />);
+  await submitPrompt();
+  await waitFor(() => expect(screen.getByText(/Reuse: possible duplication/)).toBeInTheDocument());
+  expect(screen.getByTestId("duplication-reason")).toHaveTextContent(/cost-summary\.ts/);
+  // The DRY gate set the run to needs_human, so the handoff is withheld.
+  expect(screen.getByTestId("handoff-status")).toHaveTextContent(/Needs human|did not allow/i);
+  expect(screen.queryByTestId("approve-open-pr")).not.toBeInTheDocument();
 });
 
 test("approve & open PR: clicking approve opens the real PR and shows the link", async () => {

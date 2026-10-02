@@ -7,6 +7,17 @@
  */
 import { KEY_SIGNATURES } from "@/lib/ai-surface/detect";
 import { secretInLogs } from "@/lib/platform-scan/static/detectors";
+import {
+  // ONE definition of each security pattern, shared with the whole-file scanner
+  // (platform-scan/static/detectors.ts) via security-corpus - no second copy.
+  isCodeExecLine,
+  isSqlInjectionLine,
+  isWeakRandomLine,
+  DANGEROUS_HTML,
+  TLS_DISABLED,
+  OPEN_CORS,
+  OPEN_CORS_OPTION,
+} from "@/lib/platform-scan/static/security-corpus";
 import type { AddedLine, AiCodeFinding } from "./types";
 
 /**
@@ -74,10 +85,7 @@ const RULES: Rule[] = [
     cwe: "CWE-95",
     title: "Dynamic code / command execution introduced",
     detail: "AI-authored code adds eval, new Function, or a child_process exec. Confirm input is not attacker-controlled.",
-    test: (t) =>
-      /\beval\s*\(/.test(t) ||
-      /new\s+Function\s*\(/.test(t) ||
-      /\bexec(?:Sync)?\s*\(|\bexecFile(?:Sync)?\s*\(|child_process/.test(t),
+    test: (t) => isCodeExecLine(t),
   },
   {
     klass: "disabled_tls",
@@ -85,7 +93,7 @@ const RULES: Rule[] = [
     cwe: "CWE-295",
     title: "TLS verification disabled",
     detail: "AI-authored code disables certificate validation (MITM exposure).",
-    test: (t) => /rejectUnauthorized\s*:\s*false/.test(t) || /NODE_TLS_REJECT_UNAUTHORIZED\s*=\s*['"]?0/.test(t),
+    test: (t) => TLS_DISABLED.test(t),
   },
   {
     klass: "dangerous_html",
@@ -93,7 +101,7 @@ const RULES: Rule[] = [
     cwe: "CWE-79",
     title: "Unsanitized HTML injection sink",
     detail: "AI-authored code adds dangerouslySetInnerHTML or innerHTML assignment (XSS risk).",
-    test: (t) => /dangerouslySetInnerHTML/.test(t) || /\.innerHTML\s*=/.test(t),
+    test: (t) => DANGEROUS_HTML.test(t),
   },
   {
     klass: "sql_concat",
@@ -101,8 +109,7 @@ const RULES: Rule[] = [
     cwe: "CWE-89",
     title: "SQL built by string interpolation",
     detail: "AI-authored code builds a SQL statement with interpolation/concatenation (injection risk). Parameterize it.",
-    test: (t) =>
-      /\b(SELECT|INSERT\s+INTO|UPDATE|DELETE\s+FROM|FROM|WHERE)\b/i.test(t) && (/\$\{/.test(t) || /['"]\s*\+|\+\s*['"]/.test(t)),
+    test: (t) => isSqlInjectionLine(t),
   },
   {
     klass: "weak_random",
@@ -110,7 +117,7 @@ const RULES: Rule[] = [
     cwe: "CWE-338",
     title: "Weak randomness in a security context",
     detail: "AI-authored code uses Math.random() near a token/secret/nonce. Use a CSPRNG.",
-    test: (t) => /Math\.random\s*\(\)/.test(t) && /\b(token|secret|password|nonce|salt|otp|key|session)\b/i.test(t),
+    test: (t) => isWeakRandomLine(t),
   },
   {
     klass: "open_cors",
@@ -118,8 +125,7 @@ const RULES: Rule[] = [
     cwe: "CWE-942",
     title: "Permissive CORS introduced",
     detail: "AI-authored code allows any origin (Access-Control-Allow-Origin: * or cors origin true).",
-    test: (t) =>
-      /access-control-allow-origin['"]?\s*[:,]\s*['"]\*/i.test(t) || /\borigin\s*:\s*(?:true|['"]\*['"])/.test(t),
+    test: (t) => OPEN_CORS.test(t) || OPEN_CORS_OPTION.test(t),
   },
   {
     klass: "suppressed_security",

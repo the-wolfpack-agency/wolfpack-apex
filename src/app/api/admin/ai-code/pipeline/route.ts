@@ -40,7 +40,7 @@ import { workspaceGithubClient, fetchFileContent, fetchRepoTree } from "@/lib/gi
 import { buildRepoContext, withRepoContext, extractMentionedPaths } from "@/lib/ai-code/repo-context";
 import { findReuseCandidates } from "@/lib/ai-code/reuse-scout";
 import { buildKnownExportsBlock, exportsEntries } from "@/lib/ai-code/export-grounding";
-import { duplicationSignal } from "@/lib/ai-code/reuse-enforcement";
+import { duplicationSignal, duplicationGate } from "@/lib/ai-code/reuse-enforcement";
 import { pickAuthorMode } from "@/lib/ai-code/author-mode";
 import { fetchRepoGrounding } from "@/lib/ai-code/repo-grounding";
 import { findPhantomImports, parseInstalledRoots, phantomImportFeedback } from "@/lib/ai-code/imports";
@@ -666,8 +666,18 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // attempt still left a broken local import, it blocks here (needs_human).
   const brokenLocalImports = await checkLocalImports(finalFiles, localImportCtx);
 
+  // DRY GATE: did the change re-implement capability that already exists? The
+  // reuse-scout surfaced the existing modules whose names match the task; if the
+  // top one is a STRONG match and the change did not import it, this is a likely
+  // duplication (the exact failure that shipped a second cost summary, and that
+  // the detector-duplication incident repeated). It ESCALATES to a human rather
+  // than hard-blocking - a name match is a strong hint, not proof - so the human
+  // confirms "reuse it" or "genuinely new". Computed here so it gates the handoff.
+  const dupSignal = duplicationSignal(reuseCandidatesList, finalFiles, aliasMap);
+  const dupGate = duplicationGate(dupSignal);
+
   let approvalId: string | null = null;
-  if (run.status === "ready_for_pr" && !invariants.wouldBlock && !deepScan.blocking && filesModeHandoffOk && syntax.ok && phantomImports.length === 0 && incompleteFiles.length === 0 && removedExports.length === 0 && anchorFailures.length === 0 && brokenLocalImports.length === 0) {
+  if (run.status === "ready_for_pr" && !invariants.wouldBlock && !deepScan.blocking && !dupGate.escalate && filesModeHandoffOk && syntax.ok && phantomImports.length === 0 && incompleteFiles.length === 0 && removedExports.length === 0 && anchorFailures.length === 0 && brokenLocalImports.length === 0) {
     // Provision the factory's own governed principal (active + revocable) and hand
     // the approval its REAL agent id, so the human-in-the-gate approval's
     // kill-switch re-check finds an active agent instead of auto-rejecting. A null
@@ -713,7 +723,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   // A change that does not parse, or imports a local symbol that does not exist,
   // is never "ready_for_pr" whatever the gate said - both always fail CI.
-  const effectiveRun = syntax.ok && brokenLocalImports.length === 0 ? run : { ...run, status: "needs_human" as const };
+  const effectiveRun =
+    syntax.ok && brokenLocalImports.length === 0 && !dupGate.escalate ? run : { ...run, status: "needs_human" as const };
 
   // A retry happened AND the final draft is clean of every self-healable class:
   // the model RECOVERED from its own mistake given the exact feedback. The single
@@ -721,9 +732,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // "needed a nudge" from "could not be nudged".
   const selfHealed =
     executorAttempts > 1 && syntax.ok && phantomImports.length === 0 && incompleteFiles.length === 0 && brokenLocalImports.length === 0;
-
-  // SHADOW duplication signal: did the change reuse the top module the scout found?
-  const dupSignal = duplicationSignal(reuseCandidatesList, finalFiles, aliasMap);
 
   // AWAITED (backs Run history) + the per-run FAILURE TAXONOMY, so every run is a
   // labeled datapoint for grading a model's real limits as we switch models:
@@ -754,6 +762,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // data is what sets the escalation threshold before we turn enforcement on.
     reuse_top_score: dupSignal.topScore,
     ...(dupSignal.topReused !== null ? { reuse_top_reused: dupSignal.topReused } : {}),
+    // The DRY gate decision: did a strong existing module go un-reused (a likely
+    // re-implementation the gate escalated to a human)? Now ENFORCED, not shadow.
+    reuse_duplication_escalated: dupGate.escalate,
     // The failure taxonomy: which deterministic gate fired on the FINAL draft.
     syntax_ok: syntax.ok,
     phantom_imports: phantomImports.length,
@@ -769,5 +780,5 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     verdict_reason: run.review.verdict.reason,
   });
 
-  return NextResponse.json({ run: effectiveRun, approvalId, executor, invariants, changeFacts, deepScan, syntax, phantomImports, incompleteFiles, removedExports, anchorFailures, brokenLocalImports, selfHealed, mode: effectiveMode, executorAttempts, repoContext: { files: repoContextFiles }, cost });
+  return NextResponse.json({ run: effectiveRun, approvalId, executor, invariants, changeFacts, deepScan, duplication: dupGate, syntax, phantomImports, incompleteFiles, removedExports, anchorFailures, brokenLocalImports, selfHealed, mode: effectiveMode, executorAttempts, repoContext: { files: repoContextFiles }, cost });
 }

@@ -95,9 +95,18 @@ interface PipelineResponse {
   executor?: Executor | null;
   invariants?: InvariantDecision;
   deepScan?: DeepScanSummary;
+  duplication?: DuplicationGate;
   mode?: string;
   cost?: RunCost;
   error?: string;
+}
+
+/** The DRY gate: did the change re-implement an existing module instead of reusing it? */
+interface DuplicationGate {
+  escalate: boolean;
+  candidatePath: string | null;
+  score: number;
+  reason: string | null;
 }
 
 const usdFmt = (n: number): string => `$${n > 0 && n < 0.01 ? n.toFixed(4) : n.toFixed(2)}`;
@@ -224,6 +233,7 @@ export default function CodeFactoryPage() {
   const [approvalId, setApprovalId] = useState<string | null>(null);
   const [invariants, setInvariants] = useState<InvariantDecision | null>(null);
   const [deepScan, setDeepScan] = useState<DeepScanSummary | null>(null);
+  const [duplication, setDuplication] = useState<DuplicationGate | null>(null);
   const [cost, setCost] = useState<RunCost | null>(null);
   const [prUrl, setPrUrl] = useState<string | null>(null);
   const [approving, setApproving] = useState(false);
@@ -391,6 +401,7 @@ export default function CodeFactoryPage() {
       setApprovalId(body.approvalId ?? null);
       setInvariants(body.invariants ?? null);
       setDeepScan(body.deepScan ?? null);
+      setDuplication(body.duplication ?? null);
       setCost(body.cost ?? null);
       // Seed the clarifier with each open question's assumed default so re-running
       // sends them explicitly (confirming the assumption resolves it).
@@ -763,8 +774,8 @@ export default function CodeFactoryPage() {
             );
           })()}
 
-          {(invariants || deepScan) && (
-            <GlassPanel title="Governance" subtitle="Deterministic engineering invariants + full deep static scan">
+          {(invariants || deepScan || duplication) && (
+            <GlassPanel title="Governance" subtitle="Deterministic engineering invariants + full deep static scan + DRY/reuse check">
               <div data-testid="governance-panel" style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
                 {invariants && (
                   <StatusPill
@@ -782,6 +793,14 @@ export default function CodeFactoryPage() {
                     size="sm"
                   />
                 )}
+                {duplication && (
+                  <StatusPill
+                    status="reuse"
+                    tone={duplication.escalate ? "warning" : "success"}
+                    label={duplication.escalate ? "Reuse: possible duplication" : "Reuse: no duplication"}
+                    size="sm"
+                  />
+                )}
               </div>
               {invariants?.wouldBlock && (
                 <p style={{ margin: "0.5rem 0 0", color: "var(--wp-text-dim)", fontSize: "0.85rem" }}>
@@ -793,12 +812,17 @@ export default function CodeFactoryPage() {
                   The deep static scan found {deepScan.critical} critical finding(s); handoff withheld.
                 </p>
               )}
+              {duplication?.escalate && (
+                <p data-testid="duplication-reason" style={{ margin: "0.35rem 0 0", color: "var(--wp-text-dim)", fontSize: "0.85rem" }}>
+                  {duplication.reason}
+                </p>
+              )}
               <p data-testid="handoff-status" style={{ margin: "0.6rem 0 0", fontSize: "0.85rem", fontWeight: 600 }}>
                 {approvalId
                   ? "Ready for PR - handoff captured for human approval; the factory never merges."
                   : run.status === "needs_human"
                     ? "Needs human - the gate did not allow this change."
-                    : `Withheld from PR handoff: ${invariants?.wouldBlock ? invariants.ruleId : deepScan?.blocking ? "critical security finding" : "needs human"}.`}
+                    : `Withheld from PR handoff: ${invariants?.wouldBlock ? invariants.ruleId : deepScan?.blocking ? "critical security finding" : duplication?.escalate ? "possible duplication of existing code" : "needs human"}.`}
               </p>
 
               {/* The human-in-the-gate step: an explicit, logged consent must be

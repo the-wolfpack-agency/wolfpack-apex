@@ -69,3 +69,53 @@ export function duplicationSignal(
     topReused: changeImportsPath(files, top.path, aliasMap),
   };
 }
+
+/**
+ * STRONG_DUPLICATION_SCORE: the reuse-scout score at/above which an un-reused top
+ * candidate is treated as a likely re-implementation worth a human's eyes. The
+ * scout scores a FILENAME concept match at +4, a parent-dir match at +3; 8 means
+ * the existing file's NAME matches TWO distinct task concepts (e.g. the prompt
+ * said "cost summary" and `cost-summary.ts` already exists). That is a precise,
+ * high-confidence signal - below it the coarse score produces noise, which is why
+ * enforcement waited for the shadow data (DuplicationSignal) to confirm the line.
+ */
+export const STRONG_DUPLICATION_SCORE = 8;
+
+export interface DuplicationGate {
+  /** Escalate to a human: a strong existing module was NOT reused. */
+  escalate: boolean;
+  /** The existing module the change most likely re-implements (null when clear). */
+  candidatePath: string | null;
+  score: number;
+  /** Human-readable reason, null when nothing to say. */
+  reason: string | null;
+}
+
+/**
+ * The DRY GATE decision from a duplication signal. Deterministic: escalate when
+ * the scout surfaced a STRONG existing module (score >= threshold) that the change
+ * did NOT import - i.e. it re-implemented capability that already exists. This is
+ * the deterministic control for the duplication incident: the factory flags "this
+ * looks like a re-implementation of <path>; reuse it" and withholds the automatic
+ * handoff so a human decides, rather than a duplicate silently reaching a PR.
+ *
+ * It ESCALATES (needs a human), never hard-blocks: the name-match score is a
+ * strong hint, not proof, so a human confirms "yes reuse it" or "no, genuinely
+ * new". Pure.
+ */
+export function duplicationGate(
+  signal: DuplicationSignal,
+  threshold = STRONG_DUPLICATION_SCORE,
+): DuplicationGate {
+  const escalate = signal.topReused === false && signal.topScore >= threshold;
+  return {
+    escalate,
+    candidatePath: signal.topCandidatePath,
+    score: signal.topScore,
+    reason: escalate
+      ? `This change does not import ${signal.topCandidatePath}, whose name strongly matches the task ` +
+        `(reuse score ${signal.topScore}). It likely re-implements capability that already exists - ` +
+        `reuse or extend ${signal.topCandidatePath}, or confirm it is genuinely new.`
+      : null,
+  };
+}

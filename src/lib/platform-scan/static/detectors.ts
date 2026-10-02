@@ -16,6 +16,19 @@
  */
 
 import type { ScanFinding } from "@/lib/platform-scan/types";
+import {
+  // The canonical security pattern signatures - defined ONCE in security-corpus
+  // and shared with the diff-line gate (ai-code/detect.ts), so the two engines
+  // can never drift. Aliased to the local names this module already used.
+  EVAL_EXEC as EVAL_CALL,
+  DYNAMIC_FUNCTION,
+  SQL_KEYWORD,
+  SQL_INTERP,
+  SQL_PARAMETERIZED as PARAMETERIZED,
+  MATH_RANDOM,
+  CRED_NAME as SECRET_NAME,
+  CRED_CONTEXT,
+} from "@/lib/platform-scan/static/security-corpus";
 
 interface SourceFile {
   path: string;
@@ -439,8 +452,6 @@ const LOG_CALL =
  * family is explicit: a reset/verify URL is a bearer credential for one
  * account, and logging one was the exact defect this detector was written for.
  */
-const SECRET_NAME =
-  /\b(?:pass(?:word|wd)?|pwd|secret|token|api[_-]?key|apikey|access[_-]?token|refresh[_-]?token|client[_-]?secret|private[_-]?key|priv[_-]?key|session[_-]?id|jwt|bearer|credentials?|otp|(?:reset|verify|verification|invite|confirm|activation|magic)[_-]?(?:link|url|token))\b|\b[A-Za-z]+(?:Token|Secret|Password|Passwd|ApiKey|PrivateKey|SessionId|AccessToken|RefreshToken|ClientSecret|Otp|Jwt|Credential)\b/i;
 
 /** A log call whose args are already redacted/masked is not a leak. */
 const REDACTED_MARK = /redact|mask|\*{3,}|\[hidden\]|\[redacted\]/i;
@@ -534,8 +545,6 @@ export function secretInLogs(file: SourceFile): ScanFinding[] {
 
 // eval(...) not preceded by `.` or a word char (so obj.eval(...) is excluded),
 // and new Function(...) - both execute a string as live code.
-const EVAL_CALL = /(?<![.\w$])eval\s*\(/;
-const DYNAMIC_FUNCTION = /\bnew\s+Function\s*\(/;
 
 /**
  * codeInjection: eval() or new Function() - running a string as code. It is
@@ -568,9 +577,6 @@ export function codeInjection(file: SourceFile): ScanFinding[] {
   return findings;
 }
 
-const SQL_KEYWORD = /\b(select|insert\s+into|update|delete\s+from|where|from)\b/i;
-const SQL_INTERP = /\$\{[^}]+\}/; // a ${...} inside the string
-const PARAMETERIZED = /\$\d+\b/; // $1, $2 - the SAFE placeholder form, never flagged
 
 /**
  * sqlInjection: a SQL statement built by interpolating a value into the query
@@ -791,10 +797,6 @@ export function dynamicModuleLoad(file: SourceFile): ScanFinding[] {
   return findings;
 }
 
-const MATH_RANDOM = /\bMath\s*\.\s*random\s*\(\s*\)/;
-// Credential / single-use-token context near a Math.random() call.
-const CRED_CONTEXT =
-  /\b(?:token|secret|pass(?:word|wd)?|pwd|otp|nonce|salt|api[_-]?key|apikey|session[_-]?id|csrf|verification|verify|reset|invite|activation|magic|auth[_-]?code|access[_-]?code|private[_-]?key)\b|\b[A-Za-z]+(?:Token|Secret|Password|Passwd|ApiKey|PrivateKey|SessionId|Otp|Nonce|Salt|Csrf)\b/i;
 
 /**
  * insecureRandomToken: Math.random() used to mint a credential (CWE-330).
