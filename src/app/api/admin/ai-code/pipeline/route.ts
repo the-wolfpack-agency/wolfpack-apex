@@ -41,6 +41,7 @@ import { buildRepoContext, withRepoContext, extractMentionedPaths } from "@/lib/
 import { findReuseCandidates } from "@/lib/ai-code/reuse-scout";
 import { buildKnownExportsBlock, exportsEntries } from "@/lib/ai-code/export-grounding";
 import { duplicationSignal } from "@/lib/ai-code/reuse-enforcement";
+import { pickAuthorMode } from "@/lib/ai-code/author-mode";
 import { fetchRepoGrounding } from "@/lib/ai-code/repo-grounding";
 import { findPhantomImports, parseInstalledRoots, phantomImportFeedback } from "@/lib/ai-code/imports";
 import {
@@ -441,12 +442,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   // Anchor mode needs the live content of the files it edits, fetched on demand.
   const fetchFilesForAnchor = async (paths: string[]): Promise<Record<string, string>> => {
-    if (!repo) return {};
+    // groundingRepo (not repo): a self-hosted edit must fetch the live file too,
+    // or anchor apply fails with file_not_provided (the #1024 miss - the factory
+    // could not edit its OWN files).
+    if (!groundingRepo) return {};
     const out: Record<string, string> = {};
     try {
       const client = await workspaceGithubClient(workspaceId);
       for (const path of paths) {
-        const c = await fetchFileContent(client, repo, path).catch(() => null);
+        const c = await fetchFileContent(client, groundingRepo, path).catch(() => null);
         if (typeof c === "string") out[path] = c;
       }
     } catch { /* best-effort; a missing file becomes an anchor failure, which escalates */ }
@@ -455,8 +459,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // Shared local-import context: the author-retry self-corrects a hallucinated
   // local import with it, and the final gate re-checks with the SAME logic.
   const localImportCtx: LocalImportCtx = { repo: groundingRepo, workspaceId, repoTree, aliasMap };
+  // AUTO EDIT-MODE: files mode cannot edit an existing file - it rewrites whole
+  // files with no live base, so an edit to a 300-line module produces an empty
+  // change (422). When the task targets a file that ALREADY exists, author via
+  // ANCHOR instead (fetches the live file + exact SEARCH/REPLACE). New-file tasks
+  // stay in files mode; a user-pinned anchor/diff is respected. Found by
+  // dogfooding: editing the factory's own imports.ts 422'd in files AND anchor
+  // (the latter on the fetch bug above) - the factory could not edit existing code.
+  const authorMode = pickAuthorMode(mode, extractMentionedPaths(prompt), repoTree);
+
   const resolved = await resolveChangeWithFallback(
-    { mode, diff, prompt: authorPrompt, authorModel, executorProviderPin, tier: authorTier, fetchFiles: fetchFilesForAnchor },
+    { mode: authorMode, diff, prompt: authorPrompt, authorModel, executorProviderPin, tier: authorTier, fetchFiles: fetchFilesForAnchor },
     installedRoots,
     (files) => checkLocalImports(files, localImportCtx),
   );
