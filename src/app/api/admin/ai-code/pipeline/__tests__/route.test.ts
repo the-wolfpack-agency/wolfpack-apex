@@ -338,6 +338,25 @@ describe("POST /api/admin/ai-code/pipeline", () => {
     );
   });
 
+  it("a SELF-HOSTED run (no repo) is still grounded + import-validated (not skipped)", async () => {
+    // Found by dogfooding: self-targeted runs (repo omitted) are how the factory
+    // maintains its OWN code, yet grounding + the local-import gate were gated on a
+    // repo being supplied, so a hallucinated import sailed through. Now they run
+    // against the self repo, so the same broken import is caught WITHOUT a repo param.
+    realRepoMocks();
+    mockComplete
+      .mockResolvedValueOnce(authorResp("```diff\n" + BROKEN_LOCAL_DIFF + "\n```"))
+      .mockResolvedValue(filesResp(ROUTE_PATH, brokenFiles));
+    mockRunPipeline.mockResolvedValue({ ...RUN, status: "ready_for_pr", diff: BROKEN_LOCAL_DIFF });
+    const res = await POST(post({ ref: "pr-self-hosted", prompt: "add route", answers: { tests: "all" } })); // NO repo
+    const body = await res.json();
+    expect(body.approvalId).toBeNull();
+    expect(body.run.status).toBe("needs_human");
+    expect(body.brokenLocalImports).toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: "missing_export", name: "missingFn" })]),
+    );
+  });
+
   it("valid local import against a real repo module hands off cleanly (no false-positive)", async () => {
     mockFetchTree.mockResolvedValue(["src/lib/real.ts"]);
     mockFetchFile.mockImplementation(async (_c: unknown, _r: unknown, path: string) => {

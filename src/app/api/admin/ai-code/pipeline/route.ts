@@ -61,6 +61,11 @@ import { ensureCodeGateAgent } from "@/lib/agents/store";
 import type { CodeReviewResult } from "@/lib/ai-code/types";
 
 const MAX_DIFF = 2_000_000; // chars
+/** The repo a run targets for GROUNDING + import validation when none is supplied.
+ *  Self-hosted runs (repo omitted) are how the factory maintains ITS OWN code, so
+ *  they must get the same grounding + local-import gate as an external repo - not
+ *  silently skip them. Mirrors the executor's PR-commit default. */
+const SELF_REPO = process.env.FACTORY_TARGET_REPO || "the-wolfpack-agency/wolfpack-apex";
 /** How much of the diff to persist on the run event so the history UI can show
  *  the actual code change. Capped so a huge diff never bloats the event row; the
  *  full diff still lives on the run response + (for ready runs) the approval. */
@@ -301,6 +306,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "repo must be in owner/name form" }, { status: 400 });
   }
   const repo = repoRaw || undefined;
+  // The repo used for GROUNDING + import validation. Falls back to the self-hosted
+  // repo so a self-targeted run (the factory improving itself) is grounded and its
+  // imports are validated, instead of authoring blind and passing a hallucination.
+  const groundingRepo = repo ?? SELF_REPO;
   // diff is OPTIONAL: when absent, the EXECUTOR stage authors it from the prompt
   // (input-to-output). A manually supplied diff is still governed as before. The
   // size ceiling is enforced ONCE, unconditionally, on the final diff below - it
@@ -359,7 +368,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // gate is a no-op (fail-open), exactly like installedRoots for the phantom gate.
   let repoTree = new Set<string>();
   let aliasMap: Record<string, string> = {};
-  if (repo && !diff.trim()) {
+  if (groundingRepo && !diff.trim()) {
     try {
       const ghClient = await workspaceGithubClient(workspaceId);
       if (ghClient.token) {
@@ -372,12 +381,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         // that already do it, so the author reuses instead of re-implementing. Runs in
         // the same Promise.all (no added latency); excludes files the prompt already named.
         const [grounding, ctx, reuse, pkgJson, tree, tsconfig] = await Promise.all([
-          fetchRepoGrounding(ghClient, repo),
-          buildRepoContext({ client: ghClient, repo, prompt }),
-          findReuseCandidates({ client: ghClient, repo, prompt, excludePaths: extractMentionedPaths(prompt) }),
-          fetchFileContent(ghClient, repo, "package.json").catch(() => null),
-          fetchRepoTree(ghClient, repo).catch(() => [] as string[]),
-          fetchFileContent(ghClient, repo, "tsconfig.json").catch(() => null),
+          fetchRepoGrounding(ghClient, groundingRepo),
+          buildRepoContext({ client: ghClient, repo: groundingRepo, prompt }),
+          findReuseCandidates({ client: ghClient, repo: groundingRepo, prompt, excludePaths: extractMentionedPaths(prompt) }),
+          fetchFileContent(ghClient, groundingRepo, "package.json").catch(() => null),
+          fetchRepoTree(ghClient, groundingRepo).catch(() => [] as string[]),
+          fetchFileContent(ghClient, groundingRepo, "tsconfig.json").catch(() => null),
         ]);
         reuseCandidates = reuse.candidates.length;
         repoTree = new Set(tree);
@@ -397,7 +406,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           const uniquePaths = [...new Set(wantPaths)].slice(0, 8);
           const fetched: { path: string; content: string }[] = [];
           for (const p of uniquePaths) {
-            const c = await fetchFileContent(ghClient, repo, p).catch(() => null);
+            const c = await fetchFileContent(ghClient, groundingRepo, p).catch(() => null);
             if (typeof c === "string") fetched.push({ path: p, content: c });
           }
           exportsBlock = buildKnownExportsBlock(exportsEntries(fetched, aliasMap));
@@ -440,7 +449,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   };
   // Shared local-import context: the author-retry self-corrects a hallucinated
   // local import with it, and the final gate re-checks with the SAME logic.
-  const localImportCtx: LocalImportCtx = { repo: repo ?? null, workspaceId, repoTree, aliasMap };
+  const localImportCtx: LocalImportCtx = { repo: groundingRepo, workspaceId, repoTree, aliasMap };
   const resolved = await resolveChangeWithFallback(
     { mode, diff, prompt: authorPrompt, authorModel, executorProviderPin, tier: authorTier, fetchFiles: fetchFilesForAnchor },
     installedRoots,
