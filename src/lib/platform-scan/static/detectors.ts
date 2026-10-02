@@ -532,6 +532,77 @@ export function secretInLogs(file: SourceFile): ScanFinding[] {
   return findings;
 }
 
+// eval(...) not preceded by `.` or a word char (so obj.eval(...) is excluded),
+// and new Function(...) - both execute a string as live code.
+const EVAL_CALL = /(?<![.\w$])eval\s*\(/;
+const DYNAMIC_FUNCTION = /\bnew\s+Function\s*\(/;
+
+/**
+ * codeInjection: eval() or new Function() - running a string as code. It is
+ * essentially never legitimate in application code, and if any part of the
+ * argument is influenced by input it is remote code execution (CWE-95). Found by
+ * the factory security dogfood: an `eval(userInput)` change was authored and
+ * handed off because nothing flagged it.
+ */
+export function codeInjection(file: SourceFile): ScanFinding[] {
+  const lines = file.content.split("\n");
+  const findings: ScanFinding[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const isEval = EVAL_CALL.test(line);
+    if (!isEval && !DYNAMIC_FUNCTION.test(line)) continue;
+    if (/(audit-safe|eslint-disable)/i.test(`${lines[i - 1] ?? ""}\n${line}`)) continue;
+    const which = isEval ? "eval()" : "new Function()";
+    findings.push({
+      route: file.path,
+      severity: "critical",
+      category: "security",
+      title: `Code injection: ${which} runs a string as code`,
+      detail:
+        `${which} executes its argument as live code. If any part of it can be ` +
+        "influenced by input, it is remote code execution (CWE-95). Use a parser " +
+        "or an explicit allowlist instead of evaluating a string.",
+      evidence: { line: i + 1, snippet: line.trim() },
+    });
+  }
+  return findings;
+}
+
+const SQL_KEYWORD = /\b(select|insert\s+into|update|delete\s+from|where|from)\b/i;
+const SQL_INTERP = /\$\{[^}]+\}/; // a ${...} inside the string
+const PARAMETERIZED = /\$\d+\b/; // $1, $2 - the SAFE placeholder form, never flagged
+
+/**
+ * sqlInjection: a SQL statement built by interpolating a value into the query
+ * text (CWE-89). Parameterized queries ($1/$2 placeholders) are the safe form and
+ * are never flagged. Found by the factory security dogfood: a
+ * `SELECT ... WHERE id = '${id}'` change was authored and handed off un-flagged.
+ */
+export function sqlInjection(file: SourceFile): ScanFinding[] {
+  const lines = file.content.split("\n");
+  const findings: ScanFinding[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    // A backticked template that carries BOTH a SQL keyword and a ${...} interp.
+    const interpolated = /`/.test(line) && SQL_KEYWORD.test(line) && SQL_INTERP.test(line);
+    if (!interpolated) continue;
+    if (PARAMETERIZED.test(line)) continue; // uses placeholders -> safe
+    if (/(audit-safe|eslint-disable)/i.test(`${lines[i - 1] ?? ""}\n${line}`)) continue;
+    findings.push({
+      route: file.path,
+      severity: "critical",
+      category: "security",
+      title: "SQL injection: value interpolated into a query string",
+      detail:
+        "A SQL statement is built by putting a value directly into the query text, " +
+        "so an attacker-controlled value can change the query (CWE-89). Use " +
+        "parameterized queries ($1, $2 / placeholders), never string interpolation.",
+      evidence: { line: i + 1, snippet: line.trim() },
+    });
+  }
+  return findings;
+}
+
 /** Compose every detector over one file. */
 export function runDetectors(file: SourceFile): ScanFinding[] {
   return [
@@ -543,5 +614,7 @@ export function runDetectors(file: SourceFile): ScanFinding[] {
     ...suppressedTypecheck(file),
     ...hardcodedSecret(file),
     ...secretInLogs(file),
+    ...codeInjection(file),
+    ...sqlInjection(file),
   ];
 }

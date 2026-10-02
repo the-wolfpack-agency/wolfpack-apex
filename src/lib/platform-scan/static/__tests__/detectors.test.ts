@@ -10,6 +10,8 @@ import {
   emptyCatch,
   unvalidatedNumericInput,
   dangerousInnerHtml,
+  codeInjection,
+  sqlInjection,
   suppressedTypecheck,
   hardcodedSecret,
   secretInLogs,
@@ -540,5 +542,41 @@ describe("runDetectors", () => {
       "}",
     ].join("\n");
     expect(runDetectors({ path: "app/api/route.ts", content })).toHaveLength(0);
+  });
+});
+
+describe("codeInjection (eval / new Function)", () => {
+  it("flags eval() as critical code injection", () => {
+    const f = codeInjection({ path: "src/lib/run.ts", content: "export const run = (s: string) => eval(s);" });
+    expect(f).toHaveLength(1);
+    expect(f[0].severity).toBe("critical");
+    expect(f[0].title).toMatch(/eval\(\)/);
+  });
+  it("flags new Function(body) as critical", () => {
+    const f = codeInjection({ path: "src/lib/run.ts", content: "const g = new Function('a', body);" });
+    expect(f).toHaveLength(1);
+    expect(f[0].severity).toBe("critical");
+  });
+  it("does NOT flag a method named eval (obj.eval(...))", () => {
+    expect(codeInjection({ path: "src/lib/x.ts", content: "const v = mathjs.eval('1+1');" })).toHaveLength(0);
+  });
+  it("respects an audit-safe suppression", () => {
+    const content = "// audit-safe: sandboxed expression evaluator\nconst v = eval(expr);";
+    expect(codeInjection({ path: "src/lib/x.ts", content })).toHaveLength(0);
+  });
+});
+
+describe("sqlInjection", () => {
+  it("flags a value interpolated into a SQL template as critical", () => {
+    const f = sqlInjection({ path: "src/lib/userq.ts", content: "const rows = await q(`SELECT * FROM users WHERE id = '${id}'`);" });
+    expect(f).toHaveLength(1);
+    expect(f[0].severity).toBe("critical");
+    expect(f[0].title).toMatch(/SQL injection/);
+  });
+  it("does NOT flag a parameterized query ($1 placeholder)", () => {
+    expect(sqlInjection({ path: "src/lib/userq.ts", content: "await q(`SELECT * FROM users WHERE id = $1`, [id]);" })).toHaveLength(0);
+  });
+  it("does NOT flag a template with an interp but no SQL", () => {
+    expect(sqlInjection({ path: "src/lib/x.ts", content: "const msg = `hello ${name}`;" })).toHaveLength(0);
   });
 });
