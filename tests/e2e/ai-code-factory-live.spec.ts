@@ -98,4 +98,15 @@ test.describe("code factory - LIVE UI journeys (real model)", () => {
     );
     await expect(page.getByTestId("pr-link"), "a withheld duplication never produces a PR link").toHaveCount(0);
   });
+
+  test("5) the model-benchmark panel loads the available models (the comparison surface)", async ({ page }) => {
+    await openFactory(page);
+    // The panel reads the configured models and offers to run the same battery
+    // across them. Assert it mounts, lists at least one model, and the Run control
+    // is present. (The full multi-model run is a minutes-long manual dogfood, not
+    // baked into the on-demand suite.)
+    await expect(page.getByTestId("benchmark-panel"), "the benchmark panel mounts").toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId("run-benchmark"), "the Run control renders").toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId("run-benchmark"), "the Run button enables once models load").toBeEnabled({ timeout: 15_000 });
+  });
 });
