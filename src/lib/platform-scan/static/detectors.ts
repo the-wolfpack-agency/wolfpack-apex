@@ -297,34 +297,55 @@ export function unvalidatedNumericInput(file: SourceFile): ScanFinding[] {
 }
 
 
+// A sanitizer wrapping the injected HTML - the value is provably cleaned.
+const HTML_SANITIZER = /\b(?:DOMPurify\s*\.\s*sanitize|sanitize(?:Html|HTML)?\s*\()/;
+
 /**
- * dangerousInnerHtml: any use of dangerouslySetInnerHTML — a real XSS surface
- * whenever the HTML is not provably sanitized. We flag every usage so a human
- * confirms the source is trusted/sanitized.
+ * dangerousInnerHtml: a use of dangerouslySetInnerHTML — an XSS surface whenever
+ * the HTML is not provably sanitized.
+ *
+ * SEVERITY POLICY (decided 2026-10-02): HIGH, which ESCALATES to a human rather
+ * than hard-blocking (deep-scan blocks only on `critical`). This is deliberate,
+ * not a gap. In real code the value is usually sanitized upstream where a line
+ * scanner cannot see it — a markdown renderer, a CSS/font-face string, an
+ * already-DOMPurify'd field — so hard-blocking every usage would false-block
+ * legitimate code. A human confirms the source is trusted/sanitized. The clearly
+ * SAFE idioms are excluded so the escalations stay high-signal:
+ *   - JSON.stringify(...) (serialized data / JSON-LD, not markup),
+ *   - a DOMPurify.sanitize / sanitizeHtml(...) wrap on the value,
+ *   - an audit-safe / eslint-disable reviewer vouch.
  */
 export function dangerousInnerHtml(file: SourceFile): ScanFinding[] {
   const lines = file.content.split("\n");
   const findings: ScanFinding[] = [];
 
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
+    // codeNoStrings: skip comments AND string-literal bodies, so a detail message
+    // or a doc table that merely MENTIONS "dangerouslySetInnerHTML" is not flagged;
+    // only the real JSX attribute (code) matches.
+    const line = codeNoStrings(lines[i]);
     if (!DANGEROUS_INNER_HTML.test(line)) continue;
     // The __html value sits on this line or the next couple (object literal).
-    const ctx = `${line}\n${lines[i + 1] ?? ""}\n${lines[i + 2] ?? ""}`;
+    const ctx = `${line}\n${codeNoStrings(lines[i + 1] ?? "")}\n${codeNoStrings(lines[i + 2] ?? "")}`;
     // JSON.stringify(...) is the standard SAFE JSON-LD / structured-data pattern
     // (serialized data, not markup) — not an XSS vector.
     if (/JSON\.stringify\s*\(/.test(ctx)) continue;
+    // The value is provably sanitized (DOMPurify / sanitizeHtml) — not a vector.
+    if (HTML_SANITIZER.test(ctx)) continue;
     // A reviewer already vetted this site (audit-safe / eslint-disable comment).
     if (/(audit-safe|eslint-disable)/i.test(`${lines[i - 1] ?? ""}\n${line}`)) continue;
 
     findings.push({
       route: file.path,
+      // HIGH = escalate to a human, NOT block: dangerouslySetInnerHTML is too
+      // often legitimately sanitized (markdown/CSS/DOMPurify'd) to hard-block.
       severity: "high",
       category: "security",
       title: "XSS risk: dangerouslySetInnerHTML",
       detail:
         "dangerouslySetInnerHTML injects raw HTML into the DOM. If the value is " +
-        "not provably sanitized, it is a stored/reflected XSS vector.",
+        "not provably sanitized, it is a stored/reflected XSS vector. Sanitize it " +
+        "(DOMPurify) or confirm the source is trusted; a human reviews this.",
       evidence: { line: i + 1, snippet: line.trim() },
     });
   }
