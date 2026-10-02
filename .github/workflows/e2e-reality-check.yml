@@ -101,9 +101,17 @@ jobs:
       - name: Install OS libraries for Chromium
         if: steps.cfg.outputs.configured == 'true'
         timeout-minutes: 6
+        # Best-effort: a hanging apt mirror must NEVER fail the job. Each attempt is
+        # bounded by `timeout` so a stuck mirror fails FAST and the `||` fallback
+        # actually runs - instead of the step burning its whole timeout-minutes,
+        # which is a fatal kill the shell `||` cannot catch (the failure mode that
+        # red-flagged #1037 with zero specs run). continue-on-error is the backstop:
+        # a genuinely missing library still surfaces as a browser-launch failure in
+        # the next step.
+        continue-on-error: true
         run: |
-          npx playwright install-deps chromium \
-            || (echo "retrying once" && sleep 15 && npx playwright install-deps chromium) \
+          timeout 150 npx playwright install-deps chromium \
+            || (echo "retrying once" && sleep 10 && timeout 150 npx playwright install-deps chromium) \
             || echo "::warning::playwright install-deps failed (apt mirror). Continuing: a genuinely missing library surfaces as a browser launch failure in the next step."
 
       # HARD GATES — one parallel invocation; must pass on PR + push. A parity
@@ -214,6 +222,7 @@ jobs:
       # lost: the HTML report + the raw trace/video/screenshot artifacts.
       - name: Upload Playwright report
         if: always()
+        continue-on-error: true # diagnostic upload; a transient artifact-service timeout must not fail the job
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: reality-check-report
