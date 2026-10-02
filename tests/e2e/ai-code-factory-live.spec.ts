@@ -6,7 +6,7 @@
  * in, opens /admin/ai-code, types a prompt, clicks Generate & Gate, a REAL model
  * authors the change, the REAL deterministic gate runs, and a REAL verdict
  * renders. This is what the operator and a client actually see and do - not a
- * programmed API path.
+ * scripted API path.
  *
  * Gated on PROD_URL + SMOKE_TEST_EMAIL/PASSWORD; skips cleanly when absent. It
  * makes a real (cheap) model call, so it is an ON-DEMAND reality check, not an
