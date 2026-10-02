@@ -17,6 +17,7 @@ import { useCallback, useEffect, useState, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import { getInstinctUser, fetchWithRefresh, jsonHeaders } from "@/lib/client-auth";
 import { GlassPanel, MetricTile, StatusPill, SectionHeader, type SeverityTone } from "@/components/console";
+import BenchmarkPanel from "@/components/ai-code/BenchmarkPanel";
 import WatchedReposPanel from "@/components/ai-code/WatchedReposPanel";
 import PipelineDashboard, { type CiDashboard } from "@/components/ai-code/PipelineDashboard";
 
@@ -1047,6 +1048,7 @@ export default function CodeFactoryPage() {
           )}
         </div>
       )}
+      <BenchmarkPanel />
       {(history?.grade?.total ?? 0) > 0 && history && (
         <GlassPanel title="Run history & quality" subtitle="How the factory is performing over time - grades are measured, not guaranteed">
           <div data-testid="history-grade" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))", gap: "0.75rem" }}>
