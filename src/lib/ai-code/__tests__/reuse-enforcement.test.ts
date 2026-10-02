@@ -58,6 +58,17 @@ describe("duplicationSignal", () => {
     const s = duplicationSignal([], reimplemented, aliasMap);
     expect(s).toEqual({ topCandidatePath: null, topScore: 0, topReused: null });
   });
+
+  it("EDITING the top candidate file counts as reuse, not re-implementation (the self-edit false positive)", () => {
+    // The change modifies the candidate file itself - you cannot import a file you
+    // are editing, so this must NOT read as an un-reused duplication.
+    const edit = [{ path: "src/lib/ai-code/grading.ts", content: "export function gradeRuns() { return 1; }" }];
+    const s = duplicationSignal(candidates, edit, aliasMap);
+    expect(s.topCandidatePath).toBe("src/lib/ai-code/grading.ts");
+    expect(s.topReused).toBe(true);
+    // ...and therefore the DRY gate does NOT escalate a legitimate in-file edit.
+    expect(duplicationGate(s).escalate).toBe(false);
+  });
 });
 
 describe("duplicationGate (the DRY gate - this is what should have caught the detector-duplication incident)", () => {

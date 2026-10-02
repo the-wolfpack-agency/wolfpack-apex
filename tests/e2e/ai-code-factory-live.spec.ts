@@ -202,12 +202,17 @@ test.describe("code factory - LIVE UI journeys (real model)", () => {
     const resp = await pipelineResp;
     expect(resp.status(), "the pipeline responds 200-class (never a 500 or blank)").toBeLessThan(400);
     const body = await resp.json().catch(() => ({}));
+    // The pipeline returns run + executor + executorAttempts + anchorFailures as
+    // TOP-LEVEL siblings (not nested under run); only status lives on run.
     const run = body.run ?? body;
+    const executor = body.executor ?? run.executor ?? null;
+    const executorAttempts = body.executorAttempts ?? run.executorAttempts ?? null;
+    const anchorFailures = body.anchorFailures ?? run.anchorFailures ?? [];
     // Observability: record WHICH model landed it + HOW MANY passes, so escalation
-    // (attempts > 1, a stronger model than gpt-4o-mini) is visible in the artifact.
+    // (attempts > 1, a model stronger than gpt-4o-mini) is visible in the artifact.
     await testInfo.attach("run-summary.json", {
       body: JSON.stringify(
-        { status: run.status, executorAttempts: run.executorAttempts, effectiveMode: run.effectiveMode, model: run.executor?.author, anchorFailures: run.anchorFailures },
+        { status: run.status, executorAttempts, effectiveMode: body.effectiveMode, model: executor?.author, anchorFailures },
         null,
         2,
       ),
@@ -217,8 +222,13 @@ test.describe("code factory - LIVE UI journeys (real model)", () => {
     // authored (ready_for_pr) or an explicit human hold (needs_human) - and is
     // NEVER the "model did not produce a usable change" cheap-only dead-end.
     expect(["ready_for_pr", "needs_human"], `terminal status, got "${run.status}"`).toContain(run.status);
-    // Whatever model LANDED it is recorded (never blank), so the route is auditable.
-    expect(String(run.executor?.author ?? ""), "the executor model is recorded").not.toBe("");
+    // Whatever model authored it is recorded (never blank), so the route is auditable.
+    expect(String(executor?.author ?? ""), "the executor model is recorded").not.toBe("");
+    // If any anchor failed, escalation must have been attempted (attempts > 1) -
+    // a failed anchor must NEVER be the terminal state without trying another model.
+    if ((anchorFailures as unknown[]).length > 0) {
+      expect(Number(executorAttempts), "a failed anchor escalated to another model").toBeGreaterThan(1);
+    }
     // The UI shows a terminal surface a client can read (authored code OR an honest handoff), not a hang.
     const rendered =
       (await page.getByTestId("generated-code").count()) > 0 || (await page.getByTestId("handoff-status").count()) > 0;

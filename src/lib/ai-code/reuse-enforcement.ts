@@ -63,10 +63,17 @@ export function duplicationSignal(
 ): DuplicationSignal {
   const top = candidates[0];
   if (!top) return { topCandidatePath: null, topScore: 0, topReused: null };
+  // EDITING the candidate file IS reuse/extension, not re-implementation. A change
+  // that modifies the file in place cannot "import" it, so changeImportsPath would
+  // read false and the gate would wrongly flag a legitimate in-file edit as a
+  // duplicate (the exact false positive the live dogfood hit editing the 1,400-line
+  // site-analytics page). Treat the change touching the candidate's own path as the
+  // strongest possible reuse.
+  const editsCandidate = files.some((f) => f.path === top.path);
   return {
     topCandidatePath: top.path,
     topScore: top.score,
-    topReused: changeImportsPath(files, top.path, aliasMap),
+    topReused: editsCandidate ? true : changeImportsPath(files, top.path, aliasMap),
   };
 }
 
