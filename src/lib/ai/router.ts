@@ -1451,7 +1451,7 @@ class RouterClient implements AIClient {
 /** The next tier up, or null at the top. Escalation is one step, never a leap
  *  to the most expensive model available: the failure being fixed is usually a
  *  small model being small, not a hard problem needing the best model made. */
-function betterTier(
+export function betterTier(
   tier: AICompleteRequest["model_tier"],
 ): AICompleteRequest["model_tier"] | null {
   if (tier === "cheap") return "standard";
