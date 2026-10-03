@@ -463,4 +463,17 @@ test.describe("code factory - LIVE UI journeys (real model)", () => {
         `${attempts > 1 ? "(ESCALATED inferior->superior)" : "(cheap model sufficed)"}`,
     );
   });
-});
+test("18) client build: a realistic retry-with-backoff utility (generation QUALITY probe)", async ({ page }, testInfo) => {
+    const { status, model, attempts } = await clientBuild(
+      page,
+      "realistic-retry",
+      "Create src/lib/util/retry.ts exporting `export async function retry<T>(fn: () => Promise<T>, opts: { attempts: number; baseMs: number; maxMs: number; retryOn?: (e: unknown) => boolean }): Promise<T>` that retries fn up to opts.attempts times with exponential backoff (baseMs * 2 ** n, capped at maxMs), only retrying when retryOn(error) returns true (default: always retry), and throws the LAST error after exhausting attempts. Add a co-located test src/lib/util/retry.test.ts covering: success on the first try, success after two failures, exhaustion throwing the last error, and retryOn returning false meaning no retry.",
+    );
+    // Capture the AUTHORED CODE so its quality can be judged - not just the verdict.
+    const code = (await page.getByTestId("generated-code").count()) > 0
+      ? await page.getByTestId("generated-code").innerText()
+      : "(no generated-code rendered)";
+    await testInfo.attach("retry-generated.txt", { body: code, contentType: "text/plain" });
+    console.log(`[dogfood:quality] realistic-retry status=${status} model=${model} passes=${attempts} codeLen=${code.length}`);
+  });
+}); // end describe
