@@ -13,6 +13,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth/require-capability";
+import { resolveWorkspace } from "@/lib/auth/workspace";
 import { requireEntitlement } from "@/lib/tenancy/require-entitlement";
 import { recordAuditNonFatal, extractRequestMetadata } from "@/lib/audit-log";
 import { workspaceGithubClient } from "@/lib/github-client";
@@ -41,7 +42,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "repo must be in owner/name form" }, { status: 400 });
   }
 
-  const workspaceId = auth.user.workspaceId ?? "default";
+  const workspaceId = resolveWorkspace(auth.user.workspaceId);
   const client = await workspaceGithubClient(workspaceId);
   if (!client.token) {
     return NextResponse.json({ ok: false, reason: "no GitHub token for this workspace; cannot revert" });

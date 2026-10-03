@@ -19,6 +19,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth/require-capability";
+import { resolveWorkspace } from "@/lib/auth/workspace";
 import { requireEntitlement } from "@/lib/tenancy/require-entitlement";
 import { trackEvent } from "@/lib/analytics";
 import { recordAuditNonFatal } from "@/lib/audit-log";
@@ -34,7 +35,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (!auth.ok) return auth.response;
   const gate = await requireEntitlement(auth.user.workspaceId, "secure_agent");
   if (gate) return gate;
-  const reviews = await listReviews(auth.user.workspaceId ?? "default");
+  const reviews = await listReviews(resolveWorkspace(auth.user.workspaceId));
   return NextResponse.json({ reviews });
 }
 
@@ -66,7 +67,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const wantJudge = b.judge === true;
   const authorModel = typeof b.authorModel === "string" ? b.authorModel : undefined;
 
-  const workspaceId = auth.user.workspaceId ?? "default";
+  const workspaceId = resolveWorkspace(auth.user.workspaceId);
   const result = await runCodeReview({
     workspaceId,
     ref,

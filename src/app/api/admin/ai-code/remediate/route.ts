@@ -20,6 +20,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth/require-capability";
+import { resolveWorkspace } from "@/lib/auth/workspace";
 import { requireEntitlement } from "@/lib/tenancy/require-entitlement";
 import { trackEvent } from "@/lib/analytics";
 import { recordAuditNonFatal } from "@/lib/audit-log";
@@ -63,7 +64,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       ? Math.max(1, Math.min(MAX_ATTEMPTS_CAP, Math.floor(b.maxAttempts)))
       : 2;
 
-  const workspaceId = auth.user.workspaceId ?? "default";
+  const workspaceId = resolveWorkspace(auth.user.workspaceId);
   // The reviewer is the shipped gate (runCodeReview): every attempt is scanned,
   // gated deterministically, and persisted. The judge is not run here - the
   // deterministic gate, not a model, decides whether a repair worked.
