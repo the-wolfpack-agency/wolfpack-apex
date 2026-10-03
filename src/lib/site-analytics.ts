@@ -308,15 +308,16 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
        ones (and every RECENT agent) never appear. Instead take the most-recent N
        events PER SITE, so every property is represented and newest agents always
        show, then order ascending for the journey reconstruction. */
-    safeQuery<{ event_type: string; path: string | null; created_at: string; sig: string | null; nonce: string | null; agent: string | null; attack: string | null; tool: string | null; client_type: string | null; principal_status: string | null; principal: string | null; principal_issuer: string | null; principal_scopes: string | null }>(
+    safeQuery<{ event_type: string; path: string | null; created_at: string; sig: string | null; nonce: string | null; agent: string | null; attack: string | null; tool: string | null; client_type: string | null; principal_status: string | null; principal: string | null; principal_issuer: string | null; principal_scopes: string | null; site: string | null }>(
       `SELECT event_type, path, created_at::text AS created_at, sig, nonce, agent, attack, tool, client_type,
-              principal_status, principal, principal_issuer, principal_scopes
+              principal_status, principal, principal_issuer, principal_scopes, site
          FROM (
            SELECT event_type, path, created_at,
                   props->>'sig' AS sig, props->>'nonce' AS nonce, props->>'agent' AS agent, props->>'attack' AS attack,
                   props->>'tool' AS tool, props->>'client_type' AS client_type,
                   props->>'principal_status' AS principal_status, props->>'principal' AS principal,
                   props->>'principal_issuer' AS principal_issuer, props->>'principal_scopes' AS principal_scopes,
+                  coalesce(props->>'site', 'ogiam.com') AS site,
                   ROW_NUMBER() OVER (PARTITION BY coalesce(props->>'site', 'ogiam.com') ORDER BY created_at DESC) AS rn
              FROM site_analytics_events
             WHERE ${sinceClause}${surfaceClause}${notAssetFlag}
@@ -398,7 +399,7 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
           try { const parsed = JSON.parse(r.principal_scopes); if (Array.isArray(parsed)) principalScopes = parsed.filter((x): x is string => typeof x === "string"); } catch { /* ignore malformed */ }
         }
         const principalStatus = r.principal_status === "verified" || r.principal_status === "claimed" || r.principal_status === "absent" ? r.principal_status : undefined;
-        return { key, keyKind, type: r.event_type, path: r.path ?? "", at: r.created_at, nonceLinked: !!nonce, agent: r.agent ?? undefined, attack: r.attack ?? undefined, tool: r.tool ?? undefined, clientType: r.client_type ?? undefined, principalStatus, principal: r.principal ?? undefined, principalIssuer: r.principal_issuer ?? undefined, principalScopes };
+        return { key, keyKind, type: r.event_type, path: r.path ?? "", at: r.created_at, nonceLinked: !!nonce, agent: r.agent ?? undefined, attack: r.attack ?? undefined, tool: r.tool ?? undefined, clientType: r.client_type ?? undefined, principalStatus, principal: r.principal ?? undefined, principalIssuer: r.principal_issuer ?? undefined, principalScopes, site: r.site ?? undefined };
       }).filter((r) => r.key !== ""),
     ).slice(0, 25).map((j) => ({ ...j, profile: buildAgentProfile(j) })),
     workspaceId,

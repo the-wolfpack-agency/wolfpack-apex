@@ -240,3 +240,29 @@ describe("classifySession - client tool/type derivation (operator-fingerprint in
     expect(j.clientType).toBe("scripted_library");
   });
 });
+
+describe("journey surface derivation (so a promoted sighting records its REAL property)", () => {
+  it("derives the surface from the events' site tag, not a hardcoded host", () => {
+    const j = classifySession({
+      key: "sig-wp",
+      keyKind: "fingerprint",
+      events: [
+        ev("site.agent_probed_sensitive", "/.env", "2026-09-18T10:00:00Z", { site: "weekendwithporsche.com" }),
+        ev("site.agent_high_rate", "/admin", "2026-09-18T10:00:05Z", { site: "weekendwithporsche.com" }),
+      ],
+    });
+    expect(j.surface).toBe("weekendwithporsche.com");
+  });
+
+  it("defaults to ogiam.com for a legacy session with no site tag", () => {
+    const j = classifySession({ key: "s", keyKind: "fingerprint", events: [ev("site.agent_high_rate", "/", "2026-09-18T10:00:00Z")] });
+    expect(j.surface).toBe("ogiam.com");
+  });
+
+  it("buildJourneys carries each row's site through to the journey surface", () => {
+    const [j] = buildJourneys([
+      { key: "k", keyKind: "fingerprint", type: "site.agent_trap_tripped", path: "/_ff/x", at: "2026-09-18T10:00:00Z", site: "aidanmulready.com" },
+    ]);
+    expect(j.surface).toBe("aidanmulready.com");
+  });
+});
