@@ -10,7 +10,9 @@
  *   2. a dangerous change is BLOCKED and WITHHELD from handoff (the safety story),
  *   3. an EDIT to an existing file authors (auto anchor-mode).
  *
- * Gated on PROD_URL + SMOKE_TEST_EMAIL/PASSWORD; skips cleanly in CI (no spend).
+ * Gated on PROD_URL + SMOKE_TEST_EMAIL/PASSWORD: skips cleanly LOCALLY when
+ * unconfigured, but FAILS in CI if those are missing (a misconfigured gate must
+ * not skip-green). Runs as a real PR gate in factory-live-dogfood.yml.
  * Real (cheap) model calls, so it is an ON-DEMAND reality check. The authored-code
  * block only renders after a model actually ran, so it cannot false-positive on
  * static page text.
@@ -63,8 +65,22 @@ async function submit(page: Page, prompt: string): Promise<void> {
   await expect(page.getByTestId("generated-code"), "a real run rendered authored code").toBeVisible({ timeout: 120_000 });
 }
 
+const CI = process.env.CI === "true";
+
 test.describe("code factory - LIVE UI journeys (real model)", () => {
-  test.skip(!PROD_URL || !EMAIL || !PASSWORD, "needs PROD_URL + SMOKE_TEST_EMAIL + SMOKE_TEST_PASSWORD");
+  // Skip only LOCALLY when unconfigured. In CI this spec runs behind the
+  // dogfood workflow's PROD_URL gate, so a MISSING credential there is a CI
+  // misconfiguration that must FAIL LOUDLY - never skip green and report a false
+  // pass that hides a broken gate. (This is what makes the e2e an actual PR gate.)
+  test.skip(!CI && (!PROD_URL || !EMAIL || !PASSWORD), "local: needs PROD_URL + SMOKE_TEST_EMAIL + SMOKE_TEST_PASSWORD");
+  test.beforeAll(() => {
+    if (CI && (!PROD_URL || !EMAIL || !PASSWORD)) {
+      throw new Error(
+        "CI misconfiguration: the factory live dogfood requires PROD_URL + SMOKE_TEST_EMAIL + SMOKE_TEST_PASSWORD. " +
+          "Refusing to skip-green and hide that the live gate did not run.",
+      );
+    }
+  });
   // A real model authors + the gate runs; anchor-mode edits are slower still.
   test.setTimeout(180_000);
 
