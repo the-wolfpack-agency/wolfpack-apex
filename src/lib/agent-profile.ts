@@ -172,7 +172,7 @@ export function buildAgentProfile(journey: AgentJourney): AgentProfile {
  * the operator fingerprint space with probe/harness sightings. Used to promote an
  * escalated operator into the persistent operators board.
  */
-export function liveSightingFor(journey: AgentJourney, surface: string): Sighting {
+export function liveSightingFor(journey: AgentJourney, surface: string = journey.surface ?? "ogiam.com"): Sighting {
   const scaffoldingLite = deriveScaffolding(journey);
   const tools = analyzeToolComposition(observedTools(journey.signals));
   const scaffolding: ScaffoldingSignature = {

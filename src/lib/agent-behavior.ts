@@ -91,6 +91,9 @@ export interface SessionEvent {
   tool?: string;
   /** UA-derived client type (props.client_type: "scanner", "scripted_library", ...). */
   clientType?: string;
+  /** The property (surface) this event occurred on (props.site), e.g.
+   *  "ogiam.com". Legacy untagged events coalesce to "ogiam.com" upstream. */
+  site?: string;
   /** Principal verdict fields, verified at the ingest boundary and carried on
    *  the event props. "verified" here is already cryptographically proven; this
    *  module never re-verifies, it only reasons about behavior vs the mandate. */
@@ -136,6 +139,10 @@ export interface AgentJourney {
   /** Whether the agent stayed inside the mandate it presented. Only meaningful
    *  for a verified principal. */
   mandate?: MandateCheck;
+  /** The property (surface) this agent was seen on, derived from the events'
+   *  site tag. Used so a promoted sighting records its REAL surface, not a
+   *  hardcoded host. Defaults to "ogiam.com" for legacy untagged sessions. */
+  surface?: string;
 }
 
 /** Map an event type to the structural signal it represents. Unknown/benign
@@ -386,6 +393,7 @@ export function classifySession(input: AgentSessionInput): AgentJourney {
     insights,
     principal,
     mandate,
+    surface: dominant(events.map((e) => e.site)) ?? "ogiam.com",
   };
 }
 
@@ -433,7 +441,7 @@ function summarize(cls: BehaviorClass, conf: Confidence, signals: readonly Agent
  * otherwise a fingerprint (inferred). Returns journeys newest-activity first.
  */
 export function buildJourneys(
-  rows: ReadonlyArray<{ key: string; keyKind: CorrelationKind; type: string; path: string; at: string; nonceLinked?: boolean; agent?: string; attack?: string; tool?: string; clientType?: string }>,
+  rows: ReadonlyArray<{ key: string; keyKind: CorrelationKind; type: string; path: string; at: string; nonceLinked?: boolean; agent?: string; attack?: string; tool?: string; clientType?: string; site?: string }>,
 ): AgentJourney[] {
   const byKey = new Map<string, AgentSessionInput>();
   for (const r of rows) {
@@ -444,7 +452,7 @@ export function buildJourneys(
     }
     // A nonce grouping always wins over a fingerprint grouping for the same key.
     if (r.keyKind === "nonce") (s as { keyKind: CorrelationKind }).keyKind = "nonce";
-    (s.events as SessionEvent[]).push({ type: r.type, path: r.path, at: r.at, nonceLinked: r.nonceLinked, agent: r.agent, attack: r.attack, tool: r.tool, clientType: r.clientType });
+    (s.events as SessionEvent[]).push({ type: r.type, path: r.path, at: r.at, nonceLinked: r.nonceLinked, agent: r.agent, attack: r.attack, tool: r.tool, clientType: r.clientType, site: r.site });
   }
   return Array.from(byKey.values())
     .map(classifySession)
