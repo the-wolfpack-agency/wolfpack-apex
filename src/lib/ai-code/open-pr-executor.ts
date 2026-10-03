@@ -17,6 +17,7 @@ import { createHash } from "node:crypto";
 import { workspaceGithubClient, openPullRequest } from "@/lib/github-client";
 import { authorize } from "@/lib/ogiam/authorize";
 import { recordActionOutcome } from "@/lib/ogiam/ledger";
+import { trackEvent } from "@/lib/analytics";
 import { newFilesFromDiff } from "./oracle";
 import { commitFileChanges, type FileChange } from "./file-changes";
 import { pushValidationBranch } from "./pre-pr-validation";
@@ -209,6 +210,8 @@ export async function executeOpenPr(params: OpenPrParams, ctx: WriteCtx): Promis
     try {
       const pr = await openPullRequest(client, repo, branch, base, title, body);
       await recordOutcome(true, "ok", pr.html_url);
+      // MISSION outcome: a reviewable PR was actually produced (not just gated).
+      void trackEvent("ai_code.pr_opened", ctx.userId, ctx.userRole, { repo, pr_number: pr.number, files: committed.length, branch });
       return { ok: true, url: pr.html_url, number: pr.number, branch, files: committed.length };
     } catch (prErr) {
       // The branch + commit LANDED, but opening the PR failed - most commonly a
