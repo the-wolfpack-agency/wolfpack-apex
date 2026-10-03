@@ -18,7 +18,7 @@ import { listCheckRuns, listWorkflowRunChecks, workspaceGithubClient, triggerWor
  *  back to the Actions API (workflow runs), which the token's Actions permission
  *  allows. Throws only when BOTH are unavailable, so a caller can surface the
  *  real reason. */
-async function readChecks(client: GithubClient, repoFullName: string, ref: string): Promise<CheckRun[]> {
+export async function readRefChecks(client: GithubClient, repoFullName: string, ref: string): Promise<CheckRun[]> {
   try {
     return await listCheckRuns(client, repoFullName, ref);
   } catch (checksErr) {
@@ -95,7 +95,7 @@ export async function fetchCiStatus(repoFullName: string, ref: string, workspace
   try {
     const client: GithubClient = await workspaceGithubClient(workspaceId);
     if (!client.token) return unreadable("no GitHub credential for this workspace");
-    const checks = await readChecks(client, repoFullName, ref);
+    const checks = await readRefChecks(client, repoFullName, ref);
     return summarizeChecks(checks);
   } catch (e) {
     // Both the Checks and Actions reads failed. Surface the RAW reason (never a
@@ -193,7 +193,7 @@ export async function fetchCiDashboard(repoFullName: string, ref: string, worksp
   try {
     const client: GithubClient = await workspaceGithubClient(workspaceId);
     if (!client.token) return categorizeChecks([]);
-    const checks = await readChecks(client, repoFullName, ref);
+    const checks = await readRefChecks(client, repoFullName, ref);
     return categorizeChecks(checks);
   } catch {
     return categorizeChecks([]);
@@ -304,8 +304,8 @@ export async function fetchCiAttribution(
     const client: GithubClient = await workspaceGithubClient(workspaceId);
     if (!client.token) return attributeChecks([], []);
     const [baseline, head] = await Promise.all([
-      readChecks(client, repoFullName, baseRef).catch(() => [] as CheckRun[]),
-      readChecks(client, repoFullName, headRef).catch(() => [] as CheckRun[]),
+      readRefChecks(client, repoFullName, baseRef).catch(() => [] as CheckRun[]),
+      readRefChecks(client, repoFullName, headRef).catch(() => [] as CheckRun[]),
     ]);
     return attributeChecks(baseline, head);
   } catch {
