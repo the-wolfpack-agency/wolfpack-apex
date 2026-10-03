@@ -318,7 +318,7 @@ const siteAnalytics: ToolSpec = {
 // ===========================================================================
 const OGIAM_ROUTES = ["src/app/api/admin/ogiam", "src/app/api/agents"];
 const OGIAM_LIBS = ["src/lib/ogiam"];
-const OGIAM_E2E = "tests/e2e/ogiam-adversarial-flow.spec.ts";
+const OGIAM_E2E = "tests/e2e/ogiam-gate-client-journeys.spec.ts";
 
 const ogiamGate: ToolSpec = {
   id: "ogiam-gate",
