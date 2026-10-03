@@ -121,8 +121,13 @@ const aiCode: ToolSpec = {
   surface: "/admin/ai-code",
   collectSignals(reader: RepoReader): ToolSignals {
     const wf = workflowTexts(reader);
+    // ai-code DB tests live under src/db/__tests__ (ai-code-reviews.db.test.ts)
+    // plus any co-located under its lib/routes.
+    const aiCodeDbTests =
+      reader.listFiles("src/db/__tests__", ".db.test.ts").filter((f) => /ai.?code/i.test(f)).length +
+      dbTestCount(reader, [...AI_CODE_ROUTES, ...AI_CODE_LIBS]);
     return {
-      dbTestCount: dbTestCount(reader, [...AI_CODE_ROUTES, ...AI_CODE_LIBS]),
+      dbTestCount: aiCodeDbTests,
       e2eGatesOnPR: specGatesOnPR(wf, AI_CODE_E2E),
       // "skip-green" is only a problem when the spec can skip in CI. A spec whose
       // skip is guarded by a CI check (skips locally, FAILS in CI on misconfig)
@@ -142,7 +147,9 @@ const aiCode: ToolSpec = {
       // cheaper answer is never silent - the router tags it, not just analytics.
       noSilentTierDegrade: fileMatches(reader, "src/lib/ai/router.ts", /degraded: true/),
       // --- attested (centrally maintained; flip when closed) ---
-      hashChainedAudit: false, // only the PR-open action is chained; pipeline runs are plain events
+      // the pipeline run writes an ai_code.pipeline_run entry via recordAuditNonFatal
+      // -> recordAudit -> the hash-chained audit log (same as every other tool here).
+      hashChainedAudit: anyFileMatches(reader, AI_CODE_ROUTES, /recordAudit/),
       retentionFailClosed: false, // AI_ZERO_RETENTION unset => sensitive egress is non-blocking
     };
   },
