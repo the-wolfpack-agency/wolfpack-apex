@@ -87,3 +87,40 @@ describe("findReuseCandidates (best-effort orchestration)", () => {
     expect(await findReuseCandidates({ client: {} as never, repo: "o/r", prompt: "x" })).toEqual({ block: "", candidates: [] });
   });
 });
+
+describe("precision: generic repo/structural terms do not create false duplicates", () => {
+  // Found by the live client-build dogfood (3 common build types all held by the
+  // DRY gate): two were false positives from generic terms coinciding.
+  const scoreAgainst = (prompt: string, path: string): number =>
+    scoreReuseCandidates(extractIntentKeywords(prompt), [path])[0]?.score ?? 0;
+
+  it("a /ping health route is NOT flagged as duplicating check-credentials.ts", () => {
+    // was 8 (check + auth->credential synonym); "check" is now a stopword.
+    expect(
+      scoreAgainst(
+        "Create a new API route src/app/api/ping/route.ts: a public health check; add the // PUBLIC marker the auth-bypass scan expects.",
+        "scripts/check-credentials.ts",
+      ),
+    ).toBeLessThan(8);
+  });
+
+  it("a new feedback-table migration is NOT flagged as duplicating an aliases migration", () => {
+    // was 8 ("instinct" + "table", both generic repo/DB terms, now stopwords).
+    expect(
+      scoreAgainst(
+        "Create a migration that adds an idempotent table instinct_client_feedback using CREATE TABLE IF NOT EXISTS.",
+        "src/db/migrations/014_instinct_table_aliases.sql",
+      ),
+    ).toBeLessThan(8);
+  });
+
+  it("STILL flags a genuine duplicate: a new StatusPill vs an existing StatusPill", () => {
+    // the legitimate catch must survive the precision tightening (status+pill=8).
+    expect(
+      scoreAgainst(
+        "Create a React component src/components/StatusPill.tsx: a status pill.",
+        "src/app/(dashboard)/support/_components/StatusPill.tsx",
+      ),
+    ).toBeGreaterThanOrEqual(8);
+  });
+});
