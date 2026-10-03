@@ -80,6 +80,15 @@ const KNOWN_DORMANT: Record<string, string> = {
   INVITE_EMAIL: "Ad-hoc override; the wired flow uses INVITE_SMOKE_TARGET_EMAIL.",
 };
 
+/**
+ * Env vars the CI RUNTIME always supplies, independent of any workflow `env:`
+ * block. GitHub Actions sets CI=true (and these others) for every job, so a spec
+ * gating on them is never dormant - a `!CI && unconfigured` skip means the spec
+ * RUNS in CI and only skips locally, which is the opposite of the problem this
+ * guardrail exists to catch.
+ */
+const ALWAYS_PRESENT_IN_CI = new Set(["CI", "GITHUB_ACTIONS", "RUNNER_OS", "GITHUB_SHA", "GITHUB_REF"]);
+
 function specFiles(): string[] {
   return readdirSync(E2E_DIR).filter((f) => f.endsWith(".spec.ts"));
 }
@@ -117,7 +126,9 @@ describe("every e2e spec can run, or is knowingly dormant", () => {
 
   it.each(specFiles())("%s", (file) => {
     const vars = gatedEnvVars(readFileSync(join(E2E_DIR, file), "utf8"));
-    const unexplained = vars.filter((v) => !supplied.has(v) && !(v in KNOWN_DORMANT));
+    const unexplained = vars.filter(
+      (v) => !supplied.has(v) && !(v in KNOWN_DORMANT) && !ALWAYS_PRESENT_IN_CI.has(v),
+    );
     if (unexplained.length > 0) {
       throw new Error(
         `${file} gates itself on ${unexplained.join(", ")}, which no workflow supplies and ` +
