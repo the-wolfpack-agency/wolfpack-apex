@@ -83,3 +83,18 @@ describe("the trusted list is configuration, not a constant", () => {
     expect([...set].sort()).toEqual(["anthropic", "azure-openai"]);
   });
 });
+
+describe("confidential source code is restricted (the factory's egress)", () => {
+  test("confidential requires a zero-retention provider", () => {
+    expect(requiresZeroRetention("confidential")).toBe(true);
+  });
+  test("with no trusted provider configured, confidential egress is REFUSED (fail-closed)", () => {
+    expect(mayServe({ sensitivity: "confidential", provider: "azure-openai", trusted: trusted() })).toEqual({ allowed: false, reason: "none_configured" });
+  });
+  test("a trusted provider may serve confidential egress", () => {
+    expect(mayServe({ sensitivity: "confidential", provider: "azure-openai", trusted: trusted("azure-openai") })).toEqual({ allowed: true, reason: "provider_trusted" });
+  });
+  test("an untrusted provider may NOT serve confidential egress", () => {
+    expect(mayServe({ sensitivity: "confidential", provider: "openai", trusted: trusted("azure-openai") })).toEqual({ allowed: false, reason: "provider_not_trusted" });
+  });
+});

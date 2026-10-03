@@ -105,3 +105,18 @@ describe("authorFileChanges (full-file executor)", () => {
     expect(out.changes).toEqual([]);
   });
 });
+
+describe("the factory classifies its egress as confidential (so the zero-retention control can protect client code)", () => {
+  it("authorDiff declares sensitivity 'confidential' on the model request", async () => {
+    let captured: AICompleteRequest | null = null;
+    const deps = {
+      complete: async (r: AICompleteRequest) => {
+        captured = r;
+        return resp("```diff\n" + SAMPLE_DIFF + "\n```");
+      },
+    };
+    await authorDiff({ prompt: "add an add() function", executorProviderPin: "azure-openai" }, deps);
+    expect(captured).not.toBeNull();
+    expect(captured!.sensitivity).toBe("confidential");
+  });
+});

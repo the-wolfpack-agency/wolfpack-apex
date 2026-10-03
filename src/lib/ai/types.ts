@@ -10,7 +10,7 @@
 
 export type AIModelTier = "cheap" | "standard" | "premium";
 
-export type AISensitivity = "public" | "pii" | "phi";
+export type AISensitivity = "public" | "confidential" | "pii" | "phi";
 
 export type AILatencyTarget = "real_time" | "standard" | "batch";
 
