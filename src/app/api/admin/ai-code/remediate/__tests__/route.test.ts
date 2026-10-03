@@ -23,7 +23,7 @@ jest.mock("@/lib/ai-code/repair", () => ({
 }));
 jest.mock("@/lib/ai-code/scan", () => ({ runCodeReview: jest.fn() }));
 jest.mock("@/lib/analytics", () => ({ trackEvent: (...a: unknown[]) => mockTrackEvent(...a) }));
-jest.mock("@/lib/audit-log", () => ({ recordAudit: (...a: unknown[]) => mockRecordAudit(...a) }));
+jest.mock("@/lib/audit-log", () => ({ recordAudit: (...a: unknown[]) => mockRecordAudit(...a), recordAuditNonFatal: (...a: unknown[]) => mockRecordAudit(...a) }));
 
 import { POST } from "../route";
 

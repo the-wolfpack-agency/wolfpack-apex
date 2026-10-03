@@ -111,14 +111,16 @@ const aiCode: ToolSpec = {
       emitsAnalytics: anyFileMatches(reader, AI_CODE_ROUTES, /trackEvent/),
       isolationDbEnforced: hasReviewRls && !tripwire,
       defaultWorkspaceCoalesce: anyFileMatches(reader, AI_CODE_ROUTES, /\?\?\s*"default"/),
-      // deep static scan covers edits when it reads modified/changed lines, not only new files.
+      // deep static scan covers edits when it reads full changed files, not only new files.
       deepScanCoversEdits:
-        fileMatches(reader, DEEP_SCAN, /changedLines|modifiedLines|editedFiles|addedLines/),
+        fileMatches(reader, DEEP_SCAN, /changedFiles|changedLines|modifiedLines|editedFiles|addedLines/),
+      // a transient audit-write never 500s a completed run: no bare `await recordAudit(`
+      // in the routes (all post-hoc writes go through recordAuditNonFatal).
+      auditCallsGuarded: !anyFileMatches(reader, AI_CODE_ROUTES, /await recordAudit\(/),
       // --- attested (centrally maintained; flip when closed) ---
       hashChainedAudit: false, // only the PR-open action is chained; pipeline runs are plain events
       noSilentTierDegrade: false, // router inline escalation can still catch-and-keep the cheap answer
       retentionFailClosed: false, // AI_ZERO_RETENTION unset => sensitive egress is non-blocking
-      auditCallsGuarded: false, // bare `await recordAudit` in pipeline/review can 500 a completed run
     };
   },
   criteria: [
@@ -174,7 +176,7 @@ const aiCode: ToolSpec = {
     {
       id: "audit-calls-guarded",
       dimension: "fail-closed",
-      kind: "attested",
+      kind: "auto",
       title: "A transient audit-write failure never 500s a completed run",
       rationale:
         "Bare `await recordAudit(...)` after paid model work means a DB hiccup throws an unhandled 500 and the client loses a run that actually succeeded.",

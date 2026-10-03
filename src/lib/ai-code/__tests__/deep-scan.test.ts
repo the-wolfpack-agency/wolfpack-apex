@@ -42,9 +42,20 @@ describe("deepScanChange", () => {
     expect(s.blocking).toBe(false);
   });
 
-  it("is a no-op (not blocking) for a modification-only diff - editing existing files is the workspace stage", async () => {
+  it("falls back to new-files-from-diff for a pure modification-only diff with no changedFiles", async () => {
     const s = await deepScanChange(EDIT_ONLY);
     expect(s.scanned).toBe(0);
     expect(s.blocking).toBe(false);
+  });
+
+  it("DEEP-SCANS edited existing files when changedFiles is provided (not just new files)", async () => {
+    // An edit to an EXISTING large file that introduces a provider-signature secret
+    // must be caught - the gap that let a secret ride in via a modify hunk.
+    const s = await deepScanChange("", "the-wolfpack-agency/wolfpack-apex", [
+      { path: "src/app/(dashboard)/admin/site-analytics/page.tsx", content: 'export const K = "AKIA1234567890ABCDEF";' },
+    ]);
+    expect(s.scanned).toBe(1);
+    expect(s.critical).toBeGreaterThan(0);
+    expect(s.blocking).toBe(true);
   });
 });

@@ -11,7 +11,7 @@ const mockAudit = jest.fn();
 const mockTrack = jest.fn();
 jest.mock("@/lib/auth/require-capability", () => ({ requireCapability: (...a: unknown[]) => mockRequireCapability(...a) }));
 jest.mock("@/lib/tenancy/require-entitlement", () => ({ requireEntitlement: (...a: unknown[]) => mockGate(...a) }));
-jest.mock("@/lib/audit-log", () => ({ recordAudit: (...a: unknown[]) => mockAudit(...a) }));
+jest.mock("@/lib/audit-log", () => ({ recordAudit: (...a: unknown[]) => mockAudit(...a), recordAuditNonFatal: (...a: unknown[]) => mockAudit(...a) }));
 jest.mock("@/lib/analytics", () => ({ trackEvent: (...a: unknown[]) => mockTrack(...a) }));
 jest.mock("@/lib/ai-code/watched-repos", () => ({
   ...jest.requireActual("@/lib/ai-code/watched-repos"),

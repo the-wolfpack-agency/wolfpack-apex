@@ -11,6 +11,7 @@ jest.mock("@/lib/ai-code/revert", () => ({ revertFactoryBranch: (...a: unknown[]
 const mockRecordAudit = jest.fn();
 jest.mock("@/lib/audit-log", () => ({
   recordAudit: (...a: unknown[]) => mockRecordAudit(...a),
+  recordAuditNonFatal: (...a: unknown[]) => mockRecordAudit(...a),
   extractRequestMetadata: () => ({ ipAddress: "127.0.0.1", userAgent: "test", requestId: "r1" }),
 }));
 
