@@ -45,5 +45,15 @@ jobs:
 
       # The repo's OWN canonical gate - identical to the pre-push gate a human
       # runs - so pre-PR validation is exactly as strict as the repo itself.
-      - name: Run the repo gate (lint + tsc + jest, incl. guardrails)
-        run: npm run verify
+      #
+      # EGRESS LOCKDOWN: the authored change is UNTRUSTED (a prompt-injected spec
+      # could author a test that phones home). `npm ci` above needs the network to
+      # install declared deps; `verify` (lint+tsc+jest) needs NONE, so run it in a
+      # fresh network namespace with no egress - the untrusted code cannot exfil.
+      # Dependency-free (util-linux `unshare`, rootless via -r); loopback is
+      # brought up for any test that uses localhost. If a repo's verify genuinely
+      # needs network, drop the unshare wrapper for that repo.
+      - name: Run the repo gate under network isolation (untrusted authored code)
+        run: |
+          unshare -r -n bash -c 'ip link set lo up 2>/dev/null || true; npm run verify' \
+            || { echo "::error::verify failed under network isolation (or unshare unavailable)"; exit 1; }
