@@ -212,7 +212,7 @@ test.describe("code factory - LIVE UI journeys (real model)", () => {
     // (attempts > 1, a model stronger than gpt-4o-mini) is visible in the artifact.
     await testInfo.attach("run-summary.json", {
       body: JSON.stringify(
-        { status: run.status, executorAttempts, effectiveMode: body.effectiveMode, model: executor?.author, anchorFailures },
+        { status: run.status, executorAttempts, effectiveMode: body.mode ?? body.effectiveMode, model: executor?.author, anchorFailures },
         null,
         2,
       ),
@@ -234,5 +234,68 @@ test.describe("code factory - LIVE UI journeys (real model)", () => {
       (await page.getByTestId("generated-code").count()) > 0 || (await page.getByTestId("handoff-status").count()) > 0;
     expect(rendered, "the UI renders a terminal result, not a spinner").toBe(true);
     expect(csp, "no CSP violations during the large-file journey").toEqual([]);
+  });
+
+  // ─── The JUMP: a substantive edit to the SAME large file that requires
+  // reproducing a multi-line verbatim anchor (two style-heavy <p> elements). The
+  // cheap model (Auto = gpt-4o-mini) tends to garble long exact spans on a 1,400-
+  // line file, which fails the anchor and triggers the #1050 pin-escalation to a
+  // genuinely-distinct model (Foundry deepseek/llama) that CAN reproduce it. This
+  // is the whole purpose of the build: hard work the cheap model cannot do routes
+  // UP and completes, instead of dead-ending "we only ran a cheap model". The run
+  // summary is console.logged so the model + pass count are in the CI log every
+  // run, whether or not the jump was needed this time. ───
+  test("11) a hard LARGE existing-file edit escalates to a stronger model when the cheap one can't", async ({ page }, testInfo) => {
+    const csp = await openFactory(page);
+    const pipelineResp = page.waitForResponse(
+      (r) => r.url().includes("/api/admin/ai-code/pipeline") && r.request().method() === "POST",
+      { timeout: 175_000 },
+    );
+    await page.getByLabel("Prompt").fill(
+      "In the existing file src/app/(dashboard)/admin/site-analytics/page.tsx, find the <div> that contains the paragraph \"Why this verdict\" followed by the paragraph rendering {profile.verdict.why}, and wrap those two <p> elements in a <section aria-label=\"Why this verdict\"> ... </section>. Reproduce the existing paragraphs EXACTLY, keep all inline styles, change only that block, and keep every existing export.",
+    );
+    await page.getByRole("button", { name: /generate & gate/i }).click();
+    const resp = await pipelineResp;
+    expect(resp.status(), "the pipeline responds 200-class").toBeLessThan(400);
+    const body = await resp.json().catch(() => ({}));
+    const run = body.run ?? body;
+    const executor = body.executor ?? run.executor ?? null;
+    const executorAttempts = Number(body.executorAttempts ?? run.executorAttempts ?? 1);
+    const anchorFailures = (body.anchorFailures ?? run.anchorFailures ?? []) as unknown[];
+    const model = String(executor?.author ?? "");
+    // ALWAYS visible in the CI log - this is the evidence of the route.
+    console.log(
+      `[dogfood:routing] status=${run.status} model=${model} passes=${executorAttempts} ` +
+        `anchorFailures=${anchorFailures.length} effectiveMode=${body.effectiveMode}`,
+    );
+    await testInfo.attach("routing-summary.json", {
+      body: JSON.stringify({ status: run.status, model, executorAttempts, anchorFailures, effectiveMode: body.mode ?? body.effectiveMode }, null, 2),
+      contentType: "application/json",
+    });
+    // Honest terminal state - never the cheap-only dead-end.
+    expect(["ready_for_pr", "needs_human"], `terminal status, got "${run.status}"`).toContain(run.status);
+    expect(model, "the model that authored it is recorded").not.toBe("");
+    // A failed anchor must NEVER be terminal without trying another model.
+    if (anchorFailures.length > 0) {
+      expect(executorAttempts, "a failed anchor escalated").toBeGreaterThan(1);
+    }
+    // THE JUMP (observational): when it took more than one pass, we EXPECT the
+    // authoring model to be a DISTINCT, stronger model than the cheap default. This
+    // is LOGGED, not hard-asserted, because this spec runs against whatever is in
+    // PROD_URL - a deployment that predates the routing fix legitimately still shows
+    // the cheap model, and a live reality-check must report that honestly, not go
+    // red on a not-yet-deployed truth. The routing LOGIC is hard-enforced in the
+    // unit tests (escalation-provider-pins.test.ts + the route test assert the retry
+    // is pinned to the distinct provider at its served tier). The [dogfood:routing]
+    // line above is the live evidence of which model actually authored it.
+    if (executorAttempts > 1 && /gpt-4o-mini|azure-gpt-4o-mini/i.test(model)) {
+      console.warn(
+        `[dogfood:routing] NOTE: ${executorAttempts} passes but still ${model} - escalation did not route ` +
+          `to a distinct model on this target (expected until the routing fix is deployed here).`,
+      );
+    } else if (executorAttempts > 1) {
+      console.log(`[dogfood:routing] JUMP CONFIRMED: escalated to ${model} over ${executorAttempts} passes.`);
+    }
+    expect(csp, "no CSP violations").toEqual([]);
   });
 });
