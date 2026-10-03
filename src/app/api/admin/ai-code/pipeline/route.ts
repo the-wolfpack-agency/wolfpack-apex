@@ -18,6 +18,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth/require-capability";
+import { resolveWorkspace } from "@/lib/auth/workspace";
 import { factoryServiceAuth } from "@/lib/ai-code/factory-service-auth";
 import { requireEntitlement } from "@/lib/tenancy/require-entitlement";
 import { trackEvent, trackEventAwait } from "@/lib/analytics";
@@ -378,7 +379,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       ? Math.max(1, Math.min(MAX_ATTEMPTS_CAP, Math.floor(b.maxAttempts)))
       : 2;
 
-  const workspaceId = auth.user.workspaceId ?? "default";
+  const workspaceId = resolveWorkspace(auth.user.workspaceId);
 
   // EXECUTOR stage. No diff supplied -> a model authors it from the prompt, and
   // the authoring model becomes the pipeline `author` so the repairer is a

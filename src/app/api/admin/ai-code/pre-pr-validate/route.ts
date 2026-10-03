@@ -17,6 +17,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth/require-capability";
+import { resolveWorkspace } from "@/lib/auth/workspace";
 import { requireEntitlement } from "@/lib/tenancy/require-entitlement";
 import { workspaceGithubClient } from "@/lib/github-client";
 import { pushValidationBranch } from "@/lib/ai-code/pre-pr-validation";
@@ -50,7 +51,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     : [];
   if (changes.length === 0) return NextResponse.json({ error: "changes must be a non-empty array of { path, content }" }, { status: 400 });
 
-  const workspaceId = auth.user.workspaceId ?? "default";
+  const workspaceId = resolveWorkspace(auth.user.workspaceId);
   const client = await workspaceGithubClient(workspaceId);
   if (!client.token) return NextResponse.json({ error: "no GitHub token for validation" }, { status: 400 });
 

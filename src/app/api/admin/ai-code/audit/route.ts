@@ -15,6 +15,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth/require-capability";
+import { resolveWorkspace } from "@/lib/auth/workspace";
 import { requireEntitlement } from "@/lib/tenancy/require-entitlement";
 import { verifyChain } from "@/lib/ogiam/checkpoint";
 import { listDecisions } from "@/lib/ogiam/queries";
@@ -25,7 +26,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const gate = await requireEntitlement(auth.user.workspaceId, "secure_agent");
   if (gate) return gate;
 
-  const workspaceId = auth.user.workspaceId ?? "default";
+  const workspaceId = resolveWorkspace(auth.user.workspaceId);
   const limParam = Number(new URL(req.url).searchParams.get("limit"));
   const limit = Number.isFinite(limParam) && limParam > 0 ? limParam : 200;
 
