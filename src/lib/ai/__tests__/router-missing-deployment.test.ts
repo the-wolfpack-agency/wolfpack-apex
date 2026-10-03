@@ -79,6 +79,10 @@ describe("when the requested tier has no deployment", () => {
 
     const res = await getAIClient().complete(request("premium"));
     expect(res.content).toBe("answered anyway");
+    // The degrade is surfaced ON THE RESPONSE (not just analytics) so the caller
+    // can see "routed up" did not actually happen.
+    expect(res.degraded).toBe(true);
+    expect(res.degraded_reason).toMatch(/missing_deployment:premium/);
   });
 
   /* A silent degrade would hide the stale variable forever. The reason this
