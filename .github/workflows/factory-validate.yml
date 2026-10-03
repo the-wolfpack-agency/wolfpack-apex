@@ -45,5 +45,17 @@ jobs:
 
       # The repo's OWN canonical gate - identical to the pre-push gate a human
       # runs - so pre-PR validation is exactly as strict as the repo itself.
-      - name: Run the repo gate (lint + tsc + jest, incl. guardrails)
-        run: npm run verify
+      #
+      # UNTRUSTED CODE / EGRESS THREAT MODEL: this runs model-authored code (verify
+      # executes the authored tests). A prompt-injected spec could author a test
+      # that tries to exfiltrate. Live mitigations: this job references NO secrets
+      # and the token is `contents: read` only, so there is nothing high-value to
+      # exfil and no write capability. A STRICTER network egress lockdown is NOT
+      # cleanly available on GitHub-hosted runners (rootless `unshare -r -n` is
+      # blocked - /proc/self/uid_map Operation not permitted - and a job-wide
+      # iptables DROP breaks the artifact-upload step). For client repos that need
+      # true egress control, run factory-validate on a SELF-HOSTED hardened runner
+      # or add step-security/harden-runner (external action + telemetry) with an
+      # allowlist. Tracked as a client-onboarding control, not an apex code change.
+      - name: Run the repo gate (lint + tsc + unit, incl. guardrails)
+        run: npm run verify:fast
