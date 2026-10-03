@@ -281,14 +281,26 @@ async function resolveChangeWithFallback(
     if (broken.length > 0) feedback = brokenLocalImportFeedback(broken);
   }
   if (feedback) {
-    // Recover on a stronger model, WITH the deterministic reason fed back, AND in
-    // FILES mode. Two dogfooding lessons combined: (1) "give the model the real
-    // error" turns a needs_human hold into a converged draft; (2) files authoring
-    // (full contents) has no diff-reconstruction ambiguity, the #1 cause of a bad
-    // draft - diff mode garbled the same new-file task 3x, files landed it green
-    // first try. Diff stays the FIRST attempt (better for targeted edits); files
-    // is the recovery, so edits are unaffected and new-file garbles self-heal.
-    const retry = await resolveChange({ ...args, mode: "files", tier: "premium", prompt: `${args.prompt}\n\n${feedback}` });
+    // Recover on a DIFFERENT, stronger MODEL, WITH the deterministic reason fed
+    // back, AND in FILES mode. Three dogfooding lessons combined:
+    //   (1) "give the model the real error" turns a needs_human hold into a
+    //       converged draft;
+    //   (2) files authoring (full contents) has no diff-reconstruction ambiguity,
+    //       the #1 cause of a bad draft;
+    //   (3) a TIER bump ("premium") was a NO-OP in a single-Azure-deployment env -
+    //       it resolved to the SAME cheap model, so "escalation" re-ran the model
+    //       that just failed (caught live: passes=2 but still gpt-4o-mini). So we
+    //       escalate the SAME way the anchor path does: PIN a genuinely-distinct
+    //       provider the router can actually invoke, at a tier it serves. Only when
+    //       no distinct provider is configured do we fall back to the premium tier
+    //       bump as a best effort (honest: nothing stronger exists to route to).
+    const [candidate] = escalationProviderPins({ excludePins: [args.executorProviderPin ?? ""] });
+    const retry = await resolveChange({
+      ...args,
+      mode: "files",
+      ...(candidate ? { executorProviderPin: candidate.pin, tier: candidate.tier } : { tier: "premium" }),
+      prompt: `${args.prompt}\n\n${feedback}`,
+    });
     attempts++;
     resolved = retry; // the escalated attempt is the final draft (its evidence is what a human sees if it too failed)
     effectiveMode = "files";

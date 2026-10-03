@@ -263,10 +263,12 @@ test.describe("code factory - LIVE UI journeys (real model)", () => {
     const executorAttempts = Number(body.executorAttempts ?? run.executorAttempts ?? 1);
     const anchorFailures = (body.anchorFailures ?? run.anchorFailures ?? []) as unknown[];
     const model = String(executor?.author ?? "");
-    // ALWAYS visible in the CI log - this is the evidence of the route.
+    const provider = String(executor?.provider ?? "");
+    // ALWAYS visible in the CI log - this is the evidence of the route. `mode` is
+    // the response field (NOT effectiveMode), and provider tells us if a pin fell back.
     console.log(
-      `[dogfood:routing] status=${run.status} model=${model} passes=${executorAttempts} ` +
-        `anchorFailures=${anchorFailures.length} effectiveMode=${body.effectiveMode}`,
+      `[dogfood:routing] status=${run.status} model=${model} provider=${provider} passes=${executorAttempts} ` +
+        `anchorFailures=${anchorFailures.length} mode=${body.mode ?? body.effectiveMode}`,
     );
     await testInfo.attach("routing-summary.json", {
       body: JSON.stringify({ status: run.status, model, executorAttempts, anchorFailures, effectiveMode: body.mode ?? body.effectiveMode }, null, 2),

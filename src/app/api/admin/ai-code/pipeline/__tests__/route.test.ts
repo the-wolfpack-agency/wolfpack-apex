@@ -255,6 +255,22 @@ describe("POST /api/admin/ai-code/pipeline", () => {
     expect(retryPrompt).toMatch(/src\/lib\/slug\.ts/); // the offending file is named
   });
 
+  it("files/diff self-heal escalates to a DISTINCT provider (not a tier bump that collapses to cheap)", async () => {
+    // The live-dogfood finding: a "premium" tier bump re-runs the SAME cheap model
+    // in a single-Azure-deployment env. When a genuinely-distinct provider exists,
+    // the self-heal must PIN it at the tier it serves - routing work UP for real.
+    mockEscalationPins.mockReturnValue([{ pin: "foundry", tier: "cheap" }]);
+    mockComplete
+      .mockResolvedValueOnce(authorResp("```diff\n" + TRUNCATED_DIFF + "\n```")) // first draft does not parse -> feedback
+      .mockResolvedValue(filesResp("src/lib/slug.ts", "export function slugify(s: string): string { return s.toLowerCase(); }"));
+    const res = await POST(post({ ref: "pr-escalate-files", prompt: "add slugify", answers: { tests: "all" } }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.executorAttempts).toBe(2);
+    // The recovery pinned the distinct provider at its served tier - NOT a premium bump.
+    expect(mockComplete).toHaveBeenLastCalledWith(expect.objectContaining({ provider_pin: "foundry", model_tier: "cheap" }));
+  });
+
   const NOOKIES_DIFF = 'diff --git a/src/x.ts b/src/x.ts\n--- /dev/null\n+++ b/src/x.ts\n@@ -0,0 +1,2 @@\n+import { parseCookies } from "nookies";\n+export const x = 1;';
   const CLEAN_NEW_DIFF = "diff --git a/src/x.ts b/src/x.ts\n--- /dev/null\n+++ b/src/x.ts\n@@ -0,0 +1 @@\n+export const x = 1;";
 
