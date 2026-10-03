@@ -105,7 +105,7 @@ jobs:
         run: >-
           npx playwright test
           tests/e2e/ai-code-factory-live.spec.ts
-          --grep "LARGE existing-file|escalates to a stronger model|client build"
+          --grep "LARGE existing-file|escalates to a stronger model|client build|adversarial"
           --config=playwright.config.ts
           --reporter=github
 
