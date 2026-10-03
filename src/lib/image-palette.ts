@@ -358,25 +358,51 @@ export function kmeansRgb(
  * decoded (e.g. JPEG, WEBP, or a malformed PNG). Callers should treat
  * empty palettes as "model-only theme hints" and still continue.
  */
-export function extractPalette(
-  buf: Uint8Array | Buffer,
-  count = 5,
-): Palette {
-  const u8 = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
-  const pixels = decodeImageToPixels(u8);
-  if (!pixels || pixels.pixels.length === 0) {
-    return { swatches: [], weights: [] };
-  }
+/** The pixels -> palette core (k-means), shared by the sync PNG path and the
+ *  async sharp path so both produce an identical palette from identical pixels. */
+export function paletteFromPixels(pixels: PixelBuffer, count = 5): Palette {
+  if (pixels.pixels.length === 0) return { swatches: [], weights: [] };
   const samples = samplePixels(pixels, 4096);
   if (samples.length === 0) return { swatches: [], weights: [] };
   const clusters = kmeansRgb(samples, count, 10);
   const total = clusters.reduce((n, c) => n + c.size, 0) || 1;
   return {
-    swatches: clusters.map((c) =>
-      rgbToHex(c.centroid[0], c.centroid[1], c.centroid[2]),
-    ),
+    swatches: clusters.map((c) => rgbToHex(c.centroid[0], c.centroid[1], c.centroid[2])),
     weights: clusters.map((c) => c.size / total),
   };
+}
+
+export function extractPalette(buf: Uint8Array | Buffer, count = 5): Palette {
+  const u8 = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+  const pixels = decodeImageToPixels(u8);
+  if (!pixels) return { swatches: [], weights: [] };
+  return paletteFromPixels(pixels, count);
+}
+
+/**
+ * Async palette extraction that ALSO covers JPEG (and anything sharp decodes),
+ * so a designer's JPEG mock-up gets a DETERMINISTIC palette instead of only the
+ * model's color guess. PNG stays on the pure-JS fast path (no sharp).
+ *
+ * sharp is GUARDED on purpose: it has never run in this app's REQUEST runtime
+ * (only tests/build), and sharp 0.35.x historically blanked a sibling Vercel
+ * deployment. So the import is dynamic and inside try/catch - any failure
+ * (import, native binary, decode) degrades to an empty palette (exactly today's
+ * behavior) and NEVER throws or blanks. Worst case = status quo; best case = a
+ * real palette for JPEG.
+ */
+export async function extractPaletteAsync(buf: Uint8Array | Buffer, count = 5): Promise<Palette> {
+  const u8 = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+  const png = decodeImageToPixels(u8); // pure-JS, no dependency
+  if (png) return paletteFromPixels(png, count);
+  try {
+    const sharp = (await import("sharp")).default;
+    const { data, info } = await sharp(Buffer.from(u8)).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+    if (info.channels !== 3 || data.length === 0) return { swatches: [], weights: [] };
+    return paletteFromPixels({ width: info.width, height: info.height, pixels: new Uint8Array(data) }, count);
+  } catch {
+    return { swatches: [], weights: [] }; // sharp unavailable/broken -> status quo, never blank
+  }
 }
 
 /**

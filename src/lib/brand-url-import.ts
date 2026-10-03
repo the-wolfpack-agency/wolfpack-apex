@@ -39,7 +39,7 @@
  *     tokens do designers actually accept?
  */
 
-import { extractPalette } from "./image-palette";
+import { extractPaletteAsync } from "./image-palette";
 import { trackEvent } from "./analytics";
 
 /* --------------------------------------------------------------------- *
@@ -584,7 +584,7 @@ async function tryImagePalette(
     // Cap at 1MB — a hero image we can't decode in under that is not a
     // hero image worth palette-extracting from.
     if (buf.byteLength > 1024 * 1024) return [];
-    const palette = extractPalette(buf, 5);
+    const palette = await extractPaletteAsync(buf, 5);
     return palette.swatches;
   } catch {
     return [];

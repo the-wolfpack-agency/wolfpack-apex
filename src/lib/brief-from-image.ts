@@ -44,7 +44,7 @@ import {
   type SiteTheme,
   type SiteThemeColors,
 } from "@/lib/sites-schema";
-import { extractPalette, paletteToTheme, type Palette } from "@/lib/image-palette";
+import { extractPaletteAsync, paletteToTheme, type Palette } from "@/lib/image-palette";
 import { insertBriefGeneration } from "@/lib/brief-generations";
 import {
   getAcceptedExemplars,
@@ -458,7 +458,7 @@ export async function briefFromFrames(
   // First frame = the designer's "hero" page. Extracting a palette per
   // frame would multiply decode cost without improving theme quality:
   // one consistent theme across all pages is the designer's intent.
-  const palette = extractPalette(frames[0].bytes);
+  const palette = await extractPaletteAsync(frames[0].bytes);
 
   /* --- 4. Build vision content blocks --- */
 
