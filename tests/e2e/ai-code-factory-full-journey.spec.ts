@@ -82,7 +82,7 @@ test.describe("Factory full journey (cayenne-e4)", () => {
     const run = body.run ?? body;
     const model = String((body.executor ?? run.executor)?.author ?? "");
     await expect(
-      page.getByTestId("generated-code").or(page.getByTestId("handoff-status")),
+      page.getByTestId("generated-code").or(page.getByTestId("handoff-status")).first(),
       "the UI renders a terminal result, not a spinner",
     ).toBeVisible({ timeout: 30_000 });
     console.log(`[dogfood:journey] repo=${CAYENNE} status=${run.status} model=${model}`);
@@ -109,7 +109,7 @@ test.describe("Factory full journey (cayenne-e4)", () => {
     const connect = page.getByTestId("connect-github");
     const validating = page.getByTestId("prepr-validation");
     await expect(
-      prLink.or(compare).or(connect).or(validating),
+      prLink.or(compare).or(connect).or(validating).first(),
       "approve resolves to a PR link, an honest no-token state, or a tier-2 validating hold",
     ).toBeVisible({ timeout: 60_000 });
 
