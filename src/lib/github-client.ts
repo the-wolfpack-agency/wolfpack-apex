@@ -409,6 +409,26 @@ export interface CheckRun {
 
 /** List the check runs for a commit / branch / PR head ref. Used to read a
  *  factory PR's CI status back into Instinct. */
+export interface PullRequestState {
+  number: number;
+  /** "open" | "closed" */
+  state: string;
+  merged: boolean;
+  merged_at: string | null;
+}
+
+/** Read a single PR's merge/close state - for correlating a factory-opened PR's
+ *  outcome (merged vs closed-unmerged) after the fact. Never throws caller-side
+ *  beyond the shared gh() error surface. */
+export async function getPullRequest(client: GithubClient, repoFullName: string, number: number): Promise<PullRequestState> {
+  const pr = await gh<{ number: number; state: string; merged?: boolean; merged_at?: string | null }>(
+    client,
+    "GET",
+    `/repos/${repoFullName}/pulls/${number}`,
+  );
+  return { number: pr.number, state: pr.state, merged: pr.merged === true, merged_at: pr.merged_at ?? null };
+}
+
 export async function listCheckRuns(
   client: GithubClient,
   repoFullName: string,

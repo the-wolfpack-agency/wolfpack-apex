@@ -712,6 +712,10 @@ export type InstinctEventType =
   // ai_code.pr_opened { repo, pr_number, files, branch } - the MISSION outcome: a
   // reviewable PR was actually produced (vs pr_gated = the gate merely ran).
   | "ai_code.pr_opened"
+  // ai_code.pr_merged { repo, pr_number } - the factory's PR was MERGED by a human.
+  | "ai_code.pr_merged"
+  // ai_code.pr_closed_unmerged { repo, pr_number } - closed without merging (rejected/superseded).
+  | "ai_code.pr_closed_unmerged"
   // forcefield.canary_seeded { workspace_id, kind, seeded_in } - a decoy was
   //   registered; the decoy VALUE is never in analytics.
   // forcefield.verdict_false_positive { workspace_id, operatorKey, findingKey, reason }
