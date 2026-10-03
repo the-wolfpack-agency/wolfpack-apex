@@ -39,6 +39,13 @@ const TENANT_GUARDRAIL = "src/lib/db/__tests__/tenant-isolation-global.test.ts";
  * the defense-in-depth goal (=> ready). A table with no workspace_id is unscoped
  * (=> gap). Honest, not binary.
  */
+/** "skip-green" is only a problem when the spec can skip IN CI. A spec whose skip
+ *  is guarded by a CI check (skips locally, FAILS in CI on misconfig) genuinely
+ *  gates a PR, so it is NOT skip-green. Shared by every tool (DRY). */
+function e2eSkipsGreen(reader: RepoReader, specPath: string): boolean {
+  return fileMatches(reader, specPath, /test\.skip\(/) && !fileMatches(reader, specPath, /process\.env\.CI/);
+}
+
 function isolationSignals(reader: RepoReader, table: string): { isolationDbEnforced: boolean; isolationGuarded: boolean } {
   const migrations = ["src/db/migrations"];
   const hasWorkspaceId = anyFileMatches(reader, migrations, new RegExp(`${table}[\\s\\S]*workspace_id`, "i"));
@@ -129,11 +136,7 @@ const aiCode: ToolSpec = {
     return {
       dbTestCount: aiCodeDbTests,
       e2eGatesOnPR: specGatesOnPR(wf, AI_CODE_E2E),
-      // "skip-green" is only a problem when the spec can skip in CI. A spec whose
-      // skip is guarded by a CI check (skips locally, FAILS in CI on misconfig)
-      // genuinely gates a PR, so it is NOT skip-green.
-      e2eSkipsGreen:
-        fileMatches(reader, AI_CODE_E2E, /test\.skip\(/) && !fileMatches(reader, AI_CODE_E2E, /process\.env\.CI/),
+      e2eSkipsGreen: e2eSkipsGreen(reader, AI_CODE_E2E),
       emitsAnalytics: anyFileMatches(reader, AI_CODE_ROUTES, /trackEvent/),
       ...isolationSignals(reader, "instinct_ai_code_reviews"),
       defaultWorkspaceCoalesce: anyFileMatches(reader, AI_CODE_ROUTES, /\?\?\s*"default"/),
@@ -247,7 +250,7 @@ const siteAnalytics: ToolSpec = {
     return {
       dbTestCount: saDbTests,
       e2eGatesOnPR: specGatesOnPR(wf, SA_E2E),
-      e2eSkipsGreen: fileMatches(reader, SA_E2E, /test\.skip\(/),
+      e2eSkipsGreen: e2eSkipsGreen(reader, SA_E2E),
       emitsAnalytics: anyFileMatches(reader, SA_ROUTES, /trackEvent/),
       hashChainedAudit: anyFileMatches(reader, SA_ROUTES, /recordAudit/),
       ...isolationSignals(reader, "site_analytics_events"),
@@ -327,8 +330,7 @@ const ogiamGate: ToolSpec = {
     return {
       dbTestCount: dbTestCount(reader, [...OGIAM_ROUTES, ...OGIAM_LIBS]),
       e2eGatesOnPR: specGatesOnPR(wf, OGIAM_E2E),
-      e2eSkipsGreen:
-        fileMatches(reader, OGIAM_E2E, /test\.skip\(/) && !fileMatches(reader, OGIAM_E2E, /process\.env\.CI/),
+      e2eSkipsGreen: e2eSkipsGreen(reader, OGIAM_E2E),
       emitsAnalytics: anyFileMatches(reader, OGIAM_ROUTES, /trackEvent/),
       // the ledger IS the hash-chained audit for agent actions.
       hashChainedAudit: anyFileMatches(reader, OGIAM_LIBS, /entry_hash|prev_hash|sha256/i),
@@ -386,8 +388,7 @@ const agentApprovals: ToolSpec = {
     return {
       dbTestCount: dbTestCount(reader, [...APPROVALS_ROUTES, ...APPROVALS_LIBS]),
       e2eGatesOnPR: specGatesOnPR(wf, APPROVALS_E2E),
-      e2eSkipsGreen:
-        fileMatches(reader, APPROVALS_E2E, /test\.skip\(/) && !fileMatches(reader, APPROVALS_E2E, /process\.env\.CI/),
+      e2eSkipsGreen: e2eSkipsGreen(reader, APPROVALS_E2E),
       emitsAnalytics: anyFileMatches(reader, APPROVALS_ROUTES, /trackEvent/),
       hashChainedAudit: anyFileMatches(reader, APPROVALS_ROUTES, /recordAudit/),
       ...isolationSignals(reader, "agent_pending_approvals"),
