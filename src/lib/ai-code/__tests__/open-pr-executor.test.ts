@@ -11,6 +11,7 @@ const openPullRequest = jest.fn();
 const workspaceGithubClient = jest.fn();
 const authorize = jest.fn();
 const recordActionOutcome = jest.fn();
+const trackEvent = jest.fn();
 
 jest.mock("@/lib/github-client", () => ({
   workspaceGithubClient: (...a: unknown[]) => workspaceGithubClient(...a),
@@ -20,6 +21,7 @@ jest.mock("@/lib/github-client", () => ({
 }));
 jest.mock("@/lib/ogiam/authorize", () => ({ authorize: (...a: unknown[]) => authorize(...a) }));
 jest.mock("@/lib/ogiam/ledger", () => ({ recordActionOutcome: (...a: unknown[]) => recordActionOutcome(...a) }));
+jest.mock("@/lib/analytics", () => ({ trackEvent: (...a: unknown[]) => trackEvent(...a) }));
 
 import { executeOpenPr } from "../open-pr-executor";
 
@@ -160,4 +162,22 @@ test("commits full-file CHANGES (edit-support), including a modified existing fi
   // both files committed via putFile (create-or-update handles the modification)
   expect(putFile).toHaveBeenCalledTimes(2);
   expect(openPullRequest).toHaveBeenCalledTimes(1);
+});
+
+describe("outcome telemetry: pr_opened (the MISSION signal, not just the gate)", () => {
+  it("emits ai_code.pr_opened with the PR number when a PR is actually opened", async () => {
+    await executeOpenPr({ ref: "x", diff: NEW_FILE_DIFF, repo: "o/r" }, ctx);
+    expect(trackEvent).toHaveBeenCalledWith(
+      "ai_code.pr_opened",
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ repo: "o/r", pr_number: 7 }),
+    );
+  });
+
+  it("does NOT emit pr_opened when opening the PR fails (no false 'produced' signal)", async () => {
+    openPullRequest.mockRejectedValueOnce(new Error("403 pull_requests"));
+    await executeOpenPr({ ref: "x", diff: NEW_FILE_DIFF, repo: "o/r" }, ctx);
+    expect(trackEvent).not.toHaveBeenCalledWith("ai_code.pr_opened", expect.anything(), expect.anything(), expect.anything());
+  });
 });
