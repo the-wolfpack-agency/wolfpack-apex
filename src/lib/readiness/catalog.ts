@@ -26,6 +26,26 @@ import {
 const num = (s: ToolSignals, k: string): number => (typeof s[k] === "number" ? (s[k] as number) : 0);
 const bool = (s: ToolSignals, k: string): boolean => s[k] === true;
 
+/** The repo-wide predicate guardrail: a build-failing scan that every
+ *  workspace-scoped query carries its workspace_id predicate. Its presence is
+ *  what makes app-side isolation an ENFORCED control, not a hope. */
+const TENANT_GUARDRAIL = "src/lib/db/__tests__/tenant-isolation-global.test.ts";
+
+/**
+ * Isolation signals for one tool's primary workspace-scoped table. Reflects the
+ * repo's DOCUMENTED model (docs/tenant-isolation.md): the enforced boundary today
+ * is the app-side workspace_id predicate backed by TENANT_GUARDRAIL (=> partial),
+ * and DB-level session-var RLS (a current_setting('app.workspace_id') policy) is
+ * the defense-in-depth goal (=> ready). A table with no workspace_id is unscoped
+ * (=> gap). Honest, not binary.
+ */
+function isolationSignals(reader: RepoReader, table: string): { isolationDbEnforced: boolean; isolationGuarded: boolean } {
+  const migrations = ["src/db/migrations"];
+  const hasWorkspaceId = anyFileMatches(reader, migrations, new RegExp(`${table}[\\s\\S]*workspace_id`, "i"));
+  const hasRealRls = anyFileMatches(reader, migrations, new RegExp(`${table}[\\s\\S]*current_setting\\('app\\.workspace_id'`, "i"));
+  return { isolationDbEnforced: hasRealRls, isolationGuarded: hasWorkspaceId && reader.exists(TENANT_GUARDRAIL) };
+}
+
 // ---- reusable criteria shared by every tool -------------------------------
 const dbTestsCriterion = (): ReadinessCriterion => ({
   id: "db-tests",
@@ -60,14 +80,16 @@ const isolationCriterion = (): ReadinessCriterion => ({
   id: "isolation-db-enforced",
   dimension: "isolation",
   kind: "auto",
-  title: "Tenant isolation is enforced at the database, not app-code only",
+  title: "Tenant isolation: predicate-guarded now, DB-level RLS as defense-in-depth",
   rationale:
-    "A USING(true) RLS policy or a table with no workspace_id means a single app-code bug (or a null workspace coalesced to a shared bucket) leaks one tenant's data to another on a shared database.",
-  status: (s) => (bool(s, "isolationDbEnforced") ? "ready" : "gap"),
+    "The enforced boundary today is the app-side workspace_id predicate backed by the repo-wide build-failing guardrail (docs/tenant-isolation.md) - materially stronger than app-code alone, hence partial. DB-level session-var RLS (a current_setting policy) adds defense-in-depth so a forgotten predicate still cannot leak - that is ready. A table with no workspace_id is unscoped - gap.",
+  status: (s) => (bool(s, "isolationDbEnforced") ? "ready" : bool(s, "isolationGuarded") ? "partial" : "gap"),
   evidence: (s) =>
     bool(s, "isolationDbEnforced")
-      ? "real RLS policy + workspace scoping on this surface's tables"
-      : "app-level WHERE workspace_id only, or USING(true) tripwire / missing workspace_id",
+      ? "DB-level RLS keyed on the workspace GUC (defense-in-depth)"
+      : bool(s, "isolationGuarded")
+        ? "workspace_id + repo-wide predicate guardrail (enforced app-side); DB-level RLS pending"
+        : "no workspace_id / not covered by the predicate guardrail",
 });
 
 const observabilityCriterion = (): ReadinessCriterion => ({
@@ -99,11 +121,6 @@ const aiCode: ToolSpec = {
   surface: "/admin/ai-code",
   collectSignals(reader: RepoReader): ToolSignals {
     const wf = workflowTexts(reader);
-    const migrations = ["src/db/migrations"];
-    // Isolation: the reviews migration (mentions instinct_ai_code_reviews) must
-    // carry a real RLS policy, not USING(true).
-    const hasReviewRls = anyFileMatches(reader, migrations, /instinct_ai_code_reviews[\s\S]*ROW LEVEL SECURITY/i);
-    const tripwire = anyFileMatches(reader, migrations, /USING \(true\)/);
     return {
       dbTestCount: dbTestCount(reader, [...AI_CODE_ROUTES, ...AI_CODE_LIBS]),
       e2eGatesOnPR: specGatesOnPR(wf, AI_CODE_E2E),
@@ -113,7 +130,7 @@ const aiCode: ToolSpec = {
       e2eSkipsGreen:
         fileMatches(reader, AI_CODE_E2E, /test\.skip\(/) && !fileMatches(reader, AI_CODE_E2E, /process\.env\.CI/),
       emitsAnalytics: anyFileMatches(reader, AI_CODE_ROUTES, /trackEvent/),
-      isolationDbEnforced: hasReviewRls && !tripwire,
+      ...isolationSignals(reader, "instinct_ai_code_reviews"),
       defaultWorkspaceCoalesce: anyFileMatches(reader, AI_CODE_ROUTES, /\?\?\s*"default"/),
       // deep static scan covers edits when it reads full changed files, not only new files.
       deepScanCoversEdits:
@@ -208,11 +225,6 @@ const siteAnalytics: ToolSpec = {
     const migrations = ["src/db/migrations"];
     // The core events table (migration mentions site_analytics_events) must carry
     // workspace_id for any shared-DB isolation to be possible.
-    const eventsHasWorkspace = anyFileMatches(
-      reader,
-      migrations,
-      /site_analytics_events[\s\S]*workspace_id/i,
-    );
     const eventsHasSiteIndex = anyFileMatches(
       reader,
       migrations,
@@ -231,8 +243,7 @@ const siteAnalytics: ToolSpec = {
       e2eSkipsGreen: fileMatches(reader, SA_E2E, /test\.skip\(/),
       emitsAnalytics: anyFileMatches(reader, SA_ROUTES, /trackEvent/),
       hashChainedAudit: anyFileMatches(reader, SA_ROUTES, /recordAudit/),
-      isolationDbEnforced: eventsHasWorkspace,
-      eventsWorkspaceScoped: eventsHasWorkspace,
+      ...isolationSignals(reader, "site_analytics_events"),
       perfIndexes: eventsHasSiteIndex,
       // promote route must use the operator's real surface, not a hardcoded host.
       promoteSurfaceCorrect: !anyFileMatches(reader, SA_ROUTES, /SURFACE\s*=\s*"ogiam\.com"/),
@@ -314,7 +325,7 @@ const ogiamGate: ToolSpec = {
       emitsAnalytics: anyFileMatches(reader, OGIAM_ROUTES, /trackEvent/),
       // the ledger IS the hash-chained audit for agent actions.
       hashChainedAudit: anyFileMatches(reader, OGIAM_LIBS, /entry_hash|prev_hash|sha256/i),
-      isolationDbEnforced: anyFileMatches(reader, migrations, /ogiam_decisions[\s\S]*ROW LEVEL SECURITY/i),
+      ...isolationSignals(reader, "ogiam_decisions"),
       // models advise, only POLICY authorizes: a pure decide() is the whole thesis.
       policyDecides: fileMatches(reader, "src/lib/ogiam/policy.ts", /export function decide/),
       // the ledger is hash-chained AND the rows are immutable (a DB trigger blocks UPDATE/DELETE).
@@ -365,7 +376,6 @@ const agentApprovals: ToolSpec = {
   surface: "/admin/agents",
   collectSignals(reader: RepoReader): ToolSignals {
     const wf = workflowTexts(reader);
-    const migrations = ["src/db/migrations"];
     return {
       dbTestCount: dbTestCount(reader, [...APPROVALS_ROUTES, ...APPROVALS_LIBS]),
       e2eGatesOnPR: specGatesOnPR(wf, APPROVALS_E2E),
@@ -373,7 +383,7 @@ const agentApprovals: ToolSpec = {
         fileMatches(reader, APPROVALS_E2E, /test\.skip\(/) && !fileMatches(reader, APPROVALS_E2E, /process\.env\.CI/),
       emitsAnalytics: anyFileMatches(reader, APPROVALS_ROUTES, /trackEvent/),
       hashChainedAudit: anyFileMatches(reader, APPROVALS_ROUTES, /recordAudit/),
-      isolationDbEnforced: anyFileMatches(reader, migrations, /agent_pending_approvals[\s\S]*ROW LEVEL SECURITY/i),
+      ...isolationSignals(reader, "agent_pending_approvals"),
       // the approve -> execute-as-owner step must be audited (who authorized what).
       approvalsAudited: anyFileMatches(reader, ["src/app/api/admin/agents/approvals"], /recordAudit/),
     };

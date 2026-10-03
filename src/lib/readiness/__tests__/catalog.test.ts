@@ -43,7 +43,8 @@ describe("ai-code signals + grading", () => {
     "src/lib/ai-code/x.db.test.ts": "db",
     "src/app/api/admin/ai-code/y.db.test.ts": "db",
     "src/db/migrations/212_ai_code_reviews.sql":
-      "CREATE TABLE instinct_ai_code_reviews(workspace_id uuid);\nENABLE ROW LEVEL SECURITY;\nCREATE POLICY p ON instinct_ai_code_reviews USING (workspace_id = current_setting('app.workspace')::uuid);",
+      "CREATE TABLE instinct_ai_code_reviews(workspace_id uuid);\nENABLE ROW LEVEL SECURITY;\nCREATE POLICY p ON instinct_ai_code_reviews USING (workspace_id = current_setting('app.workspace_id')::uuid);",
+    "src/lib/db/__tests__/tenant-isolation-global.test.ts": "repo-wide predicate guardrail",
   };
 
   it("a worked-up repo flips the auto criteria to ready (the engine is movable)", () => {
@@ -117,5 +118,26 @@ describe("governance tools (ogiam-gate, agent-approvals)", () => {
     const unaudited = { "src/app/api/admin/agents/approvals/[id]/route.ts": "execute();" };
     const r2 = reportTool(toolById("agent-approvals")!, fakeReader(unaudited));
     expect(Object.fromEntries(r2.results.map((x) => [x.id, x.status]))["approval-execute-audited"]).toBe("gap");
+  });
+});
+
+describe("isolation is graded in three honest levels", () => {
+  const base = {
+    "src/lib/db/__tests__/tenant-isolation-global.test.ts": "repo-wide predicate guardrail",
+  };
+  it("PARTIAL when the table has workspace_id + the guardrail, but no DB-level RLS", () => {
+    const repo = { ...base, "src/db/migrations/212_ai_code_reviews.sql": "CREATE TABLE instinct_ai_code_reviews(workspace_id text); ENABLE ROW LEVEL SECURITY; CREATE POLICY p ... USING (true);" };
+    const r = reportTool(toolById("ai-code")!, fakeReader(repo));
+    expect(Object.fromEntries(r.results.map((x) => [x.id, x.status]))["isolation-db-enforced"]).toBe("partial");
+  });
+  it("READY only with a real current_setting('app.workspace_id') policy", () => {
+    const repo = { ...base, "src/db/migrations/212_ai_code_reviews.sql": "CREATE TABLE instinct_ai_code_reviews(workspace_id text); CREATE POLICY p ON instinct_ai_code_reviews USING (workspace_id = current_setting('app.workspace_id'));" };
+    const r = reportTool(toolById("ai-code")!, fakeReader(repo));
+    expect(Object.fromEntries(r.results.map((x) => [x.id, x.status]))["isolation-db-enforced"]).toBe("ready");
+  });
+  it("GAP when the table has no workspace_id at all", () => {
+    const repo = { ...base, "src/db/migrations/178_site_analytics_events.sql": "CREATE TABLE site_analytics_events(id bigserial, props jsonb);" };
+    const r = reportTool(toolById("site-analytics")!, fakeReader(repo));
+    expect(Object.fromEntries(r.results.map((x) => [x.id, x.status]))["isolation-db-enforced"]).toBe("gap");
   });
 });

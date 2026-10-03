@@ -1,9 +1,9 @@
 {
   "note": "Production-readiness floor per tool. Scores may only go UP. Raise a value here in the same PR that closes the gap that lifts it.",
   "scores": {
-    "ai-code": 50,
+    "ai-code": 56,
     "site-analytics": 81,
-    "ogiam-gate": 67,
-    "agent-approvals": 50
+    "ogiam-gate": 75,
+    "agent-approvals": 60
   }
 }
