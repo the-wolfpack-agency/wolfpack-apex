@@ -45,7 +45,7 @@ import {
   AzureOpenAIProvider,
   isAzureConfigured,
 } from "./azure-openai-provider";
-import { buildCompatibleProviders } from "./openai-compatible-provider";
+import { buildCompatibleProviders, configuredCompatibleProviders } from "./openai-compatible-provider";
 import type {
   AIClient,
   AICompleteRequest,
@@ -1457,6 +1457,47 @@ export function betterTier(
   if (tier === "cheap") return "standard";
   if (tier === "standard") return "premium";
   return null;
+}
+
+const _ESCALATION_TIER_ORDER: AIModelTier[] = ["premium", "standard", "cheap"];
+
+/**
+ * Providers to ESCALATE to when the cheap default could not do a task, as
+ * {pin, tier} pairs the executor hands straight to complete(). This is the
+ * mechanism behind "route hard work to a model that can actually do it", and it
+ * exists because an earlier version routed by models/registry id (e.g.
+ * "azure-deepseek-v3") - which complete() does NOT recognize: it matches
+ * `provider_pin` against a PROVIDER name, so that id silently fell back to the
+ * cheap Azure default and the "escalation" re-ran the same cheap model (caught by
+ * the live dogfood: passes=2 but model still gpt-4o-mini).
+ *
+ *   - `pin` is the provider NAME complete() matches: a configured compatible
+ *     provider's id (e.g. "foundry"), or "anthropic". Genuinely distinct from the
+ *     cheap Azure default (which is deliberately NOT offered - re-running it is
+ *     the no-op we are fixing).
+ *   - `tier` is the STRONGEST tier that provider actually serves. Required because
+ *     the anchor author requests "standard" by default, and a provider configured
+ *     only for `cheap` (the prod Foundry case) would be rejected by supportsTier
+ *     at "standard" and fall back to cheap - the exact compounding failure. Asking
+ *     it at the tier it serves makes the pin resolve to its distinct model.
+ *
+ * Excludes already-tried pins. Pure; reads only env (injectable for tests).
+ */
+export function escalationProviderPins(
+  opts: { excludePins?: readonly string[]; env?: Record<string, string | undefined> } = {},
+): { pin: string; tier: AIModelTier }[] {
+  const env = opts.env ?? process.env;
+  const exclude = new Set((opts.excludePins ?? []).filter(Boolean));
+  const out: { pin: string; tier: AIModelTier }[] = [];
+  for (const c of configuredCompatibleProviders(env)) {
+    if (exclude.has(c.id)) continue;
+    const tier = _ESCALATION_TIER_ORDER.find((t) => c.models[t]);
+    if (tier) out.push({ pin: c.id, tier });
+  }
+  if ((env.ANTHROPIC_API_KEY ?? "").trim() && !exclude.has("anthropic")) {
+    out.push({ pin: "anthropic", tier: "premium" });
+  }
+  return out;
 }
 
 /** The last thing the user actually said, for the verifier's context. */

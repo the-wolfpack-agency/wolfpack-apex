@@ -212,7 +212,7 @@ test.describe("code factory - LIVE UI journeys (real model)", () => {
     // (attempts > 1, a model stronger than gpt-4o-mini) is visible in the artifact.
     await testInfo.attach("run-summary.json", {
       body: JSON.stringify(
-        { status: run.status, executorAttempts, effectiveMode: body.effectiveMode, model: executor?.author, anchorFailures },
+        { status: run.status, executorAttempts, effectiveMode: body.mode ?? body.effectiveMode, model: executor?.author, anchorFailures },
         null,
         2,
       ),
@@ -269,7 +269,7 @@ test.describe("code factory - LIVE UI journeys (real model)", () => {
         `anchorFailures=${anchorFailures.length} effectiveMode=${body.effectiveMode}`,
     );
     await testInfo.attach("routing-summary.json", {
-      body: JSON.stringify({ status: run.status, model, executorAttempts, anchorFailures, effectiveMode: body.effectiveMode }, null, 2),
+      body: JSON.stringify({ status: run.status, model, executorAttempts, anchorFailures, effectiveMode: body.mode ?? body.effectiveMode }, null, 2),
       contentType: "application/json",
     });
     // Honest terminal state - never the cheap-only dead-end.

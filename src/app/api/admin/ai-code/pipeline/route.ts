@@ -31,7 +31,7 @@ import { applyAnchorEdits, anchorFailureFeedback, type AnchorFailure } from "@/l
 import { newFilesFromDiff } from "@/lib/ai-code/oracle";
 import { checkSyntax } from "@/lib/ai-code/syntax-check";
 import { remediateFileChanges } from "@/lib/ai-code/repair-files";
-import { buildRegistry, judgeCandidates } from "@/lib/ai/router";
+import { buildRegistry, judgeCandidates, escalationProviderPins } from "@/lib/ai/router";
 import { chooseIndependentJudge } from "@/lib/ai/judge-selection";
 import { evaluateChangeInvariants } from "@/lib/ai-code/change-facts";
 import { deepScanChange } from "@/lib/ai-code/deep-scan";
@@ -41,7 +41,6 @@ import { buildRepoContext, withRepoContext, extractMentionedPaths } from "@/lib/
 import { findReuseCandidates } from "@/lib/ai-code/reuse-scout";
 import { buildKnownExportsBlock, exportsEntries } from "@/lib/ai-code/export-grounding";
 import { duplicationSignal, duplicationGate } from "@/lib/ai-code/reuse-enforcement";
-import { escalationModelPins } from "@/lib/ai-code/model-benchmark";
 import { pickAuthorMode } from "@/lib/ai-code/author-mode";
 import { fetchRepoGrounding } from "@/lib/ai-code/repo-grounding";
 import { findPhantomImports, parseInstalledRoots, phantomImportFeedback } from "@/lib/ai-code/imports";
@@ -255,13 +254,16 @@ async function resolveChangeWithFallback(
   // anchor mode (never a lossy whole-file rewrite). This is why a client's complex task
   // is not answered with "we only ran a cheap model": it routes to one that can.
   if (args.mode === "anchor" && !manualDiff) {
-    const candidates = escalationModelPins({ excludePins: [args.executorProviderPin ?? "", resolved.author ?? ""] });
-    for (const pin of candidates) {
+    const candidates = escalationProviderPins({ excludePins: [args.executorProviderPin ?? ""] });
+    for (const { pin, tier } of candidates) {
       if ((resolved.anchorFailures?.length ?? 0) === 0) break; // applied cleanly
       if (attempts >= MAX_ATTEMPTS_CAP) break; // bounded cost
+      // Pin the provider complete() recognizes AND ask at the tier it serves, or the
+      // pin is rejected by supportsTier and silently falls back to the cheap default.
       resolved = await resolveChange({
         ...args,
         executorProviderPin: pin,
+        tier,
         prompt: `${args.prompt}\n\n${anchorFailureFeedback(resolved.anchorFailures ?? [])}`,
       });
       attempts++;
