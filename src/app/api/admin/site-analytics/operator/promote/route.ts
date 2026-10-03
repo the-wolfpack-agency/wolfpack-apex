@@ -17,8 +17,6 @@ import { liveSightingFor } from "@/lib/agent-profile";
 import { recordSighting } from "@/lib/agent-operators";
 import { recordAudit, extractRequestMetadata } from "@/lib/audit-log";
 
-const SURFACE = "ogiam.com";
-
 export async function POST(req: NextRequest) {
   const auth = await requireCapability(req, "analytics.triage");
   if (!auth.ok) return auth.response;
@@ -40,7 +38,10 @@ export async function POST(req: NextRequest) {
   let promoted = 0;
   for (const j of group.journeys) {
     try {
-      await recordSighting({ workspaceId, sighting: liveSightingFor(j, SURFACE) });
+      // Record the operator's REAL surface (derived from the journey's events),
+      // not a hardcoded host - so a sighting first seen on another property is
+      // filed under the property it actually occurred on.
+      await recordSighting({ workspaceId, sighting: liveSightingFor(j) });
       promoted += 1;
     } catch {
       /* one failed sighting must not abort the promotion; record what we can */

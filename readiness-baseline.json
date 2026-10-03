@@ -2,6 +2,6 @@
   "note": "Production-readiness floor per tool. Scores may only go UP. Raise a value here in the same PR that closes the gap that lifts it.",
   "scores": {
     "ai-code": 44,
-    "site-analytics": 69
+    "site-analytics": 81
   }
 }
