@@ -1,0 +1,96 @@
+name: Agent Approvals Dogfood
+
+# Drives the REAL human-in-the-loop approvals inbox at /admin/agents/approvals
+# against the DEPLOYED app: unauth bounces to /login; signed in, the inbox loads
+# 200 (never a blank 401), resolves to a real terminal state, and pending writes
+# expose actionable approve/reject controls. It never CLICKS approve/reject (those
+# mutate production); it proves the surface is present + usable. No model spend.
+#
+# Needs PROD_URL + SMOKE_TEST_EMAIL + SMOKE_TEST_PASSWORD; skips loudly if PROD_URL
+# is unset, FAILS (not skip-green) in CI if a credential is missing.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "47 13 * * *"
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "tests/e2e/agent-approvals-journeys.spec.ts"
+      - ".github/workflows/agent-approvals-dogfood.yml"
+      - "src/app/(dashboard)/admin/agents/approvals/**"
+      - "src/components/agents/ApprovalList.tsx"
+      - "src/app/api/admin/agents/approvals/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agent-approvals-dogfood-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dogfood:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CI: "true"
+      PROD_URL: ${{ secrets.PROD_URL }}
+      SMOKE_TEST_EMAIL: ${{ secrets.SMOKE_TEST_EMAIL }}
+      SMOKE_TEST_PASSWORD: ${{ secrets.SMOKE_TEST_PASSWORD }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Require PROD_URL
+        id: cfg
+        run: |
+          if [ -z "${PROD_URL}" ]; then
+            echo "configured=false" >> $GITHUB_OUTPUT
+            echo "::warning::PROD_URL secret not set - Agent Approvals dogfood SKIPPED."
+          else
+            echo "configured=true" >> $GITHUB_OUTPUT
+          fi
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v4.0.4
+        if: steps.cfg.outputs.configured == 'true'
+        with:
+          node-version: 20
+          cache: "npm"
+      - name: Install dependencies
+        if: steps.cfg.outputs.configured == 'true'
+        run: npm ci
+      - name: Cache Playwright browsers
+        if: steps.cfg.outputs.configured == 'true'
+        id: pw-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - name: Install Playwright browser
+        if: steps.cfg.outputs.configured == 'true' && steps.pw-cache.outputs.cache-hit != 'true'
+        timeout-minutes: 8
+        run: npx playwright install chromium
+      - name: Install OS libraries for Chromium
+        if: steps.cfg.outputs.configured == 'true'
+        timeout-minutes: 6
+        continue-on-error: true
+        run: |
+          timeout 150 npx playwright install-deps chromium \
+            || (echo "retrying once" && sleep 10 && timeout 150 npx playwright install-deps chromium) \
+            || echo "::warning::playwright install-deps failed (apt mirror)."
+      - name: Dogfood Agent Approvals through the live UI
+        if: steps.cfg.outputs.configured == 'true'
+        run: >-
+          npx playwright test tests/e2e/agent-approvals-journeys.spec.ts
+          --config=playwright.config.ts --reporter=github
+      - name: Upload Playwright report
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: agent-approvals-dogfood-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 14
+          if-no-files-found: ignore
