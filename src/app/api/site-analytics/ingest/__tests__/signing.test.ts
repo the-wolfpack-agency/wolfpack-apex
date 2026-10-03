@@ -7,14 +7,13 @@ jest.mock("@/lib/site-analytics", () => ({ recordSiteEvent: (...a: unknown[]) =>
 jest.mock("@/lib/forcefield/ingest-signing", () => ({ ingestSigningEnforced: (...a: unknown[]) => ingestSigningEnforced(...a), verifyIngestSignature: (...a: unknown[]) => verifyIngestSignature(...a) }));
 jest.mock("@/lib/forcefield/principal", () => ({ verifyPresentedDelegation: async () => ({ status: "absent", scopes: [], reason: "" }), getDelegationIssuer: async () => null, consumeDelegationJti: async () => true }));
 
-import { POST, _resetIngestRateLimit } from "@/app/api/site-analytics/ingest/route";
+import { POST } from "@/app/api/site-analytics/ingest/route";
 const req = (body: unknown, headers: Record<string, string> = {}) =>
   new NextRequest("http://localhost/api/site-analytics/ingest", { method: "POST", headers: { "content-type": "application/json", "x-ingest-token": "tok", ...headers }, body: JSON.stringify(body) });
 
 beforeEach(() => {
   process.env.SITE_ANALYTICS_INGEST_TOKEN = "tok";
   [recordSiteEvent, verifyIngestSignature, ingestSigningEnforced].forEach((m) => m.mockReset());
-  _resetIngestRateLimit();
 });
 
 it("with signing enforced, rejects an unsigned batch (401) even with a valid token", async () => {

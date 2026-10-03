@@ -22,6 +22,7 @@ jest.mock("@/lib/analytics", () => ({
 
 import {
   recordAudit,
+  recordAuditNonFatal,
   redactPII,
   canonicalJSON,
   computeEntryHash,
@@ -345,5 +346,37 @@ describe("recordAudit", () => {
     } finally {
       process.env.DATABASE_URL = saved;
     }
+  });
+});
+
+describe("recordAuditNonFatal (post-hoc logging must never 500 a completed action)", () => {
+  it("returns ok:false and does NOT throw when the audit write fails", async () => {
+    mockConnect.mockRejectedValueOnce(new Error("db down"));
+    const res = await recordAuditNonFatal({
+      actor: { user_id: "u1", role: "cto" },
+      action: "ai_code.pipeline_run",
+      resourceType: "ai_code_pipeline_run",
+      resourceId: "ref-1",
+    });
+    expect(res).toEqual({ ok: false });
+  });
+
+  it("returns ok:true on a successful write", async () => {
+    const { client } = buildClient([
+      [], // BEGIN
+      [], // pg_advisory_xact_lock
+      [], // SELECT prev (empty)
+      [{ nextval: "1" }], // nextval
+      [{ id: "uuid-1" }], // INSERT RETURNING id
+      [], // COMMIT
+    ]);
+    mockConnect.mockResolvedValueOnce(client);
+    const res = await recordAuditNonFatal({
+      actor: { user_id: "u1", role: "cto" },
+      action: "ai_code.pipeline_run",
+      resourceType: "ai_code_pipeline_run",
+      resourceId: "ref-1",
+    });
+    expect(res.ok).toBe(true);
   });
 });

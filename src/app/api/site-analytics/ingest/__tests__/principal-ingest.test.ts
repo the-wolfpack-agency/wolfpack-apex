@@ -20,7 +20,7 @@ jest.mock("@/lib/forcefield/principal", () => ({
   consumeDelegationJti: (...a: unknown[]) => consumeDelegationJti(...a),
 }));
 
-import { POST, _resetIngestRateLimit } from "@/app/api/site-analytics/ingest/route";
+import { POST } from "@/app/api/site-analytics/ingest/route";
 
 const SECRET = "issuer-secret-key-abcdef";
 let jtiSeq = 0;
@@ -45,7 +45,6 @@ beforeEach(() => {
   getDelegationIssuer.mockResolvedValue({ issuer: "acme-fleet", algorithm: "hs256", secret: SECRET, allowedScopes: [] });
   consumeDelegationJti.mockReset();
   consumeDelegationJti.mockResolvedValue(true); // fresh by default
-  _resetIngestRateLimit();
 });
 
 it("stores a VERIFIED verdict for a valid delegation and never the raw credential", async () => {

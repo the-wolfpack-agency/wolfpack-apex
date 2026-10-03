@@ -111,14 +111,16 @@ const aiCode: ToolSpec = {
       emitsAnalytics: anyFileMatches(reader, AI_CODE_ROUTES, /trackEvent/),
       isolationDbEnforced: hasReviewRls && !tripwire,
       defaultWorkspaceCoalesce: anyFileMatches(reader, AI_CODE_ROUTES, /\?\?\s*"default"/),
-      // deep static scan covers edits when it reads modified/changed lines, not only new files.
+      // deep static scan covers edits when it reads full changed files, not only new files.
       deepScanCoversEdits:
-        fileMatches(reader, DEEP_SCAN, /changedLines|modifiedLines|editedFiles|addedLines/),
+        fileMatches(reader, DEEP_SCAN, /changedFiles|changedLines|modifiedLines|editedFiles|addedLines/),
+      // a transient audit-write never 500s a completed run: no bare `await recordAudit(`
+      // in the routes (all post-hoc writes go through recordAuditNonFatal).
+      auditCallsGuarded: !anyFileMatches(reader, AI_CODE_ROUTES, /await recordAudit\(/),
       // --- attested (centrally maintained; flip when closed) ---
       hashChainedAudit: false, // only the PR-open action is chained; pipeline runs are plain events
       noSilentTierDegrade: false, // router inline escalation can still catch-and-keep the cheap answer
       retentionFailClosed: false, // AI_ZERO_RETENTION unset => sensitive egress is non-blocking
-      auditCallsGuarded: false, // bare `await recordAudit` in pipeline/review can 500 a completed run
     };
   },
   criteria: [
@@ -174,7 +176,7 @@ const aiCode: ToolSpec = {
     {
       id: "audit-calls-guarded",
       dimension: "fail-closed",
-      kind: "attested",
+      kind: "auto",
       title: "A transient audit-write failure never 500s a completed run",
       rationale:
         "Bare `await recordAudit(...)` after paid model work means a DB hiccup throws an unhandled 500 and the client loses a run that actually succeeded.",
@@ -230,8 +232,9 @@ const siteAnalytics: ToolSpec = {
       promoteSurfaceCorrect: !anyFileMatches(reader, SA_ROUTES, /SURFACE\s*=\s*"ogiam\.com"/),
       // the truthfulness engineering (n/a vs 0, hostile vs flagged) is present.
       truthfulnessHonest: fileMatches(reader, SA_LIB, /collectsPageViews|hostileOperators/),
-      // --- attested ---
-      durableRateLimit: false, // ingest rate limit is in-memory, per-lambda, cold-start-reset
+      // ingest rate limit is DURABLE when the route no longer keeps in-memory
+      // per-lambda counters (it delegates to the DB-backed checkRateLimit).
+      durableRateLimit: !anyFileMatches(reader, SA_ROUTES, /let windowCount|let windowStart/),
     };
   },
   criteria: [
@@ -272,7 +275,7 @@ const siteAnalytics: ToolSpec = {
     {
       id: "durable-rate-limit",
       dimension: "fail-closed",
-      kind: "attested",
+      kind: "auto",
       title: "Ingest rate limiting is durable, not per-lambda in-memory",
       rationale:
         "An in-memory, cold-start-reset limit means a leaked ingest token floods far past the stated cap and inflates cost.",

@@ -14,7 +14,7 @@ jest.mock("@/lib/site-analytics", () => ({
   recordSiteEvent: (...a: unknown[]) => mockRecordSiteEvent(...a),
 }));
 
-import { POST, _resetIngestRateLimit } from "@/app/api/site-analytics/ingest/route";
+import { POST } from "@/app/api/site-analytics/ingest/route";
 
 const ORIGINAL_TOKEN = process.env.SITE_ANALYTICS_INGEST_TOKEN;
 
@@ -31,7 +31,6 @@ function mkReq(body: unknown, token?: string): any {
 
 beforeEach(() => {
   jest.clearAllMocks();
-  _resetIngestRateLimit();
   process.env.SITE_ANALYTICS_INGEST_TOKEN = "secret-token";
   delete process.env.SITE_ANALYTICS_INGEST_TOKEN_2;
 });

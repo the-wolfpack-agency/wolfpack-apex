@@ -16,7 +16,7 @@ import { requireCapability } from "@/lib/auth/require-capability";
 import { requireEntitlement } from "@/lib/tenancy/require-entitlement";
 import { establishBaseline } from "@/lib/ai-code/ci-status";
 import { trackEvent } from "@/lib/analytics";
-import { recordAudit } from "@/lib/audit-log";
+import { recordAuditNonFatal } from "@/lib/audit-log";
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const auth = await requireCapability(req, "settings.manage_team");
@@ -44,7 +44,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   });
   // A mutation on the client's repo (it dispatches a CI run on their base branch),
   // so it belongs in the hash-chained audit log, not only analytics.
-  await recordAudit({
+  await recordAuditNonFatal({
     actor: { user_id: auth.user.id, role: auth.user.role },
     action: "ai_code.baseline_established",
     resourceType: "ai_code_baseline",
