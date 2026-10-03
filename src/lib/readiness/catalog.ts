@@ -117,9 +117,11 @@ const aiCode: ToolSpec = {
       // a transient audit-write never 500s a completed run: no bare `await recordAudit(`
       // in the routes (all post-hoc writes go through recordAuditNonFatal).
       auditCallsGuarded: !anyFileMatches(reader, AI_CODE_ROUTES, /await recordAudit\(/),
+      // escalation/degrade surfaces on the response (degraded flag), so a kept
+      // cheaper answer is never silent - the router tags it, not just analytics.
+      noSilentTierDegrade: fileMatches(reader, "src/lib/ai/router.ts", /degraded: true/),
       // --- attested (centrally maintained; flip when closed) ---
       hashChainedAudit: false, // only the PR-open action is chained; pipeline runs are plain events
-      noSilentTierDegrade: false, // router inline escalation can still catch-and-keep the cheap answer
       retentionFailClosed: false, // AI_ZERO_RETENTION unset => sensitive egress is non-blocking
     };
   },
@@ -155,7 +157,7 @@ const aiCode: ToolSpec = {
     {
       id: "no-silent-model-degrade",
       dimension: "fail-closed",
-      kind: "attested",
+      kind: "auto",
       title: 'Escalation never silently serves the cheap model ("routed up" is true)',
       rationale:
         "A premium-tier 404 degraded a tier down, and verify-escalation is wrapped in catch-and-keep-cheap. The flagship promise can fail invisibly - the exact failure the live dogfood exists to catch.",

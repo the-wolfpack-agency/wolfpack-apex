@@ -848,7 +848,14 @@ class RouterClient implements AIClient {
           console.warn(
             `[ai/router] ${primary.name} has no deployment for tier ${cReq.model_tier}; serving ${lower} instead`,
           );
-          return this.complete({ ...cReq, model_tier: lower });
+          // Surface the degrade on the RESPONSE (not just analytics) so the caller
+          // sees the requested capability was not served.
+          const served = await this.complete({ ...cReq, model_tier: lower });
+          return {
+            ...served,
+            degraded: true,
+            degraded_reason: served.degraded_reason ?? `missing_deployment:${cReq.model_tier}->${lower}`,
+          };
         }
       }
 
@@ -1439,7 +1446,14 @@ class RouterClient implements AIClient {
           });
           return retried;
         } catch {
-          /* Keep the answer we have. */
+          /* Escalation failed; keep the answer we have, but SURFACE that we could
+             NOT route up. A kept cheaper answer must never read as a clean
+             escalation - the exact "we only ran a cheap model" blind spot. */
+          return {
+            ...response,
+            degraded: true,
+            degraded_reason: `escalation_failed:${req.model_tier}->${escalateTo}`,
+          };
         }
       }
     }
