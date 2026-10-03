@@ -377,7 +377,7 @@ const ogiamGate: ToolSpec = {
 // ===========================================================================
 const APPROVALS_ROUTES = ["src/app/api/admin/agents"];
 const APPROVALS_LIBS = ["src/lib/agents/approvals"];
-const APPROVALS_E2E = "tests/e2e/agents-console.spec.ts";
+const APPROVALS_E2E = "tests/e2e/agent-approvals-journeys.spec.ts";
 
 const agentApprovals: ToolSpec = {
   id: "agent-approvals",
