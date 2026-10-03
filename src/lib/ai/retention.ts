@@ -41,7 +41,7 @@
 import type { AISensitivity } from "./types";
 
 /** Sensitivity levels that require a zero-retention provider. */
-const RESTRICTED: ReadonlySet<string> = new Set(["pii", "phi"]);
+const RESTRICTED: ReadonlySet<string> = new Set(["confidential", "pii", "phi"]);
 
 export function requiresZeroRetention(sensitivity: AISensitivity | undefined): boolean {
   return sensitivity !== undefined && RESTRICTED.has(sensitivity);

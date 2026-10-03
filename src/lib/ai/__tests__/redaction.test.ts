@@ -460,3 +460,12 @@ describe("an Outlook link is not an API key", () => {
     expect(r.hits.map((h) => h.kind)).toContain("api_key");
   });
 });
+
+describe("confidential egress is sent VERBATIM (its protection is provider-restriction, not redaction)", () => {
+  it("passes confidential content through unredacted, like public (never mangles the code being authored)", () => {
+    const code = "export function pay(acct: string) { return charge(acct, SECRET_KEY); }";
+    const out = redactMessages([{ role: "user", content: code }], undefined, "confidential");
+    expect(out.messages[0].content).toBe(code);
+    expect(out.count).toBe(0);
+  });
+});

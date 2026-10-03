@@ -89,6 +89,7 @@ export async function authorDiff(input: AuthorInput, deps: AuthorDeps): Promise<
       max_tokens: maxTokens,
       model_tier: input.tier ?? "standard",
       ...(input.executorProviderPin ? { provider_pin: input.executorProviderPin } : {}),
+      sensitivity: "confidential",
       metadata: { feature },
     });
     result.diff = extractDiff(resp.content);
@@ -138,6 +139,7 @@ export async function authorFileChanges(input: AuthorInput, deps: AuthorDeps): P
       max_tokens: maxTokens,
       model_tier: input.tier ?? "standard",
       ...(input.executorProviderPin ? { provider_pin: input.executorProviderPin } : {}),
+      sensitivity: "confidential",
       metadata: { feature },
     });
     result.changes = parseFileChanges(resp.content);
@@ -188,6 +190,7 @@ export async function authorAnchorEdits(input: AuthorInput, deps: AuthorDeps): P
       max_tokens: maxTokens,
       model_tier: input.tier ?? "standard",
       ...(input.executorProviderPin ? { provider_pin: input.executorProviderPin } : {}),
+      sensitivity: "confidential",
       metadata: { feature },
     });
     result.edits = parseAnchorEdits(resp.content);

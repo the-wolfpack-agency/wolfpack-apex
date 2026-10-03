@@ -451,7 +451,7 @@ export function redactText(
 export function redactMessages(
   messages: { role: string; content: string }[],
   system: string | undefined,
-  sensitivity: "public" | "pii" | "phi" | undefined,
+  sensitivity: "public" | "confidential" | "pii" | "phi" | undefined,
   /* Restrict redaction to these kinds. Undefined means all of them, which is
      what every caller predating this parameter gets. */
   kinds?: ReadonlySet<RedactionKind>,
@@ -462,7 +462,7 @@ export function redactMessages(
   count: number;
 } {
   /* Public data → passthrough. */
-  if (sensitivity === "public") {
+  if (sensitivity === "public" || sensitivity === "confidential") {
     return {
       messages: messages.map((m) => ({ ...m })),
       system,
