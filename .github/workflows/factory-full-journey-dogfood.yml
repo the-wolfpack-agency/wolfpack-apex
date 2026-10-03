@@ -1,0 +1,108 @@
+# Factory Full-Journey Dogfood - drives the DEPLOYED factory at /admin/ai-code
+# through the complete client journey against the THROWAWAY repo
+# wolfpack-cayenne-e4 (never apex): sign in, target the repo, describe a feature,
+# gate the authored code, give consent, approve, and SEE the real PR link render.
+# It stops at the PR link - merging + deploying is the human's step.
+#
+# Opening a real PR on the throwaway is the POINT, so this does NOT run on every
+# apex PR: only on demand, weekly, and on a PR that edits the journey spec/workflow
+# itself (so a change to the journey re-proves itself). Zero apex blast radius -
+# all writes land on cayenne-e4. Data-tolerant: no cayenne token => the spec
+# asserts the honest compare-link/connect-github state rather than failing.
+#
+# Needs PROD_URL + SMOKE_TEST_EMAIL + SMOKE_TEST_PASSWORD (repo secrets); FAILS
+# LOUDLY in CI if a credential is missing. If PROD_URL is unset the job SKIPS.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 14 * * 1" # weekly, Monday ~14:17 UTC
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "tests/e2e/ai-code-factory-full-journey.spec.ts"
+      - ".github/workflows/factory-full-journey-dogfood.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: factory-full-journey-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dogfood:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CI: "true"
+      PROD_URL: ${{ secrets.PROD_URL }}
+      SMOKE_TEST_EMAIL: ${{ secrets.SMOKE_TEST_EMAIL }}
+      SMOKE_TEST_PASSWORD: ${{ secrets.SMOKE_TEST_PASSWORD }}
+
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Require PROD_URL (the dogfood targets the live deployment)
+        id: cfg
+        run: |
+          if [ -z "${PROD_URL}" ]; then
+            echo "configured=false" >> $GITHUB_OUTPUT
+            echo "::warning::PROD_URL secret not set - factory full-journey dogfood SKIPPED."
+          else
+            echo "configured=true" >> $GITHUB_OUTPUT
+          fi
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v4.0.4
+        if: steps.cfg.outputs.configured == 'true'
+        with:
+          node-version: 20
+          cache: "npm"
+
+      - name: Install dependencies
+        if: steps.cfg.outputs.configured == 'true'
+        run: npm ci
+
+      - name: Cache Playwright browsers
+        if: steps.cfg.outputs.configured == 'true'
+        id: pw-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Install Playwright browser
+        if: steps.cfg.outputs.configured == 'true' && steps.pw-cache.outputs.cache-hit != 'true'
+        timeout-minutes: 8
+        run: npx playwright install chromium
+
+      - name: Install OS libraries for Chromium
+        if: steps.cfg.outputs.configured == 'true'
+        timeout-minutes: 6
+        continue-on-error: true
+        run: |
+          timeout 150 npx playwright install-deps chromium \
+            || (echo "retrying once" && sleep 10 && timeout 150 npx playwright install-deps chromium) \
+            || echo "::warning::playwright install-deps failed (apt mirror). Continuing: a missing library surfaces as a browser launch failure next."
+
+      - name: Dogfood the factory full journey through the live UI
+        if: steps.cfg.outputs.configured == 'true'
+        run: >-
+          npx playwright test
+          tests/e2e/ai-code-factory-full-journey.spec.ts
+          --config=playwright.config.ts
+          --reporter=github
+
+      - name: Upload Playwright report
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: factory-full-journey-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 14
+          if-no-files-found: ignore
