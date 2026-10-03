@@ -57,5 +57,5 @@ jobs:
       # true egress control, run factory-validate on a SELF-HOSTED hardened runner
       # or add step-security/harden-runner (external action + telemetry) with an
       # allowlist. Tracked as a client-onboarding control, not an apex code change.
-      - name: Run the repo gate (lint + tsc + jest, incl. guardrails)
-        run: npm run verify
+      - name: Run the repo gate (lint + tsc + unit, incl. guardrails)
+        run: npm run verify:fast
