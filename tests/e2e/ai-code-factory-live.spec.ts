@@ -65,6 +65,41 @@ async function submit(page: Page, prompt: string): Promise<void> {
   await expect(page.getByTestId("generated-code"), "a real run rendered authored code").toBeVisible({ timeout: 120_000 });
 }
 
+/**
+ * Drive the real UI for ONE client build request, capture the real pipeline
+ * response, and assert the universal CLIENT GUARANTEE for ANY build type: it
+ * reaches a terminal, honest state (authored -> ready_for_pr, or an explicit
+ * human hold -> needs_human), never a 500/blank/hang, with the authoring model
+ * recorded and no CSP violation. Logs [dogfood:clientbuild] so what the gate did
+ * with each build type is visible in the run. Reused by the build-coverage
+ * scenarios below so the factory is proven across the range a client (and every
+ * competing tool) is judged on - backend, UI, database, CRUD - not toy helpers.
+ */
+async function clientBuild(page: Page, kind: string, prompt: string): Promise<{ status: string; model: string; mode: string }> {
+  const csp = await openFactory(page);
+  const pipelineResp = page.waitForResponse(
+    (r) => r.url().includes("/api/admin/ai-code/pipeline") && r.request().method() === "POST",
+    { timeout: 175_000 },
+  );
+  await page.getByLabel("Prompt").fill(prompt);
+  await page.getByRole("button", { name: /generate & gate/i }).click();
+  const resp = await pipelineResp;
+  expect(resp.status(), `${kind}: pipeline responds 200-class (never 500/blank)`).toBeLessThan(400);
+  const body = await resp.json().catch(() => ({}));
+  const run = body.run ?? body;
+  const model = String((body.executor ?? run.executor)?.author ?? "");
+  const status = String(run.status ?? "");
+  const mode = String(body.mode ?? body.effectiveMode ?? "");
+  console.log(`[dogfood:clientbuild] ${kind} status=${status} model=${model} mode=${mode}`);
+  expect(["ready_for_pr", "needs_human"], `${kind}: terminal status, got "${status}"`).toContain(status);
+  expect(model, `${kind}: the authoring model is recorded`).not.toBe("");
+  const rendered =
+    (await page.getByTestId("generated-code").count()) > 0 || (await page.getByTestId("handoff-status").count()) > 0;
+  expect(rendered, `${kind}: the UI renders a terminal result, not a spinner`).toBe(true);
+  expect(csp, `${kind}: no CSP violations`).toEqual([]);
+  return { status, model, mode };
+}
+
 const CI = process.env.CI === "true";
 
 test.describe("code factory - LIVE UI journeys (real model)", () => {
@@ -315,5 +350,40 @@ test.describe("code factory - LIVE UI journeys (real model)", () => {
       console.log(`[dogfood:routing] JUMP CONFIRMED: escalated to ${model} over ${executorAttempts} passes.`);
     }
     expect(csp, "no CSP violations").toEqual([]);
+  });
+
+  // ─── CLIENT BUILD-TYPE COVERAGE. A client runs more than toy helpers through the
+  // gate: backend endpoints, UI components, database migrations, CRUD across the
+  // codebase - the full range competing tools (Cursor, Devin, Copilot Workspace,
+  // Factory) are judged on. Each proves the factory + gate handle that build type
+  // end to end; the [dogfood:clientbuild] log shows what the gate did with each. ───
+  test("12) client build: a BACKEND api route (new file)", async ({ page }) => {
+    await clientBuild(
+      page,
+      "backend-route",
+      "Create a new API route at src/app/api/ping/route.ts: export an async GET that returns " +
+        "NextResponse.json({ ok: true, ts: new Date().toISOString() }). It is a public health check, " +
+        "so add the // PUBLIC marker the auth-bypass scan expects.",
+    );
+  });
+
+  test("13) client build: a UI component (new file)", async ({ page }) => {
+    await clientBuild(
+      page,
+      "ui-component",
+      "Create a React component src/components/StatusPill.tsx: a 'use client' component taking a " +
+        "status: 'ok' | 'warn' | 'error' prop that renders a colored pill using the var(--wp-*) dark-theme " +
+        "tokens (never hard-coded colors). Add a co-located test file.",
+    );
+  });
+
+  test("14) client build: a DATABASE migration (new file)", async ({ page }) => {
+    await clientBuild(
+      page,
+      "db-migration",
+      "Create the next numbered SQL migration in src/db/migrations that adds an idempotent table " +
+        "instinct_client_feedback (id uuid primary key, workspace_id text not null, rating int, note text, " +
+        "created_at timestamptz default now()) using CREATE TABLE IF NOT EXISTS, with an index on (workspace_id, created_at).",
+    );
   });
 });
