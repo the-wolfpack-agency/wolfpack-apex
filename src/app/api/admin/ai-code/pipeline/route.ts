@@ -21,7 +21,7 @@ import { requireCapability } from "@/lib/auth/require-capability";
 import { factoryServiceAuth } from "@/lib/ai-code/factory-service-auth";
 import { requireEntitlement } from "@/lib/tenancy/require-entitlement";
 import { trackEvent, trackEventAwait } from "@/lib/analytics";
-import { recordAudit } from "@/lib/audit-log";
+import { recordAuditNonFatal } from "@/lib/audit-log";
 import { runCodeReview } from "@/lib/ai-code/scan";
 import { liveRepairComplete } from "@/lib/ai-code/repair";
 import { runPipeline } from "@/lib/ai-code/pipeline";
@@ -606,10 +606,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   // Full-power deep static scan: run the platform-scan detector engine (provider-
   // signature secrets, taint/SSRF/SQLi) on the authored files, not just the ai-code
-  // subset. A critical finding withholds the handoff, same as an invariant block.
-  const deepScan = await deepScanChange(run.diff, repo);
+  // subset. Pass the full changed-file contents (new AND edited) so an edit to an
+  // existing file is scanned too, not only new files. A critical finding withholds
+  // the handoff, same as an invariant block.
+  const deepScan = await deepScanChange(run.diff, repo, changes ?? undefined);
 
-  await recordAudit({
+  await recordAuditNonFatal({
     actor: { user_id: auth.user.id, role: auth.user.role },
     action: "ai_code.pipeline_run",
     resourceType: "ai_code_pipeline_run",

@@ -26,7 +26,7 @@ jest.mock("@/lib/analytics", () => ({
   trackEvent: (...a: unknown[]) => mockTrackEvent(...a),
   trackEventAwait: (...a: unknown[]) => mockTrackEventAwait(...a),
 }));
-jest.mock("@/lib/audit-log", () => ({ recordAudit: (...a: unknown[]) => mockRecordAudit(...a) }));
+jest.mock("@/lib/audit-log", () => ({ recordAudit: (...a: unknown[]) => mockRecordAudit(...a), recordAuditNonFatal: (...a: unknown[]) => mockRecordAudit(...a) }));
 jest.mock("@/lib/agents/approvals/store", () => ({ createPendingApproval: (...a: unknown[]) => mockCreateApproval(...a) }));
 const mockEnsureCodeGateAgent = jest.fn();
 jest.mock("@/lib/agents/store", () => ({ ensureCodeGateAgent: (...a: unknown[]) => mockEnsureCodeGateAgent(...a) }));

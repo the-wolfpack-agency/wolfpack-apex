@@ -16,7 +16,7 @@ jest.mock("@/lib/auth/require-capability", () => ({ requireCapability: (...a: un
 jest.mock("@/lib/ai-code/scan", () => ({ runCodeReview: (...a: unknown[]) => mockRun(...a) }));
 jest.mock("@/lib/ai-code/store", () => ({ listReviews: (...a: unknown[]) => mockList(...a) }));
 jest.mock("@/lib/analytics", () => ({ trackEvent: (...a: unknown[]) => mockTrackEvent(...a) }));
-jest.mock("@/lib/audit-log", () => ({ recordAudit: (...a: unknown[]) => mockRecordAudit(...a) }));
+jest.mock("@/lib/audit-log", () => ({ recordAudit: (...a: unknown[]) => mockRecordAudit(...a), recordAuditNonFatal: (...a: unknown[]) => mockRecordAudit(...a) }));
 
 import { NextRequest, NextResponse } from "next/server";
 import { GET, POST } from "../route";

@@ -13,7 +13,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { requireEntitlement } from "@/lib/tenancy/require-entitlement";
-import { recordAudit } from "@/lib/audit-log";
+import { recordAuditNonFatal } from "@/lib/audit-log";
 import { trackEvent } from "@/lib/analytics";
 import { listWatchedRepos, enrollRepo, setRepoEnabled, unenrollRepo, isValidRepo } from "@/lib/ai-code/watched-repos";
 
@@ -46,7 +46,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if (enabled) await enrollRepo(ws, repo);
   else await setRepoEnabled(ws, repo, false);
 
-  await recordAudit({
+  await recordAuditNonFatal({
     actor: { user_id: auth.user.id, role: auth.user.role },
     action: "ai_code.watched_repo_set",
     resourceType: "ai_code_watched_repo",
@@ -68,7 +68,7 @@ export async function DELETE(req: NextRequest): Promise<NextResponse> {
 
   const ws = auth.user.workspaceId;
   await unenrollRepo(ws, repo);
-  await recordAudit({
+  await recordAuditNonFatal({
     actor: { user_id: auth.user.id, role: auth.user.role },
     action: "ai_code.watched_repo_removed",
     resourceType: "ai_code_watched_repo",

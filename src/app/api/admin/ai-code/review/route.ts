@@ -21,7 +21,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { requireEntitlement } from "@/lib/tenancy/require-entitlement";
 import { trackEvent } from "@/lib/analytics";
-import { recordAudit } from "@/lib/audit-log";
+import { recordAuditNonFatal } from "@/lib/audit-log";
 import { runCodeReview } from "@/lib/ai-code/scan";
 import { liveJudgeComplete } from "@/lib/ai-code/judge";
 import { listReviews } from "@/lib/ai-code/store";
@@ -77,7 +77,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   });
 
   // The gate verdict gates a merge: hash-chain it.
-  await recordAudit({
+  await recordAuditNonFatal({
     actor: { user_id: auth.user.id, role: auth.user.role },
     action: "ai_code.reviewed",
     resourceType: "ai_code_review",

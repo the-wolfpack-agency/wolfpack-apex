@@ -22,7 +22,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { requireEntitlement } from "@/lib/tenancy/require-entitlement";
 import { trackEvent } from "@/lib/analytics";
-import { recordAudit } from "@/lib/audit-log";
+import { recordAuditNonFatal } from "@/lib/audit-log";
 import { runCodeReview } from "@/lib/ai-code/scan";
 import { remediateDiff, liveRepairComplete } from "@/lib/ai-code/repair";
 import type { CodeReviewResult } from "@/lib/ai-code/types";
@@ -78,7 +78,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     maxAttempts,
   });
 
-  await recordAudit({
+  await recordAuditNonFatal({
     actor: { user_id: auth.user.id, role: auth.user.role },
     action: "ai_code.remediated",
     resourceType: "ai_code_remediation",

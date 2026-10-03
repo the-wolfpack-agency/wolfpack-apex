@@ -15,7 +15,7 @@ jest.mock("@/lib/auth/require-capability", () => ({
   requireCapability: (...a: unknown[]) => mockRequireCapability(...a),
 }));
 jest.mock("@/lib/analytics", () => ({ trackEvent: jest.fn() }));
-jest.mock("@/lib/audit-log", () => ({ recordAudit: jest.fn().mockResolvedValue({ ok: true }) }));
+jest.mock("@/lib/audit-log", () => ({ recordAudit: jest.fn().mockResolvedValue({ ok: true }), recordAuditNonFatal: jest.fn().mockResolvedValue({ ok: true }) }));
 // @/lib/ai-code/{scan,store,detect} are intentionally NOT mocked: the real gate runs.
 
 import { NextRequest } from "next/server";

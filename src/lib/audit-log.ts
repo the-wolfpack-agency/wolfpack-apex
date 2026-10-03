@@ -370,6 +370,27 @@ export async function recordAudit(entry: AuditEntryInput): Promise<RecordResult>
   }
 }
 
+/**
+ * recordAudit for POST-HOC logging of an action that ALREADY completed (a
+ * finished pipeline run, a review, a baseline set): the user already has the
+ * result, so a transient audit-write failure must NOT throw an unhandled 500 and
+ * discard a run that actually succeeded - often after paid model work. The
+ * failure is logged and surfaced via `ok`, never thrown.
+ *
+ * This is NOT a license to drop audits for not-yet-taken actions: an action gate
+ * that must fail closed if it cannot be audited keeps calling recordAudit
+ * directly. Use this only where the write records something that already happened.
+ */
+export async function recordAuditNonFatal(entry: AuditEntryInput): Promise<{ ok: boolean }> {
+  try {
+    await recordAudit(entry);
+    return { ok: true };
+  } catch (err) {
+    console.error("[audit] non-fatal audit write failed:", (err as Error)?.message ?? err);
+    return { ok: false };
+  }
+}
+
 // ---------------------------------------------------------------------------
 // verifyChain
 // ---------------------------------------------------------------------------

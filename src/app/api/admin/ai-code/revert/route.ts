@@ -14,7 +14,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { requireEntitlement } from "@/lib/tenancy/require-entitlement";
-import { recordAudit, extractRequestMetadata } from "@/lib/audit-log";
+import { recordAuditNonFatal, extractRequestMetadata } from "@/lib/audit-log";
 import { workspaceGithubClient } from "@/lib/github-client";
 import { revertFactoryBranch } from "@/lib/ai-code/revert";
 
@@ -61,7 +61,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // Rewriting a branch is a security-relevant mutation on the client's repo, so
   // it lands on the hash-chained audit log in addition to the OGIAM action ledger.
   const meta = extractRequestMetadata(req);
-  await recordAudit({
+  await recordAuditNonFatal({
     actor: { user_id: auth.user.id, role: auth.user.role },
     action: "ai_code.branch_reverted",
     resourceType: "github_branch",
@@ -71,7 +71,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     ipAddress: meta.ipAddress,
     userAgent: meta.userAgent,
     requestId: meta.requestId,
-  }).catch((e) => console.warn("[audit]", (e as Error).message));
+  });
 
   return NextResponse.json(outcome);
 }
