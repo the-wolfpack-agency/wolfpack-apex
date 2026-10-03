@@ -232,8 +232,9 @@ const siteAnalytics: ToolSpec = {
       promoteSurfaceCorrect: !anyFileMatches(reader, SA_ROUTES, /SURFACE\s*=\s*"ogiam\.com"/),
       // the truthfulness engineering (n/a vs 0, hostile vs flagged) is present.
       truthfulnessHonest: fileMatches(reader, SA_LIB, /collectsPageViews|hostileOperators/),
-      // --- attested ---
-      durableRateLimit: false, // ingest rate limit is in-memory, per-lambda, cold-start-reset
+      // ingest rate limit is DURABLE when the route no longer keeps in-memory
+      // per-lambda counters (it delegates to the DB-backed checkRateLimit).
+      durableRateLimit: !anyFileMatches(reader, SA_ROUTES, /let windowCount|let windowStart/),
     };
   },
   criteria: [
@@ -274,7 +275,7 @@ const siteAnalytics: ToolSpec = {
     {
       id: "durable-rate-limit",
       dimension: "fail-closed",
-      kind: "attested",
+      kind: "auto",
       title: "Ingest rate limiting is durable, not per-lambda in-memory",
       rationale:
         "An in-memory, cold-start-reset limit means a leaked ingest token floods far past the stated cap and inflates cost.",

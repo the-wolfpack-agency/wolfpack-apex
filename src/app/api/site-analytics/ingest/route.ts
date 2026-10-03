@@ -21,6 +21,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { timingSafeEqual } from "crypto";
+import { checkRateLimit } from "@/lib/ogiam/gate-rate-limit";
 import { isSiteEventType, recordSiteEvent } from "@/lib/site-analytics";
 import { autoBlockFingerprint } from "@/lib/forcefield/blocked-fingerprints";
 import { verifyPresentedDelegation, getDelegationIssuer, consumeDelegationJti } from "@/lib/forcefield/principal";
@@ -31,23 +32,6 @@ const MAX_PER_WINDOW = 600; // generous for a marketing site; bounds abuse.
 // The marketing-site event stream is a single global tenant; its trusted
 // delegation issuers live under this workspace id.
 const SITE_WORKSPACE_ID = process.env.SITE_ANALYTICS_WORKSPACE_ID || "default";
-let windowStart = 0;
-let windowCount = 0;
-
-export function _resetIngestRateLimit(): void {
-  windowStart = 0;
-  windowCount = 0;
-}
-
-function rateLimited(now: number): boolean {
-  if (now - windowStart >= WINDOW_MS) {
-    windowStart = now;
-    windowCount = 1;
-    return false;
-  }
-  windowCount += 1;
-  return windowCount > MAX_PER_WINDOW;
-}
 
 /** Constant-time string compare that never throws on length mismatch. */
 function tokenMatches(provided: string, expected: string): boolean {
@@ -83,7 +67,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
   }
 
-  if (rateLimited(Date.now())) {
+  // DURABLE rate limit: a DB fixed-window counter (shared across all lambdas,
+  // survives cold starts), not per-instance in-memory state that a leaked token
+  // could flood past by hitting many instances. Fail-closed on a DB error.
+  const rl = await checkRateLimit("site-analytics:ingest", { limit: MAX_PER_WINDOW, windowMs: WINDOW_MS });
+  if (!rl.ok) {
     return NextResponse.json({ ok: false, error: "rate_limited" }, { status: 429 });
   }
 
