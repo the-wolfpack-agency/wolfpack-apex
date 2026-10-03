@@ -29,6 +29,14 @@ const STOPWORDS = new Set([
   "return", "returns", "function", "export", "exports", "file", "code", "test", "tests",
   "value", "values", "number", "string", "boolean", "pure", "include", "including",
   "src", "lib", "app", "api", "route", "page", "component", "handler", "endpoint",
+  // Generic repo / DB structural terms that match a huge fraction of files, so two
+  // of them coinciding falsely scored a brand-new build as a duplicate of an
+  // unrelated file. "instinct" is the repo's own prefix; "table"/"migration" are on
+  // every migration; "check" is a bare verb. A real duplicate matches on a
+  // distinctive CONCEPT (e.g. "cost-summary", "status-pill"), never on these.
+  // Found by the live client-build dogfood: a /ping route flagged as
+  // check-credentials.ts, a feedback-table migration as 014_instinct_table_aliases.sql.
+  "instinct", "table", "tables", "check", "checks", "migration", "migrations",
 ]);
 
 /**
