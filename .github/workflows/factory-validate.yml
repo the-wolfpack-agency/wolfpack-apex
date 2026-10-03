@@ -1,0 +1,49 @@
+# factory-validate - the factory runs the TARGET REPO's OWN full gate against an
+# authored change on a throwaway validation branch BEFORE a real PR is opened.
+#
+# This is tier 2 of the secure-agent gate: tier 1 (the universal security scan in
+# the pipeline) catches cross-repo vuln classes; THIS runs the repo's own
+# conventions + tests (lint + tsc + jest, incl. guardrails like no-raw-api-fetch
+# and the auth-bypass scan) so a convention-violating or self-inconsistent change
+# is caught at the source, not after a looping PR. It is the repo's own rules, so
+# it never over-fits the shared gate to one client.
+#
+# Dispatched by the app (triggerWorkflow) onto the content-hashed
+# `factory-validate/*` branch; pre-pr-validation.ts reads the conclusion and the
+# approve->open-PR flow only opens the real PR when this is green.
+#
+# name MUST contain "factory-validate" (readValidationOutcome matches run.name);
+# opt-in via PREPR_VALIDATE_WORKFLOW=factory-validate.yml on the deployment.
+name: factory-validate
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# NO cancel-in-progress: a cancelled run settles with conclusion "cancelled",
+# which the reader does not treat as a failure - cancelling could read as a false
+# pass. The validation branch is content-hashed, so duplicate runs are harmless.
+concurrency:
+  group: factory-validate-${{ github.ref }}
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v4.0.4
+        with:
+          node-version: 20
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      # The repo's OWN canonical gate - identical to the pre-push gate a human
+      # runs - so pre-PR validation is exactly as strict as the repo itself.
+      - name: Run the repo gate (lint + tsc + jest, incl. guardrails)
+        run: npm run verify

@@ -10,7 +10,7 @@ import {
 import { getAgent } from "@/lib/agents/store";
 import { executeCreateExternalRecord } from "@/lib/assistant/tools/create-external-record-tool";
 import { executeUpdateExternalRecord } from "@/lib/assistant/tools/update-external-record-tool";
-import { executeOpenPr } from "@/lib/ai-code/open-pr-executor";
+import { executeOpenPr, validateBeforePr } from "@/lib/ai-code/open-pr-executor";
 
 type WriteCtx = { userId: string; userRole: string; workspaceId?: string; agentId?: string };
 type WriteOutcome = { ok: boolean; [k: string]: unknown };
@@ -100,6 +100,23 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     workspaceId,
     agentId: approval.agentId,
   };
+
+  // TIER-2 PRE-PR VALIDATION (opt-in via PREPR_VALIDATE_WORKFLOW). Run the TARGET
+  // repo's OWN gate against the authored change BEFORE claiming/opening the PR, so
+  // a convention violation or self-inconsistent artifact is caught at the source.
+  // A not-yet-green result returns 202 and LEAVES THE APPROVAL PENDING, so the
+  // user (or a UI poller) retries once validation settles - the atomic claim
+  // below (the double-execute guard) therefore runs ONLY on the open-PR path.
+  // When the env is unset this block is skipped entirely: the flow is unchanged.
+  if (approval.tool === "ai_code.open_pr" && process.env.PREPR_VALIDATE_WORKFLOW) {
+    const validation = await validateBeforePr(approval.params as never, ownerCtx);
+    if (validation.verdict !== "allow") {
+      await audit("agent.write.prepr_held");
+      // 202 Accepted: the request was understood, the work is validating (or needs
+      // a human) - it is NOT an error and the approval remains actionable.
+      return NextResponse.json({ ok: false, status: "validating", validation }, { status: 202 });
+    }
+  }
 
   // Claim the approval atomically BEFORE executing so a concurrent approve cannot
   // run the write twice.

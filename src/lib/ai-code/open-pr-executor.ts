@@ -19,6 +19,10 @@ import { authorize } from "@/lib/ogiam/authorize";
 import { recordActionOutcome } from "@/lib/ogiam/ledger";
 import { newFilesFromDiff } from "./oracle";
 import { commitFileChanges, type FileChange } from "./file-changes";
+import { pushValidationBranch } from "./pre-pr-validation";
+import { prePrValidateGate } from "@/lib/gates/pre-pr-validate-gate";
+import { runGate } from "@/lib/gates/run-gate";
+import { DEFAULT_COMPLIANCE_POLICY } from "@/lib/gates/types";
 
 export interface OpenPrParams {
   /** target repo "owner/name". Defaults to apex (self-hosting) when absent. */
@@ -52,15 +56,85 @@ function sanitizeRef(ref: string): string {
   return (ref || "change").replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "change";
 }
 
-export async function executeOpenPr(params: OpenPrParams, ctx: WriteCtx): Promise<OpenPrOutcome> {
+/**
+ * Derive the file changes to commit from the approved params. Full file contents
+ * (new OR modified) take precedence; else fall back to the new files extracted
+ * from the diff. Either way we commit full contents via commitFileChanges - no
+ * patch application. Shared by executeOpenPr and validateBeforePr so the two
+ * always validate + commit the EXACT same change set (DRY).
+ */
+export function changesFromParams(params: OpenPrParams): FileChange[] {
   const diff = typeof params.diff === "string" ? params.diff : "";
+  return params.changes && params.changes.length > 0
+    ? params.changes
+    : Object.entries(newFilesFromDiff(diff)).map(([path, content]) => ({ path, content }));
+}
+
+export interface PrePrValidationResult {
+  /** "allow" = safe to open the PR; "require_human" = not green yet (still
+   *  validating) or failed (self-inconsistent / convention violation). */
+  verdict: "allow" | "require_human";
+  status: string;
+  failing: string[];
+  branch?: string;
+  reason: string;
+}
+
+/**
+ * Tier-2 pre-PR validation: push the authored change to a throwaway branch and
+ * run the TARGET REPO's OWN gate (factory-validate = the repo's full verify)
+ * against it BEFORE a real PR is opened. Catches a convention violation (e.g.
+ * raw-fetch, missing auth) or a self-inconsistent artifact at the source, using
+ * the repo's own rules - so it never over-fits the shared gate to one client.
+ *
+ * Opt-in via PREPR_VALIDATE_WORKFLOW: a no-op "allow" when unset, so the existing
+ * approve->open-PR flow is byte-identical until a deployment turns it on. Reuses
+ * the built pushValidationBranch + prePrValidateGate via runGate (DRY - there is
+ * no second validator).
+ */
+export async function validateBeforePr(params: OpenPrParams, ctx: WriteCtx): Promise<PrePrValidationResult> {
+  if (!process.env.PREPR_VALIDATE_WORKFLOW) {
+    return { verdict: "allow", status: "not_enforced", failing: [], reason: "pre-PR validation not enabled" };
+  }
+  const changes = changesFromParams(params);
+  if (changes.length === 0) {
+    // Nothing to validate; executeOpenPr returns the authoritative "no file
+    // changes" error, so let it proceed (allow) to keep that error singular.
+    return { verdict: "allow", status: "no_changes", failing: [], reason: "no file changes to validate" };
+  }
+  const repo = params.repo || DEFAULT_REPO;
+  const base = params.base || "main";
+  const ref = sanitizeRef(params.ref || "change");
+  const client = await workspaceGithubClient(ctx.workspaceId);
+  if (!client.token) {
+    return { verdict: "require_human", status: "no_token", failing: [], reason: "no GitHub token configured for pre-PR validation" };
+  }
+  let branch: string;
+  try {
+    branch = await pushValidationBranch(client, repo, changes, base, ref);
+  } catch (err) {
+    return { verdict: "require_human", status: "push_failed", failing: [], reason: `could not push validation branch: ${(err as Error).message}` };
+  }
+  const result = await runGate(prePrValidateGate, { repo, branch }, {
+    workspaceId: ctx.workspaceId ?? "default",
+    actorId: ctx.userId,
+    policy: DEFAULT_COMPLIANCE_POLICY,
+  });
+  const out = result.output ?? { status: "unknown", failing: [] as string[] };
+  return {
+    verdict: result.verdict === "allow" ? "allow" : "require_human",
+    status: out.status,
+    failing: out.failing ?? [],
+    branch,
+    reason: result.reason,
+  };
+}
+
+export async function executeOpenPr(params: OpenPrParams, ctx: WriteCtx): Promise<OpenPrOutcome> {
   // Edit-support: full file contents (new OR modified) take precedence; else fall
   // back to the new files extracted from the diff. Either way we commit full
   // contents via commitFileChanges - no patch application.
-  const changes: FileChange[] =
-    params.changes && params.changes.length > 0
-      ? params.changes
-      : Object.entries(newFilesFromDiff(diff)).map(([path, content]) => ({ path, content }));
+  const changes: FileChange[] = changesFromParams(params);
   if (changes.length === 0) {
     return { ok: false, reason: "no file changes to commit (a modification-only diff needs full-file changes)" };
   }

@@ -241,6 +241,10 @@ export default function CodeFactoryPage() {
   const [approving, setApproving] = useState(false);
   const [approveConsent, setApproveConsent] = useState(false);
   const [approveError, setApproveError] = useState<string | null>(null);
+  // Tier-2 pre-PR validation hold: the repo's own gate is still running (or
+  // needs a human) against the change, so the PR has NOT been opened yet. Not an
+  // error - the approval stays actionable and the user retries once it settles.
+  const [validationNote, setValidationNote] = useState<string | null>(null);
   // Set when the branch was pushed but the PR could not be opened (e.g. token
   // without pull_requests: write): a one-click link to open the PR manually.
   const [compareUrl, setCompareUrl] = useState<string | null>(null);
@@ -430,6 +434,7 @@ export default function CodeFactoryPage() {
     if (!approvalId) return;
     setApproving(true);
     setApproveError(null);
+    setValidationNote(null);
     setCompareUrl(null);
     setNeedsInstall(false);
     try {
@@ -438,8 +443,14 @@ export default function CodeFactoryPage() {
         headers: jsonHeaders(),
         body: JSON.stringify({ action: "approve" }),
       });
-      const body = (await res.json()) as { ok?: boolean; outcome?: { ok?: boolean; url?: string; reason?: string; branch?: string; compareUrl?: string; needsInstall?: boolean }; error?: string };
-      if (res.ok && body.outcome?.ok && body.outcome.url) {
+      const body = (await res.json()) as { ok?: boolean; status?: string; validation?: { status?: string; failing?: string[]; reason?: string }; outcome?: { ok?: boolean; url?: string; reason?: string; branch?: string; compareUrl?: string; needsInstall?: boolean }; error?: string };
+      if (res.status === 202 || body.status === "validating") {
+        // The repo's own gate is still running (or needs a human) against the
+        // change; the PR is NOT open yet and the approval is still actionable.
+        const v = body.validation;
+        const failing = v?.failing?.length ? ` Failing: ${v.failing.join(", ")}.` : "";
+        setValidationNote((v?.reason || "Validating the change against the repository's own gate before opening the PR.") + failing + " Retry once it settles.");
+      } else if (res.ok && body.outcome?.ok && body.outcome.url) {
         setPrUrl(body.outcome.url);
         // Tie the pipeline to the work: the PR is open, so show its build + deploy
         // progress automatically for the branch the factory just created.
@@ -848,6 +859,11 @@ export default function CodeFactoryPage() {
                   <button type="button" onClick={() => void approve()} disabled={approving || !approveConsent} style={btnStyle(approving || !approveConsent)} data-testid="approve-open-pr">
                     {approving ? "Opening PR…" : "Approve & open PR on GitHub"}
                   </button>
+                  {validationNote && (
+                    <p data-testid="prepr-validation" style={{ margin: "0.5rem 0 0", fontSize: "0.8rem", color: "var(--wp-gold, #e8b528)" }}>
+                      {validationNote}
+                    </p>
+                  )}
                   {approveError && (
                     <p role="alert" style={{ margin: "0.5rem 0 0", color: "var(--wp-error, #ef4444)", fontSize: "0.85rem" }}>
                       {approveError}
