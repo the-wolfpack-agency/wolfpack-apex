@@ -475,6 +475,5 @@ test("18) client build: a realistic retry-with-backoff utility (generation QUALI
       : "(no generated-code rendered)";
     await testInfo.attach("retry-generated.txt", { body: code, contentType: "text/plain" });
     console.log(`[dogfood:quality] realistic-retry status=${status} model=${model} passes=${attempts} codeLen=${code.length}`);
-    console.log("===RETRY-CODE-START===\n" + code + "\n===RETRY-CODE-END===");
   });
 }); // end describe
