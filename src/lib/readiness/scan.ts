@@ -52,7 +52,9 @@ function reMatch(re: RegExp, s: string): boolean {
  */
 export function specGatesOnPR(workflowTexts: readonly string[], specPath: string): boolean {
   return workflowTexts.some(
-    (t) => t.includes(specPath) && /^on:|[\s\n]on:/.test(t) && /pull_request/.test(t),
+    // `/^on:/m` anchors to the start of any line (the YAML trigger key), properly
+    // grouped - no missing-anchor precedence trap. Plus a pull_request trigger.
+    (t) => t.includes(specPath) && /^on:/m.test(t) && /pull_request/.test(t),
   );
 }
 
