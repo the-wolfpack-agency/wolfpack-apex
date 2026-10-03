@@ -115,7 +115,7 @@ export async function validateBeforePr(params: OpenPrParams, ctx: WriteCtx): Pro
   } catch (err) {
     return { verdict: "require_human", status: "push_failed", failing: [], reason: `could not push validation branch: ${(err as Error).message}` };
   }
-  const result = await runGate(prePrValidateGate, { repo, branch }, {
+  const result = await runGate(prePrValidateGate, { repo, branch, base }, {
     workspaceId: ctx.workspaceId ?? "default",
     actorId: ctx.userId,
     policy: DEFAULT_COMPLIANCE_POLICY,
