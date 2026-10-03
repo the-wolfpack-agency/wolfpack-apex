@@ -62,7 +62,9 @@
     "scan:dup-exports": "npx tsx scripts/scan-duplicate-exports.ts",
     "a2a:proof": "npx tsx scripts/a2a-proof.ts",
     "factory:ladder": "npx tsx scripts/factory-ladder.ts",
-    "check:commit-hygiene": "npx tsx scripts/check-commit-hygiene.ts"
+    "check:commit-hygiene": "npx tsx scripts/check-commit-hygiene.ts",
+    "readiness": "tsx scripts/readiness.ts",
+    "readiness:json": "tsx scripts/readiness.ts --json"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.92.0",
