@@ -149,6 +149,19 @@ export interface AICompleteResponse {
   output_tokens: number;
   cost_usd: number;
   latency_ms: number;
+  /**
+   * True when the router did NOT serve the capability the caller asked for: it
+   * degraded to a lower tier (a missing premium deployment) or an escalation
+   * attempt failed and the cheaper answer was kept. Surfaced on the response -
+   * not just in analytics - so the IMMEDIATE caller can see that "routed up" did
+   * not actually happen and react (the factory must never read a kept cheap
+   * answer as a clean escalation). Absent/false = the requested capability was
+   * served.
+   */
+  degraded?: boolean;
+  /** Machine-readable reason for the degrade, e.g.
+   *  "missing_deployment:premium->standard" or "escalation_failed:cheap->standard". */
+  degraded_reason?: string;
 }
 
 export interface AIProvider {
