@@ -46,14 +46,16 @@ jobs:
       # The repo's OWN canonical gate - identical to the pre-push gate a human
       # runs - so pre-PR validation is exactly as strict as the repo itself.
       #
-      # EGRESS LOCKDOWN: the authored change is UNTRUSTED (a prompt-injected spec
-      # could author a test that phones home). `npm ci` above needs the network to
-      # install declared deps; `verify` (lint+tsc+jest) needs NONE, so run it in a
-      # fresh network namespace with no egress - the untrusted code cannot exfil.
-      # Dependency-free (util-linux `unshare`, rootless via -r); loopback is
-      # brought up for any test that uses localhost. If a repo's verify genuinely
-      # needs network, drop the unshare wrapper for that repo.
-      - name: Run the repo gate under network isolation (untrusted authored code)
-        run: |
-          unshare -r -n bash -c 'ip link set lo up 2>/dev/null || true; npm run verify' \
-            || { echo "::error::verify failed under network isolation (or unshare unavailable)"; exit 1; }
+      # UNTRUSTED CODE / EGRESS THREAT MODEL: this runs model-authored code (verify
+      # executes the authored tests). A prompt-injected spec could author a test
+      # that tries to exfiltrate. Live mitigations: this job references NO secrets
+      # and the token is `contents: read` only, so there is nothing high-value to
+      # exfil and no write capability. A STRICTER network egress lockdown is NOT
+      # cleanly available on GitHub-hosted runners (rootless `unshare -r -n` is
+      # blocked - /proc/self/uid_map Operation not permitted - and a job-wide
+      # iptables DROP breaks the artifact-upload step). For client repos that need
+      # true egress control, run factory-validate on a SELF-HOSTED hardened runner
+      # or add step-security/harden-runner (external action + telemetry) with an
+      # allowlist. Tracked as a client-onboarding control, not an apex code change.
+      - name: Run the repo gate (lint + tsc + jest, incl. guardrails)
+        run: npm run verify
