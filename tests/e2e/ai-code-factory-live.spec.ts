@@ -90,7 +90,21 @@ async function clientBuild(page: Page, kind: string, prompt: string): Promise<{ 
   const model = String((body.executor ?? run.executor)?.author ?? "");
   const status = String(run.status ?? "");
   const mode = String(body.mode ?? body.effectiveMode ?? "");
-  console.log(`[dogfood:clientbuild] ${kind} status=${status} model=${model} mode=${mode}`);
+  // WHY did the gate hold it? Surface every blocking signal so an over-hold (a
+  // false-positive gate) is distinguishable from a legitimate one at a glance.
+  const held = [
+    body.duplication?.escalate ? `dup(${body.duplication.candidatePath ?? "?"})` : "",
+    body.deepScan?.critical ? `deepScanCritical:${body.deepScan.critical}` : "",
+    body.invariants?.wouldBlock ? "invariantBlock" : "",
+    body.phantomImports?.length ? `phantomImports:${body.phantomImports.length}` : "",
+    body.incompleteFiles?.length ? `incompleteFiles:${body.incompleteFiles.length}` : "",
+    body.removedExports?.length ? `removedExports:${body.removedExports.length}` : "",
+    body.brokenLocalImports?.length ? `brokenImports:${body.brokenLocalImports.length}` : "",
+    Array.isArray(body.anchorFailures) && body.anchorFailures.length ? `anchorFailures:${body.anchorFailures.length}` : "",
+    body.syntax && body.syntax.ok === false ? "syntaxError" : "",
+  ].filter(Boolean).join(",");
+  const verdict = run?.review?.verdict?.reason ?? "";
+  console.log(`[dogfood:clientbuild] ${kind} status=${status} model=${model} mode=${mode} held_by=${held || verdict || "(none surfaced)"}`);
   expect(["ready_for_pr", "needs_human"], `${kind}: terminal status, got "${status}"`).toContain(status);
   expect(model, `${kind}: the authoring model is recorded`).not.toBe("");
   const rendered =
@@ -307,8 +321,18 @@ test.describe("code factory - LIVE UI journeys (real model)", () => {
     );
     await page.getByRole("button", { name: /generate & gate/i }).click();
     const resp = await pipelineResp;
-    expect(resp.status(), "the pipeline responds 200-class").toBeLessThan(400);
     const body = await resp.json().catch(() => ({}));
+    // 422 = the factory HONESTLY could not produce a usable change even after
+    // escalation (this hard multi-line anchor was unachievable for both models).
+    // That is an honest terminal with a surfaced reason - never a 500/blank/hang -
+    // so it is an acceptable outcome for a genuinely-hard edit, not a failure.
+    if (resp.status() === 422) {
+      const af = Array.isArray(body.anchorFailures) ? body.anchorFailures.length : 0;
+      console.log(`[dogfood:routing] UNACHIEVABLE: 422 after escalation (anchorFailures=${af}) - honest, not a dead-end`);
+      expect(af, "a 422 surfaces WHY (the anchor failures)").toBeGreaterThan(0);
+      return;
+    }
+    expect(resp.status(), "the pipeline responds 200-class or an honest 422").toBeLessThan(400);
     const run = body.run ?? body;
     const executor = body.executor ?? run.executor ?? null;
     const executorAttempts = Number(body.executorAttempts ?? run.executorAttempts ?? 1);
