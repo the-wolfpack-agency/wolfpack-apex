@@ -93,3 +93,29 @@ describe("site-analytics signals + grading", () => {
     expect(by["observability"]).toBe("ready"); // analytics + audit in routes
   });
 });
+
+describe("governance tools (ogiam-gate, agent-approvals)", () => {
+  it("ogiam-gate credits a deterministic decide() + a hash-chained immutable ledger", () => {
+    const repo = {
+      "src/lib/ogiam/policy.ts": "export function decide(signals) { return { outcome: 'deny' }; }",
+      "src/lib/ogiam/ledger.ts": "const entry_hash = sha256(prev_hash + json);",
+      "src/db/migrations/177_ogiam_immutability_triggers.sql": "CREATE TRIGGER ogiam_immutable ... BEFORE UPDATE",
+      "src/app/api/admin/ogiam/x/route.ts": "trackEvent('x');",
+    };
+    const r = reportTool(toolById("ogiam-gate")!, fakeReader(repo));
+    const by = Object.fromEntries(r.results.map((x) => [x.id, x.status]));
+    expect(by["deterministic-policy-decides"]).toBe("ready");
+    expect(by["ledger-hash-chained-immutable"]).toBe("ready");
+    expect(by["observability"]).toBe("ready"); // trackEvent + hash chain
+  });
+
+  it("agent-approvals requires the execute-as-owner path to be audited", () => {
+    const audited = { "src/app/api/admin/agents/approvals/[id]/route.ts": "await recordAudit({ action: 'approved' });" };
+    const r1 = reportTool(toolById("agent-approvals")!, fakeReader(audited));
+    expect(Object.fromEntries(r1.results.map((x) => [x.id, x.status]))["approval-execute-audited"]).toBe("ready");
+
+    const unaudited = { "src/app/api/admin/agents/approvals/[id]/route.ts": "execute();" };
+    const r2 = reportTool(toolById("agent-approvals")!, fakeReader(unaudited));
+    expect(Object.fromEntries(r2.results.map((x) => [x.id, x.status]))["approval-execute-audited"]).toBe("gap");
+  });
+});

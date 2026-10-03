@@ -288,7 +288,111 @@ const siteAnalytics: ToolSpec = {
 };
 
 /** Every tool under readiness tracking. Add a tool here to put it on the board. */
-export const READINESS_TOOLS: readonly ToolSpec[] = [aiCode, siteAnalytics];
+// ===========================================================================
+// Tool: OGIAM Gate  (/admin/ogiam) - the deterministic agent-action plane
+// ===========================================================================
+const OGIAM_ROUTES = ["src/app/api/admin/ogiam", "src/app/api/agents"];
+const OGIAM_LIBS = ["src/lib/ogiam"];
+const OGIAM_E2E = "tests/e2e/ogiam-adversarial-flow.spec.ts";
+
+const ogiamGate: ToolSpec = {
+  id: "ogiam-gate",
+  label: "OGIAM Gate (agent action plane)",
+  surface: "/admin/ogiam",
+  collectSignals(reader: RepoReader): ToolSignals {
+    const wf = workflowTexts(reader);
+    const migrations = ["src/db/migrations"];
+    return {
+      dbTestCount: dbTestCount(reader, [...OGIAM_ROUTES, ...OGIAM_LIBS]),
+      e2eGatesOnPR: specGatesOnPR(wf, OGIAM_E2E),
+      e2eSkipsGreen:
+        fileMatches(reader, OGIAM_E2E, /test\.skip\(/) && !fileMatches(reader, OGIAM_E2E, /process\.env\.CI/),
+      emitsAnalytics: anyFileMatches(reader, OGIAM_ROUTES, /trackEvent/),
+      // the ledger IS the hash-chained audit for agent actions.
+      hashChainedAudit: anyFileMatches(reader, OGIAM_LIBS, /entry_hash|prev_hash|sha256/i),
+      isolationDbEnforced: anyFileMatches(reader, migrations, /ogiam_decisions[\s\S]*ROW LEVEL SECURITY/i),
+      // models advise, only POLICY authorizes: a pure decide() is the whole thesis.
+      policyDecides: fileMatches(reader, "src/lib/ogiam/policy.ts", /export function decide/),
+      // the ledger is hash-chained AND the rows are immutable (a DB trigger blocks UPDATE/DELETE).
+      ledgerImmutable:
+        anyFileMatches(reader, OGIAM_LIBS, /entry_hash|sha256/i) &&
+        anyFileMatches(reader, migrations, /ogiam[\s\S]*immutab|immutab[\s\S]*ogiam/i),
+    };
+  },
+  criteria: [
+    dbTestsCriterion(),
+    e2eGatesCriterion(),
+    isolationCriterion(),
+    observabilityCriterion(),
+    {
+      id: "deterministic-policy-decides",
+      dimension: "correctness",
+      kind: "auto",
+      title: "A deterministic policy authorizes the action - the model only advises",
+      rationale:
+        "If a model could authorize an agent action, a prompt-injected agent could authorize itself. A pure decide() over signals is the control that makes the gate model-independent.",
+      status: (s) => (bool(s, "policyDecides") ? "ready" : "gap"),
+      evidence: (s) => (bool(s, "policyDecides") ? "pure decide() over signals" : "no deterministic decide() found"),
+    },
+    {
+      id: "ledger-hash-chained-immutable",
+      dimension: "observability",
+      kind: "auto",
+      title: "The action ledger is hash-chained and DB-immutable",
+      rationale:
+        "A tamper-evident, append-only ledger is what makes a disputed agent action auditable. A chain without a DB immutability trigger can be rewritten in place.",
+      status: (s) => (bool(s, "ledgerImmutable") ? "ready" : bool(s, "hashChainedAudit") ? "partial" : "gap"),
+      evidence: (s) =>
+        bool(s, "ledgerImmutable") ? "hash chain + immutability trigger" : bool(s, "hashChainedAudit") ? "hash chain, trigger not detected" : "no hash chain",
+    },
+  ],
+};
+
+// ===========================================================================
+// Tool: Agent Approvals  (/admin/agents) - human-in-the-loop -> execute-as-owner
+// ===========================================================================
+const APPROVALS_ROUTES = ["src/app/api/admin/agents"];
+const APPROVALS_LIBS = ["src/lib/agents/approvals"];
+const APPROVALS_E2E = "tests/e2e/agents-console.spec.ts";
+
+const agentApprovals: ToolSpec = {
+  id: "agent-approvals",
+  label: "Agent Approvals (human-in-the-loop)",
+  surface: "/admin/agents",
+  collectSignals(reader: RepoReader): ToolSignals {
+    const wf = workflowTexts(reader);
+    const migrations = ["src/db/migrations"];
+    return {
+      dbTestCount: dbTestCount(reader, [...APPROVALS_ROUTES, ...APPROVALS_LIBS]),
+      e2eGatesOnPR: specGatesOnPR(wf, APPROVALS_E2E),
+      e2eSkipsGreen:
+        fileMatches(reader, APPROVALS_E2E, /test\.skip\(/) && !fileMatches(reader, APPROVALS_E2E, /process\.env\.CI/),
+      emitsAnalytics: anyFileMatches(reader, APPROVALS_ROUTES, /trackEvent/),
+      hashChainedAudit: anyFileMatches(reader, APPROVALS_ROUTES, /recordAudit/),
+      isolationDbEnforced: anyFileMatches(reader, migrations, /agent_pending_approvals[\s\S]*ROW LEVEL SECURITY/i),
+      // the approve -> execute-as-owner step must be audited (who authorized what).
+      approvalsAudited: anyFileMatches(reader, ["src/app/api/admin/agents/approvals"], /recordAudit/),
+    };
+  },
+  criteria: [
+    dbTestsCriterion(),
+    e2eGatesCriterion(),
+    isolationCriterion(),
+    observabilityCriterion(),
+    {
+      id: "approval-execute-audited",
+      dimension: "observability",
+      kind: "auto",
+      title: "Approve -> execute-as-owner is audited (who authorized what)",
+      rationale:
+        "The whole point of the human-in-the-loop gate is accountability: an executed action must carry who approved it. An unaudited execute path is an authority with no record.",
+      status: (s) => (bool(s, "approvalsAudited") ? "ready" : "gap"),
+      evidence: (s) => (bool(s, "approvalsAudited") ? "execute path records an audit entry" : "no audit on the approval execute path"),
+    },
+  ],
+};
+
+export const READINESS_TOOLS: readonly ToolSpec[] = [aiCode, siteAnalytics, ogiamGate, agentApprovals];
 
 export function toolById(id: string): ToolSpec | undefined {
   return READINESS_TOOLS.find((t) => t.id === id);
