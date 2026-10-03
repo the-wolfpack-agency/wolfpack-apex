@@ -107,7 +107,11 @@ const aiCode: ToolSpec = {
     return {
       dbTestCount: dbTestCount(reader, [...AI_CODE_ROUTES, ...AI_CODE_LIBS]),
       e2eGatesOnPR: specGatesOnPR(wf, AI_CODE_E2E),
-      e2eSkipsGreen: fileMatches(reader, AI_CODE_E2E, /test\.skip\(/),
+      // "skip-green" is only a problem when the spec can skip in CI. A spec whose
+      // skip is guarded by a CI check (skips locally, FAILS in CI on misconfig)
+      // genuinely gates a PR, so it is NOT skip-green.
+      e2eSkipsGreen:
+        fileMatches(reader, AI_CODE_E2E, /test\.skip\(/) && !fileMatches(reader, AI_CODE_E2E, /process\.env\.CI/),
       emitsAnalytics: anyFileMatches(reader, AI_CODE_ROUTES, /trackEvent/),
       isolationDbEnforced: hasReviewRls && !tripwire,
       defaultWorkspaceCoalesce: anyFileMatches(reader, AI_CODE_ROUTES, /\?\?\s*"default"/),
