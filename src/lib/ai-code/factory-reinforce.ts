@@ -48,7 +48,12 @@ export async function reinforceFromOutcome(args: {
   const factor = merged ? REINFORCE_FACTOR : DECAY_FACTOR;
   try {
     const entries = await deps.loadProvenance(workspaceId, approvalId);
-    const reusePaths = entries.filter((e) => e.kind === "reuse").map((e) => e.key);
+    // #7 PRECISE CREDIT: only reinforce/decay a reuse suggestion the author ACTUALLY
+    // USED. One retrieved but ignored did not help (nothing to reward on merge) and
+    // is not to blame (nothing to punish on reject). Failure memories are unchanged:
+    // avoiding a past mistake is the whole handoff, so every run that cited one gets
+    // the outcome applied.
+    const reusePaths = entries.filter((e) => e.kind === "reuse" && e.used === true).map((e) => e.key);
     const failureSigs = entries.filter((e) => e.kind === "failure").map((e) => e.key);
     const [r, f] = await Promise.all([
       deps.adjustReuse(workspaceId, repo, reusePaths, factor),
