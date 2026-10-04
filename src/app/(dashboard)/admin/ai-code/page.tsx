@@ -134,6 +134,8 @@ interface ProtectionSummary { totalCaught: number; byClass: { klass: string; lab
 interface PlanStep { id: string; title: string; instruction: string; rationale: string; sensitive: boolean }
 interface ProposedPlan { goal: string; steps: PlanStep[]; truncated: boolean; model: string | null }
 interface LoopEfficacy { windowDays: number; runs: number; firstPassReadyRate: number | null; acceptanceRate: number | null; duplicationRate: number | null; reuseSemanticRate: number | null; repeatFindingRate: number | null; readyTrend: "up" | "down" | "flat" | "n/a" }
+interface PolicyDenyRule { title: string; pattern: string; severity: "critical" | "high" | "medium" | "low"; flags?: string; detail?: string }
+interface CodeGatePolicyView { protectedPaths: string[]; denyRules: PolicyDenyRule[] }
 interface ClassPrecision { findingClass: string; flagged: number; reviewed: number; wrong: number; valid: number; acceptedRisk: number; wrongRate: number | null }
 interface GatePrecision { windowDays: number; classes: ClassPrecision[] }
 interface GateDecisionRow { gate: string; verdict: "allow" | "auto_fix" | "require_human" | "deny"; modelInvoked: string | null; findings: number; recordedSeq: number | null; createdAt: string; previewUrl: string | null }
@@ -243,6 +245,11 @@ export default function CodeFactoryPage() {
   const [brainFailures, setBrainFailures] = useState<number | null>(null);
   // Loop efficacy: is the factory getting better over time?
   const [efficacy, setEfficacy] = useState<LoopEfficacy | null>(null);
+  // Code-gate policy editor (policy-as-code, additive-only).
+  const [policyPaths, setPolicyPaths] = useState("");
+  const [policyRules, setPolicyRules] = useState<PolicyDenyRule[]>([]);
+  const [policySaving, setPolicySaving] = useState(false);
+  const [policyNote, setPolicyNote] = useState<string | null>(null);
   // Per-rule gate precision from human reviews (the FalsePositiveTracker).
   const [precision, setPrecision] = useState<GatePrecision | null>(null);
   const [reviewed, setReviewed] = useState<Record<string, string>>({});
@@ -409,6 +416,46 @@ export default function CodeFactoryPage() {
     }
   }, [brainRepo, brainBusy]);
 
+  // Load the current code-gate policy into the editor. Best-effort.
+  const loadPolicy = useCallback(async () => {
+    try {
+      const res = await fetchWithRefresh("/api/admin/ai-code/policy");
+      if (!res.ok) return;
+      const data = (await res.json()) as { policy?: CodeGatePolicyView };
+      setPolicyPaths((data.policy?.protectedPaths ?? []).join("\n"));
+      setPolicyRules(data.policy?.denyRules ?? []);
+    } catch {
+      /* best-effort */
+    }
+  }, []);
+
+  // Save the edited policy (additive-only; server sanitizes + returns warnings).
+  const savePolicy = useCallback(async () => {
+    if (policySaving) return;
+    setPolicySaving(true);
+    setPolicyNote(null);
+    try {
+      const protectedPaths = policyPaths.split("\n").map((s) => s.trim()).filter(Boolean);
+      const res = await fetchWithRefresh("/api/admin/ai-code/policy", {
+        method: "PUT",
+        headers: jsonHeaders(),
+        body: JSON.stringify({ protectedPaths, denyRules: policyRules }),
+      });
+      if (!res.ok) {
+        setPolicyNote("Could not save the policy.");
+        return;
+      }
+      const data = (await res.json()) as { policy: CodeGatePolicyView; warnings: string[] };
+      setPolicyPaths(data.policy.protectedPaths.join("\n"));
+      setPolicyRules(data.policy.denyRules);
+      setPolicyNote(data.warnings.length ? `Saved. Adjusted: ${data.warnings.join("; ")}` : "Saved. The gate now enforces this on every PR.");
+    } catch {
+      setPolicyNote("Network error saving the policy.");
+    } finally {
+      setPolicySaving(false);
+    }
+  }, [policyPaths, policyRules, policySaving]);
+
   // Is the factory improving? Read-only efficacy trend. Best-effort.
   const loadEfficacy = useCallback(async () => {
     try {
@@ -458,7 +505,8 @@ export default function CodeFactoryPage() {
     void loadBrain();
     void loadEfficacy();
     void loadPrecision();
-  }, [loadHistory, loadBrain, loadEfficacy, loadPrecision]);
+    void loadPolicy();
+  }, [loadHistory, loadBrain, loadEfficacy, loadPrecision, loadPolicy]);
 
   const generate = useCallback(async (opts?: { keepAnswers?: boolean; refineOf?: string; promptOverride?: string }) => {
     if (!prompt.trim()) {
@@ -852,6 +900,50 @@ export default function CodeFactoryPage() {
           </p>
         </GlassPanel>
       )}
+
+      <GlassPanel title="Code-gate policy" subtitle="Your own rules, enforced on every PR (yours + Copilot/Cursor/Devin). Additive only - it can tighten the gate, never weaken it.">
+        <label style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
+          <span style={{ fontSize: "0.8rem", color: "var(--wp-text-dim)" }}>Protected paths (one regex per line) - a change touching these needs human review</span>
+          <textarea
+            data-testid="policy-paths"
+            value={policyPaths}
+            onChange={(e) => setPolicyPaths(e.target.value)}
+            placeholder={"src/lib/crypto/\nsrc/db/migrations/"}
+            aria-label="Protected paths"
+            rows={3}
+            style={{ ...inputStyle, resize: "vertical", fontFamily: "var(--wp-mono, monospace)" }}
+          />
+        </label>
+
+        <div data-testid="policy-rules" style={{ marginTop: "0.9rem", display: "grid", gap: "0.5rem" }}>
+          <span style={{ fontSize: "0.8rem", color: "var(--wp-text-dim)" }}>Deny rules - forbidden content (a match holds the change for a human)</span>
+          {policyRules.map((r, i) => (
+            <div key={i} style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap", alignItems: "center" }}>
+              <input aria-label={`Rule ${i + 1} title`} data-testid={`policy-rule-title-${i}`} value={r.title} onChange={(e) => setPolicyRules((rs) => rs.map((x, j) => j === i ? { ...x, title: e.target.value } : x))} placeholder="title" style={{ ...inputStyle, flex: "1 1 8rem" }} />
+              <input aria-label={`Rule ${i + 1} pattern`} data-testid={`policy-rule-pattern-${i}`} value={r.pattern} onChange={(e) => setPolicyRules((rs) => rs.map((x, j) => j === i ? { ...x, pattern: e.target.value } : x))} placeholder="regex pattern" style={{ ...inputStyle, flex: "2 1 12rem", fontFamily: "var(--wp-mono, monospace)" }} />
+              <select aria-label={`Rule ${i + 1} severity`} value={r.severity} onChange={(e) => setPolicyRules((rs) => rs.map((x, j) => j === i ? { ...x, severity: e.target.value as PolicyDenyRule["severity"] } : x))} style={inputStyle}>
+                <option value="critical">critical (block)</option>
+                <option value="high">high (block)</option>
+                <option value="medium">medium (note)</option>
+                <option value="low">low (note)</option>
+              </select>
+              <button type="button" data-testid={`policy-rule-remove-${i}`} onClick={() => setPolicyRules((rs) => rs.filter((_, j) => j !== i))} aria-label={`Remove rule ${i + 1}`} style={{ background: "transparent", border: "1px solid var(--wp-border, #2a2f3a)", borderRadius: 6, color: "var(--wp-text-dim)", padding: "0.3rem 0.5rem", cursor: "pointer" }}>Remove</button>
+            </div>
+          ))}
+          <div>
+            <button type="button" data-testid="policy-rule-add" onClick={() => setPolicyRules((rs) => [...rs, { title: "", pattern: "", severity: "high" }])} style={{ background: "var(--wp-surface-2, #171a21)", border: "1px solid var(--wp-border, #2a2f3a)", borderRadius: 6, color: "var(--wp-text, #e6e9ef)", padding: "0.3rem 0.6rem", fontSize: "0.8rem", cursor: "pointer" }}>+ Add deny rule</button>
+          </div>
+        </div>
+
+        <div style={{ marginTop: "0.9rem" }}>
+          <button type="button" data-testid="policy-save" onClick={() => void savePolicy()} disabled={policySaving} style={btnStyle(policySaving)}>
+            {policySaving ? "Saving…" : "Save policy"}
+          </button>
+        </div>
+        {policyNote && (
+          <p data-testid="policy-note" style={{ marginTop: "0.6rem", fontSize: "0.85rem", color: "var(--wp-text, #e6e9ef)" }}>{policyNote}</p>
+        )}
+      </GlassPanel>
 
       {readiness && (
         <GlassPanel title="Readiness" subtitle="Checked before you build, so nothing surprises you mid-run">
