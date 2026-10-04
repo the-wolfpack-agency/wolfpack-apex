@@ -48,6 +48,8 @@ import { semanticReuseEnabled } from "@/lib/ai-code/reuse-scout-semantic";
 import { rememberRepoTree } from "@/lib/ai-code/factory-reuse-producer";
 import { searchFailureMemory } from "@/lib/ai-code/factory-failure-index";
 import { rememberRunFailures, buildFailureAvoidanceBlock } from "@/lib/ai-code/factory-failure-producer";
+import { failureSignature } from "@/lib/ai-code/factory-failure-store";
+import { recordMemoryProvenance } from "@/lib/ai-code/factory-provenance";
 import { buildKnownExportsBlock, exportsEntries } from "@/lib/ai-code/export-grounding";
 import { duplicationSignal, duplicationGate } from "@/lib/ai-code/reuse-enforcement";
 import { pickAuthorMode } from "@/lib/ai-code/author-mode";
@@ -419,6 +421,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // The reuse-scout candidates (path + score), kept for the SHADOW duplication
   // signal recorded on the run event (did the change reuse the top candidate?).
   let reuseCandidatesList: { path: string; score: number }[] = [];
+  // The memories the brain GAVE this run (reuse paths + failure signatures), so a
+  // merge/reject can later reinforce/decay exactly these (provenance, keyed by the
+  // approval id below).
+  const retrievedReuseKeys: string[] = [];
+  const retrievedFailureKeys: string[] = [];
   // The repo's installed packages (package.json), so a phantom-import (a package
   // not installed) can be DETERMINISTICALLY caught and self-corrected - grounding
   // only advises against it. Empty set => unknown deps => the phantom check is a
@@ -454,6 +461,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         reuseCandidates = reuse.candidates.length;
         reuseSemantic = reuse.semantic;
         reuseCandidatesList = reuse.candidates.map((c) => ({ path: c.path, score: c.score }));
+        retrievedReuseKeys.push(...reuse.candidates.map((c) => c.path));
         repoTree = new Set(tree);
         // FACTORY BRAIN producer: persist this repo's code paths into the reuse
         // corpus so it fills as runs happen (the indexer cron embeds them later).
@@ -492,6 +500,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           try {
             const hits = await searchFailureMemory({ workspaceId, repo: groundingRepo, query: prompt });
             failuresBlock = buildFailureAvoidanceBlock(hits);
+            retrievedFailureKeys.push(...hits.map((h) => failureSignature(h.findingClass, h.summary)));
           } catch { /* cold/unavailable memory -> no warning block */ }
         }
 
@@ -821,6 +830,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         },
         capability: "settings.manage_team",
       });
+      // MEMORY PROVENANCE: record which memories the brain gave THIS handoff, keyed
+      // by the approval id, so a later merge/reject reinforces/decays exactly these.
+      // Fire-and-forget + flag-gated; only ready handoffs (which open PRs) get an
+      // outcome to learn from.
+      if (approvalId && semanticReuseEnabled()) {
+        void recordMemoryProvenance(workspaceId, approvalId, groundingRepo, [
+          ...retrievedReuseKeys.map((key) => ({ kind: "reuse" as const, key })),
+          ...retrievedFailureKeys.map((key) => ({ kind: "failure" as const, key })),
+        ]).catch(() => {});
+      }
     }
   }
 

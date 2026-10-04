@@ -41,7 +41,7 @@ export interface OpenPrParams {
   base?: string;
 }
 
-export type WriteCtx = { userId: string; userRole: string; workspaceId?: string; agentId?: string };
+export type WriteCtx = { userId: string; userRole: string; workspaceId?: string; agentId?: string; approvalId?: string };
 export type OpenPrOutcome =
   | { ok: true; url: string; number: number; branch: string; files: number }
   // On a failure AFTER the branch was pushed, we still hand back the branch + a
@@ -211,7 +211,7 @@ export async function executeOpenPr(params: OpenPrParams, ctx: WriteCtx): Promis
       const pr = await openPullRequest(client, repo, branch, base, title, body);
       await recordOutcome(true, "ok", pr.html_url);
       // MISSION outcome: a reviewable PR was actually produced (not just gated).
-      void trackEvent("ai_code.pr_opened", ctx.userId, ctx.userRole, { repo, pr_number: pr.number, files: committed.length, branch });
+      void trackEvent("ai_code.pr_opened", ctx.userId, ctx.userRole, { repo, pr_number: pr.number, files: committed.length, branch, ...(ctx.approvalId ? { approval_id: ctx.approvalId } : {}) });
       return { ok: true, url: pr.html_url, number: pr.number, branch, files: committed.length };
     } catch (prErr) {
       // The branch + commit LANDED, but opening the PR failed - most commonly a
