@@ -723,6 +723,10 @@ export type InstinctEventType =
   // ai_code.plan_step_launched { step_index, steps } - a human sent one proposed
   //   step to the factory. The human-in-the-loop gate for multi-step autonomy.
   | "ai_code.plan_step_launched"
+  // ai_code.policy_set { workspace_id, protected_paths, deny_rules, warnings } -
+  //   a client edited their code-gate policy (additive-only). Security-relevant,
+  //   so ALSO recorded to the hash-chained audit log at the route.
+  | "ai_code.policy_set"
   // forcefield.canary_seeded { workspace_id, kind, seeded_in } - a decoy was
   //   registered; the decoy VALUE is never in analytics.
   // forcefield.verdict_false_positive { workspace_id, operatorKey, findingKey, reason }
