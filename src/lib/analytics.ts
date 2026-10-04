@@ -727,6 +727,10 @@ export type InstinctEventType =
   //   warmed the reuse brain for a repo (persist its paths + index them now)
   //   instead of waiting for runs to fill it. Makes the corpus observable+seedable.
   | "ai_code.brain_backfilled"
+  // ai_code.gate_finding_reviewed { workspace_id, finding_class, verdict, severity? } -
+  //   a HUMAN judged a gate finding wrong | valid | accepted_risk. The first real
+  //   human-in-the-loop label; feeds per-rule precision (demote noisy rules).
+  | "ai_code.gate_finding_reviewed"
   // ai_code.policy_set { workspace_id, protected_paths, deny_rules, warnings } -
   //   a client edited their code-gate policy (additive-only). Security-relevant,
   //   so ALSO recorded to the hash-chained audit log at the route.
