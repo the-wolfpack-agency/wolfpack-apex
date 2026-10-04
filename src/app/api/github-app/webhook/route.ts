@@ -143,7 +143,10 @@ export async function POST(req: NextRequest) {
     }
 
     const diff = await fetchPullRequestDiff(client, repo, prNumber);
-    const verdict = await gatePullRequestDiff(diff);
+    // Govern the PR under THIS workspace's code-gate policy (deny rules +
+    // protected paths), not just the built-in gate - so a client's own rules
+    // apply to any PR author (Copilot/Cursor/Devin/human). Empty policy = no-op.
+    const verdict = await gatePullRequestDiff(diff, { workspaceId });
 
     // Self-host observe: post the would-be verdict as a NEUTRAL, non-blocking
     // check so we watch it on our own live PRs without ever blocking a merge.
