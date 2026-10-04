@@ -134,6 +134,28 @@ export async function markCorpusEmbedded(workspaceId: string, repo: string, path
   );
 }
 
+/** Confidence stays in [FLOOR, CAP] so reinforcement can't runaway or zero out. */
+export const CONFIDENCE_FLOOR = 0.1;
+export const CONFIDENCE_CAP = 3.0;
+
+/** Multiply the confidence of the given paths by `factor`, clamped to [FLOOR,CAP].
+ *  Workspace+repo scoped. Never throws (reinforcement is best-effort maintenance).
+ *  No-op on empty paths or factor===1. Returns rows adjusted. */
+export async function adjustReuseConfidence(workspaceId: string, repo: string, paths: readonly string[], factor: number): Promise<{ adjusted: number }> {
+  if (paths.length === 0 || factor === 1 || !Number.isFinite(factor) || factor <= 0) return { adjusted: 0 };
+  try {
+    const res = await query(
+      `UPDATE instinct_factory_reuse_corpus
+          SET confidence = LEAST($4, GREATEST($5, confidence * $6))
+        WHERE workspace_id = $1 AND repo = $2 AND path = ANY($3::text[])`,
+      [workspaceId, repo, [...paths], CONFIDENCE_CAP, CONFIDENCE_FLOOR, factor],
+    );
+    return { adjusted: (res as { rowCount?: number }).rowCount ?? 0 };
+  } catch {
+    return { adjusted: 0 };
+  }
+}
+
 /** Confidence (0..1+, default 1.0) for the given paths, workspace+repo scoped.
  *  Read at retrieval time so the vector index never needs re-embedding when a
  *  confidence changes. Missing paths are absent from the map (caller defaults 1). */

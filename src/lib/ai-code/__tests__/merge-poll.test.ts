@@ -42,3 +42,28 @@ describe("pollMergeOutcomes", () => {
     expect(emitted.sort()).toEqual(["ai_code.pr_closed_unmerged:o/b", "ai_code.pr_merged:o/a"]);
   });
 });
+
+describe("pollMergeOutcomes reinforcement wiring", () => {
+  it("calls reinforce for each settled outcome, carrying the approvalId", async () => {
+    const reinforce = jest.fn(async () => {});
+    const outcomes = await pollMergeOutcomes({
+      loadOpenedPrs: async () => [{ repo: "o/a", prNumber: 1, approvalId: "appr1" }],
+      loadAlreadyReported: async () => new Set<string>(),
+      prState: async () => ({ merged: true, closedUnmerged: false }),
+      emit: async () => {},
+      reinforce,
+    });
+    expect(outcomes[0]).toMatchObject({ event: "ai_code.pr_merged", approvalId: "appr1" });
+    expect(reinforce).toHaveBeenCalledWith(expect.objectContaining({ approvalId: "appr1", event: "ai_code.pr_merged" }));
+  });
+  it("a reinforce failure never aborts the poll", async () => {
+    const outcomes = await pollMergeOutcomes({
+      loadOpenedPrs: async () => [{ repo: "o/a", prNumber: 1, approvalId: "x" }],
+      loadAlreadyReported: async () => new Set<string>(),
+      prState: async () => ({ merged: false, closedUnmerged: true }),
+      emit: async () => {},
+      reinforce: async () => { throw new Error("boom"); },
+    });
+    expect(outcomes).toHaveLength(1); // still returned
+  });
+});
