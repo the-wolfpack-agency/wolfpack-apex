@@ -237,6 +237,7 @@ export default function CodeFactoryPage() {
   // runs from here - each step is launched into the prompt for a normal run.
   // Reuse-brain readout + on-demand backfill (warm a repo's corpus now).
   const [brainTotal, setBrainTotal] = useState<number | null>(null);
+  const [brainFailures, setBrainFailures] = useState<number | null>(null);
   const [brainRepo, setBrainRepo] = useState("");
   const [brainBusy, setBrainBusy] = useState(false);
   const [brainNote, setBrainNote] = useState<string | null>(null);
@@ -366,8 +367,9 @@ export default function CodeFactoryPage() {
     try {
       const res = await fetchWithRefresh("/api/admin/ai-code/brain");
       if (!res.ok) return;
-      const data = (await res.json()) as { reuseCorpus?: { total?: number } };
+      const data = (await res.json()) as { reuseCorpus?: { total?: number }; failureMemory?: { total?: number } };
       setBrainTotal(typeof data.reuseCorpus?.total === "number" ? data.reuseCorpus.total : null);
+      setBrainFailures(typeof data.failureMemory?.total === "number" ? data.failureMemory.total : null);
     } catch {
       /* readout is best-effort */
     }
@@ -748,6 +750,9 @@ export default function CodeFactoryPage() {
             {brainTotal === null ? "-" : brainTotal.toLocaleString()}
           </span>
           <span style={{ fontSize: "0.85rem", color: "var(--wp-text-dim)" }}>code paths remembered{brainTotal === 0 ? " (cold - warm a repo below)" : ""}</span>
+          <span data-testid="brain-failures" style={{ fontSize: "0.85rem", color: "var(--wp-text-dim)", marginLeft: "0.75rem" }}>
+            · <strong style={{ color: "var(--wp-text, #e6e9ef)", fontVariantNumeric: "tabular-nums" }}>{brainFailures === null ? "-" : brainFailures.toLocaleString()}</strong> past failures it now avoids
+          </span>
         </div>
         <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.75rem", flexWrap: "wrap" }}>
           <input

@@ -28,6 +28,7 @@ import { recordAuditNonFatal, extractRequestMetadata } from "@/lib/audit-log";
 import { workspaceGithubClient, fetchRepoTree } from "@/lib/github-client";
 import { isValidRepo } from "@/lib/ai-code/watched-repos";
 import { countReuseCorpus } from "@/lib/ai-code/factory-reuse-store";
+import { countFailures } from "@/lib/ai-code/factory-failure-store";
 import { rememberRepoTree } from "@/lib/ai-code/factory-reuse-producer";
 import { indexReuseCorpus } from "@/lib/ai-code/factory-reuse-index";
 
@@ -37,8 +38,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const gate = await requireEntitlement(auth.user.workspaceId, "secure_agent");
   if (gate) return gate;
   const workspaceId = resolveWorkspace(auth.user.workspaceId);
-  const total = await countReuseCorpus(workspaceId);
-  return NextResponse.json({ reuseCorpus: { total } }, { status: 200 });
+  const [total, failures] = await Promise.all([countReuseCorpus(workspaceId), countFailures(workspaceId)]);
+  return NextResponse.json({ reuseCorpus: { total }, failureMemory: { total: failures } }, { status: 200 });
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
