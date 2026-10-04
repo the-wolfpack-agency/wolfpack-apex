@@ -441,16 +441,32 @@ describe("POST /api/admin/ai-code/pipeline", () => {
   });
 
   it("preserving all exports while editing hands off normally", async () => {
-    const EDIT_KEEPS_EXPORTS = "diff --git a/src/lib/ogiam/policy.ts b/src/lib/ogiam/policy.ts\n--- /dev/null\n+++ b/src/lib/ogiam/policy.ts\n@@ -0,0 +1,2 @@\n+export function decide(){ return 2; }\n+export function riskTierFor(){}";
+    // A NEUTRAL (non-security-surface) file, so this exercises export-preservation
+    // handoff without the security-surface guard escalating it.
+    const EDIT_KEEPS_EXPORTS = "diff --git a/src/lib/pricing.ts b/src/lib/pricing.ts\n--- /dev/null\n+++ b/src/lib/pricing.ts\n@@ -0,0 +1,2 @@\n+export function decide(){ return 2; }\n+export function riskTierFor(){}";
     mockComplete.mockResolvedValue(authorResp("```diff\n" + EDIT_KEEPS_EXPORTS + "\n```"));
     mockRunPipeline.mockResolvedValue({ ...RUN, status: "ready_for_pr", diff: EDIT_KEEPS_EXPORTS });
     mockFetchFile.mockImplementation((_c: unknown, _r: unknown, path: string) =>
-      Promise.resolve(path === "src/lib/ogiam/policy.ts" ? "export function decide(){}\nexport function riskTierFor(){}" : null),
+      Promise.resolve(path === "src/lib/pricing.ts" ? "export function decide(){}\nexport function riskTierFor(){}" : null),
     );
-    const res = await POST(post({ ref: "pr-keepexport", prompt: "edit policy.ts", repo: "acme/app", answers: { tests: "unit" } }));
+    const res = await POST(post({ ref: "pr-keepexport", prompt: "edit pricing.ts", repo: "acme/app", answers: { tests: "unit" } }));
     const body = await res.json();
     expect(body.removedExports).toEqual([]);
     expect(body.approvalId).toBe("appr-1");
+  });
+
+  it("SECURITY-SURFACE guard: a change touching the protections (ogiam PEP) escalates to needs_human", async () => {
+    const EDIT_OGIAM = "diff --git a/src/lib/ogiam/policy.ts b/src/lib/ogiam/policy.ts\n--- /dev/null\n+++ b/src/lib/ogiam/policy.ts\n@@ -0,0 +1 @@\n+export function riskTierFor(){ return \"low\"; }";
+    mockComplete.mockResolvedValue(authorResp("```diff\n" + EDIT_OGIAM + "\n```"));
+    mockRunPipeline.mockResolvedValue({ ...RUN, status: "ready_for_pr", diff: EDIT_OGIAM });
+    mockFetchFile.mockImplementation((_c: unknown, _r: unknown, path: string) =>
+      Promise.resolve(path === "src/lib/ogiam/policy.ts" ? "export function riskTierFor(){}" : null),
+    );
+    const res = await POST(post({ ref: "pr-ogiam", prompt: "tweak policy", repo: "acme/app", answers: { tests: "unit" } }));
+    const body = await res.json();
+    // Content gate allowed it, but it touches the security surface -> no auto-handoff.
+    expect(body.securitySurface).toEqual(["src/lib/ogiam/policy.ts"]);
+    expect(body.approvalId).toBeNull();
   });
 
   it("only a TRUE failure surfaces: both the draft and the escalated retry are empty -> 422", async () => {
