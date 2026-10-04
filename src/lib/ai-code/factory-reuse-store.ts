@@ -149,6 +149,29 @@ export async function loadReuseConfidence(workspaceId: string, repo: string, pat
   return out;
 }
 
+/**
+ * Prune reuse-corpus rows whose path is no longer in the repo's live tree
+ * (deleted/renamed files), so the brain stops suggesting code that no longer
+ * exists. Workspace+repo scoped. Returns how many rows were pruned.
+ *
+ * SAFETY: an EMPTY livePaths is treated as "unknown" and prunes NOTHING - a
+ * failed tree fetch returning [] must never wipe the corpus. Never throws
+ * (maintenance; a prune failure just leaves stale rows, which is not harmful).
+ */
+export async function pruneStaleReuse(workspaceId: string, repo: string, livePaths: readonly string[]): Promise<{ pruned: number }> {
+  if (livePaths.length === 0) return { pruned: 0 }; // never wipe on an empty/failed tree
+  try {
+    const res = await query(
+      `DELETE FROM instinct_factory_reuse_corpus
+        WHERE workspace_id = $1 AND repo = $2 AND NOT (path = ANY($3::text[]))`,
+      [workspaceId, repo, [...livePaths]],
+    );
+    return { pruned: (res as { rowCount?: number }).rowCount ?? 0 };
+  } catch {
+    return { pruned: 0 };
+  }
+}
+
 /** How many corpus rows a workspace has persisted (0 on failure). Drives the
  *  "is the brain warm yet" readout + the backfill progress. */
 export async function countReuseCorpus(workspaceId: string, repo?: string): Promise<number> {
