@@ -432,3 +432,38 @@ export function autoFixImports(
   });
   return { files: outFiles, fixes };
 }
+
+
+/**
+ * Full import correction: the pure fixes (autoFixImports) PLUS a hint relocation for
+ * a single wrong-module symbol that an EXISTING module does not export. The
+ * broken-import check is INJECTED (it needs IO to read modules), so this stays a
+ * pure orchestrator. Returns the corrected files, the applied fixes, and the broken
+ * imports that REMAIN - so the caller can decide to escalate ONLY when a fix is not
+ * possible, instead of burning a stronger-model call on an import a rewrite fixes.
+ */
+export async function autoCorrectImports(
+  files: readonly { path: string; content: string }[],
+  repoTree: ReadonlySet<string>,
+  aliasMap: Record<string, string>,
+  check: (files: readonly { path: string; content: string }[]) => Promise<BrokenLocalImport[]>,
+): Promise<{ files: { path: string; content: string }[]; fixes: ImportFix[]; remaining: BrokenLocalImport[] }> {
+  const pure = autoFixImports(files, repoTree, aliasMap);
+  const fileArr = pure.files.map((f) => ({ ...f }));
+  const fixes: ImportFix[] = [...pure.fixes];
+  const broken = await check(fileArr);
+  let relocated = false;
+  for (const b of broken) {
+    if (b.kind !== "missing_export" || !b.hint || !b.name) continue;
+    const file = fileArr.find((x) => x.path === b.path);
+    if (!file) continue;
+    const imp = extractLocalImports(file.path, file.content).find((li) => li.spec === b.spec);
+    if (imp && imp.names.length === 1 && imp.names[0] === b.name && !imp.hasDefault) {
+      file.content = file.content.split(`"${b.spec}"`).join(`"${b.hint}"`).split(`'${b.spec}'`).join(`'${b.hint}'`);
+      fixes.push({ path: b.path, from: b.spec, to: b.hint });
+      relocated = true;
+    }
+  }
+  const remaining = relocated ? await check(fileArr) : broken;
+  return { files: fileArr, fixes, remaining };
+}

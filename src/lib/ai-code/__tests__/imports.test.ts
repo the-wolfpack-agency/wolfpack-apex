@@ -17,6 +17,7 @@ import {
   brokenLocalImportFeedback,
   locateSymbolSpec,
   autoFixImports,
+  autoCorrectImports,
 } from "@/lib/ai-code/imports";
 
 describe("packageRoot", () => {
@@ -318,5 +319,26 @@ describe("autoFixImports (deterministically correct the model's wrong imports)",
   it("leaves a genuinely unfixable import alone", () => {
     const r = autoFixImports([{ path: "src/app/x/route.ts", content: `import { a } from "@/totally/made/up";` }], tree, { "@/": "src/" });
     expect(r.fixes).toEqual([]);
+  });
+});
+
+
+describe("autoCorrectImports (pure fix + hint relocation, reports what REMAINS)", () => {
+  const tree = new Set(["src/lib/auth.ts", "src/lib/auth/require-capability.ts"]);
+  it("relocates a wrong-module symbol via the injected check's hint, leaving nothing remaining", async () => {
+    // @/lib/auth resolves but does NOT export requireCapability; the check supplies the hint.
+    const check = async (files: readonly { path: string; content: string }[]) =>
+      files.some((f) => f.content.includes('from "@/lib/auth"') && f.content.includes("requireCapability"))
+        ? [{ path: "src/app/x/route.ts", spec: "@/lib/auth", kind: "missing_export" as const, name: "requireCapability", hint: "@/lib/auth/require-capability" }]
+        : [];
+    const r = await autoCorrectImports([{ path: "src/app/x/route.ts", content: `import { requireCapability } from "@/lib/auth";` }], tree, { "@/": "src/" }, check);
+    expect(r.fixes.map((f) => f.to)).toContain("@/lib/auth/require-capability");
+    expect(r.files[0].content).toContain('from "@/lib/auth/require-capability"');
+    expect(r.remaining).toEqual([]); // re-check finds it clean -> no escalation needed
+  });
+  it("reports a genuinely-broken import as remaining (escalation IS warranted)", async () => {
+    const check = async () => [{ path: "src/app/x/route.ts", spec: "@/lib/ghost", kind: "missing_module" as const }];
+    const r = await autoCorrectImports([{ path: "src/app/x/route.ts", content: `import { z } from "@/lib/ghost";` }], tree, { "@/": "src/" }, check);
+    expect(r.remaining.length).toBe(1); // unfixable -> caller escalates
   });
 });
