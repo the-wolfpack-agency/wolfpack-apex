@@ -17,6 +17,7 @@ import { isAuthorizedBearer } from "@/lib/auth/bearer-auth";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { listAllEnabledWatched } from "@/lib/ai-code/watched-repos";
 import { indexReuseCorpus, defaultReuseIndexDeps } from "@/lib/ai-code/factory-reuse-index";
+import { indexFailureMemory, defaultFailureIndexDeps } from "@/lib/ai-code/factory-failure-index";
 
 /** Per-repo cap per cron tick, so one invocation can't run an unbounded embed job. */
 const PER_REPO_LIMIT = 500;
@@ -37,19 +38,29 @@ async function run(): Promise<NextResponse> {
     return NextResponse.json({ ok: true, indexed: 0, repos: 0, note: "indexer not configured (embedder/Qdrant)" });
   }
 
+  // The failure memory shares the same embedder + Qdrant; index it in the same
+  // sweep (own deps so the loaders/collection differ). Null => no embedder (same
+  // degrade as above), so only run it when available.
+  const failureDeps = await defaultFailureIndexDeps();
+
   const targets = await listAllEnabledWatched().catch(() => []);
   let total = 0;
-  const detail: Array<{ workspaceId: string; repo: string; indexed: number }> = [];
+  let failuresTotal = 0;
+  const detail: Array<{ workspaceId: string; repo: string; indexed: number; failures: number }> = [];
   for (const t of targets) {
+    let indexed = 0;
+    let failures = 0;
     try {
-      const { indexed } = await indexReuseCorpus({ workspaceId: t.workspaceId, repo: t.repo, limit: PER_REPO_LIMIT, deps });
-      total += indexed;
-      if (indexed > 0) detail.push({ workspaceId: t.workspaceId, repo: t.repo, indexed });
-    } catch {
-      // never let one repo abort the sweep
-    }
+      ({ indexed } = await indexReuseCorpus({ workspaceId: t.workspaceId, repo: t.repo, limit: PER_REPO_LIMIT, deps }));
+    } catch { /* never let one repo abort the sweep */ }
+    try {
+      if (failureDeps) ({ indexed: failures } = await indexFailureMemory({ workspaceId: t.workspaceId, repo: t.repo, limit: PER_REPO_LIMIT, deps: failureDeps }));
+    } catch { /* same */ }
+    total += indexed;
+    failuresTotal += failures;
+    if (indexed > 0 || failures > 0) detail.push({ workspaceId: t.workspaceId, repo: t.repo, indexed, failures });
   }
-  return NextResponse.json({ ok: true, repos: targets.length, indexed: total, detail });
+  return NextResponse.json({ ok: true, repos: targets.length, indexed: total, failuresIndexed: failuresTotal, detail });
 }
 
 export async function GET(req: NextRequest): Promise<NextResponse> {

@@ -6,12 +6,18 @@ const mockRequireCapability = jest.fn();
 const mockListWatched = jest.fn();
 const mockIndex = jest.fn();
 const mockDeps = jest.fn();
+const mockIndexFailures = jest.fn();
+const mockFailureDeps = jest.fn();
 jest.mock("@/lib/auth/bearer-auth", () => ({ isAuthorizedBearer: (...a: unknown[]) => mockBearer(...a) }));
 jest.mock("@/lib/auth/require-capability", () => ({ requireCapability: (...a: unknown[]) => mockRequireCapability(...a) }));
 jest.mock("@/lib/ai-code/watched-repos", () => ({ listAllEnabledWatched: (...a: unknown[]) => mockListWatched(...a) }));
 jest.mock("@/lib/ai-code/factory-reuse-index", () => ({
   indexReuseCorpus: (...a: unknown[]) => mockIndex(...a),
   defaultReuseIndexDeps: (...a: unknown[]) => mockDeps(...a),
+}));
+jest.mock("@/lib/ai-code/factory-failure-index", () => ({
+  indexFailureMemory: (...a: unknown[]) => mockIndexFailures(...a),
+  defaultFailureIndexDeps: (...a: unknown[]) => mockFailureDeps(...a),
 }));
 
 import { GET } from "../route";
@@ -30,6 +36,8 @@ beforeEach(() => {
     { workspaceId: "w1", repo: "o/b" },
   ]);
   mockIndex.mockResolvedValue({ indexed: 3 });
+  mockFailureDeps.mockResolvedValue({ qdrant: { url: "http://q" }, embed: jest.fn() });
+  mockIndexFailures.mockResolvedValue({ indexed: 1 });
 });
 afterAll(() => { if (OLD === undefined) delete process.env.DATABASE_URL; else process.env.DATABASE_URL = OLD; });
 
@@ -44,9 +52,20 @@ it("indexes every enabled watched repo and sums the count", async () => {
   expect(res.status).toBe(200);
   const json = await res.json();
   expect(json.repos).toBe(2);
-  expect(json.indexed).toBe(6); // 3 + 3
+  expect(json.indexed).toBe(6); // reuse: 3 + 3
+  expect(json.failuresIndexed).toBe(2); // failures: 1 + 1
   expect(mockIndex).toHaveBeenCalledTimes(2);
+  expect(mockIndexFailures).toHaveBeenCalledTimes(2);
   expect(mockIndex).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: "w1", repo: "o/a", limit: 500 }));
+});
+
+it("still indexes the reuse corpus when the failure embedder is absent", async () => {
+  mockFailureDeps.mockResolvedValue(null); // no failure indexing this tick
+  const res = await GET(req("Bearer s3cret"));
+  const json = await res.json();
+  expect(json.indexed).toBe(6);
+  expect(json.failuresIndexed).toBe(0);
+  expect(mockIndexFailures).not.toHaveBeenCalled();
 });
 
 it("no-op (not error) when the indexer is unconfigured", async () => {
