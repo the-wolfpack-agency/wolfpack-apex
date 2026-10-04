@@ -73,6 +73,7 @@ test("readiness preflight: renders the checks and a one-click fix link for a blo
 });
 
 let pipelineResp: Response;
+let planResp: Response;
 let approveResp: Response;
 let historyResp: Response;
 let auditResp: Response;
@@ -82,6 +83,10 @@ beforeEach(() => {
   jest.clearAllMocks();
   user = { role: "cto" };
   pipelineResp = resp(200, runResp({ outcome: "allow" }));
+  planResp = resp(200, { plan: { goal: "g", truncated: false, model: "test-model", steps: [
+    { id: "step-1", title: "Add schema", instruction: "Create the quotas table", rationale: "foundation", sensitive: true },
+    { id: "step-2", title: "Add API", instruction: "Add the rate-limit route", rationale: "uses schema", sensitive: false },
+  ] } });
   approveResp = resp(200, { ok: true, status: "executed", outcome: { ok: true, url: "https://github.com/o/r/pull/42", number: 42 } });
   historyResp = HISTORY_EMPTY();
   auditResp = resp(200, { verification: { ok: true, verifiedCount: 7, legacyCount: 0, brokenAtSeq: null, headSeq: 7, headHash: "h" }, entries: [{ seq: 7, created_at: "2026-09-27T10:00:00Z", principal_agent: "instinct.ai_code", intended_outcome: "allow", effective_outcome: "allow", would_block: false, rule_id: "R-MUTATION-ALLOW", reason: null }], entryCount: 1, generatedAtIso: "2026-09-27T10:00:00.000Z" });
@@ -99,6 +104,8 @@ beforeEach(() => {
     if (u.includes("/ai-code/audit")) return Promise.resolve(auditResp);
     if (u.includes("/ai-code/readiness")) return Promise.resolve(readinessResp);
     if (u.includes("/ai-code/ci")) return Promise.resolve(ciResp);
+    if (u.includes("/ai-code/plan")) return Promise.resolve(planResp);
+    if (u.includes("/api/analytics")) return Promise.resolve(resp(200, { ok: true }));
     if (u.includes("/approvals/")) return Promise.resolve(approveResp);
     return Promise.resolve(pipelineResp);
   });
@@ -584,4 +591,36 @@ test("iterative refinement: Refine re-runs the pipeline with refineOf = the prio
   const body = JSON.parse((calls[calls.length - 1][1] as { body: string }).body);
   expect(body.refineOf).toContain("diff --git a/lib/x.ts");
   expect(body.prompt).toBe("also handle the empty string");
+});
+
+test("multi-step planning: proposes steps and launching one fills the prompt (propose-only, nothing runs)", async () => {
+  render(<CodeFactoryPage />);
+  fireEvent.change(screen.getByTestId("plan-goal"), { target: { value: "add per-tenant rate limiting with an admin view" } });
+  await act(async () => { fireEvent.click(screen.getByTestId("plan-propose")); });
+
+  // Both proposed steps render; the schema step is flagged sensitive.
+  await waitFor(() => expect(screen.getByTestId("plan-steps")).toBeInTheDocument());
+  expect(screen.getByTestId("plan-step-step-1")).toHaveTextContent("Add schema");
+  expect(screen.getByTestId("plan-step-sensitive-step-1")).toBeInTheDocument();
+  expect(screen.getByTestId("plan-step-step-2")).toHaveTextContent("Add API");
+
+  // Proposing must NOT have run the pipeline (propose-only).
+  expect(mockFetch.mock.calls.some((c) => c[0] === "/api/admin/ai-code/pipeline")).toBe(false);
+
+  // Launching a step fills the main prompt + fires the human-in-the-loop event,
+  // but still does not run the pipeline - the human clicks Generate next.
+  await act(async () => { fireEvent.click(screen.getByTestId("plan-step-launch-step-2")); });
+  expect((screen.getByLabelText("Prompt") as HTMLTextAreaElement).value).toBe("Add the rate-limit route");
+  const analyticsCall = mockFetch.mock.calls.find((c) => String(c[0]).includes("/api/analytics"));
+  expect(analyticsCall).toBeTruthy();
+  expect(JSON.parse((analyticsCall![1] as { body: string }).body).event).toBe("ai_code.plan_step_launched");
+  expect(mockFetch.mock.calls.some((c) => c[0] === "/api/admin/ai-code/pipeline")).toBe(false);
+});
+
+test("multi-step planning: a model/parse failure shows a friendly error, not a crash", async () => {
+  planResp = resp(200, { plan: { goal: "g", truncated: false, model: null, steps: [] } });
+  render(<CodeFactoryPage />);
+  fireEvent.change(screen.getByTestId("plan-goal"), { target: { value: "something vague" } });
+  await act(async () => { fireEvent.click(screen.getByTestId("plan-propose")); });
+  await waitFor(() => expect(screen.getByTestId("plan-error")).toBeInTheDocument());
 });

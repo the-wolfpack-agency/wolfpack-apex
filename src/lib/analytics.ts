@@ -716,6 +716,13 @@ export type InstinctEventType =
   | "ai_code.pr_merged"
   // ai_code.pr_closed_unmerged { repo, pr_number } - closed without merging (rejected/superseded).
   | "ai_code.pr_closed_unmerged"
+  // ai_code.plan_proposed { goal_len, steps, truncated, model } - a multi-step
+  //   goal was decomposed into a PROPOSE-ONLY plan. Nothing executes; a human
+  //   launches each step through the normal pipeline. No plan auto-runs.
+  | "ai_code.plan_proposed"
+  // ai_code.plan_step_launched { step_index, steps } - a human sent one proposed
+  //   step to the factory. The human-in-the-loop gate for multi-step autonomy.
+  | "ai_code.plan_step_launched"
   // forcefield.canary_seeded { workspace_id, kind, seeded_in } - a decoy was
   //   registered; the decoy VALUE is never in analytics.
   // forcefield.verdict_false_positive { workspace_id, operatorKey, findingKey, reason }
