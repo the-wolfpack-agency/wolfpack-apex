@@ -76,6 +76,7 @@ let pipelineResp: Response;
 let planResp: Response;
 let brainResp: Response;
 let efficacyResp: Response;
+let taskGradesResp: Response;
 let findingReviewResp: Response;
 let policyResp: Response;
 let approveResp: Response;
@@ -93,6 +94,10 @@ beforeEach(() => {
   ] } });
   brainResp = resp(200, { reuseCorpus: { total: 128 }, failureMemory: { total: 9 } });
   efficacyResp = resp(200, { efficacy: { windowDays: 30, runs: 12, firstPassReadyRate: 0.75, acceptanceRate: 0.6, duplicationRate: 0.1, reuseSemanticRate: 0.5, repeatFindingRate: 0.25, readyTrend: "up" } });
+  taskGradesResp = resp(200, { grades: { windowDays: 30, byModelTask: [
+    { model: "azure-gpt4o-grade", taskType: "migration", runs: 10, readyRate: 0.8 },
+    { model: "foundry-deepseek-grade", taskType: "ui", runs: 4, readyRate: 0.25 },
+  ] } });
   findingReviewResp = resp(200, { ok: true, precision: { windowDays: 30, classes: [{ findingClass: "logged_credential", flagged: 3, reviewed: 1, wrong: 1, valid: 0, acceptedRisk: 0, wrongRate: 1 }] } });
   policyResp = resp(200, { policy: { protectedPaths: ["src/lib/crypto/"], denyRules: [{ title: "no moment", pattern: "require\\(.moment", severity: "high" }] } });
   approveResp = resp(200, { ok: true, status: "executed", outcome: { ok: true, url: "https://github.com/o/r/pull/42", number: 42 } });
@@ -114,6 +119,7 @@ beforeEach(() => {
     if (u.includes("/ai-code/ci")) return Promise.resolve(ciResp);
     if (u.includes("/ai-code/plan")) return Promise.resolve(planResp);
     if (u.includes("/ai-code/efficacy")) return Promise.resolve(efficacyResp);
+    if (u.includes("/ai-code/task-grades")) return Promise.resolve(taskGradesResp);
     if (u.includes("/ai-code/finding-review")) return Promise.resolve(findingReviewResp);
     if (u.includes("/ai-code/policy")) return Promise.resolve(policyResp);
     if (u.includes("/ai-code/brain")) return Promise.resolve(brainResp);
@@ -712,4 +718,17 @@ test("code-gate policy: removing a rule drops it from the saved payload", async 
   await act(async () => { fireEvent.click(screen.getByTestId("policy-save")); });
   const put = mockFetch.mock.calls.find((c) => c[0] === "/api/admin/ai-code/policy" && (c[1] as { method?: string })?.method === "PUT");
   expect(JSON.parse((put![1] as { body: string }).body).denyRules).toEqual([]);
+});
+
+test("shows the per-(model, task-type) grades panel (which model ships best for what)", async () => {
+  render(<CodeFactoryPage />);
+  await waitFor(() => expect(screen.getByTestId("task-grades-panel")).toBeInTheDocument());
+  const rows = screen.getAllByTestId("task-grade-row");
+  expect(rows).toHaveLength(2);
+  // most-runs-first ordering + the ready rate rendered as a percent
+  expect(rows[0]).toHaveTextContent("azure-gpt4o-grade");
+  expect(rows[0]).toHaveTextContent("migration");
+  expect(rows[0]).toHaveTextContent("80%");
+  expect(rows[1]).toHaveTextContent("foundry-deepseek-grade");
+  expect(rows[1]).toHaveTextContent("25%");
 });

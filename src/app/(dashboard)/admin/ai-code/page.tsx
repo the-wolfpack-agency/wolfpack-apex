@@ -134,6 +134,8 @@ interface ProtectionSummary { totalCaught: number; byClass: { klass: string; lab
 interface PlanStep { id: string; title: string; instruction: string; rationale: string; sensitive: boolean }
 interface ProposedPlan { goal: string; steps: PlanStep[]; truncated: boolean; model: string | null }
 interface LoopEfficacy { windowDays: number; runs: number; firstPassReadyRate: number | null; acceptanceRate: number | null; duplicationRate: number | null; reuseSemanticRate: number | null; repeatFindingRate: number | null; readyTrend: "up" | "down" | "flat" | "n/a" }
+interface ModelTaskGrade { model: string; taskType: string; runs: number; readyRate: number }
+interface TaskTypeGrades { windowDays: number; byModelTask: ModelTaskGrade[] }
 interface PolicyDenyRule { title: string; pattern: string; severity: "critical" | "high" | "medium" | "low"; flags?: string; detail?: string }
 interface CodeGatePolicyView { protectedPaths: string[]; denyRules: PolicyDenyRule[] }
 interface ClassPrecision { findingClass: string; flagged: number; reviewed: number; wrong: number; valid: number; acceptedRisk: number; wrongRate: number | null }
@@ -245,6 +247,8 @@ export default function CodeFactoryPage() {
   const [brainFailures, setBrainFailures] = useState<number | null>(null);
   // Loop efficacy: is the factory getting better over time?
   const [efficacy, setEfficacy] = useState<LoopEfficacy | null>(null);
+  // Per-(model, task-type) grades: which model ships best for which kind of task.
+  const [taskGrades, setTaskGrades] = useState<TaskTypeGrades | null>(null);
   // Code-gate policy editor (policy-as-code, additive-only).
   const [policyPaths, setPolicyPaths] = useState("");
   const [policyRules, setPolicyRules] = useState<PolicyDenyRule[]>([]);
@@ -468,6 +472,18 @@ export default function CodeFactoryPage() {
     }
   }, []);
 
+  // Which model ships best for which task type. Read-only. Best-effort.
+  const loadTaskGrades = useCallback(async () => {
+    try {
+      const res = await fetchWithRefresh("/api/admin/ai-code/task-grades");
+      if (!res.ok) return;
+      const data = (await res.json()) as { grades?: TaskTypeGrades };
+      if (data.grades) setTaskGrades(data.grades);
+    } catch {
+      /* best-effort readout */
+    }
+  }, []);
+
   // Per-rule precision (FalsePositiveTracker). Best-effort readout.
   const loadPrecision = useCallback(async () => {
     try {
@@ -504,9 +520,10 @@ export default function CodeFactoryPage() {
     void loadHistory();
     void loadBrain();
     void loadEfficacy();
+    void loadTaskGrades();
     void loadPrecision();
     void loadPolicy();
-  }, [loadHistory, loadBrain, loadEfficacy, loadPrecision, loadPolicy]);
+  }, [loadHistory, loadBrain, loadEfficacy, loadTaskGrades, loadPrecision, loadPolicy]);
 
   const generate = useCallback(async (opts?: { keepAnswers?: boolean; refineOf?: string; promptOverride?: string }) => {
     if (!prompt.trim()) {
@@ -898,6 +915,35 @@ export default function CodeFactoryPage() {
           <p data-testid="efficacy-runs" style={{ marginTop: "0.6rem", fontSize: "0.78rem", color: "var(--wp-text-dim)" }}>
             from {efficacy.runs.toLocaleString()} run{efficacy.runs === 1 ? "" : "s"} in the window
           </p>
+        </GlassPanel>
+      )}
+
+      {taskGrades && taskGrades.byModelTask.length > 0 && (
+        <GlassPanel title="Which model ships best for what" subtitle={`First-pass ready rate per model x task type, last ${taskGrades.windowDays} days. Use it to pin the right model per kind of work (migration / UI / API / test / refactor / docs).`}>
+          <div style={{ overflowX: "auto" }}>
+            <table data-testid="task-grades-panel" style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.85rem" }}>
+              <thead>
+                <tr style={{ textAlign: "left", color: "var(--wp-text-dim)", fontSize: "0.68rem", textTransform: "uppercase", letterSpacing: "0.03em" }}>
+                  <th style={{ padding: "0.4rem 0.6rem" }}>Model</th>
+                  <th style={{ padding: "0.4rem 0.6rem" }}>Task type</th>
+                  <th style={{ padding: "0.4rem 0.6rem", textAlign: "right" }}>Ready rate</th>
+                  <th style={{ padding: "0.4rem 0.6rem", textAlign: "right" }}>Runs</th>
+                </tr>
+              </thead>
+              <tbody>
+                {taskGrades.byModelTask.map((g) => (
+                  <tr key={`${g.model}:${g.taskType}`} data-testid="task-grade-row" style={{ borderTop: "1px solid var(--wp-border, #2a2f3a)" }}>
+                    <td style={{ padding: "0.4rem 0.6rem", color: "var(--wp-text, #e6e9ef)" }}>{g.model}</td>
+                    <td style={{ padding: "0.4rem 0.6rem", color: "var(--wp-text-dim)" }}>{g.taskType}</td>
+                    <td style={{ padding: "0.4rem 0.6rem", textAlign: "right", fontVariantNumeric: "tabular-nums", fontWeight: 600, color: g.readyRate >= 0.66 ? "var(--wp-success, #22c55e)" : g.readyRate >= 0.33 ? "var(--wp-text, #e6e9ef)" : "var(--wp-error, #ef4444)" }}>
+                      {Math.round(g.readyRate * 100)}%
+                    </td>
+                    <td style={{ padding: "0.4rem 0.6rem", textAlign: "right", fontVariantNumeric: "tabular-nums", color: "var(--wp-text-dim)" }}>{g.runs.toLocaleString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </GlassPanel>
       )}
 
