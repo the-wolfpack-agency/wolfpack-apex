@@ -77,6 +77,7 @@ let planResp: Response;
 let brainResp: Response;
 let efficacyResp: Response;
 let findingReviewResp: Response;
+let policyResp: Response;
 let approveResp: Response;
 let historyResp: Response;
 let auditResp: Response;
@@ -93,6 +94,7 @@ beforeEach(() => {
   brainResp = resp(200, { reuseCorpus: { total: 128 }, failureMemory: { total: 9 } });
   efficacyResp = resp(200, { efficacy: { windowDays: 30, runs: 12, firstPassReadyRate: 0.75, acceptanceRate: 0.6, duplicationRate: 0.1, reuseSemanticRate: 0.5, repeatFindingRate: 0.25, readyTrend: "up" } });
   findingReviewResp = resp(200, { ok: true, precision: { windowDays: 30, classes: [{ findingClass: "logged_credential", flagged: 3, reviewed: 1, wrong: 1, valid: 0, acceptedRisk: 0, wrongRate: 1 }] } });
+  policyResp = resp(200, { policy: { protectedPaths: ["src/lib/crypto/"], denyRules: [{ title: "no moment", pattern: "require\\(.moment", severity: "high" }] } });
   approveResp = resp(200, { ok: true, status: "executed", outcome: { ok: true, url: "https://github.com/o/r/pull/42", number: 42 } });
   historyResp = HISTORY_EMPTY();
   auditResp = resp(200, { verification: { ok: true, verifiedCount: 7, legacyCount: 0, brokenAtSeq: null, headSeq: 7, headHash: "h" }, entries: [{ seq: 7, created_at: "2026-09-27T10:00:00Z", principal_agent: "instinct.ai_code", intended_outcome: "allow", effective_outcome: "allow", would_block: false, rule_id: "R-MUTATION-ALLOW", reason: null }], entryCount: 1, generatedAtIso: "2026-09-27T10:00:00.000Z" });
@@ -113,6 +115,7 @@ beforeEach(() => {
     if (u.includes("/ai-code/plan")) return Promise.resolve(planResp);
     if (u.includes("/ai-code/efficacy")) return Promise.resolve(efficacyResp);
     if (u.includes("/ai-code/finding-review")) return Promise.resolve(findingReviewResp);
+    if (u.includes("/ai-code/policy")) return Promise.resolve(policyResp);
     if (u.includes("/ai-code/brain")) return Promise.resolve(brainResp);
     if (u.includes("/api/analytics")) return Promise.resolve(resp(200, { ok: true }));
     if (u.includes("/approvals/")) return Promise.resolve(approveResp);
@@ -638,6 +641,7 @@ test("reuse brain: shows the corpus size on mount and warming a repo updates it"
   brainResp = resp(200, { reuseCorpus: { total: 128 }, failureMemory: { total: 9 } });
   efficacyResp = resp(200, { efficacy: { windowDays: 30, runs: 12, firstPassReadyRate: 0.75, acceptanceRate: 0.6, duplicationRate: 0.1, reuseSemanticRate: 0.5, repeatFindingRate: 0.25, readyTrend: "up" } });
   findingReviewResp = resp(200, { ok: true, precision: { windowDays: 30, classes: [{ findingClass: "logged_credential", flagged: 3, reviewed: 1, wrong: 1, valid: 0, acceptedRisk: 0, wrongRate: 1 }] } });
+  policyResp = resp(200, { policy: { protectedPaths: ["src/lib/crypto/"], denyRules: [{ title: "no moment", pattern: "require\\(.moment", severity: "high" }] } });
   render(<CodeFactoryPage />);
   await waitFor(() => expect(screen.getByTestId("brain-total")).toHaveTextContent("128"));
 
@@ -654,6 +658,7 @@ test("reuse brain: shows the corpus size on mount and warming a repo updates it"
 test("improving-over-time panel renders the efficacy rates + trend arrow", async () => {
   efficacyResp = resp(200, { efficacy: { windowDays: 30, runs: 12, firstPassReadyRate: 0.75, acceptanceRate: 0.6, duplicationRate: 0.1, reuseSemanticRate: 0.5, repeatFindingRate: 0.25, readyTrend: "up" } });
   findingReviewResp = resp(200, { ok: true, precision: { windowDays: 30, classes: [{ findingClass: "logged_credential", flagged: 3, reviewed: 1, wrong: 1, valid: 0, acceptedRisk: 0, wrongRate: 1 }] } });
+  policyResp = resp(200, { policy: { protectedPaths: ["src/lib/crypto/"], denyRules: [{ title: "no moment", pattern: "require\\(.moment", severity: "high" }] } });
   render(<CodeFactoryPage />);
   await waitFor(() => expect(screen.getByTestId("efficacy-panel")).toBeInTheDocument());
   expect(screen.getByTestId("efficacy-panel")).toHaveTextContent("75%"); // first-pass ready
@@ -678,4 +683,33 @@ test("finding review: marking a finding wrong records the human verdict + tunes 
   const call = mockFetch.mock.calls.find((c) => c[0] === "/api/admin/ai-code/finding-review" && (c[1] as { method?: string })?.method === "POST");
   expect(JSON.parse((call![1] as { body: string }).body)).toMatchObject({ findingClass: FINDING.klass, verdict: "wrong" });
   await waitFor(() => expect(screen.getByTestId(`finding-reviewed-${FINDING.klass}`)).toBeInTheDocument());
+});
+
+test("code-gate policy editor loads the policy, edits a rule, and PUTs the additive policy", async () => {
+  policyResp = resp(200, { policy: { protectedPaths: ["src/lib/crypto/"], denyRules: [{ title: "no moment", pattern: "require.moment", severity: "high" }] } });
+  render(<CodeFactoryPage />);
+  await waitFor(() => expect(screen.getByTestId("policy-paths")).toHaveValue("src/lib/crypto/"));
+  // add a protected path + a deny rule, then save
+  fireEvent.change(screen.getByTestId("policy-paths"), { target: { value: "src/lib/crypto/\nsrc/db/migrations/" } });
+  await act(async () => { fireEvent.click(screen.getByTestId("policy-rule-add")); });
+  fireEvent.change(screen.getByTestId("policy-rule-title-1"), { target: { value: "no raw fetch" } });
+  fireEvent.change(screen.getByTestId("policy-rule-pattern-1"), { target: { value: "\\bfetch\\(" } });
+  policyResp = resp(200, { policy: { protectedPaths: ["src/lib/crypto/", "src/db/migrations/"], denyRules: [{ title: "no moment", pattern: "require.moment", severity: "high" }, { title: "no raw fetch", pattern: "\\bfetch\\(", severity: "high" }] }, warnings: [] });
+  await act(async () => { fireEvent.click(screen.getByTestId("policy-save")); });
+  const put = mockFetch.mock.calls.find((c) => c[0] === "/api/admin/ai-code/policy" && (c[1] as { method?: string })?.method === "PUT");
+  const body = JSON.parse((put![1] as { body: string }).body);
+  expect(body.protectedPaths).toEqual(["src/lib/crypto/", "src/db/migrations/"]);
+  expect(body.denyRules.map((r: { title: string }) => r.title)).toEqual(["no moment", "no raw fetch"]);
+  await waitFor(() => expect(screen.getByTestId("policy-note")).toHaveTextContent(/Saved/));
+});
+
+test("code-gate policy: removing a rule drops it from the saved payload", async () => {
+  policyResp = resp(200, { policy: { protectedPaths: [], denyRules: [{ title: "r0", pattern: "a", severity: "low" }] } });
+  render(<CodeFactoryPage />);
+  await waitFor(() => expect(screen.getByTestId("policy-rule-title-0")).toHaveValue("r0"));
+  await act(async () => { fireEvent.click(screen.getByTestId("policy-rule-remove-0")); });
+  policyResp = resp(200, { policy: { protectedPaths: [], denyRules: [] }, warnings: [] });
+  await act(async () => { fireEvent.click(screen.getByTestId("policy-save")); });
+  const put = mockFetch.mock.calls.find((c) => c[0] === "/api/admin/ai-code/policy" && (c[1] as { method?: string })?.method === "PUT");
+  expect(JSON.parse((put![1] as { body: string }).body).denyRules).toEqual([]);
 });
