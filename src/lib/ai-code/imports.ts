@@ -375,3 +375,60 @@ export function brokenLocalImportFeedback(broken: readonly BrokenLocalImport[]):
     "Only import names that are actually exported by the referenced local module.",
   ].join("\n");
 }
+
+
+export interface ImportFix { path: string; from: string; to: string }
+
+/**
+ * Deterministically CORRECT common wrong local imports the model makes, BEFORE the
+ * gate - so a fumbled import becomes shipped code instead of a hold. The product
+ * thesis: wrap the probabilistic model in deterministic controls. We only ever
+ * rewrite an import that currently does NOT resolve to a correction that DOES
+ * resolve (verified against the repo tree + this change), so a fix can never break
+ * a working import.
+ *
+ * Handles: the double-prefix mistake (@/src/lib/auth -> @/lib/auth, i.e. the alias
+ * prefix followed by its own target dir), and a wrong-module symbol when we can
+ * LOCATE where it actually lives (import { requireCapability } from "@/lib/auth"
+ * -> "@/lib/auth/require-capability"). Pure.
+ */
+export function autoFixImports(
+  files: readonly { path: string; content: string }[],
+  repoTree: ReadonlySet<string>,
+  aliasMap: Record<string, string>,
+): { files: { path: string; content: string }[]; fixes: ImportFix[] } {
+  const changeset = new Set(files.map((f) => f.path));
+  const resolves = (fromPath: string, spec: string): boolean =>
+    resolveLocalCandidates(fromPath, spec, aliasMap).some((x) => changeset.has(x) || repoTree.has(x));
+
+  const correctionCandidates = (spec: string, names: readonly string[]): string[] => {
+    const out: string[] = [];
+    // Double-prefix: an alias prefix followed by its own target dir (e.g. "@/" + "src/").
+    for (const [pref, target] of Object.entries(aliasMap)) {
+      const t = target.replace(/\/$/, "");
+      if (t && spec.startsWith(pref + t + "/")) out.push(pref + spec.slice((pref + t + "/").length));
+    }
+    if (spec.startsWith("@/src/")) out.push("@/" + spec.slice("@/src/".length)); // common even w/o alias map
+    // Wrong-module symbol: when the import names a single symbol we can locate elsewhere.
+    if (names.length === 1) {
+      const located = locateSymbolSpec(names[0], repoTree);
+      if (located && located !== spec) out.push(located);
+    }
+    return [...new Set(out)];
+  };
+
+  const fixes: ImportFix[] = [];
+  const outFiles = files.map((f) => {
+    let content = f.content;
+    for (const li of extractLocalImports(f.path, f.content)) {
+      if (resolves(f.path, li.spec)) continue; // already fine - never touch a working import
+      const cand = correctionCandidates(li.spec, li.names).find((c) => resolves(f.path, c));
+      if (cand) {
+        content = content.split(`"${li.spec}"`).join(`"${cand}"`).split(`'${li.spec}'`).join(`'${cand}'`);
+        fixes.push({ path: f.path, from: li.spec, to: cand });
+      }
+    }
+    return { path: f.path, content };
+  });
+  return { files: outFiles, fixes };
+}
