@@ -18,8 +18,16 @@ import { isSafeRepoPath } from "./file-changes";
 
 /** Source-file extensions worth pulling as context. */
 const CODE_EXT = /\.(tsx?|jsx?|mjs|cjs|json|css|scss|sql|md|ya?ml|py|rb|go|rs|java|php|sh)$/i;
-/** A path-like token: dotted/slashed segments ending in a code extension. */
-const PATH_TOKEN = /\b((?:[\w.-]+\/)*[\w.-]+\.[A-Za-z0-9]+)\b/g;
+/**
+ * A path-like token: slashed segments ending in a code extension. The segment
+ * class includes `()` and `[]` so Next.js route groups (`(dashboard)`) and dynamic
+ * segments (`[id]`, `[...slug]`) are captured whole - without them a path like
+ * `src/app/(dashboard)/admin/page.tsx` was truncated to its tail `admin/page.tsx`,
+ * which then matched nothing in the repo tree (missed context fetch AND missed the
+ * existing-file -> anchor redirect, so a minimal edit dead-ended at a 422). Found
+ * by the live large-file routing dogfood.
+ */
+const PATH_TOKEN = /((?:[\w.()\[\]-]+\/)*[\w.()\[\]-]+\.[A-Za-z0-9]+)/g;
 
 /** Distinct, safe, code-like paths a prompt explicitly names (order preserved). */
 export function extractMentionedPaths(prompt: string, max = 5): string[] {

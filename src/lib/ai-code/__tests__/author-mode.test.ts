@@ -24,4 +24,19 @@ describe("pickAuthorMode", () => {
   it("no tree (grounding unavailable) -> files is left as-is", () => {
     expect(pickAuthorMode("files", ["src/lib/ai-code/imports.ts"], new Set())).toBe("files");
   });
+
+  // The live large-file dogfood: the pipeline DEFAULTS to diff when the caller
+  // sends no mode. An UNPINNED diff editing an existing file must redirect to
+  // anchor (diff has no live base -> empty change -> 422 dead-end).
+  it("UNPINNED default-diff editing an existing file -> anchor", () => {
+    expect(pickAuthorMode("diff", ["src/lib/ai-code/imports.ts"], tree, false)).toBe("anchor");
+  });
+
+  it("UNPINNED default-diff for a NEW file stays diff", () => {
+    expect(pickAuthorMode("diff", ["src/lib/ai-code/brand-new.ts"], tree, false)).toBe("diff");
+  });
+
+  it("an EXPLICITLY pinned diff is still respected over an existing file", () => {
+    expect(pickAuthorMode("diff", ["src/lib/ai-code/imports.ts"], tree, true)).toBe("diff");
+  });
 });

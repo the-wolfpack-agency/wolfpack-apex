@@ -10,6 +10,16 @@ import { extractMentionedPaths, buildRepoContext, withRepoContext } from "@/lib/
 beforeEach(() => jest.clearAllMocks());
 
 describe("extractMentionedPaths", () => {
+  it("extracts a Next.js route-group / dynamic-segment path WHOLE (not truncated to its tail)", () => {
+    const p = extractMentionedPaths(
+      "Edit src/app/(dashboard)/admin/site-analytics/page.tsx and src/app/g/[brandId]/route.ts",
+    );
+    expect(p).toContain("src/app/(dashboard)/admin/site-analytics/page.tsx");
+    expect(p).toContain("src/app/g/[brandId]/route.ts");
+    // The bug was truncation to the post-paren tail; prove that is gone.
+    expect(p).not.toContain("admin/site-analytics/page.tsx");
+  });
+
   it("finds code-like paths a prompt names, in order, deduped", () => {
     const paths = extractMentionedPaths("Add rate limiting to src/app/api/auth/login/route.ts and update src/lib/rate.ts, again src/lib/rate.ts");
     expect(paths).toEqual(["src/app/api/auth/login/route.ts", "src/lib/rate.ts"]);
