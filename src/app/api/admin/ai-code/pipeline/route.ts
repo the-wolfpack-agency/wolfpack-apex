@@ -46,6 +46,8 @@ import { buildRepoContext, withRepoContext, extractMentionedPaths } from "@/lib/
 import { findReuseCandidates } from "@/lib/ai-code/reuse-scout";
 import { semanticReuseEnabled } from "@/lib/ai-code/reuse-scout-semantic";
 import { rememberRepoTree } from "@/lib/ai-code/factory-reuse-producer";
+import { searchFailureMemory } from "@/lib/ai-code/factory-failure-index";
+import { rememberRunFailures, buildFailureAvoidanceBlock } from "@/lib/ai-code/factory-failure-producer";
 import { buildKnownExportsBlock, exportsEntries } from "@/lib/ai-code/export-grounding";
 import { duplicationSignal, duplicationGate } from "@/lib/ai-code/reuse-enforcement";
 import { pickAuthorMode } from "@/lib/ai-code/author-mode";
@@ -482,8 +484,20 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           exportsBlock = buildKnownExportsBlock(exportsEntries(fetched, aliasMap));
         }
 
-        // REUSE block first (read existing capability), then the exact exports.
-        const block = [grounding, reuse.block, exportsBlock, ctx.block].filter(Boolean).join("\n\n---\n\n");
+        // RETRIEVAL-AUGMENTED AUTHORING: warn the author about past failures the
+        // gate has CAUGHT in this repo, so it doesn't reintroduce them. Flag-gated
+        // + best-effort (empty block when the memory is cold / unavailable).
+        let failuresBlock = "";
+        if (semanticReuseEnabled()) {
+          try {
+            const hits = await searchFailureMemory({ workspaceId, repo: groundingRepo, query: prompt });
+            failuresBlock = buildFailureAvoidanceBlock(hits);
+          } catch { /* cold/unavailable memory -> no warning block */ }
+        }
+
+        // REUSE block first (read existing capability), the exact exports, then the
+        // past-failure warnings.
+        const block = [grounding, reuse.block, exportsBlock, ctx.block, failuresBlock].filter(Boolean).join("\n\n---\n\n");
         authorPrompt = withRepoContext(refinedPrompt, block);
         repoContextFiles = ctx.files;
         if (pkgJson) installedRoots = parseInstalledRoots(pkgJson);
@@ -698,6 +712,20 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     deepScan.high += policyFindings.filter((f) => f.severity === "high").length;
     deepScan.blocking = deepScan.blocking || deepScan.critical > 0;
   }
+
+  // FACTORY BRAIN producer: persist this run's CONFIRMED catches (deep-scan
+  // findings + a blocking invariant) as failure memories, so a later run can be
+  // warned not to repeat them. Flag-gated + fire-and-forget: never blocks or
+  // fails the run; summaries are redacted by the store (never a secret).
+  if (semanticReuseEnabled()) {
+    void rememberRunFailures({
+      workspaceId,
+      repo: groundingRepo,
+      findings: deepScan.findings,
+      invariant: { wouldBlock: invariants.wouldBlock, ruleId: invariants.ruleId, reason: invariants.reason },
+    }).catch(() => {});
+  }
+
   const syntax = checkSyntax(finalFiles);
   // Phantom-dependency gate: a change that imports a package not in package.json
   // always fails CI ("Cannot find module") - it can never hand off. Enforced, not
