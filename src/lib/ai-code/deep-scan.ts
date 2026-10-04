@@ -15,6 +15,7 @@
 import { scanSource } from "@/lib/platform-scan/static/scan";
 import type { ScanFinding } from "@/lib/platform-scan/types";
 import { newFilesFromDiff } from "./oracle";
+import { scanDestructiveSql } from "./destructive-sql";
 
 export interface DeepScanSummary {
   scanned: number;
@@ -50,7 +51,10 @@ export async function deepScanChange(
     readFile: async (p) => (p in files ? files[p] : null),
   });
 
-  const critical = result.findings.filter((f) => f.severity === "critical").length;
-  const high = result.findings.filter((f) => f.severity === "high").length;
-  return { scanned: paths.length, findings: result.findings, critical, high, blocking: critical > 0 };
+  // Merge destructive-migration findings (DROP TABLE/TRUNCATE/DROP COLUMN) - valid
+  // SQL the deep detectors do not flag, but a data-loss op the gate must HOLD.
+  const findings = [...result.findings, ...scanDestructiveSql(files)];
+  const critical = findings.filter((f) => f.severity === "critical").length;
+  const high = findings.filter((f) => f.severity === "high").length;
+  return { scanned: paths.length, findings, critical, high, blocking: critical > 0 };
 }
