@@ -16,11 +16,15 @@ import { isAuthorizedBearer } from "@/lib/auth/bearer-auth";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { query } from "@/lib/db";
 import { trackEvent } from "@/lib/analytics";
-import { workspaceGithubClient, getPullRequest } from "@/lib/github-client";
+import { workspaceGithubClient, getPullRequest, fetchPullRequestDiff } from "@/lib/github-client";
 import { resolveWorkspace } from "@/lib/auth/workspace";
 import { pollMergeOutcomes, type OpenedPr, type PrState } from "@/lib/ai-code/merge-poll";
 import { reinforceFromOutcome } from "@/lib/ai-code/factory-reinforce";
 import { markExemplarMerged } from "@/lib/ai-code/factory-exemplar-store";
+import { getPendingApproval } from "@/lib/agents/approvals/store";
+import { analyzeCorrection } from "@/lib/ai-code/factory-correction-analysis";
+import { recordCorrection } from "@/lib/ai-code/factory-correction-store";
+import { classifyTaskType } from "@/lib/ai-code/task-type";
 
 function isAuthorizedCron(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET;
@@ -75,6 +79,21 @@ async function run(): Promise<NextResponse> {
       await reinforceFromOutcome({ workspaceId, repo: o.repo, approvalId: o.approvalId, merged });
       // #10: a merged PR promotes its exemplar to the positive, retrievable set.
       if (merged && o.approvalId) await markExemplarMerged(workspaceId, o.approvalId);
+      // #3 CORRECTION MEMORY: diff what the factory authored against what actually
+      // merged; record the human correction (categories + counts, never the code).
+      // Best-effort: any read/parse failure just skips this one, never aborts the poll.
+      if (merged && o.approvalId && client.token) {
+        try {
+          const approval = await getPendingApproval(o.approvalId, workspaceId);
+          const authoredDiff = typeof approval?.params?.diff === "string" ? approval.params.diff : "";
+          const prompt = typeof approval?.params?.prompt === "string" ? approval.params.prompt : "";
+          if (authoredDiff) {
+            const mergedDiff = await fetchPullRequestDiff(client, o.repo, o.prNumber);
+            const analysis = analyzeCorrection(authoredDiff, mergedDiff);
+            await recordCorrection({ workspaceId, approvalId: o.approvalId, repo: o.repo, taskType: classifyTaskType(prompt), analysis });
+          }
+        } catch { /* best-effort learning telemetry */ }
+      }
     },
   });
 
