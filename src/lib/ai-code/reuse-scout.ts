@@ -165,6 +165,9 @@ export async function findReuseCandidates(args: {
   prompt: string;
   ref?: string;
   excludePaths?: readonly string[];
+  /** When present (+ semantic reuse on), the PERSISTED corpus index is searched
+   *  first; without it the scout uses the in-memory per-run widening only. */
+  workspaceId?: string;
 }): Promise<{ block: string; candidates: ReuseCandidate[]; semantic: boolean }> {
   try {
     const tree = await fetchRepoTree(args.client, args.repo, args.ref);
@@ -179,6 +182,8 @@ export async function findReuseCandidates(args: {
       treePaths: tree,
       keywordCandidates: candidates,
       excludePaths: args.excludePaths ?? [],
+      repo: args.repo,
+      workspaceId: args.workspaceId,
     });
 
     const finalCandidates = semantic ?? candidates;
@@ -200,10 +205,29 @@ async function maybeWidenSemantically(args: {
   treePaths: readonly string[];
   keywordCandidates: readonly ReuseCandidate[];
   excludePaths: readonly string[];
+  repo: string;
+  workspaceId?: string;
 }): Promise<ReuseCandidate[] | null> {
   try {
-    const { semanticReuseEnabled, widenReuseWithSemantics } = await import("@/lib/ai-code/reuse-scout-semantic");
+    const { semanticReuseEnabled, widenReuseWithSemantics, mergeReuseCandidates } = await import("@/lib/ai-code/reuse-scout-semantic");
     if (!semanticReuseEnabled()) return null;
+
+    // WARM PATH: search the PERSISTED corpus index (factory brain). One query
+    // embed, no per-run candidate embedding, and it carries cross-run memory.
+    // Only when we know the workspace (the index is workspace+repo scoped).
+    if (args.workspaceId) {
+      try {
+        const { searchReuseCorpus } = await import("@/lib/ai-code/factory-reuse-index");
+        const excluded = new Set(args.excludePaths);
+        const hits = await searchReuseCorpus({ workspaceId: args.workspaceId, repo: args.repo, query: args.prompt });
+        const fresh = hits.filter((h) => !excluded.has(h.path)).map((h) => ({ path: h.path, score: h.score }));
+        if (fresh.length > 0) return mergeReuseCandidates(args.keywordCandidates, fresh);
+      } catch {
+        // fall through to the in-memory cold-start path
+      }
+    }
+
+    // COLD PATH: corpus empty/unavailable -> in-memory widening over the tree.
     const { getEmbeddingProvider } = await import("@/lib/rag-providers/factory");
     let provider;
     try {

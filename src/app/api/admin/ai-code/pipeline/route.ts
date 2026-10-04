@@ -442,7 +442,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         const [grounding, ctx, reuse, pkgJson, tree, tsconfig] = await Promise.all([
           fetchRepoGrounding(ghClient, groundingRepo),
           buildRepoContext({ client: ghClient, repo: groundingRepo, prompt }),
-          findReuseCandidates({ client: ghClient, repo: groundingRepo, prompt, excludePaths: extractMentionedPaths(prompt) }),
+          findReuseCandidates({ client: ghClient, repo: groundingRepo, prompt, excludePaths: extractMentionedPaths(prompt), workspaceId }),
           fetchFileContent(ghClient, groundingRepo, "package.json").catch(() => null),
           fetchRepoTree(ghClient, groundingRepo).catch(() => [] as string[]),
           fetchFileContent(ghClient, groundingRepo, "tsconfig.json").catch(() => null),
