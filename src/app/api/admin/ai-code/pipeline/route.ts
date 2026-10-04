@@ -52,6 +52,7 @@ import { failureSignature } from "@/lib/ai-code/factory-failure-store";
 import { recordMemoryProvenance } from "@/lib/ai-code/factory-provenance";
 import { markReuseUsage } from "@/lib/ai-code/factory-memory-usefulness";
 import { recordExemplar, loadExemplars, buildExemplarBlock } from "@/lib/ai-code/factory-exemplar-store";
+import { recordRepairOutcome } from "@/lib/ai-code/factory-repair-recipes";
 import { classifyTaskType } from "@/lib/ai-code/task-type";
 import { buildKnownExportsBlock, exportsEntries } from "@/lib/ai-code/export-grounding";
 import { duplicationSignal, duplicationGate } from "@/lib/ai-code/reuse-enforcement";
@@ -632,6 +633,18 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     effectiveAuthor = repaired.author;
     effectiveDiff = filesToDiff(changes);
     filesRepairStatus = repaired.status;
+    // #8 REPAIR RECIPE: record whether Stage-2 repair RESOLVED the gate block or
+    // handed off, by block category, so we learn which blocks are auto-fixable.
+    // Only when repair actually ran (a block triggered it). Flag-gated, never throws.
+    if (semanticReuseEnabled() && repaired.attempts.length > 0) {
+      void recordRepairOutcome({
+        workspaceId,
+        repo: groundingRepo,
+        blockedBy: repaired.attempts[0]?.blockedBy,
+        attempts: repaired.attempts.length,
+        resolved: repaired.status === "clean",
+      }).catch(() => {});
+    }
   }
 
   // Unconditional ceiling on the final diff, whatever its source (supplied or
