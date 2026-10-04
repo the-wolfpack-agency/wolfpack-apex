@@ -32,6 +32,36 @@ describe("newFilesFromDiff", () => {
   it("returns nothing for a diff that creates no files", () => {
     expect(newFilesFromDiff("just some prose, no diff")).toEqual({});
   });
+  it("drops a prototype-polluting path and never touches Object.prototype (CWE-915)", () => {
+    const evil = [
+      "diff --git a/__proto__ b/__proto__",
+      "--- /dev/null",
+      "+++ b/__proto__",
+      "@@ -0,0 +1 @@",
+      "+polluted",
+    ].join("\n");
+    const files = newFilesFromDiff(evil);
+    expect(Object.keys(files)).toEqual([]); // the hostile path is dropped
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((Object.prototype as any).polluted).toBeUndefined();
+  });
+  it("still extracts a legitimate file that sits alongside a dropped hostile one", () => {
+    const mixed = [
+      "diff --git a/constructor b/constructor",
+      "--- /dev/null",
+      "+++ b/constructor",
+      "@@ -0,0 +1 @@",
+      "+nope",
+      "diff --git a/src/ok.ts b/src/ok.ts",
+      "--- /dev/null",
+      "+++ b/src/ok.ts",
+      "@@ -0,0 +1 @@",
+      "+export const ok = 1;",
+    ].join("\n");
+    const files = newFilesFromDiff(mixed);
+    expect(Object.keys(files)).toEqual(["src/ok.ts"]);
+  });
 });
 
 describe("makeSandboxOracle", () => {

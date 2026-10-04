@@ -17,8 +17,15 @@ import type { RunOracle } from "./capability-ladder";
  * `--- /dev/null` -> `+++ b/<path>`). Returns {} when the diff creates none.
  * Modification hunks are ignored on purpose - a greenfield task creates files.
  */
+/** Keys that would pollute Object.prototype if used as a map key. A real source
+ *  path is never one of these, so a diff claiming such a path is malformed/hostile
+ *  and its file is dropped (CWE-915 / js/remote-property-injection: the diff path
+ *  is model-controlled). */
+const UNSAFE_PATH_KEY = new Set(["__proto__", "prototype", "constructor"]);
+
 export function newFilesFromDiff(diff: string): Record<string, string> {
-  const files: Record<string, string> = {};
+  // Null-prototype map so an attacker-chosen path can never reach Object.prototype.
+  const files: Record<string, string> = Object.create(null);
   const lines = diff.split("\n");
   let i = 0;
   while (i < lines.length) {
@@ -33,7 +40,7 @@ export function newFilesFromDiff(diff: string): Record<string, string> {
       if (m) { path = m[1].trim(); }
       if (lines[j].startsWith("@@")) break; // body starts after the first hunk header
     }
-    if (isNew && path) {
+    if (isNew && path && !UNSAFE_PATH_KEY.has(path)) {
       // Collect the added lines of the body until the next file section.
       const body: string[] = [];
       let k = j + 1;
