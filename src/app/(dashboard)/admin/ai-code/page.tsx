@@ -134,6 +134,8 @@ interface ProtectionSummary { totalCaught: number; byClass: { klass: string; lab
 interface PlanStep { id: string; title: string; instruction: string; rationale: string; sensitive: boolean }
 interface ProposedPlan { goal: string; steps: PlanStep[]; truncated: boolean; model: string | null }
 interface LoopEfficacy { windowDays: number; runs: number; firstPassReadyRate: number | null; acceptanceRate: number | null; duplicationRate: number | null; reuseSemanticRate: number | null; repeatFindingRate: number | null; readyTrend: "up" | "down" | "flat" | "n/a" }
+interface ClassPrecision { findingClass: string; flagged: number; reviewed: number; wrong: number; valid: number; acceptedRisk: number; wrongRate: number | null }
+interface GatePrecision { windowDays: number; classes: ClassPrecision[] }
 interface GateDecisionRow { gate: string; verdict: "allow" | "auto_fix" | "require_human" | "deny"; modelInvoked: string | null; findings: number; recordedSeq: number | null; createdAt: string; previewUrl: string | null }
 interface AwaitingProd { previewUrl: string | null; recordedSeq: number | null; createdAt: string }
 interface GateSafety { total: number; allowed: number; autoFixed: number; escalatedToHuman: number; badChangesPrevented: number; dataKeptFromModel: number; frameworks: string[]; recent: GateDecisionRow[]; awaitingProd: AwaitingProd[] }
@@ -241,6 +243,9 @@ export default function CodeFactoryPage() {
   const [brainFailures, setBrainFailures] = useState<number | null>(null);
   // Loop efficacy: is the factory getting better over time?
   const [efficacy, setEfficacy] = useState<LoopEfficacy | null>(null);
+  // Per-rule gate precision from human reviews (the FalsePositiveTracker).
+  const [precision, setPrecision] = useState<GatePrecision | null>(null);
+  const [reviewed, setReviewed] = useState<Record<string, string>>({});
   const [brainRepo, setBrainRepo] = useState("");
   const [brainBusy, setBrainBusy] = useState(false);
   const [brainNote, setBrainNote] = useState<string | null>(null);
@@ -416,13 +421,44 @@ export default function CodeFactoryPage() {
     }
   }, []);
 
+  // Per-rule precision (FalsePositiveTracker). Best-effort readout.
+  const loadPrecision = useCallback(async () => {
+    try {
+      const res = await fetchWithRefresh("/api/admin/ai-code/finding-review");
+      if (!res.ok) return;
+      const data = (await res.json()) as { precision?: GatePrecision };
+      if (data.precision) setPrecision(data.precision);
+    } catch {
+      /* best-effort */
+    }
+  }, []);
+
+  // Record a human verdict on a finding class (the gate's ground-truth label).
+  const reviewFinding = useCallback(async (findingClass: string, verdict: "wrong" | "valid" | "accepted_risk", severity?: string) => {
+    setReviewed((prev) => ({ ...prev, [findingClass]: verdict }));
+    try {
+      const res = await fetchWithRefresh("/api/admin/ai-code/finding-review", {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: JSON.stringify({ findingClass, verdict, severity }),
+      });
+      if (res.ok) {
+        const data = (await res.json()) as { precision?: GatePrecision };
+        if (data.precision) setPrecision(data.precision);
+      }
+    } catch {
+      /* the optimistic mark stays; the event just didn't record */
+    }
+  }, []);
+
   // Separate mount-only load (stable loadHistory dep) so it fires once, not on
   // every re-render of the auth effect above.
   useEffect(() => {
     void loadHistory();
     void loadBrain();
     void loadEfficacy();
-  }, [loadHistory, loadBrain, loadEfficacy]);
+    void loadPrecision();
+  }, [loadHistory, loadBrain, loadEfficacy, loadPrecision]);
 
   const generate = useCallback(async (opts?: { keepAnswers?: boolean; refineOf?: string; promptOverride?: string }) => {
     if (!prompt.trim()) {
@@ -1177,11 +1213,51 @@ export default function CodeFactoryPage() {
                       {f.file}:{f.line} · {f.klass}
                     </p>
                     <p style={{ margin: "0.25rem 0 0", fontSize: "0.9rem" }}>{f.detail}</p>
+                    {/* Human review (the gate's ground-truth label - trains precision). */}
+                    {reviewed[f.klass] ? (
+                      <p data-testid={`finding-reviewed-${f.klass}`} style={{ margin: "0.4rem 0 0", fontSize: "0.78rem", color: "var(--wp-text-dim)" }}>
+                        Marked <strong>{reviewed[f.klass].replace("_", " ")}</strong> - thanks, that tunes the gate.
+                      </p>
+                    ) : (
+                      <div style={{ display: "flex", gap: "0.4rem", marginTop: "0.45rem", flexWrap: "wrap" }}>
+                        <span style={{ fontSize: "0.75rem", color: "var(--wp-text-dim)", alignSelf: "center" }}>Was this right?</span>
+                        {([
+                          { v: "valid", label: "Valid catch" },
+                          { v: "wrong", label: "Wrong (false positive)" },
+                          { v: "accepted_risk", label: "Accept anyway" },
+                        ] as const).map((b) => (
+                          <button
+                            key={b.v}
+                            type="button"
+                            data-testid={`finding-review-${b.v}-${f.klass}`}
+                            onClick={() => void reviewFinding(f.klass, b.v, f.severity)}
+                            style={{ background: "var(--wp-surface-2, #171a21)", border: "1px solid var(--wp-border, #2a2f3a)", borderRadius: 6, color: "var(--wp-text, #e6e9ef)", padding: "0.2rem 0.5rem", fontSize: "0.76rem", cursor: "pointer" }}
+                          >
+                            {b.label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </li>
                 ))}
               </ul>
             )}
           </GlassPanel>
+
+          {precision && precision.classes.some((c) => c.reviewed > 0) && (
+            <GlassPanel title="Gate precision" subtitle="Per-rule, from your reviews. A high wrong-rate means a noisy rule to demote - the gate learns from this.">
+              <ul data-testid="gate-precision" style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: "0.4rem" }}>
+                {precision.classes.filter((c) => c.reviewed > 0).slice(0, 12).map((c) => (
+                  <li key={c.findingClass} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.6rem", fontSize: "0.85rem", padding: "0.4rem 0.55rem", borderRadius: 6, background: "var(--wp-surface-2, #171a21)", border: "1px solid var(--wp-border, #2a2f3a)" }}>
+                    <span style={{ color: "var(--wp-text, #e6e9ef)" }}>{c.findingClass}</span>
+                    <span style={{ fontVariantNumeric: "tabular-nums", color: (c.wrongRate ?? 0) >= 0.5 ? "var(--wp-error, #ef4444)" : "var(--wp-text-dim)" }}>
+                      {c.wrongRate === null ? "n/a" : `${Math.round(c.wrongRate * 100)}% wrong`} · {c.reviewed} reviewed / {c.flagged} flagged
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </GlassPanel>
+          )}
 
           {run.review.judgments && run.review.judgments.length > 0 && (
             <GlassPanel title="Independent judge" subtitle="A different-family model's opinion - advisory, never the decision">

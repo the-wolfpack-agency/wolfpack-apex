@@ -76,6 +76,7 @@ let pipelineResp: Response;
 let planResp: Response;
 let brainResp: Response;
 let efficacyResp: Response;
+let findingReviewResp: Response;
 let approveResp: Response;
 let historyResp: Response;
 let auditResp: Response;
@@ -91,6 +92,7 @@ beforeEach(() => {
   ] } });
   brainResp = resp(200, { reuseCorpus: { total: 128 }, failureMemory: { total: 9 } });
   efficacyResp = resp(200, { efficacy: { windowDays: 30, runs: 12, firstPassReadyRate: 0.75, acceptanceRate: 0.6, duplicationRate: 0.1, reuseSemanticRate: 0.5, repeatFindingRate: 0.25, readyTrend: "up" } });
+  findingReviewResp = resp(200, { ok: true, precision: { windowDays: 30, classes: [{ findingClass: "logged_credential", flagged: 3, reviewed: 1, wrong: 1, valid: 0, acceptedRisk: 0, wrongRate: 1 }] } });
   approveResp = resp(200, { ok: true, status: "executed", outcome: { ok: true, url: "https://github.com/o/r/pull/42", number: 42 } });
   historyResp = HISTORY_EMPTY();
   auditResp = resp(200, { verification: { ok: true, verifiedCount: 7, legacyCount: 0, brokenAtSeq: null, headSeq: 7, headHash: "h" }, entries: [{ seq: 7, created_at: "2026-09-27T10:00:00Z", principal_agent: "instinct.ai_code", intended_outcome: "allow", effective_outcome: "allow", would_block: false, rule_id: "R-MUTATION-ALLOW", reason: null }], entryCount: 1, generatedAtIso: "2026-09-27T10:00:00.000Z" });
@@ -110,6 +112,7 @@ beforeEach(() => {
     if (u.includes("/ai-code/ci")) return Promise.resolve(ciResp);
     if (u.includes("/ai-code/plan")) return Promise.resolve(planResp);
     if (u.includes("/ai-code/efficacy")) return Promise.resolve(efficacyResp);
+    if (u.includes("/ai-code/finding-review")) return Promise.resolve(findingReviewResp);
     if (u.includes("/ai-code/brain")) return Promise.resolve(brainResp);
     if (u.includes("/api/analytics")) return Promise.resolve(resp(200, { ok: true }));
     if (u.includes("/approvals/")) return Promise.resolve(approveResp);
@@ -634,6 +637,7 @@ test("multi-step planning: a model/parse failure shows a friendly error, not a c
 test("reuse brain: shows the corpus size on mount and warming a repo updates it", async () => {
   brainResp = resp(200, { reuseCorpus: { total: 128 }, failureMemory: { total: 9 } });
   efficacyResp = resp(200, { efficacy: { windowDays: 30, runs: 12, firstPassReadyRate: 0.75, acceptanceRate: 0.6, duplicationRate: 0.1, reuseSemanticRate: 0.5, repeatFindingRate: 0.25, readyTrend: "up" } });
+  findingReviewResp = resp(200, { ok: true, precision: { windowDays: 30, classes: [{ findingClass: "logged_credential", flagged: 3, reviewed: 1, wrong: 1, valid: 0, acceptedRisk: 0, wrongRate: 1 }] } });
   render(<CodeFactoryPage />);
   await waitFor(() => expect(screen.getByTestId("brain-total")).toHaveTextContent("128"));
 
@@ -649,6 +653,7 @@ test("reuse brain: shows the corpus size on mount and warming a repo updates it"
 
 test("improving-over-time panel renders the efficacy rates + trend arrow", async () => {
   efficacyResp = resp(200, { efficacy: { windowDays: 30, runs: 12, firstPassReadyRate: 0.75, acceptanceRate: 0.6, duplicationRate: 0.1, reuseSemanticRate: 0.5, repeatFindingRate: 0.25, readyTrend: "up" } });
+  findingReviewResp = resp(200, { ok: true, precision: { windowDays: 30, classes: [{ findingClass: "logged_credential", flagged: 3, reviewed: 1, wrong: 1, valid: 0, acceptedRisk: 0, wrongRate: 1 }] } });
   render(<CodeFactoryPage />);
   await waitFor(() => expect(screen.getByTestId("efficacy-panel")).toBeInTheDocument());
   expect(screen.getByTestId("efficacy-panel")).toHaveTextContent("75%"); // first-pass ready
@@ -661,4 +666,16 @@ test("improving-over-time panel is hidden until there are runs (no empty noise)"
   render(<CodeFactoryPage />);
   await waitFor(() => expect(screen.getByTestId("brain-readout")).toBeInTheDocument());
   expect(screen.queryByTestId("efficacy-panel")).toBeNull();
+});
+
+test("finding review: marking a finding wrong records the human verdict + tunes precision", async () => {
+  pipelineResp = resp(200, runResp({ outcome: "block", findings: [FINDING] }));
+  render(<CodeFactoryPage />);
+  await submitPrompt();
+  await waitFor(() => expect(screen.getByTestId(`finding-review-wrong-${FINDING.klass}`)).toBeInTheDocument());
+  await act(async () => { fireEvent.click(screen.getByTestId(`finding-review-wrong-${FINDING.klass}`)); });
+  // POSTs the verdict for that class + shows the reviewed acknowledgment.
+  const call = mockFetch.mock.calls.find((c) => c[0] === "/api/admin/ai-code/finding-review" && (c[1] as { method?: string })?.method === "POST");
+  expect(JSON.parse((call![1] as { body: string }).body)).toMatchObject({ findingClass: FINDING.klass, verdict: "wrong" });
+  await waitFor(() => expect(screen.getByTestId(`finding-reviewed-${FINDING.klass}`)).toBeInTheDocument());
 });
