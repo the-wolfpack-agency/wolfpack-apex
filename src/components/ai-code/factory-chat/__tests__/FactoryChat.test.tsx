@@ -23,15 +23,31 @@ const cleanResult: PipelineResult = {
 };
 
 beforeEach(() => jest.clearAllMocks());
+
+// Guided intake is the default; composer-based tests switch to freeform first.
+const goFreeform = () => fireEvent.click(screen.getByTestId("freeform"));
 afterEach(() => cleanup());
+
+it("guided intake is the default and a guided submit runs the pipeline with a composed request", async () => {
+  mockRun.mockResolvedValue({ ok: true, status: 200, result: { run: { status: "ready_for_pr", diff: "d" }, executor: { author: "m" }, executorAttempts: 1, invariants:{wouldBlock:false}, deepScan:{blocking:false,critical:0}, duplication:{escalate:false}, syntax:{ok:true}, phantomImports:[], incompleteFiles:[], removedExports:[], anchorFailures:[], brokenLocalImports:[] }, approvalId: "a1", model: { name: "m", escalated: false } });
+  render(<FactoryChat />);
+  expect(screen.getByTestId("intake-goals")).toBeInTheDocument(); // no blank box by default
+  fireEvent.click(screen.getByTestId("goal-feature"));
+  fireEvent.change(screen.getByTestId("input-what"), { target: { value: "a billing page" } });
+  await act(async () => { fireEvent.click(screen.getByTestId("intake-start")); });
+  await waitFor(() => expect(mockRun).toHaveBeenCalled());
+  expect(mockRun.mock.calls[0][0].prompt).toMatch(/Add a new feature: a billing page/);
+});
 
 it("renders the OGIAM brand lockup in the header", () => {
   render(<FactoryChat />);
+  goFreeform();
   expect(screen.getByAltText("OGIAM")).toBeInTheDocument();
 });
 
 it("a prompt chip seeds the composer", () => {
   render(<FactoryChat />);
+  goFreeform();
   fireEvent.click(screen.getByTestId("chip-migration"));
   expect((screen.getByTestId("composer") as HTMLTextAreaElement).value).toMatch(/database migration/i);
 });
@@ -39,6 +55,7 @@ it("a prompt chip seeds the composer", () => {
 it("send -> clean result renders the checkpoint track + model badge + consent CTA", async () => {
   mockRun.mockResolvedValue({ ok: true, status: 200, result: cleanResult, approvalId: "appr1", model: { name: "gpt-4o-mini", escalated: false } });
   render(<FactoryChat />);
+  goFreeform();
   fireEvent.change(screen.getByTestId("composer"), { target: { value: "Add a thing" } });
   await act(async () => { fireEvent.click(screen.getByTestId("send")); });
   await waitFor(() => expect(screen.getByTestId("checkpoint-track")).toBeInTheDocument());
@@ -50,6 +67,7 @@ it("send -> clean result renders the checkpoint track + model badge + consent CT
 it("shows the in-chat diff review alongside the consent step", async () => {
   mockRun.mockResolvedValue({ ok: true, status: 200, result: cleanResult, approvalId: "appr1", model: { name: "gpt-4o-mini", escalated: false } });
   render(<FactoryChat />);
+  goFreeform();
   fireEvent.change(screen.getByTestId("composer"), { target: { value: "Add a thing" } });
   await act(async () => { fireEvent.click(screen.getByTestId("send")); });
   await waitFor(() => expect(screen.getByTestId("consent-cta")).toBeInTheDocument());
@@ -61,6 +79,7 @@ it("merge is gated on consent, then opens the PR and shows the link", async () =
   mockApprove.mockResolvedValue({ ok: true, validating: false, prUrl: "https://github.com/o/r/pull/7", branch: "factory/x" });
   mockCi.mockResolvedValue(null);
   render(<FactoryChat />);
+  goFreeform();
   fireEvent.change(screen.getByTestId("composer"), { target: { value: "Add a thing" } });
   await act(async () => { fireEvent.click(screen.getByTestId("send")); });
   await waitFor(() => expect(screen.getByTestId("merge")).toBeInTheDocument());
@@ -74,6 +93,7 @@ it("merge is gated on consent, then opens the PR and shows the link", async () =
 it("a held (needs_human) run shows the held notice, no consent CTA", async () => {
   mockRun.mockResolvedValue({ ok: true, status: 200, result: { ...cleanResult, run: { status: "needs_human", diff: "x" }, deepScan: { blocking: true, critical: 1 } }, approvalId: null, model: { name: "DeepSeek-V4-Flash", escalated: true } });
   render(<FactoryChat />);
+  goFreeform();
   fireEvent.change(screen.getByTestId("composer"), { target: { value: "sketchy change" } });
   await act(async () => { fireEvent.click(screen.getByTestId("send")); });
   await waitFor(() => expect(screen.getByTestId("held-notice")).toBeInTheDocument());
@@ -84,6 +104,7 @@ it("a held (needs_human) run shows the held notice, no consent CTA", async () =>
 it("a non-request (intent gate) shows a gentle nudge, not a red error or a PR", async () => {
   mockRun.mockResolvedValue({ ok: false, status: 400, result: {}, notARequest: true, error: "That doesn't look like a change request yet." });
   render(<FactoryChat />);
+  goFreeform();
   fireEvent.change(screen.getByTestId("composer"), { target: { value: "hello" } });
   await act(async () => { fireEvent.click(screen.getByTestId("send")); });
   await waitFor(() => expect(screen.getByTestId("not-a-request")).toBeInTheDocument());
@@ -95,6 +116,7 @@ it("a non-request (intent gate) shows a gentle nudge, not a red error or a PR", 
 it("a non-200 pipeline response surfaces an honest error, not a blank bubble", async () => {
   mockRun.mockResolvedValue({ ok: false, status: 422, result: {}, error: "The factory responded 422." });
   render(<FactoryChat />);
+  goFreeform();
   fireEvent.change(screen.getByTestId("composer"), { target: { value: "x" } });
   await act(async () => { fireEvent.click(screen.getByTestId("send")); });
   await waitFor(() => expect(screen.getByTestId("turn-error")).toHaveTextContent("422"));

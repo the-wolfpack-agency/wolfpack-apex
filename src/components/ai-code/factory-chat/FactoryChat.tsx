@@ -14,6 +14,7 @@ import ChatBubble from "./ChatBubble";
 import CheckpointTrack from "./CheckpointTrack";
 import DiffView from "./DiffView";
 import PromptChips from "./PromptChips";
+import GuidedIntake from "./GuidedIntake";
 import FactoryLogo from "./FactoryLogo";
 import { deriveCheckpoints, trackSummary } from "./checkpoints";
 import { requestPipelineRun, approveHandoff, loadCi } from "./client";
@@ -25,6 +26,9 @@ const nextId = (): string => `turn-${++turnSeq}`;
 
 export default function FactoryChat({ defaultRepo = "" }: { defaultRepo?: string }): React.ReactElement {
   const [input, setInput] = useState("");
+  // Guided is the default intake (lead the user); freeform is the escape hatch.
+  const [mode, setMode] = useState<"guided" | "freeform">("guided");
+  const [intakeKey, setIntakeKey] = useState(0);
   const [repo, setRepo] = useState(defaultRepo);
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [busy, setBusy] = useState(false);
@@ -100,6 +104,17 @@ export default function FactoryChat({ defaultRepo = "" }: { defaultRepo?: string
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: "0.6rem", position: "sticky", bottom: 0, paddingTop: "0.5rem" }}>
+        {mode === "guided" ? (
+          <GuidedIntake
+            key={intakeKey}
+            onSubmit={(p) => { void submit(p); setIntakeKey((k) => k + 1); }}
+            onFreeform={() => setMode("freeform")}
+          />
+        ) : (
+        <>
+        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+          <button type="button" data-testid="to-guided" onClick={() => setMode("guided")} style={{ background: "transparent", border: "none", color: NEON.textDim, fontSize: "0.74rem", cursor: "pointer", textDecoration: "underline" }}>← guided</button>
+        </div>
         <PromptChips onPick={(c: PromptChip) => { setInput(c.prompt); inputRef.current?.focus(); }} />
         <div style={{ display: "flex", gap: "0.5rem", alignItems: "flex-end" }}>
           <textarea
@@ -128,6 +143,8 @@ export default function FactoryChat({ defaultRepo = "" }: { defaultRepo?: string
             {busy ? "Working…" : "Send"}
           </button>
         </div>
+        </>
+        )}
       </div>
     </div>
   );
