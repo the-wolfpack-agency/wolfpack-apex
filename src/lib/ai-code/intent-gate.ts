@@ -16,8 +16,10 @@
 
 /** Verbs that signal an actual change request (dev-flavored, generous on purpose). */
 const ACTION_VERBS = /\b(add|create|build|make|implement|write|fix|change|update|modify|edit|remove|delete|drop|refactor|dedupe|rename|move|replace|wire|hook|migrate|optimi[sz]e|improve|extend|support|handle|render|display|show|validate|enforce|gate|guard|test|document|generate|convert|upgrade|bump|patch|revert|restore|configure|set\s+up|integrate|tweak|tidy|adjust|clean|cleanup|simplify|tune|polish|rework|revamp|restyle|reskin|style|colou?r|format|lint|align|standardi[sz]e|normali[sz]e|cache|sort|filter|group|split|extract|inline|log|instrument|track|audit|secure|sanitize|parse|serialize|stream|enable|disable|swap|rename)\b/i;
-/** A file-path-ish token (slashed segments or a bare filename ending in a code ext). */
-const FILE_HINT = /[\w.()[\]/-]+\.(tsx?|jsx?|mjs|cjs|json|css|scss|sql|md|ya?ml|py|rb|go|rs|java|php|sh)\b/i;
+/** A named file: a filename segment ending in a code extension. Linear (the body
+ *  class excludes `.` so there is no backtracking ambiguity) - ReDoS-safe on the
+ *  uncontrolled prompt. Matches the last segment, e.g. `page.tsx` in any dir path. */
+const FILE_HINT = /\b[\w-]+\.(tsx?|jsx?|mjs|cjs|json|css|scss|sql|md|ya?ml|py|rb|go|rs|java|php|sh)\b/i;
 /** Symptom / problem words - a bug report is a valid request even with no verb. */
 const PROBLEM_SIGNAL = /\b(broken?|broke|crash(?:es|ing|ed)?|error|fails?|failing|failed|bug|issue|slow|laggy|wrong|incorrect|doesn'?t|does\s+not|isn'?t|is\s+not|not\s+working|hang(?:s|ing)?|freez(?:e|es|ing)|leak(?:s|ing)?|regression|500|404|403|undefined|null|nan|flaky|stuck)\b/i;
 /** Bare greetings / filler that are never a request, even if repeated. */
