@@ -15,6 +15,7 @@ import {
   resolveLocalCandidates,
   findBrokenLocalImports,
   brokenLocalImportFeedback,
+  locateSymbolSpec,
 } from "@/lib/ai-code/imports";
 
 describe("packageRoot", () => {
@@ -266,5 +267,31 @@ describe("resolveLocalCandidates @/ fallback (alias map unavailable at runtime)"
   it("does not treat a bare package as a local module", () => {
     expect(resolveLocalCandidates("src/x.ts", "react", {})).toEqual([]);
     expect(resolveLocalCandidates("src/x.ts", "@scope/pkg", {})).toEqual([]);
+  });
+});
+
+
+describe("locateSymbolSpec (tell the model WHERE a symbol really lives)", () => {
+  const tree = new Set(["src/lib/auth.ts", "src/lib/auth/require-capability.ts", "src/components/support/StatusPill.tsx", "src/lib/auth/workspace.ts"]);
+  it("locates a camelCase symbol by its kebab-case file (requireCapability -> .../require-capability)", () => {
+    expect(locateSymbolSpec("requireCapability", tree)).toBe("@/lib/auth/require-capability");
+  });
+  it("locates a PascalCase component (StatusPill -> .../StatusPill)", () => {
+    expect(locateSymbolSpec("StatusPill", tree)).toBe("@/components/support/StatusPill");
+  });
+  it("returns null when the symbol has no matching file", () => {
+    expect(locateSymbolSpec("totallyMadeUp", tree)).toBeNull();
+    expect(locateSymbolSpec("x", new Set())).toBeNull();
+  });
+});
+
+describe("brokenLocalImportFeedback uses the hint", () => {
+  it("names the correct module when a hint is present", () => {
+    const fb = brokenLocalImportFeedback([{ path: "src/app/api/x/route.ts", spec: "@/lib/auth", kind: "missing_export", name: "requireCapability", hint: "@/lib/auth/require-capability" }]);
+    expect(fb).toMatch(/Import it from "@\/lib\/auth\/require-capability" instead/);
+  });
+  it("falls back to the generic message without a hint", () => {
+    const fb = brokenLocalImportFeedback([{ path: "src/app/api/x/route.ts", spec: "@/lib/foo", kind: "missing_export", name: "bar" }]);
+    expect(fb).toMatch(/module that actually defines "bar"/);
   });
 });
