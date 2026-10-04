@@ -165,13 +165,61 @@ export async function findReuseCandidates(args: {
   prompt: string;
   ref?: string;
   excludePaths?: readonly string[];
-}): Promise<{ block: string; candidates: ReuseCandidate[] }> {
+}): Promise<{ block: string; candidates: ReuseCandidate[]; semantic: boolean }> {
   try {
     const tree = await fetchRepoTree(args.client, args.repo, args.ref);
     const keywords = extractIntentKeywords(args.prompt);
     const candidates = scoreReuseCandidates(keywords, tree, args.excludePaths ?? []);
-    return { block: buildReuseBlock(candidates), candidates };
+
+    // Optional, flag-gated semantic widening: surface synonym/intent matches the
+    // curated keyword map misses. Falls back to keyword-only on any failure.
+    const semantic = await maybeWidenSemantically({
+      prompt: args.prompt,
+      keywords,
+      treePaths: tree,
+      keywordCandidates: candidates,
+      excludePaths: args.excludePaths ?? [],
+    });
+
+    const finalCandidates = semantic ?? candidates;
+    return { block: buildReuseBlock(finalCandidates), candidates: finalCandidates, semantic: semantic !== null };
   } catch {
-    return { block: "", candidates: [] };
+    return { block: "", candidates: [], semantic: false };
+  }
+}
+
+/**
+ * Resolve the Azure embedder (never throwing) and widen the keyword candidates.
+ * Returns null when semantic reuse is off or no embedder is available, so the
+ * caller keeps the keyword candidates verbatim. Kept here so reuse-scout.ts has no
+ * hard dependency on the rag-provider wiring until the flag is on.
+ */
+async function maybeWidenSemantically(args: {
+  prompt: string;
+  keywords: readonly string[];
+  treePaths: readonly string[];
+  keywordCandidates: readonly ReuseCandidate[];
+  excludePaths: readonly string[];
+}): Promise<ReuseCandidate[] | null> {
+  try {
+    const { semanticReuseEnabled, widenReuseWithSemantics } = await import("@/lib/ai-code/reuse-scout-semantic");
+    if (!semanticReuseEnabled()) return null;
+    const { getEmbeddingProvider } = await import("@/lib/rag-providers/factory");
+    let provider;
+    try {
+      provider = getEmbeddingProvider(); // throws when not configured
+    } catch {
+      return null;
+    }
+    return await widenReuseWithSemantics({
+      embed: (texts) => provider.embed(texts),
+      prompt: args.prompt,
+      keywords: args.keywords,
+      treePaths: args.treePaths,
+      keywordCandidates: args.keywordCandidates,
+      excludePaths: args.excludePaths,
+    });
+  } catch {
+    return null;
   }
 }

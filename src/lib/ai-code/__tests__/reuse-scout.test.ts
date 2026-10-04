@@ -84,7 +84,7 @@ describe("findReuseCandidates (best-effort orchestration)", () => {
   });
   it("never throws: a tree-fetch failure degrades to an empty block", async () => {
     mockFetchTree.mockRejectedValue(new Error("github down"));
-    expect(await findReuseCandidates({ client: {} as never, repo: "o/r", prompt: "x" })).toEqual({ block: "", candidates: [] });
+    expect(await findReuseCandidates({ client: {} as never, repo: "o/r", prompt: "x" })).toEqual({ block: "", candidates: [], semantic: false });
   });
 });
 

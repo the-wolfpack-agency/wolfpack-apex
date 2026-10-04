@@ -409,6 +409,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   let authorPrompt = refinedPrompt;
   let repoContextFiles: string[] = [];
   let reuseCandidates = 0;
+  // Did the (flag-gated) semantic widening run for this job? Recorded so the
+  // learning loop can compare duplication outcomes with vs without it.
+  let reuseSemantic = false;
   // The reuse-scout candidates (path + score), kept for the SHADOW duplication
   // signal recorded on the run event (did the change reuse the top candidate?).
   let reuseCandidatesList: { path: string; score: number }[] = [];
@@ -445,6 +448,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           fetchFileContent(ghClient, groundingRepo, "tsconfig.json").catch(() => null),
         ]);
         reuseCandidates = reuse.candidates.length;
+        reuseSemantic = reuse.semantic;
         reuseCandidatesList = reuse.candidates.map((c) => ({ path: c.path, score: c.score }));
         repoTree = new Set(tree);
         if (tsconfig) aliasMap = parseAliasMap(tsconfig);
@@ -828,6 +832,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     handed_off: approvalId !== null,
     repo_context_files: repoContextFiles.length,
     reuse_candidates: reuseCandidates,
+    reuse_semantic: reuseSemantic,
     // SHADOW duplication signal (reuse-enforcement.ts): the top existing module
     // the scout surfaced + whether the change reused it. Recorded, NOT enforced -
     // a high score that went unreused is likely a re-implementation, and this
