@@ -19,22 +19,28 @@ import { isSafeRepoPath } from "./file-changes";
 /** Source-file extensions worth pulling as context. */
 const CODE_EXT = /\.(tsx?|jsx?|mjs|cjs|json|css|scss|sql|md|ya?ml|py|rb|go|rs|java|php|sh)$/i;
 /**
- * A path-like token: slashed segments ending in a code extension. The segment
- * class includes `()` and `[]` so Next.js route groups (`(dashboard)`) and dynamic
- * segments (`[id]`, `[...slug]`) are captured whole - without them a path like
- * `src/app/(dashboard)/admin/page.tsx` was truncated to its tail `admin/page.tsx`,
- * which then matched nothing in the repo tree (missed context fetch AND missed the
- * existing-file -> anchor redirect, so a minimal edit dead-ended at a 422). Found
- * by the live large-file routing dogfood.
+ * A maximal run of path characters. ONE character class, ONE quantifier, nothing
+ * after it - so the regex never backtracks and is linear on any input (safe on the
+ * uncontrolled prompt; no ReDoS). The class includes `/` and `.` so a whole path
+ * matches at once, and `()` / `[]` so Next.js route groups (`(dashboard)`) and
+ * dynamic segments (`[id]`, `[...slug]`) are captured WHOLE - without them a path
+ * like `src/app/(dashboard)/admin/page.tsx` was truncated to its tail
+ * `admin/page.tsx`, which matched nothing in the repo tree (missed context fetch
+ * AND missed the existing-file -> anchor redirect, so a minimal edit dead-ended at
+ * a 422). The code extension is validated AFTER the match (CODE_EXT), not in the
+ * regex. Found by the live large-file routing dogfood.
  */
-const PATH_TOKEN = /((?:[\w.()\[\]-]+\/)*[\w.()\[\]-]+\.[A-Za-z0-9]+)/g;
+const PATH_TOKEN = /[\w.()\[\]/-]+/g;
 
 /** Distinct, safe, code-like paths a prompt explicitly names (order preserved). */
 export function extractMentionedPaths(prompt: string, max = 5): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
-  for (const m of prompt.matchAll(PATH_TOKEN)) {
-    const p = m[1];
+  // Defensive bound: never run the tokenizer over an unbounded prompt (the regex
+  // is linear, but a hard cap keeps worst-case work constant regardless).
+  const text = prompt.length > 20_000 ? prompt.slice(0, 20_000) : prompt;
+  for (const m of text.matchAll(PATH_TOKEN)) {
+    const p = m[0].replace(/[.\-]+$/, "");
     // Must look like a real repo path: has a slash OR a code extension, safe, unique.
     if (!CODE_EXT.test(p)) continue;
     if (!isSafeRepoPath(p)) continue;
