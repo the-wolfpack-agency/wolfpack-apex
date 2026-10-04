@@ -5,6 +5,7 @@ const mockRequireCapability = jest.fn();
 const mockServiceAuth = jest.fn();
 const mockGate = jest.fn();
 const mockCount = jest.fn();
+const mockCountFailures = jest.fn();
 const mockClient = jest.fn();
 const mockTree = jest.fn();
 const mockRemember = jest.fn();
@@ -19,6 +20,7 @@ jest.mock("@/lib/analytics", () => ({ trackEvent: (...a: unknown[]) => mockTrack
 jest.mock("@/lib/audit-log", () => ({ recordAuditNonFatal: (...a: unknown[]) => mockAudit(...a), extractRequestMetadata: () => ({}) }));
 jest.mock("@/lib/github-client", () => ({ workspaceGithubClient: (...a: unknown[]) => mockClient(...a), fetchRepoTree: (...a: unknown[]) => mockTree(...a) }));
 jest.mock("@/lib/ai-code/factory-reuse-store", () => ({ countReuseCorpus: (...a: unknown[]) => mockCount(...a) }));
+jest.mock("@/lib/ai-code/factory-failure-store", () => ({ countFailures: (...a: unknown[]) => mockCountFailures(...a) }));
 jest.mock("@/lib/ai-code/factory-reuse-producer", () => ({ rememberRepoTree: (...a: unknown[]) => mockRemember(...a) }));
 jest.mock("@/lib/ai-code/factory-reuse-index", () => ({ indexReuseCorpus: (...a: unknown[]) => mockIndex(...a) }));
 
@@ -32,6 +34,7 @@ beforeEach(() => {
   mockRequireCapability.mockResolvedValue({ ok: true, user: { id: "u1", role: "admin", workspaceId: "w1" } });
   mockGate.mockResolvedValue(null);
   mockCount.mockResolvedValue(42);
+  mockCountFailures.mockResolvedValue(7);
   mockClient.mockResolvedValue({ token: "t" });
   mockTree.mockResolvedValue(["src/a.ts", "src/b.ts"]);
   mockRemember.mockResolvedValue({ written: 2 });
@@ -51,7 +54,9 @@ it("401/403 on both verbs", async () => {
 it("GET reports the corpus total", async () => {
   const res = await GET(get());
   expect(res.status).toBe(200);
-  expect((await res.json()).reuseCorpus.total).toBe(42);
+  const g = await res.json();
+  expect(g.reuseCorpus.total).toBe(42);
+  expect(g.failureMemory.total).toBe(7);
 });
 
 it("POST backfills: fetch tree -> remember -> index, audits + tracks", async () => {

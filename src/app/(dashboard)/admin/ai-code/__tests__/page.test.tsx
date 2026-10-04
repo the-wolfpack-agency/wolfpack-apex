@@ -88,7 +88,7 @@ beforeEach(() => {
     { id: "step-1", title: "Add schema", instruction: "Create the quotas table", rationale: "foundation", sensitive: true },
     { id: "step-2", title: "Add API", instruction: "Add the rate-limit route", rationale: "uses schema", sensitive: false },
   ] } });
-  brainResp = resp(200, { reuseCorpus: { total: 128 } });
+  brainResp = resp(200, { reuseCorpus: { total: 128 }, failureMemory: { total: 9 } });
   approveResp = resp(200, { ok: true, status: "executed", outcome: { ok: true, url: "https://github.com/o/r/pull/42", number: 42 } });
   historyResp = HISTORY_EMPTY();
   auditResp = resp(200, { verification: { ok: true, verifiedCount: 7, legacyCount: 0, brokenAtSeq: null, headSeq: 7, headHash: "h" }, entries: [{ seq: 7, created_at: "2026-09-27T10:00:00Z", principal_agent: "instinct.ai_code", intended_outcome: "allow", effective_outcome: "allow", would_block: false, rule_id: "R-MUTATION-ALLOW", reason: null }], entryCount: 1, generatedAtIso: "2026-09-27T10:00:00.000Z" });
@@ -629,7 +629,7 @@ test("multi-step planning: a model/parse failure shows a friendly error, not a c
 });
 
 test("reuse brain: shows the corpus size on mount and warming a repo updates it", async () => {
-  brainResp = resp(200, { reuseCorpus: { total: 128 } });
+  brainResp = resp(200, { reuseCorpus: { total: 128 }, failureMemory: { total: 9 } });
   render(<CodeFactoryPage />);
   await waitFor(() => expect(screen.getByTestId("brain-total")).toHaveTextContent("128"));
 
