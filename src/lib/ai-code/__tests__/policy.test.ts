@@ -1,6 +1,6 @@
 /** Policy-as-code: additive org rules (deny patterns + protected paths); the
  *  default is a no-op (zero regression); malformed client regex is skipped. */
-import { applyDenyRules, touchesPolicyProtectedPaths, DEFAULT_CODE_GATE_POLICY, sanitizePolicyInput, MAX_PROTECTED_PATHS, MAX_DENY_RULES, type CodeGatePolicy } from "../policy";
+import { applyDenyRules, touchesPolicyProtectedPaths, DEFAULT_CODE_GATE_POLICY, sanitizePolicyInput, looksCatastrophic, MAX_PROTECTED_PATHS, MAX_DENY_RULES, MAX_PATTERN_LENGTH, type CodeGatePolicy } from "../policy";
 
 describe("policy-as-code (additive-only)", () => {
   it("DEFAULT policy is a no-op (zero regression)", () => {
@@ -86,5 +86,37 @@ describe("sanitizePolicyInput (untrusted edit -> safe, additive policy)", () => 
     const findings = applyDenyRules({ "a.ts": "await fetch('/x');" }, policy);
     expect(findings).toHaveLength(1);
     expect(findings[0].title).toMatch(/no fetch/);
+  });
+});
+
+describe("ReDoS / length guard on client patterns (safeRegex chokepoint)", () => {
+  it("flags nested-quantifier shapes as catastrophic", () => {
+    for (const bad of ["(a+)+", "(a*)*", "(.*)*", "(x|y+)*", "(\\d+){10,}+"]) {
+      expect(looksCatastrophic(bad)).toBe(true);
+    }
+  });
+  it("passes ordinary deny-rule patterns", () => {
+    for (const ok of ["require\\(['\"]moment", "\\bfetch\\(", "console\\.debug", "AKIA[0-9A-Z]{16}"]) {
+      expect(looksCatastrophic(ok)).toBe(false);
+    }
+  });
+  it("sanitizePolicyInput drops a catastrophic deny-rule pattern", () => {
+    const { policy, warnings } = sanitizePolicyInput({ denyRules: [
+      { title: "evil", pattern: "(a+)+$", severity: "high" },
+      { title: "fine", pattern: "\\bfetch\\(", severity: "high" },
+    ] });
+    expect(policy.denyRules.map((r) => r.title)).toEqual(["fine"]);
+    expect(warnings.join(" ")).toMatch(/invalid regex/i);
+  });
+  it("drops an over-length pattern", () => {
+    const huge = "a".repeat(MAX_PATTERN_LENGTH + 1);
+    const { policy } = sanitizePolicyInput({ protectedPaths: [huge, "src/ok/"] });
+    expect(policy.protectedPaths).toEqual(["src/ok/"]);
+  });
+  it("applyDenyRules never compiles a catastrophic rule (it is skipped, no hang)", () => {
+    const findings = applyDenyRules({ "a.ts": "aaaaaaaaaaaaaaaaaaaaX" }, { protectedPaths: [], denyRules: [
+      { title: "redos", pattern: "(a+)+$", severity: "critical" },
+    ] });
+    expect(findings).toEqual([]); // skipped, not run
   });
 });
