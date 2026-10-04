@@ -20,19 +20,25 @@ on:
     - cron: "0 6 * * *" # daily, before the working day
   workflow_dispatch: {}
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 jobs:
   sweep:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # Write is scoped to this job (opens the dependency-audit PR), not granted
+    # to the whole workflow - least privilege.
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v4.0.4
         with:
           node-version: 20
       - name: Install
-        run: npm ci || npm install
+        # Pinned to the committed lockfile (npm ci); no unpinned `npm install`
+        # fallback (Scorecard PinnedDependencies).
+        run: npm ci
 
       - name: Audit production deps
         id: audit
