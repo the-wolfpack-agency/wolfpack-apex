@@ -57,6 +57,7 @@ export interface ChatTurn {
   ci?: CiDashboardLite;
   model?: { name: string; escalated: boolean };
   prUrl?: string;
+  notARequest?: boolean;
   previewUrl?: string;
   deployedUrl?: string;
   error?: string;

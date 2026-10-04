@@ -72,6 +72,17 @@ it("a held (needs_human) run shows the held notice, no consent CTA", async () =>
   expect(screen.queryByTestId("consent-cta")).toBeNull();
 });
 
+it("a non-request (intent gate) shows a gentle nudge, not a red error or a PR", async () => {
+  mockRun.mockResolvedValue({ ok: false, status: 400, result: {}, notARequest: true, error: "That doesn't look like a change request yet." });
+  render(<FactoryChat />);
+  fireEvent.change(screen.getByTestId("composer"), { target: { value: "hello" } });
+  await act(async () => { fireEvent.click(screen.getByTestId("send")); });
+  await waitFor(() => expect(screen.getByTestId("not-a-request")).toBeInTheDocument());
+  expect(screen.getByTestId("not-a-request")).toHaveTextContent(/change request/i);
+  expect(screen.queryByTestId("turn-error")).toBeNull();      // not a red error
+  expect(screen.queryByTestId("consent-cta")).toBeNull();     // and never a PR path
+});
+
 it("a non-200 pipeline response surfaces an honest error, not a blank bubble", async () => {
   mockRun.mockResolvedValue({ ok: false, status: 422, result: {}, error: "The factory responded 422." });
   render(<FactoryChat />);

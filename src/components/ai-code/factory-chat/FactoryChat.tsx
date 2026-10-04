@@ -43,7 +43,7 @@ export default function FactoryChat({ defaultRepo = "" }: { defaultRepo?: string
     setBusy(true);
     try {
       const out = await requestPipelineRun({ prompt: text, repo });
-      if (!out.ok) { patch(id, { phase: "error", error: out.error, result: out.result, model: out.model }); return; }
+      if (!out.ok) { patch(id, { phase: "error", error: out.error, result: out.result, model: out.model, notARequest: out.notARequest }); return; }
       const status = out.result.run?.status;
       patch(id, {
         phase: status === "ready_for_pr" ? "awaiting-human" : "gated",
@@ -139,6 +139,10 @@ function FactoryResponse({
     return <span data-testid="running" style={{ color: NEON.textDim }}>Generating and gating the change…</span>;
   }
   if (turn.phase === "error") {
+    // A non-request (intent gate) is a gentle nudge, not a red error.
+    if (turn.notARequest) {
+      return <span data-testid="not-a-request" style={{ color: NEON.textDim }}>{turn.error ?? "That doesn't look like a change request."}</span>;
+    }
     return <span data-testid="turn-error" style={{ color: NEON.blocked }}>{turn.error ?? "Something went wrong."}</span>;
   }
 

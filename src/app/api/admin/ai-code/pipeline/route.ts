@@ -57,6 +57,7 @@ import { recordRepairOutcome } from "@/lib/ai-code/factory-repair-recipes";
 import { loadCorrectionSignals } from "@/lib/ai-code/factory-correction-store";
 import { buildCorrectionBlock } from "@/lib/ai-code/factory-correction-analysis";
 import { classifyTaskType } from "@/lib/ai-code/task-type";
+import { looksLikeChangeRequest } from "@/lib/ai-code/intent-gate";
 import { buildKnownExportsBlock, exportsEntries } from "@/lib/ai-code/export-grounding";
 import { duplicationSignal, duplicationGate } from "@/lib/ai-code/reuse-enforcement";
 import { pickAuthorMode } from "@/lib/ai-code/author-mode";
@@ -357,6 +358,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const diff = typeof b.diff === "string" ? b.diff : "";
   if (!ref) return NextResponse.json({ error: "ref is required" }, { status: 400 });
   if (!prompt.trim()) return NextResponse.json({ error: "prompt is required" }, { status: 400 });
+  // INTENT GATE: a greeting / non-request never enters the factory. Runs BEFORE any
+  // authoring (zero model cost), server-side so no UI can bypass it. Only when
+  // authoring from a prompt - a supplied diff is governed as-is. (Found by dogfood:
+  // "hello" authored a change and cleared every gate.)
+  if (!diff.trim()) {
+    const intent = looksLikeChangeRequest(prompt);
+    if (!intent.ok) return NextResponse.json({ error: intent.reason, notARequest: true }, { status: 400 });
+  }
   // ITERATIVE REFINEMENT: an optional prior change the user wants revised. When
   // present, the authoring prompt becomes a complete-revision of it per the
   // instruction; the raw `prompt` stays the instruction (for the record/title).
