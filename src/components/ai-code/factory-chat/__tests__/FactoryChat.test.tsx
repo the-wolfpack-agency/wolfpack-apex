@@ -47,6 +47,15 @@ it("send -> clean result renders the checkpoint track + model badge + consent CT
   expect(screen.getByTestId("consent-cta")).toBeInTheDocument();
 });
 
+it("shows the in-chat diff review alongside the consent step", async () => {
+  mockRun.mockResolvedValue({ ok: true, status: 200, result: cleanResult, approvalId: "appr1", model: { name: "gpt-4o-mini", escalated: false } });
+  render(<FactoryChat />);
+  fireEvent.change(screen.getByTestId("composer"), { target: { value: "Add a thing" } });
+  await act(async () => { fireEvent.click(screen.getByTestId("send")); });
+  await waitFor(() => expect(screen.getByTestId("consent-cta")).toBeInTheDocument());
+  expect(screen.getByTestId("diff-view")).toBeInTheDocument(); // review in-chat, no link-out
+});
+
 it("merge is gated on consent, then opens the PR and shows the link", async () => {
   mockRun.mockResolvedValue({ ok: true, status: 200, result: cleanResult, approvalId: "appr1", model: { name: "gpt-4o-mini", escalated: false } });
   mockApprove.mockResolvedValue({ ok: true, validating: false, prUrl: "https://github.com/o/r/pull/7", branch: "factory/x" });

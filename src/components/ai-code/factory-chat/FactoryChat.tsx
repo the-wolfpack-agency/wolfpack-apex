@@ -12,6 +12,7 @@ import { useCallback, useRef, useState } from "react";
 import { NEON, neonGlow } from "./neon";
 import ChatBubble from "./ChatBubble";
 import CheckpointTrack from "./CheckpointTrack";
+import DiffView from "./DiffView";
 import PromptChips from "./PromptChips";
 import FactoryLogo from "./FactoryLogo";
 import { deriveCheckpoints, trackSummary } from "./checkpoints";
@@ -161,6 +162,9 @@ function FactoryResponse({
       )}
 
       <CheckpointTrack checkpoints={checkpoints} />
+
+      {/* Review the exact change in-chat - no link-out before consenting. */}
+      {turn.result?.run?.diff ? <DiffView diff={turn.result.run.diff} /> : null}
 
       {/* Held: the gate did not clear an auto-handoff. */}
       {turn.phase === "gated" && (
