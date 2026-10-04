@@ -476,4 +476,28 @@ test("18) client build: a realistic retry-with-backoff utility (generation QUALI
     await testInfo.attach("retry-generated.txt", { body: code, contentType: "text/plain" });
     console.log(`[dogfood:quality] realistic-retry status=${status} model=${model} passes=${attempts} codeLen=${code.length}`);
   });
+test("19) iterative refinement: Refine re-gates a revision of the prior change (forward-compatible)", async ({ page }) => {
+    const csp = await openFactory(page);
+    await submit(page, "Create src/lib/util/titlecase.ts exporting `titleCase(s: string): string` that uppercases the first letter of each whitespace-separated word; add a co-located test.");
+    // The Refine affordance ships with the iterative-refinement UI. Tolerate a
+    // deployment that predates it: pass pre-deploy, EXERCISE it once deployed.
+    const refineInput = page.getByTestId("refine-instruction");
+    if ((await refineInput.count()) === 0) {
+      console.log("[dogfood:refine] refine UI not deployed on this target yet - forward-compatible skip of the exercise");
+      expect(csp, "no CSP violations").toEqual([]);
+      return;
+    }
+    const refineResp = page.waitForResponse((r) => r.url().includes("/api/admin/ai-code/pipeline") && r.request().method() === "POST", { timeout: 175_000 });
+    await refineInput.fill("also handle an empty string by returning an empty string");
+    await page.getByTestId("refine-run").click();
+    const resp = await refineResp;
+    expect(resp.status(), "the refine re-run responds 200-class").toBeLessThan(400);
+    const sent = JSON.parse(resp.request().postData() ?? "{}");
+    // The REVISION carries the prior change as refineOf (not a blank fresh run).
+    expect(typeof sent.refineOf === "string" && sent.refineOf.includes("diff --git"), "refine sent the prior diff as refineOf").toBe(true);
+    const body = await resp.json().catch(() => ({}));
+    await expect(page.getByTestId("generated-code").or(page.getByTestId("handoff-status")).first(), "the refined result renders").toBeVisible({ timeout: 30_000 });
+    console.log(`[dogfood:refine] refined -> status=${(body.run ?? body).status} model=${(body.executor ?? (body.run ?? body).executor)?.author}`);
+    expect(csp, "no CSP violations").toEqual([]);
+  });
 }); // end describe
