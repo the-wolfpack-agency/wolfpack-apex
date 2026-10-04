@@ -248,12 +248,21 @@ function pathTemplate(p: string): { template: string; num: number } | null {
   return { template: `${m[1]}{n}${m[3]}`, num: Number(m[2]) };
 }
 
-/** True when the paths walk >=3 distinct IDs under a shared template. */
+/** Public-content templates where walking numbered pages is normal BROWSING, not
+ *  IDOR enumeration: a crawler reading /blog/1,2,3 is not "fishing for data it
+ *  should not reach". Enumeration is hostile under OBJECT / record / API paths.
+ *  Deliberately conservative - this ONLY suppresses false positives on obvious
+ *  content prefixes, it never creates a new hostile verdict. */
+const CONTENT_TEMPLATE =
+  /\/(blog|post|posts|article|articles|news|story|stories|product|products|shop|page|pages|p|tag|tags|category|categories|press|event|events|portfolio|gallery|photo|photos|recipe|recipes|job|jobs)\//i;
+
+/** True when the paths walk >=3 distinct IDs under a shared NON-content template. */
 export function detectIdEnumeration(paths: readonly string[]): boolean {
   const byTemplate = new Map<string, Set<number>>();
   for (const p of paths) {
     const t = pathTemplate(p);
     if (!t) continue;
+    if (CONTENT_TEMPLATE.test(t.template)) continue; // numbered content = browsing, not IDOR
     const set = byTemplate.get(t.template) ?? new Set<number>();
     set.add(t.num);
     byTemplate.set(t.template, set);

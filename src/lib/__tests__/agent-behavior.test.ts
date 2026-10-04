@@ -2,7 +2,7 @@
  * Agent behavior classifier - the fused-signal verdict + the proven/inferred
  * honesty rail. Pure, no I/O.
  */
-import { classifySession, buildJourneys, type SessionEvent } from "@/lib/agent-behavior";
+import { classifySession, detectIdEnumeration, buildJourneys, type SessionEvent } from "@/lib/agent-behavior";
 
 const ev = (type: string, path: string, at: string, extra: Partial<SessionEvent> = {}): SessionEvent => ({ type, path, at, ...extra });
 
@@ -264,5 +264,30 @@ describe("journey surface derivation (so a promoted sighting records its REAL pr
       { key: "k", keyKind: "fingerprint", type: "site.agent_trap_tripped", path: "/_ff/x", at: "2026-09-18T10:00:00Z", site: "aidanmulready.com" },
     ]);
     expect(j.surface).toBe("aidanmulready.com");
+  });
+});
+
+describe("inferred-accuracy battery (path-derived IDOR detection): false positives + real catches", () => {
+  const session = (paths: string[]): import("@/lib/agent-behavior").AgentSessionInput => ({
+    key: "k",
+    keyKind: "fingerprint",
+    events: paths.map((p, i) => ({ type: "site.page_view", path: p, at: `2026-10-03T12:00:${String(i).padStart(2, "0")}.000Z` })),
+  });
+
+  it("does NOT flag normal numbered CONTENT browsing as IDOR enumeration (false-positive guard)", () => {
+    expect(detectIdEnumeration(["/blog/1", "/blog/2", "/blog/3"])).toBe(false);
+    expect(detectIdEnumeration(["/products/101", "/products/102", "/products/103"])).toBe(false);
+    expect(detectIdEnumeration(["/page/1", "/page/2", "/page/3", "/page/4"])).toBe(false);
+    // and end to end: reading three blog posts is not a vuln_scanner
+    expect(classifySession(session(["/blog/1", "/blog/2", "/blog/3"])).behaviorClass).not.toBe("vuln_scanner");
+  });
+
+  it("STILL catches real IDOR enumeration under object/record/API paths", () => {
+    expect(detectIdEnumeration(["/api/users/1", "/api/users/2", "/api/users/3"])).toBe(true);
+    expect(detectIdEnumeration(["/account/1001", "/account/1002", "/account/1003"])).toBe(true);
+    expect(detectIdEnumeration(["/invoice/5", "/invoice/6", "/invoice/7"])).toBe(true);
+    expect(classifySession(session(["/api/users/1", "/api/users/2", "/api/users/3"])).behaviorClass).toBe("vuln_scanner");
+    // the verdict is INFERRED (path fingerprint), not proven - honest confidence.
+    expect(classifySession(session(["/api/users/1", "/api/users/2", "/api/users/3"])).confidence).toBe("inferred");
   });
 });
