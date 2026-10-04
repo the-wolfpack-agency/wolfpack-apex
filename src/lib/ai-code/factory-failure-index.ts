@@ -124,6 +124,10 @@ export async function searchFailureMemory(args: {
   query: string;
   k?: number;
   deps?: FailureIndexDeps | null;
+  /** #9: draw from EVERY repo in this workspace, not just `repo`. A mistake caught
+   *  in one of a workspace's repos is worth warning about in another. Still strictly
+   *  workspace-scoped (workspace_id is always in the filter) - never cross-tenant. */
+  crossRepo?: boolean;
 }): Promise<FailureHit[]> {
   const q = args.query.trim();
   if (!q) return [];
@@ -133,11 +137,16 @@ export async function searchFailureMemory(args: {
     const vectors = await deps.embed([q]);
     const vec = Array.isArray(vectors) ? vectors[0] : undefined;
     if (!vec || vec.length === 0) return [];
+    // workspace_id is ALWAYS present (tenant isolation is never relaxed); repo is
+    // dropped only in cross-repo mode to span the workspace's own repos.
+    const filter: Record<string, string> = args.crossRepo
+      ? { workspace_id: args.workspaceId }
+      : { workspace_id: args.workspaceId, repo: args.repo };
     const hits: VectorHit[] = await deps.search(
       deps.qdrant,
       FACTORY_FAILURE_COLLECTION,
       vec,
-      { workspace_id: args.workspaceId, repo: args.repo },
+      filter,
       Math.min(Math.max(args.k ?? 5, 1), 50),
     );
     const mapped = hits

@@ -32,6 +32,14 @@ export function semanticReuseEnabled(env: NodeJS.ProcessEnv = process.env): bool
   return v === "on" || v === "true" || v === "1";
 }
 
+/** #9: warn authoring about mistakes caught in ANY repo of this workspace (not just
+ *  the current one). Independently switchable so it can be dogfooded without
+ *  touching the main reuse flag. Dark until explicitly flipped. */
+export function crossRepoMemoryEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  const v = (env.AI_CODE_CROSS_REPO_MEMORY ?? "").trim().toLowerCase();
+  return v === "on" || v === "true" || v === "1";
+}
+
 /** Code files only, mirroring the keyword scout's candidate filter. */
 const CODE_FILE = /\.(tsx?|jsx?|mjs|cjs|sql|py|rb|go|rs|java|php)$/i;
 const NOT_REUSABLE = /(?:^|\/)(__tests__|__mocks__|node_modules|\.next|dist|build)\//i;

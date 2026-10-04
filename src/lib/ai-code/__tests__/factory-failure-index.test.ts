@@ -58,6 +58,25 @@ describe("searchFailureMemory", () => {
     const [, , , must] = (d.search as jest.Mock).mock.calls[0];
     expect(must).toEqual({ workspace_id: "w1", repo: "o/r" });
   });
+  it("#9 crossRepo spans the WORKSPACE (drops the repo filter) but always keeps workspace_id", async () => {
+    const d = deps({ search: jest.fn(async () => [
+      { id: 1, score: 0.9, payload: { finding_class: "logged_credential", summary: "logged a token", path: "src/a.ts", severity: "critical" } },
+    ]) });
+    const hits = await searchFailureMemory({ workspaceId: "w1", repo: "o/r", query: "handle a token", deps: d, crossRepo: true });
+    expect(hits).toHaveLength(1);
+    const [, , , must] = (d.search as jest.Mock).mock.calls[0];
+    expect(must).toEqual({ workspace_id: "w1" }); // repo dropped
+    expect(must.workspace_id).toBe("w1");         // tenant isolation never relaxed
+    expect("repo" in must).toBe(false);
+  });
+
+  it("without crossRepo the filter stays repo-scoped (default)", async () => {
+    const d = deps({ search: jest.fn(async () => []) });
+    await searchFailureMemory({ workspaceId: "w1", repo: "o/r", query: "x", deps: d });
+    const [, , , must] = (d.search as jest.Mock).mock.calls[0];
+    expect(must).toEqual({ workspace_id: "w1", repo: "o/r" });
+  });
+
   it("drops payloads without a summary; [] on empty query / null qdrant / embedder miss", async () => {
     expect(await searchFailureMemory({ workspaceId: "w1", repo: "o/r", query: "x", deps: deps({ search: jest.fn(async () => [{ id: 1, score: 0.9, payload: {} }]) }) })).toEqual([]);
     expect(await searchFailureMemory({ workspaceId: "w1", repo: "o/r", query: "   ", deps: deps() })).toEqual([]);
