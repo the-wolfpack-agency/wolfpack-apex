@@ -53,6 +53,8 @@ import { recordMemoryProvenance } from "@/lib/ai-code/factory-provenance";
 import { markReuseUsage } from "@/lib/ai-code/factory-memory-usefulness";
 import { recordExemplar, loadExemplars, buildExemplarBlock } from "@/lib/ai-code/factory-exemplar-store";
 import { recordRepairOutcome } from "@/lib/ai-code/factory-repair-recipes";
+import { loadCorrectionSignals } from "@/lib/ai-code/factory-correction-store";
+import { buildCorrectionBlock } from "@/lib/ai-code/factory-correction-analysis";
 import { classifyTaskType } from "@/lib/ai-code/task-type";
 import { buildKnownExportsBlock, exportsEntries } from "@/lib/ai-code/export-grounding";
 import { duplicationSignal, duplicationGate } from "@/lib/ai-code/reuse-enforcement";
@@ -522,9 +524,19 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           } catch { /* cold/unavailable -> no examples block */ }
         }
 
+        // #3 CORRECTION MEMORY: tell the author what humans usually had to fix for
+        // this kind of task, so it does it up front. Flag-gated + best-effort.
+        let correctionBlock = "";
+        if (semanticReuseEnabled()) {
+          try {
+            const signals = await loadCorrectionSignals(workspaceId, classifyTaskType(prompt));
+            correctionBlock = buildCorrectionBlock(signals.categories);
+          } catch { /* cold/unavailable -> no corrections block */ }
+        }
+
         // REUSE block first (read existing capability), the exact exports, then the
         // past-failure warnings.
-        const block = [grounding, reuse.block, exportsBlock, ctx.block, exemplarsBlock, failuresBlock].filter(Boolean).join("\n\n---\n\n");
+        const block = [grounding, reuse.block, exportsBlock, ctx.block, exemplarsBlock, correctionBlock, failuresBlock].filter(Boolean).join("\n\n---\n\n");
         authorPrompt = withRepoContext(refinedPrompt, block);
         repoContextFiles = ctx.files;
         if (pkgJson) installedRoots = parseInstalledRoots(pkgJson);
