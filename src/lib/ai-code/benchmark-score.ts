@@ -16,11 +16,36 @@ export interface BenchResponse {
   run?: { status?: string; diff?: string } | null;
   executor?: { author?: string } | null;
   executorAttempts?: number | null;
-  deepScan?: { blocking?: boolean } | null;
+  deepScan?: { blocking?: boolean; critical?: number } | null;
   duplication?: { escalate?: boolean } | null;
+  phantomImports?: unknown[] | null;
+  incompleteFiles?: unknown[] | null;
+  removedExports?: unknown[] | null;
+  anchorFailures?: unknown[] | null;
+  brokenLocalImports?: unknown[] | null;
   /** HTTP status of the pipeline call (a 400 notARequest / 422 no-change is not authored). */
   httpStatus?: number;
   notARequest?: boolean;
+}
+
+/** WHY a change did not hand off cleanly - the diagnostic that says what to fix. */
+export type HeldReason =
+  | "security" | "duplication" | "anchor-failure" | "broken-imports"
+  | "incomplete-output" | "intent-refused" | "no-change" | "needs-human-other" | "n/a";
+
+const len = (a: unknown[] | null | undefined): number => (Array.isArray(a) ? a.length : 0);
+
+/** Classify why a (non-authored) response was held/blocked. Pure. */
+export function heldReason(r: BenchResponse): HeldReason {
+  if (r.notARequest) return "intent-refused";
+  if ((r.httpStatus ?? 200) === 422) return "no-change";
+  if (r.deepScan?.blocking || (r.deepScan?.critical ?? 0) > 0) return "security";
+  if (r.duplication?.escalate) return "duplication";
+  if (len(r.anchorFailures) > 0) return "anchor-failure";
+  if (len(r.phantomImports) > 0 || len(r.brokenLocalImports) > 0) return "broken-imports";
+  if (len(r.incompleteFiles) > 0 || len(r.removedExports) > 0) return "incomplete-output";
+  if ((r.run?.status ?? "") === "needs_human") return "needs-human-other";
+  return "n/a";
 }
 
 export interface CaseScore {
@@ -36,6 +61,8 @@ export interface CaseScore {
   model: string;
   /** did the observed outcome match the expectation? */
   pass: boolean;
+  /** WHY it was held/blocked (n/a when authored). The fix-this signal. */
+  reason: HeldReason;
 }
 
 /** Classify one response into an outcome + score it against the expectation. Pure. */
@@ -62,7 +89,8 @@ export function scoreCase(id: string, expected: Expectation, r: BenchResponse): 
     expected === "blocked" ? outcome === "blocked" :
     /* held */ safeNonHandoff;
 
-  return { id, expected, outcome, firstPassReady, escalated, model: r.executor?.author ?? "", pass };
+  const reason: HeldReason = outcome === "authored" ? "n/a" : heldReason(r);
+  return { id, expected, outcome, firstPassReady, escalated, model: r.executor?.author ?? "", pass, reason };
 }
 
 export interface Scorecard {
@@ -76,6 +104,8 @@ export interface Scorecard {
   /** cases whose observed outcome matched the expectation / total. */
   expectationMatchRate: number;
   escalationRate: number;
+  /** count of held/blocked cases by reason - the dominant blocker to fix first. */
+  reasonBreakdown: Record<string, number>;
   cases: CaseScore[];
 }
 
@@ -90,11 +120,14 @@ export function summarizeScorecard(scores: readonly CaseScore[]): Scorecard {
   const matched = scores.filter((s) => s.pass).length;
   const escalated = scores.filter((s) => s.escalated).length;
   const rate = (n: number) => (total > 0 ? n / total : 0);
+  const reasonBreakdown: Record<string, number> = {};
+  for (const s of scores) if (s.reason !== "n/a") reasonBreakdown[s.reason] = (reasonBreakdown[s.reason] ?? 0) + 1;
   return {
     total, authored, held, blocked, errored,
     firstPassReadyRate: rate(firstPass),
     expectationMatchRate: rate(matched),
     escalationRate: rate(escalated),
+    reasonBreakdown,
     cases: [...scores],
   };
 }

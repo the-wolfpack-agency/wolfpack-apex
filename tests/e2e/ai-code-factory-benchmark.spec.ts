@@ -77,7 +77,7 @@ test.describe("factory reliability benchmark", () => {
       const s = scoreCase(c.id, c.expected, resp);
       scores.push(s);
       // eslint-disable-next-line no-console
-      console.log(`[bench] ${c.id} expected=${c.expected} -> outcome=${s.outcome} firstPass=${s.firstPassReady} escalated=${s.escalated} model=${s.model} pass=${s.pass}`);
+      console.log(`[bench] ${c.id} expected=${c.expected} -> outcome=${s.outcome} reason=${s.reason} firstPass=${s.firstPassReady} escalated=${s.escalated} model=${s.model} pass=${s.pass}`);
     }
 
     const card = summarizeScorecard(scores);
