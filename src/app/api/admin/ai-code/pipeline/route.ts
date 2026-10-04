@@ -29,6 +29,8 @@ import { runPipeline } from "@/lib/ai-code/pipeline";
 import { authorDiff, authorFileChanges, authorAnchorEdits } from "@/lib/ai-code/author";
 import { composeRefinePrompt } from "@/lib/ai-code/refine";
 import { touchesSecuritySurface } from "@/lib/ai-code/security-surface";
+import { applyDenyRules, touchesPolicyProtectedPaths } from "@/lib/ai-code/policy";
+import { loadCodeGatePolicy } from "@/lib/ai-code/policy-store";
 import { filesToDiff, type FileChange } from "@/lib/ai-code/file-changes";
 import { applyAnchorEdits, anchorFailureFeedback, type AnchorFailure } from "@/lib/ai-code/anchor-edit";
 import { newFilesFromDiff } from "@/lib/ai-code/oracle";
@@ -672,6 +674,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // is needs_human, with the parse errors surfaced. (Found by dogfooding: a
   // diff-truncated file missing its closing brace was marked allow / ready.)
   const finalFiles = resolvedFiles({ diff: run.diff, changes });
+  // POLICY-AS-CODE (additive, default empty = identical to today): a client's own
+  // deny rules merge into the deep scan (critical holds the handoff); their
+  // protected paths extend the security surface below.
+  const gatePolicy = await loadCodeGatePolicy(workspaceId);
+  const policyFindings = applyDenyRules(Object.fromEntries(finalFiles.map((f) => [f.path, f.content])), gatePolicy);
+  if (policyFindings.length > 0) {
+    deepScan.findings.push(...policyFindings);
+    deepScan.critical += policyFindings.filter((f) => f.severity === "critical").length;
+    deepScan.high += policyFindings.filter((f) => f.severity === "high").length;
+    deepScan.blocking = deepScan.blocking || deepScan.critical > 0;
+  }
   const syntax = checkSyntax(finalFiles);
   // Phantom-dependency gate: a change that imports a package not in package.json
   // always fails CI ("Cannot find module") - it can never hand off. Enforced, not
@@ -731,7 +744,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // guardrails/allowlists, CSP/auth/crypto, OGIAM PEP, CI gate) must get explicit
   // human review even if the content gate allowed it - the factory may improve its
   // gate, never silently weaken it. Non-empty => needs_human, not an auto-handoff.
-  const securitySurface = touchesSecuritySurface(finalFiles.map((f) => f.path));
+  const securitySurface = [
+    ...touchesSecuritySurface(finalFiles.map((f) => f.path)),
+    ...touchesPolicyProtectedPaths(finalFiles.map((f) => f.path), gatePolicy),
+  ];
   let approvalId: string | null = null;
   if (run.status === "ready_for_pr" && !invariants.wouldBlock && !deepScan.blocking && !dupGate.escalate && filesModeHandoffOk && syntax.ok && phantomImports.length === 0 && incompleteFiles.length === 0 && removedExports.length === 0 && anchorFailures.length === 0 && brokenLocalImports.length === 0 && securitySurface.length === 0) {
     // Provision the factory's own governed principal (active + revocable) and hand
@@ -836,5 +852,5 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     verdict_reason: run.review.verdict.reason,
   });
 
-  return NextResponse.json({ run: effectiveRun, approvalId, executor, invariants, changeFacts, deepScan, duplication: dupGate, securitySurface, syntax, phantomImports, incompleteFiles, removedExports, anchorFailures, brokenLocalImports, selfHealed, mode: effectiveMode, executorAttempts, repoContext: { files: repoContextFiles }, cost });
+  return NextResponse.json({ run: effectiveRun, approvalId, executor, invariants, changeFacts, deepScan, duplication: dupGate, securitySurface, policyApplied: { denyRules: gatePolicy.denyRules.length, protectedPaths: gatePolicy.protectedPaths.length }, syntax, phantomImports, incompleteFiles, removedExports, anchorFailures, brokenLocalImports, selfHealed, mode: effectiveMode, executorAttempts, repoContext: { files: repoContextFiles }, cost });
 }
