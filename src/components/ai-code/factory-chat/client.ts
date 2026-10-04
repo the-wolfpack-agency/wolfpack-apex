@@ -18,6 +18,8 @@ export interface RunOutcome {
   approvalId?: string | null;
   model?: { name: string; escalated: boolean };
   error?: string;
+  /** The prompt was not a change request (intent gate). Render as a gentle nudge. */
+  notARequest?: boolean;
 }
 
 export async function requestPipelineRun(input: RunInput): Promise<RunOutcome> {
@@ -26,7 +28,7 @@ export async function requestPipelineRun(input: RunInput): Promise<RunOutcome> {
     headers: JSON_HEADERS,
     body: JSON.stringify({ ref: input.ref?.trim() || "factory", repo: input.repo?.trim() || undefined, prompt: input.prompt.trim() }),
   });
-  const body = (await res.json().catch(() => ({}))) as PipelineResult & { approvalId?: string | null; executorAttempts?: number; error?: string };
+  const body = (await res.json().catch(() => ({}))) as PipelineResult & { approvalId?: string | null; executorAttempts?: number; error?: string; notARequest?: boolean };
   const author = body.executor?.author ?? "";
   return {
     ok: res.ok,
@@ -35,6 +37,7 @@ export async function requestPipelineRun(input: RunInput): Promise<RunOutcome> {
     approvalId: body.approvalId ?? null,
     model: author ? { name: author, escalated: (body.executorAttempts ?? 1) > 1 } : undefined,
     error: res.ok ? undefined : body.error || `The factory responded ${res.status}.`,
+    notARequest: body.notARequest === true,
   };
 }
 
