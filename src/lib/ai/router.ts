@@ -845,8 +845,11 @@ class RouterClient implements AIClient {
               feature: cReq.metadata?.feature ?? "unknown",
             },
           );
+          // Strip CR/LF from the interpolated provider name so a crafted name can
+          // never forge a second log line (CWE-117 / js/log-injection).
+          const safeName = String(primary.name).replace(/[\r\n]+/g, " ");
           console.warn(
-            `[ai/router] ${primary.name} has no deployment for tier ${cReq.model_tier}; serving ${lower} instead`,
+            `[ai/router] ${safeName} has no deployment for tier ${cReq.model_tier}; serving ${lower} instead`,
           );
           // Surface the degrade on the RESPONSE (not just analytics) so the caller
           // sees the requested capability was not served.
