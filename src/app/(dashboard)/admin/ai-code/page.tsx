@@ -228,6 +228,9 @@ export default function CodeFactoryPage() {
   const [ref, setRef] = useState("");
   const [repo, setRepo] = useState("");
   const [prompt, setPrompt] = useState("");
+  // Iterative refinement: an instruction to revise the current run's change in
+  // place, instead of starting a fresh prompt. Re-runs with refineOf=run.diff.
+  const [refineInstruction, setRefineInstruction] = useState("");
   const [executorPin, setExecutorPin] = useState("");
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [run, setRun] = useState<PipelineRun | null>(null);
@@ -351,7 +354,7 @@ export default function CodeFactoryPage() {
     void loadHistory();
   }, [loadHistory]);
 
-  const generate = useCallback(async (opts?: { keepAnswers?: boolean }) => {
+  const generate = useCallback(async (opts?: { keepAnswers?: boolean; refineOf?: string; promptOverride?: string }) => {
     if (!prompt.trim()) {
       setError("Describe the change you want the factory to build.");
       return;
@@ -384,7 +387,9 @@ export default function CodeFactoryPage() {
         body: JSON.stringify({
           ref: ref.trim() || "factory",
           repo: repo.trim() || undefined,
-          prompt: prompt.trim(),
+          prompt: (opts?.promptOverride ?? prompt).trim(),
+          // Iterative refinement: the prior change to revise, per the instruction.
+          refineOf: opts?.refineOf,
           executorProviderPin: executorPin.trim() || undefined,
           // Confirmed/changed assumptions from the clarifier (empty on a fresh run,
           // so the clarifier re-opens every question against the new prompt).
@@ -782,6 +787,26 @@ export default function CodeFactoryPage() {
                       {line || " "}
                     </div>
                   ))}
+                </div>
+                {/* Iterative refinement: revise this change in place (re-gated in full). */}
+                <div style={{ marginTop: "0.8rem", display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                  <input
+                    data-testid="refine-instruction"
+                    value={refineInstruction}
+                    onChange={(e) => setRefineInstruction(e.target.value)}
+                    placeholder="Refine this change — e.g. 'also handle the empty case'"
+                    onKeyDown={(e) => { if (e.key === "Enter" && refineInstruction.trim() && !running) void generate({ refineOf: run.diff, promptOverride: refineInstruction }); }}
+                    style={{ flex: 1, background: "var(--wp-surface-2, #171a21)", border: "1px solid var(--wp-border, #2a2f3a)", borderRadius: 8, color: "var(--wp-text, #e6e9ef)", padding: "0.45rem 0.7rem", fontSize: "0.82rem" }}
+                  />
+                  <button
+                    type="button"
+                    data-testid="refine-run"
+                    disabled={running || !refineInstruction.trim()}
+                    onClick={() => void generate({ refineOf: run.diff, promptOverride: refineInstruction })}
+                    style={btnStyle(running || !refineInstruction.trim())}
+                  >
+                    {running ? "Refining…" : "Refine"}
+                  </button>
                 </div>
               </GlassPanel>
             );

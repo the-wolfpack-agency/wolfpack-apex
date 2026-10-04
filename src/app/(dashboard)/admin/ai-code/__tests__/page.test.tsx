@@ -567,3 +567,16 @@ test("per-site selector: lists the sites the factory built against and scopes hi
     ).toBe(true),
   );
 });
+
+test("iterative refinement: Refine re-runs the pipeline with refineOf = the prior diff", async () => {
+  pipelineResp = resp(200, runResp({ outcome: "allow" }));
+  render(<CodeFactoryPage />);
+  await submitPrompt();
+  await waitFor(() => expect(screen.getByTestId("generated-code")).toBeInTheDocument());
+  fireEvent.change(screen.getByTestId("refine-instruction"), { target: { value: "also handle the empty string" } });
+  await act(async () => { fireEvent.click(screen.getByTestId("refine-run")); });
+  const calls = mockFetch.mock.calls.filter((c) => c[0] === "/api/admin/ai-code/pipeline");
+  const body = JSON.parse((calls[calls.length - 1][1] as { body: string }).body);
+  expect(body.refineOf).toContain("diff --git a/lib/x.ts");
+  expect(body.prompt).toBe("also handle the empty string");
+});
