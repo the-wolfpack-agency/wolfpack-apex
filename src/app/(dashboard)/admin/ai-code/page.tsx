@@ -20,6 +20,7 @@ import { GlassPanel, MetricTile, StatusPill, SectionHeader, type SeverityTone } 
 import BenchmarkPanel from "@/components/ai-code/BenchmarkPanel";
 import WatchedReposPanel from "@/components/ai-code/WatchedReposPanel";
 import PipelineDashboard, { type CiDashboard } from "@/components/ai-code/PipelineDashboard";
+import FactoryBrainPanel from "@/components/ai-code/FactoryBrainPanel";
 
 type Outcome = "allow" | "escalate" | "block";
 
@@ -888,6 +889,8 @@ export default function CodeFactoryPage() {
           <p data-testid="brain-note" style={{ marginTop: "0.6rem", fontSize: "0.85rem", color: "var(--wp-text, #e6e9ef)" }}>{brainNote}</p>
         )}
       </GlassPanel>
+
+      <FactoryBrainPanel />
 
       {efficacy && efficacy.runs > 0 && (
         <GlassPanel title="Improving over time" subtitle={`Over the last ${efficacy.windowDays} days. If the brain is working, first-pass + acceptance rise and repeat findings fall.`}>
