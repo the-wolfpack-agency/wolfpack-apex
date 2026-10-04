@@ -25,6 +25,11 @@ const cleanResult: PipelineResult = {
 beforeEach(() => jest.clearAllMocks());
 afterEach(() => cleanup());
 
+it("renders the OGIAM brand lockup in the header", () => {
+  render(<FactoryChat />);
+  expect(screen.getByAltText("OGIAM")).toBeInTheDocument();
+});
+
 it("a prompt chip seeds the composer", () => {
   render(<FactoryChat />);
   fireEvent.click(screen.getByTestId("chip-migration"));

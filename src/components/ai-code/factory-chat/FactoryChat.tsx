@@ -13,6 +13,7 @@ import { NEON, neonGlow } from "./neon";
 import ChatBubble from "./ChatBubble";
 import CheckpointTrack from "./CheckpointTrack";
 import PromptChips from "./PromptChips";
+import FactoryLogo from "./FactoryLogo";
 import { deriveCheckpoints, trackSummary } from "./checkpoints";
 import { requestPipelineRun, approveHandoff, loadCi } from "./client";
 import type { ChatTurn } from "./types";
@@ -75,12 +76,13 @@ export default function FactoryChat({ defaultRepo = "" }: { defaultRepo?: string
   }, [patch, repo]);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "1rem", maxWidth: 820, margin: "0 auto", minHeight: "70vh" }}>
-      <header style={{ textAlign: "center" }}>
-        <h1 style={{ fontSize: "1.1rem", letterSpacing: "0.08em", textTransform: "uppercase", color: NEON.accent, textShadow: neonGlow(NEON.accent), margin: 0 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: "1rem", maxWidth: 820, margin: "0 auto", minHeight: "70vh", fontFamily: NEON.fontSans }}>
+      <header style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "0.5rem" }}>
+        <FactoryLogo height={44} />
+        <div style={{ fontSize: "0.72rem", letterSpacing: "0.22em", textTransform: "uppercase", color: NEON.accent }}>
           Code Factory
-        </h1>
-        <p style={{ color: NEON.textDim, fontSize: "0.82rem", marginTop: "0.3rem" }}>
+        </div>
+        <p style={{ color: NEON.textDim, fontSize: "0.82rem", margin: 0, textAlign: "center" }}>
           Describe the change. The factory writes it, proves it through the gate, and hands you a PR to approve.
         </p>
       </header>

@@ -10,7 +10,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getInstinctUser } from "@/lib/client-auth";
 import FactoryChat from "@/components/ai-code/factory-chat/FactoryChat";
-import { NEON } from "@/components/ai-code/factory-chat/neon";
+import { NEON, BRAND_BACKGROUND } from "@/components/ai-code/factory-chat/neon";
 
 export default function CodeFactoryChatPage(): React.ReactElement | null {
   const router = useRouter();
@@ -31,7 +31,10 @@ export default function CodeFactoryChatPage(): React.ReactElement | null {
     <main
       style={{
         minHeight: "100vh",
-        background: `radial-gradient(1200px 600px at 50% -10%, #0e1420 0%, ${NEON.ground} 60%)`,
+        background: BRAND_BACKGROUND,
+        backgroundAttachment: "fixed",
+        color: NEON.text,
+        fontFamily: NEON.fontSans,
         padding: "2rem 1rem 3rem",
       }}
     >
