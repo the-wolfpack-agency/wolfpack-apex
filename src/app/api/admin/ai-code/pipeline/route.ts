@@ -44,7 +44,7 @@ import { buildRunCost } from "@/lib/ai-code/cost";
 import { workspaceGithubClient, fetchFileContent, fetchRepoTree } from "@/lib/github-client";
 import { buildRepoContext, withRepoContext, extractMentionedPaths } from "@/lib/ai-code/repo-context";
 import { findReuseCandidates } from "@/lib/ai-code/reuse-scout";
-import { semanticReuseEnabled } from "@/lib/ai-code/reuse-scout-semantic";
+import { semanticReuseEnabled, crossRepoMemoryEnabled } from "@/lib/ai-code/reuse-scout-semantic";
 import { rememberRepoTree } from "@/lib/ai-code/factory-reuse-producer";
 import { searchFailureMemory } from "@/lib/ai-code/factory-failure-index";
 import { rememberRunFailures, buildFailureAvoidanceBlock } from "@/lib/ai-code/factory-failure-producer";
@@ -505,7 +505,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         let failuresBlock = "";
         if (semanticReuseEnabled()) {
           try {
-            const hits = await searchFailureMemory({ workspaceId, repo: groundingRepo, query: prompt });
+            const hits = await searchFailureMemory({ workspaceId, repo: groundingRepo, query: prompt, crossRepo: crossRepoMemoryEnabled() });
             failuresBlock = buildFailureAvoidanceBlock(hits);
             retrievedFailureKeys.push(...hits.map((h) => failureSignature(h.findingClass, h.summary)));
           } catch { /* cold/unavailable memory -> no warning block */ }
