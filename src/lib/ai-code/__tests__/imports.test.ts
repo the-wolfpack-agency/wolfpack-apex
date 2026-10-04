@@ -251,3 +251,20 @@ describe("brokenLocalImportFeedback", () => {
     expect(fb).toMatch(/has no exported member|NOT exported/i);
   });
 });
+
+
+describe("resolveLocalCandidates @/ fallback (alias map unavailable at runtime)", () => {
+  it("resolves @/ imports to src/ even with an EMPTY alias map (the broken-imports false positive)", () => {
+    const c = resolveLocalCandidates("src/app/api/admin/x/route.ts", "@/lib/auth", {});
+    expect(c).toContain("src/lib/auth.ts");
+    expect(c).toContain("src/lib/auth/index.ts");
+  });
+  it("still prefers the REAL alias map when present", () => {
+    const c = resolveLocalCandidates("src/x.ts", "~/lib/thing", { "~/": "app/" });
+    expect(c).toContain("app/lib/thing.ts");
+  });
+  it("does not treat a bare package as a local module", () => {
+    expect(resolveLocalCandidates("src/x.ts", "react", {})).toEqual([]);
+    expect(resolveLocalCandidates("src/x.ts", "@scope/pkg", {})).toEqual([]);
+  });
+});
