@@ -90,6 +90,25 @@ it("merge is gated on consent, then opens the PR and shows the link", async () =
   await waitFor(() => expect(screen.getByTestId("pr-link")).toHaveAttribute("href", "https://github.com/o/r/pull/7"));
 });
 
+it("after the PR opens, CI status fills the test dots in-chat (no link-out)", async () => {
+  mockRun.mockResolvedValue({ ok: true, status: 200, result: cleanResult, approvalId: "appr1", model: { name: "gpt-4o-mini", escalated: false } });
+  mockApprove.mockResolvedValue({ ok: true, validating: false, prUrl: "https://github.com/o/r/pull/7", branch: "factory/x" });
+  mockCi.mockResolvedValue({ overall: "pass", categories: [
+    { key: "security", label: "Security tests", status: "pass" },
+    { key: "db", label: "Data tests", status: "pass" },
+  ] });
+  render(<FactoryChat defaultRepo="o/r" />);
+  goFreeform();
+  fireEvent.change(screen.getByTestId("composer"), { target: { value: "Add a thing" } });
+  await act(async () => { fireEvent.click(screen.getByTestId("send")); });
+  await waitFor(() => expect(screen.getByTestId("merge")).toBeInTheDocument());
+  fireEvent.click(screen.getByTestId("consent"));
+  await act(async () => { fireEvent.click(screen.getByTestId("merge")); });
+  await waitFor(() => expect(screen.getByText("Security tests")).toBeInTheDocument()); // CI dot filled in-chat
+  expect(screen.getByText("Data tests")).toBeInTheDocument();
+  expect(mockCi).toHaveBeenCalledWith("o/r", "factory/x");
+});
+
 it("a held (needs_human) run shows the held notice, no consent CTA", async () => {
   mockRun.mockResolvedValue({ ok: true, status: 200, result: { ...cleanResult, run: { status: "needs_human", diff: "x" }, deepScan: { blocking: true, critical: 1 } }, approvalId: null, model: { name: "DeepSeek-V4-Flash", escalated: true } });
   render(<FactoryChat />);

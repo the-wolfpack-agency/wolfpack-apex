@@ -21,6 +21,11 @@ import { requestPipelineRun, approveHandoff, loadCi } from "./client";
 import type { ChatTurn } from "./types";
 import type { PromptChip } from "./chips";
 
+/** CI poll cadence after a PR opens: fill the test dots live until CI is terminal. */
+const CI_POLL_MS = 15_000;
+const CI_POLL_MAX = 40; // ~10 min ceiling
+const sleep = (ms: number) => new Promise<void>((r) => { setTimeout(r, ms); });
+
 let turnSeq = 0;
 const nextId = (): string => `turn-${++turnSeq}`;
 
@@ -70,10 +75,17 @@ export default function FactoryChat({ defaultRepo = "" }: { defaultRepo?: string
     const out = await approveHandoff(approvalId);
     if (out.ok && out.prUrl) {
       patch(turn.id, { phase: "pr-open", prUrl: out.prUrl });
-      // Pull the post-PR CI for the branch so the test checkpoints fill in.
+      // Poll the post-PR CI for the branch so the test checkpoints fill in LIVE,
+      // in-chat - no link-out to GitHub Actions to watch the build. Bounded.
       if (out.branch && repo.trim()) {
-        const ci = await loadCi(repo.trim(), out.branch);
-        if (ci) patch(turn.id, { ci });
+        const repoFull = repo.trim();
+        const branch = out.branch;
+        for (let i = 0; i < CI_POLL_MAX; i++) {
+          const ci = await loadCi(repoFull, branch);
+          if (ci) patch(turn.id, { ci });
+          if (!ci || ci.overall !== "pending") break; // terminal (or unavailable)
+          await sleep(CI_POLL_MS);
+        }
       }
     } else {
       patch(turn.id, { phase: "awaiting-human", error: out.validating ? "The repo's own gate is still validating - retry shortly." : out.error });
