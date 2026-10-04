@@ -44,6 +44,8 @@ import { buildRunCost } from "@/lib/ai-code/cost";
 import { workspaceGithubClient, fetchFileContent, fetchRepoTree } from "@/lib/github-client";
 import { buildRepoContext, withRepoContext, extractMentionedPaths } from "@/lib/ai-code/repo-context";
 import { findReuseCandidates } from "@/lib/ai-code/reuse-scout";
+import { semanticReuseEnabled } from "@/lib/ai-code/reuse-scout-semantic";
+import { rememberRepoTree } from "@/lib/ai-code/factory-reuse-producer";
 import { buildKnownExportsBlock, exportsEntries } from "@/lib/ai-code/export-grounding";
 import { duplicationSignal, duplicationGate } from "@/lib/ai-code/reuse-enforcement";
 import { pickAuthorMode } from "@/lib/ai-code/author-mode";
@@ -451,6 +453,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         reuseSemantic = reuse.semantic;
         reuseCandidatesList = reuse.candidates.map((c) => ({ path: c.path, score: c.score }));
         repoTree = new Set(tree);
+        // FACTORY BRAIN producer: persist this repo's code paths into the reuse
+        // corpus so it fills as runs happen (the indexer cron embeds them later).
+        // Flag-gated + fire-and-forget: a cheap SQL write that never blocks or
+        // fails the run. Off entirely until AI_CODE_SEMANTIC_REUSE is set.
+        if (semanticReuseEnabled()) {
+          void rememberRepoTree({ workspaceId, repo: groundingRepo, treePaths: tree }).catch(() => {});
+        }
         if (tsconfig) aliasMap = parseAliasMap(tsconfig);
 
         // EXPORT GROUNDING: the exact exported symbols of the modules this task is
