@@ -9,6 +9,7 @@ const mockCountFailures = jest.fn();
 const mockClient = jest.fn();
 const mockTree = jest.fn();
 const mockRemember = jest.fn();
+const mockPrune = jest.fn();
 const mockIndex = jest.fn();
 const mockAudit = jest.fn();
 const mockTrack = jest.fn();
@@ -19,7 +20,7 @@ jest.mock("@/lib/auth/workspace", () => ({ resolveWorkspace: (w: string) => w })
 jest.mock("@/lib/analytics", () => ({ trackEvent: (...a: unknown[]) => mockTrack(...a) }));
 jest.mock("@/lib/audit-log", () => ({ recordAuditNonFatal: (...a: unknown[]) => mockAudit(...a), extractRequestMetadata: () => ({}) }));
 jest.mock("@/lib/github-client", () => ({ workspaceGithubClient: (...a: unknown[]) => mockClient(...a), fetchRepoTree: (...a: unknown[]) => mockTree(...a) }));
-jest.mock("@/lib/ai-code/factory-reuse-store", () => ({ countReuseCorpus: (...a: unknown[]) => mockCount(...a) }));
+jest.mock("@/lib/ai-code/factory-reuse-store", () => ({ countReuseCorpus: (...a: unknown[]) => mockCount(...a), pruneStaleReuse: (...a: unknown[]) => mockPrune(...a) }));
 jest.mock("@/lib/ai-code/factory-failure-store", () => ({ countFailures: (...a: unknown[]) => mockCountFailures(...a) }));
 jest.mock("@/lib/ai-code/factory-reuse-producer", () => ({ rememberRepoTree: (...a: unknown[]) => mockRemember(...a) }));
 jest.mock("@/lib/ai-code/factory-reuse-index", () => ({ indexReuseCorpus: (...a: unknown[]) => mockIndex(...a) }));
@@ -38,6 +39,7 @@ beforeEach(() => {
   mockClient.mockResolvedValue({ token: "t" });
   mockTree.mockResolvedValue(["src/a.ts", "src/b.ts"]);
   mockRemember.mockResolvedValue({ written: 2 });
+  mockPrune.mockResolvedValue({ pruned: 1 });
   mockIndex.mockResolvedValue({ indexed: 2 });
   mockAudit.mockResolvedValue({ ok: true });
 });
@@ -63,7 +65,8 @@ it("POST backfills: fetch tree -> remember -> index, audits + tracks", async () 
   const res = await POST(post({ repo: "acme/app" }));
   expect(res.status).toBe(200);
   const json = await res.json();
-  expect(json).toMatchObject({ written: 2, indexed: 2, total: 42 });
+  expect(json).toMatchObject({ written: 2, indexed: 2, pruned: 1, total: 42 });
+  expect(mockPrune).toHaveBeenCalledWith("w1", "acme/app", ["src/a.ts", "src/b.ts"]);
   expect(mockRemember).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: "w1", repo: "acme/app", treePaths: ["src/a.ts", "src/b.ts"] }));
   expect(mockIndex).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: "w1", repo: "acme/app" }));
   expect(mockAudit).toHaveBeenCalledWith(expect.objectContaining({ action: "ai_code.brain.backfilled" }));

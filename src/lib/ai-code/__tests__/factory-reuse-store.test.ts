@@ -17,6 +17,7 @@ import {
   loadReuseCorpus,
   countReuseCorpus,
   MAX_CORPUS_WRITE,
+  pruneStaleReuse,
 } from "@/lib/ai-code/factory-reuse-store";
 
 beforeEach(() => jest.clearAllMocks());
@@ -82,5 +83,26 @@ describe("loadReuseCorpus / countReuseCorpus (read, degrade to []/0)", () => {
     mockSafeQuery.mockResolvedValue({ rows: [{ n: 42 }] });
     expect(await countReuseCorpus("w1", "o/r")).toBe(42);
     expect(mockSafeQuery.mock.calls[1][1]).toEqual(["w1", "o/r"]);
+  });
+});
+
+describe("pruneStaleReuse (drop paths no longer in the repo)", () => {
+  it("SAFETY: empty livePaths prunes nothing (never wipes on a failed tree fetch)", async () => {
+    const r = await pruneStaleReuse("w1", "o/r", []);
+    expect(r.pruned).toBe(0);
+    expect(mockQuery).not.toHaveBeenCalled();
+  });
+  it("deletes rows whose path is not in the live tree, workspace+repo scoped", async () => {
+    mockQuery.mockResolvedValue({ rowCount: 3 });
+    const r = await pruneStaleReuse("w1", "o/r", ["src/a.ts", "src/b.ts"]);
+    expect(r.pruned).toBe(3);
+    const [sql, params] = mockQuery.mock.calls[0];
+    expect(sql).toMatch(/DELETE FROM instinct_factory_reuse_corpus/);
+    expect(sql).toMatch(/NOT \(path = ANY\(\$3::text\[\]\)\)/);
+    expect(params).toEqual(["w1", "o/r", ["src/a.ts", "src/b.ts"]]);
+  });
+  it("never throws on a db error (maintenance; leaves stale rows)", async () => {
+    mockQuery.mockRejectedValue(new Error("db down"));
+    await expect(pruneStaleReuse("w1", "o/r", ["x"])).resolves.toEqual({ pruned: 0 });
   });
 });

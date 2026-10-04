@@ -27,7 +27,7 @@ import { trackEvent } from "@/lib/analytics";
 import { recordAuditNonFatal, extractRequestMetadata } from "@/lib/audit-log";
 import { workspaceGithubClient, fetchRepoTree } from "@/lib/github-client";
 import { isValidRepo } from "@/lib/ai-code/watched-repos";
-import { countReuseCorpus } from "@/lib/ai-code/factory-reuse-store";
+import { countReuseCorpus, pruneStaleReuse } from "@/lib/ai-code/factory-reuse-store";
 import { countFailures } from "@/lib/ai-code/factory-failure-store";
 import { rememberRepoTree } from "@/lib/ai-code/factory-reuse-producer";
 import { indexReuseCorpus } from "@/lib/ai-code/factory-reuse-index";
@@ -63,15 +63,19 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // building blocks; a GitHub failure yields written:0 rather than a 500.
   let written = 0;
   let indexed = 0;
+  let pruned = 0;
   try {
     const client = await workspaceGithubClient(workspaceId);
     if (client.token) {
       const tree = await fetchRepoTree(client, repo).catch(() => [] as string[]);
       ({ written } = await rememberRepoTree({ workspaceId, repo, treePaths: tree }));
+      // Sync: drop corpus rows whose path is no longer in the live tree (deleted/
+      // renamed files). pruneStaleReuse never wipes on an empty/failed tree.
+      ({ pruned } = await pruneStaleReuse(workspaceId, repo, tree));
       ({ indexed } = await indexReuseCorpus({ workspaceId, repo }));
     }
   } catch {
-    // leave written/indexed at 0; the response reports the honest result
+    // leave written/indexed/pruned at 0; the response reports the honest result
   }
 
   const total = await countReuseCorpus(workspaceId);
@@ -82,7 +86,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     action: "ai_code.brain.backfilled",
     resourceType: "reuse_corpus",
     resourceId: `${workspaceId}:${repo}`,
-    afterState: { workspace_id: workspaceId, repo, written, indexed, total },
+    afterState: { workspace_id: workspaceId, repo, written, indexed, pruned, total },
     ipAddress: meta.ipAddress,
     userAgent: meta.userAgent,
     requestId: meta.requestId,
@@ -94,5 +98,5 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     indexed,
   });
 
-  return NextResponse.json({ written, indexed, total }, { status: 200 });
+  return NextResponse.json({ written, indexed, pruned, total }, { status: 200 });
 }
