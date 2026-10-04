@@ -63,6 +63,7 @@ const QUOTED_INTERPOLATION_OK: Readonly<Record<string, string>> = {
  */
 const LIMIT_INTERPOLATION_OK: readonly string[] = [
   "app/api/admin/feedback/route.ts",
+  "lib/ai-code/factory-exemplar-store.ts", // LIMIT clamped to [1,20] before interpolation
   "lib/ai-code/factory-failure-store.ts",
   "lib/ai-code/factory-reuse-store.ts",
   "lib/ai-code/runs.ts",

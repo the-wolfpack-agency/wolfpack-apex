@@ -20,6 +20,7 @@ import { workspaceGithubClient, getPullRequest } from "@/lib/github-client";
 import { resolveWorkspace } from "@/lib/auth/workspace";
 import { pollMergeOutcomes, type OpenedPr, type PrState } from "@/lib/ai-code/merge-poll";
 import { reinforceFromOutcome } from "@/lib/ai-code/factory-reinforce";
+import { markExemplarMerged } from "@/lib/ai-code/factory-exemplar-store";
 
 function isAuthorizedCron(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET;
@@ -69,12 +70,11 @@ async function run(): Promise<NextResponse> {
     // Close the learning loop: a merged PR reinforces the memories its run used;
     // a closed-unmerged one decays them (weight-aware retrieval reads the result).
     reinforce: async (o) => {
-      await reinforceFromOutcome({
-        workspaceId: resolveWorkspace(null),
-        repo: o.repo,
-        approvalId: o.approvalId,
-        merged: o.event === "ai_code.pr_merged",
-      });
+      const workspaceId = resolveWorkspace(null);
+      const merged = o.event === "ai_code.pr_merged";
+      await reinforceFromOutcome({ workspaceId, repo: o.repo, approvalId: o.approvalId, merged });
+      // #10: a merged PR promotes its exemplar to the positive, retrievable set.
+      if (merged && o.approvalId) await markExemplarMerged(workspaceId, o.approvalId);
     },
   });
 

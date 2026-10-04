@@ -51,6 +51,7 @@ import { rememberRunFailures, buildFailureAvoidanceBlock } from "@/lib/ai-code/f
 import { failureSignature } from "@/lib/ai-code/factory-failure-store";
 import { recordMemoryProvenance } from "@/lib/ai-code/factory-provenance";
 import { markReuseUsage } from "@/lib/ai-code/factory-memory-usefulness";
+import { recordExemplar, loadExemplars, buildExemplarBlock } from "@/lib/ai-code/factory-exemplar-store";
 import { classifyTaskType } from "@/lib/ai-code/task-type";
 import { buildKnownExportsBlock, exportsEntries } from "@/lib/ai-code/export-grounding";
 import { duplicationSignal, duplicationGate } from "@/lib/ai-code/reuse-enforcement";
@@ -510,9 +511,19 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           } catch { /* cold/unavailable memory -> no warning block */ }
         }
 
+        // #10 EXEMPLARS: ground the author in similar work a human already merged
+        // (known-good in this codebase). Flag-gated + best-effort.
+        let exemplarsBlock = "";
+        if (semanticReuseEnabled()) {
+          try {
+            const ex = await loadExemplars(workspaceId, classifyTaskType(prompt));
+            exemplarsBlock = buildExemplarBlock(ex);
+          } catch { /* cold/unavailable -> no examples block */ }
+        }
+
         // REUSE block first (read existing capability), the exact exports, then the
         // past-failure warnings.
-        const block = [grounding, reuse.block, exportsBlock, ctx.block, failuresBlock].filter(Boolean).join("\n\n---\n\n");
+        const block = [grounding, reuse.block, exportsBlock, ctx.block, exemplarsBlock, failuresBlock].filter(Boolean).join("\n\n---\n\n");
         authorPrompt = withRepoContext(refinedPrompt, block);
         repoContextFiles = ctx.files;
         if (pkgJson) installedRoots = parseInstalledRoots(pkgJson);
@@ -851,6 +862,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           run.diff,
         );
         void recordMemoryProvenance(workspaceId, approvalId, groundingRepo, provenance).catch(() => {});
+        // #10: record this handoff as a (pending) exemplar; the merge-poll promotes
+        // it to merged=true if a human merges the PR. Pointer + prompt + model only.
+        void recordExemplar({
+          workspaceId,
+          approvalId,
+          repo: groundingRepo,
+          taskType: classifyTaskType(prompt),
+          prompt,
+          model: effectiveAuthor,
+        }).catch(() => {});
       }
     }
   }
