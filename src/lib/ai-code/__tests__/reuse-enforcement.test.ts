@@ -56,7 +56,7 @@ describe("duplicationSignal", () => {
 
   it("topReused is null when the scout found no candidate (nothing to reuse)", () => {
     const s = duplicationSignal([], reimplemented, aliasMap);
-    expect(s).toEqual({ topCandidatePath: null, topScore: 0, topReused: null });
+    expect(s).toEqual({ topCandidatePath: null, topScore: 0, topReused: null, addsNewFile: true });
   });
 
   it("EDITING the top candidate file counts as reuse, not re-implementation (the self-edit false positive)", () => {
@@ -69,33 +69,60 @@ describe("duplicationSignal", () => {
     // ...and therefore the DRY gate does NOT escalate a legitimate in-file edit.
     expect(duplicationGate(s).escalate).toBe(false);
   });
+
+  it("an EDIT whose top candidate is a DIFFERENT file does NOT escalate (the benchmark bug)", () => {
+    // Real case: "add a token to neon.ts" edited an existing file, but the scout
+    // surfaced a different high-scoring file as the top candidate -> the edit does
+    // not import it -> it was wrongly held as a "duplication". With the repo tree,
+    // an edits-only change is known to add no new file, so it cannot be a dup.
+    const repoTree = new Set(["src/components/neon.ts", "src/lib/other-theme.ts"]);
+    const editOnly = [{ path: "src/components/neon.ts", content: "export const NEON = { info: '#6aa6ff' };" }];
+    const cands = [{ path: "src/lib/other-theme.ts", score: 12 }]; // a DIFFERENT file scored top
+    const s = duplicationSignal(cands, editOnly, aliasMap, repoTree);
+    expect(s.addsNewFile).toBe(false);
+    expect(duplicationGate(s).escalate).toBe(false); // was `true` before the fix
+  });
+
+  it("a NEW file that re-implements a strong candidate STILL escalates (gate intact)", () => {
+    const repoTree = new Set(["src/lib/ai-code/grading.ts"]);
+    const newFile = [{ path: "src/app/brand-new-report.ts", content: "export function report(x: unknown[]) { return x.length; }" }];
+    const cands = [{ path: "src/lib/ai-code/grading.ts", score: 8 }];
+    const s = duplicationSignal(cands, newFile, aliasMap, repoTree);
+    expect(s.addsNewFile).toBe(true);
+    expect(duplicationGate(s).escalate).toBe(true); // the real dup case is unaffected
+  });
 });
 
 describe("duplicationGate (the DRY gate - this is what should have caught the detector-duplication incident)", () => {
   it("ESCALATES when a strong existing module was NOT reused (likely re-implementation)", () => {
-    const g = duplicationGate({ topCandidatePath: "src/lib/cost-summary.ts", topScore: 8, topReused: false });
+    const g = duplicationGate({ topCandidatePath: "src/lib/cost-summary.ts", topScore: 8, topReused: false, addsNewFile: true });
     expect(g.escalate).toBe(true);
     expect(g.candidatePath).toBe("src/lib/cost-summary.ts");
     expect(g.reason).toMatch(/re-implement|reuse/i);
   });
 
   it("does NOT escalate when the strong candidate WAS reused (imported)", () => {
-    const g = duplicationGate({ topCandidatePath: "src/lib/cost-summary.ts", topScore: 12, topReused: true });
+    const g = duplicationGate({ topCandidatePath: "src/lib/cost-summary.ts", topScore: 12, topReused: true, addsNewFile: true });
     expect(g.escalate).toBe(false);
     expect(g.reason).toBeNull();
   });
 
   it("does NOT escalate on a weak/coarse score below the threshold (precision - no noise)", () => {
-    const g = duplicationGate({ topCandidatePath: "src/lib/thing.ts", topScore: STRONG_DUPLICATION_SCORE - 1, topReused: false });
+    const g = duplicationGate({ topCandidatePath: "src/lib/thing.ts", topScore: STRONG_DUPLICATION_SCORE - 1, topReused: false, addsNewFile: true });
     expect(g.escalate).toBe(false);
   });
 
   it("does NOT escalate when there was no candidate at all", () => {
-    const g = duplicationGate({ topCandidatePath: null, topScore: 0, topReused: null });
+    const g = duplicationGate({ topCandidatePath: null, topScore: 0, topReused: null, addsNewFile: true });
     expect(g.escalate).toBe(false);
   });
 
   it("fires exactly at the threshold boundary", () => {
-    expect(duplicationGate({ topCandidatePath: "a.ts", topScore: STRONG_DUPLICATION_SCORE, topReused: false }).escalate).toBe(true);
+    expect(duplicationGate({ topCandidatePath: "a.ts", topScore: STRONG_DUPLICATION_SCORE, topReused: false, addsNewFile: true }).escalate).toBe(true);
+  });
+
+  it("NEVER escalates an EDITS-ONLY change (a strong candidate but no new file) - the benchmark bug", () => {
+    const g = duplicationGate({ topCandidatePath: "src/lib/cost-summary.ts", topScore: 12, topReused: false, addsNewFile: false });
+    expect(g.escalate).toBe(false); // editing existing files cannot be a re-implementation
   });
 });

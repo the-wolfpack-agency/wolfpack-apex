@@ -49,6 +49,10 @@ export interface DuplicationSignal {
   topScore: number;
   /** Whether the change imported from it. null when there was no candidate. */
   topReused: boolean | null;
+  /** Does the change ADD a new file? A change that only EDITS existing files cannot
+   *  be a re-implementation of anything, so the DRY gate must not fire on it. True
+   *  when the repo tree is unknown (self-hosted / diff mode) to preserve behavior. */
+  addsNewFile: boolean;
 }
 
 /**
@@ -60,9 +64,14 @@ export function duplicationSignal(
   candidates: readonly { path: string; score: number }[],
   files: readonly { path: string; content: string }[],
   aliasMap: Record<string, string>,
+  repoTree?: ReadonlySet<string>,
 ): DuplicationSignal {
+  // A change that only EDITS existing files is never a re-implementation. When the
+  // repo tree is known, "adds a new file" = some changed file is not already in it.
+  // Unknown tree (self-hosted / diff mode) -> default true (preserve prior behavior).
+  const addsNewFile = repoTree && repoTree.size > 0 ? files.some((f) => !repoTree.has(f.path)) : true;
   const top = candidates[0];
-  if (!top) return { topCandidatePath: null, topScore: 0, topReused: null };
+  if (!top) return { topCandidatePath: null, topScore: 0, topReused: null, addsNewFile };
   // EDITING the candidate file IS reuse/extension, not re-implementation. A change
   // that modifies the file in place cannot "import" it, so changeImportsPath would
   // read false and the gate would wrongly flag a legitimate in-file edit as a
@@ -74,6 +83,7 @@ export function duplicationSignal(
     topCandidatePath: top.path,
     topScore: top.score,
     topReused: editsCandidate ? true : changeImportsPath(files, top.path, aliasMap),
+    addsNewFile,
   };
 }
 
@@ -114,7 +124,9 @@ export function duplicationGate(
   signal: DuplicationSignal,
   threshold = STRONG_DUPLICATION_SCORE,
 ): DuplicationGate {
-  const escalate = signal.topReused === false && signal.topScore >= threshold;
+  // An edits-only change cannot re-implement anything - never escalate it (the bug the
+  // benchmark caught: a one-token edit to neon.ts was held as a "duplication").
+  const escalate = signal.addsNewFile && signal.topReused === false && signal.topScore >= threshold;
   return {
     escalate,
     candidatePath: signal.topCandidatePath,

@@ -849,7 +849,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // the detector-duplication incident repeated). It ESCALATES to a human rather
   // than hard-blocking - a name match is a strong hint, not proof - so the human
   // confirms "reuse it" or "genuinely new". Computed here so it gates the handoff.
-  const dupSignal = duplicationSignal(reuseCandidatesList, finalFiles, aliasMap);
+  const dupSignal = duplicationSignal(reuseCandidatesList, finalFiles, aliasMap, repoTree);
   const dupGate = duplicationGate(dupSignal);
 
   // SECURITY-SURFACE GUARD: a change touching the protections themselves (the gate,
