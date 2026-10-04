@@ -1,7 +1,7 @@
 /**
  * /api/admin/ai-code/pipeline — one governed run over an AI-authored change.
  *
- *   POST { ref, prompt, answers?, diff?, author?, authorModel?, executorProviderPin?, maxAttempts? }
+ *   POST { ref, prompt, answers?, diff?, refineOf?, author?, authorModel?, executorProviderPin?, maxAttempts? }
  *        -> EXECUTOR (no diff supplied -> a model authors it from the prompt;
  *           input-to-output) -> intake (fixed multiple-choice -> frozen spec) ->
  *           the deterministic gate -> Stage 2 re-route repair on a non-allow
@@ -27,6 +27,7 @@ import { runCodeReview } from "@/lib/ai-code/scan";
 import { liveRepairComplete } from "@/lib/ai-code/repair";
 import { runPipeline } from "@/lib/ai-code/pipeline";
 import { authorDiff, authorFileChanges, authorAnchorEdits } from "@/lib/ai-code/author";
+import { composeRefinePrompt } from "@/lib/ai-code/refine";
 import { filesToDiff, type FileChange } from "@/lib/ai-code/file-changes";
 import { applyAnchorEdits, anchorFailureFeedback, type AnchorFailure } from "@/lib/ai-code/anchor-edit";
 import { newFilesFromDiff } from "@/lib/ai-code/oracle";
@@ -324,6 +325,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const b = (body ?? {}) as {
     ref?: unknown;
     prompt?: unknown;
+    refineOf?: unknown;
     answers?: unknown;
     diff?: unknown;
     author?: unknown;
@@ -339,6 +341,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const diff = typeof b.diff === "string" ? b.diff : "";
   if (!ref) return NextResponse.json({ error: "ref is required" }, { status: 400 });
   if (!prompt.trim()) return NextResponse.json({ error: "prompt is required" }, { status: 400 });
+  // ITERATIVE REFINEMENT: an optional prior change the user wants revised. When
+  // present, the authoring prompt becomes a complete-revision of it per the
+  // instruction; the raw `prompt` stays the instruction (for the record/title).
+  // The revision runs the FULL gate, so it is never less-governed than a first
+  // draft. Absent -> an ordinary first run (pass-through).
+  const refineOf = typeof b.refineOf === "string" ? b.refineOf : "";
+  const refinedPrompt = composeRefinePrompt(prompt, refineOf);
   // Optional target repo. Validate the owner/repo shape up front so a malformed
   // value is a clean 400, never a string interpolated into a GitHub API path.
   // Absent -> the executor defaults to apex (self-hosting).
@@ -394,7 +403,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // code consistently instead of authoring blind. Best-effort: any failure falls
   // back to prompt-only authoring (no regression). Skipped when a diff is supplied
   // (that is governed as-is). Uses the `repo` already validated above.
-  let authorPrompt = prompt;
+  let authorPrompt = refinedPrompt;
   let repoContextFiles: string[] = [];
   let reuseCandidates = 0;
   // The reuse-scout candidates (path + score), kept for the SHADOW duplication
@@ -459,7 +468,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
         // REUSE block first (read existing capability), then the exact exports.
         const block = [grounding, reuse.block, exportsBlock, ctx.block].filter(Boolean).join("\n\n---\n\n");
-        authorPrompt = withRepoContext(prompt, block);
+        authorPrompt = withRepoContext(refinedPrompt, block);
         repoContextFiles = ctx.files;
         if (pkgJson) installedRoots = parseInstalledRoots(pkgJson);
       }
