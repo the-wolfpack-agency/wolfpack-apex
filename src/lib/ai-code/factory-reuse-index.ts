@@ -17,6 +17,7 @@
 import {
   loadUnembeddedCorpus,
   markCorpusEmbedded,
+  loadReuseConfidence,
   type ReuseCorpusRow,
 } from "./factory-reuse-store";
 import {
@@ -25,6 +26,7 @@ import {
   upsertPoints,
   searchPoints,
   pointId,
+  rerankByConfidence,
   FACTORY_REUSE_COLLECTION,
   type QdrantConfig,
   type VectorHit,
@@ -44,6 +46,8 @@ export interface ReuseIndexDeps {
   ensure: typeof ensureCollection;
   upsert: typeof upsertPoints;
   search: typeof searchPoints;
+  /** Per-path confidence lookup for weight-aware retrieval (defaults to the store). */
+  loadConfidence?: (workspaceId: string, repo: string, paths: string[]) => Promise<Map<string, number>>;
 }
 
 /** Build the real deps lazily (keeps the rag-provider import off the hot path
@@ -66,6 +70,7 @@ export async function defaultReuseIndexDeps(): Promise<ReuseIndexDeps | null> {
     ensure: ensureCollection,
     upsert: upsertPoints,
     search: searchPoints,
+    loadConfidence: loadReuseConfidence,
   };
 }
 
@@ -135,9 +140,14 @@ export async function searchReuseCorpus(args: {
       { workspace_id: args.workspaceId, repo: args.repo },
       Math.min(Math.max(args.k ?? 6, 1), 50),
     );
-    return hits
+    const mapped = hits
       .map((h) => ({ path: typeof h.payload.path === "string" ? h.payload.path : "", score: h.score }))
       .filter((h) => h.path !== "");
+    // Weight-aware retrieval: a proven path outranks a doubtful one. Confidence is
+    // authoritative in Postgres (looked up here), so it reflects reinforcement
+    // without re-embedding. All-1.0 (today) leaves the order unchanged.
+    const confidence = await (deps.loadConfidence ?? loadReuseConfidence)(args.workspaceId, args.repo, mapped.map((m) => m.path));
+    return rerankByConfidence(mapped, (m) => m.path, confidence);
   } catch {
     return [];
   }

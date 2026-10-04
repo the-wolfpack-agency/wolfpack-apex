@@ -134,6 +134,21 @@ export async function markCorpusEmbedded(workspaceId: string, repo: string, path
   );
 }
 
+/** Confidence (0..1+, default 1.0) for the given paths, workspace+repo scoped.
+ *  Read at retrieval time so the vector index never needs re-embedding when a
+ *  confidence changes. Missing paths are absent from the map (caller defaults 1). */
+export async function loadReuseConfidence(workspaceId: string, repo: string, paths: readonly string[]): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  if (paths.length === 0) return out;
+  const { rows } = await safeQuery<{ path: string; confidence: number }>(
+    `SELECT path, confidence FROM instinct_factory_reuse_corpus
+      WHERE workspace_id = $1 AND repo = $2 AND path = ANY($3::text[])`,
+    [workspaceId, repo, [...paths]],
+  );
+  for (const r of rows) out.set(r.path, Number(r.confidence));
+  return out;
+}
+
 /** How many corpus rows a workspace has persisted (0 on failure). Drives the
  *  "is the brain warm yet" readout + the backfill progress. */
 export async function countReuseCorpus(workspaceId: string, repo?: string): Promise<number> {

@@ -5,6 +5,7 @@
  */
 import { indexFailureMemory, searchFailureMemory, type FailureIndexDeps } from "@/lib/ai-code/factory-failure-index";
 import type { FailureRow } from "@/lib/ai-code/factory-failure-store";
+import { failureSignature } from "@/lib/ai-code/factory-failure-store";
 
 const row = (signature: string, summary = signature): FailureRow => ({
   repo: "o/r", signature, findingClass: "logged_credential", summary, path: "src/x.ts", severity: "critical", timesSeen: 2, embedded: false, updatedAt: "t",
@@ -62,5 +63,22 @@ describe("searchFailureMemory", () => {
     expect(await searchFailureMemory({ workspaceId: "w1", repo: "o/r", query: "   ", deps: deps() })).toEqual([]);
     expect(await searchFailureMemory({ workspaceId: "w1", repo: "o/r", query: "x", deps: deps({ qdrant: null }) })).toEqual([]);
     expect(await searchFailureMemory({ workspaceId: "w1", repo: "o/r", query: "x", deps: deps({ embed: jest.fn(async () => []) }) })).toEqual([]);
+  });
+});
+
+describe("searchFailureMemory weight-aware retrieval", () => {
+  it("reorders by confidence: a proven failure outranks a higher-similarity doubtful one", async () => {
+    const d = deps({
+      search: jest.fn(async () => [
+        { id: 1, score: 0.9, payload: { finding_class: "c", summary: "alpha", path: "", severity: "high" } },
+        { id: 2, score: 0.6, payload: { finding_class: "c", summary: "beta", path: "", severity: "high" } },
+      ]),
+      loadConfidence: jest.fn(async () => new Map([
+        [failureSignature("c", "alpha"), 0.2], // doubtful -> 0.18 weighted
+        [failureSignature("c", "beta"), 1.5],  // proven   -> 0.90 weighted
+      ])),
+    });
+    const hits = await searchFailureMemory({ workspaceId: "w1", repo: "o/r", query: "x", deps: d });
+    expect(hits.map((h) => h.summary)).toEqual(["beta", "alpha"]);
   });
 });
