@@ -130,7 +130,7 @@ interface RunSummary {
 interface ModelGrade { model: string; n: number; readyRate: number; firstPassRate: number; blockRate: number }
 interface Grade { total: number; readyRate: number; firstPassRate: number; blockRate: number; escalationRate: number; byModel: ModelGrade[] }
 interface DriftFlag { model: string; priorReadyRate: number; recentReadyRate: number; drop: number; priorN: number; recentN: number }
-interface ProtectionSummary { totalCaught: number; byClass: { klass: string; label: string; count: number }[]; changesBlocked: number; sentForReview: number; criticalsCaught: number; windowDays: number }
+interface ProtectionSummary { totalCaught: number; byClass: { klass: string; label: string; count: number }[]; changesBlocked: number; sentForReview: number; criticalsCaught: number; prsOpened: number; prsMerged: number; prsClosedUnmerged: number; acceptanceRate: number | null; windowDays: number }
 interface GateDecisionRow { gate: string; verdict: "allow" | "auto_fix" | "require_human" | "deny"; modelInvoked: string | null; findings: number; recordedSeq: number | null; createdAt: string; previewUrl: string | null }
 interface AwaitingProd { previewUrl: string | null; recordedSeq: number | null; createdAt: string }
 interface GateSafety { total: number; allowed: number; autoFixed: number; escalatedToHuman: number; badChangesPrevented: number; dataKeptFromModel: number; frameworks: string[]; recent: GateDecisionRow[]; awaitingProd: AwaitingProd[] }
@@ -1049,6 +1049,19 @@ export default function CodeFactoryPage() {
               <div key={t.k} style={{ background: "var(--wp-surface-2, #171a21)", border: "1px solid var(--wp-border, #2a2f3a)", borderRadius: 8, padding: "0.6rem 0.75rem" }}>
                 <div style={{ fontSize: "0.68rem", textTransform: "uppercase", letterSpacing: "0.03em", color: "var(--wp-text-dim)" }}>{t.k}</div>
                 <div style={{ fontSize: "1.4rem", fontWeight: 700, marginTop: "0.2rem", color: t.v > 0 ? t.c : "var(--wp-text, #e6e9ef)" }}>{t.v.toLocaleString()}</div>
+              </div>
+            ))}
+          </div>
+          <div data-testid="protected-outcomes" style={{ marginTop: "0.75rem", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: "0.75rem" }}>
+            {[
+              { k: "PRs opened", v: history.protected.prsOpened.toLocaleString(), c: "var(--wp-text, #e6e9ef)" },
+              { k: "Merged", v: history.protected.prsMerged.toLocaleString(), c: "var(--wp-success, #22c55e)" },
+              { k: "Closed unmerged", v: history.protected.prsClosedUnmerged.toLocaleString(), c: "var(--wp-text-dim)" },
+              { k: "Acceptance rate", v: history.protected.acceptanceRate === null ? "n/a" : `${Math.round(history.protected.acceptanceRate * 100)}%`, c: "var(--wp-gold, #e8b528)" },
+            ].map((t) => (
+              <div key={t.k} style={{ background: "var(--wp-surface-2, #171a21)", border: "1px solid var(--wp-border, #2a2f3a)", borderRadius: 8, padding: "0.6rem 0.75rem" }}>
+                <div style={{ fontSize: "0.68rem", textTransform: "uppercase", letterSpacing: "0.03em", color: "var(--wp-text-dim)" }}>{t.k}</div>
+                <div style={{ fontSize: "1.4rem", fontWeight: 700, marginTop: "0.2rem", color: t.c }}>{t.v}</div>
               </div>
             ))}
           </div>

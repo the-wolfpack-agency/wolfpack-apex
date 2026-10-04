@@ -44,6 +44,13 @@ export interface ProtectionSummary {
   sentForReview: number;
   /** Critical security issues the deep scan caught. */
   criticalsCaught: number;
+  /** MISSION outcomes: PRs the factory actually produced + whether they landed. */
+  prsOpened: number;
+  prsMerged: number;
+  prsClosedUnmerged: number;
+  /** merged / (merged + closed-unmerged); null until something has settled. The
+   *  honest "does the tool's work actually ship" number, not just gate activity. */
+  acceptanceRate: number | null;
   windowDays: number;
 }
 
@@ -75,9 +82,25 @@ export async function listProtections(workspaceId: string, days = 30): Promise<P
     [String(d), workspaceId],
   );
 
+  // MISSION outcomes: did the factory's PRs actually land? (pr_opened -> merged /
+  // closed-unmerged, from the outcome telemetry). This is what tells us the tool
+  // HELPS, not just that the gate ran.
+  const outcomes = await safeQuery<{ opened: number; merged: number; closed: number }>(
+    `SELECT
+       count(*) FILTER (WHERE event_type = 'ai_code.pr_opened')::int AS opened,
+       count(*) FILTER (WHERE event_type = 'ai_code.pr_merged')::int AS merged,
+       count(*) FILTER (WHERE event_type = 'ai_code.pr_closed_unmerged')::int AS closed
+       FROM instinct_events
+      WHERE event_type IN ('ai_code.pr_opened', 'ai_code.pr_merged', 'ai_code.pr_closed_unmerged')
+        AND ${asObjWhere(d)}`,
+    [String(d), workspaceId],
+  );
+
   const byClass = findings.rows.map((r) => ({ klass: r.klass, label: labelForClass(r.klass), count: Number(r.n) }));
   const totalCaught = byClass.reduce((s, r) => s + r.count, 0);
   const run = runs.rows[0] ?? { blocked: 0, escalated: 0, criticals: 0 };
+  const o = outcomes.rows[0] ?? { opened: 0, merged: 0, closed: 0 };
+  const settled = Number(o.merged) + Number(o.closed);
 
   return {
     totalCaught,
@@ -85,6 +108,10 @@ export async function listProtections(workspaceId: string, days = 30): Promise<P
     changesBlocked: Number(run.blocked) || 0,
     sentForReview: Number(run.escalated) || 0,
     criticalsCaught: Number(run.criticals) || 0,
+    prsOpened: Number(o.opened) || 0,
+    prsMerged: Number(o.merged) || 0,
+    prsClosedUnmerged: Number(o.closed) || 0,
+    acceptanceRate: settled > 0 ? Number(o.merged) / settled : null,
     windowDays: d,
   };
 }
