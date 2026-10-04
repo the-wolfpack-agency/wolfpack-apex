@@ -45,6 +45,7 @@ Any missing value = production crash loop. Flag at the top of a handoff, not the
 | `NEO4J_URI` / `NEO4J_USER` / `NEO4J_PASSWORD` | Graph store. Optional, and unset in production today. Absence degrades the triple write to Postgres + Qdrant and is reported, not silent |
 | `PROD_DOMAIN` | Enables the TLS hybrid posture CI assertion |
 | `FACTORY_SERVICE_TOKEN` | OPTIONAL (>=16 chars). Lets the code factory run non-interactively (the driver presents it instead of a user login); accepted only by the ai-code pipeline + ci-fix routes, scoped to the factory workspace. Unset = service path OFF (user login required). `FACTORY_SERVICE_WORKSPACE` overrides the default workspace. |
+| `AI_CODE_SEMANTIC_REUSE` | OPTIONAL (`on`/`true`/`1` to enable). Turns on the factory's semantic reuse widening: the reuse-scout embeds the prompt + repo paths via the existing Azure embedder (`getEmbeddingProvider`) to surface synonym/intent matches the curated keyword map misses. OFF by default; needs the Azure OpenAI embedding env already used by the RAG stack. Absent embedder or any failure degrades to keyword-only (zero behavior change). |
 
 ## Messaging guardrails
 
