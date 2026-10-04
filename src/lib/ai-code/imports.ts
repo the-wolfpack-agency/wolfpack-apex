@@ -269,8 +269,17 @@ export function resolveLocalCandidates(fromPath: string, spec: string, aliasMap:
   } else {
     // alias: longest matching prefix wins
     const pref = Object.keys(aliasMap).filter((p) => spec.startsWith(p)).sort((a, b) => b.length - a.length)[0];
-    if (!pref) return [];
-    base = (aliasMap[pref] + spec.slice(pref.length)).replace(/^\.\//, "");
+    if (pref) {
+      base = (aliasMap[pref] + spec.slice(pref.length)).replace(/^\.\//, "");
+    } else if (spec.startsWith("@/")) {
+      // FAIL-SAFE: @/ -> src/ is the near-universal Next.js/TS convention. When the
+      // alias map is unavailable at runtime (e.g. the tsconfig fetch failed), resolve
+      // @/ imports anyway instead of flagging EVERY real import as missing - the
+      // false positive that held build-api on broken-imports (found by the benchmark).
+      base = ("src/" + spec.slice(2)).replace(/^\.\//, "");
+    } else {
+      return []; // a bare package (react, ...) or an unknown alias - not a local module
+    }
   }
   if (/\.(tsx?|jsx?|mjs|cjs|json)$/.test(base)) return [base];
   const exts = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".d.ts"];
