@@ -71,6 +71,8 @@ import {
   parseAliasMap,
   type ModuleResolver,
   type BrokenLocalImport,
+  autoFixImports,
+  type ImportFix,
 } from "@/lib/ai-code/imports";
 import { findIncompleteFiles, completenessFeedback } from "@/lib/ai-code/completeness";
 import { findRemovedExports, type RemovedExport } from "@/lib/ai-code/exports-preservation";
@@ -678,6 +680,41 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
   }
 
+  // DETERMINISTIC IMPORT AUTO-FIX: correct the model's common wrong imports BEFORE
+  // the gate - the double-prefix mistake (@/src/lib/auth -> @/lib/auth) and a single
+  // wrong-module symbol we can locate (import { requireCapability } from "@/lib/auth"
+  // -> "@/lib/auth/require-capability"). The thesis: wrap the probabilistic model in
+  // deterministic controls, so a fumbled import becomes shipped code, not a hold. Only
+  // rewrites an import that does NOT resolve to one that DOES, so it can never break a
+  // working import. Best-effort: any failure leaves the change untouched.
+  let importFixes: ImportFix[] = [];
+  if (groundingRepo && repoTree.size > 0 && effectiveDiff.trim()) {
+    try {
+      const authored = changes ?? resolvedFiles({ diff: effectiveDiff, changes: null });
+      const fixed = autoFixImports(authored, repoTree, aliasMap);
+      // Hint relocation for a single wrong-module symbol in an EXISTING module.
+      const broken = await checkLocalImports(fixed.files, localImportCtx);
+      for (const b of broken) {
+        if (b.kind !== "missing_export" || !b.hint || !b.name) continue;
+        const file = fixed.files.find((x) => x.path === b.path);
+        if (!file) continue;
+        const imp = extractLocalImports(file.path, file.content).find((li) => li.spec === b.spec);
+        if (imp && imp.names.length === 1 && imp.names[0] === b.name && !imp.hasDefault) {
+          file.content = file.content.split(`"${b.spec}"`).join(`"${b.hint}"`).split(`'${b.spec}'`).join(`'${b.hint}'`);
+          fixed.fixes.push({ path: b.path, from: b.spec, to: b.hint });
+        }
+      }
+      if (fixed.fixes.length > 0) {
+        const byPath = new Map(fixed.files.map((x) => [x.path, x.content]));
+        if (changes) changes = changes.map((c) => ({ ...c, content: byPath.get(c.path) ?? c.content }));
+        effectiveDiff = changes
+          ? filesToDiff(changes)
+          : filesToDiff(fixed.files.map((x) => ({ path: x.path, content: x.content })));
+        importFixes = fixed.fixes;
+      }
+    } catch { /* best-effort: never block a handoff on the auto-fixer */ }
+  }
+
   // Unconditional ceiling on the final diff, whatever its source (supplied or
   // authored). Enforced on every path, so no user-controlled input decides
   // whether this check runs.
@@ -1003,5 +1040,5 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     verdict_reason: run.review.verdict.reason,
   });
 
-  return NextResponse.json({ run: effectiveRun, approvalId, executor, invariants, changeFacts, deepScan, duplication: dupGate, securitySurface, policyApplied: { denyRules: gatePolicy.denyRules.length, protectedPaths: gatePolicy.protectedPaths.length }, syntax, phantomImports, incompleteFiles, removedExports, anchorFailures, brokenLocalImports, selfHealed, mode: effectiveMode, executorAttempts, repoContext: { files: repoContextFiles }, cost });
+  return NextResponse.json({ run: effectiveRun, approvalId, executor, invariants, changeFacts, deepScan, duplication: dupGate, securitySurface, policyApplied: { denyRules: gatePolicy.denyRules.length, protectedPaths: gatePolicy.protectedPaths.length }, syntax, phantomImports, incompleteFiles, removedExports, anchorFailures, brokenLocalImports, selfHealed, mode: effectiveMode, executorAttempts, repoContext: { files: repoContextFiles }, importFixes, cost });
 }

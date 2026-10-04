@@ -16,6 +16,7 @@ import {
   findBrokenLocalImports,
   brokenLocalImportFeedback,
   locateSymbolSpec,
+  autoFixImports,
 } from "@/lib/ai-code/imports";
 
 describe("packageRoot", () => {
@@ -293,5 +294,29 @@ describe("brokenLocalImportFeedback uses the hint", () => {
   it("falls back to the generic message without a hint", () => {
     const fb = brokenLocalImportFeedback([{ path: "src/app/api/x/route.ts", spec: "@/lib/foo", kind: "missing_export", name: "bar" }]);
     expect(fb).toMatch(/module that actually defines "bar"/);
+  });
+});
+
+
+describe("autoFixImports (deterministically correct the model's wrong imports)", () => {
+  const tree = new Set(["src/lib/auth.ts", "src/lib/auth/require-capability.ts"]);
+  it("fixes the double-prefix @/src/lib/auth -> @/lib/auth (verified to resolve)", () => {
+    const r = autoFixImports([{ path: "src/app/x/route.ts", content: `import { a } from "@/src/lib/auth";` }], tree, { "@/": "src/" });
+    expect(r.fixes).toEqual([{ path: "src/app/x/route.ts", from: "@/src/lib/auth", to: "@/lib/auth" }]);
+    expect(r.files[0].content).toContain('from "@/lib/auth"');
+  });
+  it("relocates a single wrong-module symbol when the module is missing", () => {
+    // @/lib/nope does not resolve; requireCapability lives in require-capability.ts
+    const r = autoFixImports([{ path: "src/app/x/route.ts", content: `import { requireCapability } from "@/lib/nope";` }], tree, { "@/": "src/" });
+    expect(r.fixes[0]?.to).toBe("@/lib/auth/require-capability");
+  });
+  it("NEVER touches an import that already resolves", () => {
+    const r = autoFixImports([{ path: "src/app/x/route.ts", content: `import { a } from "@/lib/auth";` }], tree, { "@/": "src/" });
+    expect(r.fixes).toEqual([]);
+    expect(r.files[0].content).toContain('from "@/lib/auth"');
+  });
+  it("leaves a genuinely unfixable import alone", () => {
+    const r = autoFixImports([{ path: "src/app/x/route.ts", content: `import { a } from "@/totally/made/up";` }], tree, { "@/": "src/" });
+    expect(r.fixes).toEqual([]);
   });
 });
