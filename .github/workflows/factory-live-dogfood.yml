@@ -1,4 +1,4 @@
-name: Factory Live Dogfood
+name: "E2E: Code Factory (live UI)"
 
 # Drives the REAL code factory UI at /admin/ai-code against the DEPLOYED app, as a
 # client does: logs in with the smoke account, submits a LARGE existing-file edit,
@@ -12,7 +12,7 @@ name: Factory Live Dogfood
 #   * on demand   (workflow_dispatch) - once this file is on main,
 #   * on a schedule (daily)           - the "verify the tool regularly" guarantee,
 #   * on a PR that touches the factory (paths filter) - so a factory change
-#     re-dogfoods itself before merge.
+#     re-runs the E2E before merge.
 #
 # Needs PROD_URL + SMOKE_TEST_EMAIL + SMOKE_TEST_PASSWORD in repo secrets (already
 # set). If PROD_URL is unset the job SKIPS loudly rather than booting a local dev
@@ -37,11 +37,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: factory-live-dogfood-${{ github.ref }}
+  group: factory-live-e2e-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  dogfood:
+  e2e:
+    name: E2E (live UI)
     # On PRs only once ready for review, never on a draft commit (real model spend).
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
@@ -55,12 +56,12 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      - name: Require PROD_URL (the dogfood targets the live deployment)
+      - name: Require PROD_URL (the E2E targets the live deployment)
         id: cfg
         run: |
           if [ -z "${PROD_URL}" ]; then
             echo "configured=false" >> $GITHUB_OUTPUT
-            echo "::warning::PROD_URL secret not set - factory live dogfood SKIPPED. It must target the deployed app. Add PROD_URL + SMOKE_TEST_EMAIL + SMOKE_TEST_PASSWORD in Settings -> Secrets -> Actions."
+            echo "::warning::PROD_URL secret not set - factory live E2E SKIPPED. It must target the deployed app. Add PROD_URL + SMOKE_TEST_EMAIL + SMOKE_TEST_PASSWORD in Settings -> Secrets -> Actions."
           else
             echo "configured=true" >> $GITHUB_OUTPUT
           fi
@@ -100,7 +101,7 @@ jobs:
             || (echo "retrying once" && sleep 10 && timeout 150 npx playwright install-deps chromium) \
             || echo "::warning::playwright install-deps failed (apt mirror). Continuing: a missing library surfaces as a browser launch failure next."
 
-      - name: Dogfood the factory through the live UI (large-file routing journey)
+      - name: Run the Code Factory E2E through the live UI (large-file routing journey)
         if: steps.cfg.outputs.configured == 'true'
         run: >-
           npx playwright test
@@ -114,7 +115,7 @@ jobs:
         continue-on-error: true # diagnostic upload must not fail the job
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: factory-live-dogfood-report
+          name: factory-live-e2e-report
           path: |
             playwright-report/
             test-results/

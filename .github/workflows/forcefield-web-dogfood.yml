@@ -1,4 +1,4 @@
-name: Forcefield Web Dogfood
+name: "E2E: Forcefield Web (live UI)"
 
 # Drives the REAL Forcefield Web UI at /admin/site-analytics against the DEPLOYED
 # app, as a client does: loads the board, reads usage, switches to agent defense,
@@ -7,7 +7,7 @@ name: Forcefield Web Dogfood
 # failures, and that every surface renders real content or an explicit empty state.
 #
 # No model spend (pure page reads), so it is light. Runs on demand, daily, and on
-# any PR that touches the surface, so a change re-dogfoods itself. Needs PROD_URL +
+# any PR that touches the surface, so a change re-runs the E2E. Needs PROD_URL +
 # SMOKE_TEST_EMAIL + SMOKE_TEST_PASSWORD (already in repo secrets); skips the signed
 # -in journeys loudly in CI if a credential is missing (the spec fails rather than
 # skip-green). If PROD_URL is unset the job SKIPS loudly.
@@ -34,11 +34,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: forcefield-web-dogfood-${{ github.ref }}
+  group: forcefield-web-e2e-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  dogfood:
+  e2e:
+    name: E2E (live UI)
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -51,12 +52,12 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      - name: Require PROD_URL (the dogfood targets the live deployment)
+      - name: Require PROD_URL (the E2E targets the live deployment)
         id: cfg
         run: |
           if [ -z "${PROD_URL}" ]; then
             echo "configured=false" >> $GITHUB_OUTPUT
-            echo "::warning::PROD_URL secret not set - Forcefield Web dogfood SKIPPED. It must target the deployed app. Add PROD_URL + SMOKE_TEST_EMAIL + SMOKE_TEST_PASSWORD in Settings -> Secrets -> Actions."
+            echo "::warning::PROD_URL secret not set - Forcefield Web E2E SKIPPED. It must target the deployed app. Add PROD_URL + SMOKE_TEST_EMAIL + SMOKE_TEST_PASSWORD in Settings -> Secrets -> Actions."
           else
             echo "configured=true" >> $GITHUB_OUTPUT
           fi
@@ -88,7 +89,7 @@ jobs:
         if: steps.cfg.outputs.configured == 'true'
         timeout-minutes: 6
         # Best-effort: a hanging apt mirror must NEVER fail the job (mirrors the
-        # other dogfood workflows). A genuinely missing library surfaces as a
+        # other live-UI E2E workflows). A genuinely missing library surfaces as a
         # browser-launch failure in the next step.
         continue-on-error: true
         run: |
@@ -96,7 +97,7 @@ jobs:
             || (echo "retrying once" && sleep 10 && timeout 150 npx playwright install-deps chromium) \
             || echo "::warning::playwright install-deps failed (apt mirror). Continuing: a missing library surfaces as a browser launch failure next."
 
-      - name: Dogfood Forcefield Web through the live UI
+      - name: Run the Forcefield Web E2E through the live UI
         if: steps.cfg.outputs.configured == 'true'
         run: >-
           npx playwright test
@@ -109,7 +110,7 @@ jobs:
         continue-on-error: true # diagnostic upload must not fail the job
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: forcefield-web-dogfood-report
+          name: forcefield-web-e2e-report
           path: |
             playwright-report/
             test-results/

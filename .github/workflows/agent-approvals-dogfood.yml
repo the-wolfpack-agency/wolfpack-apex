@@ -1,4 +1,4 @@
-name: Agent Approvals Dogfood
+name: "E2E: Agent Approvals (live UI)"
 
 # Drives the REAL human-in-the-loop approvals inbox at /admin/agents/approvals
 # against the DEPLOYED app: unauth bounces to /login; signed in, the inbox loads
@@ -27,11 +27,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: agent-approvals-dogfood-${{ github.ref }}
+  group: agent-approvals-e2e-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  dogfood:
+  e2e:
+    name: E2E (live UI)
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -47,7 +48,7 @@ jobs:
         run: |
           if [ -z "${PROD_URL}" ]; then
             echo "configured=false" >> $GITHUB_OUTPUT
-            echo "::warning::PROD_URL secret not set - Agent Approvals dogfood SKIPPED."
+            echo "::warning::PROD_URL secret not set - Agent Approvals E2E SKIPPED."
           else
             echo "configured=true" >> $GITHUB_OUTPUT
           fi
@@ -78,7 +79,7 @@ jobs:
           timeout 150 npx playwright install-deps chromium \
             || (echo "retrying once" && sleep 10 && timeout 150 npx playwright install-deps chromium) \
             || echo "::warning::playwright install-deps failed (apt mirror)."
-      - name: Dogfood Agent Approvals through the live UI
+      - name: Run the Agent Approvals E2E through the live UI
         if: steps.cfg.outputs.configured == 'true'
         run: >-
           npx playwright test tests/e2e/agent-approvals-journeys.spec.ts
@@ -88,7 +89,7 @@ jobs:
         continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: agent-approvals-dogfood-report
+          name: agent-approvals-e2e-report
           path: |
             playwright-report/
             test-results/
