@@ -407,6 +407,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const executorProviderPin =
     typeof b.executorProviderPin === "string" && b.executorProviderPin.trim() ? b.executorProviderPin.trim() : undefined;
   const mode: "diff" | "files" | "anchor" = b.mode === "files" ? "files" : b.mode === "anchor" ? "anchor" : "diff";
+  // Whether the caller EXPLICITLY sent a mode. A defaulted "diff" (nothing sent)
+  // must not dead-end a large existing-file edit at a 422, so it is eligible for
+  // the anchor redirect below; an explicit diff/anchor is respected as-is.
+  const modePinned = b.mode === "diff" || b.mode === "files" || b.mode === "anchor";
 
   // Repo-aware context: when a target repo is set, fetch the current contents of
   // the files the prompt NAMES and prepend them so the executor MODIFIES existing
@@ -554,7 +558,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // stay in files mode; a user-pinned anchor/diff is respected. Found by
   // dogfooding: editing the factory's own imports.ts 422'd in files AND anchor
   // (the latter on the fetch bug above) - the factory could not edit existing code.
-  const authorMode = pickAuthorMode(mode, extractMentionedPaths(prompt), repoTree);
+  const authorMode = pickAuthorMode(mode, extractMentionedPaths(prompt), repoTree, modePinned);
 
   const resolved = await resolveChangeWithFallback(
     { mode: authorMode, diff, prompt: authorPrompt, authorModel, executorProviderPin, tier: authorTier, fetchFiles: fetchFilesForAnchor },
