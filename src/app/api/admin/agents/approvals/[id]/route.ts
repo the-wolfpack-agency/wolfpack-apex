@@ -12,7 +12,7 @@ import { executeCreateExternalRecord } from "@/lib/assistant/tools/create-extern
 import { executeUpdateExternalRecord } from "@/lib/assistant/tools/update-external-record-tool";
 import { executeOpenPr, validateBeforePr } from "@/lib/ai-code/open-pr-executor";
 
-type WriteCtx = { userId: string; userRole: string; workspaceId?: string; agentId?: string };
+type WriteCtx = { userId: string; userRole: string; workspaceId?: string; agentId?: string; approvalId?: string };
 type WriteOutcome = { ok: boolean; [k: string]: unknown };
 
 /** The captured tool -> its real write executor. Only confirmation-gated CRM
@@ -99,6 +99,9 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     userRole: owner?.role ?? "member",
     workspaceId,
     agentId: approval.agentId,
+    // Carry the approval id so pr_opened can echo it - the join key that links the
+    // merged/rejected PR back to the memories this handoff used (provenance).
+    approvalId: id,
   };
 
   // TIER-2 PRE-PR VALIDATION (opt-in via PREPR_VALIDATE_WORKFLOW). Run the TARGET
