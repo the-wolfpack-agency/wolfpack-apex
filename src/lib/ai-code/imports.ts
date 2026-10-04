@@ -294,6 +294,40 @@ export interface BrokenLocalImport {
   spec: string;
   kind: "missing_module" | "missing_export";
   name?: string;
+  /** For a missing_export: the import spec where the symbol ACTUALLY lives, if we
+   *  could locate it in the repo (so the repair tells the model where to import from). */
+  hint?: string;
+}
+
+/** camelCase / PascalCase -> kebab-case (requireCapability -> require-capability). */
+function toKebab(name: string): string {
+  return name.replace(/([a-z0-9])([A-Z])/g, "$1-$2").replace(/_/g, "-").toLowerCase();
+}
+
+/**
+ * Locate the import spec that actually EXPORTS `name`, by the strong naming
+ * convention that a symbol lives in a file of the same name (requireCapability ->
+ * .../require-capability.ts). Pure: searches the repo tree by basename, prefers a
+ * `src/` path, and returns an `@/`-style spec (or null when nothing matches).
+ *
+ * This turns the repair feedback from "X is not here" into "X is exported from
+ * <spec> - import it there", which is what lets the model fix a wrong import path.
+ */
+export function locateSymbolSpec(name: string, repoTree: ReadonlySet<string>): string | null {
+  if (!name || repoTree.size === 0) return null;
+  const forms = new Set([toKebab(name), name.toLowerCase(), name.replace(/_/g, "").toLowerCase()]);
+  const matches: string[] = [];
+  for (const path of repoTree) {
+    const m = path.match(/([^/]+)\.(tsx?|jsx?|mjs|cjs)$/);
+    if (!m) continue;
+    const baseNoExt = m[1].toLowerCase();
+    if (forms.has(baseNoExt) || forms.has(baseNoExt.replace(/\./g, "-"))) matches.push(path);
+  }
+  if (matches.length === 0) return null;
+  // Prefer a src/ path, then the shortest (closest to a top-level module).
+  matches.sort((a, b) => (a.startsWith("src/") ? 0 : 1) - (b.startsWith("src/") ? 0 : 1) || a.length - b.length);
+  const best = matches[0].replace(/\.(tsx?|jsx?|mjs|cjs)$/, "").replace(/\/index$/, "");
+  return best.startsWith("src/") ? "@/" + best.slice(4) : best;
 }
 
 /** Resolve one local specifier to a module the pipeline can read. `exists` is
@@ -332,7 +366,7 @@ export function brokenLocalImportFeedback(broken: readonly BrokenLocalImport[]):
   const lines = broken.map((b) =>
     b.kind === "missing_module"
       ? `- "${b.spec}" (in ${b.path}) does not resolve to any file in the repo. Import from the correct path, or do not import it.`
-      : `- "${b.name}" is NOT exported by "${b.spec}" (imported in ${b.path}). Use a symbol that module actually exports, or import from the module that defines "${b.name}".`,
+      : `- "${b.name}" is NOT exported by "${b.spec}" (imported in ${b.path}). ${b.hint ? `Import it from "${b.hint}" instead.` : `Import from the module that actually defines "${b.name}".`}`,
   );
   return [
     "The previous attempt imported local symbols that do not exist and will fail CI",

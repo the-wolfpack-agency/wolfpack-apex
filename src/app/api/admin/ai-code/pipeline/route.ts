@@ -62,7 +62,7 @@ import { buildKnownExportsBlock, exportsEntries } from "@/lib/ai-code/export-gro
 import { duplicationSignal, duplicationGate } from "@/lib/ai-code/reuse-enforcement";
 import { pickAuthorMode } from "@/lib/ai-code/author-mode";
 import { fetchRepoGrounding } from "@/lib/ai-code/repo-grounding";
-import { findPhantomImports, parseInstalledRoots, phantomImportFeedback } from "@/lib/ai-code/imports";
+import { findPhantomImports, parseInstalledRoots, phantomImportFeedback, locateSymbolSpec } from "@/lib/ai-code/imports";
 import {
   findBrokenLocalImports,
   brokenLocalImportFeedback,
@@ -206,7 +206,16 @@ async function checkLocalImports(
       }
       return { exists: false, content: null };
     };
-    return findBrokenLocalImports(files, resolver);
+    const broken = findBrokenLocalImports(files, resolver);
+    // Enrich a wrong-symbol import with WHERE the symbol actually lives, so the
+    // author-retry imports it from the right path instead of guessing again.
+    for (const b of broken) {
+      if (b.kind === "missing_export" && b.name) {
+        const hint = locateSymbolSpec(b.name, ctx.repoTree);
+        if (hint && hint !== b.spec) b.hint = hint;
+      }
+    }
+    return broken;
   } catch {
     return []; // best-effort: never block a handoff on a resolver/fetch failure
   }
