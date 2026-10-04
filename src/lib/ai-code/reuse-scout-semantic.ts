@@ -36,6 +36,12 @@ export function semanticReuseEnabled(env: NodeJS.ProcessEnv = process.env): bool
 const CODE_FILE = /\.(tsx?|jsx?|mjs|cjs|sql|py|rb|go|rs|java|php)$/i;
 const NOT_REUSABLE = /(?:^|\/)(__tests__|__mocks__|node_modules|\.next|dist|build)\//i;
 
+/** A path worth keeping as a reuse candidate: a source file, not a test/build
+ *  artifact. Single source of truth for both the scout and the corpus producer. */
+export function isReusableCodePath(path: string): boolean {
+  return CODE_FILE.test(path) && !NOT_REUSABLE.test(path);
+}
+
 /** Hard ceiling on how many paths we embed in a run (cost + latency bound). */
 export const MAX_EMBED_DOCS = 400;
 /** Minimum cosine similarity for a semantic-only candidate to be surfaced. */
@@ -87,7 +93,7 @@ export function prescorePaths(
   const scored: { path: string; score: number }[] = [];
   for (const path of treePaths) {
     if (excluded.has(path)) continue;
-    if (!CODE_FILE.test(path) || NOT_REUSABLE.test(path)) continue;
+    if (!isReusableCodePath(path)) continue;
     const words = new Set(humanizePath(path).split(" "));
     let score = 0;
     for (const k of kw) if (words.has(k)) score += 1;

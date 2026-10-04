@@ -99,6 +99,10 @@
     {
       "path": "/api/cron/ai-code-merge-poll",
       "schedule": "23 */6 * * *"
+    },
+    {
+      "path": "/api/cron/ai-code-reuse-index",
+      "schedule": "41 */6 * * *"
     }
   ]
 }
