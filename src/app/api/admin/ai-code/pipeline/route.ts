@@ -50,6 +50,7 @@ import { searchFailureMemory } from "@/lib/ai-code/factory-failure-index";
 import { rememberRunFailures, buildFailureAvoidanceBlock } from "@/lib/ai-code/factory-failure-producer";
 import { failureSignature } from "@/lib/ai-code/factory-failure-store";
 import { recordMemoryProvenance } from "@/lib/ai-code/factory-provenance";
+import { classifyTaskType } from "@/lib/ai-code/task-type";
 import { buildKnownExportsBlock, exportsEntries } from "@/lib/ai-code/export-grounding";
 import { duplicationSignal, duplicationGate } from "@/lib/ai-code/reuse-enforcement";
 import { pickAuthorMode } from "@/lib/ai-code/author-mode";
@@ -881,6 +882,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     conforms: run.conformance.conforms,
     // Per-model attribution (src/lib/ai-code/grading.ts).
     model: effectiveAuthor,
+    // Task type (#6): grade per (model, task-type) so we can see which model
+    // ships best for migrations vs UI vs API, not just an overall average.
+    task_type: classifyTaskType(prompt),
     mode: effectiveMode,
     cost_usd: executor?.costUsd ?? 0,
     executor_attempts: executorAttempts,
