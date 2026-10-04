@@ -497,7 +497,7 @@ test("generated code is shown prominently with a diff summary and copy control",
 test("protected panel shows what the gate caught, by class, from mount", async () => {
   historyResp = resp(200, {
     runs: [], grade: { total: 0, readyRate: 0, firstPassRate: 0, blockRate: 0, escalationRate: 0, byModel: [] }, drift: [],
-    protected: { totalCaught: 5, byClass: [{ klass: "logged_credential", label: "Secret written to a log", count: 3 }, { klass: "sql_injection", label: "SQL injection", count: 2 }], changesBlocked: 2, sentForReview: 1, criticalsCaught: 4, windowDays: 30 },
+    protected: { totalCaught: 5, byClass: [{ klass: "logged_credential", label: "Secret written to a log", count: 3 }, { klass: "sql_injection", label: "SQL injection", count: 2 }], changesBlocked: 2, sentForReview: 1, criticalsCaught: 4, prsOpened: 8, prsMerged: 6, prsClosedUnmerged: 2, acceptanceRate: 0.75, windowDays: 30 },
   });
   render(<CodeFactoryPage />);
   await waitFor(() => expect(screen.getByTestId("protected-summary")).toBeInTheDocument());
@@ -506,6 +506,11 @@ test("protected panel shows what the gate caught, by class, from mount", async (
   const byClass = screen.getByTestId("protected-by-class");
   expect(byClass).toHaveTextContent("Secret written to a log");
   expect(byClass).toHaveTextContent("SQL injection");
+  // ROI/adoption outcomes: did the factory's work actually ship?
+  const outcomes = screen.getByTestId("protected-outcomes");
+  expect(outcomes).toHaveTextContent("PRs opened");
+  expect(outcomes).toHaveTextContent("8"); // opened
+  expect(outcomes).toHaveTextContent("75%"); // acceptance rate (6/8)
 });
 
 test("human-in-the-gate: the approve button is disabled until consent is given, and nothing touches GitHub before then", async () => {
