@@ -106,6 +106,34 @@ export async function loadReuseCorpus(workspaceId: string, repo: string): Promis
   }));
 }
 
+/** Corpus rows that still need a vector (embedded=false), capped. Read-only;
+ *  [] on failure. The indexer (factory brain pt2) consumes these. */
+export async function loadUnembeddedCorpus(workspaceId: string, repo: string, limit = 500): Promise<ReuseCorpusRow[]> {
+  const n = Math.min(Math.max(Math.trunc(limit), 1), MAX_CORPUS_WRITE);
+  const { rows } = await safeQuery<{ path: string; text: string; commit_sha: string; updated_at: string }>(
+    `SELECT path, text, commit_sha, updated_at
+       FROM instinct_factory_reuse_corpus
+      WHERE workspace_id = $1 AND repo = $2 AND embedded = false
+      ORDER BY updated_at
+      LIMIT ${n}`,
+    [workspaceId, repo],
+  );
+  return rows.map((r) => ({ path: r.path, text: r.text, repo, commitSha: r.commit_sha, embedded: false, updatedAt: r.updated_at }));
+}
+
+/** Flip embedded=true for the given paths after their vectors are in Qdrant.
+ *  Uses query (not safeQuery): a silent failure would make the indexer re-embed
+ *  the same rows forever (cost), so it must surface. No-op on empty input. */
+export async function markCorpusEmbedded(workspaceId: string, repo: string, paths: readonly string[]): Promise<void> {
+  if (paths.length === 0) return;
+  await query(
+    `UPDATE instinct_factory_reuse_corpus
+        SET embedded = true
+      WHERE workspace_id = $1 AND repo = $2 AND path = ANY($3::text[])`,
+    [workspaceId, repo, [...paths]],
+  );
+}
+
 /** How many corpus rows a workspace has persisted (0 on failure). Drives the
  *  "is the brain warm yet" readout + the backfill progress. */
 export async function countReuseCorpus(workspaceId: string, repo?: string): Promise<number> {
