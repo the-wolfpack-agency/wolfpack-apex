@@ -4,6 +4,7 @@
  * the gate, and an unconfigured workspace behaves exactly like today.
  */
 import { safeQuery } from "@/lib/db";
+import { query } from "@/lib/db";
 import { DEFAULT_CODE_GATE_POLICY, type CodeGatePolicy, type CodeGateDenyRule } from "./policy";
 
 export async function loadCodeGatePolicy(workspaceId: string): Promise<CodeGatePolicy> {
@@ -28,4 +29,27 @@ export async function loadCodeGatePolicy(workspaceId: string): Promise<CodeGateP
   } catch {
     return DEFAULT_CODE_GATE_POLICY;
   }
+}
+
+/**
+ * Upsert a workspace's code-gate policy. Unlike the loader this uses `query` (not
+ * safeQuery): a SET that silently failed would leave the operator believing a
+ * control is in force when it is not, so a write failure MUST surface to the
+ * caller (the route maps it to a 500). Caller sanitizes first (sanitizePolicyInput).
+ */
+export async function saveCodeGatePolicy(
+  workspaceId: string,
+  policy: CodeGatePolicy,
+  updatedBy: string,
+): Promise<void> {
+  await query(
+    `INSERT INTO instinct_code_gate_policy (workspace_id, protected_paths, deny_rules, updated_by, updated_at)
+       VALUES ($1, $2::jsonb, $3::jsonb, $4, now())
+     ON CONFLICT (workspace_id) DO UPDATE
+       SET protected_paths = EXCLUDED.protected_paths,
+           deny_rules      = EXCLUDED.deny_rules,
+           updated_by      = EXCLUDED.updated_by,
+           updated_at      = now()`,
+    [workspaceId, JSON.stringify(policy.protectedPaths), JSON.stringify(policy.denyRules), updatedBy],
+  );
 }
