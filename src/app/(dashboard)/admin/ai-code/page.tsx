@@ -131,6 +131,8 @@ interface ModelGrade { model: string; n: number; readyRate: number; firstPassRat
 interface Grade { total: number; readyRate: number; firstPassRate: number; blockRate: number; escalationRate: number; byModel: ModelGrade[] }
 interface DriftFlag { model: string; priorReadyRate: number; recentReadyRate: number; drop: number; priorN: number; recentN: number }
 interface ProtectionSummary { totalCaught: number; byClass: { klass: string; label: string; count: number }[]; changesBlocked: number; sentForReview: number; criticalsCaught: number; prsOpened: number; prsMerged: number; prsClosedUnmerged: number; acceptanceRate: number | null; windowDays: number }
+interface PlanStep { id: string; title: string; instruction: string; rationale: string; sensitive: boolean }
+interface ProposedPlan { goal: string; steps: PlanStep[]; truncated: boolean; model: string | null }
 interface GateDecisionRow { gate: string; verdict: "allow" | "auto_fix" | "require_human" | "deny"; modelInvoked: string | null; findings: number; recordedSeq: number | null; createdAt: string; previewUrl: string | null }
 interface AwaitingProd { previewUrl: string | null; recordedSeq: number | null; createdAt: string }
 interface GateSafety { total: number; allowed: number; autoFixed: number; escalatedToHuman: number; badChangesPrevented: number; dataKeptFromModel: number; frameworks: string[]; recent: GateDecisionRow[]; awaitingProd: AwaitingProd[] }
@@ -231,6 +233,12 @@ export default function CodeFactoryPage() {
   // Iterative refinement: an instruction to revise the current run's change in
   // place, instead of starting a fresh prompt. Re-runs with refineOf=run.diff.
   const [refineInstruction, setRefineInstruction] = useState("");
+  // Multi-step planning (PROPOSE-ONLY): decompose a goal into steps. Nothing
+  // runs from here - each step is launched into the prompt for a normal run.
+  const [planGoal, setPlanGoal] = useState("");
+  const [plan, setPlan] = useState<ProposedPlan | null>(null);
+  const [planning, setPlanning] = useState(false);
+  const [planError, setPlanError] = useState<string | null>(null);
   const [executorPin, setExecutorPin] = useState("");
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [run, setRun] = useState<PipelineRun | null>(null);
@@ -432,6 +440,46 @@ export default function CodeFactoryPage() {
     }
   }, [ref, prompt, executorPin, repo, answers, loadHistory]);
 
+  // PROPOSE-ONLY planning: ask the factory to decompose a goal into steps. This
+  // never executes anything - it returns a list of prompts the human reviews.
+  const proposePlan = useCallback(async () => {
+    if (!planGoal.trim() || planning) return;
+    setPlanning(true);
+    setPlanError(null);
+    try {
+      const res = await fetchWithRefresh("/api/admin/ai-code/plan", {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: JSON.stringify({ goal: planGoal.trim() }),
+      });
+      if (!res.ok) {
+        setPlanError("Could not plan - try rephrasing the goal.");
+        setPlan(null);
+        return;
+      }
+      const data = (await res.json()) as { plan: ProposedPlan };
+      setPlan(data.plan);
+      if (data.plan.steps.length === 0) setPlanError("No steps came back - try a more concrete goal.");
+    } catch {
+      setPlanError("Network error - could not reach the planner.");
+      setPlan(null);
+    } finally {
+      setPlanning(false);
+    }
+  }, [planGoal, planning]);
+
+  // Human-in-the-loop: send ONE proposed step into the main prompt for a normal
+  // governed run. The human then clicks Generate - the plan itself never runs.
+  const launchStep = useCallback((step: PlanStep, index: number, total: number) => {
+    setPrompt(step.instruction);
+    void fetchWithRefresh("/api/analytics", {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: JSON.stringify({ event: "ai_code.plan_step_launched", metadata: { step_index: index, steps: total } }),
+    }).catch(() => undefined);
+    if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
+  }, []);
+
   // Approve the captured handoff -> the approved write executes (opens the real
   // PR as the owner, re-gated + ledgered) and returns the PR url. This is the
   // human-in-the-loop step; the factory never merges.
@@ -594,6 +642,59 @@ export default function CodeFactoryPage() {
           <p role="alert" style={{ marginTop: "0.75rem", color: "var(--wp-error, #ef4444)", fontSize: "0.9rem" }}>
             {error}
           </p>
+        )}
+      </GlassPanel>
+
+      <GlassPanel title="Plan a multi-step change" subtitle="Decompose a big goal into reviewable steps. Nothing runs here - you launch each step into a normal governed run.">
+        <label style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
+          <span style={{ fontSize: "0.8rem", color: "var(--wp-text-dim)" }}>What is the goal?</span>
+          <textarea
+            data-testid="plan-goal"
+            value={planGoal}
+            onChange={(e) => setPlanGoal(e.target.value)}
+            placeholder={"e.g. Add per-tenant rate limiting with quotas, metrics, and an admin view."}
+            aria-label="Goal"
+            rows={3}
+            style={{ ...inputStyle, resize: "vertical" }}
+          />
+        </label>
+        <div style={{ marginTop: "0.75rem" }}>
+          <button type="button" data-testid="plan-propose" onClick={() => void proposePlan()} disabled={planning || !planGoal.trim()} style={btnStyle(planning || !planGoal.trim())}>
+            {planning ? "Planning…" : "Propose plan"}
+          </button>
+        </div>
+        {planError && (
+          <p role="alert" data-testid="plan-error" style={{ marginTop: "0.75rem", color: "var(--wp-error, #ef4444)", fontSize: "0.9rem" }}>
+            {planError}
+          </p>
+        )}
+        {plan && plan.steps.length > 0 && (
+          <div data-testid="plan-steps" style={{ marginTop: "0.9rem", display: "grid", gap: "0.6rem" }}>
+            <p style={{ margin: 0, fontSize: "0.8rem", color: "var(--wp-text-dim)" }}>
+              {plan.steps.length} step{plan.steps.length === 1 ? "" : "s"} proposed{plan.model ? ` by ${plan.model}` : ""}. Review, then send any step to the factory.
+              {plan.truncated ? " (Long plan - only the first steps are shown; ship these first, then re-plan.)" : ""}
+            </p>
+            {plan.steps.map((s, i) => (
+              <div key={s.id} data-testid={`plan-step-${s.id}`} style={{ background: "var(--wp-surface-2, #171a21)", border: "1px solid var(--wp-border, #2a2f3a)", borderRadius: 8, padding: "0.7rem 0.8rem", display: "grid", gap: "0.35rem" }}>
+                <div style={{ display: "flex", alignItems: "baseline", gap: "0.5rem", flexWrap: "wrap" }}>
+                  <span style={{ fontSize: "0.72rem", color: "var(--wp-text-dim)", fontVariantNumeric: "tabular-nums" }}>{i + 1}.</span>
+                  <strong style={{ fontSize: "0.92rem" }}>{s.title}</strong>
+                  {s.sensitive && (
+                    <span data-testid={`plan-step-sensitive-${s.id}`} title="Touches a security-sensitive surface; the gate will require a human" style={{ fontSize: "0.68rem", textTransform: "uppercase", letterSpacing: "0.03em", color: "var(--wp-warning, #f5a623)", border: "1px solid var(--wp-warning, #f5a623)", borderRadius: 4, padding: "0.05rem 0.35rem" }}>
+                      sensitive
+                    </span>
+                  )}
+                </div>
+                <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--wp-text, #e6e9ef)" }}>{s.instruction}</p>
+                {s.rationale && <p style={{ margin: 0, fontSize: "0.78rem", color: "var(--wp-text-dim)" }}>Why: {s.rationale}</p>}
+                <div>
+                  <button type="button" data-testid={`plan-step-launch-${s.id}`} onClick={() => launchStep(s, i, plan.steps.length)} style={{ ...btnStyle(false), padding: "0.35rem 0.7rem", fontSize: "0.8rem" }}>
+                    Send to factory &rarr;
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
         )}
       </GlassPanel>
 

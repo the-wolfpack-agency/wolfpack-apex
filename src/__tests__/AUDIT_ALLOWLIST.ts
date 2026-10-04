@@ -56,6 +56,10 @@ export const AUDIT_ALLOWLIST: ReadonlyArray<AuditAllowlistEntry> = [
     route: "src/app/api/admin/agent-probe/run/route.ts",
     reason: "Runs a model against an allowlisted target and returns a behavior report + dossier; it persists one anonymous, non-PII SIGHTING (structural features + an opaque operator fingerprint) for the operators history - observability data, not a user-facing state mutation, the same class as an analytics row. The model call itself is metered and recorded by the router's own hash-chained AI ledger (recordRouterCall), where model/provider/cost are known, so a second thinner audit row would duplicate it",
   },
+  {
+    route: "src/app/api/admin/ai-code/plan/route.ts",
+    reason: "Propose-only planning: POST decomposes a goal into a list of suggested prompts and returns them. It performs NO durable mutation and no GitHub action - every proposed step is executed later, one at a time, through the pipeline endpoint, which IS audited. The only side effect here is the ai_code.plan_proposed analytics row (observability). A per-proposal hash-chained audit row would carry no compliance value; the governed, auditable event is the run a human launches from a step.",
+  },
   // Read-only-by-effect (POST that returns a computation, no durable write)
   {
     route: "src/app/api/admin/ai-code/ci-fix/route.ts",
