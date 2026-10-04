@@ -235,6 +235,11 @@ export default function CodeFactoryPage() {
   const [refineInstruction, setRefineInstruction] = useState("");
   // Multi-step planning (PROPOSE-ONLY): decompose a goal into steps. Nothing
   // runs from here - each step is launched into the prompt for a normal run.
+  // Reuse-brain readout + on-demand backfill (warm a repo's corpus now).
+  const [brainTotal, setBrainTotal] = useState<number | null>(null);
+  const [brainRepo, setBrainRepo] = useState("");
+  const [brainBusy, setBrainBusy] = useState(false);
+  const [brainNote, setBrainNote] = useState<string | null>(null);
   const [planGoal, setPlanGoal] = useState("");
   const [plan, setPlan] = useState<ProposedPlan | null>(null);
   const [planning, setPlanning] = useState(false);
@@ -356,11 +361,50 @@ export default function CodeFactoryPage() {
     setReady(true);
   }, [router]);
 
+  // Read how warm the reuse brain is (corpus size). Best-effort; silent on fail.
+  const loadBrain = useCallback(async () => {
+    try {
+      const res = await fetchWithRefresh("/api/admin/ai-code/brain");
+      if (!res.ok) return;
+      const data = (await res.json()) as { reuseCorpus?: { total?: number } };
+      setBrainTotal(typeof data.reuseCorpus?.total === "number" ? data.reuseCorpus.total : null);
+    } catch {
+      /* readout is best-effort */
+    }
+  }, []);
+
+  // Backfill: warm a repo's corpus on demand (persist its paths + index them).
+  const warmBrain = useCallback(async () => {
+    const repo = brainRepo.trim();
+    if (!repo || brainBusy) return;
+    setBrainBusy(true);
+    setBrainNote(null);
+    try {
+      const res = await fetchWithRefresh("/api/admin/ai-code/brain", {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: JSON.stringify({ repo }),
+      });
+      if (!res.ok) {
+        setBrainNote(res.status === 400 ? "Enter a repo as owner/name." : "Could not warm the brain for that repo.");
+        return;
+      }
+      const data = (await res.json()) as { written: number; indexed: number; total: number };
+      setBrainTotal(data.total);
+      setBrainNote(`Warmed ${repo}: +${data.written} paths persisted, ${data.indexed} indexed.`);
+    } catch {
+      setBrainNote("Network error warming the brain.");
+    } finally {
+      setBrainBusy(false);
+    }
+  }, [brainRepo, brainBusy]);
+
   // Separate mount-only load (stable loadHistory dep) so it fires once, not on
   // every re-render of the auth effect above.
   useEffect(() => {
     void loadHistory();
-  }, [loadHistory]);
+    void loadBrain();
+  }, [loadHistory, loadBrain]);
 
   const generate = useCallback(async (opts?: { keepAnswers?: boolean; refineOf?: string; promptOverride?: string }) => {
     if (!prompt.trim()) {
@@ -695,6 +739,31 @@ export default function CodeFactoryPage() {
               </div>
             ))}
           </div>
+        )}
+      </GlassPanel>
+
+      <GlassPanel title="Reuse brain" subtitle="What the factory remembers about your repos, so it reuses existing code instead of re-writing it. Warm a repo to seed it now.">
+        <div data-testid="brain-readout" style={{ display: "flex", alignItems: "baseline", gap: "0.5rem", flexWrap: "wrap" }}>
+          <span style={{ fontSize: "1.6rem", fontWeight: 700, color: "var(--wp-gold, #e8b528)", fontVariantNumeric: "tabular-nums" }} data-testid="brain-total">
+            {brainTotal === null ? "-" : brainTotal.toLocaleString()}
+          </span>
+          <span style={{ fontSize: "0.85rem", color: "var(--wp-text-dim)" }}>code paths remembered{brainTotal === 0 ? " (cold - warm a repo below)" : ""}</span>
+        </div>
+        <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.75rem", flexWrap: "wrap" }}>
+          <input
+            data-testid="brain-repo"
+            value={brainRepo}
+            onChange={(e) => setBrainRepo(e.target.value)}
+            placeholder="owner/name"
+            aria-label="Repo to warm"
+            style={{ ...inputStyle, flex: "1 1 14rem" }}
+          />
+          <button type="button" data-testid="brain-warm" onClick={() => void warmBrain()} disabled={brainBusy || !brainRepo.trim()} style={btnStyle(brainBusy || !brainRepo.trim())}>
+            {brainBusy ? "Warming…" : "Warm this repo"}
+          </button>
+        </div>
+        {brainNote && (
+          <p data-testid="brain-note" style={{ marginTop: "0.6rem", fontSize: "0.85rem", color: "var(--wp-text, #e6e9ef)" }}>{brainNote}</p>
         )}
       </GlassPanel>
 

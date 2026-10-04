@@ -74,6 +74,7 @@ test("readiness preflight: renders the checks and a one-click fix link for a blo
 
 let pipelineResp: Response;
 let planResp: Response;
+let brainResp: Response;
 let approveResp: Response;
 let historyResp: Response;
 let auditResp: Response;
@@ -87,6 +88,7 @@ beforeEach(() => {
     { id: "step-1", title: "Add schema", instruction: "Create the quotas table", rationale: "foundation", sensitive: true },
     { id: "step-2", title: "Add API", instruction: "Add the rate-limit route", rationale: "uses schema", sensitive: false },
   ] } });
+  brainResp = resp(200, { reuseCorpus: { total: 128 } });
   approveResp = resp(200, { ok: true, status: "executed", outcome: { ok: true, url: "https://github.com/o/r/pull/42", number: 42 } });
   historyResp = HISTORY_EMPTY();
   auditResp = resp(200, { verification: { ok: true, verifiedCount: 7, legacyCount: 0, brokenAtSeq: null, headSeq: 7, headHash: "h" }, entries: [{ seq: 7, created_at: "2026-09-27T10:00:00Z", principal_agent: "instinct.ai_code", intended_outcome: "allow", effective_outcome: "allow", would_block: false, rule_id: "R-MUTATION-ALLOW", reason: null }], entryCount: 1, generatedAtIso: "2026-09-27T10:00:00.000Z" });
@@ -105,6 +107,7 @@ beforeEach(() => {
     if (u.includes("/ai-code/readiness")) return Promise.resolve(readinessResp);
     if (u.includes("/ai-code/ci")) return Promise.resolve(ciResp);
     if (u.includes("/ai-code/plan")) return Promise.resolve(planResp);
+    if (u.includes("/ai-code/brain")) return Promise.resolve(brainResp);
     if (u.includes("/api/analytics")) return Promise.resolve(resp(200, { ok: true }));
     if (u.includes("/approvals/")) return Promise.resolve(approveResp);
     return Promise.resolve(pipelineResp);
@@ -623,4 +626,19 @@ test("multi-step planning: a model/parse failure shows a friendly error, not a c
   fireEvent.change(screen.getByTestId("plan-goal"), { target: { value: "something vague" } });
   await act(async () => { fireEvent.click(screen.getByTestId("plan-propose")); });
   await waitFor(() => expect(screen.getByTestId("plan-error")).toBeInTheDocument());
+});
+
+test("reuse brain: shows the corpus size on mount and warming a repo updates it", async () => {
+  brainResp = resp(200, { reuseCorpus: { total: 128 } });
+  render(<CodeFactoryPage />);
+  await waitFor(() => expect(screen.getByTestId("brain-total")).toHaveTextContent("128"));
+
+  // Warm a repo -> POST returns a new total, panel updates + notes the result.
+  brainResp = resp(200, { written: 40, indexed: 40, total: 168 });
+  fireEvent.change(screen.getByTestId("brain-repo"), { target: { value: "acme/app" } });
+  await act(async () => { fireEvent.click(screen.getByTestId("brain-warm")); });
+  await waitFor(() => expect(screen.getByTestId("brain-total")).toHaveTextContent("168"));
+  expect(screen.getByTestId("brain-note")).toHaveTextContent(/\+40 paths persisted, 40 indexed/);
+  const warmCall = mockFetch.mock.calls.find((c) => c[0] === "/api/admin/ai-code/brain" && (c[1] as { method?: string })?.method === "POST");
+  expect(JSON.parse((warmCall![1] as { body: string }).body).repo).toBe("acme/app");
 });

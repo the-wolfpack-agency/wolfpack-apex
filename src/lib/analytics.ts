@@ -723,6 +723,10 @@ export type InstinctEventType =
   // ai_code.plan_step_launched { step_index, steps } - a human sent one proposed
   //   step to the factory. The human-in-the-loop gate for multi-step autonomy.
   | "ai_code.plan_step_launched"
+  // ai_code.brain_backfilled { workspace_id, repo, written, indexed } - an admin
+  //   warmed the reuse brain for a repo (persist its paths + index them now)
+  //   instead of waiting for runs to fill it. Makes the corpus observable+seedable.
+  | "ai_code.brain_backfilled"
   // ai_code.policy_set { workspace_id, protected_paths, deny_rules, warnings } -
   //   a client edited their code-gate policy (additive-only). Security-relevant,
   //   so ALSO recorded to the hash-chained audit log at the route.

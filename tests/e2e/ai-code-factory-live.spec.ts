@@ -500,4 +500,19 @@ test("19) iterative refinement: Refine re-gates a revision of the prior change (
     console.log(`[dogfood:refine] refined -> status=${(body.run ?? body).status} model=${(body.executor ?? (body.run ?? body).executor)?.author}`);
     expect(csp, "no CSP violations").toEqual([]);
   });
+
+  test("18) the reuse brain readout renders a real count from the DB (data actually populated)", async ({ page }) => {
+    // Proves the brain readout works end-to-end against the DEPLOYED app + real DB,
+    // not just a connection: the panel reads /api/admin/ai-code/brain (countReuseCorpus)
+    // and renders a numeric total. A dropped/empty write would show "-", not a number.
+    await openFactory(page);
+    await expect(page.getByTestId("brain-readout"), "the reuse-brain panel mounts").toBeVisible({ timeout: 10_000 });
+    const total = page.getByTestId("brain-total");
+    await expect(total, "the corpus count renders").toBeVisible({ timeout: 10_000 });
+    // The GET resolved to a number (even 0 is a real answer); "-" means it never loaded.
+    await expect.poll(async () => (await total.textContent())?.trim() ?? "", { timeout: 10_000 }).not.toBe("-");
+    const shown = (await total.textContent())?.trim() ?? "";
+    expect(/^[\d,]+$/.test(shown), `brain total is a real number (got "${shown}")`).toBe(true);
+    console.log(`[e2e:brain] reuse corpus total = ${shown}`);
+  });
 }); // end describe
