@@ -40,6 +40,7 @@ import { buildRegistry, judgeCandidates, escalationProviderPins } from "@/lib/ai
 import { chooseIndependentJudge } from "@/lib/ai/judge-selection";
 import { evaluateChangeInvariants } from "@/lib/ai-code/change-facts";
 import { deepScanChange } from "@/lib/ai-code/deep-scan";
+import { findMissingAuth } from "@/lib/ai-code/missing-auth";
 import { buildRunCost } from "@/lib/ai-code/cost";
 import { workspaceGithubClient, fetchFileContent, fetchRepoTree } from "@/lib/github-client";
 import { buildRepoContext, withRepoContext, extractMentionedPaths } from "@/lib/ai-code/repo-context";
@@ -762,6 +763,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     deepScan.critical += policyFindings.filter((f) => f.severity === "critical").length;
     deepScan.high += policyFindings.filter((f) => f.severity === "high").length;
     deepScan.blocking = deepScan.blocking || deepScan.critical > 0;
+  }
+  // Missing-authorization gate (CWE-862): a new protected API route the factory
+  // authored with no auth control is HELD, not handed off. The factory enforces on
+  // its OWN output the same rule the repo's capability-coverage guardrail enforces,
+  // so this is caught inline, not only by the consuming repo's CI. (Found by dogfood.)
+  const missingAuth = findMissingAuth(finalFiles);
+  if (missingAuth.length > 0) {
+    deepScan.findings.push(...missingAuth);
+    deepScan.critical += missingAuth.length;
+    deepScan.blocking = true;
   }
 
   // FACTORY BRAIN producer: persist this run's CONFIRMED catches (deep-scan
