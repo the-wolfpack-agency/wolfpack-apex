@@ -18,6 +18,8 @@
 import {
   loadUnembeddedFailures,
   markFailuresEmbedded,
+  loadFailureConfidence,
+  failureSignature,
   type FailureRow,
 } from "./factory-failure-store";
 import {
@@ -26,6 +28,7 @@ import {
   upsertPoints,
   searchPoints,
   pointId,
+  rerankByConfidence,
   type QdrantConfig,
   type VectorHit,
 } from "./factory-vector";
@@ -49,6 +52,8 @@ export interface FailureIndexDeps {
   ensure: typeof ensureCollection;
   upsert: typeof upsertPoints;
   search: typeof searchPoints;
+  /** Per-signature confidence lookup for weight-aware retrieval (defaults to store). */
+  loadConfidence?: (workspaceId: string, repo: string, signatures: string[]) => Promise<Map<string, number>>;
 }
 
 /** Real deps, lazily (keeps the rag-provider import off the cold path). Null when
@@ -70,6 +75,7 @@ export async function defaultFailureIndexDeps(): Promise<FailureIndexDeps | null
     ensure: ensureCollection,
     upsert: upsertPoints,
     search: searchPoints,
+    loadConfidence: loadFailureConfidence,
   };
 }
 
@@ -134,7 +140,7 @@ export async function searchFailureMemory(args: {
       { workspace_id: args.workspaceId, repo: args.repo },
       Math.min(Math.max(args.k ?? 5, 1), 50),
     );
-    return hits
+    const mapped = hits
       .map((h) => ({
         findingClass: str(h.payload.finding_class),
         summary: str(h.payload.summary),
@@ -143,6 +149,12 @@ export async function searchFailureMemory(args: {
         score: h.score,
       }))
       .filter((h) => h.summary !== "");
+    // Weight-aware: a failure memory reinforced by rejections outranks a doubtful
+    // one. Signature is recomputed from class+summary (no payload change needed);
+    // confidence is authoritative in Postgres. All-1.0 today -> order unchanged.
+    const sigOf = (h: { findingClass: string; summary: string }) => failureSignature(h.findingClass, h.summary);
+    const confidence = await (deps.loadConfidence ?? loadFailureConfidence)(args.workspaceId, args.repo, mapped.map(sigOf));
+    return rerankByConfidence(mapped, sigOf, confidence);
   } catch {
     return [];
   }

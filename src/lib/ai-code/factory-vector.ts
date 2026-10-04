@@ -35,6 +35,22 @@ export interface VectorHit {
   payload: Record<string, unknown>;
 }
 
+/**
+ * Re-rank vector hits by similarity x confidence (authoritative confidence lives
+ * in Postgres, looked up per hit key). Stable: a missing/1.0 confidence leaves the
+ * order unchanged, so this is a no-op until outcomes move confidence. Pure.
+ */
+export function rerankByConfidence<T extends { score: number }>(
+  hits: readonly T[],
+  keyOf: (h: T) => string,
+  confidence: ReadonlyMap<string, number>,
+): T[] {
+  return hits
+    .map((h, i) => ({ h, i, w: h.score * (confidence.get(keyOf(h)) ?? 1) }))
+    .sort((a, b) => b.w - a.w || a.i - b.i)
+    .map((x) => x.h);
+}
+
 /** Resolve config from env; null when Qdrant is not configured (fall back path). */
 export function qdrantConfigFromEnv(): QdrantConfig | null {
   const url = process.env.QDRANT_URL;

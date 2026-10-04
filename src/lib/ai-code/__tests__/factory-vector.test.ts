@@ -8,6 +8,7 @@ import {
   ensureCollection,
   upsertPoints,
   searchPoints,
+  rerankByConfidence,
   qdrantConfigFromEnv,
   type QdrantConfig,
 } from "@/lib/ai-code/factory-vector";
@@ -76,5 +77,20 @@ describe("searchPoints", () => {
     expect(await searchPoints(cfg((() => {}) as unknown as typeof fetch), "c", [], {}, 5)).toEqual([]);
     expect(await searchPoints(cfg(jest.fn().mockResolvedValue(notOk()) as unknown as typeof fetch), "c", [1], {}, 5)).toEqual([]);
     expect(await searchPoints(cfg(jest.fn().mockRejectedValue(new Error("x")) as unknown as typeof fetch), "c", [1], {}, 5)).toEqual([]);
+  });
+});
+
+describe("rerankByConfidence", () => {
+  const key = (h: { path: string }) => h.path;
+  it("a lower-similarity but high-confidence hit can outrank a higher-similarity doubtful one", () => {
+    const hits = [{ path: "a", score: 0.9 }, { path: "b", score: 0.6 }];
+    // a is doubtful (0.3), b is proven (1.5): weighted 0.27 vs 0.9 -> b first.
+    const out = rerankByConfidence(hits, key, new Map([["a", 0.3], ["b", 1.5]]));
+    expect(out.map((h) => h.path)).toEqual(["b", "a"]);
+  });
+  it("missing/1.0 confidence leaves order unchanged (stable, zero behavior change)", () => {
+    const hits = [{ path: "a", score: 0.9 }, { path: "b", score: 0.9 }, { path: "c", score: 0.8 }];
+    expect(rerankByConfidence(hits, key, new Map()).map((h) => h.path)).toEqual(["a", "b", "c"]);
+    expect(rerankByConfidence(hits, key, new Map([["a", 1], ["b", 1], ["c", 1]])).map((h) => h.path)).toEqual(["a", "b", "c"]);
   });
 });
