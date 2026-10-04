@@ -71,7 +71,7 @@ import {
   parseAliasMap,
   type ModuleResolver,
   type BrokenLocalImport,
-  autoFixImports,
+  autoCorrectImports,
   type ImportFix,
 } from "@/lib/ai-code/imports";
 import { findIncompleteFiles, completenessFeedback } from "@/lib/ai-code/completeness";
@@ -234,10 +234,10 @@ async function checkLocalImports(
 async function resolveChangeWithFallback(
   args: ResolveArgs,
   installedRoots: ReadonlySet<string> = new Set(),
-  /** Optional async check for hallucinated LOCAL imports. When it finds any, the
-   *  draft self-corrects (escalate + exact feedback) instead of only blocking at
-   *  the gate - the #229 class (a name a real module doesn't export). */
-  localImportCheck?: (files: readonly { path: string; content: string }[]) => Promise<BrokenLocalImport[]>,
+  /** Optional DETERMINISTIC import corrector. It auto-fixes what a rewrite can fix
+   *  and reports what REMAINS - so the draft escalates ONLY for imports a rewrite
+   *  cannot fix, instead of burning a stronger-model call on a fixable import. */
+  autoCorrect?: (files: readonly { path: string; content: string }[]) => Promise<{ remaining: BrokenLocalImport[] }>,
 ): Promise<Awaited<ReturnType<typeof resolveChange>> & { executorAttempts: number; effectiveMode: "diff" | "files" | "anchor" }> {
   const emptyOrError = (r: Awaited<ReturnType<typeof resolveChange>>) => !r.diff.trim() || Boolean(r.executor?.error);
   // Deterministic reasons a draft is bad, each fed back to the escalation retry:
@@ -306,9 +306,11 @@ async function resolveChangeWithFallback(
   // Then the async check: a hallucinated LOCAL import (resolves to no file, or a
   // name a real module does not export - the #229 class). Same self-heal path:
   // give the model the exact failure and re-author, instead of only blocking.
-  if (!feedback && selfHealable && localImportCheck) {
-    const broken = await localImportCheck(resolvedFiles(resolved));
-    if (broken.length > 0) feedback = brokenLocalImportFeedback(broken);
+  if (!feedback && selfHealable && autoCorrect) {
+    // Deterministic fix FIRST; escalate only on imports a rewrite cannot fix - so a
+    // fumbled-but-fixable import clears first-pass instead of wasting an escalation.
+    const { remaining } = await autoCorrect(resolvedFiles(resolved));
+    if (remaining.length > 0) feedback = brokenLocalImportFeedback(remaining);
   }
   if (feedback) {
     // Recover on a DIFFERENT, stronger MODEL, WITH the deterministic reason fed
@@ -609,7 +611,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const resolved = await resolveChangeWithFallback(
     { mode: authorMode, diff, prompt: authorPrompt, authorModel, executorProviderPin, tier: authorTier, fetchFiles: fetchFilesForAnchor },
     installedRoots,
-    (files) => checkLocalImports(files, localImportCtx),
+    (files) => autoCorrectImports(files, repoTree, aliasMap, (ff) => checkLocalImports(ff, localImportCtx)),
   );
   // The mode the draft ACTUALLY ended on: a bad first draft recovers in files
   // mode, so downstream files-mode handling (repair loop, handoff, response) must
@@ -680,37 +682,22 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
   }
 
-  // DETERMINISTIC IMPORT AUTO-FIX: correct the model's common wrong imports BEFORE
-  // the gate - the double-prefix mistake (@/src/lib/auth -> @/lib/auth) and a single
-  // wrong-module symbol we can locate (import { requireCapability } from "@/lib/auth"
-  // -> "@/lib/auth/require-capability"). The thesis: wrap the probabilistic model in
-  // deterministic controls, so a fumbled import becomes shipped code, not a hold. Only
-  // rewrites an import that does NOT resolve to one that DOES, so it can never break a
-  // working import. Best-effort: any failure leaves the change untouched.
+  // DETERMINISTIC IMPORT AUTO-FIX at the gate: correct the model's wrong imports so a
+  // fumbled import becomes shipped code, not a hold. The SAME corrector ran in the
+  // authoring self-heal (to avoid escalating on a fixable import); this is the final
+  // pass that persists the fix into the committed change. Best-effort, both modes.
   let importFixes: ImportFix[] = [];
   if (groundingRepo && repoTree.size > 0 && effectiveDiff.trim()) {
     try {
       const authored = changes ?? resolvedFiles({ diff: effectiveDiff, changes: null });
-      const fixed = autoFixImports(authored, repoTree, aliasMap);
-      // Hint relocation for a single wrong-module symbol in an EXISTING module.
-      const broken = await checkLocalImports(fixed.files, localImportCtx);
-      for (const b of broken) {
-        if (b.kind !== "missing_export" || !b.hint || !b.name) continue;
-        const file = fixed.files.find((x) => x.path === b.path);
-        if (!file) continue;
-        const imp = extractLocalImports(file.path, file.content).find((li) => li.spec === b.spec);
-        if (imp && imp.names.length === 1 && imp.names[0] === b.name && !imp.hasDefault) {
-          file.content = file.content.split(`"${b.spec}"`).join(`"${b.hint}"`).split(`'${b.spec}'`).join(`'${b.hint}'`);
-          fixed.fixes.push({ path: b.path, from: b.spec, to: b.hint });
-        }
-      }
-      if (fixed.fixes.length > 0) {
-        const byPath = new Map(fixed.files.map((x) => [x.path, x.content]));
+      const corrected = await autoCorrectImports(authored, repoTree, aliasMap, (ff) => checkLocalImports(ff, localImportCtx));
+      if (corrected.fixes.length > 0) {
+        const byPath = new Map(corrected.files.map((x) => [x.path, x.content]));
         if (changes) changes = changes.map((c) => ({ ...c, content: byPath.get(c.path) ?? c.content }));
         effectiveDiff = changes
           ? filesToDiff(changes)
-          : filesToDiff(fixed.files.map((x) => ({ path: x.path, content: x.content })));
-        importFixes = fixed.fixes;
+          : filesToDiff(corrected.files.map((x) => ({ path: x.path, content: x.content })));
+        importFixes = corrected.fixes;
       }
     } catch { /* best-effort: never block a handoff on the auto-fixer */ }
   }
