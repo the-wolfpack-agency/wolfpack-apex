@@ -14,6 +14,9 @@
 export interface OpenedPr {
   repo: string;
   prNumber: number;
+  /** The handoff that opened this PR (pr_opened.approval_id) - the join key to the
+   *  memories that run used, for confidence reinforcement. Absent on older PRs. */
+  approvalId?: string;
 }
 export interface PrState {
   merged: boolean;
@@ -25,6 +28,8 @@ export interface MergeOutcome {
   repo: string;
   prNumber: number;
   event: MergeEvent;
+  /** Carried through from the opened PR so reinforcement can find its memories. */
+  approvalId?: string;
 }
 
 const keyOf = (repo: string, prNumber: number) => `${repo}#${prNumber}`;
@@ -46,8 +51,8 @@ export function classifyOutcomes(
     if (alreadyReported.has(key) || seen.has(key)) continue; // dedupe: terminal once
     const s = stateOf(o.repo, o.prNumber);
     if (!s) continue; // unreadable -> never guess an outcome
-    if (s.merged) { out.push({ repo: o.repo, prNumber: o.prNumber, event: "ai_code.pr_merged" }); seen.add(key); }
-    else if (s.closedUnmerged) { out.push({ repo: o.repo, prNumber: o.prNumber, event: "ai_code.pr_closed_unmerged" }); seen.add(key); }
+    if (s.merged) { out.push({ repo: o.repo, prNumber: o.prNumber, event: "ai_code.pr_merged", approvalId: o.approvalId }); seen.add(key); }
+    else if (s.closedUnmerged) { out.push({ repo: o.repo, prNumber: o.prNumber, event: "ai_code.pr_closed_unmerged", approvalId: o.approvalId }); seen.add(key); }
     // still open -> nothing yet
   }
   return out;
@@ -58,6 +63,9 @@ export interface MergePollDeps {
   loadAlreadyReported: () => Promise<Set<string>>;
   prState: (repo: string, prNumber: number) => Promise<PrState | null>;
   emit: (event: MergeEvent, repo: string, prNumber: number) => Promise<void>;
+  /** Optional: apply the outcome to the memories the handoff used (confidence
+   *  reinforce on merge / decay on reject). Best-effort; a failure never aborts. */
+  reinforce?: (outcome: MergeOutcome) => Promise<void>;
 }
 
 /** Orchestrate one poll: load opened + already-reported, fetch each state, emit
@@ -71,6 +79,9 @@ export async function pollMergeOutcomes(deps: MergePollDeps): Promise<MergeOutco
     stateCache.set(key, await deps.prState(o.repo, o.prNumber).catch(() => null));
   }
   const outcomes = classifyOutcomes(opened, (repo, n) => stateCache.get(keyOf(repo, n)) ?? null, alreadyReported);
-  for (const o of outcomes) await deps.emit(o.event, o.repo, o.prNumber).catch(() => {});
+  for (const o of outcomes) {
+    await deps.emit(o.event, o.repo, o.prNumber).catch(() => {});
+    if (deps.reinforce) await deps.reinforce(o).catch(() => {});
+  }
   return outcomes;
 }

@@ -19,17 +19,19 @@ import { trackEvent } from "@/lib/analytics";
 import { workspaceGithubClient, getPullRequest } from "@/lib/github-client";
 import { resolveWorkspace } from "@/lib/auth/workspace";
 import { pollMergeOutcomes, type OpenedPr, type PrState } from "@/lib/ai-code/merge-poll";
+import { reinforceFromOutcome } from "@/lib/ai-code/factory-reinforce";
 
 function isAuthorizedCron(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET;
   return !!secret && isAuthorizedBearer(req.headers.get("authorization"), secret);
 }
 
-type Meta = { repo?: unknown; pr_number?: unknown };
+type Meta = { repo?: unknown; pr_number?: unknown; approval_id?: unknown };
 const asOpened = (m: Meta): OpenedPr | null => {
   const repo = typeof m.repo === "string" ? m.repo : null;
   const n = typeof m.pr_number === "number" ? m.pr_number : Number(m.pr_number);
-  return repo && Number.isInteger(n) && n > 0 ? { repo, prNumber: n } : null;
+  const approvalId = typeof m.approval_id === "string" ? m.approval_id : undefined;
+  return repo && Number.isInteger(n) && n > 0 ? { repo, prNumber: n, approvalId } : null;
 };
 
 async function run(): Promise<NextResponse> {
@@ -63,6 +65,16 @@ async function run(): Promise<NextResponse> {
     },
     emit: async (event, repo, prNumber) => {
       await trackEvent(event, "system", "system", { repo, pr_number: prNumber });
+    },
+    // Close the learning loop: a merged PR reinforces the memories its run used;
+    // a closed-unmerged one decays them (weight-aware retrieval reads the result).
+    reinforce: async (o) => {
+      await reinforceFromOutcome({
+        workspaceId: resolveWorkspace(null),
+        repo: o.repo,
+        approvalId: o.approvalId,
+        merged: o.event === "ai_code.pr_merged",
+      });
     },
   });
 
