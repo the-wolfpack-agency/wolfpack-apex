@@ -75,6 +75,7 @@ test("readiness preflight: renders the checks and a one-click fix link for a blo
 let pipelineResp: Response;
 let planResp: Response;
 let brainResp: Response;
+let efficacyResp: Response;
 let approveResp: Response;
 let historyResp: Response;
 let auditResp: Response;
@@ -89,6 +90,7 @@ beforeEach(() => {
     { id: "step-2", title: "Add API", instruction: "Add the rate-limit route", rationale: "uses schema", sensitive: false },
   ] } });
   brainResp = resp(200, { reuseCorpus: { total: 128 }, failureMemory: { total: 9 } });
+  efficacyResp = resp(200, { efficacy: { windowDays: 30, runs: 12, firstPassReadyRate: 0.75, acceptanceRate: 0.6, duplicationRate: 0.1, reuseSemanticRate: 0.5, repeatFindingRate: 0.25, readyTrend: "up" } });
   approveResp = resp(200, { ok: true, status: "executed", outcome: { ok: true, url: "https://github.com/o/r/pull/42", number: 42 } });
   historyResp = HISTORY_EMPTY();
   auditResp = resp(200, { verification: { ok: true, verifiedCount: 7, legacyCount: 0, brokenAtSeq: null, headSeq: 7, headHash: "h" }, entries: [{ seq: 7, created_at: "2026-09-27T10:00:00Z", principal_agent: "instinct.ai_code", intended_outcome: "allow", effective_outcome: "allow", would_block: false, rule_id: "R-MUTATION-ALLOW", reason: null }], entryCount: 1, generatedAtIso: "2026-09-27T10:00:00.000Z" });
@@ -107,6 +109,7 @@ beforeEach(() => {
     if (u.includes("/ai-code/readiness")) return Promise.resolve(readinessResp);
     if (u.includes("/ai-code/ci")) return Promise.resolve(ciResp);
     if (u.includes("/ai-code/plan")) return Promise.resolve(planResp);
+    if (u.includes("/ai-code/efficacy")) return Promise.resolve(efficacyResp);
     if (u.includes("/ai-code/brain")) return Promise.resolve(brainResp);
     if (u.includes("/api/analytics")) return Promise.resolve(resp(200, { ok: true }));
     if (u.includes("/approvals/")) return Promise.resolve(approveResp);
@@ -630,6 +633,7 @@ test("multi-step planning: a model/parse failure shows a friendly error, not a c
 
 test("reuse brain: shows the corpus size on mount and warming a repo updates it", async () => {
   brainResp = resp(200, { reuseCorpus: { total: 128 }, failureMemory: { total: 9 } });
+  efficacyResp = resp(200, { efficacy: { windowDays: 30, runs: 12, firstPassReadyRate: 0.75, acceptanceRate: 0.6, duplicationRate: 0.1, reuseSemanticRate: 0.5, repeatFindingRate: 0.25, readyTrend: "up" } });
   render(<CodeFactoryPage />);
   await waitFor(() => expect(screen.getByTestId("brain-total")).toHaveTextContent("128"));
 
@@ -641,4 +645,20 @@ test("reuse brain: shows the corpus size on mount and warming a repo updates it"
   expect(screen.getByTestId("brain-note")).toHaveTextContent(/\+40 paths persisted, 40 indexed/);
   const warmCall = mockFetch.mock.calls.find((c) => c[0] === "/api/admin/ai-code/brain" && (c[1] as { method?: string })?.method === "POST");
   expect(JSON.parse((warmCall![1] as { body: string }).body).repo).toBe("acme/app");
+});
+
+test("improving-over-time panel renders the efficacy rates + trend arrow", async () => {
+  efficacyResp = resp(200, { efficacy: { windowDays: 30, runs: 12, firstPassReadyRate: 0.75, acceptanceRate: 0.6, duplicationRate: 0.1, reuseSemanticRate: 0.5, repeatFindingRate: 0.25, readyTrend: "up" } });
+  render(<CodeFactoryPage />);
+  await waitFor(() => expect(screen.getByTestId("efficacy-panel")).toBeInTheDocument());
+  expect(screen.getByTestId("efficacy-panel")).toHaveTextContent("75%"); // first-pass ready
+  expect(screen.getByTestId("efficacy-trend")).toHaveTextContent("↑"); // ready-rate rising
+  expect(screen.getByTestId("efficacy-runs")).toHaveTextContent("12 runs");
+});
+
+test("improving-over-time panel is hidden until there are runs (no empty noise)", async () => {
+  efficacyResp = resp(200, { efficacy: { windowDays: 30, runs: 0, firstPassReadyRate: null, acceptanceRate: null, duplicationRate: null, reuseSemanticRate: null, repeatFindingRate: null, readyTrend: "n/a" } });
+  render(<CodeFactoryPage />);
+  await waitFor(() => expect(screen.getByTestId("brain-readout")).toBeInTheDocument());
+  expect(screen.queryByTestId("efficacy-panel")).toBeNull();
 });

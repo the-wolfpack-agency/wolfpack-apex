@@ -133,6 +133,7 @@ interface DriftFlag { model: string; priorReadyRate: number; recentReadyRate: nu
 interface ProtectionSummary { totalCaught: number; byClass: { klass: string; label: string; count: number }[]; changesBlocked: number; sentForReview: number; criticalsCaught: number; prsOpened: number; prsMerged: number; prsClosedUnmerged: number; acceptanceRate: number | null; windowDays: number }
 interface PlanStep { id: string; title: string; instruction: string; rationale: string; sensitive: boolean }
 interface ProposedPlan { goal: string; steps: PlanStep[]; truncated: boolean; model: string | null }
+interface LoopEfficacy { windowDays: number; runs: number; firstPassReadyRate: number | null; acceptanceRate: number | null; duplicationRate: number | null; reuseSemanticRate: number | null; repeatFindingRate: number | null; readyTrend: "up" | "down" | "flat" | "n/a" }
 interface GateDecisionRow { gate: string; verdict: "allow" | "auto_fix" | "require_human" | "deny"; modelInvoked: string | null; findings: number; recordedSeq: number | null; createdAt: string; previewUrl: string | null }
 interface AwaitingProd { previewUrl: string | null; recordedSeq: number | null; createdAt: string }
 interface GateSafety { total: number; allowed: number; autoFixed: number; escalatedToHuman: number; badChangesPrevented: number; dataKeptFromModel: number; frameworks: string[]; recent: GateDecisionRow[]; awaitingProd: AwaitingProd[] }
@@ -238,6 +239,8 @@ export default function CodeFactoryPage() {
   // Reuse-brain readout + on-demand backfill (warm a repo's corpus now).
   const [brainTotal, setBrainTotal] = useState<number | null>(null);
   const [brainFailures, setBrainFailures] = useState<number | null>(null);
+  // Loop efficacy: is the factory getting better over time?
+  const [efficacy, setEfficacy] = useState<LoopEfficacy | null>(null);
   const [brainRepo, setBrainRepo] = useState("");
   const [brainBusy, setBrainBusy] = useState(false);
   const [brainNote, setBrainNote] = useState<string | null>(null);
@@ -401,12 +404,25 @@ export default function CodeFactoryPage() {
     }
   }, [brainRepo, brainBusy]);
 
+  // Is the factory improving? Read-only efficacy trend. Best-effort.
+  const loadEfficacy = useCallback(async () => {
+    try {
+      const res = await fetchWithRefresh("/api/admin/ai-code/efficacy");
+      if (!res.ok) return;
+      const data = (await res.json()) as { efficacy?: LoopEfficacy };
+      if (data.efficacy) setEfficacy(data.efficacy);
+    } catch {
+      /* best-effort readout */
+    }
+  }, []);
+
   // Separate mount-only load (stable loadHistory dep) so it fires once, not on
   // every re-render of the auth effect above.
   useEffect(() => {
     void loadHistory();
     void loadBrain();
-  }, [loadHistory, loadBrain]);
+    void loadEfficacy();
+  }, [loadHistory, loadBrain, loadEfficacy]);
 
   const generate = useCallback(async (opts?: { keepAnswers?: boolean; refineOf?: string; promptOverride?: string }) => {
     if (!prompt.trim()) {
@@ -771,6 +787,35 @@ export default function CodeFactoryPage() {
           <p data-testid="brain-note" style={{ marginTop: "0.6rem", fontSize: "0.85rem", color: "var(--wp-text, #e6e9ef)" }}>{brainNote}</p>
         )}
       </GlassPanel>
+
+      {efficacy && efficacy.runs > 0 && (
+        <GlassPanel title="Improving over time" subtitle={`Over the last ${efficacy.windowDays} days. If the brain is working, first-pass + acceptance rise and repeat findings fall.`}>
+          <div data-testid="efficacy-panel" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "0.75rem" }}>
+            {([
+              { k: "First-pass ready", v: efficacy.firstPassReadyRate, good: "high", trend: efficacy.readyTrend },
+              { k: "Acceptance (merged)", v: efficacy.acceptanceRate, good: "high" },
+              { k: "Repeat findings", v: efficacy.repeatFindingRate, good: "low" },
+              { k: "Duplication caught", v: efficacy.duplicationRate, good: "low" },
+              { k: "Used the brain", v: efficacy.reuseSemanticRate, good: "high" },
+            ] as const).map((m) => (
+              <div key={m.k} style={{ background: "var(--wp-surface-2, #171a21)", border: "1px solid var(--wp-border, #2a2f3a)", borderRadius: 8, padding: "0.6rem 0.75rem" }}>
+                <div style={{ fontSize: "0.68rem", textTransform: "uppercase", letterSpacing: "0.03em", color: "var(--wp-text-dim)" }}>{m.k}</div>
+                <div style={{ fontSize: "1.4rem", fontWeight: 700, marginTop: "0.2rem", color: "var(--wp-text, #e6e9ef)", fontVariantNumeric: "tabular-nums" }}>
+                  {m.v === null ? "n/a" : `${Math.round(m.v * 100)}%`}
+                  {"trend" in m && m.trend && m.trend !== "n/a" && (
+                    <span data-testid="efficacy-trend" title={`ready-rate trend: ${m.trend}`} style={{ fontSize: "0.9rem", marginLeft: "0.4rem", color: m.trend === "up" ? "var(--wp-success, #22c55e)" : m.trend === "down" ? "var(--wp-error, #ef4444)" : "var(--wp-text-dim)" }}>
+                      {m.trend === "up" ? "↑" : m.trend === "down" ? "↓" : "→"}
+                    </span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+          <p data-testid="efficacy-runs" style={{ marginTop: "0.6rem", fontSize: "0.78rem", color: "var(--wp-text-dim)" }}>
+            from {efficacy.runs.toLocaleString()} run{efficacy.runs === 1 ? "" : "s"} in the window
+          </p>
+        </GlassPanel>
+      )}
 
       {readiness && (
         <GlassPanel title="Readiness" subtitle="Checked before you build, so nothing surprises you mid-run">
