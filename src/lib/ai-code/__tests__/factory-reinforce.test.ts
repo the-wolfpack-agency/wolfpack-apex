@@ -7,7 +7,7 @@ import { reinforceFromOutcome, REINFORCE_FACTOR, DECAY_FACTOR, type ReinforceDep
 function deps(over: Partial<ReinforceDeps> = {}): ReinforceDeps {
   return {
     loadProvenance: jest.fn(async () => [
-      { kind: "reuse" as const, key: "src/a.ts" },
+      { kind: "reuse" as const, key: "src/a.ts", used: true },
       { kind: "failure" as const, key: "sig1" },
     ]),
     adjustReuse: jest.fn(async () => ({ adjusted: 1 })),
@@ -30,6 +30,20 @@ it("closed-unmerged DECAYS them (factor < 1)", async () => {
   expect(d.adjustReuse).toHaveBeenCalledWith("w1", "o/r", ["src/a.ts"], DECAY_FACTOR);
   expect(DECAY_FACTOR).toBeLessThan(1);
   expect(REINFORCE_FACTOR).toBeGreaterThan(1);
+});
+
+it("#7: a RETRIEVED-but-UNUSED reuse suggestion is NOT reinforced (failure still is)", async () => {
+  const d = deps({
+    loadProvenance: jest.fn(async () => [
+      { kind: "reuse" as const, key: "src/used.ts", used: true },
+      { kind: "reuse" as const, key: "src/ignored.ts", used: false },
+      { kind: "failure" as const, key: "sig1" },
+    ]),
+  });
+  await reinforceFromOutcome({ workspaceId: "w1", repo: "o/r", approvalId: "appr1", merged: true, deps: d });
+  // only the USED reuse path is credited; the ignored one is left untouched
+  expect(d.adjustReuse).toHaveBeenCalledWith("w1", "o/r", ["src/used.ts"], REINFORCE_FACTOR);
+  expect(d.adjustFailure).toHaveBeenCalledWith("w1", "o/r", ["sig1"], REINFORCE_FACTOR);
 });
 
 it("no-op without an approvalId (older PRs with no provenance link)", async () => {

@@ -50,6 +50,7 @@ import { searchFailureMemory } from "@/lib/ai-code/factory-failure-index";
 import { rememberRunFailures, buildFailureAvoidanceBlock } from "@/lib/ai-code/factory-failure-producer";
 import { failureSignature } from "@/lib/ai-code/factory-failure-store";
 import { recordMemoryProvenance } from "@/lib/ai-code/factory-provenance";
+import { markReuseUsage } from "@/lib/ai-code/factory-memory-usefulness";
 import { classifyTaskType } from "@/lib/ai-code/task-type";
 import { buildKnownExportsBlock, exportsEntries } from "@/lib/ai-code/export-grounding";
 import { duplicationSignal, duplicationGate } from "@/lib/ai-code/reuse-enforcement";
@@ -840,10 +841,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       // Fire-and-forget + flag-gated; only ready handoffs (which open PRs) get an
       // outcome to learn from.
       if (approvalId && semanticReuseEnabled()) {
-        void recordMemoryProvenance(workspaceId, approvalId, groundingRepo, [
-          ...retrievedReuseKeys.map((key) => ({ kind: "reuse" as const, key })),
-          ...retrievedFailureKeys.map((key) => ({ kind: "failure" as const, key })),
-        ]).catch(() => {});
+        // #7: mark which reuse suggestions the author ACTUALLY USED in the authored
+        // diff, so reinforcement credits only the ones that helped ship.
+        const provenance = markReuseUsage(
+          [
+            ...retrievedReuseKeys.map((key) => ({ kind: "reuse" as const, key })),
+            ...retrievedFailureKeys.map((key) => ({ kind: "failure" as const, key })),
+          ],
+          run.diff,
+        );
+        void recordMemoryProvenance(workspaceId, approvalId, groundingRepo, provenance).catch(() => {});
       }
     }
   }

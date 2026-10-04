@@ -19,8 +19,13 @@ describe("normalizeProvenance", () => {
       { kind: "reuse", key: "" }, // blank
       { kind: "bogus" as never, key: "x" }, // bad kind
     ]);
-    expect(out).toEqual([{ kind: "reuse", key: "a.ts" }, { kind: "failure", key: "a.ts" }]);
+    expect(out).toEqual([{ kind: "reuse", key: "a.ts", used: false }, { kind: "failure", key: "a.ts", used: false }]);
   });
+  it("preserves used=true (reuse) and defaults it to false otherwise", () => {
+    const out = normalizeProvenance([{ kind: "reuse", key: "u.ts", used: true }, { kind: "reuse", key: "n.ts" }]);
+    expect(out).toEqual([{ kind: "reuse", key: "u.ts", used: true }, { kind: "reuse", key: "n.ts", used: false }]);
+  });
+
   it("caps at MAX_PROVENANCE", () => {
     const many = Array.from({ length: MAX_PROVENANCE + 10 }, (_, i) => ({ kind: "reuse" as const, key: `p${i}` }));
     expect(normalizeProvenance(many).length).toBe(MAX_PROVENANCE);
@@ -40,6 +45,7 @@ describe("recordMemoryProvenance", () => {
     const [sql, params] = mockQuery.mock.calls[0];
     expect(sql).toMatch(/INSERT INTO instinct_factory_memory_provenance/);
     expect(sql).toMatch(/ON CONFLICT \(workspace_id, approval_id, kind, mem_key\) DO NOTHING/);
+    expect(sql).toMatch(/\(workspace_id, approval_id, repo, kind, mem_key, used\)/);
     expect(params.slice(0, 3)).toEqual(["w1", "appr1", "o/r"]);
   });
   it("never throws on a db error (best-effort learning telemetry)", async () => {
@@ -50,8 +56,8 @@ describe("recordMemoryProvenance", () => {
 
 describe("loadProvenanceByApproval", () => {
   it("returns scoped entries, filtering unknown kinds; [] without approvalId", async () => {
-    mockSafeQuery.mockResolvedValue({ rows: [{ kind: "reuse", mem_key: "a" }, { kind: "failure", mem_key: "s" }, { kind: "junk", mem_key: "x" }] });
-    expect(await loadProvenanceByApproval("w1", "appr1")).toEqual([{ kind: "reuse", key: "a" }, { kind: "failure", key: "s" }]);
+    mockSafeQuery.mockResolvedValue({ rows: [{ kind: "reuse", mem_key: "a", used: true }, { kind: "failure", mem_key: "s", used: false }, { kind: "junk", mem_key: "x", used: false }] });
+    expect(await loadProvenanceByApproval("w1", "appr1")).toEqual([{ kind: "reuse", key: "a", used: true }, { kind: "failure", key: "s", used: false }]);
     expect(mockSafeQuery.mock.calls[0][1]).toEqual(["w1", "appr1"]);
     expect(await loadProvenanceByApproval("w1", "")).toEqual([]);
   });
