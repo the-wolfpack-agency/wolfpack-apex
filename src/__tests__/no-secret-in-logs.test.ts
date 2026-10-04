@@ -24,6 +24,10 @@ const EXCEPTIONS = [
   // The detector documents the pattern it catches in its own docstring
   // (``console.log(`link ${resetUrl}`)``), which is not executable code.
   "src/lib/platform-scan/static/detectors.ts",
+  // The gate REGRESSION eval corpus: synthetic, obviously-fake sample lines (a
+  // dummy key string in a data array, never executed) that the detectors MUST
+  // keep flagging. By design it contains sample offending lines, like fixtures.
+  "src/lib/ai-code/gate-eval-corpus.ts",
 ];
 
 function walk(dir: string): string[] {
