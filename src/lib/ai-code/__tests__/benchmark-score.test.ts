@@ -3,7 +3,10 @@
  * scored against what the case expected; the scorecard aggregates the rates that
  * answer "is it reliable for my SDLC flow".
  */
-import { scoreCase, summarizeScorecard, heldReason, type BenchResponse } from "@/lib/ai-code/benchmark-score";
+import {
+  scoreCase, summarizeScorecard, heldReason, modelLimitationProfiles, formatLimitationProfile,
+  type BenchResponse,
+} from "@/lib/ai-code/benchmark-score";
 
 const authored: BenchResponse = { run: { status: "ready_for_pr", diff: "d" }, executor: { author: "gpt-4o-mini" }, executorAttempts: 1 };
 const escalatedAuthored: BenchResponse = { run: { status: "ready_for_pr", diff: "d" }, executor: { author: "DeepSeek-V4-Flash" }, executorAttempts: 2 };
@@ -86,5 +89,53 @@ describe("summarizeScorecard", () => {
   it("is zeroed on empty", () => {
     expect(summarizeScorecard([]).total).toBe(0);
     expect(summarizeScorecard([]).firstPassReadyRate).toBe(0);
+  });
+});
+
+describe("modelLimitationProfiles (per-model ground-truth limitation tracking)", () => {
+  // broken-imports hold authored by a small model, EXPECTED to author -> a real limitation
+  const smallBrokenImports: BenchResponse = {
+    run: { status: "needs_human" }, executor: { author: "gpt-4o-mini" },
+    brokenLocalImports: [{}], executorAttempts: 1,
+  };
+  it("charges a limitation only when the model was expected to author and was withheld", () => {
+    const scores = [
+      scoreCase("imp", "authored", smallBrokenImports), // gpt-4o-mini: broken-imports limitation
+      scoreCase("ok", "authored", authored),            // gpt-4o-mini: clean author
+      scoreCase("adv", "blocked", blockedSec),          // model "m" correctly blocked -> NOT a limitation
+    ];
+    const profiles = modelLimitationProfiles(scores);
+    const small = profiles.find((p) => p.model === "gpt-4o-mini")!;
+    expect(small.authoringTasks).toBe(2);
+    expect(small.limitations["broken-imports"]).toEqual({ count: 1, rate: 0.5 });
+    // the correctly-blocked adversarial case is NOT charged against model "m"
+    const m = profiles.find((p) => p.model === "m")!;
+    expect(m.limitations).toEqual({});
+  });
+  it("excludes cases with no authoring model (an intent-gate refusal)", () => {
+    const profiles = modelLimitationProfiles([scoreCase("greet", "blocked", notReq)]);
+    expect(profiles).toEqual([]); // notReq has model "" -> nothing to attribute
+  });
+  it("computes per-model first-pass / escalation / match rates", () => {
+    const profiles = modelLimitationProfiles([
+      scoreCase("a", "authored", authored),          // gpt-4o-mini first-pass pass
+      scoreCase("b", "authored", escalatedAuthored), // DeepSeek escalated pass
+    ]);
+    const small = profiles.find((p) => p.model === "gpt-4o-mini")!;
+    expect(small.firstPassRate).toBe(1);
+    expect(small.escalationRate).toBe(0);
+    const deep = profiles.find((p) => p.model === "DeepSeek-V4-Flash")!;
+    expect(deep.escalationRate).toBe(1);
+    expect(deep.firstPassRate).toBe(0);
+  });
+  it("formatLimitationProfile renders a one-line summary, limitations highest-rate first", () => {
+    const [p] = modelLimitationProfiles([
+      scoreCase("imp", "authored", smallBrokenImports),
+      scoreCase("ok", "authored", authored),
+    ]);
+    const line = formatLimitationProfile(p);
+    expect(line).toContain("[profile] gpt-4o-mini");
+    expect(line).toContain("broken-imports=50%");
+    expect(line).toContain("firstPass=50%");
   });
 });

@@ -10,7 +10,10 @@
  * (it spends real model tokens). Skips cleanly when creds are absent.
  */
 import { test, expect, type Page } from "@playwright/test";
-import { scoreCase, summarizeScorecard, type BenchResponse, type Expectation } from "@/lib/ai-code/benchmark-score";
+import {
+  scoreCase, summarizeScorecard, modelLimitationProfiles, formatLimitationProfile,
+  type BenchResponse, type Expectation,
+} from "@/lib/ai-code/benchmark-score";
 
 const CI = !!process.env.CI;
 const PROD_URL = process.env.PROD_URL?.replace(/\/$/, "");
@@ -84,6 +87,17 @@ test.describe("factory reliability benchmark", () => {
     await testInfo.attach("reliability-scorecard.json", { body: JSON.stringify(card, null, 2), contentType: "application/json" });
     // eslint-disable-next-line no-console
     console.log(`[bench] SCORECARD first-pass-ready=${(card.firstPassReadyRate * 100).toFixed(0)}% expectation-match=${(card.expectationMatchRate * 100).toFixed(0)}% escalation=${(card.escalationRate * 100).toFixed(0)}% (authored=${card.authored} held=${card.held} blocked=${card.blocked} errored=${card.errored} / ${card.total})`);
+
+    // MODEL LIMITATION PROFILE: where each authoring model fails inside a real
+    // SDLC, using the gate's verdicts as free ground-truth labels. Attached as a
+    // durable artifact + logged per model so a run shows which model struggles
+    // with which class (e.g. smaller models with imports).
+    const profiles = modelLimitationProfiles(scores);
+    await testInfo.attach("model-limitation-profiles.json", { body: JSON.stringify(profiles, null, 2), contentType: "application/json" });
+    for (const p of profiles) {
+      // eslint-disable-next-line no-console
+      console.log(formatLimitationProfile(p));
+    }
 
     // SAFETY guarantees (hard asserts) - the benchmark is a measurement, but these
     // must never regress:
