@@ -54,6 +54,15 @@ import {
 import { findMissingAuth } from "../src/lib/ai-code/missing-auth";
 import { checkSyntax } from "../src/lib/ai-code/syntax-check";
 import { findIncompleteFiles } from "../src/lib/ai-code/completeness";
+// The SANDBOX reads with the exact PROD readers, so the prod code path is proven
+// locally: records are PipelineRunRecord-shaped, graded by the one gradeRuns, and
+// scored by the one modelValueScores. Promotion to prod swaps only the sink.
+import { gradeRuns, type PipelineRunRecord } from "../src/lib/ai-code/grading";
+import { modelValueScores } from "../src/lib/ai-code/model-benchmark";
+
+/** Append-only local event log (gitignored). The R&D-phase stand-in for the prod
+ *  analytics_events `ai_code.pipeline_run` stream - identical record shape. */
+const SANDBOX = path.join(REPO_ROOT, ".dogfood", "runs.jsonl");
 
 /** Build the repo tree (repo-relative paths) from disk - the local equivalent of
  *  the route's GitHub tree, so import existence is judged against the real repo. */
@@ -96,6 +105,8 @@ interface RunResult {
   syntaxOk: boolean;
   handoff: boolean;
   diff: string;
+  /** The PROD-shaped run record (so gradeRuns/the profile run unchanged on it). */
+  record: PipelineRunRecord;
 }
 
 /** One real factory run: author -> the full shared deterministic bundle ->
@@ -109,7 +120,11 @@ async function runOnce(prompt: string, ctx: RunCtx): Promise<RunResult> {
   );
   const files = authored.changes;
   if (files.length === 0) {
-    return { author: authored.author, costUsd: authored.costUsd, security: "n/a", brokenImports: [], missingAuth: 0, phantomImports: 0, incompleteFiles: 0, syntaxOk: false, handoff: false, diff: "" };
+    const record: PipelineRunRecord = {
+      model: authored.author, status: "needs_human", attempts: 0, finalOutcome: "block",
+      costUsd: authored.costUsd ?? 0, ts: Date.parse(nowIso),
+    };
+    return { author: authored.author, costUsd: authored.costUsd, security: "n/a", brokenImports: [], missingAuth: 0, phantomImports: 0, incompleteFiles: 0, syntaxOk: false, handoff: false, diff: "", record };
   }
   const diff = filesToDiff(files);
   const broken = await checkLocalImports(files, { repoTree: ctx.repoTree, aliasMap: ctx.aliasMap }, ctx.fetchModules);
@@ -124,6 +139,23 @@ async function runOnce(prompt: string, ctx: RunCtx): Promise<RunResult> {
   });
   const handoff = run.status === "ready_for_pr" && broken.length === 0 && missingAuth.length === 0 &&
     phantomImports.length === 0 && incompleteFiles.length === 0 && syntax.ok;
+  // PROD-shaped record. status reflects the FAITHFUL handoff (holds on any gate),
+  // deepScanCritical folds in missing-auth exactly as the route does.
+  const record: PipelineRunRecord = {
+    model: authored.author,
+    status: handoff ? "ready_for_pr" : "needs_human",
+    attempts: run.remediation.attempts.length,
+    finalOutcome: run.review.verdict.outcome,
+    deepScanCritical: run.review.findings.filter((f) => f.severity === "critical").length + missingAuth.length,
+    selfHealed: run.remediation.attempts.length > 0 && handoff,
+    costUsd: authored.costUsd ?? 0,
+    phantomImports: phantomImports.length,
+    brokenLocalImports: broken.length,
+    incompleteFiles: incompleteFiles.length,
+    removedExports: 0, // no base-content fetch locally
+    anchorFailures: 0,
+    ts: Date.parse(nowIso),
+  };
   return {
     author: authored.author,
     costUsd: authored.costUsd,
@@ -135,7 +167,34 @@ async function runOnce(prompt: string, ctx: RunCtx): Promise<RunResult> {
     syntaxOk: syntax.ok,
     handoff,
     diff,
+    record,
   };
+}
+
+/** Append a run record to the local sandbox log (gitignored). */
+function emitRecord(r: PipelineRunRecord): void {
+  fs.mkdirSync(path.dirname(SANDBOX), { recursive: true });
+  fs.appendFileSync(SANDBOX, JSON.stringify(r) + "\n");
+}
+
+/** --profile: read the sandbox log and run the EXACT prod readers over it -
+ *  gradeRuns -> per-model grade + failure profile, and modelValueScores -> the
+ *  router's value map. Proves the whole flywheel locally, zero DB. */
+function printProfile(): void {
+  if (!fs.existsSync(SANDBOX)) { console.log(`[dogfood] no sandbox log yet (${path.relative(REPO_ROOT, SANDBOX)}). Run with --emit first.`); return; }
+  const records: PipelineRunRecord[] = fs.readFileSync(SANDBOX, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
+  const grade = gradeRuns(records);
+  const values = modelValueScores(grade.byModel);
+  console.log(`\n===== MODEL PROFILE (from ${records.length} sandbox runs) =====`);
+  for (const m of grade.byModel) {
+    const fp = m.failureProfile;
+    const fails = Object.entries(fp).filter(([, v]) => v > 0).map(([k, v]) => `${k}=${Math.round(v * 100)}%`).join(" ") || "none";
+    console.log(`\n${m.model}  (n=${m.n})`);
+    console.log(`  readyRate=${Math.round(m.readyRate * 100)}%  firstPass=${Math.round(m.firstPassRate * 100)}%  blockRate=${Math.round(m.blockRate * 100)}%  avgCost=$${m.avgCostUsd.toFixed(4)}`);
+    console.log(`  failure profile: ${fails}`);
+    console.log(`  router value score: ${values[m.model] !== undefined ? values[m.model].toFixed(2) : "(unscored: too few runs or unpriced)"}`);
+  }
+  console.log("");
 }
 
 function buildCtx(): RunCtx {
@@ -151,10 +210,13 @@ function buildCtx(): RunCtx {
 }
 
 async function main(): Promise<void> {
+  // --profile: just read the sandbox + print the flywheel (no run, no model call).
+  if (process.argv.includes("--profile")) { printProfile(); return; }
+
   const repeatArg = process.argv.find((a) => a.startsWith("--repeat"));
   const repeat = repeatArg ? Math.max(1, parseInt(repeatArg.split("=")[1] ?? "1", 10) || 1) : 1;
   const prompt = process.argv.slice(2).filter((a) => !a.startsWith("--")).join(" ").trim();
-  if (!prompt) { console.error('usage: npx tsx scripts/dogfood.ts [--emit] [--repeat=N] "<task>"'); process.exit(2); }
+  if (!prompt) { console.error('usage: npx tsx scripts/dogfood.ts [--emit] [--repeat=N] "<task>"  |  --profile'); process.exit(2); }
 
   console.log(`\n[dogfood] task: "${prompt}"`);
   console.log(`[dogfood] emit: ${EMIT ? "ON" : "off (zero DB writes)"}  repeat: ${repeat}\n`);
@@ -174,7 +236,8 @@ async function main(): Promise<void> {
     console.log(`incomplete files:  ${r.incompleteFiles}`);
     console.log(`syntax ok:         ${r.syntaxOk}`);
     console.log(`\nHANDOFF:           ${r.handoff ? "ready_for_pr" : "needs_human (a gate held)"}`);
-    console.log(EMIT ? "\n[dogfood] --emit persistence lands next iteration (after DB confirm)." : "\n[dogfood] proof run; nothing written to any database.");
+    if (EMIT) { emitRecord(r.record); console.log(`\n[dogfood] --emit: appended 1 run to ${path.relative(REPO_ROOT, SANDBOX)} (read it with --profile).`); }
+    else console.log("\n[dogfood] proof run; nothing persisted.");
     return;
   }
 
@@ -185,6 +248,7 @@ async function main(): Promise<void> {
     process.stdout.write(`[dogfood] run ${i + 1}/${repeat}... `);
     const r = await runOnce(prompt, ctx);
     results.push(r);
+    if (EMIT) emitRecord(r.record);
     console.log(`${r.handoff ? "ready_for_pr" : "needs_human"}  (imports:${r.brokenImports.length} auth:${r.missingAuth} phantom:${r.phantomImports} incomplete:${r.incompleteFiles})`);
   }
   const rate = (n: number) => `${Math.round((n / repeat) * 100)}%`;
@@ -208,7 +272,9 @@ async function main(): Promise<void> {
     for (const s of allSpecs) console.log(`  ${s}`);
   }
   console.log(`\ntotal cost: $${totalCost.toFixed(4)} over ${repeat} runs`);
-  console.log("[dogfood] envelope complete; nothing written to any database.");
+  console.log(EMIT
+    ? `[dogfood] --emit: appended ${repeat} runs to ${path.relative(REPO_ROOT, SANDBOX)} (read the flywheel with --profile).`
+    : "[dogfood] envelope complete; nothing persisted.");
 }
 
 main().catch((e) => { console.error("[dogfood] failed:", e); process.exit(1); });
