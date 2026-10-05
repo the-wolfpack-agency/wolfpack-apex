@@ -6,5 +6,5 @@
  * change auto-merge-ELIGIBLE (small, non-sensitive, tests present, gate allow).
  */
 export function dogfoodAdd(a: number, b: number): number {
-  return "intentionally wrong - the loop should fix this to a + b";
+  return a + b;
 }
