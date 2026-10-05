@@ -10,8 +10,9 @@
  *
  * Client-safety is by construction, not by option:
  *   - OPT-IN per (workspace, repo): only enrolled targets are ever touched.
- *   - ONLY the AI's own PRs: it acts on `factory/*` head branches exclusively -
- *     never a human's branch or a human's PR.
+ *   - ONLY the AI's own PRs BY DEFAULT: it acts on `factory/*` head branches, OR a
+ *     human PR that EXPLICITLY opted in with the `ci-autofix` label. An unlabeled
+ *     human branch is never touched (the loop auto-commits, so opt-in is required).
  *   - NEVER auto-merges: it drives to merge_ready and stops; a human approves.
  *   - Bounded + audited: same gate, same attempt budget, every terminal outcome
  *     recorded via ai_code.ci_fix_resolved.
@@ -33,6 +34,21 @@ export interface WatchPr {
   number: number;
   headRef: string;
   baseRef: string;
+  /** PR labels, so a HAND-authored PR can OPT IN to auto-triage. Absent/undefined
+   *  => only the factory-branch rule applies (exact prior behavior). */
+  labels?: readonly string[];
+}
+
+/** The opt-in label a human adds to a non-factory PR to request auto-triage. The
+ *  loop AUTO-COMMITS fixes, so a human's branch is touched ONLY with this explicit
+ *  opt-in - never by default. */
+export const AUTOFIX_LABEL = "ci-autofix";
+
+/** A PR the watcher may act on: the AI's own factory branch (always), OR any PR a
+ *  human explicitly opted in with the AUTOFIX_LABEL. Anything else is never touched.
+ *  Pure - the single eligibility rule, reused by the sweep + the cron wiring. */
+export function isAutoTriageEligible(pr: WatchPr): boolean {
+  return isFactoryBranch(pr.headRef) || !!pr.labels?.includes(AUTOFIX_LABEL);
 }
 
 export interface WatchDriveResult {
@@ -64,7 +80,7 @@ export async function runAiCodeWatch(deps: WatchDeps): Promise<WatchSummary> {
   for (const target of deps.targets) {
     let prs: WatchPr[] = [];
     try {
-      prs = (await deps.listPRs(target)).filter((p) => isFactoryBranch(p.headRef));
+      prs = (await deps.listPRs(target)).filter(isAutoTriageEligible);
     } catch {
       continue; // a target we cannot read is skipped, not fatal
     }

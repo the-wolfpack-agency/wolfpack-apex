@@ -2,7 +2,7 @@
  * The autonomous watcher. The safety properties are the product: enrolled targets
  * only, factory/* PRs only, per-workspace, one bad PR never stalls the sweep.
  */
-import { runAiCodeWatch, type WatchPr, type WatchTarget } from "@/lib/ai-code/watch";
+import { runAiCodeWatch, isAutoTriageEligible, AUTOFIX_LABEL, type WatchPr, type WatchTarget } from "@/lib/ai-code/watch";
 import { isFactoryBranch } from "@/lib/ai-code/revert";
 
 describe("isFactoryBranch is the reused safety predicate (never touch a human's branch)", () => {
@@ -59,5 +59,32 @@ describe("runAiCodeWatch", () => {
       .mockResolvedValueOnce([pr(9, "factory/z")]);
     const s = await runAiCodeWatch({ targets: [t("w1", "o/bad"), t("w1", "o/good")], listPRs, drive });
     expect(s.driven.map((d) => d.pr)).toEqual([9]);
+  });
+});
+
+describe("isAutoTriageEligible (factory branch OR explicit opt-in; never a bare human PR)", () => {
+  it("a factory/* branch is always eligible (no label needed)", () => {
+    expect(isAutoTriageEligible({ number: 1, headRef: "factory/x", baseRef: "main" })).toBe(true);
+  });
+  it("a human branch with NO opt-in label is NEVER eligible (the auto-commit safety guarantee)", () => {
+    expect(isAutoTriageEligible({ number: 2, headRef: "feature/human", baseRef: "main" })).toBe(false);
+    expect(isAutoTriageEligible({ number: 2, headRef: "gate/x", baseRef: "main", labels: ["bug", "p1"] })).toBe(false);
+  });
+  it("a human branch WITH the ci-autofix label opts in", () => {
+    expect(isAutoTriageEligible({ number: 3, headRef: "gate/x", baseRef: "main", labels: [AUTOFIX_LABEL] })).toBe(true);
+  });
+});
+
+describe("runAiCodeWatch honours the opt-in label", () => {
+  it("drives factory PRs + label-opted-in human PRs, never an unlabeled human PR", async () => {
+    const drive = jest.fn().mockResolvedValue({ action: "merge_ready", terminal: true });
+    const listPRs = jest.fn().mockResolvedValue([
+      { number: 1, headRef: "factory/a", baseRef: "main" },
+      { number: 2, headRef: "feature/human", baseRef: "main" }, // no label -> never touched
+      { number: 3, headRef: "gate/opted-in", baseRef: "main", labels: [AUTOFIX_LABEL] }, // opt-in -> driven
+    ]);
+    const s = await runAiCodeWatch({ targets: [t("w1", "o/r")], listPRs, drive });
+    expect(s.driven.map((d) => d.pr).sort()).toEqual([1, 3]);
+    expect(drive).toHaveBeenCalledTimes(2);
   });
 });

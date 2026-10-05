@@ -326,17 +326,25 @@ export interface OpenPullRequestRef {
   headRef: string;
   baseRef: string;
   title: string;
+  /** Label names on the PR (drives the watcher's `ci-autofix` opt-in). */
+  labels: string[];
 }
 
 /** List a repo's OPEN pull requests (head/base branch + number). Used by the
  *  autonomous watcher to find the factory's own PRs to drive. Read-only. */
 export async function listOpenPullRequests(client: GithubClient, repoFullName: string): Promise<OpenPullRequestRef[]> {
-  const raw = await gh<Array<{ number: number; title: string; head: { ref: string }; base: { ref: string } }>>(
+  const raw = await gh<Array<{ number: number; title: string; head: { ref: string }; base: { ref: string }; labels?: Array<{ name: string }> }>>(
     client,
     "GET",
     `/repos/${repoFullName}/pulls?state=open&per_page=100`,
   );
-  return raw.map((p) => ({ number: p.number, headRef: p.head.ref, baseRef: p.base.ref, title: p.title }));
+  return raw.map((p) => ({
+    number: p.number,
+    headRef: p.head.ref,
+    baseRef: p.base.ref,
+    title: p.title,
+    labels: (p.labels ?? []).map((l) => l.name),
+  }));
 }
 
 /** Open a pull request. NEVER merges: a PR is the human-review checkpoint. */
