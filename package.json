@@ -20,6 +20,7 @@
     "release:backfill": "npx tsx scripts/backfill-release-notes.ts",
     "release:notes": "npx tsx scripts/generate-release-notes.ts",
     "router:exercise": "npx tsx scripts/router-exercise.ts",
+    "dogfood": "npx tsx scripts/dogfood.ts",
     "scan:tenant-isolation": "npx tsx scripts/scan-tenant-isolation.ts",
     "check:merge-orphans": "npx tsx scripts/check-merge-orphans.ts",
     "scan:silent-catches": "npx tsx scripts/scan-silent-catches.ts",
