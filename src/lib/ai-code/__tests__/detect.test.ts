@@ -105,6 +105,24 @@ test("PRECISION: authenticated/non-interactive auth and a vercel.app URL are NOT
   expect(classes(`const label = "Log in with GitHub";`)).not.toContain("interactive_auth");
 });
 
+test("detects a secret-named env var written to a log (high, CWE-532)", () => {
+  // Found by adversarial dogfood: logging process.env.<SECRET> leaks the resolved
+  // credential at runtime, and it passed every other detector.
+  const classes = (body: string) => reviewDiff(diff(`@@ -1,0 +1,1 @@\n+${body}`)).map((f) => f.klass);
+  expect(classes("console.log('jwt', process.env.INSTINCT_JWT_SECRET);")).toContain("logged_env_secret");
+  expect(classes("logger.info(process.env.STRIPE_SECRET_KEY);")).toContain("logged_env_secret");
+  expect(classes("console.error(`token=${process.env.GITHUB_TOKEN}`);")).toContain("logged_env_secret");
+  const f = reviewDiff(diff("@@ -1,0 +1,1 @@\n+console.log(process.env.API_KEY);")).find((x) => x.klass === "logged_env_secret");
+  expect(f).toMatchObject({ severity: "high", cwe: "CWE-532" });
+});
+
+test("PRECISION: a non-secret env log and USING (not logging) a secret are not flagged", () => {
+  const clean = (body: string) => reviewDiff(diff(`@@ -1,0 +1,1 @@\n+${body}`)).filter((x) => x.klass === "logged_env_secret");
+  expect(clean("console.log('port', process.env.PORT);")).toEqual([]); // not a secret-named var
+  expect(clean("const key = process.env.STRIPE_SECRET_KEY;")).toEqual([]); // used, not logged
+  expect(clean("console.log('user signed in', userId);")).toEqual([]); // ordinary log
+});
+
 test("a multi-file diff attributes findings to the right file", () => {
   const d = `diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -1,0 +1,1 @@\n+eval(x);\ndiff --git a/b.ts b/b.ts\n--- a/b.ts\n+++ b/b.ts\n@@ -1,0 +1,1 @@\n+const ok = 1;`;
   const f = detectCodeFindings(parseAddedLines(d));
