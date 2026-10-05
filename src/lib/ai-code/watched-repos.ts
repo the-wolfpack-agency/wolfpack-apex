@@ -78,6 +78,11 @@ export async function unenrollRepo(workspaceId: string, repo: string): Promise<v
   );
 }
 
+/** Our own repo - always self-watched so the factory maintains itself without a
+ *  new env var. Eligibility of individual PRs is still gated by entitlement + the
+ *  factory-branch / ci-autofix-label rule. */
+export const SELF_REPO = "the-wolfpack-agency/wolfpack-apex";
+
 /** Merge the DB-enrolled targets with the env bootstrap fallback, deduped by
  *  (workspace, repo). The env (AI_CODE_WATCH_REPOS + AI_CODE_WATCH_WORKSPACE) is a
  *  single-tenant convenience only; the DB is the SaaS source of truth. Pure over
@@ -99,5 +104,10 @@ export function mergeWatchTargets(
   for (const t of dbTargets) add(t.workspaceId, t.repo);
   const ws = envWorkspace && envWorkspace.trim() ? envWorkspace.trim() : "default";
   for (const r of (envRepos ?? "").split(",").map((s) => s.trim()).filter(Boolean)) add(ws, r);
+  // Always watch OUR OWN repo (self-maintaining), with NO new required env var.
+  // This only makes the cron LIST apex's PRs; which ones it may act on is still
+  // gated downstream by the secure_agent entitlement check + the watcher's
+  // factory-branch / ci-autofix-label rule, so an unlabeled human PR is untouched.
+  add(ws, SELF_REPO);
   return out;
 }

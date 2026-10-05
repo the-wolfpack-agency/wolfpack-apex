@@ -34,7 +34,10 @@ it("runs on the correct cron bearer secret", async () => {
   const res = await GET(req("Bearer s3cret"));
   expect(res.status).toBe(200);
   const body = await res.json();
-  expect(body.summary.enabled).toBe(false);
+  // Self-watch always adds our own repo as a target, so the watcher is enabled even
+  // with no DB/env enrollment; with no open PRs it simply drives nothing.
+  expect(body.summary.enabled).toBe(true);
+  expect(body.summary.driven).toEqual([]);
 });
 
 it("401s a wrong secret with no capability", async () => {
