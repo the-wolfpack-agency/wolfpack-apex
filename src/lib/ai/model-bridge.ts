@@ -124,10 +124,18 @@ export function takeNoSelectionReason(): NoSelectionReason | null {
 export function bridgeSelection(
   tier: AIModelTier,
   providers: ProviderLookup,
-  deps: { select?: typeof selectModel; env?: NodeJS.ProcessEnv } = {},
+  deps: { select?: typeof selectModel; env?: NodeJS.ProcessEnv; modelValue?: Record<string, number> } = {},
 ): BridgedChoice | null {
   const select = deps.select ?? selectModel;
-  const decision = select({ requiredTier: capabilityTierFor(tier) }, deps.env ?? process.env);
+  // Feed the LEARNED value scores (produced by the one modelValueScores, from the
+  // gate's grades) into the one selectModel, so the live authoring path routes on
+  // measured capability-per-dollar. Undefined => selectModel falls back to its
+  // cost/tier logic (exact prior behavior); this is the wire, the caller supplies
+  // the scores.
+  const decision = select(
+    { requiredTier: capabilityTierFor(tier), ...(deps.modelValue ? { modelValue: deps.modelValue } : {}) },
+    deps.env ?? process.env,
+  );
 
   // Selection had no real choice. Its answer is a placeholder, not a decision.
   if (decision.reason === "no_model_available_using_default") {
