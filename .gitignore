@@ -53,3 +53,4 @@ __pycache__/
 
 # jest machine-readable run summary (written by scripts/verify.sh --json)
 jest-results*.json
+.dogfood/
