@@ -2,9 +2,12 @@
  * EMPIRICAL model capability - the moat. The model registry assigns each model a
  * capabilityTier ("small" | "large" | "reasoning") from the vendor's marketing.
  * This module measures what the model ACTUALLY does in our pipeline, using the
- * deterministic gate's verdicts as free ground-truth labels (see
- * modelLimitationProfiles in benchmark-score.ts), and turns that into two things
- * nobody else has the data to build:
+ * deterministic gate's verdicts as free ground-truth labels. It consumes a
+ * normalized CapabilitySource that BOTH the live per-model grade (grading.ts
+ * ModelGrade, aggregated from real ai_code.pipeline_run events - the real-usage
+ * flywheel) and the synthetic benchmark (benchmark-score.ts) adapt into, so the
+ * decision logic is one implementation over either source. It turns that into two
+ * things nobody else has the data to build:
  *
  *   1. DECLARED vs OBSERVED capability - does a model perform at the weight class
  *      it is tagged? ("tagged large, but a 45% import-limitation rate" = punches
@@ -19,6 +22,7 @@
  * decision logic is unit-testable without the whole model stack.
  */
 import type { ModelLimitationProfile } from "./benchmark-score";
+import type { ModelGrade } from "./grading";
 
 /** Vendor/registry-declared tier. Mirrors CapabilityTier in ai/models/types.ts. */
 export type DeclaredTier = "small" | "large" | "reasoning";
@@ -49,22 +53,76 @@ export interface ObservedCapability {
 
 const sum = (ns: number[]) => ns.reduce((a, b) => a + b, 0);
 
-/** Measure one model's observed capability from its limitation profile. Pure. */
-export function observedCapability(p: ModelLimitationProfile): ObservedCapability {
-  const sample = p.authoringTasks;
-  // each withheld authoring task contributes exactly one reason, so the count
-  // sum is the number of authoring tasks the gate had to withhold.
+/**
+ * Normalized capability observation. BOTH sources adapt into this, so one
+ * capability core serves the live pipeline grades (grading.ts ModelGrade, the
+ * real-usage flywheel) AND the synthetic benchmark (ModelLimitationProfile) - no
+ * second capability implementation per source.
+ */
+export interface CapabilitySource {
+  model: string;
+  /** authoring runs observed - the sample behind the read. */
+  sample: number;
+  /** fraction of authoring runs the gate had to withhold (0..1). lower = more capable. */
+  limitationRate: number;
+  firstPassRate: number;
+  /** per-limitation-class incidence (fraction of runs tripping that class). */
+  classRate: Record<string, number>;
+}
+
+/**
+ * Adapt a LIVE per-model grade (grading.ts, from real ai_code.pipeline_run events)
+ * into a CapabilitySource. The gate withheld any run that did not reach
+ * ready_for_pr, so limitationRate = 1 - readyRate; per-class rates come from the
+ * failure profile (incidence per deterministic gate). This is the real-usage path.
+ */
+export function fromModelGrade(g: ModelGrade): CapabilitySource {
+  const fp = g.failureProfile;
+  return {
+    model: g.model,
+    sample: g.n,
+    limitationRate: Math.max(0, 1 - g.readyRate),
+    firstPassRate: g.firstPassRate,
+    classRate: {
+      "broken-imports": fp.brokenLocalImports,
+      "phantom-imports": fp.phantomImports,
+      "incomplete-files": fp.incompleteFiles,
+      "removed-exports": fp.removedExports,
+      "anchor-failure": fp.anchorFailures,
+      security: fp.deepScanCritical,
+    },
+  };
+}
+
+/**
+ * Adapt a benchmark limitation profile into a CapabilitySource. Each withheld
+ * authoring task contributes exactly one reason, so the count sum is the number
+ * of withheld tasks.
+ */
+export function fromLimitationProfile(p: ModelLimitationProfile): CapabilitySource {
   const withheld = sum(Object.values(p.limitations).map((l) => l.count));
-  const limitationRate = sample > 0 ? withheld / sample : 0;
-  const observedTier: ObservedTier =
-    sample === 0 ? "mid" : limitationRate <= HIGH_BAR ? "large" : limitationRate >= LOW_BAR ? "small" : "mid";
+  const classRate: Record<string, number> = {};
+  for (const [k, v] of Object.entries(p.limitations)) classRate[k] = v.rate;
   return {
     model: p.model,
-    limitationRate,
+    sample: p.authoringTasks,
+    limitationRate: p.authoringTasks > 0 ? withheld / p.authoringTasks : 0,
     firstPassRate: p.firstPassRate,
-    sample,
+    classRate,
+  };
+}
+
+/** Measure one model's observed capability from a normalized source. Pure. */
+export function observedCapability(s: CapabilitySource): ObservedCapability {
+  const observedTier: ObservedTier =
+    s.sample === 0 ? "mid" : s.limitationRate <= HIGH_BAR ? "large" : s.limitationRate >= LOW_BAR ? "small" : "mid";
+  return {
+    model: s.model,
+    limitationRate: s.limitationRate,
+    firstPassRate: s.firstPassRate,
+    sample: s.sample,
     observedTier,
-    confident: sample >= MIN_SAMPLE,
+    confident: s.sample >= MIN_SAMPLE,
   };
 }
 
@@ -87,9 +145,9 @@ function declaredAsObserved(t: DeclaredTier): ObservedTier {
 const RANK: Record<ObservedTier, number> = { small: 0, mid: 1, large: 2 };
 
 /** Compare a model's declared tier to its measured capability. Pure. */
-export function capabilityMismatch(declaredTier: DeclaredTier, p: ModelLimitationProfile): CapabilityMismatch {
-  const obs = observedCapability(p);
-  const base = { model: p.model, declaredTier, observedTier: obs.observedTier, limitationRate: obs.limitationRate, sample: obs.sample };
+export function capabilityMismatch(declaredTier: DeclaredTier, s: CapabilitySource): CapabilityMismatch {
+  const obs = observedCapability(s);
+  const base = { model: s.model, declaredTier, observedTier: obs.observedTier, limitationRate: obs.limitationRate, sample: obs.sample };
   if (!obs.confident) return { ...base, verdict: "unproven" };
   const expected = RANK[declaredAsObserved(declaredTier)];
   const got = RANK[obs.observedTier];
@@ -129,19 +187,18 @@ export interface RouteAdvice {
 export function recommendModel(
   taskClasses: readonly string[],
   candidates: readonly RouteCandidate[],
-  profiles: readonly ModelLimitationProfile[],
+  sources: readonly CapabilitySource[],
   opts: { maxClassRate?: number } = {},
 ): RouteAdvice {
   const maxClassRate = opts.maxClassRate ?? DEFAULT_MAX_CLASS_RATE;
-  const byModel = new Map(profiles.map((p) => [p.model, p]));
+  const byModel = new Map(sources.map((s) => [s.model, s]));
 
   const considered: RouteConsideration[] = candidates.map((c) => {
-    const p = byModel.get(c.model);
-    const obs = p ? observedCapability(p) : null;
-    const worstClassRate = p
-      ? Math.max(0, ...taskClasses.map((k) => p.limitations[k]?.rate ?? 0))
+    const s = byModel.get(c.model);
+    const worstClassRate = s
+      ? Math.max(0, ...taskClasses.map((k) => s.classRate[k] ?? 0))
       : 0;
-    const proven = !!obs && obs.confident;
+    const proven = !!s && s.sample >= MIN_SAMPLE;
     const cleared = proven && worstClassRate <= maxClassRate;
     return { model: c.model, costRank: c.costRank, worstClassRate, cleared, proven };
   });
@@ -165,4 +222,42 @@ export function recommendModel(
     return { model: byCost[0].model, reason: "no limitation telemetry yet; defaulting to the cheapest candidate", considered };
   }
   return { model: null, reason: "no candidates", considered };
+}
+
+/**
+ * Produce the router's `modelValue` map (SelectOptions.modelValue) from LIVE
+ * grades - the bridge that finally FEEDS the router's existing value-aware
+ * routing. The router already prefers a higher-value model and treats a scored
+ * model as beating an unscored one; nothing ever produced the scores. This does.
+ *
+ * value = reliability-per-dollar, where reliability is readyRate discounted by
+ * the model's failure rate in the classes THIS task stresses (so a model weak in
+ * the needed class scores low even if generally strong). Only PRICED + confident
+ * (sample >= minSample) models are scored, for two reasons:
+ *   - comparability: every score is value-per-dollar on one scale (mixing a
+ *     per-dollar score with a bare reliability would make the cheap-but-unpriced
+ *     model incomparable);
+ *   - policy: an unpriced or low-sample model is left UNSCORED on purpose, so the
+ *     router falls back to its price/tier logic and the benchmark - not the hot
+ *     path - explores it (the router's own documented stance).
+ *
+ * Empty map when there is no qualifying telemetry => the router behaves exactly
+ * as today (safe no-op). Keyed by model id, matching ModelSpec.id. Pure.
+ */
+export function capabilityValueScores(
+  grades: readonly ModelGrade[],
+  taskClasses: readonly string[] = [],
+  opts: { minSample?: number } = {},
+): Record<string, number> {
+  const minSample = opts.minSample ?? MIN_SAMPLE;
+  const scores: Record<string, number> = {};
+  for (const g of grades) {
+    if (g.n < minSample) continue; // unscored -> router/benchmark explores it, not us
+    if (!(g.pricedShare > 0 && g.avgCostUsd > 0)) continue; // unpriced -> not comparable per-dollar
+    const src = fromModelGrade(g);
+    const worstClass = taskClasses.length ? Math.max(0, ...taskClasses.map((k) => src.classRate[k] ?? 0)) : 0;
+    const reliability = g.readyRate * (1 - worstClass);
+    scores[g.model] = reliability / g.avgCostUsd; // value per dollar; higher = better
+  }
+  return scores;
 }

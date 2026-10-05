@@ -3,23 +3,25 @@
  * observed mismatch, and cost-efficient routing advice. All pure.
  */
 import {
-  observedCapability, capabilityMismatch, recommendModel,
-  MIN_SAMPLE, type ObservedCapability,
+  observedCapability, capabilityMismatch, recommendModel, capabilityValueScores,
+  fromLimitationProfile, fromModelGrade,
+  MIN_SAMPLE, type ObservedCapability, type CapabilitySource,
 } from "@/lib/ai-code/model-capability";
 import type { ModelLimitationProfile } from "@/lib/ai-code/benchmark-score";
+import type { ModelGrade } from "@/lib/ai-code/grading";
 
-/** Build a profile with a given authoringTasks + per-class withheld counts. */
+/** Build a CapabilitySource via the benchmark-profile adapter (exercises fromLimitationProfile). */
 function profile(
   model: string,
   authoringTasks: number,
   limitations: Record<string, number>,
   extra: Partial<ModelLimitationProfile> = {},
-): ModelLimitationProfile {
+): CapabilitySource {
   const lims: ModelLimitationProfile["limitations"] = {};
   for (const [k, count] of Object.entries(limitations)) {
     lims[k] = { count, rate: authoringTasks > 0 ? count / authoringTasks : 0 };
   }
-  return {
+  return fromLimitationProfile({
     model,
     cases: authoringTasks,
     authoringTasks,
@@ -28,6 +30,25 @@ function profile(
     expectationMatchRate: 1,
     limitations: lims,
     ...extra,
+  });
+}
+
+/** Build a LIVE ModelGrade (grading.ts shape) for the real-usage path. */
+function grade(
+  model: string,
+  n: number,
+  readyRate: number,
+  fp: Partial<ModelGrade["failureProfile"]> = {},
+  firstPassRate = 0.5,
+  avgCostUsd = 0,
+): ModelGrade {
+  return {
+    model, n, readyRate, firstPassRate, blockRate: 0, recoveryRate: 0,
+    avgCostUsd, pricedShare: avgCostUsd > 0 ? 1 : 0,
+    failureProfile: {
+      phantomImports: 0, brokenLocalImports: 0, incompleteFiles: 0,
+      removedExports: 0, anchorFailures: 0, deepScanCritical: 0, ...fp,
+    },
   };
 }
 
@@ -113,5 +134,69 @@ describe("recommendModel (cost-efficient routing advice)", () => {
     // is the only candidate and is unproven -> cheapest fallback returns ghost.
     expect(a.model).toBe("ghost");
     expect(a.considered[0].proven).toBe(false);
+  });
+});
+
+describe("fromModelGrade (LIVE path - real pipeline grades drive the same core)", () => {
+  it("maps a live grade: limitationRate = 1 - readyRate; per-class from failureProfile", () => {
+    const s: CapabilitySource = fromModelGrade(grade("live", 10, 0.4, { brokenLocalImports: 0.6 }));
+    expect(s.sample).toBe(10);
+    expect(s.limitationRate).toBeCloseTo(0.6, 5);
+    expect(s.classRate["broken-imports"]).toBeCloseTo(0.6, 5);
+    expect(observedCapability(s).observedTier).toBe("small");
+  });
+  it("the moat insight on LIVE data: a 'large'-tagged model measuring small", () => {
+    const m = capabilityMismatch("large", fromModelGrade(grade("gpt-4o", 12, 0.3, { brokenLocalImports: 0.5 })));
+    expect(m.observedTier).toBe("small");
+    expect(m.verdict).toBe("below");
+  });
+  it("routes cheapest-that-clears over LIVE grades", () => {
+    const sources = [
+      fromModelGrade(grade("mini", 10, 0.5, { brokenLocalImports: 0.6 })), // 60% on imports
+      fromModelGrade(grade("mid", 10, 0.9, { brokenLocalImports: 0.1 })),  // 10% on imports
+    ];
+    const a = recommendModel(["broken-imports"], [{ model: "mini", costRank: 1 }, { model: "mid", costRank: 2 }], sources);
+    expect(a.model).toBe("mid"); // mini fails the ceiling; mid clears
+  });
+});
+
+describe("capabilityValueScores (produce the router's modelValue from LIVE grades)", () => {
+  it("scores priced+confident models by reliability-per-dollar (higher = better)", () => {
+    const scores = capabilityValueScores([
+      grade("cheap-good", 10, 0.9, {}, 0.6, 1),  // 0.9 ready / $1 = 0.9
+      grade("pricey-good", 10, 0.9, {}, 0.6, 3), // 0.9 ready / $3 = 0.3
+    ]);
+    expect(scores["cheap-good"]).toBeGreaterThan(scores["pricey-good"]); // value per dollar
+  });
+  it("discounts a model that fails the class THIS task stresses", () => {
+    const scores = capabilityValueScores(
+      [
+        grade("weak-imports", 10, 0.9, { brokenLocalImports: 0.8 }, 0.6, 1),
+        grade("strong-imports", 10, 0.9, { brokenLocalImports: 0.0 }, 0.6, 1),
+      ],
+      ["broken-imports"],
+    );
+    expect(scores["strong-imports"]).toBeGreaterThan(scores["weak-imports"]);
+  });
+  it("leaves low-sample and unpriced models UNSCORED (router/benchmark explores them)", () => {
+    const scores = capabilityValueScores([
+      grade("low-sample", MIN_SAMPLE - 1, 0.9, {}, 0.6, 1),
+      grade("unpriced", 10, 0.9, {}, 0.6, 0), // avgCostUsd 0 -> pricedShare 0
+    ]);
+    expect(scores).toEqual({}); // neither qualifies; map empty -> router unchanged
+  });
+  it("empty telemetry -> empty map (safe no-op: router behaves exactly as today)", () => {
+    expect(capabilityValueScores([])).toEqual({});
+  });
+  it("ranks the value-optimal model highest (the property the router consumes)", () => {
+    const scores = capabilityValueScores(
+      [
+        grade("gpt-4o-mini", 20, 0.85, { brokenLocalImports: 0.1 }, 0.7, 0.5), // cheap + strong on imports
+        grade("gpt-4o", 20, 0.9, { brokenLocalImports: 0.05 }, 0.8, 5),         // strong but pricey
+      ],
+      ["broken-imports"],
+    );
+    const winner = Object.entries(scores).sort((a, b) => b[1] - a[1])[0][0];
+    expect(winner).toBe("gpt-4o-mini"); // value per dollar picks the cheap-and-capable model
   });
 });
