@@ -54,6 +54,7 @@ import {
 import { findMissingAuth } from "../src/lib/ai-code/missing-auth";
 import { checkSyntax } from "../src/lib/ai-code/syntax-check";
 import { findIncompleteFiles } from "../src/lib/ai-code/completeness";
+import { deepScanChange } from "../src/lib/ai-code/deep-scan";
 // The SANDBOX reads with the exact PROD readers, so the prod code path is proven
 // locally: records are PipelineRunRecord-shaped, graded by the one gradeRuns, and
 // scored by the one modelValueScores. Promotion to prod swaps only the sink.
@@ -103,6 +104,10 @@ interface RunResult {
   phantomImports: number;
   incompleteFiles: number;
   syntaxOk: boolean;
+  /** Deep static engine (platform-scan via deepScanChange) - the SAME layer the route runs. */
+  deepCritical: number;
+  deepHigh: number;
+  deepFindings: string[];
   handoff: boolean;
   diff: string;
   /** The PROD-shaped run record (so gradeRuns/the profile run unchanged on it). */
@@ -124,7 +129,7 @@ async function runOnce(prompt: string, ctx: RunCtx): Promise<RunResult> {
       model: authored.author, status: "needs_human", attempts: 0, finalOutcome: "block",
       costUsd: authored.costUsd ?? 0, ts: Date.parse(nowIso),
     };
-    return { author: authored.author, costUsd: authored.costUsd, security: "n/a", brokenImports: [], missingAuth: 0, phantomImports: 0, incompleteFiles: 0, syntaxOk: false, handoff: false, diff: "", record };
+    return { author: authored.author, costUsd: authored.costUsd, security: "n/a", brokenImports: [], missingAuth: 0, phantomImports: 0, incompleteFiles: 0, syntaxOk: false, deepCritical: 0, deepHigh: 0, deepFindings: [], handoff: false, diff: "", record };
   }
   const diff = filesToDiff(files);
   const broken = await checkLocalImports(files, { repoTree: ctx.repoTree, aliasMap: ctx.aliasMap }, ctx.fetchModules);
@@ -132,13 +137,18 @@ async function runOnce(prompt: string, ctx: RunCtx): Promise<RunResult> {
   const syntax = checkSyntax(files);
   const phantomImports = findPhantomImports(files, ctx.installedRoots);
   const incompleteFiles = findIncompleteFiles(files);
+  // The DEEP static engine (platform-scan) - the same layer the route runs, which
+  // the harness previously skipped. DRY by design: scans the authored content, no
+  // checkout/network.
+  const deep = await deepScanChange(diff, "local/dogfood", files);
   const run = await runPipeline({
     ref, prompt, diff, author: authored.author, nowIso,
     review: (d) => runCodeReview({ workspaceId: ctx.workspaceId, ref, author: authored.author, diff: d, nowIso }),
     repair: liveRepairComplete(),
   });
   const handoff = run.status === "ready_for_pr" && broken.length === 0 && missingAuth.length === 0 &&
-    phantomImports.length === 0 && incompleteFiles.length === 0 && syntax.ok;
+    phantomImports.length === 0 && incompleteFiles.length === 0 && syntax.ok &&
+    !deep.blocking && deep.critical === 0;
   // PROD-shaped record. status reflects the FAITHFUL handoff (holds on any gate),
   // deepScanCritical folds in missing-auth exactly as the route does.
   const record: PipelineRunRecord = {
@@ -146,7 +156,7 @@ async function runOnce(prompt: string, ctx: RunCtx): Promise<RunResult> {
     status: handoff ? "ready_for_pr" : "needs_human",
     attempts: run.remediation.attempts.length,
     finalOutcome: run.review.verdict.outcome,
-    deepScanCritical: run.review.findings.filter((f) => f.severity === "critical").length + missingAuth.length,
+    deepScanCritical: deep.critical + missingAuth.length,
     selfHealed: run.remediation.attempts.length > 0 && handoff,
     costUsd: authored.costUsd ?? 0,
     phantomImports: phantomImports.length,
@@ -165,6 +175,9 @@ async function runOnce(prompt: string, ctx: RunCtx): Promise<RunResult> {
     phantomImports: phantomImports.length,
     incompleteFiles: incompleteFiles.length,
     syntaxOk: syntax.ok,
+    deepCritical: deep.critical,
+    deepHigh: deep.high,
+    deepFindings: deep.findings.map((f) => `${f.title} [${f.category}/${f.severity}]`),
     handoff,
     diff,
     record,
@@ -235,6 +248,7 @@ async function main(): Promise<void> {
     console.log(`phantom imports:   ${r.phantomImports}`);
     console.log(`incomplete files:  ${r.incompleteFiles}`);
     console.log(`syntax ok:         ${r.syntaxOk}`);
+    console.log(`deep scan:         crit=${r.deepCritical} high=${r.deepHigh}${r.deepFindings.length ? "  <-- " + r.deepFindings.join(", ") : ""}`);
     console.log(`\nHANDOFF:           ${r.handoff ? "ready_for_pr" : "needs_human (a gate held)"}`);
     if (EMIT) { emitRecord(r.record); console.log(`\n[dogfood] --emit: appended 1 run to ${path.relative(REPO_ROOT, SANDBOX)} (read it with --profile).`); }
     else console.log("\n[dogfood] proof run; nothing persisted.");
