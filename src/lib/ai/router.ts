@@ -27,6 +27,7 @@
 
 import { trackEvent } from "@/lib/analytics";
 import { bridgeSelection, takeNoSelectionReason, capabilityTierFor } from "./model-bridge";
+import { cachedModelValueScores, valueRoutingEnabled, isFactoryFeature } from "./value-scores";
 import { selectModel, logModelSelection } from "@/lib/ai/models";
 import { applyConstitutionToRequest } from "@/lib/constitution";
 import { redactMessages, redactText, NEVER_SEND_KINDS } from "./redaction";
@@ -161,7 +162,18 @@ function pickPrimary(
   // model — and the original logic below then runs untouched. There is no path
   // where this makes a call fail that would otherwise have succeeded.
   if (override === "auto") {
-    const bridged = bridgeSelection(req.model_tier, registry);
+    // Route on LEARNED value scores for factory/ai-code features only, flag-gated
+    // + fail-open: an empty map (cold cache, failure, flag off, or a non-factory
+    // feature) means bridgeSelection runs exactly as before. Can only refine.
+    const scores =
+      valueRoutingEnabled() && isFactoryFeature(req.metadata?.feature)
+        ? cachedModelValueScores(req.metadata?.workspace_id ?? "")
+        : {};
+    const bridged = bridgeSelection(
+      req.model_tier,
+      registry,
+      Object.keys(scores).length > 0 ? { modelValue: scores } : {},
+    );
     if (bridged) return bridged.provider;
   }
 
