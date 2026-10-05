@@ -123,6 +123,30 @@ test("PRECISION: a non-secret env log and USING (not logging) a secret are not f
   expect(clean("console.log('user signed in', userId);")).toEqual([]); // ordinary log
 });
 
+test("adversarial-sweep gaps: weak hash, insecure JWT, exposed secret (all high)", () => {
+  // Found by the deterministic adversarial coverage sweep - each a precise,
+  // high-value pattern an agent authored that the gate had missed.
+  const classes = (body: string) => reviewDiff(diff(`@@ -1,0 +1,1 @@\n+${body}`)).map((f) => f.klass);
+  expect(classes('const h = crypto.createHash("md5").update(password).digest("hex");')).toContain("weak_hash");
+  expect(classes('const h = crypto.createHash("sha1").update(secret).digest();')).toContain("weak_hash");
+  expect(classes('const p = jwt.verify(token, key, { algorithms: ["none"] });')).toContain("insecure_jwt");
+  expect(classes('const p = jwt.decode(t, { verify: false });')).toContain("insecure_jwt");
+  expect(classes("res.json({ apiKey: process.env.STRIPE_SECRET_KEY });")).toContain("exposed_secret");
+  expect(classes("return NextResponse.json({ k: process.env.JWT_SECRET });")).toContain("exposed_secret");
+  const f = reviewDiff(diff('@@ -1,0 +1,1 @@\n+const h = createHash("md5").update(password);')).find((x) => x.klass === "weak_hash");
+  expect(f).toMatchObject({ severity: "high", cwe: "CWE-328" });
+});
+
+test("PRECISION: a legit md5 checksum, a benign env response, and a normal JWT verify are not flagged", () => {
+  const classes = (body: string) => reviewDiff(diff(`@@ -1,0 +1,1 @@\n+${body}`)).map((f) => f.klass);
+  // md5 for a cache key (no security term on the line) -> not weak_hash
+  expect(classes('const etag = crypto.createHash("md5").update(fileBuffer).digest("hex");')).not.toContain("weak_hash");
+  // a non-secret env returned to the client -> not exposed_secret
+  expect(classes("res.json({ region: process.env.AWS_REGION });")).not.toContain("exposed_secret");
+  // a normal, verified JWT -> not insecure_jwt
+  expect(classes('const p = jwt.verify(token, key, { algorithms: ["RS256"] });')).not.toContain("insecure_jwt");
+});
+
 test("a multi-file diff attributes findings to the right file", () => {
   const d = `diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -1,0 +1,1 @@\n+eval(x);\ndiff --git a/b.ts b/b.ts\n--- a/b.ts\n+++ b/b.ts\n@@ -1,0 +1,1 @@\n+const ok = 1;`;
   const f = detectCodeFindings(parseAddedLines(d));

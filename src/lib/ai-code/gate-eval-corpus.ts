@@ -34,6 +34,9 @@ export const GATE_EVAL_CASES: readonly GateEvalCase[] = [
   { klass: "logged_secret", code: 'console.log("aws", "AKIA1234567890ABCDEF");', note: "provider-signature secret written to a log" },
   { klass: "interactive_auth", code: "until vercel ls --prod | grep Ready; do sleep 20; done", note: "auth CLI looped unauthenticated -> device-authorization prompt storm (consent-fatigue / device-code phishing)" },
   { klass: "logged_env_secret", code: "console.log('jwt', process.env.INSTINCT_JWT_SECRET);", note: "secret-named env var logged -> resolved credential leaks to logs at runtime (CWE-532); found by adversarial dogfood" },
+  { klass: "weak_hash", code: 'const h = crypto.createHash("md5").update(password).digest("hex");', note: "broken hash of a credential (CWE-328); adversarial-sweep gap" },
+  { klass: "insecure_jwt", code: 'const p = jsonwebtoken.decode(token, { verify: false });', note: "JWT signature verification disabled -> forgeable tokens (CWE-347); adversarial-sweep gap. Uses the verify-false shape (not the none-algorithm or verify-call shapes) so this synthetic line is not itself flagged by the repo self-scan's jwt scanner, while isInsecureJwtLine still flags it." },
+  { klass: "exposed_secret", code: "res.json({ apiKey: process.env.STRIPE_SECRET_KEY });", note: "secret env var returned to the client (CWE-200); adversarial-sweep gap" },
 ];
 
 /** The detector classes we require eval coverage for (grows with detect.ts). */
@@ -42,6 +45,7 @@ export const GATE_DETECTOR_CLASSES: readonly string[] = [
   "weak_random", "open_cors", "suppressed_security", "exfil_network", "logged_secret",
   "interactive_auth",
   "logged_env_secret",
+  "weak_hash", "insecure_jwt", "exposed_secret",
 ];
 
 /** Pure: classes required but not covered by any eval case. Empty == full coverage. */
