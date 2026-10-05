@@ -30,9 +30,20 @@ export async function readRefChecks(client: GithubClient, repoFullName: string, 
   }
 }
 
-/** Conclusions that count as a pass. Everything else that has a conclusion is a
- *  fail; a null conclusion means it has not finished. */
+/** Conclusions that count as a pass. */
 const PASSING = new Set(["success", "neutral", "skipped"]);
+
+/** Conclusions that mean the check did NOT run to completion - superseded by a
+ *  newer run (concurrency cancel-in-progress), marked stale, or manually
+ *  cancelled. These are NOT failures: there is no code defect to repair. Treating
+ *  a cancellation as a failure made the autonomous fixer THRASH - each no-op /
+ *  whitespace re-author pushes a commit, which cancels its own in-flight CI run,
+ *  which then read as "failed", so the next tick re-authored and cancelled again.
+ *  Count them as pending so CI reads as "not settled yet, wait" until a real run
+ *  concludes, instead of as red to fix. Everything else with a conclusion (and
+ *  not in PASSING) is a genuine failure: failure, timed_out, action_required,
+ *  startup_failure. A null conclusion means it has not finished. */
+const INCOMPLETE = new Set(["cancelled", "stale"]);
 
 export interface CiSummary {
   total: number;
@@ -65,6 +76,13 @@ export function summarizeChecks(checks: readonly CheckRun[]): CiSummary {
   const failedDetails: { name: string; summary: string }[] = [];
   for (const c of checks) {
     if (c.status !== "completed") {
+      pending++;
+      continue;
+    }
+    // A cancelled / stale check did not run to completion - treat it as not-yet-
+    // settled (pending), never as a failure to fix. This is what stops the
+    // self-cancelling thrash loop (see INCOMPLETE).
+    if (c.conclusion && INCOMPLETE.has(c.conclusion)) {
       pending++;
       continue;
     }
