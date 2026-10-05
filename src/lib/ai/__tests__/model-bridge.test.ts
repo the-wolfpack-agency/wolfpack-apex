@@ -118,3 +118,19 @@ describe("what this fixes", () => {
     expect(bridged?.spec.id).toBe("azure-gpt-4o-mini");
   });
 });
+
+describe("bridgeSelection forwards learned value scores to selectModel (A1c wire)", () => {
+  it("passes deps.modelValue through as SelectOptions.modelValue", () => {
+    const captured: Array<Record<string, unknown>> = [];
+    const spy = ((opts: Record<string, unknown>) => { captured.push(opts); return selection(); }) as unknown as typeof import("@/lib/ai/models/router").selectModel;
+    bridgeSelection("standard", registry(), { select: spy, modelValue: { "azure-gpt-4o": 9, "anthropic-x": 1 } });
+    expect(captured[0].modelValue).toEqual({ "azure-gpt-4o": 9, "anthropic-x": 1 });
+    expect(captured[0].requiredTier).toBe(capabilityTierFor("standard"));
+  });
+  it("omits modelValue when none is supplied (exact prior behavior)", () => {
+    const captured: Array<Record<string, unknown>> = [];
+    const spy = ((opts: Record<string, unknown>) => { captured.push(opts); return selection(); }) as unknown as typeof import("@/lib/ai/models/router").selectModel;
+    bridgeSelection("standard", registry(), { select: spy });
+    expect("modelValue" in captured[0]).toBe(false);
+  });
+});
