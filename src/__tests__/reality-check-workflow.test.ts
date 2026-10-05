@@ -65,6 +65,10 @@ const KNOWN_UNRUN: string[] = [
   "tests/e2e/agents-behavior-panel.spec.ts",
   "tests/e2e/agents-console.spec.ts",
   "tests/e2e/agents-release-gate.spec.ts",
+  // Model Fitness dashboard reality-check: needs SMOKE_TEST creds against prod,
+  // same as benchmark-dashboard.spec.ts below. Not wired into the reality-check
+  // workflow; it runs in the live-UI E2E lane with creds.
+  "tests/e2e/ai-code-fitness.spec.ts",
   "tests/e2e/alicia-first-day.spec.ts",
   "tests/e2e/assistant-clarify-widget.spec.ts",
   "tests/e2e/assistant-cross-tab-sync.spec.ts",

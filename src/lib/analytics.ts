@@ -709,6 +709,7 @@ export type InstinctEventType =
   // included) and posted a Check. One per gated PR event so the learning loop sees
   // pass/block rates by author over time.
   | "ai_code.pr_gated"
+  | "ai_code.model_fitness_viewed"
   // ai_code.pr_opened { repo, pr_number, files, branch } - the MISSION outcome: a
   // reviewable PR was actually produced (vs pr_gated = the gate merely ran).
   | "ai_code.pr_opened"
