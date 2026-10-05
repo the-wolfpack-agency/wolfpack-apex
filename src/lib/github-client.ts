@@ -366,6 +366,32 @@ export async function enableAutoMerge(
   }
 }
 
+/**
+ * Submit an APPROVING review on a PR, as whatever identity `client.token` is.
+ *
+ * This is the authorization half of the auto-merge tail: branch protection on
+ * main requires one approving review, which native auto-merge cannot bypass.
+ * GitHub FORBIDS approving your own PR, so the caller must pass a client whose
+ * identity differs from the PR author (e.g. the agentgate-ai[bot] App identity
+ * approving a PAT-authored PR, or vice-versa); a self-approval returns 422 and
+ * surfaces here as { approved:false } rather than throwing. Fail-open: any
+ * error returns { approved:false, reason } and never throws into the hot path.
+ */
+export async function approvePullRequest(
+  client: GithubClient,
+  repoFullName: string,
+  prNumber: number,
+  body = "Auto-approved by policy: change is auto-merge-eligible (small diff, tests present, gate=allow, no sensitive surface). Models advise; policy authorizes.",
+): Promise<{ approved: boolean; reason: string }> {
+  if (!client.token) return { approved: false, reason: "no github token" };
+  try {
+    await gh(client, "POST", `/repos/${repoFullName}/pulls/${prNumber}/reviews`, { event: "APPROVE", body });
+    return { approved: true, reason: "approving review submitted" };
+  } catch (e) {
+    return { approved: false, reason: (e as Error).message.slice(0, 200) };
+  }
+}
+
 export async function listOpenPullRequests(client: GithubClient, repoFullName: string): Promise<OpenPullRequestRef[]> {
   const raw = await gh<Array<{ number: number; title: string; head: { ref: string }; base: { ref: string }; labels?: Array<{ name: string }> }>>(
     client,

@@ -320,7 +320,7 @@ export async function driveCiFixStep(input: DriveCiFixInput): Promise<DriveCiFix
   // throws; a no-op when the flag is off, so the human gate is the default.
   let autoMerge: MaybeAutoMergeResult | undefined;
   if (result.terminal && result.decision.action === "merge_ready") {
-    autoMerge = await maybeAutoMerge({ client, repo, base, branch, prNumber });
+    autoMerge = await maybeAutoMerge({ client, repo, base, branch, prNumber, workspaceId });
   }
 
   return {
