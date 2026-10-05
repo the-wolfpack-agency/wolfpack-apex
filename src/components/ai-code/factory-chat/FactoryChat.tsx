@@ -18,6 +18,7 @@ import GuidedIntake from "./GuidedIntake";
 import FactoryLogo from "./FactoryLogo";
 import { deriveCheckpoints, trackSummary } from "./checkpoints";
 import { requestPipelineRun, approveHandoff, loadCi } from "./client";
+import OpenPullRequests from "./OpenPullRequests";
 import type { ChatTurn } from "./types";
 import type { PromptChip } from "./chips";
 
@@ -103,6 +104,8 @@ export default function FactoryChat({ defaultRepo = "" }: { defaultRepo?: string
           Describe the change. The factory writes it, proves it through the gate, and hands you a PR to approve.
         </p>
       </header>
+
+      <OpenPullRequests repo={repo} />
 
       <div data-testid="chat-log" style={{ display: "flex", flexDirection: "column", gap: "0.9rem", flex: 1 }}>
         {turns.map((t) => (

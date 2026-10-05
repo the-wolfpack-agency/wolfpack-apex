@@ -12,6 +12,9 @@ jest.mock("@/components/ai-code/factory-chat/client", () => ({
   requestPipelineRun: (...a: unknown[]) => mockRun(...a),
   approveHandoff: (...a: unknown[]) => mockApprove(...a),
   loadCi: (...a: unknown[]) => mockCi(...a),
+  // The approval panel loads on mount; no open PRs keeps these tests focused on chat.
+  loadOpenPulls: async () => [],
+  mergePull: async () => ({ ok: true }),
 }));
 
 const cleanResult: PipelineResult = {

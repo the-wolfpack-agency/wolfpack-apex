@@ -39,7 +39,7 @@
  */
 
 import type { GithubClient } from "@/lib/github-client";
-import { defaultGithubClient } from "@/lib/github-client";
+import { defaultGithubClient, mergePullRequest } from "@/lib/github-client";
 
 /**
  * The five states a built change can be in relative to the production branch.
@@ -446,40 +446,12 @@ export async function promoteChange(
     return { ok: false, reason: `Not ready to promote: ${reason}.` };
   }
 
-  // 3. Merge (squash) via REST. We pass the verified head SHA so GitHub rejects
-  //    the merge if the branch advanced between verification and merge - a
+  // 3. Merge (squash) via the shared helper. Pass the verified head SHA so GitHub
+  //    rejects the merge if the branch advanced between verification and merge - a
   //    last-line fail-closed guard against a TOCTOU race.
-  let res: Response;
-  try {
-    res = await client.fetch(`https://api.github.com/repos/${owner}/${repo}/pulls/${prNumber}/merge`, {
-      method: "PUT",
-      headers: {
-        Accept: "application/vnd.github+json",
-        Authorization: `Bearer ${client.token}`,
-        "Content-Type": "application/json",
-        "X-GitHub-Api-Version": "2022-11-28",
-        "User-Agent": "wolfpack-instinct-release-gate",
-      },
-      body: JSON.stringify({
-        merge_method: "squash",
-        sha: pr.headRefOid,
-      }),
-    });
-  } catch (err) {
-    return { ok: false, reason: `The merge call to GitHub failed: ${(err as Error).message}` };
+  const m = await mergePullRequest(client, `${owner}/${repo}`, prNumber, { sha: pr.headRefOid });
+  if (!m.merged || !m.mergedSha) {
+    return { ok: false, reason: m.reason };
   }
-
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    // 405/409 = GitHub itself refused the merge (not mergeable / sha mismatch).
-    // Surface it as a refusal, not a success - fail closed.
-    return { ok: false, reason: `GitHub refused the merge (HTTP ${res.status}): ${body.slice(0, 200)}` };
-  }
-
-  const merged = (await res.json().catch(() => ({}))) as { sha?: string; merged?: boolean };
-  if (!merged.merged || !merged.sha) {
-    return { ok: false, reason: "GitHub reported the merge did not complete." };
-  }
-
-  return { ok: true, mergedSha: merged.sha };
+  return { ok: true, mergedSha: m.mergedSha };
 }
