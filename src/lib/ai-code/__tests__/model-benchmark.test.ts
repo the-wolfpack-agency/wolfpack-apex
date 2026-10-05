@@ -144,4 +144,12 @@ describe("modelValueScores (the router's value hint)", () => {
   it("omits an unpriced model (no value-per-dollar; $0 != infinite value)", () => {
     expect(modelValueScores([g({ model: "foundry", pricedShare: 0, avgCostUsd: 0 })])).toEqual({});
   });
+  it("task-class aware: discounts a model weak in the class THIS task stresses", () => {
+    const weak = g({ model: "weak", failureProfile: { phantomImports: 0, brokenLocalImports: 0.8, incompleteFiles: 0, removedExports: 0, anchorFailures: 0, deepScanCritical: 0 } });
+    const strong = g({ model: "strong", failureProfile: { phantomImports: 0, brokenLocalImports: 0, incompleteFiles: 0, removedExports: 0, anchorFailures: 0, deepScanCritical: 0 } });
+    const base = modelValueScores([weak, strong]); // no taskClasses -> equal (same readyRate/cost)
+    expect(base["weak"]).toBeCloseTo(base["strong"], 10);
+    const scoped = modelValueScores([weak, strong], undefined, ["broken-imports"]);
+    expect(scoped["strong"]).toBeGreaterThan(scoped["weak"]); // weak discounted for this task
+  });
 });

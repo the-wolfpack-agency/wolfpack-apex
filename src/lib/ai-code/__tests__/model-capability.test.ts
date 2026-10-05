@@ -3,7 +3,7 @@
  * observed mismatch, and cost-efficient routing advice. All pure.
  */
 import {
-  observedCapability, capabilityMismatch, recommendModel, capabilityValueScores,
+  observedCapability, capabilityMismatch, recommendModel,
   fromLimitationProfile, fromModelGrade,
   MIN_SAMPLE, type ObservedCapability, type CapabilitySource,
 } from "@/lib/ai-code/model-capability";
@@ -157,46 +157,5 @@ describe("fromModelGrade (LIVE path - real pipeline grades drive the same core)"
     ];
     const a = recommendModel(["broken-imports"], [{ model: "mini", costRank: 1 }, { model: "mid", costRank: 2 }], sources);
     expect(a.model).toBe("mid"); // mini fails the ceiling; mid clears
-  });
-});
-
-describe("capabilityValueScores (produce the router's modelValue from LIVE grades)", () => {
-  it("scores priced+confident models by reliability-per-dollar (higher = better)", () => {
-    const scores = capabilityValueScores([
-      grade("cheap-good", 10, 0.9, {}, 0.6, 1),  // 0.9 ready / $1 = 0.9
-      grade("pricey-good", 10, 0.9, {}, 0.6, 3), // 0.9 ready / $3 = 0.3
-    ]);
-    expect(scores["cheap-good"]).toBeGreaterThan(scores["pricey-good"]); // value per dollar
-  });
-  it("discounts a model that fails the class THIS task stresses", () => {
-    const scores = capabilityValueScores(
-      [
-        grade("weak-imports", 10, 0.9, { brokenLocalImports: 0.8 }, 0.6, 1),
-        grade("strong-imports", 10, 0.9, { brokenLocalImports: 0.0 }, 0.6, 1),
-      ],
-      ["broken-imports"],
-    );
-    expect(scores["strong-imports"]).toBeGreaterThan(scores["weak-imports"]);
-  });
-  it("leaves low-sample and unpriced models UNSCORED (router/benchmark explores them)", () => {
-    const scores = capabilityValueScores([
-      grade("low-sample", MIN_SAMPLE - 1, 0.9, {}, 0.6, 1),
-      grade("unpriced", 10, 0.9, {}, 0.6, 0), // avgCostUsd 0 -> pricedShare 0
-    ]);
-    expect(scores).toEqual({}); // neither qualifies; map empty -> router unchanged
-  });
-  it("empty telemetry -> empty map (safe no-op: router behaves exactly as today)", () => {
-    expect(capabilityValueScores([])).toEqual({});
-  });
-  it("ranks the value-optimal model highest (the property the router consumes)", () => {
-    const scores = capabilityValueScores(
-      [
-        grade("gpt-4o-mini", 20, 0.85, { brokenLocalImports: 0.1 }, 0.7, 0.5), // cheap + strong on imports
-        grade("gpt-4o", 20, 0.9, { brokenLocalImports: 0.05 }, 0.8, 5),         // strong but pricey
-      ],
-      ["broken-imports"],
-    );
-    const winner = Object.entries(scores).sort((a, b) => b[1] - a[1])[0][0];
-    expect(winner).toBe("gpt-4o-mini"); // value per dollar picks the cheap-and-capable model
   });
 });
