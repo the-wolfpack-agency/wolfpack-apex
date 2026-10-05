@@ -95,6 +95,19 @@ export function isInteractiveAuthLine(t: string): boolean {
   return false;
 }
 
+// A secret-named ENV VAR written to a log. The hardcoded-secret rule excludes
+// process.env (an env ref is not a hardcoded secret - correct), but LOGGING its
+// resolved value leaks the real credential to logs at runtime (CWE-532). Found by
+// adversarial dogfood: `console.log(process.env.INSTINCT_JWT_SECRET)` passed every
+// other detector. Two linear tests (log call + secret-named env ref), no ReDoS.
+const LOG_CALL = /\b(?:console\.(?:log|error|warn|info|debug|trace)|logger\.\w+)\s*\(/;
+const ENV_SECRET_REF = /process\.env\.[A-Z0-9_]*(?:SECRET|TOKEN|KEY|PASSWORD|PASSWD|CREDENTIAL|PRIVATE)/i;
+
+/** True when an added line logs a secret-named environment variable. */
+export function isLoggedEnvSecretLine(t: string): boolean {
+  return LOG_CALL.test(t) && ENV_SECRET_REF.test(t);
+}
+
 const RULES: Rule[] = [
   {
     klass: "secret",
@@ -183,6 +196,15 @@ const RULES: Rule[] = [
     detail:
       "AI-authored code triggers an interactive login or loops an auth CLI that opens a device-authorization prompt (a consent-fatigue / device-code phishing vector). Committed code must authenticate non-interactively with a scoped token, never a human-in-the-loop login.",
     test: (t) => isInteractiveAuthLine(t),
+  },
+  {
+    klass: "logged_env_secret",
+    severity: "high",
+    cwe: "CWE-532",
+    title: "Secret environment variable written to a log",
+    detail:
+      "AI-authored code logs a secret-named env var (process.env.*SECRET/TOKEN/KEY/PASSWORD*) via console.*/logger.*, leaking the resolved credential to logs at runtime. Log a non-sensitive id or a redacted form, never the secret's value.",
+    test: (t) => isLoggedEnvSecretLine(t),
   },
 ];
 
