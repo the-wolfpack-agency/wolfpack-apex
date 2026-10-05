@@ -76,73 +76,139 @@ const readRepoFile = (p: string): string | null => {
   try { return fs.readFileSync(path.join(REPO_ROOT, p), "utf8"); } catch { return null; }
 };
 
-async function main(): Promise<void> {
-  const prompt = process.argv.slice(2).filter((a) => !a.startsWith("--")).join(" ").trim();
-  if (!prompt) { console.error('usage: npx tsx scripts/dogfood.ts [--emit] "<task>"'); process.exit(2); }
+interface RunCtx {
+  repoTree: Set<string>;
+  aliasMap: Record<string, string>;
+  installedRoots: Set<string>;
+  fetchModules: (paths: readonly string[]) => Promise<Map<string, string | null>>;
+  client: ReturnType<typeof getAIClient>;
+  workspaceId: string;
+}
 
+interface RunResult {
+  author: string;
+  costUsd: number | null;
+  security: string; // allow | escalate | block
+  brokenImports: string[]; // "<spec> (<kind>[-> hint])"
+  missingAuth: number;
+  phantomImports: number;
+  incompleteFiles: number;
+  syntaxOk: boolean;
+  handoff: boolean;
+  diff: string;
+}
+
+/** One real factory run: author -> the full shared deterministic bundle ->
+ *  security gate + repair. Returns the structured verdict. */
+async function runOnce(prompt: string, ctx: RunCtx): Promise<RunResult> {
   const nowIso = new Date().toISOString();
   const ref = `dogfood-${nowIso.replace(/[^0-9]/g, "").slice(0, 14)}`;
-  const workspaceId = process.env.FACTORY_SERVICE_WORKSPACE || "dogfood";
-
-  console.log(`\n[dogfood] task: "${prompt}"`);
-  console.log(`[dogfood] emit: ${EMIT ? "ON (run signal will persist)" : "off (zero DB writes)"}\n`);
-
-  // Local repo context (the disk equivalent of the route's GitHub-derived context).
-  const repoTree = buildRepoTree();
-  const aliasMap = parseAliasMap(readRepoFile("tsconfig.json") ?? "{}");
-  const installedRoots = parseInstalledRoots(readRepoFile("package.json") ?? "{}");
-  const fetchModules = async (paths: readonly string[]) =>
-    new Map(paths.map((p) => [p, readRepoFile(p)] as const));
-
-  const client = getAIClient();
-
-  // 1. AUTHOR - structured full-file changes, so the checks see real file content.
   const authored = await authorFileChanges(
     { prompt, feature: "dogfood", tier: "standard" },
-    { complete: (r) => client.complete(r) },
+    { complete: (r) => ctx.client.complete(r) },
   );
-  console.log(`[dogfood] authored by: ${authored.author || "(none)"}  cost=$${authored.costUsd ?? "?"} latency=${authored.latencyMs ?? "?"}ms`);
-  if (authored.error) console.log(`[dogfood] author error: ${authored.error}`);
   const files = authored.changes;
-  if (files.length === 0) { console.log("[dogfood] no files produced; the gate would reject."); return; }
+  if (files.length === 0) {
+    return { author: authored.author, costUsd: authored.costUsd, security: "n/a", brokenImports: [], missingAuth: 0, phantomImports: 0, incompleteFiles: 0, syntaxOk: false, handoff: false, diff: "" };
+  }
   const diff = filesToDiff(files);
-
-  // 2. THE DETERMINISTIC CHECK BUNDLE - the exact shared primitives the route runs,
-  //    with a DISK-backed module fetcher (vs the route's GitHub fetcher).
-  const [brokenLocalImports] = [await checkLocalImports(files, { repoTree, aliasMap }, fetchModules)];
+  const broken = await checkLocalImports(files, { repoTree: ctx.repoTree, aliasMap: ctx.aliasMap }, ctx.fetchModules);
   const missingAuth = findMissingAuth(files);
   const syntax = checkSyntax(files);
-  const phantomImports = findPhantomImports(files, installedRoots);
+  const phantomImports = findPhantomImports(files, ctx.installedRoots);
   const incompleteFiles = findIncompleteFiles(files);
-
-  // 3. SECURITY GATE + Stage-2 REPAIR (runPipeline) on the authored diff.
   const run = await runPipeline({
     ref, prompt, diff, author: authored.author, nowIso,
-    review: (d) => runCodeReview({ workspaceId, ref, author: authored.author, diff: d, nowIso }),
+    review: (d) => runCodeReview({ workspaceId: ctx.workspaceId, ref, author: authored.author, diff: d, nowIso }),
     repair: liveRepairComplete(),
   });
-
-  console.log(`\n===== DIFF =====\n${diff.slice(0, 3500)}${diff.length > 3500 ? "\n... (truncated)" : ""}\n`);
-  console.log("===== VERDICT =====");
-  console.log(`security gate:     ${run.review.verdict.outcome} (highest: ${run.review.verdict.highestSeverity ?? "none"}, findings: ${run.review.findings.length})`);
-  console.log(`broken imports:    ${brokenLocalImports.length}${brokenLocalImports.length ? "  <-- " + brokenLocalImports.map((b) => `${b.spec} (${b.kind}${b.hint ? ` -> ${b.hint}` : ""})`).join(", ") : ""}`);
-  console.log(`missing auth:      ${missingAuth.length}${missingAuth.length ? "  <-- " + missingAuth.map((m) => m.title).join(", ") : ""}`);
-  console.log(`phantom imports:   ${phantomImports.length}`);
-  console.log(`incomplete files:  ${incompleteFiles.length}`);
-  console.log(`syntax ok:         ${syntax.ok}`);
-  console.log(`repair attempts:   ${run.remediation.attempts.length}`);
-
-  // The FAITHFUL handoff verdict: the route holds on ANY of these, not just the
-  // security gate. This is what makes the harness a true Model Fitness Test.
-  const wouldHandOff =
-    run.status === "ready_for_pr" &&
-    brokenLocalImports.length === 0 && missingAuth.length === 0 &&
+  const handoff = run.status === "ready_for_pr" && broken.length === 0 && missingAuth.length === 0 &&
     phantomImports.length === 0 && incompleteFiles.length === 0 && syntax.ok;
-  console.log(`\nHANDOFF:           ${wouldHandOff ? "ready_for_pr" : "needs_human (a gate held)"}`);
+  return {
+    author: authored.author,
+    costUsd: authored.costUsd,
+    security: run.review.verdict.outcome,
+    brokenImports: broken.map((b) => `${b.spec} (${b.kind}${b.hint ? ` -> ${b.hint}` : ""})`),
+    missingAuth: missingAuth.length,
+    phantomImports: phantomImports.length,
+    incompleteFiles: incompleteFiles.length,
+    syntaxOk: syntax.ok,
+    handoff,
+    diff,
+  };
+}
 
-  console.log(EMIT
-    ? "\n[dogfood] --emit: run-signal persistence is the next iteration (after DB confirm)."
-    : "\n[dogfood] proof run complete; nothing written to any database.");
+function buildCtx(): RunCtx {
+  const repoTree = buildRepoTree();
+  return {
+    repoTree,
+    aliasMap: parseAliasMap(readRepoFile("tsconfig.json") ?? "{}"),
+    installedRoots: parseInstalledRoots(readRepoFile("package.json") ?? "{}"),
+    fetchModules: async (paths) => new Map(paths.map((p) => [p, readRepoFile(p)] as const)),
+    client: getAIClient(),
+    workspaceId: process.env.FACTORY_SERVICE_WORKSPACE || "dogfood",
+  };
+}
+
+async function main(): Promise<void> {
+  const repeatArg = process.argv.find((a) => a.startsWith("--repeat"));
+  const repeat = repeatArg ? Math.max(1, parseInt(repeatArg.split("=")[1] ?? "1", 10) || 1) : 1;
+  const prompt = process.argv.slice(2).filter((a) => !a.startsWith("--")).join(" ").trim();
+  if (!prompt) { console.error('usage: npx tsx scripts/dogfood.ts [--emit] [--repeat=N] "<task>"'); process.exit(2); }
+
+  console.log(`\n[dogfood] task: "${prompt}"`);
+  console.log(`[dogfood] emit: ${EMIT ? "ON" : "off (zero DB writes)"}  repeat: ${repeat}\n`);
+  const ctx = buildCtx();
+
+  // SINGLE RUN - detailed verdict.
+  if (repeat === 1) {
+    const r = await runOnce(prompt, ctx);
+    console.log(`[dogfood] authored by: ${r.author || "(none)"}  cost=$${r.costUsd ?? "?"}`);
+    if (!r.diff) { console.log("[dogfood] no files produced; the gate would reject."); return; }
+    console.log(`\n===== DIFF =====\n${r.diff.slice(0, 3500)}${r.diff.length > 3500 ? "\n... (truncated)" : ""}\n`);
+    console.log("===== VERDICT =====");
+    console.log(`security gate:     ${r.security}`);
+    console.log(`broken imports:    ${r.brokenImports.length}${r.brokenImports.length ? "  <-- " + r.brokenImports.join(", ") : ""}`);
+    console.log(`missing auth:      ${r.missingAuth}`);
+    console.log(`phantom imports:   ${r.phantomImports}`);
+    console.log(`incomplete files:  ${r.incompleteFiles}`);
+    console.log(`syntax ok:         ${r.syntaxOk}`);
+    console.log(`\nHANDOFF:           ${r.handoff ? "ready_for_pr" : "needs_human (a gate held)"}`);
+    console.log(EMIT ? "\n[dogfood] --emit persistence lands next iteration (after DB confirm)." : "\n[dogfood] proof run; nothing written to any database.");
+    return;
+  }
+
+  // REPEAT - measure the BEHAVIORAL ENVELOPE: the same task N times reveals the
+  // variance around the ideal path (the std-dev the barriers are sized to).
+  const results: RunResult[] = [];
+  for (let i = 0; i < repeat; i++) {
+    process.stdout.write(`[dogfood] run ${i + 1}/${repeat}... `);
+    const r = await runOnce(prompt, ctx);
+    results.push(r);
+    console.log(`${r.handoff ? "ready_for_pr" : "needs_human"}  (imports:${r.brokenImports.length} auth:${r.missingAuth} phantom:${r.phantomImports} incomplete:${r.incompleteFiles})`);
+  }
+  const rate = (n: number) => `${Math.round((n / repeat) * 100)}%`;
+  const fired = (pred: (r: RunResult) => boolean) => results.filter(pred).length;
+  const handoffs = fired((r) => r.handoff);
+  const allSpecs = new Set(results.flatMap((r) => r.brokenImports));
+  const totalCost = results.reduce((s, r) => s + (r.costUsd ?? 0), 0);
+
+  console.log(`\n===== BEHAVIORAL ENVELOPE (${repeat} runs of the SAME task) =====`);
+  console.log(`author:            ${results[0].author}`);
+  console.log(`HANDOFF (ideal):   ${handoffs}/${repeat} ready_for_pr  (${rate(handoffs)})`);
+  console.log(`held by a gate:    ${repeat - handoffs}/${repeat}`);
+  console.log(`-- deviation (how often each gate had to hold the output) --`);
+  console.log(`broken imports:    ${rate(fired((r) => r.brokenImports.length > 0))} of runs  (avg ${(results.reduce((s, r) => s + r.brokenImports.length, 0) / repeat).toFixed(1)}/run)`);
+  console.log(`missing auth:      ${rate(fired((r) => r.missingAuth > 0))} of runs`);
+  console.log(`phantom imports:   ${rate(fired((r) => r.phantomImports > 0))} of runs`);
+  console.log(`incomplete files:  ${rate(fired((r) => r.incompleteFiles > 0))} of runs`);
+  console.log(`security != allow: ${rate(fired((r) => r.security !== "allow" && r.security !== "n/a"))} of runs`);
+  if (allSpecs.size > 0) {
+    console.log(`-- distinct hallucinated/broken imports across runs (${allSpecs.size}) --`);
+    for (const s of allSpecs) console.log(`  ${s}`);
+  }
+  console.log(`\ntotal cost: $${totalCost.toFixed(4)} over ${repeat} runs`);
+  console.log("[dogfood] envelope complete; nothing written to any database.");
 }
 
 main().catch((e) => { console.error("[dogfood] failed:", e); process.exit(1); });
