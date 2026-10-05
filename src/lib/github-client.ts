@@ -332,6 +332,40 @@ export interface OpenPullRequestRef {
 
 /** List a repo's OPEN pull requests (head/base branch + number). Used by the
  *  autonomous watcher to find the factory's own PRs to drive. Read-only. */
+/**
+ * Enable GitHub NATIVE auto-merge on a PR (GraphQL `enablePullRequestAutoMerge`).
+ * Native auto-merge is the safe mechanism: GitHub only completes the merge once
+ * every REQUIRED status check passes (branch protection), so this can never merge
+ * red - it just removes the manual "click merge" step for an already-eligible PR.
+ * Squash method, matching the repo's merge style.
+ *
+ * Fail-open: never throws (no token / missing node id / GraphQL error -> a typed
+ * {enabled:false, reason}), so a caller in the hot path is never broken by it. The
+ * POLICY that decides WHETHER to call this (autoMergeEligible + the dark flag)
+ * lives in the caller - this is only the effect.
+ */
+export async function enableAutoMerge(
+  client: GithubClient,
+  repoFullName: string,
+  prNumber: number,
+): Promise<{ enabled: boolean; reason: string }> {
+  if (!client.token) return { enabled: false, reason: "no github token" };
+  try {
+    const pr = await gh<{ node_id?: string }>(client, "GET", `/repos/${repoFullName}/pulls/${prNumber}`);
+    const id = pr?.node_id;
+    if (!id) return { enabled: false, reason: "PR has no GraphQL node id" };
+    const res = await gh<{ errors?: Array<{ message: string }> }>(client, "POST", "/graphql", {
+      query:
+        "mutation($id:ID!){ enablePullRequestAutoMerge(input:{ pullRequestId:$id, mergeMethod: SQUASH }){ clientMutationId } }",
+      variables: { id },
+    });
+    if (res?.errors?.length) return { enabled: false, reason: res.errors[0].message.slice(0, 160) };
+    return { enabled: true, reason: "native auto-merge enabled; GitHub merges when required checks pass" };
+  } catch (e) {
+    return { enabled: false, reason: (e as Error).message.slice(0, 160) };
+  }
+}
+
 export async function listOpenPullRequests(client: GithubClient, repoFullName: string): Promise<OpenPullRequestRef[]> {
   const raw = await gh<Array<{ number: number; title: string; head: { ref: string }; base: { ref: string }; labels?: Array<{ name: string }> }>>(
     client,
