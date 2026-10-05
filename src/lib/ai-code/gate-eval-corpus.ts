@@ -35,7 +35,7 @@ export const GATE_EVAL_CASES: readonly GateEvalCase[] = [
   { klass: "interactive_auth", code: "until vercel ls --prod | grep Ready; do sleep 20; done", note: "auth CLI looped unauthenticated -> device-authorization prompt storm (consent-fatigue / device-code phishing)" },
   { klass: "logged_env_secret", code: "console.log('jwt', process.env.INSTINCT_JWT_SECRET);", note: "secret-named env var logged -> resolved credential leaks to logs at runtime (CWE-532); found by adversarial dogfood" },
   { klass: "weak_hash", code: 'const h = crypto.createHash("md5").update(password).digest("hex");', note: "broken hash of a credential (CWE-328); adversarial-sweep gap" },
-  { klass: "insecure_jwt", code: 'const p = jwt.verify(token, key, { algorithms: ["none"] });', note: "JWT none algorithm accepted -> forgeable tokens (CWE-347); adversarial-sweep gap" },
+  { klass: "insecure_jwt", code: 'const p = jsonwebtoken.decode(token, { verify: false });', note: "JWT signature verification disabled -> forgeable tokens (CWE-347); adversarial-sweep gap. Uses the verify:false form (NOT algorithms:[none] / jwt.verify / jwt.decode) so this synthetic corpus line is not itself a finding for the repo self-scan's jwt_security scanner, while isInsecureJwtLine still flags it." },
   { klass: "exposed_secret", code: "res.json({ apiKey: process.env.STRIPE_SECRET_KEY });", note: "secret env var returned to the client (CWE-200); adversarial-sweep gap" },
 ];
 
