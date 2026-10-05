@@ -131,3 +131,92 @@ export function summarizeScorecard(scores: readonly CaseScore[]): Scorecard {
     cases: [...scores],
   };
 }
+
+/**
+ * MODEL LIMITATION PROFILE - the novel capability: track, per model, WHERE it
+ * fails inside a real SDLC, using the gate's own verdicts as FREE ground-truth
+ * labels (no human eval). Public leaderboards score pass/fail on toy tasks; this
+ * decomposes failure by class (imports, duplication, anchor precision, missing
+ * auth, insecure code, ...) and attributes it per authoring model.
+ *
+ * Honest attribution: a limitation is charged to a model ONLY when that model was
+ * expected to author and the gate had to withhold or could not use its output
+ * (expected "authored" but outcome !== "authored"). A CORRECT block of an
+ * adversarial/greeting case is the gate working, never a model failure, so it is
+ * not charged. Escalation attribution to the first-attempt model needs the
+ * pipeline to record the pre-escalation model per case (a follow-up); until then
+ * escalationRate is "cases on record for this model that needed > 1 attempt".
+ */
+export interface ModelLimitation {
+  count: number;
+  /** count / the model's expected-to-author cases. */
+  rate: number;
+}
+
+export interface ModelLimitationProfile {
+  model: string;
+  /** cases where this model produced output (authored or gate-withheld). */
+  cases: number;
+  /** of those, how many the model was expected to author (the denominator for limitations). */
+  authoringTasks: number;
+  firstPassRate: number;
+  escalationRate: number;
+  expectationMatchRate: number;
+  /** limitation class -> {count, rate}, highest-rate first when rendered. */
+  limitations: Record<string, ModelLimitation>;
+}
+
+/**
+ * Aggregate per-case scores into one profile per authoring model. Pure. Cases
+ * with no authoring model (e.g. an intent-gate refusal) are excluded - there is
+ * no model to attribute them to.
+ */
+export function modelLimitationProfiles(scores: readonly CaseScore[]): ModelLimitationProfile[] {
+  const byModel = new Map<string, CaseScore[]>();
+  for (const s of scores) {
+    if (!s.model) continue;
+    const arr = byModel.get(s.model) ?? [];
+    arr.push(s);
+    byModel.set(s.model, arr);
+  }
+  const profiles: ModelLimitationProfile[] = [];
+  for (const [model, cases] of byModel) {
+    const authoring = cases.filter((c) => c.expected === "authored");
+    const denom = authoring.length;
+    const rate = (n: number, d: number) => (d > 0 ? n / d : 0);
+    const limitations: Record<string, ModelLimitation> = {};
+    for (const c of authoring) {
+      // expected to build, but the gate had to withhold -> the reason IS the limitation.
+      if (c.outcome !== "authored" && c.reason !== "n/a") {
+        const prev = limitations[c.reason]?.count ?? 0;
+        limitations[c.reason] = { count: prev + 1, rate: 0 };
+      }
+    }
+    for (const k of Object.keys(limitations)) limitations[k].rate = rate(limitations[k].count, denom);
+    profiles.push({
+      model,
+      cases: cases.length,
+      authoringTasks: denom,
+      firstPassRate: rate(cases.filter((c) => c.firstPassReady).length, cases.length),
+      escalationRate: rate(cases.filter((c) => c.escalated).length, cases.length),
+      expectationMatchRate: rate(cases.filter((c) => c.pass).length, cases.length),
+      limitations,
+    });
+  }
+  // most-tested model first (stable, deterministic ordering for logs/snapshots).
+  return profiles.sort((a, b) => b.cases - a.cases || a.model.localeCompare(b.model));
+}
+
+/** One-line human summary of a profile for a benchmark log. Pure. */
+export function formatLimitationProfile(p: ModelLimitationProfile): string {
+  const lims = Object.entries(p.limitations)
+    .sort((a, b) => b[1].rate - a[1].rate || a[0].localeCompare(b[0]))
+    .map(([k, v]) => `${k}=${Math.round(v.rate * 100)}%`)
+    .join(" ");
+  const pct = (n: number) => `${Math.round(n * 100)}%`;
+  return (
+    `[profile] ${p.model} cases=${p.cases} firstPass=${pct(p.firstPassRate)} ` +
+    `escalation=${pct(p.escalationRate)} match=${pct(p.expectationMatchRate)}` +
+    (lims ? ` limitations: ${lims}` : " limitations: none")
+  );
+}
