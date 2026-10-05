@@ -67,6 +67,34 @@ interface Rule {
 const isEnvOrPlaceholder = (t: string) =>
   /process\.env|import\.meta\.env|\$\{|<[^>]+>|\byour[_-]|[_-]here\b|xxxx|example|changeme|placeholder|redacted|dummy|\bfake|\bsample/i.test(t);
 
+// An interactive device-authorization / credential-consent flow introduced into
+// committed code. Born from the 2026-10 incident: a backgrounded `until vercel ls`
+// loop (unauthenticated) spammed device-authorization BROWSER prompts for days -
+// the same shape as a device-code phishing / consent-fatigue attack (approve-this-
+// device spam until a tired operator approves one). Committed code must never
+// trigger an interactive login; a human runs those out of band, and automation
+// authenticates with a scoped, non-interactive token. This mirrors the dev-side
+// Claude Code guard (auth-loop-guard.py) so the rule the agent authors under and
+// the rule that guards the operator's own shell are one rule.
+// Every sub-pattern is a single-quantifier-over-single-class alternation (no
+// overlapping quantifiers) -> linear time, no ReDoS.
+const INTERACTIVE_LOGIN =
+  /\b(?:vercel|netlify|wrangler|supabase|firebase|heroku|railway)\s+login\b|\bgh\s+auth\s+login\b|\b(?:npm|pnpm|yarn)\s+login\b|\bgcloud\s+auth\s+login\b|\baws\s+sso\s+login\b|\baz\s+login\b|\b(?:flyctl|fly)\s+auth\s+login\b|\bdoctl\s+auth\s+init\b/i;
+// An auth-prompting CLI as a COMMAND token (not inside a hostname/path like
+// "x.vercel.app"): reject a leading . / - or word char, and a trailing one.
+const AUTH_CLI = /(?<![./\w-])(?:vercel|netlify|wrangler|supabase|heroku|flyctl)(?![.\w-])/i;
+const NONINTERACTIVE_TOKEN = /--token\b|_TOKEN\b|--access-token\b|--auth-token\b/i;
+const LOOPS = /\b(?:until|while)\b/;
+
+/** True when an added line triggers an interactive auth / device-authorization flow. */
+export function isInteractiveAuthLine(t: string): boolean {
+  if (INTERACTIVE_LOGIN.test(t)) return true;
+  // an auth-prompting CLI inside a loop, with no non-interactive token -> the
+  // exact runaway/consent-fatigue shape.
+  if (LOOPS.test(t) && AUTH_CLI.test(t) && !NONINTERACTIVE_TOKEN.test(t)) return true;
+  return false;
+}
+
 const RULES: Rule[] = [
   {
     klass: "secret",
@@ -145,6 +173,16 @@ const RULES: Rule[] = [
       const m = t.match(/(?:fetch|axios|got|\.post|\.get|https?\.request)\s*\(\s*['"]https?:\/\/([^'"/\s]+)/i);
       return !!m && !/^(localhost|127\.0\.0\.1|0\.0\.0\.0)/.test(m[1]);
     },
+  },
+
+  {
+    klass: "interactive_auth",
+    severity: "high",
+    cwe: "CWE-287",
+    title: "Interactive auth / device-authorization flow in committed code",
+    detail:
+      "AI-authored code triggers an interactive login or loops an auth CLI that opens a device-authorization prompt (a consent-fatigue / device-code phishing vector). Committed code must authenticate non-interactively with a scoped token, never a human-in-the-loop login.",
+    test: (t) => isInteractiveAuthLine(t),
   },
 ];
 

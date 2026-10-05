@@ -79,6 +79,32 @@ test("PRECISION: Math.random with no security context, internal fetch, benign co
   expect(clean(`export const sum = (a, b) => a + b;`)).toEqual([]);
 });
 
+test("detects an interactive auth / device-authorization flow (high, CWE-287)", () => {
+  // Born from the 2026-10 incident: a looped auth CLI spamming device-auth prompts.
+  const looped = reviewDiff(diff("@@ -1,0 +1,1 @@\n+until vercel ls --prod | grep Ready; do sleep 20; done"));
+  expect(looped).toHaveLength(1);
+  expect(looped[0]).toMatchObject({ klass: "interactive_auth", severity: "high", cwe: "CWE-287" });
+
+  const classes = (body: string) => reviewDiff(diff(`@@ -1,0 +1,1 @@\n+${body}`)).map((f) => f.klass);
+  // explicit device-flow logins a human must complete out of band
+  expect(classes(`await exec("vercel login");`)).toContain("interactive_auth");
+  expect(classes(`exec("gh auth login");`)).toContain("interactive_auth");
+  expect(classes(`run("npm login");`)).toContain("interactive_auth");
+  expect(classes(`exec("aws sso login --profile prod");`)).toContain("interactive_auth");
+});
+
+test("PRECISION: authenticated/non-interactive auth and a vercel.app URL are NOT flagged", () => {
+  const classes = (body: string) => reviewDiff(diff(`@@ -1,0 +1,1 @@\n+${body}`)).map((f) => f.klass);
+  // a token is present -> no interactive prompt -> not the consent-fatigue shape
+  expect(classes(`until vercel ls --token $VERCEL_TOKEN | grep Ready; do sleep 5; done`)).not.toContain("interactive_auth");
+  // "vercel" inside a hostname is not the CLI (the safe curl-poll pattern)
+  expect(classes(`until curl -s https://x.vercel.app/api/version | grep -q sha; do sleep 15; done`)).not.toContain("interactive_auth");
+  // a one-shot authenticated deploy is neither a loop nor an interactive login
+  expect(classes(`vercel deploy --prod --token $VERCEL_TOKEN`)).not.toContain("interactive_auth");
+  // an ordinary login UI string is not a CLI login command
+  expect(classes(`const label = "Log in with GitHub";`)).not.toContain("interactive_auth");
+});
+
 test("a multi-file diff attributes findings to the right file", () => {
   const d = `diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -1,0 +1,1 @@\n+eval(x);\ndiff --git a/b.ts b/b.ts\n--- a/b.ts\n+++ b/b.ts\n@@ -1,0 +1,1 @@\n+const ok = 1;`;
   const f = detectCodeFindings(parseAddedLines(d));
