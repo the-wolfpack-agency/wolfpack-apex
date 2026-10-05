@@ -9,6 +9,7 @@ import {
   duplicationSignal,
   duplicationGate,
   STRONG_DUPLICATION_SCORE,
+  isTestPath,
 } from "@/lib/ai-code/reuse-enforcement";
 
 const aliasMap = { "@/": "src/" };
@@ -81,6 +82,26 @@ describe("duplicationSignal", () => {
     const s = duplicationSignal(cands, editOnly, aliasMap, repoTree);
     expect(s.addsNewFile).toBe(false);
     expect(duplicationGate(s).escalate).toBe(false); // was `true` before the fix
+  });
+
+  it("isTestPath recognizes test/spec/__tests__/e2e files", () => {
+    expect(isTestPath("src/lib/x/__tests__/x.test.ts")).toBe(true);
+    expect(isTestPath("src/components/Thing.spec.tsx")).toBe(true);
+    expect(isTestPath("tests/e2e/flow.spec.ts")).toBe(true);
+    expect(isTestPath("src/lib/x/thing.ts")).toBe(false);
+  });
+
+  it("a change whose ONLY new file is a TEST does not escalate (coverage, not a dup)", () => {
+    const repoTree = new Set(["src/lib/ai-code/intent-gate.ts"]);
+    // edits an existing file + adds a NEW test; the test must not trip the DRY gate
+    const files = [
+      { path: "src/lib/ai-code/intent-gate.ts", content: "export const x = 1;" },
+      { path: "src/lib/ai-code/__tests__/intent-gate.test.ts", content: "it('x', () => {});" },
+    ];
+    const cands = [{ path: "src/lib/ai-code/other.ts", score: 12 }]; // a strong, un-reused candidate
+    const s = duplicationSignal(cands, files, aliasMap, repoTree);
+    expect(s.addsNewFile).toBe(false); // the only new file is a test
+    expect(duplicationGate(s).escalate).toBe(false);
   });
 
   it("a NEW file that re-implements a strong candidate STILL escalates (gate intact)", () => {
