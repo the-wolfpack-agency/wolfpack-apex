@@ -18,6 +18,7 @@
  * deployed URL - the true, UI-equivalent path - under a budget cap.
  */
 import { gradeRuns, type PipelineRunRecord, type ModelGrade } from "./grading";
+import { fromModelGrade } from "./model-capability";
 import { listModels, isModelAvailable, type ModelSpec } from "@/lib/ai/models";
 
 /** A model to benchmark: the pin the pipeline understands + a display label. */
@@ -97,13 +98,27 @@ export const MIN_RUNS_FOR_VALUE = 3;
  * under-sampled or unpriced model is OMITTED (the router then treats it as
  * unscored and falls back to cheapest), so a $0-recorded Foundry model never reads
  * as "infinite value". Pure.
+ *
+ * Optional `taskClasses`: when the pending task stresses specific limitation
+ * classes (e.g. ["broken-imports"] for an import-heavy multi-file build), the
+ * score is discounted by the model's failure rate in THOSE classes, so a model
+ * weak where this task is hard scores lower even if generally strong. The
+ * class->failure mapping is the one defined in fromModelGrade (no second copy).
+ * Empty/omitted taskClasses => the original overall value (backward compatible).
  */
-export function modelValueScores(perModel: readonly ModelGrade[], minRuns: number = MIN_RUNS_FOR_VALUE): Record<string, number> {
+export function modelValueScores(
+  perModel: readonly ModelGrade[],
+  minRuns: number = MIN_RUNS_FOR_VALUE,
+  taskClasses: readonly string[] = [],
+): Record<string, number> {
   const out: Record<string, number> = {};
   for (const m of perModel) {
     if (m.n < minRuns) continue; // too little data to trust
     if (m.pricedShare <= 0 || m.avgCostUsd <= 0) continue; // unpriced -> value-per-dollar is undefined
-    out[m.model] = (m.readyRate * (0.5 + 0.5 * m.firstPassRate)) / m.avgCostUsd;
+    const classDiscount = taskClasses.length
+      ? 1 - Math.max(0, ...taskClasses.map((k) => fromModelGrade(m).classRate[k] ?? 0))
+      : 1;
+    out[m.model] = (m.readyRate * (0.5 + 0.5 * m.firstPassRate) * classDiscount) / m.avgCostUsd;
   }
   return out;
 }
