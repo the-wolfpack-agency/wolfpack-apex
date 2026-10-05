@@ -62,3 +62,23 @@ export interface ChatTurn {
   deployedUrl?: string;
   error?: string;
 }
+
+/** An open factory PR with everything the in-tool approval surface shows. Mirrors
+ *  the server's PullApprovalStatus (kept local so the module stays self-contained
+ *  for the standalone extraction). */
+export interface OpenPullStatus {
+  repo: string;
+  number: number;
+  title: string;
+  url: string;
+  branch: string;
+  base: string;
+  ciGreen: boolean;
+  ciReadable: boolean;
+  gateOutcome: "allow" | "escalate" | "block" | "unknown";
+  touchesSensitiveSurface: boolean;
+  hasTests: boolean;
+  fileCount: number;
+  eligible: boolean;
+  eligibilityReason: string;
+}

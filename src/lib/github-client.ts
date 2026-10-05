@@ -366,6 +366,47 @@ export async function enableAutoMerge(
   }
 }
 
+/**
+ * Merge a PR immediately via REST (squash by default). This is the shared helper
+ * behind both the release gate and the Code Factory's in-tool "approve & merge"
+ * action, so the one merge code path is tested once.
+ *
+ * Pass `sha` (the verified head) to make GitHub reject the merge if the branch
+ * advanced since verification - a fail-closed TOCTOU guard. GitHub refusing the
+ * merge (405 not-mergeable / 409 sha-mismatch) surfaces as { merged:false }, not
+ * a throw: fail closed, never a false success. Fail-open on transport error too.
+ */
+export async function mergePullRequest(
+  client: GithubClient,
+  repoFullName: string,
+  prNumber: number,
+  opts: { sha?: string; method?: "squash" | "merge" | "rebase" } = {},
+): Promise<{ merged: boolean; mergedSha?: string; reason: string }> {
+  if (!client.token) return { merged: false, reason: "no github token" };
+  try {
+    const res = await client.fetch(`https://api.github.com/repos/${repoFullName}/pulls/${prNumber}/merge`, {
+      method: "PUT",
+      headers: {
+        "Accept": "application/vnd.github+json",
+        "Authorization": `Bearer ${client.token}`,
+        "Content-Type": "application/json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "wolfpack-instinct",
+      },
+      body: JSON.stringify({ merge_method: opts.method ?? "squash", ...(opts.sha ? { sha: opts.sha } : {}) }),
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      return { merged: false, reason: `GitHub refused the merge (HTTP ${res.status}): ${body.slice(0, 200)}` };
+    }
+    const out = (await res.json().catch(() => ({}))) as { sha?: string; merged?: boolean };
+    if (!out.merged || !out.sha) return { merged: false, reason: "GitHub reported the merge did not complete" };
+    return { merged: true, mergedSha: out.sha, reason: "merged" };
+  } catch (e) {
+    return { merged: false, reason: `merge call failed: ${(e as Error).message.slice(0, 160)}` };
+  }
+}
+
 export async function listOpenPullRequests(client: GithubClient, repoFullName: string): Promise<OpenPullRequestRef[]> {
   const raw = await gh<Array<{ number: number; title: string; head: { ref: string }; base: { ref: string }; labels?: Array<{ name: string }> }>>(
     client,

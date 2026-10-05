@@ -69,6 +69,9 @@ const KNOWN_UNRUN: string[] = [
   // same as benchmark-dashboard.spec.ts below. Not wired into the reality-check
   // workflow; it runs in the live-UI E2E lane with creds.
   "tests/e2e/ai-code-fitness.spec.ts",
+  // Code Factory approval surface: live-UI E2E lane, needs SMOKE_TEST creds (same
+  // as ai-code-fitness.spec.ts). Not wired into the reality-check workflow.
+  "tests/e2e/ai-code-factory-approvals.spec.ts",
   "tests/e2e/alicia-first-day.spec.ts",
   "tests/e2e/assistant-clarify-widget.spec.ts",
   "tests/e2e/assistant-cross-tab-sync.spec.ts",

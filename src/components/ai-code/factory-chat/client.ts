@@ -4,7 +4,7 @@
  * repoint FACTORY_API_BASE. Auth is the shared refresh-aware fetch (never raw fetch).
  */
 import { fetchWithRefresh } from "@/lib/client-auth";
-import type { PipelineResult, CiDashboardLite } from "./types";
+import type { PipelineResult, CiDashboardLite, OpenPullStatus } from "./types";
 
 /** Same-origin in the Instinct app; set to the factory host in the standalone repo. */
 export const FACTORY_API_BASE = "";
@@ -75,5 +75,37 @@ export async function loadCi(repo: string, ref: string): Promise<CiDashboardLite
     return body.dashboard ?? null;
   } catch {
     return null;
+  }
+}
+
+/** List the workspace's OPEN factory PRs with their approval status. */
+export async function loadOpenPulls(repo: string): Promise<OpenPullStatus[]> {
+  try {
+    const res = await fetchWithRefresh(`${FACTORY_API_BASE}/api/admin/ai-code/pulls?repo=${encodeURIComponent(repo)}`);
+    if (!res.ok) return [];
+    const body = (await res.json()) as { pulls?: OpenPullStatus[] };
+    return body.pulls ?? [];
+  } catch {
+    return [];
+  }
+}
+
+export interface MergeOutcome { ok: boolean; sha?: string; error?: string }
+
+/** Approve & merge a factory PR from the tool. Governance is preserved: the
+ *  server refuses red/unverified CI, and GitHub's branch protection still applies
+ *  (an unapproved / not-green PR is refused and the reason surfaced). */
+export async function mergePull(repo: string, prNumber: number): Promise<MergeOutcome> {
+  try {
+    const res = await fetchWithRefresh(`${FACTORY_API_BASE}/api/admin/ai-code/pulls/merge`, {
+      method: "POST",
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ repo, prNumber }),
+    });
+    const body = (await res.json().catch(() => ({}))) as { merged?: boolean; sha?: string; error?: string };
+    if (res.ok && body.merged) return { ok: true, sha: body.sha };
+    return { ok: false, error: body.error || `Merge was refused (HTTP ${res.status}).` };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
   }
 }
