@@ -342,3 +342,42 @@ describe("autoCorrectImports (pure fix + hint relocation, reports what REMAINS)"
     expect(r.remaining.length).toBe(1); // unfixable -> caller escalates
   });
 });
+
+describe("checkLocalImports (the ONE shared checker, fetcher injected)", () => {
+  const { parseAliasMap, checkLocalImports } = require("../imports");
+  const aliasMap = parseAliasMap(JSON.stringify({ compilerOptions: { baseUrl: ".", paths: { "@/*": ["src/*"] } } }));
+  const repoTree = new Set(["src/lib/real.ts"]);
+  const fetchModules = async (paths: readonly string[]) =>
+    new Map(paths.map((p) => [p, p === "src/lib/real.ts" ? "export const foo = 1;" : null]));
+
+  it("flags an import that resolves to NO file (missing_module)", async () => {
+    const files = [{ path: "src/app/x.ts", content: 'import { foo } from "@/lib/ghost";' }];
+    const broken = await checkLocalImports(files, { repoTree, aliasMap }, fetchModules);
+    expect(broken).toEqual([{ path: "src/app/x.ts", spec: "@/lib/ghost", kind: "missing_module" }]);
+  });
+
+  it("flags a name a real module does NOT export (missing_export)", async () => {
+    const files = [{ path: "src/app/x.ts", content: 'import { bar } from "@/lib/real";' }];
+    const broken = await checkLocalImports(files, { repoTree, aliasMap }, fetchModules);
+    expect(broken[0]).toMatchObject({ spec: "@/lib/real", kind: "missing_export", name: "bar" });
+  });
+
+  it("passes a valid import (resolves + the name is exported)", async () => {
+    const files = [{ path: "src/app/x.ts", content: 'import { foo } from "@/lib/real";' }];
+    expect(await checkLocalImports(files, { repoTree, aliasMap }, fetchModules)).toEqual([]);
+  });
+
+  it("no-ops on an empty repo tree (unknown -> never flag)", async () => {
+    const files = [{ path: "a.ts", content: 'import x from "@/y";' }];
+    expect(await checkLocalImports(files, { repoTree: new Set(), aliasMap }, fetchModules)).toEqual([]);
+  });
+
+  it("does NOT re-fetch a module authored in THIS change (changeset wins)", async () => {
+    const files = [
+      { path: "src/app/x.ts", content: 'import { baz } from "@/lib/new-mod";' },
+      { path: "src/lib/new-mod.ts", content: "export const baz = 1;" },
+    ];
+    const broken = await checkLocalImports(files, { repoTree, aliasMap }, fetchModules);
+    expect(broken).toEqual([]); // new-mod is in the changeset, not missing
+  });
+});

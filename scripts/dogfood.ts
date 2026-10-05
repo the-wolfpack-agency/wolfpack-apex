@@ -1,112 +1,214 @@
 /**
- * scripts/dogfood.ts - LOCAL factory dogfood run (the R&D engine).
+ * scripts/dogfood.ts - LOCAL factory dogfood run (the R&D engine / Model Fitness Test core).
  *
  * Drives the REAL factory pipeline against a task, locally, from the library
- * primitives - NO HTTP, so the Forcefield bot-guard is moot, and NO hand-coding:
- * the model authors, the deterministic gate + Stage-2 repair rule, exactly as the
- * live route runs them. One implementation reused (getAIClient / authorDiff /
- * runPipeline / runCodeReview / liveRepairComplete), zero duplication of the
- * orchestration.
+ * primitives - NO HTTP (the Forcefield bot-guard is moot), NO hand-coding, and NO
+ * duplication of the checks: it runs the SAME shared functions the live route runs
+ * (getAIClient router -> authorFileChanges -> the deterministic check bundle ->
+ * runPipeline gate + Stage-2 repair). The ONLY difference from the route is the
+ * injected module fetcher: the route reads target modules from GitHub, the harness
+ * reads them from disk - so checkLocalImports (and the rest) apply the identical rule.
  *
- * This is the fix for the rep-waste: every run here is a real R&D datapoint that
- * exercises the product instead of a hand-made change that benefits nothing. It is
- * also the core of the Model Fitness Test (plug in a model, see what a workflow PR
- * looks like + where it fails).
+ * Every run is a real R&D datapoint that exercises the product instead of a
+ * hand-made change that benefits nothing. Plug in any model, see what a workflow
+ * PR looks like + exactly where it fails = the Model Fitness Test.
  *
  * Usage:
- *   npx tsx scripts/dogfood.ts "Add a `info` token to the NEON object in neon.ts"
+ *   npx tsx scripts/dogfood.ts "Add a route ... gated by requireCapability ..."
  *   npx tsx scripts/dogfood.ts --emit "..."   # ALSO persist the run signal (feeds grading)
  *
- * --emit is OFF by default. WITHOUT it, DATABASE_URL is not even loaded, so the
- * run writes NOTHING to any database (recordReview's best-effort write no-ops).
- * WITH it, the ai_code.pipeline_run signal is persisted so the run feeds the
- * limitation profile + the router (the flywheel).
+ * --emit is OFF by default; WITHOUT it DATABASE_URL is not even loaded, so the run
+ * writes NOTHING (recordReview's best-effort write no-ops).
  */
 import fs from "fs";
 import path from "path";
 
 const EMIT = process.argv.includes("--emit");
+const REPO_ROOT = path.resolve(__dirname, "..");
 
-/** Load .env.local into process.env (no dotenv dep). Under a proof run (no
- *  --emit) we deliberately SKIP the DB url keys so nothing can be written. */
+/** Load .env.local into process.env. Proof runs (no --emit) SKIP the DB url keys
+ *  so nothing can be written. */
 (function loadEnv() {
-  const p = path.resolve(__dirname, "..", ".env.local");
+  const p = path.join(REPO_ROOT, ".env.local");
   if (!fs.existsSync(p)) return;
   const DB_KEYS = new Set(["DATABASE_URL", "DATABASE_URL_UNPOOLED"]);
   for (const line of fs.readFileSync(p, "utf8").split("\n")) {
     const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)$/);
     if (!m) continue;
-    const key = m[1];
-    if (!EMIT && DB_KEYS.has(key)) continue; // proof run: no DB, no writes
-    if (!process.env[key]) process.env[key] = m[2].replace(/^["']|["']$/g, "").trim();
+    if (!EMIT && DB_KEYS.has(m[1])) continue;
+    if (!process.env[m[1]]) process.env[m[1]] = m[2].replace(/^["']|["']$/g, "").trim();
   }
 })();
 
-// NB: these libs read process.env at CALL time (getAIClient()/buildRegistry run
-// inside main(), after loadEnv above), so the env is in place when they execute.
+// These libs read process.env at CALL time (inside main(), after loadEnv), so the
+// env is in place when they run.
 import { getAIClient } from "../src/lib/ai";
-import { authorDiff } from "../src/lib/ai-code/author";
+import { authorFileChanges } from "../src/lib/ai-code/author";
 import { runCodeReview } from "../src/lib/ai-code/scan";
 import { runPipeline } from "../src/lib/ai-code/pipeline";
 import { liveRepairComplete } from "../src/lib/ai-code/repair";
+import { filesToDiff } from "../src/lib/ai-code/file-changes";
+import {
+  checkLocalImports, parseAliasMap, parseInstalledRoots, findPhantomImports,
+} from "../src/lib/ai-code/imports";
+import { findMissingAuth } from "../src/lib/ai-code/missing-auth";
+import { checkSyntax } from "../src/lib/ai-code/syntax-check";
+import { findIncompleteFiles } from "../src/lib/ai-code/completeness";
 
-async function main(): Promise<void> {
-  const prompt = process.argv.slice(2).filter((a) => !a.startsWith("--")).join(" ").trim();
-  if (!prompt) {
-    console.error('usage: npx tsx scripts/dogfood.ts [--emit] "<task>"');
-    process.exit(2);
-  }
+/** Build the repo tree (repo-relative paths) from disk - the local equivalent of
+ *  the route's GitHub tree, so import existence is judged against the real repo. */
+function buildRepoTree(): Set<string> {
+  const tree = new Set<string>();
+  const EXT = /\.(tsx?|jsx?|mjs|cjs|json|css|scss|svg|md|sql)$/;
+  const SKIP = new Set(["node_modules", ".next", ".git", "dist", "build", "coverage"]);
+  (function walk(dir: string) {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (SKIP.has(e.name)) continue;
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) walk(full);
+      else if (EXT.test(e.name)) tree.add(path.relative(REPO_ROOT, full));
+    }
+  })(path.join(REPO_ROOT, "src"));
+  return tree;
+}
 
+const readRepoFile = (p: string): string | null => {
+  try { return fs.readFileSync(path.join(REPO_ROOT, p), "utf8"); } catch { return null; }
+};
+
+interface RunCtx {
+  repoTree: Set<string>;
+  aliasMap: Record<string, string>;
+  installedRoots: Set<string>;
+  fetchModules: (paths: readonly string[]) => Promise<Map<string, string | null>>;
+  client: ReturnType<typeof getAIClient>;
+  workspaceId: string;
+}
+
+interface RunResult {
+  author: string;
+  costUsd: number | null;
+  security: string; // allow | escalate | block
+  brokenImports: string[]; // "<spec> (<kind>[-> hint])"
+  missingAuth: number;
+  phantomImports: number;
+  incompleteFiles: number;
+  syntaxOk: boolean;
+  handoff: boolean;
+  diff: string;
+}
+
+/** One real factory run: author -> the full shared deterministic bundle ->
+ *  security gate + repair. Returns the structured verdict. */
+async function runOnce(prompt: string, ctx: RunCtx): Promise<RunResult> {
   const nowIso = new Date().toISOString();
   const ref = `dogfood-${nowIso.replace(/[^0-9]/g, "").slice(0, 14)}`;
-  const workspaceId = process.env.FACTORY_SERVICE_WORKSPACE || "dogfood";
+  const authored = await authorFileChanges(
+    { prompt, feature: "dogfood", tier: "standard" },
+    { complete: (r) => ctx.client.complete(r) },
+  );
+  const files = authored.changes;
+  if (files.length === 0) {
+    return { author: authored.author, costUsd: authored.costUsd, security: "n/a", brokenImports: [], missingAuth: 0, phantomImports: 0, incompleteFiles: 0, syntaxOk: false, handoff: false, diff: "" };
+  }
+  const diff = filesToDiff(files);
+  const broken = await checkLocalImports(files, { repoTree: ctx.repoTree, aliasMap: ctx.aliasMap }, ctx.fetchModules);
+  const missingAuth = findMissingAuth(files);
+  const syntax = checkSyntax(files);
+  const phantomImports = findPhantomImports(files, ctx.installedRoots);
+  const incompleteFiles = findIncompleteFiles(files);
+  const run = await runPipeline({
+    ref, prompt, diff, author: authored.author, nowIso,
+    review: (d) => runCodeReview({ workspaceId: ctx.workspaceId, ref, author: authored.author, diff: d, nowIso }),
+    repair: liveRepairComplete(),
+  });
+  const handoff = run.status === "ready_for_pr" && broken.length === 0 && missingAuth.length === 0 &&
+    phantomImports.length === 0 && incompleteFiles.length === 0 && syntax.ok;
+  return {
+    author: authored.author,
+    costUsd: authored.costUsd,
+    security: run.review.verdict.outcome,
+    brokenImports: broken.map((b) => `${b.spec} (${b.kind}${b.hint ? ` -> ${b.hint}` : ""})`),
+    missingAuth: missingAuth.length,
+    phantomImports: phantomImports.length,
+    incompleteFiles: incompleteFiles.length,
+    syntaxOk: syntax.ok,
+    handoff,
+    diff,
+  };
+}
+
+function buildCtx(): RunCtx {
+  const repoTree = buildRepoTree();
+  return {
+    repoTree,
+    aliasMap: parseAliasMap(readRepoFile("tsconfig.json") ?? "{}"),
+    installedRoots: parseInstalledRoots(readRepoFile("package.json") ?? "{}"),
+    fetchModules: async (paths) => new Map(paths.map((p) => [p, readRepoFile(p)] as const)),
+    client: getAIClient(),
+    workspaceId: process.env.FACTORY_SERVICE_WORKSPACE || "dogfood",
+  };
+}
+
+async function main(): Promise<void> {
+  const repeatArg = process.argv.find((a) => a.startsWith("--repeat"));
+  const repeat = repeatArg ? Math.max(1, parseInt(repeatArg.split("=")[1] ?? "1", 10) || 1) : 1;
+  const prompt = process.argv.slice(2).filter((a) => !a.startsWith("--")).join(" ").trim();
+  if (!prompt) { console.error('usage: npx tsx scripts/dogfood.ts [--emit] [--repeat=N] "<task>"'); process.exit(2); }
 
   console.log(`\n[dogfood] task: "${prompt}"`);
-  console.log(`[dogfood] emit: ${EMIT ? "ON (run signal will persist)" : "off (zero DB writes)"}\n`);
+  console.log(`[dogfood] emit: ${EMIT ? "ON" : "off (zero DB writes)"}  repeat: ${repeat}\n`);
+  const ctx = buildCtx();
 
-  const client = getAIClient();
-
-  // 1. AUTHOR - the configured model produces the change.
-  const authored = await authorDiff(
-    { prompt, feature: "dogfood", tier: "standard" },
-    { complete: (r) => client.complete(r) },
-  );
-  console.log(`[dogfood] authored by: ${authored.author || "(none)"}  ` +
-    `cost=$${authored.costUsd ?? "?"} latency=${authored.latencyMs ?? "?"}ms`);
-  if (authored.error) console.log(`[dogfood] author error: ${authored.error}`);
-  if (!authored.diff.trim()) {
-    console.log("[dogfood] no diff produced; the gate would reject. (honest: the model gave nothing usable)");
+  // SINGLE RUN - detailed verdict.
+  if (repeat === 1) {
+    const r = await runOnce(prompt, ctx);
+    console.log(`[dogfood] authored by: ${r.author || "(none)"}  cost=$${r.costUsd ?? "?"}`);
+    if (!r.diff) { console.log("[dogfood] no files produced; the gate would reject."); return; }
+    console.log(`\n===== DIFF =====\n${r.diff.slice(0, 3500)}${r.diff.length > 3500 ? "\n... (truncated)" : ""}\n`);
+    console.log("===== VERDICT =====");
+    console.log(`security gate:     ${r.security}`);
+    console.log(`broken imports:    ${r.brokenImports.length}${r.brokenImports.length ? "  <-- " + r.brokenImports.join(", ") : ""}`);
+    console.log(`missing auth:      ${r.missingAuth}`);
+    console.log(`phantom imports:   ${r.phantomImports}`);
+    console.log(`incomplete files:  ${r.incompleteFiles}`);
+    console.log(`syntax ok:         ${r.syntaxOk}`);
+    console.log(`\nHANDOFF:           ${r.handoff ? "ready_for_pr" : "needs_human (a gate held)"}`);
+    console.log(EMIT ? "\n[dogfood] --emit persistence lands next iteration (after DB confirm)." : "\n[dogfood] proof run; nothing written to any database.");
     return;
   }
 
-  // 2. GATE + Stage-2 REPAIR - the exact deterministic pipeline the route runs.
-  const run = await runPipeline({
-    ref,
-    prompt,
-    diff: authored.diff,
-    author: authored.author,
-    nowIso,
-    review: (d) => runCodeReview({ workspaceId, ref, author: authored.author, diff: d, nowIso }),
-    repair: liveRepairComplete(),
-  });
-
-  console.log(`\n===== DIFF =====\n${run.diff.slice(0, 4000)}${run.diff.length > 4000 ? "\n... (truncated)" : ""}\n`);
-  console.log("===== VERDICT =====");
-  console.log(`status:    ${run.status}`);
-  console.log(`gate:      ${run.review.verdict.outcome} (highest severity: ${run.review.verdict.highestSeverity ?? "none"})`);
-  console.log(`findings:  ${run.review.findings.length}`);
-  console.log(`attempts:  ${run.remediation.attempts.length}`);
-  console.log(`conforms:  ${run.conformance.conforms}`);
-  console.log(`open Qs:   ${run.openQuestions.length}`);
-
-  if (EMIT) {
-    console.log("\n[dogfood] --emit: run-signal persistence is wired in the next iteration (after DB confirm).");
-  } else {
-    console.log("\n[dogfood] proof run complete; nothing written to any database.");
+  // REPEAT - measure the BEHAVIORAL ENVELOPE: the same task N times reveals the
+  // variance around the ideal path (the std-dev the barriers are sized to).
+  const results: RunResult[] = [];
+  for (let i = 0; i < repeat; i++) {
+    process.stdout.write(`[dogfood] run ${i + 1}/${repeat}... `);
+    const r = await runOnce(prompt, ctx);
+    results.push(r);
+    console.log(`${r.handoff ? "ready_for_pr" : "needs_human"}  (imports:${r.brokenImports.length} auth:${r.missingAuth} phantom:${r.phantomImports} incomplete:${r.incompleteFiles})`);
   }
+  const rate = (n: number) => `${Math.round((n / repeat) * 100)}%`;
+  const fired = (pred: (r: RunResult) => boolean) => results.filter(pred).length;
+  const handoffs = fired((r) => r.handoff);
+  const allSpecs = new Set(results.flatMap((r) => r.brokenImports));
+  const totalCost = results.reduce((s, r) => s + (r.costUsd ?? 0), 0);
+
+  console.log(`\n===== BEHAVIORAL ENVELOPE (${repeat} runs of the SAME task) =====`);
+  console.log(`author:            ${results[0].author}`);
+  console.log(`HANDOFF (ideal):   ${handoffs}/${repeat} ready_for_pr  (${rate(handoffs)})`);
+  console.log(`held by a gate:    ${repeat - handoffs}/${repeat}`);
+  console.log(`-- deviation (how often each gate had to hold the output) --`);
+  console.log(`broken imports:    ${rate(fired((r) => r.brokenImports.length > 0))} of runs  (avg ${(results.reduce((s, r) => s + r.brokenImports.length, 0) / repeat).toFixed(1)}/run)`);
+  console.log(`missing auth:      ${rate(fired((r) => r.missingAuth > 0))} of runs`);
+  console.log(`phantom imports:   ${rate(fired((r) => r.phantomImports > 0))} of runs`);
+  console.log(`incomplete files:  ${rate(fired((r) => r.incompleteFiles > 0))} of runs`);
+  console.log(`security != allow: ${rate(fired((r) => r.security !== "allow" && r.security !== "n/a"))} of runs`);
+  if (allSpecs.size > 0) {
+    console.log(`-- distinct hallucinated/broken imports across runs (${allSpecs.size}) --`);
+    for (const s of allSpecs) console.log(`  ${s}`);
+  }
+  console.log(`\ntotal cost: $${totalCost.toFixed(4)} over ${repeat} runs`);
+  console.log("[dogfood] envelope complete; nothing written to any database.");
 }
 
-main().catch((e) => {
-  console.error("[dogfood] failed:", e);
-  process.exit(1);
-});
+main().catch((e) => { console.error("[dogfood] failed:", e); process.exit(1); });

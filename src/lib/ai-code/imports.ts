@@ -360,6 +360,60 @@ export function findBrokenLocalImports(
   return broken;
 }
 
+/** Fetch the source of the given repo paths for the NAME check. The backend is
+ *  injected so one checker serves both callers: GitHub (the live route) and disk
+ *  (the local dogfood harness / Model Fitness Test). Returns null for any path it
+ *  cannot read (fail-open). */
+export type ModuleFetcher = (paths: readonly string[]) => Promise<Map<string, string | null>>;
+
+/**
+ * Resolve + name-check every LOCAL import in `files` against the repo tree and
+ * the (fetched) source of each target module. The ONE import checker, shared by
+ * the live route (GitHub-backed fetcher) and the local harness (disk-backed): a
+ * `@/`-alias or relative import that resolves to NO file, or a named symbol a
+ * readable local module does NOT export, is returned as broken (it always fails
+ * CI). A wrong-symbol import is enriched with where the symbol actually lives.
+ * Existence is judged against `repoTree` (authoritative); a name fails OPEN when
+ * the module source is unread or re-exports with `export *`. Returns [] on an
+ * unknown tree or any failure - never blocks a handoff on a resolver/fetch error.
+ */
+export async function checkLocalImports(
+  files: readonly { path: string; content: string }[],
+  ctx: { repoTree: ReadonlySet<string>; aliasMap: Record<string, string> },
+  fetchModules: ModuleFetcher,
+): Promise<BrokenLocalImport[]> {
+  if (ctx.repoTree.size === 0) return [];
+  try {
+    const changeset = new Map(files.map((f) => [f.path, f.content]));
+    const wanted = new Set<string>();
+    for (const f of files) {
+      for (const li of extractLocalImports(f.path, f.content)) {
+        const cands = resolveLocalCandidates(f.path, li.spec, ctx.aliasMap);
+        if (cands.some((c) => changeset.has(c))) continue; // authored in THIS change
+        for (const c of cands) if (ctx.repoTree.has(c)) { wanted.add(c); break; }
+      }
+    }
+    const repoCache = wanted.size > 0 ? await fetchModules([...wanted]) : new Map<string, string | null>();
+    const resolver: ModuleResolver = (fromPath, spec) => {
+      for (const cand of resolveLocalCandidates(fromPath, spec, ctx.aliasMap)) {
+        if (changeset.has(cand)) return { exists: true, content: changeset.get(cand) ?? null };
+        if (ctx.repoTree.has(cand)) return { exists: true, content: repoCache.get(cand) ?? null };
+      }
+      return { exists: false, content: null };
+    };
+    const broken = findBrokenLocalImports(files, resolver);
+    for (const b of broken) {
+      if (b.kind === "missing_export" && b.name) {
+        const hint = locateSymbolSpec(b.name, ctx.repoTree);
+        if (hint && hint !== b.spec) b.hint = hint;
+      }
+    }
+    return broken;
+  } catch {
+    return []; // best-effort: never block a handoff on a resolver/fetch failure
+  }
+}
+
 /** Feedback for the authoring retry: name each bad local import precisely so the
  *  model fixes the path or the symbol. Pure. */
 export function brokenLocalImportFeedback(broken: readonly BrokenLocalImport[]): string {

@@ -62,14 +62,11 @@ import { buildKnownExportsBlock, exportsEntries } from "@/lib/ai-code/export-gro
 import { duplicationSignal, duplicationGate } from "@/lib/ai-code/reuse-enforcement";
 import { pickAuthorMode } from "@/lib/ai-code/author-mode";
 import { fetchRepoGrounding } from "@/lib/ai-code/repo-grounding";
-import { findPhantomImports, parseInstalledRoots, phantomImportFeedback, locateSymbolSpec } from "@/lib/ai-code/imports";
+import { findPhantomImports, parseInstalledRoots, phantomImportFeedback } from "@/lib/ai-code/imports";
 import {
-  findBrokenLocalImports,
+  checkLocalImports as sharedCheckLocalImports,
   brokenLocalImportFeedback,
-  extractLocalImports,
-  resolveLocalCandidates,
   parseAliasMap,
-  type ModuleResolver,
   type BrokenLocalImport,
   autoCorrectImports,
   type ImportFix,
@@ -182,45 +179,21 @@ async function checkLocalImports(
   files: readonly { path: string; content: string }[],
   ctx: LocalImportCtx,
 ): Promise<BrokenLocalImport[]> {
-  if (!ctx.repo || ctx.repoTree.size === 0) return [];
-  try {
-    const changeset = new Map(files.map((f) => [f.path, f.content]));
-    const repoCache = new Map<string, string | null>();
-    const wanted = new Set<string>();
-    for (const f of files) {
-      for (const li of extractLocalImports(f.path, f.content)) {
-        const cands = resolveLocalCandidates(f.path, li.spec, ctx.aliasMap);
-        if (cands.some((c) => changeset.has(c))) continue; // authored in THIS change
-        for (const c of cands) if (ctx.repoTree.has(c)) { wanted.add(c); break; }
-      }
-    }
-    if (wanted.size > 0) {
+  if (!ctx.repo) return [];
+  const repo = ctx.repo;
+  // Delegate to the ONE shared checker (imports.ts), injecting the GitHub-backed
+  // module fetcher. The local dogfood harness injects a disk-backed fetcher into
+  // the same function, so the route and the harness apply the identical rule.
+  return sharedCheckLocalImports(
+    files,
+    { repoTree: ctx.repoTree, aliasMap: ctx.aliasMap },
+    async (paths) => {
       const gh = await workspaceGithubClient(ctx.workspaceId);
-      for (const path of wanted) {
-        const c = await fetchFileContent(gh, ctx.repo, path).catch(() => null);
-        repoCache.set(path, typeof c === "string" ? c : null);
-      }
-    }
-    const resolver: ModuleResolver = (fromPath, spec) => {
-      for (const cand of resolveLocalCandidates(fromPath, spec, ctx.aliasMap)) {
-        if (changeset.has(cand)) return { exists: true, content: changeset.get(cand) ?? null };
-        if (ctx.repoTree.has(cand)) return { exists: true, content: repoCache.get(cand) ?? null };
-      }
-      return { exists: false, content: null };
-    };
-    const broken = findBrokenLocalImports(files, resolver);
-    // Enrich a wrong-symbol import with WHERE the symbol actually lives, so the
-    // author-retry imports it from the right path instead of guessing again.
-    for (const b of broken) {
-      if (b.kind === "missing_export" && b.name) {
-        const hint = locateSymbolSpec(b.name, ctx.repoTree);
-        if (hint && hint !== b.spec) b.hint = hint;
-      }
-    }
-    return broken;
-  } catch {
-    return []; // best-effort: never block a handoff on a resolver/fetch failure
-  }
+      const out = new Map<string, string | null>();
+      for (const p of paths) out.set(p, await fetchFileContent(gh, repo, p).catch(() => null));
+      return out;
+    },
+  );
 }
 
 /**
