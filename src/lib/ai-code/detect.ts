@@ -108,6 +108,41 @@ export function isLoggedEnvSecretLine(t: string): boolean {
   return LOG_CALL.test(t) && ENV_SECRET_REF.test(t);
 }
 
+// The following three detectors were added after a deterministic adversarial
+// coverage sweep (the dogfood "bad instruction" probe) found the gate missed them.
+// Precision-first: each requires a specific, reviewable signature, so a legitimate
+// use (an md5 cache key, a public-key env, a dev cookie) does not trip it.
+
+// Weak hash in a SECURITY context (CWE-328). createHash('md5'|'sha1') is fine for a
+// cache key/etag - only flag it when a credential term is on the same line, so a
+// password/token/signature hashed with a broken algorithm is caught, checksums are not.
+const WEAK_HASH = /\bcreateHash\(\s*["'](?:md5|sha1)["']/i;
+const SECURITY_TERM = /\b(?:password|passwd|secret|token|credential|signature|hmac|sign|auth)\b/i;
+
+/** True when an added line hashes a credential with a broken algorithm. */
+export function isWeakHashLine(t: string): boolean {
+  return WEAK_HASH.test(t) && SECURITY_TERM.test(t);
+}
+
+// Insecure JWT verification (CWE-347): the 'none' algorithm accepted, or signature
+// verification turned off. Both let an attacker forge tokens.
+const JWT_NONE = /algorithms\s*:\s*\[\s*["']none["']/i;
+const JWT_VERIFY_OFF = /\b(?:jwt|jsonwebtoken|jose)\b[^\n]{0,60}\bverify\s*:\s*false/i;
+
+/** True when an added line disables JWT signature verification. */
+export function isInsecureJwtLine(t: string): boolean {
+  return JWT_NONE.test(t) || JWT_VERIFY_OFF.test(t);
+}
+
+// A secret-named env var sent in an HTTP RESPONSE (CWE-200): leaks the credential
+// to the client. Reuses ENV_SECRET_REF; requires a response sink on the line.
+const RESPONSE_SINK = /\bres\.(?:json|send|end|write)\s*\(|\bNextResponse\.json\s*\(|\breturn\s+Response\.json\s*\(/;
+
+/** True when an added line returns a secret-named env var in an HTTP response. */
+export function isExposedSecretLine(t: string): boolean {
+  return RESPONSE_SINK.test(t) && ENV_SECRET_REF.test(t);
+}
+
 const RULES: Rule[] = [
   {
     klass: "secret",
@@ -205,6 +240,33 @@ const RULES: Rule[] = [
     detail:
       "AI-authored code logs a secret-named env var (process.env.*SECRET/TOKEN/KEY/PASSWORD*) via console.*/logger.*, leaking the resolved credential to logs at runtime. Log a non-sensitive id or a redacted form, never the secret's value.",
     test: (t) => isLoggedEnvSecretLine(t),
+  },
+  {
+    klass: "weak_hash",
+    severity: "high",
+    cwe: "CWE-328",
+    title: "Broken hash algorithm in a security context",
+    detail:
+      "AI-authored code hashes a credential/signature with md5 or sha1 (collision-prone, fast to brute-force). Use bcrypt/scrypt/argon2 for passwords, or SHA-256+ for signatures.",
+    test: (t) => isWeakHashLine(t),
+  },
+  {
+    klass: "insecure_jwt",
+    severity: "high",
+    cwe: "CWE-347",
+    title: "JWT signature verification weakened or disabled",
+    detail:
+      "AI-authored code accepts the JWT 'none' algorithm or turns off signature verification, letting an attacker forge tokens. Verify with a fixed, asymmetric-or-HMAC algorithm allowlist.",
+    test: (t) => isInsecureJwtLine(t),
+  },
+  {
+    klass: "exposed_secret",
+    severity: "high",
+    cwe: "CWE-200",
+    title: "Secret environment variable returned in an HTTP response",
+    detail:
+      "AI-authored code returns a secret-named env var to the client in an HTTP response, leaking the credential. Return only non-sensitive fields.",
+    test: (t) => isExposedSecretLine(t),
   },
 ];
 
