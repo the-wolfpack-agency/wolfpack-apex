@@ -22,6 +22,12 @@ import { extractLocalImports } from "./imports";
 import { toImportSpecifier } from "./export-grounding";
 
 /** Every local import specifier the change makes (deduped). Pure. */
+/** A test / spec file: coverage, not production code. A NEW test is never a
+ *  re-implementation of an existing module, so it must not trip the DRY gate. */
+export function isTestPath(path: string): boolean {
+  return /(?:\.(?:test|spec)\.[tj]sx?$|(?:^|\/)__tests__\/|(?:^|\/)(?:e2e|tests)\/)/i.test(path);
+}
+
 export function changeImportSpecifiers(files: readonly { path: string; content: string }[]): Set<string> {
   const specs = new Set<string>();
   for (const f of files) for (const li of extractLocalImports(f.path, f.content)) specs.add(li.spec);
@@ -69,7 +75,9 @@ export function duplicationSignal(
   // A change that only EDITS existing files is never a re-implementation. When the
   // repo tree is known, "adds a new file" = some changed file is not already in it.
   // Unknown tree (self-hosted / diff mode) -> default true (preserve prior behavior).
-  const addsNewFile = repoTree && repoTree.size > 0 ? files.some((f) => !repoTree.has(f.path)) : true;
+  // A NEW test file is coverage, not a re-implementation - exclude it, so a change
+  // whose only new files are tests never trips the DRY gate (benchmark false positive).
+  const addsNewFile = repoTree && repoTree.size > 0 ? files.some((f) => !repoTree.has(f.path) && !isTestPath(f.path)) : true;
   const top = candidates[0];
   if (!top) return { topCandidatePath: null, topScore: 0, topReused: null, addsNewFile };
   // EDITING the candidate file IS reuse/extension, not re-implementation. A change
