@@ -223,3 +223,41 @@ export function recommendModel(
   }
   return { model: null, reason: "no candidates", considered };
 }
+
+/**
+ * Produce the router's `modelValue` map (SelectOptions.modelValue) from LIVE
+ * grades - the bridge that finally FEEDS the router's existing value-aware
+ * routing. The router already prefers a higher-value model and treats a scored
+ * model as beating an unscored one; nothing ever produced the scores. This does.
+ *
+ * value = reliability-per-dollar, where reliability is readyRate discounted by
+ * the model's failure rate in the classes THIS task stresses (so a model weak in
+ * the needed class scores low even if generally strong). Only PRICED + confident
+ * (sample >= minSample) models are scored, for two reasons:
+ *   - comparability: every score is value-per-dollar on one scale (mixing a
+ *     per-dollar score with a bare reliability would make the cheap-but-unpriced
+ *     model incomparable);
+ *   - policy: an unpriced or low-sample model is left UNSCORED on purpose, so the
+ *     router falls back to its price/tier logic and the benchmark - not the hot
+ *     path - explores it (the router's own documented stance).
+ *
+ * Empty map when there is no qualifying telemetry => the router behaves exactly
+ * as today (safe no-op). Keyed by model id, matching ModelSpec.id. Pure.
+ */
+export function capabilityValueScores(
+  grades: readonly ModelGrade[],
+  taskClasses: readonly string[] = [],
+  opts: { minSample?: number } = {},
+): Record<string, number> {
+  const minSample = opts.minSample ?? MIN_SAMPLE;
+  const scores: Record<string, number> = {};
+  for (const g of grades) {
+    if (g.n < minSample) continue; // unscored -> router/benchmark explores it, not us
+    if (!(g.pricedShare > 0 && g.avgCostUsd > 0)) continue; // unpriced -> not comparable per-dollar
+    const src = fromModelGrade(g);
+    const worstClass = taskClasses.length ? Math.max(0, ...taskClasses.map((k) => src.classRate[k] ?? 0)) : 0;
+    const reliability = g.readyRate * (1 - worstClass);
+    scores[g.model] = reliability / g.avgCostUsd; // value per dollar; higher = better
+  }
+  return scores;
+}
