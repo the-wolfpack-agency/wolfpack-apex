@@ -66,6 +66,7 @@ async function runWatch(): Promise<NextResponse> {
         ref: pr.headRef,
         branch: pr.headRef,
         base: pr.baseRef,
+        prNumber: pr.number,
         attempt: 0,
         maxAttempts: 3,
         workspaceId: t.workspaceId || undefined,

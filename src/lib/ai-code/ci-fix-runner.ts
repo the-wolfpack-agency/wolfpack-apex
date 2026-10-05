@@ -17,6 +17,7 @@ import { decideFixAction, buildFixBrief, fixAuthorTier } from "@/lib/ai-code/ci-
 import { runCiFixStep } from "@/lib/ai-code/ci-fix-driver";
 import { workspaceGithubClient, getBranchHead, countBranchCommitsMatching, listChangedFiles, listWorkflowRunsRaw, rerunFailedRun, triggerWorkflow } from "@/lib/github-client";
 import { gatherFailureContext, buildEnrichedFixPrompt, extractFailingTestFiles, fetchFilesContent, hasFixAnchor, guardAuthoredFix } from "@/lib/ai-code/ci-failure-detail";
+import { maybeAutoMerge, type MaybeAutoMergeResult } from "@/lib/ai-code/auto-merge-step";
 import { classifyCiFailure, failuresAreInfraOnly, isDependencyAuditFailure } from "@/lib/ai-code/ci-failure-classify";
 import { flakeRecheckCandidates } from "@/lib/ai-code/flake";
 import { commitFileChanges, filesToDiff } from "@/lib/ai-code/file-changes";
@@ -32,6 +33,9 @@ export interface DriveCiFixInput {
   ref: string;
   /** The PR branch to commit a fix to. Empty = decide-only (no commit). */
   branch: string;
+  /** The PR number - lets the merge_ready step enable native auto-merge (dark by
+   *  default). Absent => auto-merge is simply never attempted. */
+  prNumber?: number;
   /** The base branch for attribution. Empty = baseline-unaware (fix any red). */
   base: string;
   attempt: number;
@@ -48,7 +52,7 @@ export interface DriveCiFixOutput {
 }
 
 export async function driveCiFixStep(input: DriveCiFixInput): Promise<DriveCiFixOutput> {
-  const { repo, ref, branch, base, workspaceId, actor } = input;
+  const { repo, ref, branch, base, workspaceId, actor, prNumber } = input;
   const attempt = Math.max(0, Math.floor(input.attempt));
   const maxAttempts = Math.max(1, Math.min(MAX_ATTEMPTS_CEILING, Math.floor(input.maxAttempts)));
 
@@ -310,10 +314,20 @@ export async function driveCiFixStep(input: DriveCiFixInput): Promise<DriveCiFix
       deterministic_fix: deterministicFixDispatched,
     });
   }
+  // AUTO-MERGE (dark by default): at merge_ready the loop would stop for a human.
+  // If the operator enabled AI_CODE_AUTO_MERGE and the change is the low-risk tail
+  // (maybeAutoMerge's conservative policy), enable native auto-merge instead. Never
+  // throws; a no-op when the flag is off, so the human gate is the default.
+  let autoMerge: MaybeAutoMergeResult | undefined;
+  if (result.terminal && result.decision.action === "merge_ready") {
+    autoMerge = await maybeAutoMerge({ client, repo, base, branch, prNumber });
+  }
+
   return {
     status: 200,
     body: {
       ...result,
+      ...(autoMerge ? { autoMerge } : {}),
       context: contextSummary,
       budget: { attempt: effectiveAttempt, priorFixCommits, maxAttempts },
       ...(stalledOnAuthoredTest ? { stalledOnAuthoredTest } : {}),
