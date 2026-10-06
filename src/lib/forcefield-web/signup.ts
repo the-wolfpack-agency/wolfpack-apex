@@ -12,6 +12,7 @@
  */
 import { createHash } from "crypto";
 import { safeQuery } from "@/lib/db";
+import { checkRateLimit } from "@/lib/ogiam/gate-rate-limit";
 import { createForcefieldTenant, type ForcefieldTenant } from "@/lib/forcefield-web/tenants";
 
 /** Honeypot field name - a real user never fills it; a bot fills every field. */
@@ -80,36 +81,33 @@ export function validateSignup(input: Record<string, unknown>): ValidatedSignup 
   return { name, email, siteUrl, note };
 }
 
-// --- rate limiting (in-memory; swap for a durable store in multi-instance) ----
-
-interface RateEntry { count: number; windowStart: number }
-const rateBucket = new Map<string, RateEntry>();
-/** Exposed for tests. */
-export function _resetSignupRateLimit(): void { rateBucket.clear(); }
+// --- rate limiting (DURABLE: DB fixed-window, shared across lambdas) ----------
 
 export function hashIp(ip: string | null | undefined): string {
   return createHash("sha256").update(String(ip ?? "unknown")).digest("hex");
 }
 
-export function rateLimitCheck(ipHash: string, now: number): { allowed: boolean; retryAfterSec?: number } {
-  const entry = rateBucket.get(ipHash);
-  if (!entry || now - entry.windowStart >= RATE_LIMIT_WINDOW_MS) {
-    rateBucket.set(ipHash, { count: 1, windowStart: now });
-    return { allowed: true };
-  }
-  if (entry.count >= RATE_LIMIT_MAX) {
-    return { allowed: false, retryAfterSec: Math.ceil((RATE_LIMIT_WINDOW_MS - (now - entry.windowStart)) / 1000) };
-  }
-  entry.count += 1;
-  return { allowed: true };
-}
+/** A per-IP limiter decision. Injectable so the intake is unit-testable without a DB. */
+export type SignupLimiter = (ipHash: string) => Promise<{ allowed: boolean }>;
+
+/**
+ * The real limiter: the shared DB fixed-window counter (checkRateLimit), keyed per
+ * IP. Durable across instances and cold starts, fail-closed on a DB error - unlike
+ * the in-memory map this replaced, which a serverless fan-out could flood past.
+ */
+const durableLimiter: SignupLimiter = async (ipHash) => {
+  const r = await checkRateLimit(`forcefield:signup:${ipHash}`, {
+    limit: RATE_LIMIT_MAX,
+    windowMs: RATE_LIMIT_WINDOW_MS,
+  });
+  return { allowed: r.ok };
+};
 
 // --- intake ------------------------------------------------------------------
 
 export interface CreateSignupInput {
   raw: Record<string, unknown>;
   ipHash?: string;
-  now: number;
 }
 
 /**
@@ -117,13 +115,17 @@ export interface CreateSignupInput {
  * token. A tripped honeypot returns ok:false reason:"honeypot" but the CALLER should
  * still answer the client with a success shape so a bot learns nothing.
  */
-export async function createSignupRequest(input: CreateSignupInput, q: SignupQuery = liveQuery): Promise<SignupSubmitResult> {
+export async function createSignupRequest(
+  input: CreateSignupInput,
+  q: SignupQuery = liveQuery,
+  limiter: SignupLimiter = durableLimiter,
+): Promise<SignupSubmitResult> {
   // Honeypot: a filled hidden field means a bot.
   if (clean(input.raw[HONEYPOT_FIELD], 50)) return { ok: false, reason: "honeypot" };
 
   const ipHash = input.ipHash ?? hashIp(null);
-  const rl = rateLimitCheck(ipHash, input.now);
-  if (!rl.allowed) return { ok: false, reason: "rate_limited", retryAfterSec: rl.retryAfterSec };
+  const rl = await limiter(ipHash);
+  if (!rl.allowed) return { ok: false, reason: "rate_limited" };
 
   const valid = validateSignup(input.raw);
   if (!valid) return { ok: false, reason: "invalid" };
@@ -152,6 +154,20 @@ function rowToRequest(r: {
     status: (r.status as SignupRequest["status"]) ?? "pending",
     tenantId: r.tenant_id, createdAt: r.created_at,
   };
+}
+
+/** Fetch one request by id, or null. Never throws. */
+export async function getSignupRequest(id: string, q: SignupQuery = liveQuery): Promise<SignupRequest | null> {
+  try {
+    const [row] = await q<Parameters<typeof rowToRequest>[0]>(
+      `SELECT id, name, email, site_url, note, status, tenant_id, created_at::text AS created_at
+       FROM forcefield_signup_requests WHERE id = $1`,
+      [id],
+    );
+    return row ? rowToRequest(row) : null;
+  } catch {
+    return null;
+  }
 }
 
 /** List requests, newest first, optionally filtered by status. Never throws. */

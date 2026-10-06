@@ -24,6 +24,12 @@ function envBlock(env: Record<string, string>): string {
   return Object.entries(env).map(([k, v]) => `${k}=${v}`).join("\n");
 }
 
+const SUMMARY_UNAVAILABLE: Record<string, string> = {
+  unavailable: "AI summary unavailable right now.",
+  no_provider: "AI summary not configured.",
+  over_budget: "AI summary paused (budget reached).",
+};
+
 export default function ForcefieldSignupsPage() {
   const router = useRouter();
   const [ready, setReady] = useState(false);
@@ -31,6 +37,7 @@ export default function ForcefieldSignupsPage() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [approved, setApproved] = useState<Approved | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [summaries, setSummaries] = useState<Record<string, { loading?: boolean; text?: string }>>({});
 
   useEffect(() => {
     if (!getInstinctUser<{ role: string }>()) { router.push("/login?next=/admin/forcefield/signups"); return; }
@@ -61,6 +68,22 @@ export default function ForcefieldSignupsPage() {
     } catch (err) { setError((err as Error).message); }
     setBusyId(null);
   }, [load]);
+
+  // Advisory AI risk/fit summary, routed through the central model router. Never
+  // blocks the review; an unavailable summary shows an inline note.
+  const summarize = useCallback(async (id: string) => {
+    setSummaries((s) => ({ ...s, [id]: { loading: true } }));
+    try {
+      const res = await fetchWithRefresh("/api/admin/forcefield/signups/risk-summary", {
+        method: "POST", headers: jsonHeaders(), body: JSON.stringify({ id }),
+      });
+      const body = await res.json().catch(() => ({}));
+      const text = body.ok ? String(body.summary) : (SUMMARY_UNAVAILABLE[body.reason] ?? "AI summary unavailable right now.");
+      setSummaries((s) => ({ ...s, [id]: { text } }));
+    } catch {
+      setSummaries((s) => ({ ...s, [id]: { text: "AI summary unavailable right now." } }));
+    }
+  }, []);
 
   if (!ready) return null;
 
@@ -97,7 +120,14 @@ export default function ForcefieldSignupsPage() {
             <tbody>
               {requests.map((r) => (
                 <tr key={r.id} data-testid={`s-row-${r.id}`} style={{ borderTop: "1px solid var(--wp-border)", color: "var(--wp-text)", verticalAlign: "top" }}>
-                  <td style={{ padding: ".5rem" }}>{r.name}{r.note ? <div style={{ color: "var(--wp-text-dim)", fontSize: ".78rem", marginTop: 2 }}>{r.note}</div> : null}</td>
+                  <td style={{ padding: ".5rem" }}>
+                    {r.name}{r.note ? <div style={{ color: "var(--wp-text-dim)", fontSize: ".78rem", marginTop: 2 }}>{r.note}</div> : null}
+                    {summaries[r.id]?.loading ? (
+                      <div data-testid={`s-summary-${r.id}`} style={{ color: "var(--wp-text-dim)", fontSize: ".78rem", marginTop: 4, fontStyle: "italic" }}>Summarizing…</div>
+                    ) : summaries[r.id]?.text ? (
+                      <div data-testid={`s-summary-${r.id}`} style={{ color: "var(--wp-text-dim)", fontSize: ".78rem", marginTop: 4, borderLeft: "2px solid var(--wp-gold)", paddingLeft: 6 }}>{summaries[r.id]?.text}</div>
+                    ) : null}
+                  </td>
                   <td style={{ padding: ".5rem" }}>{r.email}</td>
                   <td style={{ padding: ".5rem" }}>{r.siteUrl}</td>
                   <td style={{ padding: ".5rem" }}>{r.createdAt.slice(0, 10)}</td>
@@ -107,8 +137,13 @@ export default function ForcefieldSignupsPage() {
                       {busyId === r.id ? "…" : "Approve"}
                     </button>
                     <button data-testid={`s-reject-${r.id}`} onClick={() => decide(r.id, "reject")} disabled={busyId === r.id}
-                      style={{ background: "transparent", color: "var(--wp-text-dim)", border: "1px solid var(--wp-border)", borderRadius: 6, padding: ".35rem .7rem", cursor: busyId === r.id ? "wait" : "pointer" }}>
+                      style={{ background: "transparent", color: "var(--wp-text-dim)", border: "1px solid var(--wp-border)", borderRadius: 6, padding: ".35rem .7rem", cursor: busyId === r.id ? "wait" : "pointer", marginRight: 6 }}>
                       Reject
+                    </button>
+                    <button data-testid={`s-summarize-${r.id}`} onClick={() => summarize(r.id)} disabled={summaries[r.id]?.loading}
+                      title="AI risk/fit summary (advisory)"
+                      style={{ background: "transparent", color: "var(--wp-gold)", border: "1px solid var(--wp-border)", borderRadius: 6, padding: ".35rem .7rem", cursor: summaries[r.id]?.loading ? "wait" : "pointer" }}>
+                      AI summary
                     </button>
                   </td>
                 </tr>

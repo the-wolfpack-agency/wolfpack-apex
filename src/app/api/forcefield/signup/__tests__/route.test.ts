@@ -17,6 +17,7 @@ jest.mock("@/lib/forcefield-web/signup", () => ({
   createSignupRequest: (...a: unknown[]) => mockCreate(...a),
   hashIp: () => "iphash",
   HONEYPOT_FIELD: "_hp_company",
+  RATE_LIMIT_WINDOW_MS: 900_000,
 }));
 jest.mock("@/lib/audit-log", () => ({
   recordAudit: (...a: unknown[]) => mockRecordAudit(...a),
@@ -64,9 +65,9 @@ it("400 on invalid input", async () => {
   expect(res.status).toBe(400);
 });
 
-it("429 with Retry-After when rate limited", async () => {
-  mockCreate.mockResolvedValueOnce({ ok: false, reason: "rate_limited", retryAfterSec: 120 });
+it("429 with a window-length Retry-After when rate limited", async () => {
+  mockCreate.mockResolvedValueOnce({ ok: false, reason: "rate_limited" });
   const res = await POST(post({ name: "Dana", email: "dana@acme.com", siteUrl: "acme.com" }));
   expect(res.status).toBe(429);
-  expect(res.headers.get("Retry-After")).toBe("120");
+  expect(res.headers.get("Retry-After")).toBe("900"); // RATE_LIMIT_WINDOW_MS / 1000
 });

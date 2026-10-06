@@ -20,7 +20,7 @@ jest.mock("@/lib/platform-scan/targets-store", () => ({
   listStoredTargets: (...a: unknown[]) => mockListStored(...a),
 }));
 
-import { resolveScanTarget, listScanTargets } from "@/lib/platform-scan/manifests";
+import { resolveScanTarget, listScanTargets, getScanManifest } from "@/lib/platform-scan/manifests";
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -110,5 +110,28 @@ describe("listScanTargets", () => {
     expect(targets.filter((t) => t.platform === "wolfpack-beyond")).toHaveLength(1);
     expect(targets.find((t) => t.platform === "wolfpack-beyond")?.baseUrl).toBe("https://beyond-sku.vercel.app");
     expect(targets.find((t) => t.platform === "inactive")).toBeUndefined();
+  });
+});
+
+describe("Forcefield surfaces in the wolfpack-instinct manifest", () => {
+  const m = getScanManifest("wolfpack-instinct");
+
+  it("includes the public Forcefield pages as public routes (must serve)", () => {
+    const publicPaths = (m?.routes ?? []).filter((r) => r.auth === "public").map((r) => r.path);
+    expect(publicPaths).toEqual(expect.arrayContaining(["/forcefield", "/forcefield/signup", "/forcefield/dashboard"]));
+  });
+
+  it("gates the Forcefield control-plane APIs and leaves public-stats open", () => {
+    const api = m?.apiEndpoints ?? [];
+    const byPath = Object.fromEntries(api.map((e) => [e.path, e]));
+    // token/capability-gated endpoints must be probed unauthenticated (expect 401/403)
+    expect(byPath["/api/forcefield/my-stats"]?.requiresAuth).toBe(true);
+    expect(byPath["/api/admin/forcefield/tenants"]?.requiresAuth).toBe(true);
+    expect(byPath["/api/admin/forcefield/signups"]?.requiresAuth).toBe(true);
+    // the aggregate is public by design
+    expect(byPath["/api/forcefield/public-stats"]?.requiresAuth).toBe(false);
+    // the public signup must reject an empty body (validation before any write)
+    expect(byPath["/api/forcefield/signup"]?.invalidBody).toEqual({});
+    expect(byPath["/api/forcefield/signup"]?.expectRejectStatuses).toEqual([400]);
   });
 });
