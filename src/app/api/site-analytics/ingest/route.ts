@@ -24,6 +24,7 @@ import { timingSafeEqual } from "crypto";
 import { checkRateLimit } from "@/lib/ogiam/gate-rate-limit";
 import { isSiteEventType, recordSiteEvent } from "@/lib/site-analytics";
 import { autoBlockFingerprint } from "@/lib/forcefield/blocked-fingerprints";
+import { resolveTenantByToken } from "@/lib/forcefield-web/tenants";
 import { verifyPresentedDelegation, getDelegationIssuer, consumeDelegationJti } from "@/lib/forcefield/principal";
 import { ingestSigningEnforced, verifyIngestSignature } from "@/lib/forcefield/ingest-signing";
 
@@ -145,12 +146,20 @@ export async function POST(req: NextRequest) {
   // The raw credential is never persisted.
   delete (props as Record<string, unknown>).delegation;
 
+  // Per-tenant attribution: when the presented ingest token belongs to an onboarded
+  // Forcefield tenant, attribute the event to it and stamp its site label as the
+  // authoritative `site` (so a tenant cannot spoof another's site via props). The
+  // shared-token internal sites resolve to no tenant and keep their own props.site.
+  const tenant = await resolveTenantByToken(provided);
+  if (tenant) props.site = tenant.siteLabel;
+
   await recordSiteEvent({
     eventType: b.type,
     path: cap(b.path, 256),
     country: cap(b.country, 4),
     referrerHost: cap(b.referrer, 256),
     props,
+    tenantId: tenant?.id ?? null,
   });
 
   // Flywheel: a honeytoken trip is the highest-confidence hostile signal, so

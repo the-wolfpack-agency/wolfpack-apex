@@ -43,14 +43,24 @@ const liveQuery: StatsQuery = async <T,>(sql: string, params?: unknown[]) => {
   return res.rows;
 };
 
-/** The safe public rollup over the window. Never throws: on any error it returns
- *  a zeroed shape so a public page degrades to "0", never to a 500. */
-export async function getPublicForcefieldStats(rangeDays = 30, q: StatsQuery = liveQuery): Promise<PublicForcefieldStats> {
+/** The safe rollup over the window. Network-wide by default; pass a tenantId to
+ *  scope to a single tenant's events (the isolation guarantee: a tenant's stats
+ *  query can only ever see rows tagged with its own id). Never throws: on any
+ *  error it returns a zeroed shape so a public page degrades to "0", never a 500. */
+export async function getPublicForcefieldStats(
+  rangeDays = 30,
+  q: StatsQuery = liveQuery,
+  tenantId?: string | null,
+): Promise<PublicForcefieldStats> {
   const empty: PublicForcefieldStats = {
     rangeDays, agentsDetected: 0, welcomed: 0, trapped: 0, probed: 0, payloads: 0, hostile: 0, sitesProtected: 0, attacks: [],
   };
   try {
     const since = `created_at > now() - ($1 || ' days')::interval`;
+    // Tenant scope: when a tenantId is given, EVERY query is constrained to that
+    // tenant's rows, so one tenant can never read another's numbers.
+    const scope = tenantId ? ` AND forcefield_tenant_id = $2` : "";
+    const params = tenantId ? [String(rangeDays), tenantId] : [String(rangeDays)];
     const [counts] = await q<{
       agents: string; welcomed: string; trapped: string; probed: string; payloads: string; sites: string;
     }>(
@@ -62,17 +72,17 @@ export async function getPublicForcefieldStats(rangeDays = 30, q: StatsQuery = l
          count(*) FILTER (WHERE event_type = 'site.agent_payload_attack')    AS payloads,
          count(DISTINCT coalesce(props->>'site', 'ogiam.com'))               AS sites
        FROM site_analytics_events
-       WHERE ${since}`,
-      [String(rangeDays)],
+       WHERE ${since}${scope}`,
+      params,
     );
     if (!counts) return empty;
 
     const attacks = await q<{ attack: string; n: string }>(
       `SELECT props->>'attack' AS attack, count(*) AS n
          FROM site_analytics_events
-        WHERE ${since} AND event_type = 'site.agent_payload_attack' AND props->>'attack' IS NOT NULL
+        WHERE ${since}${scope} AND event_type = 'site.agent_payload_attack' AND props->>'attack' IS NOT NULL
         GROUP BY 1 ORDER BY count(*) DESC LIMIT 8`,
-      [String(rangeDays)],
+      params,
     );
 
     const n = (v: string | undefined): number => Math.max(0, Number(v ?? 0) || 0);

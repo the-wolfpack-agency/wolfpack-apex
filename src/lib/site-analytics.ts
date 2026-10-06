@@ -53,6 +53,9 @@ export interface RecordSiteEventInput {
   referrerHost?: string | null;
   /** Coarse, non-identifying props (which CTA, which section). No PII. */
   props?: Record<string, string | number | boolean>;
+  /** The Forcefield tenant this event belongs to, when it arrived on a per-tenant
+   *  ingest token. Null for the internal shared-token sites. */
+  tenantId?: string | null;
 }
 
 /** Persist one site event. Best effort: no DATABASE_URL -> no-op; never throws,
@@ -61,14 +64,15 @@ export async function recordSiteEvent(input: RecordSiteEventInput): Promise<void
   if (!process.env.DATABASE_URL) return;
   try {
     await query(
-      `INSERT INTO site_analytics_events (event_type, path, country, referrer_host, props)
-       VALUES ($1, $2, $3, $4, $5::jsonb)`,
+      `INSERT INTO site_analytics_events (event_type, path, country, referrer_host, props, forcefield_tenant_id)
+       VALUES ($1, $2, $3, $4, $5::jsonb, $6)`,
       [
         input.eventType,
         input.path ?? null,
         input.country ?? null,
         input.referrerHost ?? null,
         JSON.stringify(input.props ?? {}),
+        input.tenantId ?? null,
       ],
     );
   } catch (err) {
