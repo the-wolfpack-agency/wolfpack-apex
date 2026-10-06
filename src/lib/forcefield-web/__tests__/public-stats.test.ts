@@ -39,3 +39,29 @@ describe("getPublicForcefieldStats", () => {
     expect(s.attacks).toEqual([]);
   });
 });
+
+describe("getPublicForcefieldStats tenant scoping", () => {
+  it("scopes EVERY query to the tenant's rows when a tenantId is given", async () => {
+    const seen: Array<{ sql: string; params: unknown[] }> = [];
+    const q: import("../public-stats").StatsQuery = async (sql, params) => {
+      seen.push({ sql, params: params ?? [] });
+      return (/FILTER/.test(sql) ? [countsRow] : attackRows) as never;
+    };
+    await getPublicForcefieldStats(30, q, "tenant-123");
+    // both queries carry the tenant filter + the tenant id as a param
+    expect(seen.length).toBe(2);
+    for (const call of seen) {
+      expect(call.sql).toContain("forcefield_tenant_id = $2");
+      expect(call.params).toEqual(["30", "tenant-123"]);
+    }
+  });
+
+  it("is network-wide (no tenant filter) when no tenantId is given", async () => {
+    let sql = "";
+    const q: import("../public-stats").StatsQuery = async (s, p) => {
+      sql = s; return (/FILTER/.test(s) ? [countsRow] : attackRows) as never;
+    };
+    await getPublicForcefieldStats(30, q);
+    expect(sql).not.toContain("forcefield_tenant_id");
+  });
+});
