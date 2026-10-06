@@ -100,6 +100,10 @@ const WOLFPACK_INSTINCT: ScanRouteSpec[] = [
   { path: "/", journey: "Landing", auth: "public" },
   { path: "/login", journey: "Sign-in", auth: "public" },
   { path: "/security-posture", journey: "Security posture", auth: "public" },
+  // Forcefield's self-serve surfaces are PUBLIC pages (no account) and must serve.
+  { path: "/forcefield", journey: "Forcefield marketing", auth: "public" },
+  { path: "/forcefield/signup", journey: "Forcefield signup (request access)", auth: "public" },
+  { path: "/forcefield/dashboard", journey: "Forcefield client dashboard", auth: "public" },
 ];
 // Instinct gates access client-side (the dashboard shell returns 200 to an
 // unauthenticated HTTP GET and redirects in the browser), so the meaningful
@@ -107,6 +111,14 @@ const WOLFPACK_INSTINCT: ScanRouteSpec[] = [
 const WOLFPACK_INSTINCT_API: ApiEndpointSpec[] = [
   { path: "/api/products", method: "GET", journey: "Product catalog (read)", requiresAuth: true },
   { path: "/api/releases", method: "GET", journey: "Releases (read)", requiresAuth: true },
+  // Forcefield control plane. The public-stats aggregate is unauthenticated by
+  // design; my-stats needs a tenant token; the admin + ingest endpoints must gate.
+  { path: "/api/forcefield/public-stats", method: "GET", journey: "Forcefield public stats (aggregate)", requiresAuth: false },
+  { path: "/api/forcefield/my-stats", method: "GET", journey: "Forcefield tenant stats (token-scoped)", requiresAuth: true },
+  { path: "/api/admin/forcefield/tenants", method: "GET", journey: "Forcefield tenant registry", requiresAuth: true },
+  { path: "/api/admin/forcefield/signups", method: "GET", journey: "Forcefield signup review", requiresAuth: true },
+  // The public signup must reject an empty/invalid body BEFORE any write.
+  { path: "/api/forcefield/signup", method: "POST", journey: "Forcefield signup intake", requiresAuth: false, invalidBody: {}, expectRejectStatuses: [400] },
 ];
 // Porsche Weekend gates /admin server-side (unauthenticated /admin 307s to
 // /admin/login), so the redirect is a genuine auth finding when it regresses.

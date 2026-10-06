@@ -12,7 +12,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { recordAudit, extractRequestMetadata } from "@/lib/audit-log";
-import { createSignupRequest, hashIp } from "@/lib/forcefield-web/signup";
+import { createSignupRequest, hashIp, RATE_LIMIT_WINDOW_MS } from "@/lib/forcefield-web/signup";
 import { trackEvent } from "@/lib/analytics";
 
 export const runtime = "nodejs";
@@ -23,12 +23,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const meta = extractRequestMetadata(req);
   const ipHash = hashIp(meta.ipAddress);
 
-  const result = await createSignupRequest({ raw, ipHash, now: Date.now() });
+  const result = await createSignupRequest({ raw, ipHash });
 
   if (result.reason === "rate_limited") {
+    // Durable fixed-window limiter: Retry-After is the window length.
     return NextResponse.json(
       { ok: false, error: "rate_limited" },
-      { status: 429, headers: result.retryAfterSec ? { "Retry-After": String(result.retryAfterSec) } : undefined },
+      { status: 429, headers: { "Retry-After": String(Math.ceil(RATE_LIMIT_WINDOW_MS / 1000)) } },
     );
   }
   if (result.reason === "invalid") {

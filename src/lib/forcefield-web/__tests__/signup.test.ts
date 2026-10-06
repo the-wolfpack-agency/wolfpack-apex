@@ -6,10 +6,12 @@
  */
 import {
   validateSignup, normalizeSite, createSignupRequest, approveSignupRequest, rejectSignupRequest,
-  listSignupRequests, rateLimitCheck, _resetSignupRateLimit, HONEYPOT_FIELD, RATE_LIMIT_MAX,
+  listSignupRequests, HONEYPOT_FIELD, type SignupLimiter,
 } from "../signup";
 
-beforeEach(() => _resetSignupRateLimit());
+// Injected limiters so the intake is tested without the DB-backed checkRateLimit.
+const allow: SignupLimiter = async () => ({ allowed: true });
+const block: SignupLimiter = async () => ({ allowed: false });
 
 describe("normalizeSite", () => {
   it("strips scheme/www/path and keeps the bare host", () => {
@@ -35,59 +37,57 @@ describe("validateSignup", () => {
   });
 });
 
-describe("rateLimitCheck", () => {
-  it("allows up to the max then blocks with a retry-after", () => {
-    const t = 1_000_000;
-    for (let i = 0; i < RATE_LIMIT_MAX; i++) expect(rateLimitCheck("ip1", t).allowed).toBe(true);
-    const blocked = rateLimitCheck("ip1", t);
-    expect(blocked.allowed).toBe(false);
-    expect(blocked.retryAfterSec).toBeGreaterThan(0);
-  });
-});
-
 describe("createSignupRequest", () => {
-  const now = 2_000_000;
   const good = { name: "Dana", email: "dana@acme.com", siteUrl: "acme.com" };
 
   it("inserts a pending row and returns its id", async () => {
     const q = jest.fn().mockResolvedValueOnce([{ id: "req-1" }]);
-    const res = await createSignupRequest({ raw: good, ipHash: "h", now }, q);
+    const res = await createSignupRequest({ raw: good, ipHash: "h" }, q, allow);
     expect(res).toEqual({ ok: true, reason: "ok", requestId: "req-1" });
     // never mints a token - the only write is the pending insert
     expect(q).toHaveBeenCalledTimes(1);
     expect(q.mock.calls[0][0]).toMatch(/INSERT INTO forcefield_signup_requests/);
   });
 
-  it("treats a tripped honeypot as a silent non-insert", async () => {
+  it("treats a tripped honeypot as a silent non-insert (before the limiter)", async () => {
     const q = jest.fn();
-    const res = await createSignupRequest({ raw: { ...good, [HONEYPOT_FIELD]: "bot" }, ipHash: "h", now }, q);
+    const limiter = jest.fn(allow);
+    const res = await createSignupRequest({ raw: { ...good, [HONEYPOT_FIELD]: "bot" }, ipHash: "h" }, q, limiter);
     expect(res.reason).toBe("honeypot");
     expect(q).not.toHaveBeenCalled();
+    expect(limiter).not.toHaveBeenCalled();
   });
 
   it("returns invalid (no write) on a bad payload", async () => {
     const q = jest.fn();
-    const res = await createSignupRequest({ raw: { name: "x", email: "bad", siteUrl: "" }, ipHash: "h", now }, q);
+    const res = await createSignupRequest({ raw: { name: "x", email: "bad", siteUrl: "" }, ipHash: "h" }, q, allow);
     expect(res.reason).toBe("invalid");
     expect(q).not.toHaveBeenCalled();
   });
 
   it("maps an ON CONFLICT no-row (duplicate open request) to a success", async () => {
     const q = jest.fn().mockResolvedValueOnce([]); // DO NOTHING -> no RETURNING row
-    const res = await createSignupRequest({ raw: good, ipHash: "h", now }, q);
+    const res = await createSignupRequest({ raw: good, ipHash: "h" }, q, allow);
     expect(res).toEqual({ ok: true, reason: "duplicate" });
   });
 
-  it("rate-limits the same ip after the max", async () => {
-    const q = jest.fn().mockResolvedValue([{ id: "r" }]);
-    for (let i = 0; i < RATE_LIMIT_MAX; i++) await createSignupRequest({ raw: good, ipHash: "same", now }, q);
-    const blocked = await createSignupRequest({ raw: good, ipHash: "same", now }, q);
-    expect(blocked.reason).toBe("rate_limited");
+  it("rate-limits via the durable limiter (no insert when blocked)", async () => {
+    const q = jest.fn();
+    const res = await createSignupRequest({ raw: good, ipHash: "same" }, q, block);
+    expect(res.reason).toBe("rate_limited");
+    expect(q).not.toHaveBeenCalled(); // blocked before any write
+  });
+
+  it("keys the limiter by the submitter ip", async () => {
+    const q = jest.fn().mockResolvedValueOnce([{ id: "r" }]);
+    const limiter = jest.fn(allow);
+    await createSignupRequest({ raw: good, ipHash: "ip-xyz" }, q, limiter);
+    expect(limiter).toHaveBeenCalledWith("ip-xyz");
   });
 
   it("never throws - a DB error degrades to reason:error", async () => {
     const q = jest.fn().mockRejectedValueOnce(new Error("db down"));
-    const res = await createSignupRequest({ raw: good, ipHash: "h", now }, q);
+    const res = await createSignupRequest({ raw: good, ipHash: "h" }, q, allow);
     expect(res).toEqual({ ok: false, reason: "error" });
   });
 });
