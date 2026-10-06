@@ -753,6 +753,14 @@ export type InstinctEventType =
   // forcefield.operator_auto_blocked { operator, rule, proven } - an operator was
   //   AUTO-added to the blocklist on a proven-hostile verdict. Opaque key only.
   | "forcefield.operator_auto_blocked"
+  // forcefield.signup_requested { requestId } - a prospect submitted the public,
+  //   gated self-serve signup request. No token minted; awaits operator review.
+  | "forcefield.signup_requested"
+  // forcefield.signup_approved { requestId, tenantId } - an operator approved a
+  //   signup, provisioning the tenant + issuing its ingest token.
+  | "forcefield.signup_approved"
+  // forcefield.signup_rejected { requestId } - an operator rejected a signup request.
+  | "forcefield.signup_rejected"
   // forcefield.fingerprint_autoblocked { fp, reason } - a client fingerprint was
   // auto-added to the distributed block list because it tripped a honeytoken (the
   // highest-confidence hostile signal), so the central ruleset turns it away next.
