@@ -12,6 +12,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { createForcefieldTenant, listForcefieldTenants } from "@/lib/forcefield-web/tenants";
+import { buildTenantQuickstart } from "@/lib/forcefield-web/tenant-quickstart";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -31,6 +32,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     siteLabel: String(body.siteLabel ?? ""),
   });
   if (!created) return NextResponse.json({ ok: false, error: "invalid_name_or_site" }, { status: 400 });
-  // The token is returned exactly once; it is stored only as a hash.
-  return NextResponse.json({ ok: true, tenant: created.tenant, token: created.token }, { status: 201 });
+  // The token + quick-start are returned exactly once; the token is stored only as
+  // a hash, so this is the one chance to copy the client's ready-to-paste config.
+  const quickstart = buildTenantQuickstart(created.tenant, created.token);
+  return NextResponse.json({ ok: true, tenant: created.tenant, token: created.token, quickstart }, { status: 201 });
 }
