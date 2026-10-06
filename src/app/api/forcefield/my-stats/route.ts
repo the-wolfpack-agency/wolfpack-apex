@@ -8,8 +8,12 @@
  * the API boundary: a token can only ever read its own tenant's data, and an
  * unknown/disabled token gets 401, never another tenant's numbers.
  *
- * Token-authenticated (no session needed) so a client can wire it into their own
- * dashboard. Never 500s: the stats helper degrades to zeros on any error.
+ * PUBLIC: not capability-gated in the session sense - a client wires this into
+ * their own dashboard where no apex user session exists. It is locked down by the
+ * per-tenant ingest token in the `x-forcefield-token` header, resolved by sha256
+ * hash to an ACTIVE tenant; an unknown, disabled, or missing token returns 401 and
+ * never another tenant's data. Same posture as forcefield/observe and the
+ * site-analytics ingest endpoint. Never 500s: the stats helper degrades to zeros.
  */
 import { NextRequest, NextResponse } from "next/server";
 import { resolveTenantByToken } from "@/lib/forcefield-web/tenants";
