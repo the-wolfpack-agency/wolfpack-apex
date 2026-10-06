@@ -156,6 +156,20 @@ function rowToRequest(r: {
   };
 }
 
+/** Fetch one request by id, or null. Never throws. */
+export async function getSignupRequest(id: string, q: SignupQuery = liveQuery): Promise<SignupRequest | null> {
+  try {
+    const [row] = await q<Parameters<typeof rowToRequest>[0]>(
+      `SELECT id, name, email, site_url, note, status, tenant_id, created_at::text AS created_at
+       FROM forcefield_signup_requests WHERE id = $1`,
+      [id],
+    );
+    return row ? rowToRequest(row) : null;
+  } catch {
+    return null;
+  }
+}
+
 /** List requests, newest first, optionally filtered by status. Never throws. */
 export async function listSignupRequests(status?: SignupRequest["status"], q: SignupQuery = liveQuery): Promise<SignupRequest[]> {
   try {

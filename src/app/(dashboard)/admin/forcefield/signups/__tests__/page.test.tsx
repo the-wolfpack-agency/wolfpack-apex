@@ -53,6 +53,28 @@ it("approve reveals the token + quick-start once", async () => {
   expect(approveCall).toBeTruthy();
 });
 
+it("AI summary button POSTs to the risk-summary endpoint and shows the summary inline", async () => {
+  render(<ForcefieldSignupsPage />);
+  await screen.findByTestId("s-summarize-r1");
+  mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true, summary: "Looks legitimate.", model: "gpt-4o-mini", degraded: false }) });
+  fireEvent.click(screen.getByTestId("s-summarize-r1"));
+
+  await waitFor(() => expect(screen.getByTestId("s-summary-r1")).toHaveTextContent("Looks legitimate."));
+  const call = mockFetch.mock.calls.find((c) => String(c[0]).includes("/risk-summary"));
+  expect(call).toBeTruthy();
+  expect((call![1] as RequestInit).body).toContain("r1");
+});
+
+it("AI summary shows an inline note when unavailable (never blocks the review)", async () => {
+  render(<ForcefieldSignupsPage />);
+  await screen.findByTestId("s-summarize-r1");
+  mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ ok: false, reason: "no_provider" }) });
+  fireEvent.click(screen.getByTestId("s-summarize-r1"));
+  await waitFor(() => expect(screen.getByTestId("s-summary-r1")).toHaveTextContent(/not configured/i));
+  // the row is still actionable
+  expect(screen.getByTestId("s-approve-r1")).toBeInTheDocument();
+});
+
 it("reject POSTs the reject action and shows no token panel", async () => {
   render(<ForcefieldSignupsPage />);
   await screen.findByTestId("s-reject-r1");
