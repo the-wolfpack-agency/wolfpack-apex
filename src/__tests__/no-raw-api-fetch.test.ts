@@ -26,6 +26,10 @@ const EXCEPTIONS = [
                              //   anonymous, no JWT; the /api/s/* routes are
                              //   unauthenticated by design (view beacon +
                              //   submit). No refresh flow applies.
+  "src/app/forcefield/signup",   // public Forcefield signup request - pre-account,
+                             //   no session exists; the POST is an anonymous public
+                             //   intake, same posture as /share, /s, and the client
+                             //   dashboard below. No JWT refresh flow applies.
   "src/app/forcefield/dashboard", // public Forcefield client dashboard - the
                              //   per-tenant ingest token (x-forcefield-token) IS
                              //   the credential; there is no apex session or JWT,

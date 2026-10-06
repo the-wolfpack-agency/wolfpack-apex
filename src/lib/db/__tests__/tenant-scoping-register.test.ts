@@ -88,6 +88,13 @@ const GLOBAL_BY_DESIGN: readonly string[] = [
      events it scopes (site_analytics_events.forcefield_tenant_id) carry the tenant
      reference, which is where the isolation is enforced. */
   "forcefield_tenants",
+  /* The Forcefield signup intake queue: public, GATED self-serve requests that
+     exist BEFORE any tenant (one row per prospect, pending until an operator
+     approves + provisions a tenant). It cannot be tenant-scoped because it
+     precedes the tenant it may create - the same pre-tenant posture as
+     forcefield_tenants above. It holds intake data only, no client business data;
+     approval links it to a tenant via tenant_id. */
+  "forcefield_signup_requests",
   /* Dedupe store for Forcefield-web hostile-signal alerts, computed over the
      GLOBAL site_analytics_events stream (public-site protection). A public-site
      attack has no tenant to attribute, so per-workspace rows would be WRONG: two
@@ -323,8 +330,10 @@ describe("every table declares whether it is tenant-scoped", () => {
        into the thing it was built to keep honest. Raised to 7 on 2026-10-06 for
        forcefield_tenants, the Forcefield tenant registry (looked up by token,
        keyed by the tenant it defines) - the identical chicken-and-egg as
-       instinct_tenant_registry already on this list. */
-    expect(GLOBAL_BY_DESIGN.length).toBeLessThanOrEqual(7);
+       instinct_tenant_registry already on this list. Raised to 8 the same day for
+       forcefield_signup_requests, the pre-tenant signup intake queue (a request
+       exists before the tenant it may provision). */
+    expect(GLOBAL_BY_DESIGN.length).toBeLessThanOrEqual(8);
     for (const table of GLOBAL_BY_DESIGN) {
       expect(NO_WORKSPACE_COLUMN).not.toContain(table);
     }

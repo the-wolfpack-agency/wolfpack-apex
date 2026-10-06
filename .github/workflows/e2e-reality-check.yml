@@ -197,6 +197,7 @@ jobs:
           tests/e2e/every-role.spec.ts
           tests/e2e/ai-code-factory.spec.ts
           tests/e2e/forcefield-dashboard.spec.ts
+          tests/e2e/forcefield-signup.spec.ts
           --config=playwright.config.ts --reporter=github,json
 
       # THE STEP ABOVE CANNOT FAIL, WHICH IS WHY NOBODY KNEW.
