@@ -1432,8 +1432,19 @@ export function renderReportHtml(markdown: string): string {
   // Horizontal rules
   html = html.replace(/^---$/gm, '<hr class="wp-hr" />');
 
-  // Paragraphs (lines that aren't already HTML)
-  html = html.replace(/^(?!<[a-z/]|$)(.+)$/gm, "<p>$1</p>");
+  // Paragraphs (lines that aren't already a BLOCK element).
+  //
+  // Only block-level generated tags are skipped. Inline replacements run before
+  // this step, so a paragraph that starts with bold, inline code, a link, or
+  // emphasis begins with <strong>/<code>/<a>/<em>; the old `^(?!<[a-z/])` skipped
+  // those too, which dropped the <p> wrapper and made a "**Fix.** ..." or
+  // "`code` is ..." line flow into the previous block instead of standing as its
+  // own paragraph. Listing the block tags explicitly keeps real blocks un-wrapped
+  // while still wrapping inline-led paragraphs.
+  html = html.replace(
+    /^(?!<(?:h[1-6]|ul|ol|li|div|hr|blockquote|table|thead|tbody|tr|th|td|p)\b|<\/|$)(.+)$/gm,
+    "<p>$1</p>",
+  );
 
   // Clean up empty paragraphs
   html = html.replace(/<p>\s*<\/p>/g, "");
@@ -1461,22 +1472,22 @@ export function renderReportHtml(markdown: string): string {
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Wolfpack Agency Report</title>
-  <link href="https://fonts.googleapis.com/css2?family=Lexend+Peta:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <title>OGIAM Report</title>
+  <link href="https://fonts.googleapis.com/css2?family=Jost:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
   <style>
     :root {
-      --wp-gold: #f1c233;
-      --wp-dark: #212124;
-      --wp-dark-surface: #2a2a2e;
-      --wp-dark-border: #3a3a40;
-      --wp-text: #ffffff;
-      --wp-text-dim: #a0a8b4;
+      --wp-gold: #e8b528;
+      --wp-dark: #0b0d11;
+      --wp-dark-surface: #12151c;
+      --wp-dark-border: #242a36;
+      --wp-text: #e9edf4;
+      --wp-text-dim: #b4bcc8;
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
-      font-family: 'Lexend Peta', sans-serif;
+      font-family: 'Jost', sans-serif;
       background: var(--wp-dark);
       color: var(--wp-text);
       line-height: 1.7;
@@ -1610,12 +1621,14 @@ export function renderReportHtml(markdown: string): string {
         padding: 1rem;
       }
 
-      .wp-header { border-color: #f1c233; }
+      .wp-header { border-color: #e8b528; }
 
       .wp-h1, .wp-h2 { color: #1a1a1a; }
-      .wp-h2 { border-color: #f1c233; }
+      .wp-h2 { border-color: #e8b528; }
 
       p, .wp-list, .wp-table td, .wp-checkbox { color: #333333; }
+      /* bold is the emphasis in a findings doc; keep it dark and readable on white */
+      strong { color: #111111; }
 
       .wp-table th {
         background: #f5f5f5;
@@ -1638,7 +1651,7 @@ export function renderReportHtml(markdown: string): string {
       }
 
       .wp-hr { border-color: #dddddd; }
-      .wp-footer { border-color: #f1c233; color: #666666; }
+      .wp-footer { border-color: #e8b528; color: #666666; }
       .wp-link { color: #1a1a1a; }
 
       @page {
@@ -1650,13 +1663,13 @@ export function renderReportHtml(markdown: string): string {
 </head>
 <body>
   <div class="wp-header">
-    <img src="/wolfpack-logo.png" alt="Wolfpack Agency" />
+    <img src="/ogiam-logo.png" alt="OGIAM" />
   </div>
   <div class="wp-content">
     ${html}
   </div>
   <div class="wp-footer">
-    Confidential &mdash; Prepared by Wolfpack Agency | ${date}
+    Confidential. Prepared by OGIAM | ${date}
   </div>
 </body>
 </html>`;

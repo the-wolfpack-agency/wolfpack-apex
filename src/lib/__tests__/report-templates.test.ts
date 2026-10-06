@@ -403,28 +403,58 @@ describe("renderReportHtml", () => {
     expect(html).toContain("</html>");
   });
 
-  test("includes Wolfpack branding", () => {
+  test("includes OGIAM branding (not the stale Wolfpack brand)", () => {
     const html = renderReportHtml("# Test");
-    expect(html).toContain("Wolfpack Agency");
-    expect(html).toContain("wolfpack-logo.png");
+    expect(html).toContain("OGIAM");
+    expect(html).toContain("ogiam-logo.png");
     expect(html).toContain("Confidential");
-    expect(html).toContain("Lexend Peta");
+    expect(html).toContain("Jost");
+    // the stale brand must never come back
+    expect(html).not.toContain("wolfpack-logo.png");
+    expect(html).not.toContain("Lexend Peta");
   });
 
-  test("includes gold accent color", () => {
+  test("includes the OGIAM gold accent color", () => {
     const html = renderReportHtml("# Test");
-    expect(html).toContain("#f1c233");
+    expect(html).toContain("#e8b528");
+    expect(html).not.toContain("#f1c233");
   });
 
-  test("includes dark theme color", () => {
+  test("includes the OGIAM dark theme color", () => {
     const html = renderReportHtml("# Test");
-    expect(html).toContain("#212124");
+    expect(html).toContain("#0b0d11");
+    expect(html).not.toContain("#212124");
+  });
+
+  test("the report brand stays in sync with globals.css (no drift)", () => {
+    // fs is mocked in this file, so reach for the REAL implementation to read the
+    // canonical brand source.
+    const realFs = jest.requireActual("fs") as typeof import("fs");
+    const path = jest.requireActual("path") as typeof import("path");
+    const css = realFs.readFileSync(path.join(__dirname, "..", "..", "app", "globals.css"), "utf8");
+    const token = (name: string): string => {
+      const m = css.match(new RegExp(`--${name}:\\s*(#[0-9a-fA-F]{3,8})`));
+      if (!m) throw new Error(`token --${name} not found in globals.css`);
+      return m[1];
+    };
+    const html = renderReportHtml("# Test");
+    // The canonical brand lives in globals.css; the report template must match it,
+    // so a future brand change there cannot silently leave client reports stale.
+    for (const name of ["wp-gold", "wp-dark", "wp-dark-surface", "wp-dark-border", "wp-text", "wp-text-dim"]) {
+      expect(html).toContain(token(name));
+    }
   });
 
   test("includes print styles for PDF export", () => {
     const html = renderReportHtml("# Test");
     expect(html).toContain("@media print");
     expect(html).toContain("@page");
+  });
+
+  test("bold text is dark in print (not the near-white screen color on white paper)", () => {
+    const html = renderReportHtml("# Test");
+    const printBlock = html.slice(html.indexOf("@media print"));
+    expect(printBlock).toContain("strong { color: #111111; }");
   });
 
   test("converts markdown headers to HTML", () => {
@@ -447,10 +477,27 @@ describe("renderReportHtml", () => {
     expect(html).toContain("wp-code");
   });
 
-  test("includes Wolfpack footer with date", () => {
+  test("a paragraph that STARTS with bold or inline code still gets its own <p>", () => {
+    // Regression: lead-ins like "**Fix.** do X" and "`p=none` is ..." used to lose
+    // their <p> wrapper and flow into the previous block.
+    const html = renderReportHtml("**Fix.** Disable the endpoint.");
+    expect(html).toContain("<p><strong>Fix.</strong> Disable the endpoint.</p>");
+    const code = renderReportHtml("`p=none` is the setting.");
+    expect(code).toMatch(/<p><code class="wp-code">p=none<\/code> is the setting\.<\/p>/);
+  });
+
+  test("real block elements are NOT wrapped in <p>", () => {
+    const html = renderReportHtml("## Heading\n\n- item one\n- item two\n\n---");
+    expect(html).not.toContain("<p><h2");
+    expect(html).not.toContain("<p><ul");
+    expect(html).not.toContain("<p><li>");
+    expect(html).not.toContain("<p><hr");
+  });
+
+  test("includes the OGIAM footer with date", () => {
     const html = renderReportHtml("# Test");
     expect(html).toContain("Confidential");
-    expect(html).toContain("Wolfpack Agency");
+    expect(html).toContain("Prepared by OGIAM");
     expect(html).toContain("wp-footer");
   });
 });
