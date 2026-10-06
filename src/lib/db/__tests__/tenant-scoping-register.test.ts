@@ -81,6 +81,13 @@ const GLOBAL_BY_DESIGN: readonly string[] = [
      without a chicken-and-egg. It lives in the control-plane DB and holds no
      tenant business data, only the provisioning record. */
   "instinct_tenant_registry",
+  /* The Forcefield tenant registry: the table that DEFINES the Forcefield tenants
+     (one row per onboarded client, its hashed ingest token + site). It is keyed by
+     the tenant it defines, so it cannot itself be tenant-scoped without the same
+     chicken-and-egg, and it holds no client business data, only the registry. The
+     events it scopes (site_analytics_events.forcefield_tenant_id) carry the tenant
+     reference, which is where the isolation is enforced. */
+  "forcefield_tenants",
   /* Dedupe store for Forcefield-web hostile-signal alerts, computed over the
      GLOBAL site_analytics_events stream (public-site protection). A public-site
      attack has no tenant to attribute, so per-workspace rows would be WRONG: two
@@ -313,8 +320,11 @@ describe("every table declares whether it is tenant-scoped", () => {
 
   it("does not let the by-design list become a second backlog", () => {
     /* The escape hatch has to stay small enough to read in one go, or it turns
-       into the thing it was built to keep honest. */
-    expect(GLOBAL_BY_DESIGN.length).toBeLessThanOrEqual(6);
+       into the thing it was built to keep honest. Raised to 7 on 2026-10-06 for
+       forcefield_tenants, the Forcefield tenant registry (looked up by token,
+       keyed by the tenant it defines) - the identical chicken-and-egg as
+       instinct_tenant_registry already on this list. */
+    expect(GLOBAL_BY_DESIGN.length).toBeLessThanOrEqual(7);
     for (const table of GLOBAL_BY_DESIGN) {
       expect(NO_WORKSPACE_COLUMN).not.toContain(table);
     }
