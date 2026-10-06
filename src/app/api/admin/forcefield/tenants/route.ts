@@ -1,0 +1,36 @@
+/**
+ * Admin Forcefield tenant provisioning - the onboarding backend.
+ *
+ * POST { name, siteLabel } -> create a tenant + issue its ingest token. The raw
+ *   token is returned ONCE here (it is only ever stored hashed); deliver it to the
+ *   client, it cannot be recovered later.
+ * GET -> list tenants (never returns a token).
+ *
+ * Capability: settings.manage_team. The self-serve sign-up UI will call this; for
+ * the pilot an operator provisions a client here.
+ */
+import { NextRequest, NextResponse } from "next/server";
+import { requireCapability } from "@/lib/auth/require-capability";
+import { createForcefieldTenant, listForcefieldTenants } from "@/lib/forcefield-web/tenants";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+export async function GET(req: NextRequest): Promise<NextResponse> {
+  const auth = await requireCapability(req, "settings.manage_team");
+  if (!auth.ok) return auth.response;
+  return NextResponse.json({ tenants: await listForcefieldTenants() });
+}
+
+export async function POST(req: NextRequest): Promise<NextResponse> {
+  const auth = await requireCapability(req, "settings.manage_team");
+  if (!auth.ok) return auth.response;
+  const body = (await req.json().catch(() => ({}))) as { name?: unknown; siteLabel?: unknown };
+  const created = await createForcefieldTenant({
+    name: String(body.name ?? ""),
+    siteLabel: String(body.siteLabel ?? ""),
+  });
+  if (!created) return NextResponse.json({ ok: false, error: "invalid_name_or_site" }, { status: 400 });
+  // The token is returned exactly once; it is stored only as a hash.
+  return NextResponse.json({ ok: true, tenant: created.tenant, token: created.token }, { status: 201 });
+}
