@@ -65,7 +65,8 @@
     "factory:ladder": "npx tsx scripts/factory-ladder.ts",
     "check:commit-hygiene": "npx tsx scripts/check-commit-hygiene.ts",
     "readiness": "tsx scripts/readiness.ts",
-    "readiness:json": "tsx scripts/readiness.ts --json"
+    "readiness:json": "tsx scripts/readiness.ts --json",
+    "readiness:report": "npx tsx scripts/readiness-report.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.92.0",

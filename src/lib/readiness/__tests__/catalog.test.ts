@@ -141,3 +141,53 @@ describe("isolation is graded in three honest levels", () => {
     expect(Object.fromEntries(r.results.map((x) => [x.id, x.status]))["isolation-db-enforced"]).toBe("gap");
   });
 });
+
+describe("forcefield signals + grading", () => {
+  it("a worked-up repo flips the forcefield auto criteria to ready", () => {
+    const WORKED_UP = {
+      ".github/workflows/e2e-reality-check.yml":
+        "on:\n  pull_request:\n    branches: [main]\njobs:\n  rc:\n    steps:\n      - run: npx playwright test tests/e2e/forcefield-dashboard.spec.ts",
+      "tests/e2e/forcefield-dashboard.spec.ts": "test('dash', async () => {});",
+      "src/db/__tests__/forcefield-tenants.db.test.ts": "db",
+      "src/db/__tests__/forcefield-signup-requests.db.test.ts": "db",
+      "src/app/api/forcefield/signup/route.ts": "trackEvent(); recordAudit(); return json({ ok: true, status: 'received' });",
+      "src/app/api/admin/forcefield/signups/route.ts": "recordAudit();",
+      "src/app/api/forcefield/my-stats/route.ts": "const t = await resolveTenantByToken(x); getPublicForcefieldStats(30, undefined, tenant.id);",
+      "src/lib/db/__tests__/tenant-scoping-register.test.ts": "registry guardrail",
+      "src/lib/forcefield-web/tenants.ts": "function hashToken(){} token_sha256",
+      // durable: a store-backed limiter, not an in-memory Map
+      "src/lib/forcefield-web/signup.ts": "await checkRateLimit(ipHash)",
+      // DB-level RLS on the tenant attribution column (defense-in-depth)
+      "src/db/migrations/290_ff_rls.sql": "CREATE POLICY p ON site_analytics_events USING (forcefield_tenant_id = current_setting('app.forcefield_tenant')::uuid);",
+    };
+    const r = reportTool(toolById("forcefield")!, fakeReader(WORKED_UP));
+    const by = Object.fromEntries(r.results.map((x) => [x.id, x.status]));
+    expect(by["db-tests"]).toBe("ready"); // 2 forcefield db tests
+    expect(by["e2e-gates-on-pr"]).toBe("ready"); // PR-triggered workflow, no skip
+    expect(by["observability"]).toBe("ready"); // analytics + audit
+    expect(by["token-scoped-isolation"]).toBe("ready"); // DB-level RLS present
+    expect(by["token-hashed-at-rest"]).toBe("ready");
+    expect(by["signup-gated"]).toBe("ready"); // no token minted publicly
+    expect(by["durable-rate-limit"]).toBe("ready");
+  });
+
+  it("the current repo reality registers the honest forcefield gaps", () => {
+    const CURRENT = {
+      "src/db/__tests__/forcefield-tenants.db.test.ts": "db",
+      "src/db/__tests__/forcefield-signup-requests.db.test.ts": "db",
+      "src/app/api/forcefield/my-stats/route.ts": "const t = await resolveTenantByToken(x); getPublicForcefieldStats(30, undefined, tenant.id);",
+      "src/lib/db/__tests__/tenant-scoping-register.test.ts": "registry guardrail",
+      "src/lib/forcefield-web/tenants.ts": "function hashToken(){} token_sha256",
+      "src/app/api/forcefield/signup/route.ts": "return json({ ok: true, status: 'received' });",
+      // in-memory limiter => durable rate limit is a GAP (as disclosed)
+      "src/lib/forcefield-web/signup.ts": "const rateBucket = new Map();",
+      // no forcefield_tenant_id RLS migration => isolation is PARTIAL, not ready
+    };
+    const r = reportTool(toolById("forcefield")!, fakeReader(CURRENT));
+    const by = Object.fromEntries(r.results.map((x) => [x.id, x.status]));
+    expect(by["token-scoped-isolation"]).toBe("partial"); // app-side scoping only
+    expect(by["durable-rate-limit"]).toBe("gap"); // in-memory Map
+    expect(by["signup-gated"]).toBe("ready"); // still never mints a token publicly
+    expect(by["token-hashed-at-rest"]).toBe("ready");
+  });
+});

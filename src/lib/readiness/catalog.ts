@@ -414,7 +414,111 @@ const agentApprovals: ToolSpec = {
   ],
 };
 
-export const READINESS_TOOLS: readonly ToolSpec[] = [aiCode, siteAnalytics, ogiamGate, agentApprovals];
+// ===========================================================================
+// Tool: Forcefield  (/forcefield) - the self-serve agent-defense product
+// ===========================================================================
+// Forcefield's isolation model is NOT workspace_id: it is a per-tenant ingest
+// token (sha256-resolved) that scopes every client-facing read to that tenant's
+// forcefield_tenant_id. So this tool grades isolation on its OWN model, honestly,
+// rather than reusing the workspace_id criterion that would wrongly read "gap".
+const FF_ROUTES = ["src/app/api/forcefield", "src/app/api/admin/forcefield"];
+const FF_TENANTS_LIB = "src/lib/forcefield-web/tenants.ts";
+const FF_SIGNUP_LIB = "src/lib/forcefield-web/signup.ts";
+const FF_MYSTATS = "src/app/api/forcefield/my-stats/route.ts";
+const FF_SIGNUP_PUBLIC = "src/app/api/forcefield/signup/route.ts";
+const FF_E2E = "tests/e2e/forcefield-dashboard.spec.ts";
+const FF_SCOPING_GUARDRAIL = "src/lib/db/__tests__/tenant-scoping-register.test.ts";
+
+const forcefield: ToolSpec = {
+  id: "forcefield",
+  label: "Forcefield (self-serve agent defense)",
+  surface: "/forcefield",
+  collectSignals(reader: RepoReader): ToolSignals {
+    const wf = workflowTexts(reader);
+    const ffDbTests = reader
+      .listFiles("src/db/__tests__", ".db.test.ts")
+      .filter((p) => /forcefield/i.test(p)).length;
+    // Isolation: the client read path (my-stats) scopes by the resolved tenant id,
+    // and the registry of tenant tables is held honest by the tenant-scoping guard.
+    const tokenScopedReads =
+      fileMatches(reader, FF_MYSTATS, /resolveTenantByToken/) &&
+      fileMatches(reader, FF_MYSTATS, /tenant\.id/);
+    const scopingGuardrail = reader.exists(FF_SCOPING_GUARDRAIL);
+    // DB-level RLS on the tenant attribution column is the defense-in-depth goal.
+    const tenantRls = anyFileMatches(
+      reader,
+      ["src/db/migrations"],
+      /forcefield_tenant_id[\s\S]*current_setting\('app\.forcefield_tenant/i,
+    );
+    return {
+      dbTestCount: ffDbTests,
+      e2eGatesOnPR: specGatesOnPR(wf, FF_E2E),
+      e2eSkipsGreen: e2eSkipsGreen(reader, FF_E2E),
+      emitsAnalytics: anyFileMatches(reader, FF_ROUTES, /trackEvent/),
+      hashChainedAudit: anyFileMatches(reader, FF_ROUTES, /recordAudit/),
+      tokenScopedIsolation: tokenScopedReads && scopingGuardrail,
+      tenantRls,
+      // Tokens are stored ONLY as a sha256 hash; a DB leak is not a credential leak.
+      tokenHashedAtRest: fileMatches(reader, FF_TENANTS_LIB, /hashToken|token_sha256/),
+      // The PUBLIC signup never mints a token - it only enqueues a pending request.
+      signupGated: !fileMatches(reader, FF_SIGNUP_PUBLIC, /token:/),
+      // Signup rate limiting is DURABLE only when it no longer uses an in-memory map.
+      durableRateLimit: !fileMatches(reader, FF_SIGNUP_LIB, /rateBucket|new Map/),
+    };
+  },
+  criteria: [
+    dbTestsCriterion(),
+    e2eGatesCriterion(),
+    observabilityCriterion(),
+    {
+      id: "token-scoped-isolation",
+      dimension: "isolation",
+      kind: "auto",
+      title: "A tenant token can only ever read its own tenant's data",
+      rationale:
+        "Forcefield's isolation is the per-tenant ingest token: the client read path resolves the token to a tenant and scopes every query to that tenant's id, so one client can never see another's numbers. DB-level RLS on the attribution column is the defense-in-depth goal.",
+      status: (s) => (bool(s, "tenantRls") ? "ready" : bool(s, "tokenScopedIsolation") ? "partial" : "gap"),
+      evidence: (s) =>
+        bool(s, "tenantRls")
+          ? "DB-level RLS on forcefield_tenant_id (defense-in-depth)"
+          : bool(s, "tokenScopedIsolation")
+            ? "token-resolved tenant scoping on the read path + tenant-scoping guardrail (enforced app-side); DB-level RLS pending"
+            : "client reads not scoped by a resolved tenant id",
+    },
+    {
+      id: "token-hashed-at-rest",
+      dimension: "fail-closed",
+      kind: "auto",
+      title: "Ingest tokens are stored only as a hash, shown once at issue",
+      rationale:
+        "A token stored in the clear turns a DB read into a credential leak for every connected site. Storing only the sha256 means a leak is not a usable credential.",
+      status: (s) => (bool(s, "tokenHashedAtRest") ? "ready" : "gap"),
+      evidence: (s) => (bool(s, "tokenHashedAtRest") ? "sha256 hash at rest, raw token shown once" : "token not hashed at rest"),
+    },
+    {
+      id: "signup-gated",
+      dimension: "correctness",
+      kind: "auto",
+      title: "Public signup never mints a token (operator-gated)",
+      rationale:
+        "Open token minting on an unauthenticated endpoint is an abuse surface: anyone could issue themselves ingest credentials that write into the shared analytics store. The public request must only enqueue a pending row an operator approves.",
+      status: (s) => (bool(s, "signupGated") ? "ready" : "gap"),
+      evidence: (s) => (bool(s, "signupGated") ? "public signup enqueues a pending request only" : "public signup returns a token"),
+    },
+    {
+      id: "durable-rate-limit",
+      dimension: "fail-closed",
+      kind: "auto",
+      title: "Signup rate limiting is durable, not per-lambda in-memory",
+      rationale:
+        "An in-memory, cold-start-reset limit means a determined abuser (or a serverless fan-out) sails past the stated cap. A durable store-backed limit holds across instances.",
+      status: (s) => (bool(s, "durableRateLimit") ? "ready" : "gap"),
+      evidence: (s) => (bool(s, "durableRateLimit") ? "durable store-backed limit" : "in-memory per-lambda limit (known gap)"),
+    },
+  ],
+};
+
+export const READINESS_TOOLS: readonly ToolSpec[] = [aiCode, siteAnalytics, ogiamGate, agentApprovals, forcefield];
 
 export function toolById(id: string): ToolSpec | undefined {
   return READINESS_TOOLS.find((t) => t.id === id);
