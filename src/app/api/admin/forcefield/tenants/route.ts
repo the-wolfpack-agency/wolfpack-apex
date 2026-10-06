@@ -11,6 +11,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth/require-capability";
+import { recordAudit, extractRequestMetadata } from "@/lib/audit-log";
 import { createForcefieldTenant, listForcefieldTenants } from "@/lib/forcefield-web/tenants";
 import { buildTenantQuickstart } from "@/lib/forcefield-web/tenant-quickstart";
 
@@ -32,6 +33,18 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     siteLabel: String(body.siteLabel ?? ""),
   });
   if (!created) return NextResponse.json({ ok: false, error: "invalid_name_or_site" }, { status: 400 });
+  // Audit the credential issuance (who provisioned which tenant) - NEVER the token.
+  const meta = extractRequestMetadata(req);
+  await recordAudit({
+    actor: { user_id: auth.user.id, role: auth.user.role },
+    action: "forcefield.tenant_provisioned",
+    resourceType: "forcefield_tenant",
+    resourceId: created.tenant.id,
+    ipAddress: meta.ipAddress,
+    userAgent: meta.userAgent,
+    requestId: meta.requestId,
+    afterState: { name: created.tenant.name, siteLabel: created.tenant.siteLabel },
+  }).catch(() => {});
   // The token + quick-start are returned exactly once; the token is stored only as
   // a hash, so this is the one chance to copy the client's ready-to-paste config.
   const quickstart = buildTenantQuickstart(created.tenant, created.token);

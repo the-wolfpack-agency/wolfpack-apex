@@ -20,6 +20,11 @@ jest.mock("@/lib/forcefield-web/tenants", () => ({
   createForcefieldTenant: (...a: unknown[]) => mockCreate(...a),
   listForcefieldTenants: (...a: unknown[]) => mockList(...a),
 }));
+const mockRecordAudit = jest.fn();
+jest.mock("@/lib/audit-log", () => ({
+  recordAudit: (...a: unknown[]) => mockRecordAudit(...a),
+  extractRequestMetadata: () => ({ ipAddress: "1.2.3.4", userAgent: "jest", requestId: "r1" }),
+}));
 
 import { GET, POST } from "../route";
 
@@ -30,7 +35,7 @@ const TENANT = { id: "t1", name: "Before U Trade", siteLabel: "beforeutrade", st
 const post = (body: unknown) =>
   new NextRequest("http://x/api/admin/forcefield/tenants", { method: "POST", body: JSON.stringify(body) });
 
-beforeEach(() => jest.clearAllMocks());
+beforeEach(() => { jest.clearAllMocks(); mockRecordAudit.mockResolvedValue(undefined); });
 
 describe("GET", () => {
   it("401/403 when the capability check denies", async () => {
@@ -70,6 +75,11 @@ describe("POST", () => {
     expect(body.quickstart.cloudflareEnv.SITE_ANALYTICS_INGEST_TOKEN).toBe("ff_realtoken");
     expect(body.quickstart.cloudflareEnv.FORCEFIELD_SITE).toBe("beforeutrade");
     expect(body.quickstart.cloudflareEnv.FORCEFIELD_ENFORCE).toBe("off");
+    // the issuance is audited, and the audit NEVER carries the token
+    expect(mockRecordAudit).toHaveBeenCalledTimes(1);
+    const audit = mockRecordAudit.mock.calls[0][0];
+    expect(audit.action).toBe("forcefield.tenant_provisioned");
+    expect(JSON.stringify(audit)).not.toContain("ff_realtoken");
   });
 
   it("400 (not 500) on invalid input", async () => {
