@@ -83,6 +83,44 @@ it("auto-connects when a token is already saved in the browser", async () => {
   });
 });
 
+// --- enforce-to-paid: honest labeling + the upgrade prompt --------------------
+
+it("FREE tier (enforcing:false): hostile actions are 'caught', upgrade prompt shows the count", async () => {
+  // STATS has no `enforcing` field -> watch-only, hostile = 357.
+  mockFetch.mockResolvedValueOnce(okResponse(STATS));
+  render(<ForcefieldDashboardPage />);
+  fireEvent.change(screen.getByTestId("ff-token-input"), { target: { value: "ff_realtoken" } });
+  fireEvent.click(screen.getByTestId("ff-connect"));
+
+  expect(await screen.findByTestId("ff-stats")).toBeInTheDocument();
+  // honest: we only watched, so never say "stopped"
+  expect(screen.getByTestId("ff-m-hostile")).toHaveTextContent("Hostile actions caught");
+  // the upsell appears and quotes the exact number we WOULD have blocked
+  expect(screen.getByTestId("ff-upsell")).toBeInTheDocument();
+  expect(screen.getByTestId("ff-upsell-count")).toHaveTextContent("357");
+});
+
+it("PAID tier (enforcing:true): hostile actions are 'stopped' and NO upgrade prompt", async () => {
+  mockFetch.mockResolvedValueOnce(okResponse({ ...STATS, enforcing: true, plan: "growth" }));
+  render(<ForcefieldDashboardPage />);
+  fireEvent.change(screen.getByTestId("ff-token-input"), { target: { value: "ff_realtoken" } });
+  fireEvent.click(screen.getByTestId("ff-connect"));
+
+  expect(await screen.findByTestId("ff-stats")).toBeInTheDocument();
+  expect(screen.getByTestId("ff-m-hostile")).toHaveTextContent("Hostile actions stopped");
+  expect(screen.queryByTestId("ff-upsell")).not.toBeInTheDocument();
+});
+
+it("FREE tier with zero hostile actions: no upgrade prompt (nothing to upsell yet)", async () => {
+  mockFetch.mockResolvedValueOnce(okResponse({ ...STATS, stats: { ...STATS.stats, hostile: 0, probed: 0, payloads: 0, trapped: 0, attacks: [] } }));
+  render(<ForcefieldDashboardPage />);
+  fireEvent.change(screen.getByTestId("ff-token-input"), { target: { value: "ff_realtoken" } });
+  fireEvent.click(screen.getByTestId("ff-connect"));
+
+  expect(await screen.findByTestId("ff-stats")).toBeInTheDocument();
+  expect(screen.queryByTestId("ff-upsell")).not.toBeInTheDocument();
+});
+
 // --- self-serve onboarding (Setup section via /api/forcefield/my-setup) -------
 
 const SETUP = (connected: boolean) => ({

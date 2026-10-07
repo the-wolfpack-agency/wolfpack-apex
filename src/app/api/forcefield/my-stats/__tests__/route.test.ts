@@ -11,12 +11,19 @@ import { NextRequest } from "next/server";
 
 const mockResolve = jest.fn();
 const mockStats = jest.fn();
+const mockBilling = jest.fn();
 
 jest.mock("@/lib/forcefield-web/tenants", () => ({
   resolveTenantByToken: (...a: unknown[]) => mockResolve(...a),
 }));
 jest.mock("@/lib/forcefield-web/public-stats", () => ({
   getPublicForcefieldStats: (...a: unknown[]) => mockStats(...a),
+}));
+jest.mock("@/lib/forcefield-web/billing", () => ({
+  getTenantBilling: (...a: unknown[]) => mockBilling(...a),
+  // real logic, inlined so the test pulls no db dependency (isLicensed is pure
+  // and unit-tested in billing.test.ts).
+  isLicensed: (b: { status?: string }) => b?.status === "active" || b?.status === "trialing",
 }));
 
 import { GET } from "../route";
@@ -53,6 +60,7 @@ it("401 on an unknown/disabled token (resolver returns null) - no cross-tenant l
 it("200 with stats scoped to the resolved tenant id", async () => {
   mockResolve.mockResolvedValueOnce(TENANT);
   mockStats.mockResolvedValueOnce(STATS);
+  mockBilling.mockResolvedValueOnce({ plan: "growth", status: "active", currentPeriodEnd: null });
   const res = await GET(req("ff_realtoken"));
   expect(res.status).toBe(200);
   const body = await res.json();
@@ -66,6 +74,35 @@ it("200 with stats scoped to the resolved tenant id", async () => {
 it("resolves the tenant using the exact token from the header", async () => {
   mockResolve.mockResolvedValueOnce(TENANT);
   mockStats.mockResolvedValueOnce(STATS);
+  mockBilling.mockResolvedValueOnce(null);
   await GET(req("ff_realtoken"));
   expect(mockResolve).toHaveBeenCalledWith("ff_realtoken");
+});
+
+it("a LICENSED tenant -> enforcing:true (blocks for real)", async () => {
+  mockResolve.mockResolvedValueOnce(TENANT);
+  mockStats.mockResolvedValueOnce(STATS);
+  mockBilling.mockResolvedValueOnce({ plan: "growth", status: "active", currentPeriodEnd: null });
+  const body = await (await GET(req("ff_realtoken"))).json();
+  expect(body.enforcing).toBe(true);
+  expect(body.plan).toBe("growth");
+  expect(mockBilling).toHaveBeenCalledWith("t-abc");
+});
+
+it("an UNLICENSED tenant -> enforcing:false (watch-only, drives the upsell)", async () => {
+  mockResolve.mockResolvedValueOnce(TENANT);
+  mockStats.mockResolvedValueOnce(STATS);
+  mockBilling.mockResolvedValueOnce({ plan: "none", status: "none", currentPeriodEnd: null });
+  const body = await (await GET(req("ff_realtoken"))).json();
+  expect(body.enforcing).toBe(false);
+  expect(body.plan).toBe("none");
+});
+
+it("no billing row -> enforcing:false, never overclaims a block", async () => {
+  mockResolve.mockResolvedValueOnce(TENANT);
+  mockStats.mockResolvedValueOnce(STATS);
+  mockBilling.mockResolvedValueOnce(null);
+  const body = await (await GET(req("ff_realtoken"))).json();
+  expect(body.enforcing).toBe(false);
+  expect(body.plan).toBe("none");
 });

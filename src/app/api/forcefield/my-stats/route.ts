@@ -18,6 +18,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveTenantByToken } from "@/lib/forcefield-web/tenants";
 import { getPublicForcefieldStats } from "@/lib/forcefield-web/public-stats";
+import { getTenantBilling, isLicensed } from "@/lib/forcefield-web/billing";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,9 +30,17 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
   }
   const stats = await getPublicForcefieldStats(30, undefined, tenant.id);
+  // Enforce-to-paid: is this tenant entitled to ACTUALLY block, or watch-only?
+  // Drives the honest dashboard labeling ("stopped" vs "caught") + the upgrade
+  // prompt. Defaults to watch-only (false) if billing is absent or a read fails,
+  // so we never tell a free tenant we blocked when we only watched.
+  const billing = await getTenantBilling(tenant.id);
+  const enforcing = billing ? isLicensed(billing) : false;
   return NextResponse.json({
     ok: true,
     tenant: { id: tenant.id, name: tenant.name, siteLabel: tenant.siteLabel },
     stats,
+    enforcing,
+    plan: billing?.plan ?? "none",
   });
 }
