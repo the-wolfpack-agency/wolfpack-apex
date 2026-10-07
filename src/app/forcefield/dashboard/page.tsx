@@ -39,6 +39,10 @@ interface MyStatsResponse {
   ok: boolean;
   tenant?: { id: string; name: string; siteLabel: string };
   stats?: Stats;
+  /** True when the tenant is licensed to ACTUALLY block; false = watch-only (free
+   *  tier). Drives honest labeling and the upgrade prompt. Absent -> watch-only. */
+  enforcing?: boolean;
+  plan?: string;
   error?: string;
 }
 interface Quickstart {
@@ -151,6 +155,9 @@ export default function ForcefieldDashboardPage() {
 
   const stats = data?.stats;
   const connected = status === "ok" && !!stats;
+  // Enforce-to-paid: licensed tenants block for real; the free tier watches only.
+  // We label honestly off this flag and never claim "stopped" when we only watched.
+  const enforcing = data?.enforcing === true;
   const receiving = setup?.connection?.connected === true;
   // Wired at some point but no recent traffic: a shim that went quiet or a site
   // that stopped sending. Surface honestly, never as a false "Connected".
@@ -241,6 +248,31 @@ export default function ForcefieldDashboardPage() {
               </div>
             </div>
 
+            {!enforcing && stats.hostile > 0 && (
+              <div className="mb-6">
+                <GlassPanel
+                  testId="ff-upsell"
+                  padded
+                  glow="gold"
+                  title="Watch-only: these were caught, not blocked"
+                  subtitle="Your plan watches and reports hostile agents. Blocking turns them away automatically."
+                >
+                  <p className="mt-3 text-sm" style={{ color: "var(--wp-ink, #e8eaed)" }}>
+                    In the last {stats.rangeDays} days Forcefield caught{" "}
+                    <span data-testid="ff-upsell-count" className="font-semibold tabular-nums" style={{ color: "#f87171" }}>
+                      {stats.hostile.toLocaleString()}
+                    </span>{" "}
+                    proven-hostile {stats.hostile === 1 ? "action" : "actions"} on your site. On a
+                    protection plan, every one of these is turned away at the edge before it reaches you,
+                    automatically and with no change to your setup.
+                  </p>
+                  <p className="mt-3 text-xs" style={{ color: "var(--wp-muted, #9aa0a6)" }}>
+                    Talk to your OGIAM contact to enable blocking. Watching stays on either way.
+                  </p>
+                </GlassPanel>
+              </div>
+            )}
+
             {setup?.quickstart && (
               <div className="mb-6">
                 <GlassPanel
@@ -299,7 +331,7 @@ export default function ForcefieldDashboardPage() {
             <ConsoleGrid>
               <MetricTile testId="ff-m-detected" value={stats.agentsDetected} label="Automated agents seen" />
               <MetricTile testId="ff-m-welcomed" value={stats.welcomed} label="Good bots welcomed" accent="var(--wp-gold)" />
-              <MetricTile testId="ff-m-hostile" value={stats.hostile} label="Hostile actions stopped" accent="#f87171" />
+              <MetricTile testId="ff-m-hostile" value={stats.hostile} label={enforcing ? "Hostile actions stopped" : "Hostile actions caught"} accent="#f87171" />
               <MetricTile testId="ff-m-trapped" value={stats.trapped} label="Trapped in the honeypot" />
               <MetricTile testId="ff-m-probed" value={stats.probed} label="Sensitive-path probes" />
               <MetricTile testId="ff-m-payloads" value={stats.payloads} label="Payload attacks" />
