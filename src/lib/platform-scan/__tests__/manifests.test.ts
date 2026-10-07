@@ -122,6 +122,7 @@ describe("Forcefield surfaces in the wolfpack-instinct manifest", () => {
     // plane; apex hosts only the signup + dashboard surfaces.
     expect(publicPaths).toEqual(expect.arrayContaining(["/forcefield/signup", "/forcefield/dashboard"]));
     expect(publicPaths).not.toContain("/forcefield");
+    expect(publicPaths).toContain("/forcefield/status");
   });
 
   it("gates the Forcefield control-plane APIs and leaves public-stats open", () => {
