@@ -142,3 +142,17 @@ it("re-checks the connection on demand", async () => {
   fireEvent.click(screen.getByTestId("ff-check-connection"));
   await waitFor(() => expect(screen.getByTestId("ff-connection")).toHaveTextContent(/connected/i));
 });
+
+it("shows 'No recent traffic' (stale) when the site connected before but went quiet", async () => {
+  const STALE = { ...SETUP(false), connection: { connected: false, everConnected: true, lastEventAt: "2026-10-01T00:00:00Z" } };
+  mockFetch.mockImplementation((url: string) =>
+    Promise.resolve(String(url).includes("/my-setup") ? okResponse(STALE) : okResponse(STATS)),
+  );
+  render(<ForcefieldDashboardPage />);
+  fireEvent.change(screen.getByTestId("ff-token-input"), { target: { value: "ff_realtoken" } });
+  fireEvent.click(screen.getByTestId("ff-connect"));
+  await screen.findByTestId("ff-setup");
+  expect(screen.getByTestId("ff-connection")).toHaveTextContent(/no recent traffic/i);
+  // stale must NOT re-show the copy-paste config (the shim was wired before)
+  expect(screen.queryByTestId("ff-setup-cf")).not.toBeInTheDocument();
+});

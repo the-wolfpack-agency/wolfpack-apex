@@ -104,17 +104,30 @@ export async function getPublicForcefieldStats(
 }
 
 /**
- * Onboarding connection signal for one tenant: when did we last see an event from
- * their site, and are we receiving traffic at all. "connected" means at least one
- * event has ever arrived for this tenant (the shim is wired and reaching us).
+ * Onboarding + liveness signal for one tenant. Honest about three distinct states
+ * so the dashboard never tells a client they are protected when they are not:
+ *   - connected:    an event arrived within the freshness window -> actively seeing
+ *                   traffic right now.
+ *   - everConnected: an event has EVER arrived -> the shim was wired at some point.
+ *                   `everConnected && !connected` is the STALE case (a shim that
+ *                   went quiet, or a site that stopped sending), surfaced as a
+ *                   warning rather than a false "Connected".
+ *   - lastEventAt:  when we last heard from them (for "last seen X").
  * Counts-only, tenant-scoped, never throws (degrades to disconnected).
  */
+export const CONNECTION_FRESH_WINDOW_MS = 24 * 60 * 60 * 1000;
+
 export interface TenantConnection {
   connected: boolean;
+  everConnected: boolean;
   lastEventAt: string | null;
 }
 
-export async function getTenantConnection(tenantId: string, q: StatsQuery = liveQuery): Promise<TenantConnection> {
+export async function getTenantConnection(
+  tenantId: string,
+  q: StatsQuery = liveQuery,
+  nowMs: number = Date.now(),
+): Promise<TenantConnection> {
   try {
     const rows = await q<{ last_event_at: string | null }>(
       `SELECT max(created_at)::text AS last_event_at
@@ -123,8 +136,11 @@ export async function getTenantConnection(tenantId: string, q: StatsQuery = live
       [tenantId],
     );
     const lastEventAt = rows[0]?.last_event_at ?? null;
-    return { connected: lastEventAt != null, lastEventAt };
+    const everConnected = lastEventAt != null;
+    const parsed = lastEventAt ? Date.parse(lastEventAt) : NaN;
+    const connected = !Number.isNaN(parsed) && nowMs - parsed <= CONNECTION_FRESH_WINDOW_MS;
+    return { connected, everConnected, lastEventAt };
   } catch {
-    return { connected: false, lastEventAt: null };
+    return { connected: false, everConnected: false, lastEventAt: null };
   }
 }
