@@ -26,6 +26,8 @@ import { DEFAULT_RULESET } from "@/lib/forcefield-web/ruleset";
 import { getBlockedFingerprints } from "@/lib/forcefield/blocked-fingerprints";
 import { getDatacenterPrefixes } from "@/lib/forcefield/datacenter-ranges";
 import { recordSiteEvent } from "@/lib/site-analytics";
+import { entitledToBlock, getSiteBlockEntitlement } from "@/lib/forcefield-web/billing";
+import { trackEvent } from "@/lib/analytics";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -83,6 +85,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   let action: "allow" | "block" = "allow";
   let eventType: string | null = null;
   let reasonKind: string | null = null;
+  // wouldBlock: the engine proved this request hostile. It equals action when the
+  // site is entitled to enforce, but stays true even when the paid gate withholds
+  // the block - so the free tier can show "we would have blocked this".
+  let wouldBlock = false;
   try {
     // The ENGINE: classify + stamp the stable operator fingerprint, then record.
     const obs = observeRequest(
@@ -97,12 +103,25 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // payload / an admin-blocked operator fingerprint.
     const decision = decideEnforcement({ path, method, userAgent, headerNames, rawUrl }, ruleset, { blockedFingerprints });
     if (decision.block) {
-      action = "block";
+      wouldBlock = true;
       reasonKind = decision.reasonKind ?? null;
+      // ENFORCE-TO-PAID: watching is free, blocking is paid. Resolve the site's
+      // license centrally (never from a client-controlled signal) ONLY now that a
+      // block is pending, so the common path adds no DB read. An unmanaged site
+      // (null: our own/first-party, not a SaaS tenant) enforces as configured.
+      const licensed = await getSiteBlockEntitlement(site).catch(() => null);
+      if (entitledToBlock(licensed)) {
+        action = "block";
+      } else {
+        // Free tier: withhold the block, keep the recorded event, surface the upsell.
+        void trackEvent("forcefield.block_withheld_unlicensed", `site:${site}`, "forcefield", {
+          site, reasonKind: reasonKind ?? "unknown",
+        });
+      }
     }
   } catch {
     /* fail-open: never break the site on an engine error */
   }
 
-  return NextResponse.json({ action, eventType, reasonKind });
+  return NextResponse.json({ action, eventType, reasonKind, wouldBlock });
 }
