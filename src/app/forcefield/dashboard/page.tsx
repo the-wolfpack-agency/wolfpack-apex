@@ -41,6 +41,21 @@ interface MyStatsResponse {
   stats?: Stats;
   error?: string;
 }
+interface Quickstart {
+  cloudflareEnv: Record<string, string>;
+  nextEnv: Record<string, string>;
+  nextSnippet: string;
+}
+interface MySetupResponse {
+  ok: boolean;
+  tenant?: { id: string; name: string; siteLabel: string };
+  quickstart?: Quickstart;
+  connection?: { connected: boolean; lastEventAt: string | null };
+}
+
+function envBlock(env: Record<string, string>): string {
+  return Object.entries(env).map(([k, v]) => `${k}=${v}`).join("\n");
+}
 
 const ATTACK_LABELS: Record<string, string> = {
   path_traversal: "Path traversal",
@@ -56,8 +71,26 @@ const prettyAttack = (a: string) =>
 
 export default function ForcefieldDashboardPage() {
   const [input, setInput] = useState("");
+  const [token, setToken] = useState("");
   const [data, setData] = useState<MyStatsResponse | null>(null);
+  const [setup, setSetup] = useState<MySetupResponse | null>(null);
+  const [checking, setChecking] = useState(false);
   const [status, setStatus] = useState<"idle" | "loading" | "ok" | "unauthorized" | "error">("idle");
+
+  // The onboarding payload: the client's copy-paste quick-start + whether we have
+  // seen traffic yet. Isolated (own try/catch) so it never affects the stats view.
+  const loadSetup = useCallback(async (t: string) => {
+    if (!t) return;
+    setChecking(true);
+    try {
+      const res = await fetch("/api/forcefield/my-setup", {
+        headers: { "x-forcefield-token": t },
+        cache: "no-store",
+      });
+      if (res.ok) setSetup((await res.json()) as MySetupResponse);
+    } catch { /* leave setup as-is; the stats view does not depend on it */ }
+    setChecking(false);
+  }, []);
 
   const load = useCallback(async (t: string) => {
     if (!t) return;
@@ -79,12 +112,14 @@ export default function ForcefieldDashboardPage() {
       }
       const body = (await res.json()) as MyStatsResponse;
       setData(body);
+      setToken(t);
       setStatus("ok");
       try { window.localStorage.setItem(TOKEN_KEY, t); } catch { /* ignore */ }
+      void loadSetup(t);
     } catch {
       setStatus("error");
     }
-  }, []);
+  }, [loadSetup]);
 
   // Restore a previously-connected token so a returning client lands on their numbers.
   useEffect(() => {
@@ -107,13 +142,16 @@ export default function ForcefieldDashboardPage() {
 
   const disconnect = useCallback(() => {
     setInput("");
+    setToken("");
     setData(null);
+    setSetup(null);
     setStatus("idle");
     try { window.localStorage.removeItem(TOKEN_KEY); } catch { /* ignore */ }
   }, []);
 
   const stats = data?.stats;
   const connected = status === "ok" && !!stats;
+  const receiving = setup?.connection?.connected === true;
 
   return (
     <main
@@ -199,6 +237,59 @@ export default function ForcefieldDashboardPage() {
                 </button>
               </div>
             </div>
+
+            {setup?.quickstart && (
+              <div className="mb-6">
+                <GlassPanel
+                  testId="ff-setup"
+                  padded
+                  glow={receiving ? "none" : "gold"}
+                  title="Finish setup"
+                  subtitle={
+                    receiving
+                      ? "Forcefield is receiving traffic from your site. You are protected."
+                      : "Two steps to go live: add the config to your site, then check the connection."
+                  }
+                >
+                  <div className="mt-3 flex items-center gap-2" data-testid="ff-connection">
+                    <StatusPill
+                      status={receiving ? "live" : "queued"}
+                      tone={receiving ? "success" : undefined}
+                      label={receiving ? "Connected" : "Waiting for traffic"}
+                    />
+                    <button
+                      data-testid="ff-check-connection"
+                      type="button"
+                      onClick={() => void loadSetup(token)}
+                      disabled={checking}
+                      className="text-xs underline"
+                      style={{ color: "var(--wp-muted, #9aa0a6)" }}
+                    >
+                      {checking ? "Checking..." : "Check connection"}
+                    </button>
+                  </div>
+
+                  {!receiving && (
+                    <>
+                      <p className="mt-4 text-[13px]" style={{ color: "var(--wp-muted, #9aa0a6)" }}>
+                        Option A - Cloudflare Worker (any site). Set these variables:
+                      </p>
+                      <pre data-testid="ff-setup-cf" className="mt-1 overflow-x-auto rounded-md p-3 text-xs"
+                        style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.12)" }}>{envBlock(setup.quickstart.cloudflareEnv)}</pre>
+                      <p className="mt-4 text-[13px]" style={{ color: "var(--wp-muted, #9aa0a6)" }}>
+                        Option B - Next.js site. Add the middleware and these variables:
+                      </p>
+                      <pre data-testid="ff-setup-next" className="mt-1 overflow-x-auto rounded-md p-3 text-xs"
+                        style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.12)" }}>{setup.quickstart.nextSnippet + "\n\n" + envBlock(setup.quickstart.nextEnv)}</pre>
+                      <p className="mt-3 text-xs" style={{ color: "var(--wp-muted, #9aa0a6)" }}>
+                        Forcefield starts in watch-only mode (it never blocks your traffic) until you set
+                        FORCEFIELD_ENFORCE=on. Deploy, then click Check connection.
+                      </p>
+                    </>
+                  )}
+                </GlassPanel>
+              </div>
+            )}
 
             <ConsoleGrid>
               <MetricTile testId="ff-m-detected" value={stats.agentsDetected} label="Automated agents seen" />

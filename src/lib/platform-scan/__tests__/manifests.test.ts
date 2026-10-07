@@ -126,6 +126,8 @@ describe("Forcefield surfaces in the wolfpack-instinct manifest", () => {
     const byPath = Object.fromEntries(api.map((e) => [e.path, e]));
     // token/capability-gated endpoints must be probed unauthenticated (expect 401/403)
     expect(byPath["/api/forcefield/my-stats"]?.requiresAuth).toBe(true);
+    expect(byPath["/api/forcefield/my-setup"]?.requiresAuth).toBe(true);
+    expect(byPath["/api/forcefield/status"]?.requiresAuth).toBe(false);
     expect(byPath["/api/admin/forcefield/tenants"]?.requiresAuth).toBe(true);
     expect(byPath["/api/admin/forcefield/signups"]?.requiresAuth).toBe(true);
     // the aggregate is public by design
