@@ -95,6 +95,27 @@ describe("running a scan", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(/choose a target/i);
   });
 
+  it("renders the OWASP posture, labeling an unassessed category honestly (not a pass)", async () => {
+    respondWith({
+      report: report({
+        securityControls: {
+          assessments: [
+            { owasp: { id: "A03:2021", title: "Injection" }, status: "gap", cwes: ["CWE-89"], asvs: ["V5.3.4"], detail: "1 finding.", findingCount: 1 },
+            { owasp: { id: "A05:2021", title: "Security Misconfiguration" }, status: "checked_clear", cwes: [], asvs: [], detail: "No issue found.", findingCount: 0 },
+            { owasp: { id: "A01:2021", title: "Broken Access Control" }, status: "not_assessed", cwes: [], asvs: [], detail: "Not assessed here.", findingCount: 0 },
+          ],
+          summary: { gap: 1, checked_clear: 1, compensated: 0, not_assessed: 1 },
+        },
+      }),
+    });
+    await runScan();
+    expect(await screen.findByTestId("owasp-controls")).toBeInTheDocument();
+    expect(screen.getByTestId("owasp-A03:2021")).toHaveTextContent(/Injection/);
+    expect(screen.getByTestId("owasp-A03:2021")).toHaveTextContent(/CWE-89/);
+    // the honesty that matters: an unchecked category is "Not assessed", never a pass
+    expect(screen.getByTestId("owasp-A01:2021")).toHaveTextContent(/Not assessed/);
+  });
+
   it("explains an unverified target in words an operator can act on", async () => {
     // "403" tells them nothing. What to do about it is the useful part.
     respondWith({ error: "target_not_verified" }, false, 403);
