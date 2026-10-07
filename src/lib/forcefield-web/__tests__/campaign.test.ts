@@ -98,6 +98,35 @@ describe("payload_chain (the combo): payload + recon/exfil in one session", () =
   });
 });
 
+describe("auth_abuse + payload_fuzzing (more agent combos)", () => {
+  it("auth_abuse: a burst of auth-surface hits fires (credential stuffing)", () => {
+    const v = detectCampaign(steps(["/login", "/login", "/login", "/login", "/login"]));
+    expect(v.signatures.find((s) => s.id === "auth_abuse")?.severity).toBe("high");
+  });
+
+  it("auth_abuse does NOT fire on a normal login (one or two hits)", () => {
+    const v = detectCampaign(steps(["/", "/login", "/account"]));
+    expect(v.signatures.find((s) => s.id === "auth_abuse")).toBeUndefined();
+  });
+
+  it("payload_fuzzing: several distinct injection payloads in one window fire", () => {
+    const v = detectCampaign([
+      { path: "/s", rawUrl: "/s?q=<script>alert(1)</script>", method: "GET", ts: 1 },
+      { path: "/s", rawUrl: "/s?q=../../../../etc/passwd", method: "GET", ts: 2 },
+      { path: "/s", rawUrl: "/s?q=1 UNION SELECT password FROM users", method: "GET", ts: 3 },
+    ]);
+    expect(v.signatures.find((s) => s.id === "payload_fuzzing")?.severity).toBe("high");
+  });
+
+  it("payload_fuzzing does NOT fire on a single payload (per-request engine handles it)", () => {
+    const v = detectCampaign([
+      { path: "/s", rawUrl: "/s?q=<script>alert(1)</script>", method: "GET", ts: 1 },
+      { path: "/pricing", method: "GET", ts: 2 },
+    ]);
+    expect(v.signatures.find((s) => s.id === "payload_fuzzing")).toBeUndefined();
+  });
+});
+
 describe("no false campaign on benign sessions (the worst outcome)", () => {
   const benignSessions: Array<[string, string[]]> = [
     ["normal browsing", ["/", "/pricing", "/features", "/blog/post-1", "/contact"]],
