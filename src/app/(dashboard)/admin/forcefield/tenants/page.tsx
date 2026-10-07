@@ -74,6 +74,11 @@ export default function ForcefieldTenantsPage() {
   return (
     <div style={{ maxWidth: 1040, margin: "0 auto", padding: "1.5rem 1rem 3rem" }} data-testid="forcefield-tenants">
       <SectionHeader title="Forcefield tenants" subtitle="Onboard a client: issue an ingest key and hand them the ready-to-paste config." />
+      <p style={{ marginTop: ".4rem", fontSize: ".8rem" }}>
+        <a href="/admin/forcefield/signups" style={{ color: "var(--wp-gold)" }}>Signup requests</a>
+        {" · "}
+        <a href="/admin/forcefield/docs" style={{ color: "var(--wp-gold)" }}>Docs (pricing, licensing, SLA, legal)</a>
+      </p>
 
       <GlassPanel style={{ marginTop: "1.25rem" }}>
         <form onSubmit={create} data-testid="tenant-form" style={{ display: "grid", gap: "0.75rem", gridTemplateColumns: "1fr 1fr auto", alignItems: "end" }}>

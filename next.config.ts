@@ -8,6 +8,12 @@ const nextConfig: NextConfig = {
   // instead of guessing from a parent lockfile (which silently drops
   // server-only packages like unpdf from the function bundle).
   outputFileTracingRoot: path.resolve(__dirname),
+  // The Forcefield docs viewer reads docs/forcefield/*.md at request time via fs;
+  // that read is not statically traceable, so pin the files into the function
+  // bundle (otherwise they are pruned and the viewer 404s in production).
+  outputFileTracingIncludes: {
+    "/api/admin/forcefield/docs": ["./docs/forcefield/**/*.md"],
+  },
   // unpdf wraps pdfjs-dist's legacy build which uses dynamic require
   // for its worker. @react-pdf/renderer is ESM-only and pulls in
   // yoga-layout WASM via its own ESM tree — both fail when Webpack
