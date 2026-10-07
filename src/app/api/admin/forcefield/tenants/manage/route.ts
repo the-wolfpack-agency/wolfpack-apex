@@ -13,13 +13,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { recordAudit, extractRequestMetadata } from "@/lib/audit-log";
-import { setTenantStatus, rotateTenantToken } from "@/lib/forcefield-web/tenants";
+import { setTenantStatus, rotateTenantToken, setTenantSharesIntel } from "@/lib/forcefield-web/tenants";
 import { trackEvent } from "@/lib/analytics";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const ACTIONS = ["disable", "enable", "rotate"] as const;
+const ACTIONS = ["disable", "enable", "rotate", "intel_on", "intel_off"] as const;
 type Action = (typeof ACTIONS)[number];
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
@@ -48,6 +48,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     await recordAudit({ ...auditBase, action: "forcefield.tenant_token_rotated" }).catch(() => {});
     void trackEvent("forcefield.tenant_token_rotated", auth.user.id, auth.user.role, { tenantId: id });
     return NextResponse.json({ ok: true, token: res.token });
+  }
+
+  if (action === "intel_on" || action === "intel_off") {
+    const shares = action === "intel_on";
+    const done = await setTenantSharesIntel(id, shares);
+    if (!done) return NextResponse.json({ ok: false, error: "not_found" }, { status: 404 });
+    await recordAudit({ ...auditBase, action: "forcefield.tenant_intel_updated", afterState: { sharesIntel: shares } }).catch(() => {});
+    void trackEvent("forcefield.tenant_intel_updated", auth.user.id, auth.user.role, { tenantId: id, sharesIntel: shares });
+    return NextResponse.json({ ok: true, sharesIntel: shares });
   }
 
   const status = action === "disable" ? "disabled" : "active";

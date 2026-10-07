@@ -770,6 +770,9 @@ export type InstinctEventType =
   | "forcefield.tenant_enabled"
   // forcefield.tenant_token_rotated { tenantId } - operator rotated a tenant's token.
   | "forcefield.tenant_token_rotated"
+  // forcefield.tenant_intel_updated { tenantId, sharesIntel } - tenant opted in/out
+  //   of the shared threat-intel network.
+  | "forcefield.tenant_intel_updated"
   // forcefield.tenant_license_updated { tenantId, plan, status, provider } - the
   //   tenant's licensing/subscription state changed (operator manual OR Stripe webhook).
   | "forcefield.tenant_license_updated"

@@ -27,6 +27,7 @@ export interface GtmDocMeta {
 export const GTM_DOCS: readonly GtmDocMeta[] = [
   { key: "readme", title: "Overview + required-docs checklist", category: "Overview", file: "README.md" },
   { key: "brief", title: "Product brief + pitch (for the team + CEO)", category: "Overview", file: "product-brief.md" },
+  { key: "network", title: "Network effect (how to explain + sell it)", category: "Overview", file: "network-effect.md" },
   { key: "launch", title: "Launch readiness + compliance scope (deterministic core)", category: "Overview", file: "launch-readiness.md" },
   { key: "premortem", title: "Pre-mortem: failure scenarios + controls", category: "Overview", file: "pre-mortem.md" },
   { key: "pricing", title: "Pricing and packaging", category: "Commercial", file: "pricing-and-packaging.md" },

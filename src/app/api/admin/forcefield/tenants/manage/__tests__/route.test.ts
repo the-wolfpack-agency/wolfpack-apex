@@ -18,6 +18,7 @@ jest.mock("@/lib/auth/require-capability", () => ({ requireCapability: (...a: un
 jest.mock("@/lib/forcefield-web/tenants", () => ({
   setTenantStatus: (...a: unknown[]) => mockSetStatus(...a),
   rotateTenantToken: (...a: unknown[]) => mockRotate(...a),
+  setTenantSharesIntel: jest.fn(),
 }));
 jest.mock("@/lib/audit-log", () => ({
   recordAudit: (...a: unknown[]) => mockRecordAudit(...a),
@@ -84,3 +85,22 @@ it("404 when the tenant does not exist", async () => {
   mockRotate.mockResolvedValueOnce(null);
   expect((await POST(post({ id: "nope", action: "rotate" }))).status).toBe(404);
 });
+
+describe("intel opt-out actions", () => {
+  it("intel_off sets shares false + audited", async () => {
+    mockRequireCapability.mockResolvedValueOnce(OK);
+    const mod = jest.requireMock("@/lib/forcefield-web/tenants") as { setTenantSharesIntel: jest.Mock };
+    mod.setTenantSharesIntel.mockResolvedValueOnce(true);
+    const res = await POST(post({ id: "t1", action: "intel_off" }));
+    expect(res.status).toBe(200);
+    expect((await res.json())).toEqual({ ok: true, sharesIntel: false });
+    expect(mod.setTenantSharesIntel).toHaveBeenCalledWith("t1", false);
+    expect(mockRecordAudit.mock.calls[0][0].action).toBe("forcefield.tenant_intel_updated");
+  });
+  it("intel_on sets shares true", async () => {
+    mockRequireCapability.mockResolvedValueOnce(OK);
+    const mod = jest.requireMock("@/lib/forcefield-web/tenants") as { setTenantSharesIntel: jest.Mock };
+    mod.setTenantSharesIntel.mockResolvedValueOnce(true);
+    expect((await (await POST(post({ id: "t1", action: "intel_on" }))).json()).sharesIntel).toBe(true);
+  });
+})
