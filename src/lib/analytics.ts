@@ -770,6 +770,9 @@ export type InstinctEventType =
   | "forcefield.tenant_enabled"
   // forcefield.tenant_token_rotated { tenantId } - operator rotated a tenant's token.
   | "forcefield.tenant_token_rotated"
+  // forcefield.tenant_license_updated { tenantId, plan, status, provider } - the
+  //   tenant's licensing/subscription state changed (operator manual OR Stripe webhook).
+  | "forcefield.tenant_license_updated"
   // forcefield.fingerprint_autoblocked { fp, reason } - a client fingerprint was
   // auto-added to the distributed block list because it tripped a honeytoken (the
   // highest-confidence hostile signal), so the central ruleset turns it away next.
