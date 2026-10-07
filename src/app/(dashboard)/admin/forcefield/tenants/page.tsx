@@ -36,6 +36,8 @@ export default function ForcefieldTenantsPage() {
   const [busy, setBusy] = useState(false);
   const [created, setCreated] = useState<Created | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [mgmtBusy, setMgmtBusy] = useState<string | null>(null);
+  const [rotated, setRotated] = useState<{ id: string; name: string; token: string } | null>(null);
 
   useEffect(() => {
     if (!getInstinctUser<{ role: string }>()) { router.push("/login?next=/admin/forcefield/tenants"); return; }
@@ -67,6 +69,25 @@ export default function ForcefieldTenantsPage() {
       }
     } catch (err) { setError((err as Error).message); }
     setBusy(false);
+  }
+
+  // Token lifecycle: kill a leaked token (disable), restore it (enable), or rotate
+  // to a brand-new token (shown once). The response to a suspected compromise.
+  async function manage(t: Tenant, action: "disable" | "enable" | "rotate") {
+    setMgmtBusy(t.id); setError(null); setRotated(null);
+    try {
+      const res = await fetchWithRefresh("/api/admin/forcefield/tenants/manage", {
+        method: "POST", headers: jsonHeaders(), body: JSON.stringify({ id: t.id, action }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (res.ok && body.ok) {
+        if (action === "rotate" && body.token) setRotated({ id: t.id, name: t.name, token: body.token as string });
+        void load();
+      } else {
+        setError(body.error ? `Could not ${action}: ${body.error}` : `Could not ${action} (HTTP ${res.status}).`);
+      }
+    } catch (err) { setError((err as Error).message); }
+    setMgmtBusy(null);
   }
 
   if (!ready) return null;
@@ -117,6 +138,16 @@ export default function ForcefieldTenantsPage() {
         </GlassPanel>
       ) : null}
 
+      {rotated ? (
+        <GlassPanel testId="tn-rotated" style={{ marginTop: "1.25rem", border: "1px solid var(--wp-gold)" }}>
+          <div style={{ color: "var(--wp-gold)", fontWeight: 600 }}>{rotated.name}: new token issued.</div>
+          <p style={{ marginTop: ".4rem", color: "var(--wp-text-dim)", fontSize: ".85rem" }}>
+            The old token stopped working immediately. Copy this now, it is shown once, and send it to the client.
+          </p>
+          <pre data-testid="tn-rotated-token" style={{ marginTop: 4, padding: ".6rem .75rem", background: "var(--wp-dark-surface)", border: "1px solid var(--wp-border)", borderRadius: 6, color: "var(--wp-text)", overflowX: "auto" }}>{rotated.token}</pre>
+        </GlassPanel>
+      ) : null}
+
       <GlassPanel style={{ marginTop: "1.25rem" }}>
         <div style={{ fontSize: ".8rem", color: "var(--wp-text-dim)", marginBottom: ".6rem" }}>Onboarded tenants</div>
         {tenants.length === 0 ? (
@@ -124,15 +155,28 @@ export default function ForcefieldTenantsPage() {
         ) : (
           <table data-testid="t-list" style={{ width: "100%", borderCollapse: "collapse", fontSize: ".85rem" }}>
             <thead><tr style={{ textAlign: "left", color: "var(--wp-text-dim)" }}>
-              <th style={{ padding: ".4rem .5rem" }}>Client</th><th style={{ padding: ".4rem .5rem" }}>Site</th><th style={{ padding: ".4rem .5rem" }}>Status</th><th style={{ padding: ".4rem .5rem" }}>Onboarded</th>
+              <th style={{ padding: ".4rem .5rem" }}>Client</th><th style={{ padding: ".4rem .5rem" }}>Site</th><th style={{ padding: ".4rem .5rem" }}>Status</th><th style={{ padding: ".4rem .5rem" }}>Onboarded</th><th style={{ padding: ".4rem .5rem" }}></th>
             </tr></thead>
             <tbody>
               {tenants.map((t) => (
-                <tr key={t.id} style={{ borderTop: "1px solid var(--wp-border)", color: "var(--wp-text)" }}>
+                <tr key={t.id} data-testid={`tn-row-${t.id}`} style={{ borderTop: "1px solid var(--wp-border)", color: "var(--wp-text)" }}>
                   <td style={{ padding: ".4rem .5rem" }}>{t.name}</td>
                   <td style={{ padding: ".4rem .5rem" }}>{t.siteLabel}</td>
                   <td style={{ padding: ".4rem .5rem" }}>{t.status}</td>
                   <td style={{ padding: ".4rem .5rem" }}>{t.createdAt.slice(0, 10)}</td>
+                  <td style={{ padding: ".4rem .5rem", whiteSpace: "nowrap" }}>
+                    {t.status === "active" ? (
+                      <button data-testid={`tn-disable-${t.id}`} onClick={() => manage(t, "disable")} disabled={mgmtBusy === t.id}
+                        title="Kill this token (reversible)"
+                        style={{ background: "transparent", color: "var(--wp-error, #e5484d)", border: "1px solid var(--wp-border)", borderRadius: 6, padding: ".3rem .6rem", marginRight: 6, cursor: "pointer" }}>Disable</button>
+                    ) : (
+                      <button data-testid={`tn-enable-${t.id}`} onClick={() => manage(t, "enable")} disabled={mgmtBusy === t.id}
+                        style={{ background: "transparent", color: "var(--wp-text-dim)", border: "1px solid var(--wp-border)", borderRadius: 6, padding: ".3rem .6rem", marginRight: 6, cursor: "pointer" }}>Enable</button>
+                    )}
+                    <button data-testid={`tn-rotate-${t.id}`} onClick={() => manage(t, "rotate")} disabled={mgmtBusy === t.id}
+                      title="Issue a new token; the old one stops working"
+                      style={{ background: "transparent", color: "var(--wp-gold)", border: "1px solid var(--wp-border)", borderRadius: 6, padding: ".3rem .6rem", cursor: "pointer" }}>Rotate</button>
+                  </td>
                 </tr>
               ))}
             </tbody>

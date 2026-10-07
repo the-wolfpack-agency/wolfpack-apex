@@ -764,6 +764,12 @@ export type InstinctEventType =
   // forcefield.trust_center_viewed {} - someone opened the Trust Center (the
   //   reviewer-facing security/compliance summary). A buying/assurance signal.
   | "forcefield.trust_center_viewed"
+  // forcefield.tenant_disabled / _enabled { tenantId } - operator killed/restored a
+  //   tenant's token (the leaked-credential response).
+  | "forcefield.tenant_disabled"
+  | "forcefield.tenant_enabled"
+  // forcefield.tenant_token_rotated { tenantId } - operator rotated a tenant's token.
+  | "forcefield.tenant_token_rotated"
   // forcefield.fingerprint_autoblocked { fp, reason } - a client fingerprint was
   // auto-added to the distributed block list because it tripped a honeytoken (the
   // highest-confidence hostile signal), so the central ruleset turns it away next.
