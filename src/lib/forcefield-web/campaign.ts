@@ -1,0 +1,176 @@
+/**
+ * Forcefield CAMPAIGN detection: the multi-step layer.
+ *
+ * decideEnforcement judges ONE request. A capable agent attacks the opposite way:
+ * every single request looks benign, and the hostility lives in the SEQUENCE. It
+ * recons the surface, chains a scraped id into an object it should not reach, walks
+ * the id space, then exfiltrates. No single step trips a signature, so the
+ * per-request gate is blind to it. This module holds the whole sequence for one
+ * operator (keyed on the stable fingerprint observe.ts already stamps) and matches
+ * kill-chain SHAPES deterministically.
+ *
+ * PURE + deterministic: same steps + options -> same verdict. No I/O, no model.
+ * The caller supplies the recent step history for ONE operator (from recorded
+ * events to "find it in the wild", or live once wired); this module only decides.
+ * Conservative like the rest of Forcefield: a signature needs a real shape (breadth,
+ * ordering, or enumeration), never a single ambiguous request, so normal browsing
+ * never trips it.
+ */
+import { DEFAULT_RULESET, type ForcefieldRuleset } from "./ruleset";
+
+/** Coarse, deterministic category for one step. The campaign shapes are expressed
+ *  over these, not over raw paths, so the rules stay readable and testable. */
+export type StepCategory = "decoy" | "sensitive" | "auth" | "export" | "benign";
+
+export interface OperatorStep {
+  path: string;
+  method: string;
+  /** Epoch ms. Used only for windowing; relative order is what matters. */
+  ts: number;
+}
+
+export type CampaignSignatureId = "recon_breadth" | "kill_chain" | "id_enumeration";
+
+export interface CampaignSignature {
+  id: CampaignSignatureId;
+  severity: "high" | "medium";
+  /** One plain sentence: what shape fired and why it is hostile. */
+  reason: string;
+  /** Indexes (into the input steps) that make the case, so it is auditable. */
+  stepIndexes: number[];
+}
+
+export interface CampaignVerdict {
+  /** True when at least one campaign signature fired. */
+  campaign: boolean;
+  signatures: CampaignSignature[];
+  /** Worst severity across the fired signatures (absent when none). */
+  severity?: "high" | "medium";
+}
+
+export interface CampaignOptions {
+  ruleset?: ForcefieldRuleset;
+  /** Only steps within this many ms of the latest step are considered (one burst). */
+  windowMs?: number;
+  /** Distinct sensitive/decoy paths that together count as surface recon. */
+  reconBreadth?: number;
+  /** Hits on one endpoint with distinct numeric ids that count as enumeration. */
+  enumerationCount?: number;
+}
+
+const DEFAULTS = { windowMs: 120_000, reconBreadth: 4, enumerationCount: 5 } as const;
+
+// Deterministic surface map. Sensitive = recon/attack targets; export = bulk-data
+// exfil; auth = credential surfaces. Kept tight (precision over recall) so benign
+// traffic is never categorized hostile; the red-team's job is to find the shapes
+// these miss, which then become new patterns here.
+const SENSITIVE = [
+  /\/admin(\/|$)/i, /\/wp-admin(\/|$)/i, /\/api\/(internal|admin|private)(\/|$)/i,
+  /\/\.(env|git)(\/|$)/i, /\/config(\/|$|\.)/i, /\/actuator(\/|$)/i, /\/debug(\/|$)/i,
+  /\/users?(\/|$)/i, /\/accounts?(\/|$)/i, /\/phpmyadmin(\/|$)/i, /\/\.well-known\/security/i,
+];
+const EXPORT = [
+  /\/export(\/|$)/i, /\/download(\/|$)/i, /\/dump(\/|$)/i, /\/backup(\/|$)/i,
+  /[?&]format=(csv|json|xlsx|sql)/i, /\/api\/[^?]*\/all(\/|$|\?)/i, /\/report(s)?\/.*\.(csv|xlsx)/i,
+];
+const AUTH = [/\/login(\/|$)/i, /\/signin(\/|$)/i, /\/oauth(\/|$)/i, /\/token(\/|$)/i, /\/session(\/|$)/i];
+
+/** Categorize one path deterministically. Decoy (an invisible trap) is strongest;
+ *  then export, then sensitive, then auth; otherwise benign. */
+export function categorizeStep(path: string, ruleset: ForcefieldRuleset = DEFAULT_RULESET): StepCategory {
+  const p = path || "";
+  if (ruleset.trapPaths.some((t) => p === t || p.startsWith(t + "/"))) return "decoy";
+  if (EXPORT.some((re) => re.test(p))) return "export";
+  if (SENSITIVE.some((re) => re.test(p))) return "sensitive";
+  if (AUTH.some((re) => re.test(p))) return "auth";
+  return "benign";
+}
+
+/** The base of a path with a trailing/embedded numeric id removed, so /api/orders/41
+ *  and /api/orders/42 share a base. Used to spot id-walking (IDOR sweeps). Returns
+ *  null when there is no numeric id to vary. */
+function enumerationKey(path: string): { base: string; id: string } | null {
+  const noQuery = (path || "").split("?")[0];
+  const m = noQuery.match(/^(.*?)(\d{1,})(\/?)$/);
+  if (!m) {
+    // Also catch a numeric id in the query (?id=42) on a stable path.
+    const q = (path || "").match(/^([^?]*)\?.*\b(?:id|user|account|order|invoice)=(\d+)/i);
+    return q ? { base: q[1] + "?id", id: q[2] } : null;
+  }
+  return { base: m[1] + "#" + m[3], id: m[2] };
+}
+
+/**
+ * Decide whether a sequence of one operator's steps forms a hostile campaign.
+ * Worst-first, deterministic, pure. Signatures:
+ *   recon_breadth  - touched >= reconBreadth distinct sensitive/decoy paths in the
+ *                    window (enumerating the attack surface).
+ *   kill_chain     - a recon/sensitive/decoy touch FOLLOWED BY an export within the
+ *                    window (recon then exfil, the classic agentic chain).
+ *   id_enumeration - >= enumerationCount hits on one endpoint base with distinct
+ *                    numeric ids (IDOR / object-id sweep).
+ */
+export function detectCampaign(steps: readonly OperatorStep[], opts: CampaignOptions = {}): CampaignVerdict {
+  const ruleset = opts.ruleset ?? DEFAULT_RULESET;
+  const windowMs = opts.windowMs ?? DEFAULTS.windowMs;
+  const reconBreadth = opts.reconBreadth ?? DEFAULTS.reconBreadth;
+  const enumerationCount = opts.enumerationCount ?? DEFAULTS.enumerationCount;
+  const signatures: CampaignSignature[] = [];
+
+  if (steps.length === 0) return { campaign: false, signatures: [] };
+
+  // Keep only the latest burst (within windowMs of the newest step). Index map is
+  // preserved so reported stepIndexes point back into the ORIGINAL input.
+  const latest = Math.max(...steps.map((s) => s.ts));
+  const idx = steps.map((_, i) => i).filter((i) => latest - steps[i].ts <= windowMs);
+  const cat = idx.map((i) => ({ i, c: categorizeStep(steps[i].path, ruleset), step: steps[i] }));
+
+  // 1. recon breadth: distinct sensitive/decoy paths.
+  const reconHits = cat.filter((x) => x.c === "sensitive" || x.c === "decoy");
+  const distinctReconPaths = new Set(reconHits.map((x) => x.step.path));
+  if (distinctReconPaths.size >= reconBreadth) {
+    signatures.push({
+      id: "recon_breadth",
+      severity: "medium",
+      reason: `enumerated ${distinctReconPaths.size} distinct sensitive paths in one window (surface recon)`,
+      stepIndexes: reconHits.map((x) => x.i),
+    });
+  }
+
+  // 2. kill chain: a recon/sensitive/decoy access BEFORE an export, in order.
+  const firstReconPos = cat.findIndex((x) => x.c === "sensitive" || x.c === "decoy");
+  const exportAfter = firstReconPos >= 0 ? cat.slice(firstReconPos + 1).find((x) => x.c === "export") : undefined;
+  if (firstReconPos >= 0 && exportAfter) {
+    signatures.push({
+      id: "kill_chain",
+      severity: "high",
+      reason: "accessed a sensitive resource then hit a bulk-export path (recon then exfiltration)",
+      stepIndexes: [cat[firstReconPos].i, exportAfter.i],
+    });
+  }
+
+  // 3. id enumeration: one endpoint base, many distinct numeric ids.
+  const byBase = new Map<string, { ids: Set<string>; idxs: number[] }>();
+  for (const x of cat) {
+    const k = enumerationKey(x.step.path);
+    if (!k) continue;
+    const e = byBase.get(k.base) ?? { ids: new Set<string>(), idxs: [] };
+    e.ids.add(k.id);
+    e.idxs.push(x.i);
+    byBase.set(k.base, e);
+  }
+  for (const [, e] of byBase) {
+    if (e.ids.size >= enumerationCount) {
+      signatures.push({
+        id: "id_enumeration",
+        severity: "high",
+        reason: `walked ${e.ids.size} distinct ids on one endpoint (object-id enumeration / IDOR sweep)`,
+        stepIndexes: e.idxs,
+      });
+      break; // one enumeration signature is enough to make the case
+    }
+  }
+
+  const severity = signatures.some((s) => s.severity === "high") ? "high" : signatures.length ? "medium" : undefined;
+  return { campaign: signatures.length > 0, signatures, severity };
+}

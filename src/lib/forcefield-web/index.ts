@@ -52,3 +52,13 @@ export {
   type ClientFingerprint,
   type ToolSignature,
 } from "./fingerprint";
+export {
+  detectCampaign,
+  categorizeStep,
+  type OperatorStep,
+  type StepCategory,
+  type CampaignSignature,
+  type CampaignSignatureId,
+  type CampaignVerdict,
+  type CampaignOptions,
+} from "./campaign";

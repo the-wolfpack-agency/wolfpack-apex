@@ -77,6 +77,30 @@ defensible claim: "the gate prevented 94% of hostile actions in this envelope,
 auditably, and the slips became rules within N days." The slip rate falling to
 zero across red-team rounds is the hardening, measured.
 
+## Multi-step campaigns (the hard, novel class)
+
+Everything above judges ONE request. A capable agent attacks the opposite way:
+every single request looks benign and the hostility lives in the SEQUENCE. It
+recons the surface, chains a scraped id into an object it should not reach, walks
+the id space, then exfiltrates. No single step trips a signature, so the per-request
+gate is blind to it. This is the genuinely hard class, and we do not pretend the
+per-request engine catches it.
+
+`src/lib/forcefield-web/campaign.ts` is the multi-step layer: `detectCampaign` holds
+one operator's recent step history (keyed on the fingerprint observe.ts already
+stamps) and matches kill-chain SHAPES deterministically:
+
+- `recon_breadth`: enumerated many distinct sensitive/decoy paths in one window.
+- `kill_chain`: a sensitive/decoy access THEN a bulk-export, in that order.
+- `id_enumeration`: walked many distinct ids on one endpoint (IDOR / object-id sweep).
+
+It is pure and deterministic (same steps -> same verdict), and conservative: a
+signature needs a real shape, never a single ambiguous request, so normal browsing
+never trips it (tested as the worst outcome). It runs first over RECORDED events to
+find campaigns in the wild, then wires to the live path. The AI red-team's next job
+is to GENERATE multi-step campaigns against our own system and surface the shapes
+these three signatures miss; each gap becomes a new deterministic signature.
+
 ## Productization: adversarial agents + compliance
 
 The same loop, pointed at a CUSTOMER's own system (first-party, read-only request
