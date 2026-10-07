@@ -17,19 +17,26 @@
  * never trips it.
  */
 import { DEFAULT_RULESET, type ForcefieldRuleset } from "./ruleset";
+import { detectPayload } from "./enforce";
 
 /** Coarse, deterministic category for one step. The campaign shapes are expressed
- *  over these, not over raw paths, so the rules stay readable and testable. */
-export type StepCategory = "decoy" | "sensitive" | "auth" | "export" | "benign";
+ *  over these, not over raw paths, so the rules stay readable and testable.
+ *  "payload" = the step itself carried an injection payload (SQLi/XSS/SSTI/...),
+ *  which the per-request engine blocks alone; in a SEQUENCE it is the strongest
+ *  combo signal. */
+export type StepCategory = "payload" | "decoy" | "sensitive" | "auth" | "export" | "benign";
 
 export interface OperatorStep {
   path: string;
   method: string;
   /** Epoch ms. Used only for windowing; relative order is what matters. */
   ts: number;
+  /** The full target (path + query), so a payload in the query is seen. Falls
+   *  back to `path` when absent. */
+  rawUrl?: string;
 }
 
-export type CampaignSignatureId = "recon_breadth" | "kill_chain" | "id_enumeration";
+export type CampaignSignatureId = "recon_breadth" | "kill_chain" | "id_enumeration" | "payload_chain";
 
 export interface CampaignSignature {
   id: CampaignSignatureId;
@@ -75,11 +82,15 @@ const EXPORT = [
 ];
 const AUTH = [/\/login(\/|$)/i, /\/signin(\/|$)/i, /\/oauth(\/|$)/i, /\/token(\/|$)/i, /\/session(\/|$)/i];
 
-/** Categorize one path deterministically. Decoy (an invisible trap) is strongest;
- *  then export, then sensitive, then auth; otherwise benign. */
-export function categorizeStep(path: string, ruleset: ForcefieldRuleset = DEFAULT_RULESET): StepCategory {
-  const p = path || "";
-  if (ruleset.trapPaths.some((t) => p === t || p.startsWith(t + "/"))) return "decoy";
+/** Categorize one step deterministically. `target` is the path or the full
+ *  path+query (so a payload in the query is seen). Decoy (an invisible trap) and
+ *  payload (a proven injection attempt, via the SAME detectPayload the per-request
+ *  engine uses) are the strongest; then export, sensitive, auth; else benign. */
+export function categorizeStep(target: string, ruleset: ForcefieldRuleset = DEFAULT_RULESET): StepCategory {
+  const p = target || "";
+  const pathOnly = p.split("?")[0];
+  if (ruleset.trapPaths.some((t) => pathOnly === t || pathOnly.startsWith(t + "/"))) return "decoy";
+  if (detectPayload(p)) return "payload";
   if (EXPORT.some((re) => re.test(p))) return "export";
   if (SENSITIVE.some((re) => re.test(p))) return "sensitive";
   if (AUTH.some((re) => re.test(p))) return "auth";
@@ -109,6 +120,8 @@ function enumerationKey(path: string): { base: string; id: string } | null {
  *                    window (recon then exfil, the classic agentic chain).
  *   id_enumeration - >= enumerationCount hits on one endpoint base with distinct
  *                    numeric ids (IDOR / object-id sweep).
+ *   payload_chain  - an injection payload step COMBINED with recon of a sensitive/
+ *                    decoy surface or an export, in one window (the multi-step combo).
  */
 export function detectCampaign(steps: readonly OperatorStep[], opts: CampaignOptions = {}): CampaignVerdict {
   const ruleset = opts.ruleset ?? DEFAULT_RULESET;
@@ -123,7 +136,7 @@ export function detectCampaign(steps: readonly OperatorStep[], opts: CampaignOpt
   // preserved so reported stepIndexes point back into the ORIGINAL input.
   const latest = Math.max(...steps.map((s) => s.ts));
   const idx = steps.map((_, i) => i).filter((i) => latest - steps[i].ts <= windowMs);
-  const cat = idx.map((i) => ({ i, c: categorizeStep(steps[i].path, ruleset), step: steps[i] }));
+  const cat = idx.map((i) => ({ i, c: categorizeStep(steps[i].rawUrl ?? steps[i].path, ruleset), step: steps[i] }));
 
   // 1. recon breadth: distinct sensitive/decoy paths.
   const reconHits = cat.filter((x) => x.c === "sensitive" || x.c === "decoy");
@@ -169,6 +182,24 @@ export function detectCampaign(steps: readonly OperatorStep[], opts: CampaignOpt
       });
       break; // one enumeration signature is enough to make the case
     }
+  }
+
+  // 4. payload chain (the COMBO): the agent delivered an injection payload AND, in
+  //    the same window, reconned a sensitive/decoy surface or hit an export. Each
+  //    request alone is handled by the per-request engine; chained together they are
+  //    a multi-step attack - probe the surface, then inject, or inject then exfil -
+  //    the intricate shape a human takes much longer to assemble. The payload itself
+  //    is proven-hostile, so pairing it with any recon/exfil step is high-confidence.
+  const payloadSteps = cat.filter((x) => x.c === "payload");
+  const chainPartners = cat.filter((x) => x.c === "sensitive" || x.c === "decoy" || x.c === "export");
+  if (payloadSteps.length > 0 && chainPartners.length > 0) {
+    const idxs = Array.from(new Set([...payloadSteps, ...chainPartners].map((x) => x.i))).sort((a, b) => a - b);
+    signatures.push({
+      id: "payload_chain",
+      severity: "high",
+      reason: `delivered an injection payload and ${chainPartners.some((x) => x.c === "export") ? "hit an export" : "reconned a sensitive surface"} in one session (multi-step attack chain)`,
+      stepIndexes: idxs,
+    });
   }
 
   const severity = signatures.some((s) => s.severity === "high") ? "high" : signatures.length ? "medium" : undefined;
