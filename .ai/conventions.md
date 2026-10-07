@@ -110,6 +110,20 @@ External integrations (Graph, Plaud, QuickBooks, Resend) return typed `Result<T,
 
 Every signing / verifying operation goes through `src/lib/crypto/algorithms.ts`. No direct `jsonwebtoken` imports outside that file. Cookies set auth tokens only through `setAuthCookie()` in `src/lib/crypto/cookies.ts` so HttpOnly / Secure / SameSite flags cannot drift.
 
+## AI containment boundary (deterministic runtime, AI in the factory)
+
+The deployed software is deterministic and holds all authority; AI (LLMs, ML) is a
+supplier of proposals/artifacts in the build + learning loop, never an actor in the
+runtime decision path. The deterministic cores (`src/lib/compliance`,
+`src/lib/readiness`, `src/lib/forcefield`, `src/lib/forcefield-web`,
+`src/lib/platform-scan`, `src/lib/ogiam`) must NOT import the model client
+(`getAIClient` / `getEmbeddingProvider`). This is enforced by
+`src/__tests__/ai-decision-path-boundary.test.ts` (build-failing), with an explicit
+allowlist for the rare advisory, non-authoritative touchpoint (off by default, never
+in the decision path). Deterministic helpers under `@/lib/ai` (e.g. the regex
+redactor `@/lib/ai/redaction`) are not model calls and are fine. Full standard:
+`docs/architecture/deterministic-runtime-ai-in-the-factory.md`.
+
 ## Test patterns
 
 - Unit: `*.test.ts` co-located under `__tests__/`.
