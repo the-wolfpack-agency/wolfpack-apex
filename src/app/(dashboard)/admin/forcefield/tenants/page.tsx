@@ -78,6 +78,8 @@ export default function ForcefieldTenantsPage() {
         <a href="/admin/forcefield/signups" style={{ color: "var(--wp-gold)" }}>Signup requests</a>
         {" · "}
         <a href="/admin/forcefield/docs" style={{ color: "var(--wp-gold)" }}>Docs (pricing, licensing, SLA, legal)</a>
+        {" · "}
+        <a href="/admin/trust-center" style={{ color: "var(--wp-gold)" }}>Trust Center</a>
       </p>
 
       <GlassPanel style={{ marginTop: "1.25rem" }}>
