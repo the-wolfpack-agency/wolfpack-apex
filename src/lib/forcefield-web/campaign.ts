@@ -36,7 +36,13 @@ export interface OperatorStep {
   rawUrl?: string;
 }
 
-export type CampaignSignatureId = "recon_breadth" | "kill_chain" | "id_enumeration" | "payload_chain";
+export type CampaignSignatureId =
+  | "recon_breadth"
+  | "kill_chain"
+  | "id_enumeration"
+  | "payload_chain"
+  | "auth_abuse"
+  | "payload_fuzzing";
 
 export interface CampaignSignature {
   id: CampaignSignatureId;
@@ -63,9 +69,13 @@ export interface CampaignOptions {
   reconBreadth?: number;
   /** Hits on one endpoint with distinct numeric ids that count as enumeration. */
   enumerationCount?: number;
+  /** Auth-surface hits in the window that count as credential stuffing / brute force. */
+  authAttempts?: number;
+  /** Distinct injection-payload steps in the window that count as active fuzzing. */
+  payloadBurst?: number;
 }
 
-const DEFAULTS = { windowMs: 120_000, reconBreadth: 4, enumerationCount: 5 } as const;
+const DEFAULTS = { windowMs: 120_000, reconBreadth: 4, enumerationCount: 5, authAttempts: 5, payloadBurst: 3 } as const;
 
 // Deterministic surface map. Sensitive = recon/attack targets; export = bulk-data
 // exfil; auth = credential surfaces. Kept tight (precision over recall) so benign
@@ -122,6 +132,9 @@ function enumerationKey(path: string): { base: string; id: string } | null {
  *                    numeric ids (IDOR / object-id sweep).
  *   payload_chain  - an injection payload step COMBINED with recon of a sensitive/
  *                    decoy surface or an export, in one window (the multi-step combo).
+ *   auth_abuse     - a burst of auth-surface hits (credential stuffing / brute force).
+ *   payload_fuzzing- several DISTINCT injection payloads in one window (active vuln
+ *                    scanning / fuzzing for one that lands).
  */
 export function detectCampaign(steps: readonly OperatorStep[], opts: CampaignOptions = {}): CampaignVerdict {
   const ruleset = opts.ruleset ?? DEFAULT_RULESET;
@@ -199,6 +212,32 @@ export function detectCampaign(steps: readonly OperatorStep[], opts: CampaignOpt
       severity: "high",
       reason: `delivered an injection payload and ${chainPartners.some((x) => x.c === "export") ? "hit an export" : "reconned a sensitive surface"} in one session (multi-step attack chain)`,
       stepIndexes: idxs,
+    });
+  }
+
+  // 5. auth abuse (credential stuffing / brute force): a burst of hits on the auth
+  //    surface (login/signin/oauth/token/session) from one operator. A real user
+  //    logs in once or twice; an agent stuffing credentials hammers it.
+  const authHits = cat.filter((x) => x.c === "auth");
+  if (authHits.length >= (opts.authAttempts ?? DEFAULTS.authAttempts)) {
+    signatures.push({
+      id: "auth_abuse",
+      severity: "high",
+      reason: `${authHits.length} auth-surface hits in one window (credential stuffing / brute force)`,
+      stepIndexes: authHits.map((x) => x.i),
+    });
+  }
+
+  // 6. payload fuzzing (active vuln scanning): several DISTINCT injection payloads in
+  //    one window. Even without recon, an operator throwing many different payloads
+  //    is fuzzing for one that lands - the automated scan a human never runs by hand.
+  const distinctPayloads = new Set(payloadSteps.map((x) => x.step.rawUrl ?? x.step.path));
+  if (distinctPayloads.size >= (opts.payloadBurst ?? DEFAULTS.payloadBurst)) {
+    signatures.push({
+      id: "payload_fuzzing",
+      severity: "high",
+      reason: `${distinctPayloads.size} distinct injection payloads in one window (active fuzzing / vuln scanning)`,
+      stepIndexes: payloadSteps.map((x) => x.i),
     });
   }
 
