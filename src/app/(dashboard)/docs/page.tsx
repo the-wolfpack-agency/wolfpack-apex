@@ -186,7 +186,13 @@ export default function DocsPage() {
 
   // Simple markdown-to-HTML renderer
   function renderMarkdown(md: string): string {
-    return md
+    // Escape HTML FIRST, so raw markup in document content (generated from repo
+    // files or AI output) can never render as syntax. The markdown replaces below
+    // inject their own trusted tags and operate on the escaped text; `*`, `#`, `` ` ``
+    // and `-` survive escaping, so formatting still works. Mirrors lib/markdown.ts.
+    const esc = (s: string) =>
+      s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    return esc(md)
       .replace(/^### (.*)$/gm, '<h3 class="text-lg font-semibold mt-4 mb-2" style="color:var(--wp-gold)">$1</h3>')
       .replace(/^## (.*)$/gm, '<h2 class="text-xl font-bold mt-6 mb-2" style="color:var(--wp-gold)">$1</h2>')
       .replace(/^# (.*)$/gm, '<h1 class="text-2xl font-bold mt-6 mb-3" style="color:var(--wp-gold)">$1</h1>')
