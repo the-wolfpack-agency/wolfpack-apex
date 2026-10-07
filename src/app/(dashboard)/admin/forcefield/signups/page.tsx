@@ -90,6 +90,11 @@ export default function ForcefieldSignupsPage() {
   return (
     <div style={{ maxWidth: 1040, margin: "0 auto", padding: "1.5rem 1rem 3rem" }} data-testid="forcefield-signups">
       <SectionHeader title="Forcefield signups" subtitle="Review self-serve requests. Approve to provision the tenant and issue its key." />
+      <p style={{ marginTop: ".4rem", fontSize: ".8rem" }}>
+        <a href="/admin/forcefield/tenants" style={{ color: "var(--wp-gold)" }}>Tenants</a>
+        {" · "}
+        <a href="/admin/forcefield/docs" style={{ color: "var(--wp-gold)" }}>Docs (pricing, licensing, SLA, legal)</a>
+      </p>
 
       {approved ? (
         <GlassPanel testId="s-approved" style={{ marginTop: "1.25rem", border: "1px solid var(--wp-gold)" }}>
