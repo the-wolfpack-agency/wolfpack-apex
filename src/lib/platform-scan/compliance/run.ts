@@ -33,7 +33,7 @@
  * whole value of this report is that it never confuses the two.
  */
 import { runComplianceChecks, summarize, type ComplianceFinding, type ComplianceSummary, type PageFacts } from "./findings";
-import { type SecurityControlReport } from "./security-controls";
+import { type SecurityControlReport, type SecurityFindingLike } from "./security-controls";
 import { assembleOwaspPosture, renderOwaspPostureMarkdown } from "./owasp-posture";
 import { collectStatic, type StaticCollectDeps } from "./collect-static";
 import { collectForCompliance, type CollectDeps } from "./collect";
@@ -117,6 +117,15 @@ export interface RunSiteScanInput {
   operatorAllowed?: readonly string[];
   /** Hosts implied by integrations the client is known to run. */
   integrationHosts?: readonly { host: string; name: string }[];
+  /** Security findings from a code scan of this target's repo (ScanFinding[] fits).
+   *  When supplied, the OWASP posture becomes a COMBINED code+live assessment: the
+   *  code categories (injection, access control, crypto, secrets) are assessed by
+   *  the detectors, not left not_assessed. Absent = live-only scan. */
+  codeFindings?: readonly SecurityFindingLike[];
+  /** True when this target is protected by Forcefield at runtime, so a code-level
+   *  gap in an attack class Forcefield blocks reads as "compensated" (covered in
+   *  depth) rather than an open gap. */
+  forcefieldActive?: boolean;
 }
 
 export interface RunSiteScanDeps {
@@ -254,8 +263,10 @@ export async function runSiteScan(input: RunSiteScanInput, deps: RunSiteScanDeps
   const securityControls = assembleOwaspPosture({
     liveHeadersAssessed: headersAssessed,
     liveHeadersMissing: headersAssessed && headers.verdict === "absent",
-    // A live scan runs no code detectors and does not know the target's Forcefield
-    // status, so neither is asserted here; a combined code+live caller supplies them.
+    // When the caller supplies a code scan's findings, this becomes a combined
+    // code+live posture: the code categories are assessed too, not left unknown.
+    codeFindings: input.codeFindings,
+    forcefieldActive: input.forcefieldActive,
   });
   // The exportable Markdown artifact of the posture, attached to every report.
   const postureMarkdown = renderOwaspPostureMarkdown(securityControls);
