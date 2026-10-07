@@ -33,7 +33,8 @@
  * whole value of this report is that it never confuses the two.
  */
 import { runComplianceChecks, summarize, type ComplianceFinding, type ComplianceSummary, type PageFacts } from "./findings";
-import { assessSecurityControls, type SecurityControlReport } from "./security-controls";
+import { type SecurityControlReport } from "./security-controls";
+import { assembleOwaspPosture, renderOwaspPostureMarkdown } from "./owasp-posture";
 import { collectStatic, type StaticCollectDeps } from "./collect-static";
 import { collectForCompliance, type CollectDeps } from "./collect";
 import { buildDeclarations } from "../anomaly/declared";
@@ -89,6 +90,8 @@ export interface SiteScanReport {
    *  only misconfiguration (A05, from the security-headers check); code categories
    *  read not_assessed until a code scan feeds the same mapping. Never overclaims. */
   securityControls: SecurityControlReport;
+  /** The OWASP posture rendered as a Markdown artifact a client/auditor can keep. */
+  postureMarkdown: string;
   /** Present when the page could not be read. Every check then reads
    *  unverifiable, which is the honest result rather than a clean bill. */
   error?: string;
@@ -248,12 +251,14 @@ export async function runSiteScan(input: RunSiteScanInput, deps: RunSiteScanDeps
   // detectors, so every other category reads not_assessed (honest, never "met").
   const headers = findings.find((f) => f.id === "security-headers");
   const headersAssessed = headers !== undefined && headers.verdict !== "unverifiable";
-  const securityControls = assessSecurityControls(
-    headersAssessed && headers.verdict === "absent"
-      ? [{ title: "Security misconfiguration: core security headers missing", category: "security", severity: headers.severity }]
-      : [],
-    { assessedOwaspIds: headersAssessed ? ["A05:2021"] : [] },
-  );
+  const securityControls = assembleOwaspPosture({
+    liveHeadersAssessed: headersAssessed,
+    liveHeadersMissing: headersAssessed && headers.verdict === "absent",
+    // A live scan runs no code detectors and does not know the target's Forcefield
+    // status, so neither is asserted here; a combined code+live caller supplies them.
+  });
+  // The exportable Markdown artifact of the posture, attached to every report.
+  const postureMarkdown = renderOwaspPostureMarkdown(securityControls);
 
   return {
     ok: true,
@@ -265,6 +270,7 @@ export async function runSiteScan(input: RunSiteScanInput, deps: RunSiteScanDeps
       summary: summarize(findings),
       anomaly,
       securityControls,
+      postureMarkdown,
       error,
       runId,
       baselineUpdated,

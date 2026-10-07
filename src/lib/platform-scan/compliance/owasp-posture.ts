@@ -95,7 +95,10 @@ export function renderOwaspPostureMarkdown(report: SecurityControlReport): strin
   for (const a of report.assessments) {
     const cwe = a.cwes.join(", ") || "-";
     const asvs = a.asvs.join(", ") || "-";
-    const detail = a.detail.replace(/\|/g, "\\|");
+    // Complete escaping for a Markdown table cell: backslash FIRST (so it cannot
+    // double-escape the pipe below), then the pipe, then collapse newlines (which
+    // would break the table row). Order matters; backslash-last was incomplete.
+    const detail = a.detail.replace(/\\/g, "\\\\").replace(/\|/g, "\\|").replace(/[\r\n]+/g, " ");
     lines.push(`| ${a.owasp.id} ${a.owasp.title} | ${STATUS_WORD[a.status]} | ${cwe} | ${asvs} | ${detail} |`);
   }
   lines.push("");

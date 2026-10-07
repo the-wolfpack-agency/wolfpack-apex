@@ -62,4 +62,17 @@ describe("renderOwaspPostureMarkdown (export artifact)", () => {
     const input = { codeFindings: [{ title: "SSRF to cloud metadata", category: "security" }] };
     expect(renderOwaspPostureMarkdown(assembleOwaspPosture(input))).toBe(renderOwaspPostureMarkdown(assembleOwaspPosture(input)));
   });
+
+  it("escapes backslash, pipe and newline in a cell so the table cannot be broken (CWE-116)", () => {
+    const report = {
+      assessments: [
+        { owasp: { id: "A03:2021", title: "Injection" }, status: "gap" as const, cwes: ["CWE-89"], asvs: ["V5"], detail: "a \\ b | c\nnext", findingCount: 1 },
+      ],
+      summary: { gap: 1, checked_clear: 0, compensated: 0, not_assessed: 0 },
+    };
+    const row = renderOwaspPostureMarkdown(report).split("\n").find((l) => l.includes("A03:2021"))!;
+    expect(row).toContain("a \\\\ b \\| c next"); // backslash doubled, pipe escaped, newline collapsed
+    // the row still has exactly the 6 column delimiters (table not broken by the cell)
+    expect(row.match(/(?<!\\)\|/g)?.length).toBe(6);
+  });
 });
