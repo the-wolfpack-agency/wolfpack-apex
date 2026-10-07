@@ -57,6 +57,23 @@ it("ignores non-security findings (a bug is not a control gap)", () => {
   expect(r.summary.gap).toBe(0);
 });
 
+it("assessedOwaspIds: a category OUTSIDE the assessed set is not_assessed, not checked_clear", () => {
+  // A live scan that assessed only A05 (headers) must not claim A03 is clean.
+  const r = assessSecurityControls([], { assessedOwaspIds: ["A05:2021"] });
+  expect(status(r, "A05:2021").status).toBe("checked_clear");
+  expect(status(r, "A03:2021").status).toBe("not_assessed");
+  expect(status(r, "A01:2021").status).toBe("not_assessed");
+});
+
+it("maps a missing-security-headers finding to A05 (the live-scan path)", () => {
+  const r = assessSecurityControls(
+    [find("Security misconfiguration: core security headers missing")],
+    { assessedOwaspIds: ["A05:2021"] },
+  );
+  expect(status(r, "A05:2021").status).toBe("gap");
+  expect(status(r, "A05:2021").cwes).toContain("CWE-693");
+});
+
 it("summary counts every OWASP category exactly once", () => {
   const r = assessSecurityControls([find("SQL injection"), find("SSRF to cloud metadata")]);
   const total = r.summary.gap + r.summary.checked_clear + r.summary.compensated + r.summary.not_assessed;

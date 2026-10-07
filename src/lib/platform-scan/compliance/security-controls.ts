@@ -72,6 +72,7 @@ export const CONTROL_MAP: readonly ControlMapping[] = [
   { key: "hardcoded_secret", match: /hardcoded secret|secret written to a log|credential written to a log|secret.*log/i, owasp: "A05:2021", cwe: "CWE-798", asvs: "V6.4.1", forcefieldCompensates: false },
   { key: "auth_abuse", match: /credential stuffing|brute force|auth_abuse|auth-surface/i, owasp: "A07:2021", cwe: "CWE-307", asvs: "V11.1.1", forcefieldCompensates: true },
   { key: "enumeration", match: /enumeration|recon|fuzzing|campaign/i, owasp: "A01:2021", cwe: "CWE-799", asvs: "V11.1.2", forcefieldCompensates: true },
+  { key: "security_headers", match: /security header|security misconfiguration|missing.*header/i, owasp: "A05:2021", cwe: "CWE-693", asvs: "V14.4.1", forcefieldCompensates: false },
 ];
 
 /** The minimal finding shape this reads - the common ground between a static
@@ -109,12 +110,17 @@ export interface SecurityControlReport {
  */
 export function assessSecurityControls(
   findings: readonly SecurityFindingLike[],
-  opts: { forcefieldActive?: boolean } = {},
+  opts: { forcefieldActive?: boolean; assessedOwaspIds?: readonly string[] } = {},
 ): SecurityControlReport {
   const security = findings.filter((f) => (f.category ?? "security") === "security");
 
-  // Which OWASP ids does our scanner actually assess? (every id a mapping targets)
-  const assessedOwasp = new Set(CONTROL_MAP.map((m) => m.owasp));
+  // Which OWASP ids were ACTUALLY assessed this run? A caller that ran only some
+  // checks (e.g. a live-site scan that assesses misconfiguration but not code)
+  // passes the subset it covered; a category outside it reads not_assessed, never
+  // a clean bill. Default (undefined) = the scanner assessed every mapped category.
+  const assessedOwasp = opts.assessedOwaspIds
+    ? new Set(opts.assessedOwaspIds)
+    : new Set(CONTROL_MAP.map((m) => m.owasp));
 
   // Group mapped findings by OWASP id.
   const byOwasp = new Map<string, { cwes: Set<string>; asvs: Set<string>; count: number; allCompensated: boolean }>();
