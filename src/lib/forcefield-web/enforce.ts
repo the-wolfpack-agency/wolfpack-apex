@@ -90,6 +90,67 @@ const PAYLOAD_SIGNATURES: ReadonlyArray<{ attack: string; patterns: readonly Reg
     attack: "open_redirect",
     patterns: [/[?&](?:redirect|redirect_uri|url|next|goto|return|returnurl|dest|destination)=(?:https?:)?%2f%2f/i, /[?&](?:redirect|redirect_uri|url|next|goto|return|returnurl|dest|destination)=(?:https?:)?\/\//i, /bitrix\/rk\.php/i],
   },
+  {
+    // Shell command injection. Kept deliberately tight to avoid colliding with a
+    // legitimate field value that happens to contain a separator (e.g. sort=a|id):
+    // a shell metacharacter must be immediately followed by a NETWORK/SHELL command
+    // name, or a $()/backtick substitution, or a read of a system file.
+    attack: "command_injection",
+    patterns: [
+      /[;&`]\s*(?:whoami|curl|wget|nc|ncat|bash|powershell|nslookup|dig|chmod|chown|mkfifo|telnet|\/bin\/(?:ba)?sh)\b/i,
+      /\|\s*(?:whoami|curl|wget|nc|ncat|bash|nslookup|dig|sh)\b/i,
+      /\$\((?:whoami|id|cat|curl|wget|uname|hostname|nc)\b/i,
+      /%0a\s*(?:whoami|curl|wget|nc|bash|cat|chmod)\b/i,
+      /\b(?:cat|head|less|tail)\s+\/etc\/(?:passwd|shadow)\b/i,
+    ],
+  },
+  {
+    // Server-side template injection. Tight: an arithmetic probe ({{7*7}}, ${7*7},
+    // #{7*7}) or a known sandbox-escape token, not any brace pair (a real route
+    // never carries these in its URL).
+    attack: "ssti",
+    patterns: [
+      /\{\{\s*\d+\s*[*]\s*\d+\s*\}\}/,
+      /[$#]\{\s*\d+\s*[*]\s*\d+\s*\}/,
+      /\{\{.*(?:config|self|request|__class__|__globals__|__subclasses__|cycler|lipsum|freemarker|runtime)\b.*\}\}/i,
+      /<%=?[^%]*(?:system|exec|`|Runtime|ProcessBuilder)[^%]*%>/i,
+    ],
+  },
+  {
+    // Log4Shell / JNDI lookup injection. Unambiguous: no legitimate request carries
+    // a ${jndi:...} lookup. Also catches the common ${lower:}/${env:} obfuscation.
+    attack: "log4shell",
+    patterns: [
+      /\$\{jndi:(?:ldap|ldaps|rmi|dns|iiop|nis|corba)s?:\/\//i,
+      /\$\{(?:lower|upper|env|sys|date):[^}]*jndi/i,
+    ],
+  },
+  {
+    // CRLF / HTTP response header injection: an encoded newline followed by a
+    // response header name is an attempt to split the response / set a header.
+    attack: "crlf_injection",
+    patterns: [/(?:%0d%0a|%0a|%0d|\r\n|\n)(?:%20|\s)*(?:set-cookie|location|content-length|content-type|refresh|x-)[\w-]*\s*(?::|%3a)/i],
+  },
+  {
+    // NoSQL operator injection: a Mongo-style query operator smuggled through the
+    // query string ([$ne], {"$where":...}) - a real client never sends these.
+    attack: "nosql_injection",
+    patterns: [
+      /\[\$(?:ne|gt|gte|lt|lte|regex|where|in|nin|or|and|exists|not|elemMatch)\]/i,
+      /["']?\$where["']?\s*(?::|=)/i,
+      /\{\s*["']?\$(?:ne|gt|gte|lt|lte|regex|where|in|nin)["']?\s*:/i,
+    ],
+  },
+  {
+    // SSRF: a URL-ish parameter pointing at a cloud metadata endpoint, a loopback/
+    // link-local address, or a non-http internal scheme (file/gopher/dict/ftp).
+    // Scoped to params that actually carry a fetch target to avoid false positives.
+    attack: "ssrf",
+    patterns: [
+      /[?&](?:url|uri|dest|destination|target|callback|webhook|next|image|img|src|source|proxy|fetch|load|host|domain|feed|endpoint|u|q)=[^&]*?(?:169\.254\.169\.254|metadata\.google\.internal|100\.100\.100\.200|fd00:ec2|169\.254\.170\.2)/i,
+      /[?&][^=&]*=[^&]*?\b(?:file|gopher|dict|ftp|ldap|tftp):(?:%2f%2f|\/\/)/i,
+    ],
+  },
 ];
 
 /** Scan the request target for an injection payload; returns the attack family
