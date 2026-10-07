@@ -113,3 +113,17 @@ it("licenses a client by choosing a plan (manual billing path)", async () => {
     expect(b).toMatchObject({ id: "t1", plan: "growth", status: "active" });
   });
 });
+
+it("toggles shared-intel participation for a tenant", async () => {
+  mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ tenants: [{ ...ACTIVE_TENANT, sharesIntel: true }] }) }); // initial
+  render(<ForcefieldTenantsPage />);
+  const btn = await screen.findByTestId("tn-intel-t1");
+  expect(btn).toHaveTextContent(/intel: on/i);
+  mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true, sharesIntel: false }) }); // POST intel_off
+  mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ tenants: [{ ...ACTIVE_TENANT, sharesIntel: false }] }) }); // reload
+  fireEvent.click(btn);
+  await waitFor(() => {
+    const call = mockFetch.mock.calls.find((c) => String((c[1] as RequestInit)?.body).includes("intel_off"));
+    expect(call).toBeTruthy();
+  });
+});

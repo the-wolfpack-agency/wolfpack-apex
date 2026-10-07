@@ -16,7 +16,7 @@ import { useRouter } from "next/navigation";
 import { getInstinctUser, fetchWithRefresh, jsonHeaders } from "@/lib/client-auth";
 import { GlassPanel, SectionHeader } from "@/components/console";
 
-interface Tenant { id: string; name: string; siteLabel: string; status: string; createdAt: string; plan?: string; subscriptionStatus?: string }
+interface Tenant { id: string; name: string; siteLabel: string; status: string; createdAt: string; plan?: string; subscriptionStatus?: string; sharesIntel?: boolean }
 const PLAN_OPTIONS = ["none", "starter", "growth", "scale", "enterprise"] as const;
 interface Quickstart {
   token: string; ingestUrl: string; rulesetUrl: string;
@@ -74,7 +74,7 @@ export default function ForcefieldTenantsPage() {
 
   // Token lifecycle: kill a leaked token (disable), restore it (enable), or rotate
   // to a brand-new token (shown once). The response to a suspected compromise.
-  async function manage(t: Tenant, action: "disable" | "enable" | "rotate") {
+  async function manage(t: Tenant, action: "disable" | "enable" | "rotate" | "intel_on" | "intel_off") {
     setMgmtBusy(t.id); setError(null); setRotated(null);
     try {
       const res = await fetchWithRefresh("/api/admin/forcefield/tenants/manage", {
@@ -202,7 +202,12 @@ export default function ForcefieldTenantsPage() {
                     )}
                     <button data-testid={`tn-rotate-${t.id}`} onClick={() => manage(t, "rotate")} disabled={mgmtBusy === t.id}
                       title="Issue a new token; the old one stops working"
-                      style={{ background: "transparent", color: "var(--wp-gold)", border: "1px solid var(--wp-border)", borderRadius: 6, padding: ".3rem .6rem", cursor: "pointer" }}>Rotate</button>
+                      style={{ background: "transparent", color: "var(--wp-gold)", border: "1px solid var(--wp-border)", borderRadius: 6, padding: ".3rem .6rem", cursor: "pointer", marginRight: 6 }}>Rotate</button>
+                    <button data-testid={`tn-intel-${t.id}`} onClick={() => manage(t, t.sharesIntel === false ? "intel_on" : "intel_off")} disabled={mgmtBusy === t.id}
+                      title="Shared threat-intel network participation (opaque attacker fingerprints only)"
+                      style={{ background: "transparent", color: "var(--wp-text-dim)", border: "1px solid var(--wp-border)", borderRadius: 6, padding: ".3rem .6rem", cursor: "pointer" }}>
+                      {t.sharesIntel === false ? "Intel: off" : "Intel: on"}
+                    </button>
                   </td>
                 </tr>
               ))}

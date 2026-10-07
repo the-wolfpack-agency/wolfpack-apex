@@ -94,3 +94,18 @@ and what did it try," not "who is this person and what did they read."
 - DB-level RLS is pending (app-side scoping enforced today), as above.
 - A public status endpoint for the SLA is not yet built.
 These are stated so the Privacy/DPA/SLA never overclaim.
+
+## 8. Shared threat-intelligence boundary
+
+Forcefield operates a shared network: a proven-hostile agent caught on any site can
+be blocked on the others. What crosses the boundary is strictly limited:
+
+- Shared: an OPAQUE attacker fingerprint (a hash over the request-shape + the
+  classification) and the reason it was blocked. These identify how a hostile agent
+  BEHAVES, not who any visitor is.
+- NOT shared: request contents, page data, visitor identity, a customer's traffic,
+  or anything from which a person or a page could be reconstructed. Only
+  proven-hostile actors enter the shared list; normal visitors and good bots never do.
+- Opt-out: a tenant can set `shares_intel = false` (admin toggle) to neither
+  contribute to nor consume the shared list, and still get full local protection.
+  Default is to participate, because the network is the value.

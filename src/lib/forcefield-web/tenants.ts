@@ -23,6 +23,9 @@ export interface ForcefieldTenant {
    *  ingest path - the hard entitlement kill is `status`. See billing.ts. */
   plan?: string;
   subscriptionStatus?: string;
+  /** Participates in the shared threat-intel network (default true). Opaque
+   *  attacker fingerprints only, never customer data. */
+  sharesIntel?: boolean;
 }
 
 /** The ingest token a tenant presents. Prefixed so it is recognizable in a log or
@@ -100,8 +103,8 @@ export async function resolveTenantByToken(token: string, q: TenantQuery = liveQ
 /** Registry listing for an admin surface. NEVER returns the token or its hash. */
 export async function listForcefieldTenants(q: TenantQuery = liveQuery): Promise<ForcefieldTenant[]> {
   try {
-    const rows = await q<{ id: string; name: string; site_label: string; status: string; created_at: string; plan?: string; subscription_status?: string }>(
-      `SELECT id, name, site_label, status, created_at::text AS created_at, plan, subscription_status
+    const rows = await q<{ id: string; name: string; site_label: string; status: string; created_at: string; plan?: string; subscription_status?: string; shares_intel?: boolean }>(
+      `SELECT id, name, site_label, status, created_at::text AS created_at, plan, subscription_status, shares_intel
          FROM forcefield_tenants ORDER BY created_at DESC`,
     );
     return rows.map(rowToTenant);
@@ -154,7 +157,28 @@ export async function rotateTenantToken(
   }
 }
 
-function rowToTenant(row: { id: string; name: string; site_label: string; status: string; created_at: string; plan?: string; subscription_status?: string }): ForcefieldTenant {
+/**
+ * Set a tenant's participation in the shared threat-intel network. Opting out
+ * means the tenant neither contributes caught-attacker fingerprints to, nor (when
+ * the distributed list is enabled) consumes, the shared list. Never throws.
+ */
+export async function setTenantSharesIntel(
+  id: string,
+  shares: boolean,
+  q: TenantQuery = liveQuery,
+): Promise<boolean> {
+  try {
+    const rows = await q<{ id: string }>(
+      `UPDATE forcefield_tenants SET shares_intel = $2, updated_at = now() WHERE id = $1 RETURNING id`,
+      [id, shares],
+    );
+    return rows.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+function rowToTenant(row: { id: string; name: string; site_label: string; status: string; created_at: string; plan?: string; subscription_status?: string; shares_intel?: boolean }): ForcefieldTenant {
   return {
     id: row.id,
     name: row.name,
@@ -164,5 +188,6 @@ function rowToTenant(row: { id: string; name: string; site_label: string; status
     // Present only on the admin listing (the other SELECTs omit them -> default none).
     plan: row.plan ?? "none",
     subscriptionStatus: row.subscription_status ?? "none",
+    sharesIntel: row.shares_intel !== false,
   };
 }

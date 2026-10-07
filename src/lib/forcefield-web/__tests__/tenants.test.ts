@@ -118,3 +118,18 @@ describe("token lifecycle: setTenantStatus + rotateTenantToken", () => {
     expect(await rotateTenantToken("x", jest.fn().mockRejectedValueOnce(new Error("db")))).toBeNull();
   });
 });
+
+describe("shared-intel opt-out: setTenantSharesIntel", () => {
+  it("writes the flag and returns true", async () => {
+    const { setTenantSharesIntel } = await import("../tenants");
+    const q = jest.fn().mockResolvedValueOnce([{ id: "t1" }]);
+    expect(await setTenantSharesIntel("t1", false, q)).toBe(true);
+    expect(q.mock.calls[0][0]).toMatch(/UPDATE forcefield_tenants SET shares_intel/);
+    expect(q.mock.calls[0][1]).toEqual(["t1", false]);
+  });
+  it("returns false for unknown id and never throws", async () => {
+    const { setTenantSharesIntel } = await import("../tenants");
+    expect(await setTenantSharesIntel("x", true, jest.fn().mockResolvedValueOnce([]))).toBe(false);
+    expect(await setTenantSharesIntel("x", true, jest.fn().mockRejectedValueOnce(new Error("db")))).toBe(false);
+  });
+})
