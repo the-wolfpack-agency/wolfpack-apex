@@ -53,17 +53,21 @@ describe("campaignsFromEvents", () => {
 
 describe("readOperatorCampaigns (injected query)", () => {
   it("maps rows -> steps -> campaigns, scoped to the site", async () => {
-    const q = jest.fn(async () => ({
-      rows: [
-        { fp: "fpA", path: "/admin/users", created_at: "2026-10-07T00:00:01Z" },
-        { fp: "fpA", path: "/export/users?format=csv", created_at: "2026-10-07T00:00:02Z" },
-      ],
-    }));
+    let boundParams: unknown[] = [];
+    const q = async (_sql: string, params?: unknown[]) => {
+      boundParams = params ?? [];
+      return {
+        rows: [
+          { fp: "fpA", path: "/admin/users", created_at: "2026-10-07T00:00:01Z" },
+          { fp: "fpA", path: "/export/users?format=csv", created_at: "2026-10-07T00:00:02Z" },
+        ],
+      };
+    };
     const out = await readOperatorCampaigns("ogiam.com", {}, q as never);
     expect(out).toHaveLength(1);
     expect(out[0].verdict.campaign).toBe(true);
     // scoped to the site label (first bound param)
-    expect((q.mock.calls[0][1] as unknown[])[0]).toBe("ogiam.com");
+    expect(boundParams[0]).toBe("ogiam.com");
   });
 
   it("fails safe to [] on a query error (a campaign view never throws into a route)", async () => {
