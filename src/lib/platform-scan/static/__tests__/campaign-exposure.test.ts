@@ -78,4 +78,27 @@ describe("idorObjectAccess (CWE-639 / BOLA, id-enumeration shape)", () => {
     const f = file("src/lib/data/invoices.ts", "export const get = (id) => prisma.invoice.findUnique({ where: { id } });");
     expect(idorObjectAccess(f)).toEqual([]);
   });
+
+  // Precision regressions: the three safe routes dogfooding flagged. Scoping can be
+  // a domain ownership column, user.id/user.role params, or an upstream scoping call.
+  it("does NOT flag a query scoped by a domain ownership column + user.id/role params", () => {
+    const f = file("src/app/api/reports/[id]/route.ts", [
+      "const { id } = await params;",
+      "const { rows } = await safeQuery(",
+      "  `SELECT id, title FROM instinct_documents WHERE id = $1 AND (generated_by = $2 OR $3 IN ('cto','ceo'))`,",
+      "  [id, user.id, user.role],",
+      ");",
+    ].join("\n"));
+    expect(idorObjectAccess(f)).toEqual([]);
+  });
+  it("does NOT flag when ownership was enforced upstream (getCachedTaskById(user.id, id))", () => {
+    const f = file("src/app/api/tasks/[id]/complete/route.ts", [
+      "const user = getUserFromRequest(req.headers.get('authorization'));",
+      "const { id } = await params;",
+      "const existing = await getCachedTaskById(user.id, id);",
+      "if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 });",
+      "const { rows } = await safeQuery(`SELECT ms_list_id FROM instinct_task_lists WHERE id = $1 LIMIT 1`, [existing.listId]);",
+    ].join("\n"));
+    expect(idorObjectAccess(f)).toEqual([]);
+  });
 });
