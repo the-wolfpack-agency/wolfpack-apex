@@ -30,6 +30,7 @@ import { readFileSync } from "node:fs";
 import { getAIClient } from "../src/lib/ai";
 import { BudgetExceededError, NoProviderAvailableError } from "../src/lib/ai/types";
 import { scoreGap, runGapCases, type GapCase, type GapScore } from "../src/lib/forcefield-web/gap-metric";
+import { scoreCampaignGap, type CampaignCase } from "../src/lib/forcefield-web/campaign-redteam";
 import { trackEvent } from "../src/lib/analytics";
 
 const ROUNDS = Math.max(1, Math.min(10, Number(process.env.FORCEFIELD_REDTEAM_ROUNDS) || 3));
@@ -94,6 +95,81 @@ function toCase(it: GenItem, round: number, i: number): GapCase | null {
     },
     intendedHostile: it.intendedHostile !== false,
   };
+}
+
+const CAMPAIGN_SYSTEM =
+  "You are a red-team generator attacking a deterministic MULTI-STEP defense. It " +
+  "holds one operator's recent request sequence and flags campaign SHAPES: " +
+  "(1) recon_breadth (enumerating many distinct sensitive/decoy paths), " +
+  "(2) kill_chain (a sensitive/decoy access THEN a bulk-export, in that order), " +
+  "(3) id_enumeration (walking many distinct numeric ids on one endpoint). It does " +
+  "NOT flag a normal multi-page session. Your job: invent NOVEL multi-step campaigns " +
+  "where each individual request looks benign but the SEQUENCE is an attack and that " +
+  "might EVADE those three shapes (e.g. interleave benign steps, pace requests, use " +
+  "non-obvious export paths, chain a scraped id), PLUS a few realistic benign " +
+  "multi-page sessions to probe for false campaign flags. " +
+  "Return ONLY a JSON array, each item: {\"name\": string, \"steps\": " +
+  "[{\"path\": string, \"method\": string}], \"intendedHostile\": boolean, " +
+  "\"rationale\": string}. No prose, no code fences.";
+
+interface GenCampaign { name?: string; steps?: Array<{ path?: string; method?: string }>; intendedHostile?: boolean; rationale?: string }
+
+function parseCampaigns(content: string): CampaignCase[] {
+  let txt = content.trim();
+  const fence = txt.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fence) txt = fence[1].trim();
+  const start = txt.indexOf("[");
+  const end = txt.lastIndexOf("]");
+  if (start >= 0 && end > start) txt = txt.slice(start, end + 1);
+  let arr: GenCampaign[];
+  try { arr = JSON.parse(txt); } catch { return []; }
+  if (!Array.isArray(arr)) return [];
+  return arr
+    .map((c, i): CampaignCase | null => {
+      const steps = Array.isArray(c.steps)
+        ? c.steps.filter((s) => typeof s?.path === "string" && s.path).map((s) => ({ path: s.path as string, method: typeof s.method === "string" ? s.method : "GET" }))
+        : [];
+      if (steps.length < 2) return null; // a campaign is multi-step by definition
+      return { name: (c.name || `campaign-${i}`).slice(0, 120), steps, intendedHostile: c.intendedHostile !== false };
+    })
+    .filter((c): c is CampaignCase => c !== null);
+}
+
+// Offline campaign phase: generate multi-step campaigns and score them against the
+// real detectCampaign engine via the SAME gap scorer. Slips are campaign shapes we
+// do not yet detect, the next signatures to add to campaign.ts. On by default; set
+// FORCEFIELD_REDTEAM_CAMPAIGNS=off to skip. Returns the slip names for the report.
+async function runCampaignPhase(client: ReturnType<typeof getAIClient>, brief: string): Promise<{ score: GapScore; slips: string[] } | null> {
+  if (process.env.FORCEFIELD_REDTEAM_CAMPAIGNS === "off") return null;
+  let content = "";
+  try {
+    const res = await client.complete({
+      system: CAMPAIGN_SYSTEM,
+      messages: [{ role: "user", content: (brief ? `Recent tradecraft to prioritize:\n${brief}\n\n` : "") + `Generate ${PER_ROUND} distinct multi-step campaigns. Vary how each evades the three shapes.` }],
+      model_tier: "standard",
+      max_tokens: 2200,
+      temperature: 0.9,
+      sensitivity: "public",
+      latency_target: "batch",
+      metadata: { feature: "forcefield.ai_redteam_campaign" },
+    });
+    content = res.content;
+  } catch (err) {
+    console.error(`Campaign phase generation error: ${(err as Error).message}`);
+    return null;
+  }
+  const campaigns = parseCampaigns(content);
+  if (campaigns.length === 0) { console.log("  campaign phase: no parseable campaigns; skipping."); return null; }
+  const score = scoreCampaignGap(campaigns);
+  console.log(
+    `  campaigns: ${score.hostile} hostile, detected ${score.prevented} (${score.preventedPct}%), ` +
+    `SLIPS ${score.slipped}, false flags ${score.falsePositives}`,
+  );
+  void trackEvent("forcefield.redteam_round_scored", "forcefield.ai_redteam_campaign", "forcefield", {
+    round: 0, generated: campaigns.length, hostile: score.hostile, prevented: score.prevented,
+    preventedPct: score.preventedPct, slipped: score.slipped, falsePositives: score.falsePositives,
+  });
+  return { score, slips: score.slips.map((s) => s.name) };
 }
 
 async function run(): Promise<number> {
@@ -168,6 +244,9 @@ async function run(): Promise<number> {
     }
   }
 
+  // Multi-step phase: generate campaigns and score them against detectCampaign.
+  const campaignResult = await runCampaignPhase(client, brief);
+
   const overall = scoreGap(
     roundScores.flatMap((s) => [
       ...Array.from({ length: s.prevented }, () => ({ name: "p", intendedHostile: true, blocked: true })),
@@ -182,7 +261,10 @@ async function run(): Promise<number> {
     overall: { hostile: overall.hostile, prevented: overall.prevented, preventedPct: overall.preventedPct, slipped: overall.slipped, falsePositives: overall.falsePositives },
     slips: allSlips,
     newlyBlockedCandidates: newlyBlocked,
-    note: "Slips are open gaps: write a rule for each, confirm the engine blocks it, then move it into ai-redteam-corpus.ts. False positives are the opposite gap: a rule is too broad.",
+    campaigns: campaignResult
+      ? { hostile: campaignResult.score.hostile, detected: campaignResult.score.prevented, preventedPct: campaignResult.score.preventedPct, slipped: campaignResult.score.slipped, falseFlags: campaignResult.score.falsePositives, slipNames: campaignResult.slips }
+      : null,
+    note: "Slips are open gaps: write a rule for each, confirm the engine blocks it, then move it into ai-redteam-corpus.ts (single request) or add a signature to campaign.ts (multi-step campaign). False positives are the opposite gap: a rule is too broad.",
   };
   try {
     writeFileSync(OUT, JSON.stringify(report, null, 2));
@@ -195,6 +277,13 @@ async function run(): Promise<number> {
     `\nGAP METRIC: deterministic gate prevented ${overall.prevented}/${overall.hostile} hostile cases ` +
     `(${overall.preventedPct}%). Open gaps (slips): ${allSlips.length}. False positives: ${overall.falsePositives}.`,
   );
+  if (campaignResult) {
+    console.log(
+      `CAMPAIGN GAP: detector caught ${campaignResult.score.prevented}/${campaignResult.score.hostile} ` +
+      `multi-step campaigns (${campaignResult.score.preventedPct}%). Open campaign gaps: ${campaignResult.slips.length}.`,
+    );
+    for (const name of campaignResult.slips.slice(0, 10)) console.log(`  - campaign slip (add a signature to campaign.ts): ${name}`);
+  }
   if (allSlips.length > 0) {
     console.log(`\nOpen gaps to rule (review ${OUT}):`);
     for (const s of allSlips.slice(0, 20)) console.log(`  - [r${s.round}] ${s.name}  ${s.input.rawUrl ?? s.input.path}`);

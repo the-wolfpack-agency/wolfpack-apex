@@ -97,9 +97,15 @@ stamps) and matches kill-chain SHAPES deterministically:
 It is pure and deterministic (same steps -> same verdict), and conservative: a
 signature needs a real shape, never a single ambiguous request, so normal browsing
 never trips it (tested as the worst outcome). It runs first over RECORDED events to
-find campaigns in the wild, then wires to the live path. The AI red-team's next job
-is to GENERATE multi-step campaigns against our own system and surface the shapes
-these three signatures miss; each gap becomes a new deterministic signature.
+find campaigns in the wild, then wires to the live path.
+
+The AI red-team already attacks it: `scripts/forcefield-ai-redteam.ts` has a
+campaign phase (on by default; `FORCEFIELD_REDTEAM_CAMPAIGNS=off` to skip) that
+generates multi-step campaigns, scores them against the real `detectCampaign` with
+the SAME gap scorer, and reports campaign slips, the shapes we do not yet detect.
+Each slip becomes a new signature in `campaign.ts`; the committed regression lives
+in `campaign-redteam.ts` so a caught shape stays caught and a benign session stays
+clear.
 
 ## Productization: adversarial agents + compliance
 
