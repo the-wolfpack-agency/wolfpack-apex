@@ -29,6 +29,7 @@ export const GTM_DOCS: readonly GtmDocMeta[] = [
   { key: "brief", title: "Product brief + pitch (for the team + CEO)", category: "Overview", file: "product-brief.md" },
   { key: "network", title: "Network effect (how to explain + sell it)", category: "Overview", file: "network-effect.md" },
   { key: "launch", title: "Launch readiness + compliance scope (deterministic core)", category: "Overview", file: "launch-readiness.md" },
+  { key: "rollout", title: "Rollout runbook: protect a site + join the network (shim)", category: "Overview", file: "rollout.md" },
   { key: "premortem", title: "Pre-mortem: failure scenarios + controls", category: "Overview", file: "pre-mortem.md" },
   { key: "pricing", title: "Pricing and packaging", category: "Commercial", file: "pricing-and-packaging.md" },
   { key: "licensing", title: "Licensing and subscription", category: "Commercial", file: "licensing.md" },
