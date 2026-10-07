@@ -118,7 +118,10 @@ describe("Forcefield surfaces in the wolfpack-instinct manifest", () => {
 
   it("includes the public Forcefield pages as public routes (must serve)", () => {
     const publicPaths = (m?.routes ?? []).filter((r) => r.auth === "public").map((r) => r.path);
-    expect(publicPaths).toEqual(expect.arrayContaining(["/forcefield", "/forcefield/signup", "/forcefield/dashboard"]));
+    // The marketing /forcefield index lives on ogiam.com, not the apex control
+    // plane; apex hosts only the signup + dashboard surfaces.
+    expect(publicPaths).toEqual(expect.arrayContaining(["/forcefield/signup", "/forcefield/dashboard"]));
+    expect(publicPaths).not.toContain("/forcefield");
   });
 
   it("gates the Forcefield control-plane APIs and leaves public-stats open", () => {

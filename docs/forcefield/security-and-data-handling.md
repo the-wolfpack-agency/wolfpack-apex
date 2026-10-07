@@ -4,6 +4,15 @@ Status: DRAFT, fact-checked against the code on 2026-10-06. This is the factual
 basis the Privacy Policy and DPA draw from; keep it true as the code changes. No
 em dashes.
 
+## 0. Deterministic core (compliance scope)
+
+Forcefield's detection + enforcement is DETERMINISTIC: behavioral classification,
+traps, and rules, not a probabilistic model. The AI-governance frameworks govern
+probabilistic AI, so they do not gate the core. Only two optional surfaces touch a
+model (agent-intelligence enrichment and the operator signup summary); both route
+through the governed model router and are gateable off for a lean launch. See
+`launch-readiness.md`.
+
 ## 1. What Forcefield collects (and what it does not)
 
 For each request the edge shim forwards, the engine records request METADATA and a
