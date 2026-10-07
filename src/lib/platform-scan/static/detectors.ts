@@ -615,6 +615,14 @@ const SQL_METHOD_CALL = /\.\s*(update|select|insert|delete|from|where)\s*\(/gi;
 // is the discriminator that keeps the true positives and drops the false ones.
 // Checked over a window because a statement can span lines.
 const SQL_STATEMENT = /\bselect\b[\s\S]{0,300}?\bfrom\b|\binsert\s+into\b|\bupdate\s+[A-Za-z_"'`[][\w."'`\]]*\s+set\b|\bdelete\s+from\b/i;
+// A query call closed with a bindings-array argument: a backtick followed by
+// `, [ ... ]` (the parameter list). Its presence means the query is parameterized
+// and any ${fragment} in the template is a constant clause, not a user value.
+const BOUND_PARAMS = /`\s*,\s*\[/;
+// A URL or an OData query, NOT SQL. Dogfooding found Microsoft Graph endpoints
+// (`.../messages?$select=subject,from,received&$orderby=...`) reading as SELECT..FROM
+// because OData borrows the words. A SQL query never contains `://` or `$select=`.
+const ODATA_OR_URL = /:\/\/|[?&]\$(?:select|orderby|filter|top|count|expand|skip|search)=/i;
 // A RegExp literal/constructor: SQL keywords here are DETECTION PATTERNS (data),
 // e.g. Forcefield's own `new RegExp(`union${WS}+select`)`, not a query.
 const REGEXP_CONTEXT = /\bRegExp\s*\(|=\s*\/[^/*]/;
@@ -640,14 +648,24 @@ export function sqlInjection(file: SourceFile): ScanFinding[] {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     if (!/`/.test(line) || !SQL_INTERP.test(line)) continue;
-    if (REGEXP_CONTEXT.test(line)) continue; // SQL keywords are pattern data here
+    if (REGEXP_CONTEXT.test(line) || ODATA_OR_URL.test(line)) continue; // pattern/URL, not a query
     // A SQL keyword that is NOT just a same-named method call (.update(, .from(...).
     const keywordText = line.replace(SQL_METHOD_CALL, ".__m(");
     if (!SQL_KEYWORD.test(keywordText)) continue;
     // Context window above (a multi-line query opens its template earlier).
     const ctx = lines.slice(Math.max(0, i - SQL_CTX_WINDOW), i + 1).join("\n");
-    if (PARAMETERIZED.test(ctx)) continue; // parameterized query ($1/$2) -> safe
     if (!SQL_STATEMENT.test(ctx)) continue; // no real statement shape -> not a query
+    // Parameterized check spans FORWARD too: a `SELECT ${COLS} FROM t WHERE x = $1`
+    // puts the ${...} on the SELECT line but the $1 placeholders on the lines below,
+    // so a backward-only window wrongly flagged safe parameterized queries.
+    const paramCtx = lines.slice(Math.max(0, i - SQL_CTX_WINDOW), Math.min(lines.length, i + SQL_CTX_WINDOW + 1)).join("\n");
+    if (PARAMETERIZED.test(paramCtx)) continue; // parameterized query ($1/$2) -> safe
+    if (ODATA_OR_URL.test(paramCtx)) continue; // a URL/OData sits in this template block
+    // A query executed with a BINDINGS ARRAY argument (`q(`...${frag}...`, [a, b])`)
+    // is parameterized; the interpolated ${frag} is then a constant clause (a column
+    // list, a reusable WHERE fragment), not a user value. This is the dominant safe
+    // shape in real code and the placeholders often live inside that fragment var.
+    if (BOUND_PARAMS.test(paramCtx)) continue;
     if (/(audit-safe|eslint-disable)/i.test(`${lines[i - 1] ?? ""}\n${line}`)) continue;
     findings.push({
       route: file.path,
@@ -1013,7 +1031,12 @@ const ID_PARAM = /params\.\w*id\b|req\.(query|params)\.\w*id\b|searchParams\.get
 // Looks that object up by id.
 const QUERY_BY_ID = /findunique|findfirst|findbypk|where\s*:\s*\{[^}]*\bid\b|where\s+id\s*=|\.query\s*\(\s*[`'"][\s\S]{0,120}\bwhere\b[\s\S]{0,40}\bid\b/i;
 // An ownership / tenant scope that would make the lookup safe.
-const OWNERSHIP = /\b(userid|user_id|ownerid|owner_id|workspaceid|workspace_id|tenantid|tenant_id|accountid|account_id|belongsto|scopeto|req\.user|ctx\.user|session\.user|currentuser)\b/i;
+// An ownership / tenant scope that makes a by-id lookup safe. Broadened after
+// dogfooding flagged three safe routes: the scope can be a domain ownership COLUMN
+// (generated_by/created_by/assigned_to), a user.id/user.role bound into the query
+// params, or an UPSTREAM scoping call (getUserFromRequest/getCachedTaskById(user.id,
+// ...)) that already constrained the object to the caller before this lookup.
+const OWNERSHIP = /\b(user_?id|owner_?id|workspace_?id|tenant_?id|account_?id|org_?id|member_?id|created_?by|generated_?by|authored_?by|assigned_?to|belongs_?to|scope_?to|req\.user|ctx\.user|session|currentuser|getuserfromrequest|getcachedtaskbyid|getsession|requireuser|requirecapability)\b|\buser\.(id|role|workspaceid)\b/i;
 
 /**
  * idorObjectAccess: a handler that reads an object id from the request and looks

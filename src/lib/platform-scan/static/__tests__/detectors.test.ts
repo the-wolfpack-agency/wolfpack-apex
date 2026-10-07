@@ -611,6 +611,31 @@ describe("sqlInjection", () => {
     ].join("\n");
     expect(sqlInjection({ path: "src/lib/forcefield-web/public-stats.ts", content })).toHaveLength(0);
   });
+  it("does NOT flag a Microsoft Graph / OData URL (select/from are OData, not SQL)", () => {
+    const content = 'const url = `${GRAPH_BASE}/me/mailFolders/inbox/messages?$top=10&$select=subject,from,receivedDateTime&$orderby=${order}`;';
+    expect(sqlInjection({ path: "src/app/api/microsoft/messages/route.ts", content })).toHaveLength(0);
+  });
+  it("does NOT flag a parameterized query whose $1/$2 are on lines AFTER the ${COLS} interp", () => {
+    const content = [
+      "const { rows } = await safeQuery(",
+      "  `SELECT ${COLS} FROM instinct_agent_pending_approvals",
+      "     WHERE workspace_id = $1 AND status = 'pending'",
+      "       AND ($2::text IS NULL OR agent_id = $2)`,",
+      "  [workspaceId, agentId ?? null],",
+      ");",
+    ].join("\n");
+    expect(sqlInjection({ path: "src/lib/agents/approvals/store.ts", content })).toHaveLength(0);
+  });
+  it("does NOT flag a query with a ${fragment} when it is called with a bindings array", () => {
+    const content = [
+      "const prs = await safeQuery(",
+      "  `SELECT count(*) FROM instinct_events",
+      "    WHERE event_type IN ('a','b') AND ${win}`,",
+      "  [String(d), workspaceId],",
+      ");",
+    ].join("\n");
+    expect(sqlInjection({ path: "src/lib/ai-code/loop-efficacy.ts", content })).toHaveLength(0);
+  });
   it("STILL flags a genuine multi-line interpolated query (no placeholders)", () => {
     const content = [
       "const rows = await q(",
