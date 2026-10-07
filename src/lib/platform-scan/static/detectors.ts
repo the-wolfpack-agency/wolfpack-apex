@@ -603,21 +603,51 @@ export function codeInjection(file: SourceFile): ScanFinding[] {
 }
 
 
+// A method call that merely SHARES a name with a SQL keyword: `.update(` (crypto
+// hash / HMAC / ORM / React state), `.from(` (Array.from / RxJS), `.select(`.
+// These are NOT SQL and were the top false-positive source when a hash
+// `createHmac(...).update(`...${x}...`)` read as a SQL UPDATE. Neutralized before
+// the keyword test so a method call never counts as a statement keyword.
+const SQL_METHOD_CALL = /\.\s*(update|select|insert|delete|from|where)\s*\(/gi;
+// A real SQL STATEMENT shape, not a bare keyword. `SELECT ... FROM`, `INSERT
+// INTO`, `UPDATE <table> SET`, `DELETE FROM`. This is what a query has and a
+// hash/notification/English string ("... from fingerprint ...") does not, so it
+// is the discriminator that keeps the true positives and drops the false ones.
+// Checked over a window because a statement can span lines.
+const SQL_STATEMENT = /\bselect\b[\s\S]{0,300}?\bfrom\b|\binsert\s+into\b|\bupdate\s+[A-Za-z_"'`[][\w."'`\]]*\s+set\b|\bdelete\s+from\b/i;
+// A RegExp literal/constructor: SQL keywords here are DETECTION PATTERNS (data),
+// e.g. Forcefield's own `new RegExp(`union${WS}+select`)`, not a query.
+const REGEXP_CONTEXT = /\bRegExp\s*\(|=\s*\/[^/*]/;
+
 /**
  * sqlInjection: a SQL statement built by interpolating a value into the query
  * text (CWE-89). Parameterized queries ($1/$2 placeholders) are the safe form and
  * are never flagged. Found by the factory security dogfood: a
  * `SELECT ... WHERE id = '${id}'` change was authored and handed off un-flagged.
+ *
+ * PRECISION (dogfooded against our own code, which produced 11 false positives on
+ * safe HMAC/notification/pattern strings): a line is only a candidate when its SQL
+ * keyword is NOT a same-named method call, it is not a RegExp pattern, the
+ * backticked template is actually fed to a query-executing call (within a window
+ * above, so multi-line queries count), and no parameter placeholder appears in
+ * that window. A false "critical SQL injection" on a client's safe code is a
+ * trust-destroying outcome, so this errs toward precision.
  */
+const SQL_CTX_WINDOW = 10;
 export function sqlInjection(file: SourceFile): ScanFinding[] {
   const lines = file.content.split("\n");
   const findings: ScanFinding[] = [];
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    // A backticked template that carries BOTH a SQL keyword and a ${...} interp.
-    const interpolated = /`/.test(line) && SQL_KEYWORD.test(line) && SQL_INTERP.test(line);
-    if (!interpolated) continue;
-    if (PARAMETERIZED.test(line)) continue; // uses placeholders -> safe
+    if (!/`/.test(line) || !SQL_INTERP.test(line)) continue;
+    if (REGEXP_CONTEXT.test(line)) continue; // SQL keywords are pattern data here
+    // A SQL keyword that is NOT just a same-named method call (.update(, .from(...).
+    const keywordText = line.replace(SQL_METHOD_CALL, ".__m(");
+    if (!SQL_KEYWORD.test(keywordText)) continue;
+    // Context window above (a multi-line query opens its template earlier).
+    const ctx = lines.slice(Math.max(0, i - SQL_CTX_WINDOW), i + 1).join("\n");
+    if (PARAMETERIZED.test(ctx)) continue; // parameterized query ($1/$2) -> safe
+    if (!SQL_STATEMENT.test(ctx)) continue; // no real statement shape -> not a query
     if (/(audit-safe|eslint-disable)/i.test(`${lines[i - 1] ?? ""}\n${line}`)) continue;
     findings.push({
       route: file.path,

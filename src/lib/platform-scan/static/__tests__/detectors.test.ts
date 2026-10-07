@@ -579,4 +579,45 @@ describe("sqlInjection", () => {
   it("does NOT flag a template with an interp but no SQL", () => {
     expect(sqlInjection({ path: "src/lib/x.ts", content: "const msg = `hello ${name}`;" })).toHaveLength(0);
   });
+
+  // Precision regressions: the 11 false positives the dogfood run surfaced on our
+  // OWN safe code. A false "critical SQL injection" on safe code is a trust killer.
+  it("does NOT flag a hash/HMAC .update(`...`) (name collision with SQL UPDATE)", () => {
+    const content = 'const expected = createHmac("sha256", secret).update(`${t}.${rawBody}`).digest("hex");';
+    expect(sqlInjection({ path: "src/lib/forcefield-web/billing-stripe.ts", content })).toHaveLength(0);
+  });
+  it("does NOT flag a hash .update(`${a}:${b}`) feeding an id", () => {
+    const content = 'const id = createHash("sha256").update(`${kind}:${fingerprint}`).digest("hex").slice(0, 24);';
+    expect(sqlInjection({ path: "src/lib/forcefield-web/alerts.ts", content })).toHaveLength(0);
+  });
+  it("does NOT flag a notification body that merely contains the word 'from'", () => {
+    const content = 'const body = `${s.count} event(s) from fingerprint ${s.fp}, e.g. ${s.samplePath}.`;';
+    expect(sqlInjection({ path: "src/lib/forcefield-web/alerts.ts", content })).toHaveLength(0);
+  });
+  it("does NOT flag a RegExp whose pattern is a SQL attack signature (data, not a query)", () => {
+    const content = 'const re = new RegExp(`union${WS}+select`, "i");';
+    expect(sqlInjection({ path: "src/lib/forcefield-web/enforce.ts", content })).toHaveLength(0);
+  });
+  it("does NOT flag a multi-line parameterized query (placeholders on nearby lines)", () => {
+    const content = [
+      "const since = `created_at > now() - ($1 || ' days')::interval`;",
+      "const scope = tenantId ? ` AND forcefield_tenant_id = $2` : '';",
+      "const rows = await q(",
+      "  `SELECT count(*) AS n",
+      "     FROM site_analytics_events",
+      "    WHERE ${since}${scope}`,",
+      "  params,",
+      ");",
+    ].join("\n");
+    expect(sqlInjection({ path: "src/lib/forcefield-web/public-stats.ts", content })).toHaveLength(0);
+  });
+  it("STILL flags a genuine multi-line interpolated query (no placeholders)", () => {
+    const content = [
+      "const rows = await q(",
+      "  `SELECT * FROM users",
+      "    WHERE email = '${email}'`",
+      ");",
+    ].join("\n");
+    expect(sqlInjection({ path: "src/lib/userq.ts", content })).toHaveLength(1);
+  });
 });
