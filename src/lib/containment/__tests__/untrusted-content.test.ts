@@ -83,6 +83,8 @@ const AUDITED: Readonly<Record<string, string>> = {
   "lib/html-sanitize.ts": "SAFE: this IS the sanitizer. Its template wraps input for DOMPurify to parse, which is the point.",
   "lib/forcefield-web/decoy.ts":
     "SAFE, verified by reading it: the only interpolated value in the anchor is the trap PATH, which is TRAP_PATH_PREFIX + stableHash(seed) - a fixed prefix plus an unsigned 32-bit FNV hash rendered as [0-9a-f] hex. No model output and no external/request text ever reaches the template; the seed is a server-chosen page id or salt, and even it is never emitted raw (only its hex hash is). There is no attribute or tag a hex string can break out of.",
+  "lib/forcefield-web/adversarial-corpus.ts":
+    "SAFE, verified by reading it: this file builds NO markup. It is a static corpus of attack-signature STRING LITERALS (double-quoted) used to test the engine. The EMITS_JSX heuristic matched ACROSS unrelated literals - a backtick in the `payload: ${name}` label template, then a '<' from an XSS/XXE attack string many lines later, then a ${...} from a Log4Shell/SSTI attack string - but no value is ever interpolated into markup and every value is a hardcoded literal we authored, never model output or request text. Same class as lib/dev/branch-base.ts (detector matched a '<' in a plain string).",
 };
 
 function walk(dir: string, prefix = ""): string[] {
