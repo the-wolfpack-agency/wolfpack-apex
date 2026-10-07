@@ -58,10 +58,39 @@ interface Report {
     caveats: string[];
     totals: { thirdParties: number; unexplained: number; novel: number };
   };
+  securityControls?: SecurityControls;
   error?: string;
   runId: string | null;
   baselineUpdated: boolean;
 }
+
+type ControlStatus = "gap" | "checked_clear" | "compensated" | "not_assessed";
+interface ControlAssessment {
+  owasp: { id: string; title: string };
+  status: ControlStatus;
+  cwes: string[];
+  asvs: string[];
+  detail: string;
+  findingCount: number;
+}
+interface SecurityControls {
+  assessments: ControlAssessment[];
+  summary: Record<ControlStatus, number>;
+}
+
+const CONTROL_LABEL: Record<ControlStatus, string> = {
+  gap: "Gap",
+  compensated: "Compensated",
+  checked_clear: "No issue found",
+  not_assessed: "Not assessed",
+};
+/** Neutral where we did not check; warning for a gap covered only by Forcefield. */
+const CONTROL_TONE: Record<ControlStatus, SeverityTone> = {
+  gap: "error",
+  compensated: "warning",
+  checked_clear: "success",
+  not_assessed: "neutral",
+};
 
 const VERDICT_LABEL: Record<Verdict, string> = {
   present: "In place",
@@ -209,6 +238,28 @@ export default function ComplianceScanPage() {
               ))}
             </ul>
           </GlassPanel>
+
+          {report.securityControls && (
+            <GlassPanel
+              title="Application security (OWASP Top 10)"
+              subtitle="What this scan assessed. 'Not assessed' means we did not check it here, not that it passed - a code scan fills those in."
+            >
+              <ul data-testid="owasp-controls" style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: "0.6rem" }}>
+                {report.securityControls.assessments.map((a) => (
+                  <li key={a.owasp.id} data-testid={`owasp-${a.owasp.id}`} style={rowStyle}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", flexWrap: "wrap" }}>
+                      <StatusPill status={a.status} label={CONTROL_LABEL[a.status]} tone={CONTROL_TONE[a.status]} size="sm" />
+                      <strong>{a.owasp.id} {a.owasp.title}</strong>
+                      {a.cwes.length > 0 && (
+                        <span style={{ color: "var(--wp-text-dim)", fontSize: "0.8rem" }}>{a.cwes.join(", ")}</span>
+                      )}
+                    </div>
+                    <p style={{ margin: "0.35rem 0 0", color: "var(--wp-text-dim)", fontSize: "0.9rem" }}>{a.detail}</p>
+                  </li>
+                ))}
+              </ul>
+            </GlassPanel>
+          )}
 
           <GlassPanel
             title="What this page contacts"
