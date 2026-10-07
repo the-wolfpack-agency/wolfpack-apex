@@ -20,6 +20,10 @@ describeIfDb("forcefield tenant billing schema (migration 286)", () => {
     db = new Client({ connectionString: requireLocalTestDatabase(URL) });
     await db.connect();
     await db.query(`DROP TABLE IF EXISTS forcefield_tenants`);
+    // 284 cross-ALTERs site_analytics_events; these db-tests are self-contained
+    // (not pre-migrated), so stub that table first (CREATE IF NOT EXISTS is a no-op
+    // when it already exists). We are testing 286's columns, not 178's table.
+    await db.query(`CREATE TABLE IF NOT EXISTS site_analytics_events (id bigserial PRIMARY KEY, props jsonb)`);
     await db.query(readFileSync(M284, "utf8"));
     const m286 = readFileSync(M286, "utf8");
     await db.query(m286);
