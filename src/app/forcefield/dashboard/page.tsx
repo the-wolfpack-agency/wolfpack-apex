@@ -50,7 +50,7 @@ interface MySetupResponse {
   ok: boolean;
   tenant?: { id: string; name: string; siteLabel: string };
   quickstart?: Quickstart;
-  connection?: { connected: boolean; lastEventAt: string | null };
+  connection?: { connected: boolean; everConnected?: boolean; lastEventAt: string | null };
 }
 
 function envBlock(env: Record<string, string>): string {
@@ -152,6 +152,9 @@ export default function ForcefieldDashboardPage() {
   const stats = data?.stats;
   const connected = status === "ok" && !!stats;
   const receiving = setup?.connection?.connected === true;
+  // Wired at some point but no recent traffic: a shim that went quiet or a site
+  // that stopped sending. Surface honestly, never as a false "Connected".
+  const stale = !receiving && (setup?.connection?.everConnected === true || (!!setup?.connection?.lastEventAt && setup?.connection?.connected === false));
 
   return (
     <main
@@ -248,14 +251,16 @@ export default function ForcefieldDashboardPage() {
                   subtitle={
                     receiving
                       ? "Forcefield is receiving traffic from your site. You are protected."
-                      : "Two steps to go live: add the config to your site, then check the connection."
+                      : stale
+                        ? "We saw your site before, but no traffic recently. Check that the shim is still deployed."
+                        : "Two steps to go live: add the config to your site, then check the connection."
                   }
                 >
                   <div className="mt-3 flex items-center gap-2" data-testid="ff-connection">
                     <StatusPill
-                      status={receiving ? "live" : "queued"}
-                      tone={receiving ? "success" : undefined}
-                      label={receiving ? "Connected" : "Waiting for traffic"}
+                      status={receiving ? "live" : stale ? "degraded" : "queued"}
+                      tone={receiving ? "success" : stale ? "warning" : undefined}
+                      label={receiving ? "Connected" : stale ? "No recent traffic" : "Waiting for traffic"}
                     />
                     <button
                       data-testid="ff-check-connection"
@@ -269,7 +274,7 @@ export default function ForcefieldDashboardPage() {
                     </button>
                   </div>
 
-                  {!receiving && (
+                  {!receiving && !stale && (
                     <>
                       <p className="mt-4 text-[13px]" style={{ color: "var(--wp-muted, #9aa0a6)" }}>
                         Option A - Cloudflare Worker (any site). Set these variables:
