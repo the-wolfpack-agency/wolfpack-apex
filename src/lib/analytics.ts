@@ -761,6 +761,9 @@ export type InstinctEventType =
   | "forcefield.signup_approved"
   // forcefield.signup_rejected { requestId } - an operator rejected a signup request.
   | "forcefield.signup_rejected"
+  // forcefield.trust_center_viewed {} - someone opened the Trust Center (the
+  //   reviewer-facing security/compliance summary). A buying/assurance signal.
+  | "forcefield.trust_center_viewed"
   // forcefield.fingerprint_autoblocked { fp, reason } - a client fingerprint was
   // auto-added to the distributed block list because it tripped a honeytoken (the
   // highest-confidence hostile signal), so the central ruleset turns it away next.

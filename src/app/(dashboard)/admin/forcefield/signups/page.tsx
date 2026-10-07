@@ -94,6 +94,8 @@ export default function ForcefieldSignupsPage() {
         <a href="/admin/forcefield/tenants" style={{ color: "var(--wp-gold)" }}>Tenants</a>
         {" · "}
         <a href="/admin/forcefield/docs" style={{ color: "var(--wp-gold)" }}>Docs (pricing, licensing, SLA, legal)</a>
+        {" · "}
+        <a href="/admin/trust-center" style={{ color: "var(--wp-gold)" }}>Trust Center</a>
       </p>
 
       {approved ? (
