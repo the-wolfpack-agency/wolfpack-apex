@@ -88,3 +88,33 @@ describe("listForcefieldTenants", () => {
     expect(JSON.stringify(list)).not.toMatch(/token/i);
   });
 });
+
+describe("token lifecycle: setTenantStatus + rotateTenantToken", () => {
+  it("setTenantStatus writes the status and returns true when a row updates", async () => {
+    const { setTenantStatus } = await import("../tenants");
+    const q = jest.fn().mockResolvedValueOnce([{ id: "t1" }]);
+    expect(await setTenantStatus("t1", "disabled", q)).toBe(true);
+    expect(q.mock.calls[0][0]).toMatch(/UPDATE forcefield_tenants SET status/);
+    expect(q.mock.calls[0][1]).toEqual(["t1", "disabled"]);
+  });
+  it("setTenantStatus returns false for an unknown id and never throws", async () => {
+    const { setTenantStatus } = await import("../tenants");
+    expect(await setTenantStatus("x", "active", jest.fn().mockResolvedValueOnce([]))).toBe(false);
+    expect(await setTenantStatus("x", "active", jest.fn().mockRejectedValueOnce(new Error("db")))).toBe(false);
+  });
+  it("rotateTenantToken issues a new ff_ token, stores its hash, returns it once", async () => {
+    const { rotateTenantToken } = await import("../tenants");
+    const q = jest.fn().mockResolvedValueOnce([{ id: "t1" }]);
+    const res = await rotateTenantToken("t1", q);
+    expect(res?.token).toMatch(/^ff_/);
+    // stores a hash, never the raw token
+    const storedHash = q.mock.calls[0][1][1];
+    expect(storedHash).not.toEqual(res?.token);
+    expect(storedHash).toMatch(/^[a-f0-9]{64}$/);
+  });
+  it("rotateTenantToken returns null for an unknown id and never throws", async () => {
+    const { rotateTenantToken } = await import("../tenants");
+    expect(await rotateTenantToken("x", jest.fn().mockResolvedValueOnce([]))).toBeNull();
+    expect(await rotateTenantToken("x", jest.fn().mockRejectedValueOnce(new Error("db")))).toBeNull();
+  });
+});

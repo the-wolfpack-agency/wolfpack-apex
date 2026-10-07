@@ -106,6 +106,50 @@ export async function listForcefieldTenants(q: TenantQuery = liveQuery): Promise
   }
 }
 
+/**
+ * Enable or disable a tenant. Disabling is how a leaked token is KILLED: a
+ * disabled tenant's token resolves to null (resolveTenantByToken is active-only),
+ * so the edge immediately falls through to the shared path and the token can no
+ * longer attribute events or read stats. Reversible. Never throws.
+ */
+export async function setTenantStatus(
+  id: string,
+  status: "active" | "disabled",
+  q: TenantQuery = liveQuery,
+): Promise<boolean> {
+  try {
+    const rows = await q<{ id: string }>(
+      `UPDATE forcefield_tenants SET status = $2, updated_at = now() WHERE id = $1 RETURNING id`,
+      [id, status],
+    );
+    return rows.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Rotate a tenant's ingest token: issue a NEW token, replace the stored hash, and
+ * return the new raw token ONCE (it is only ever stored hashed). The OLD token
+ * stops resolving immediately. This is the response to a suspected compromise that
+ * keeps the tenant + its history intact. Returns null on unknown id / write error.
+ */
+export async function rotateTenantToken(
+  id: string,
+  q: TenantQuery = liveQuery,
+): Promise<{ token: string } | null> {
+  const token = generateTenantToken();
+  try {
+    const rows = await q<{ id: string }>(
+      `UPDATE forcefield_tenants SET token_sha256 = $2, updated_at = now() WHERE id = $1 RETURNING id`,
+      [id, hashToken(token)],
+    );
+    return rows.length > 0 ? { token } : null;
+  } catch {
+    return null;
+  }
+}
+
 function rowToTenant(row: { id: string; name: string; site_label: string; status: string; created_at: string }): ForcefieldTenant {
   return {
     id: row.id,

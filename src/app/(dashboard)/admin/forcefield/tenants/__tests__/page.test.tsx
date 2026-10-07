@@ -68,3 +68,33 @@ it("shows an inline error on a failed create, no token panel", async () => {
   expect(await screen.findByTestId("t-error")).toHaveTextContent(/client name and a site label/i);
   expect(screen.queryByTestId("t-created")).not.toBeInTheDocument();
 });
+
+// --- token lifecycle: disable (kill a leaked token) + rotate --------------------
+
+const ACTIVE_TENANT = { id: "t1", name: "Before U Trade", siteLabel: "beforeutrade", status: "active", createdAt: "2026-10-06T00:00:00Z" };
+
+it("disables a tenant (kills a leaked token) and reloads", async () => {
+  mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ tenants: [ACTIVE_TENANT] }) }); // initial list
+  render(<ForcefieldTenantsPage />);
+  const disable = await screen.findByTestId("tn-disable-t1");
+  mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true, status: "disabled" }) }); // POST manage
+  mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ tenants: [{ ...ACTIVE_TENANT, status: "disabled" }] }) }); // reload
+  fireEvent.click(disable);
+  await waitFor(() => {
+    const call = mockFetch.mock.calls.find((c) => String(c[0]).includes("/tenants/manage"));
+    expect(call).toBeTruthy();
+    expect((call![1] as RequestInit).body).toContain("disable");
+  });
+});
+
+it("rotate shows the new token once", async () => {
+  mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ tenants: [ACTIVE_TENANT] }) }); // initial list
+  render(<ForcefieldTenantsPage />);
+  const rotate = await screen.findByTestId("tn-rotate-t1");
+  mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true, token: "ff_rotated999" }) }); // POST rotate
+  mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ tenants: [ACTIVE_TENANT] }) }); // reload
+  fireEvent.click(rotate);
+  const panel = await screen.findByTestId("tn-rotated");
+  expect(panel).toHaveTextContent(/new token issued/i);
+  expect(screen.getByTestId("tn-rotated-token")).toHaveTextContent("ff_rotated999");
+});
