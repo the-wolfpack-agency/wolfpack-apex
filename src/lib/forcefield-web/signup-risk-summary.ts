@@ -36,7 +36,7 @@ export type SignupRiskResult =
  * "this deployment uses no AI at all" (the deterministic runtime already never
  * does; this covers the operator aid). Values: on / true / 1.
  */
-export function isForcefieldAiDisabled(env: NodeJS.ProcessEnv = process.env): boolean {
+export function isForcefieldAiDisabled(env: Record<string, string | undefined> = process.env): boolean {
   const v = (env.FORCEFIELD_AI_DISABLED ?? "").toLowerCase();
   return v === "on" || v === "true" || v === "1";
 }

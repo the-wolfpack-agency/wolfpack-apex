@@ -62,11 +62,11 @@ describe("AI kill-switch (FORCEFIELD_AI_DISABLED)", () => {
 
   it("isForcefieldAiDisabled reads on/true/1 as disabled", async () => {
     const { isForcefieldAiDisabled } = await import("../signup-risk-summary");
-    expect(isForcefieldAiDisabled({ FORCEFIELD_AI_DISABLED: "on" } as NodeJS.ProcessEnv)).toBe(true);
-    expect(isForcefieldAiDisabled({ FORCEFIELD_AI_DISABLED: "true" } as NodeJS.ProcessEnv)).toBe(true);
-    expect(isForcefieldAiDisabled({ FORCEFIELD_AI_DISABLED: "1" } as NodeJS.ProcessEnv)).toBe(true);
-    expect(isForcefieldAiDisabled({} as NodeJS.ProcessEnv)).toBe(false);
-    expect(isForcefieldAiDisabled({ FORCEFIELD_AI_DISABLED: "off" } as NodeJS.ProcessEnv)).toBe(false);
+    expect(isForcefieldAiDisabled({ FORCEFIELD_AI_DISABLED: "on" })).toBe(true);
+    expect(isForcefieldAiDisabled({ FORCEFIELD_AI_DISABLED: "true" })).toBe(true);
+    expect(isForcefieldAiDisabled({ FORCEFIELD_AI_DISABLED: "1" })).toBe(true);
+    expect(isForcefieldAiDisabled({})).toBe(false);
+    expect(isForcefieldAiDisabled({ FORCEFIELD_AI_DISABLED: "off" })).toBe(false);
   });
 
   it("returns disabled WITHOUT calling the model when the switch is on", async () => {
