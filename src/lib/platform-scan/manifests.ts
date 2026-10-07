@@ -104,6 +104,7 @@ const WOLFPACK_INSTINCT: ScanRouteSpec[] = [
   // ogiam.com, NOT here - apex is the control plane). These must serve:
   { path: "/forcefield/signup", journey: "Forcefield signup (request access)", auth: "public" },
   { path: "/forcefield/dashboard", journey: "Forcefield client dashboard", auth: "public" },
+  { path: "/forcefield/status", journey: "Forcefield status page", auth: "public" },
 ];
 // Instinct gates access client-side (the dashboard shell returns 200 to an
 // unauthenticated HTTP GET and redirects in the browser), so the meaningful

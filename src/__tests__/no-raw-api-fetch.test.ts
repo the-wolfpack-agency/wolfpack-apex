@@ -26,6 +26,9 @@ const EXCEPTIONS = [
                              //   anonymous, no JWT; the /api/s/* routes are
                              //   unauthenticated by design (view beacon +
                              //   submit). No refresh flow applies.
+  "src/app/forcefield/status",   // public Forcefield status page - no session; reads the
+                             //   public /api/forcefield/status. Same posture as the
+                             //   other /forcefield pages.
   "src/app/forcefield/signup",   // public Forcefield signup request - pre-account,
                              //   no session exists; the POST is an anonymous public
                              //   intake, same posture as /share, /s, and the client
