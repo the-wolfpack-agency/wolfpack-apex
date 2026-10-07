@@ -11,6 +11,15 @@ Forcefield is the self-serve, runtime bot/agent-defense product: one portable
 edge shim forwards request signals to the central engine, which classifies,
 records, and returns an enforcement decision. It is sold per protected site.
 
+## Launch posture (read this first)
+
+Forcefield's detection + enforcement core is **deterministic, not probabilistic**,
+so the AI-governance checkpoints (ISO 42001 / NIST AI RMF / EU AI Act) do NOT gate
+the core product; only the two optional AI touchpoints do, and they are gateable.
+The deterministic product can ship to first-party sites and design-partner betas
+now, on the general SaaS controls we already prove in CI. See `launch-readiness.md`
+for the full scope and the self-run test evidence (`npm run forcefield:selftest`).
+
 ## The document set and its status
 
 | Doc | Purpose | Status | Needs |

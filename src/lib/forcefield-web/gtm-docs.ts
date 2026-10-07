@@ -26,6 +26,7 @@ export interface GtmDocMeta {
 
 export const GTM_DOCS: readonly GtmDocMeta[] = [
   { key: "readme", title: "Overview + required-docs checklist", category: "Overview", file: "README.md" },
+  { key: "launch", title: "Launch readiness + compliance scope (deterministic core)", category: "Overview", file: "launch-readiness.md" },
   { key: "pricing", title: "Pricing and packaging", category: "Commercial", file: "pricing-and-packaging.md" },
   { key: "licensing", title: "Licensing and subscription", category: "Commercial", file: "licensing.md" },
   { key: "sla", title: "SLA", category: "Commercial", file: "sla.md" },

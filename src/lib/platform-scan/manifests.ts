@@ -100,8 +100,8 @@ const WOLFPACK_INSTINCT: ScanRouteSpec[] = [
   { path: "/", journey: "Landing", auth: "public" },
   { path: "/login", journey: "Sign-in", auth: "public" },
   { path: "/security-posture", journey: "Security posture", auth: "public" },
-  // Forcefield's self-serve surfaces are PUBLIC pages (no account) and must serve.
-  { path: "/forcefield", journey: "Forcefield marketing", auth: "public" },
+  // Forcefield self-serve surfaces (the marketing /forcefield index lives on
+  // ogiam.com, NOT here - apex is the control plane). These must serve:
   { path: "/forcefield/signup", journey: "Forcefield signup (request access)", auth: "public" },
   { path: "/forcefield/dashboard", journey: "Forcefield client dashboard", auth: "public" },
 ];
