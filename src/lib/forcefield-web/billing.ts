@@ -123,3 +123,61 @@ export async function setTenantBilling(id: string, input: SetBillingInput, q: Bi
     return false;
   }
 }
+
+/**
+ * ENFORCE-TO-PAID gate (the pure, deterministic core).
+ *
+ * Watching is free; actually turning a request away is a paid capability. This
+ * function answers one question: given a tenant's license state, may the engine
+ * ACT on a would-be block? It does NOT decide whether a request is hostile
+ * (that is decideEnforcement, unchanged) - it only decides whether we are allowed
+ * to enforce the block we already computed.
+ *
+ *   licensed === true   -> entitled (active/trialing tenant: enforce for real).
+ *   licensed === false  -> NOT entitled (a known tenant without a live license:
+ *                          watch only, record what we WOULD have blocked, and
+ *                          surface the upgrade). This is the free-tier experience.
+ *   licensed === null   -> UNMANAGED: no billing tenant resolves for this site
+ *                          (our own first-party sites, internal/self-hosted
+ *                          deployments). Not a SaaS customer, so the paid gate
+ *                          does not apply and enforcement follows the env/posture
+ *                          config as it always has. Non-regressive by design.
+ *
+ * Pure + synchronous so it is trivially testable and safe on the hot path; the
+ * I/O (resolving `licensed`) is the caller's, done ONLY when a block is pending.
+ */
+export function entitledToBlock(licensed: boolean | null): boolean {
+  return licensed !== false;
+}
+
+/**
+ * Resolve the block-entitlement for a site label, centrally (never from a signal
+ * the client controls, so a customer cannot self-upgrade by editing their shim).
+ *
+ * Returns:
+ *   true  -> an active, licensed tenant owns this site.
+ *   false -> an active tenant owns this site but has no live license (free tier).
+ *   null  -> no active tenant row for this site (unmanaged / first-party) OR the
+ *            lookup failed. null is fail-OPEN for the gate (enforcement proceeds),
+ *            matching the route's fail-open posture: a billing-table hiccup must
+ *            never silently disable a paying customer's protection.
+ */
+export async function getSiteBlockEntitlement(site: string, q: BillingQuery = liveQuery): Promise<boolean | null> {
+  const label = (site ?? "").trim();
+  if (!label) return null;
+  try {
+    const rows = await q<BillingRow>(
+      `SELECT plan, subscription_status, billing_provider, billing_ref,
+              current_period_end::text AS current_period_end
+         FROM forcefield_tenants
+        WHERE site_label = $1 AND status = 'active'
+        ORDER BY created_at DESC
+        LIMIT 1`,
+      [label],
+    );
+    if (rows.length === 0) return null; // unmanaged site: paid gate does not apply.
+    return isLicensed(rowToBilling(rows[0]));
+  } catch {
+    return null; // fail-open: never let a billing read take a customer's block away.
+  }
+}

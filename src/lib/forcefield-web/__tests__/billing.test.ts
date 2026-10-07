@@ -3,7 +3,7 @@
  * getTenantBilling maps the row, isLicensed is the deterministic entitlement
  * decision. No DB (query injected); never throws.
  */
-import { setTenantBilling, getTenantBilling, isLicensed } from "../billing";
+import { setTenantBilling, getTenantBilling, isLicensed, entitledToBlock, getSiteBlockEntitlement } from "../billing";
 
 describe("isLicensed", () => {
   const NOW = Date.parse("2026-10-07T12:00:00Z");
@@ -49,5 +49,45 @@ describe("getTenantBilling", () => {
   });
   it("returns null for an unknown id", async () => {
     expect(await getTenantBilling("x", jest.fn().mockResolvedValueOnce([]))).toBeNull();
+  });
+});
+
+
+describe("entitledToBlock (enforce-to-paid, pure gate)", () => {
+  it("a licensed tenant may enforce the block", () => {
+    expect(entitledToBlock(true)).toBe(true);
+  });
+  it("an UNLICENSED tenant may NOT enforce (watch only - the free tier)", () => {
+    expect(entitledToBlock(false)).toBe(false);
+  });
+  it("an UNMANAGED site (null: first-party/internal) enforces as configured - non-regressive", () => {
+    expect(entitledToBlock(null)).toBe(true);
+  });
+});
+
+describe("getSiteBlockEntitlement (central license resolution by site)", () => {
+  const LICENSED = { plan: "growth", subscription_status: "active", billing_provider: "manual", billing_ref: null, current_period_end: null };
+  const FREE = { plan: "none", subscription_status: "none", billing_provider: "manual", billing_ref: null, current_period_end: null };
+
+  it("an active, licensed tenant -> true (enforce for real)", async () => {
+    const q = jest.fn().mockResolvedValueOnce([LICENSED]);
+    expect(await getSiteBlockEntitlement("aidanmulready", q)).toBe(true);
+    const sql = q.mock.calls[0][0] as string;
+    expect(sql).toMatch(/WHERE site_label = \$1 AND status = 'active'/);
+    expect(q.mock.calls[0][1]).toEqual(["aidanmulready"]);
+  });
+  it("an active tenant with no live license -> false (free tier: watch only)", async () => {
+    expect(await getSiteBlockEntitlement("aidanmulready", jest.fn().mockResolvedValueOnce([FREE]))).toBe(false);
+  });
+  it("no active tenant row for the site -> null (unmanaged / first-party)", async () => {
+    expect(await getSiteBlockEntitlement("ourownsite", jest.fn().mockResolvedValueOnce([]))).toBeNull();
+  });
+  it("blank site -> null without a query (no lookup to make)", async () => {
+    const q = jest.fn();
+    expect(await getSiteBlockEntitlement("  ", q)).toBeNull();
+    expect(q).not.toHaveBeenCalled();
+  });
+  it("a DB error -> null (fail-open: a billing hiccup never removes a paying customer's block)", async () => {
+    expect(await getSiteBlockEntitlement("aidanmulready", jest.fn().mockRejectedValueOnce(new Error("db")))).toBeNull();
   });
 });

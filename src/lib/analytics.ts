@@ -776,6 +776,11 @@ export type InstinctEventType =
   // forcefield.tenant_license_updated { tenantId, plan, status, provider } - the
   //   tenant's licensing/subscription state changed (operator manual OR Stripe webhook).
   | "forcefield.tenant_license_updated"
+  // forcefield.block_withheld_unlicensed { site, reasonKind } - the engine proved
+  // a request hostile and WOULD have blocked it, but the site's tenant has no live
+  // license (free tier), so the block was withheld and only recorded. Drives the
+  // "N blocks withheld - upgrade to enforce" upsell + measures free-tier value.
+  | "forcefield.block_withheld_unlicensed"
   // forcefield.fingerprint_autoblocked { fp, reason } - a client fingerprint was
   // auto-added to the distributed block list because it tripped a honeytoken (the
   // highest-confidence hostile signal), so the central ruleset turns it away next.
