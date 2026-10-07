@@ -66,7 +66,8 @@
     "check:commit-hygiene": "npx tsx scripts/check-commit-hygiene.ts",
     "readiness": "tsx scripts/readiness.ts",
     "readiness:json": "tsx scripts/readiness.ts --json",
-    "forcefield:selftest": "npx tsx scripts/forcefield-selftest.ts"
+    "forcefield:selftest": "npx tsx scripts/forcefield-selftest.ts",
+    "forcefield:redteam": "npx tsx scripts/forcefield-redteam.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.92.0",
