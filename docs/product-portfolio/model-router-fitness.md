@@ -3,7 +3,7 @@
 ## What it is
 One chokepoint every model call goes through (cost attribution, budget, region
 policy, version pinning, failover), plus Model Fitness: plug in any model and we
-tell you where it breaks on YOUR workflows, from real labelled outcomes, not a
+tell you where it breaks on YOUR workflows, from real labeled outcomes, not a
 generic benchmark. Model Router is already a named product in `src/lib/products.ts`.
 
 ## Who buys it
