@@ -33,6 +33,7 @@
  * whole value of this report is that it never confuses the two.
  */
 import { runComplianceChecks, summarize, type ComplianceFinding, type ComplianceSummary, type PageFacts } from "./findings";
+import { assessSecurityControls, type SecurityControlReport } from "./security-controls";
 import { collectStatic, type StaticCollectDeps } from "./collect-static";
 import { collectForCompliance, type CollectDeps } from "./collect";
 import { buildDeclarations } from "../anomaly/declared";
@@ -84,6 +85,10 @@ export interface SiteScanReport {
   findings: ComplianceFinding[];
   summary: ComplianceSummary;
   anomaly: AnomalyReport;
+  /** OWASP Top 10 posture derived from this scan's findings. A live scan assesses
+   *  only misconfiguration (A05, from the security-headers check); code categories
+   *  read not_assessed until a code scan feeds the same mapping. Never overclaims. */
+  securityControls: SecurityControlReport;
   /** Present when the page could not be read. Every check then reads
    *  unverifiable, which is the honest result rather than a clean bill. */
   error?: string;
@@ -237,6 +242,19 @@ export async function runSiteScan(input: RunSiteScanInput, deps: RunSiteScanDeps
     }
   }
 
+  // OWASP posture from this scan. The live scan assesses A05 (security
+  // misconfiguration) via the security-headers check: absent -> a gap, present ->
+  // checked_clear, unverifiable/missing -> not assessed. It does NOT run code
+  // detectors, so every other category reads not_assessed (honest, never "met").
+  const headers = findings.find((f) => f.id === "security-headers");
+  const headersAssessed = headers !== undefined && headers.verdict !== "unverifiable";
+  const securityControls = assessSecurityControls(
+    headersAssessed && headers.verdict === "absent"
+      ? [{ title: "Security misconfiguration: core security headers missing", category: "security", severity: headers.severity }]
+      : [],
+    { assessedOwaspIds: headersAssessed ? ["A05:2021"] : [] },
+  );
+
   return {
     ok: true,
     report: {
@@ -246,6 +264,7 @@ export async function runSiteScan(input: RunSiteScanInput, deps: RunSiteScanDeps
       findings,
       summary: summarize(findings),
       anomaly,
+      securityControls,
       error,
       runId,
       baselineUpdated,
