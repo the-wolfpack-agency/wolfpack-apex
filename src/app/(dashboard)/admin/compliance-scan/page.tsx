@@ -59,6 +59,8 @@ interface Report {
     totals: { thirdParties: number; unexplained: number; novel: number };
   };
   securityControls?: SecurityControls;
+  /** The OWASP posture rendered as a Markdown artifact (download deliverable). */
+  postureMarkdown?: string;
   error?: string;
   runId: string | null;
   baselineUpdated: boolean;
@@ -91,6 +93,22 @@ const CONTROL_TONE: Record<ControlStatus, SeverityTone> = {
   checked_clear: "success",
   not_assessed: "neutral",
 };
+
+/** Download the OWASP posture Markdown artifact. Client-only (blob + anchor);
+ *  the content is already in the report, so no round-trip. Filename derives from
+ *  the scanned host for a recognizable deliverable. */
+function downloadPosture(markdown: string, finalUrl: string): void {
+  if (typeof window === "undefined") return;
+  let host = "site";
+  try { host = new URL(finalUrl).hostname.replace(/[^a-z0-9.-]/gi, "_"); } catch { /* keep default */ }
+  const blob = new Blob([markdown], { type: "text/markdown" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `owasp-posture-${host}.md`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 const VERDICT_LABEL: Record<Verdict, string> = {
   present: "In place",
@@ -258,6 +276,16 @@ export default function ComplianceScanPage() {
                   </li>
                 ))}
               </ul>
+              {report.postureMarkdown && (
+                <button
+                  data-testid="owasp-download"
+                  type="button"
+                  onClick={() => downloadPosture(report.postureMarkdown as string, report.finalUrl)}
+                  style={{ marginTop: "0.9rem", background: "transparent", color: "var(--wp-gold)", border: "1px solid var(--wp-dark-border)", borderRadius: 6, padding: "0.4rem 0.8rem", cursor: "pointer", fontSize: "0.85rem" }}
+                >
+                  Download posture (.md)
+                </button>
+              )}
             </GlassPanel>
           )}
 

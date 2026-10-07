@@ -116,6 +116,24 @@ describe("running a scan", () => {
     expect(screen.getByTestId("owasp-A01:2021")).toHaveTextContent(/Not assessed/);
   });
 
+  it("offers a download of the OWASP posture markdown artifact when present", async () => {
+    const createObjectURL = jest.fn(() => "blob:x");
+    const revokeObjectURL = jest.fn();
+    (URL as unknown as { createObjectURL: unknown }).createObjectURL = createObjectURL;
+    (URL as unknown as { revokeObjectURL: unknown }).revokeObjectURL = revokeObjectURL;
+    respondWith({
+      report: report({
+        securityControls: { assessments: [{ owasp: { id: "A03:2021", title: "Injection" }, status: "gap", cwes: ["CWE-89"], asvs: [], detail: "x", findingCount: 1 }], summary: { gap: 1, checked_clear: 0, compensated: 0, not_assessed: 0 } },
+        postureMarkdown: "# Application security posture\n\n| A03:2021 Injection | GAP |",
+      }),
+    });
+    await runScan();
+    const btn = await screen.findByTestId("owasp-download");
+    const user = userEvent.setup();
+    await user.click(btn); // must not throw; builds a blob from the in-report markdown
+    expect(createObjectURL).toHaveBeenCalled();
+  });
+
   it("explains an unverified target in words an operator can act on", async () => {
     // "403" tells them nothing. What to do about it is the useful part.
     respondWith({ error: "target_not_verified" }, false, 403);
