@@ -65,6 +65,39 @@ describe("detectCampaign signatures", () => {
   });
 });
 
+describe("payload_chain (the combo): payload + recon/exfil in one session", () => {
+  it("fires when an injection payload is chained with sensitive recon", () => {
+    const v = detectCampaign([
+      { path: "/admin", method: "GET", ts: 1 },
+      { path: "/search", rawUrl: "/search?q=<script>alert(1)</script>", method: "GET", ts: 2 },
+    ]);
+    expect(v.campaign).toBe(true);
+    const pc = v.signatures.find((s) => s.id === "payload_chain");
+    expect(pc?.severity).toBe("high");
+  });
+
+  it("fires when a payload is chained with an export (inject then exfil)", () => {
+    const v = detectCampaign([
+      { path: "/items", rawUrl: "/items?id=1%20UNION%20SELECT%20password%20FROM%20users", method: "GET", ts: 1 },
+      { path: "/export/users?format=csv", method: "GET", ts: 2 },
+    ]);
+    expect(v.signatures.find((s) => s.id === "payload_chain")?.reason).toMatch(/export/);
+  });
+
+  it("does NOT fire on a LONE payload with no recon/exfil partner (per-request engine handles that)", () => {
+    const v = detectCampaign([
+      { path: "/search", rawUrl: "/search?q=<script>alert(1)</script>", method: "GET", ts: 1 },
+      { path: "/", method: "GET", ts: 2 },
+    ]);
+    expect(v.signatures.find((s) => s.id === "payload_chain")).toBeUndefined();
+  });
+
+  it("categorizeStep sees a payload in the query string", () => {
+    expect(categorizeStep("/x?p=../../../../etc/passwd")).toBe("payload");
+    expect(categorizeStep("/x?q=normal+search")).toBe("benign");
+  });
+});
+
 describe("no false campaign on benign sessions (the worst outcome)", () => {
   const benignSessions: Array<[string, string[]]> = [
     ["normal browsing", ["/", "/pricing", "/features", "/blog/post-1", "/contact"]],
