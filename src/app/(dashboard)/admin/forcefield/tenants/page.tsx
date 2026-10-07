@@ -16,7 +16,8 @@ import { useRouter } from "next/navigation";
 import { getInstinctUser, fetchWithRefresh, jsonHeaders } from "@/lib/client-auth";
 import { GlassPanel, SectionHeader } from "@/components/console";
 
-interface Tenant { id: string; name: string; siteLabel: string; status: string; createdAt: string }
+interface Tenant { id: string; name: string; siteLabel: string; status: string; createdAt: string; plan?: string; subscriptionStatus?: string }
+const PLAN_OPTIONS = ["none", "starter", "growth", "scale", "enterprise"] as const;
 interface Quickstart {
   token: string; ingestUrl: string; rulesetUrl: string;
   cloudflareEnv: Record<string, string>; nextEnv: Record<string, string>; nextSnippet: string;
@@ -90,6 +91,22 @@ export default function ForcefieldTenantsPage() {
     setMgmtBusy(null);
   }
 
+  // License a client (the manual path): choosing a plan activates the
+  // subscription; choosing "none" unlicenses. Decoupled from the token kill-switch.
+  async function setLicense(t: Tenant, plan: string) {
+    setMgmtBusy(t.id); setError(null);
+    try {
+      const res = await fetchWithRefresh("/api/admin/forcefield/tenants/billing", {
+        method: "POST", headers: jsonHeaders(),
+        body: JSON.stringify({ id: t.id, plan, status: plan === "none" ? "none" : "active" }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (res.ok && body.ok) void load();
+      else setError(body.error ? `Could not set plan: ${body.error}` : `Could not set plan (HTTP ${res.status}).`);
+    } catch (err) { setError((err as Error).message); }
+    setMgmtBusy(null);
+  }
+
   if (!ready) return null;
 
   return (
@@ -155,7 +172,7 @@ export default function ForcefieldTenantsPage() {
         ) : (
           <table data-testid="t-list" style={{ width: "100%", borderCollapse: "collapse", fontSize: ".85rem" }}>
             <thead><tr style={{ textAlign: "left", color: "var(--wp-text-dim)" }}>
-              <th style={{ padding: ".4rem .5rem" }}>Client</th><th style={{ padding: ".4rem .5rem" }}>Site</th><th style={{ padding: ".4rem .5rem" }}>Status</th><th style={{ padding: ".4rem .5rem" }}>Onboarded</th><th style={{ padding: ".4rem .5rem" }}></th>
+              <th style={{ padding: ".4rem .5rem" }}>Client</th><th style={{ padding: ".4rem .5rem" }}>Site</th><th style={{ padding: ".4rem .5rem" }}>Status</th><th style={{ padding: ".4rem .5rem" }}>Plan</th><th style={{ padding: ".4rem .5rem" }}>Onboarded</th><th style={{ padding: ".4rem .5rem" }}></th>
             </tr></thead>
             <tbody>
               {tenants.map((t) => (
@@ -163,6 +180,16 @@ export default function ForcefieldTenantsPage() {
                   <td style={{ padding: ".4rem .5rem" }}>{t.name}</td>
                   <td style={{ padding: ".4rem .5rem" }}>{t.siteLabel}</td>
                   <td style={{ padding: ".4rem .5rem" }}>{t.status}</td>
+                  <td style={{ padding: ".4rem .5rem" }}>
+                    <select data-testid={`tn-plan-${t.id}`} value={t.plan ?? "none"} disabled={mgmtBusy === t.id}
+                      onChange={(e) => setLicense(t, e.target.value)}
+                      style={{ background: "var(--wp-dark-surface)", color: "var(--wp-text)", border: "1px solid var(--wp-border)", borderRadius: 6, padding: ".2rem .3rem", fontSize: ".8rem" }}>
+                      {PLAN_OPTIONS.map((p) => <option key={p} value={p}>{p}</option>)}
+                    </select>
+                    {t.subscriptionStatus && t.subscriptionStatus !== "none" ? (
+                      <span style={{ marginLeft: 6, fontSize: ".72rem", color: t.subscriptionStatus === "active" || t.subscriptionStatus === "trialing" ? "var(--wp-success, #22c55e)" : "var(--wp-error, #e5484d)" }}>{t.subscriptionStatus}</span>
+                    ) : null}
+                  </td>
                   <td style={{ padding: ".4rem .5rem" }}>{t.createdAt.slice(0, 10)}</td>
                   <td style={{ padding: ".4rem .5rem", whiteSpace: "nowrap" }}>
                     {t.status === "active" ? (

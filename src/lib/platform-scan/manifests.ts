@@ -121,6 +121,8 @@ const WOLFPACK_INSTINCT_API: ApiEndpointSpec[] = [
   { path: "/api/admin/forcefield/signups", method: "GET", journey: "Forcefield signup review", requiresAuth: true },
   // The public signup must reject an empty/invalid body BEFORE any write.
   { path: "/api/forcefield/signup", method: "POST", journey: "Forcefield signup intake", requiresAuth: false, invalidBody: {}, expectRejectStatuses: [400] },
+  // The Stripe webhook is unauthenticated (signature-gated); an unsigned body must be rejected.
+  { path: "/api/forcefield/stripe-webhook", method: "POST", journey: "Forcefield Stripe webhook", requiresAuth: false, invalidBody: {}, expectRejectStatuses: [400, 501] },
 ];
 // Porsche Weekend gates /admin server-side (unauthenticated /admin 307s to
 // /admin/login), so the redirect is a genuine auth finding when it regresses.

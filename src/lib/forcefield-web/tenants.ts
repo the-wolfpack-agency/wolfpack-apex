@@ -19,6 +19,10 @@ export interface ForcefieldTenant {
   siteLabel: string;
   status: "active" | "disabled";
   createdAt: string;
+  /** Commercial state (optional; present on the admin listing). Decoupled from the
+   *  ingest path - the hard entitlement kill is `status`. See billing.ts. */
+  plan?: string;
+  subscriptionStatus?: string;
 }
 
 /** The ingest token a tenant presents. Prefixed so it is recognizable in a log or
@@ -96,8 +100,8 @@ export async function resolveTenantByToken(token: string, q: TenantQuery = liveQ
 /** Registry listing for an admin surface. NEVER returns the token or its hash. */
 export async function listForcefieldTenants(q: TenantQuery = liveQuery): Promise<ForcefieldTenant[]> {
   try {
-    const rows = await q<{ id: string; name: string; site_label: string; status: string; created_at: string }>(
-      `SELECT id, name, site_label, status, created_at::text AS created_at
+    const rows = await q<{ id: string; name: string; site_label: string; status: string; created_at: string; plan?: string; subscription_status?: string }>(
+      `SELECT id, name, site_label, status, created_at::text AS created_at, plan, subscription_status
          FROM forcefield_tenants ORDER BY created_at DESC`,
     );
     return rows.map(rowToTenant);
@@ -150,12 +154,15 @@ export async function rotateTenantToken(
   }
 }
 
-function rowToTenant(row: { id: string; name: string; site_label: string; status: string; created_at: string }): ForcefieldTenant {
+function rowToTenant(row: { id: string; name: string; site_label: string; status: string; created_at: string; plan?: string; subscription_status?: string }): ForcefieldTenant {
   return {
     id: row.id,
     name: row.name,
     siteLabel: row.site_label,
     status: row.status === "disabled" ? "disabled" : "active",
     createdAt: row.created_at,
+    // Present only on the admin listing (the other SELECTs omit them -> default none).
+    plan: row.plan ?? "none",
+    subscriptionStatus: row.subscription_status ?? "none",
   };
 }

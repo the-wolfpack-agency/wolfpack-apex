@@ -98,3 +98,18 @@ it("rotate shows the new token once", async () => {
   expect(panel).toHaveTextContent(/new token issued/i);
   expect(screen.getByTestId("tn-rotated-token")).toHaveTextContent("ff_rotated999");
 });
+
+it("licenses a client by choosing a plan (manual billing path)", async () => {
+  mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ tenants: [ACTIVE_TENANT] }) }); // initial list
+  render(<ForcefieldTenantsPage />);
+  const sel = await screen.findByTestId("tn-plan-t1");
+  mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true, billing: { plan: "growth", status: "active" } }) }); // POST billing
+  mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ tenants: [{ ...ACTIVE_TENANT, plan: "growth", subscriptionStatus: "active" }] }) }); // reload
+  fireEvent.change(sel, { target: { value: "growth" } });
+  await waitFor(() => {
+    const call = mockFetch.mock.calls.find((c) => String(c[0]).includes("/tenants/billing"));
+    expect(call).toBeTruthy();
+    const b = JSON.parse(String((call![1] as RequestInit).body));
+    expect(b).toMatchObject({ id: "t1", plan: "growth", status: "active" });
+  });
+});

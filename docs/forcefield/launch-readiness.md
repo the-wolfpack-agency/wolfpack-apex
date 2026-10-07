@@ -44,6 +44,17 @@ when the AI-governance track is complete.
 ## What DOES require the full track
 
 - Paid GA with the AI touchpoints enabled (AI-governance track).
+
+## Billing status (both paths, one model)
+
+The licensing/subscription model is built and serves BOTH paths:
+- MANUAL (an existing client we license directly): the operator sets a plan on the
+  tenants page; no Stripe needed. Live now.
+- STRIPE SaaS: the signature-verified webhook keeps subscription state in sync and
+  is INERT until STRIPE_WEBHOOK_SECRET is set (ships safe, goes live when the secret
+  is configured). The remaining creds-gated piece is CHECKOUT (creating the
+  subscription), which needs the Stripe API key; the price numbers are still a
+  business `[DECISION]`.
 - Enterprise / regulated clients that contractually require SOC 2 / DPA /
   certification. Run that track in parallel; it does not block the deterministic
   beta.
