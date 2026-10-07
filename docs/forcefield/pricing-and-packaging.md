@@ -49,14 +49,35 @@ mode, and enforce mode (client-controlled).
 | Tier | Recommended price | Sites | Fair-use requests/mo | Added capability |
 |---|---|---|---|---|
 | Free (watch-only) | $0 | 1 | ~250k | See what is hitting your site: dashboard + watch mode, 7-day history. The funnel wedge; no enforce. |
-| Starter | $49/site/mo | 1 | ~1M | Watch + enforce, 30-day history, email alerts |
-| Growth | $199/site/mo | up to 5 | ~10M | Multi-site, API access, priority alerts, 90-day history |
-| Scale | $749/site/mo (or annual) | many | ~100M | SSO, SLA (see sla.md), named support, longer retention |
+| Starter |  $99/site/mo | 1 | ~1M | Watch + enforce, 30-day history, email alerts |
+| Growth |  $349/site/mo | up to 5 | ~10M | Multi-site, API access, priority alerts, 90-day history |
+| Scale |  $1,200/site/mo (or annual) | many | ~100M | SSO, SLA (see sla.md), named support, longer retention |
 | Enterprise | custom | portfolio | custom | Custom retention, dedicated review, BYO/on-prem, optional usage pricing |
 
 Recommended annual commitment: two months free (about 17 percent) on an annual
 term. Early design partners: free or 50 percent for the first 5 to 10, in exchange
 for a logo/case study and to grow the shared-threat-intel corpus.
+
+### Anchoring strategy (why the paid numbers went UP, not down)
+
+The instinct "we need users so price low" is a trap. Two moves resolve it:
+
+- **The Free (watch-only) tier is the user-acquisition lever, not the paid price.**
+  Adoption, the network-effect corpus, and the "look at all these agents" moment
+  come from Free. That lets us price the PAID tiers at what the value is worth,
+  without anchoring the product low. (A $49 security product also reads as a hobby
+  tool; price signals trust in this category.)
+- **List high, discount tactically.** Raising a low list price later burns the base
+  and signals we underpriced; discounting from a higher list is normal. So we list
+  at the numbers above and run a time-boxed FOUNDING CUSTOMER program (for example
+  50 percent off, grandfathered 12 months) to get users at a low EFFECTIVE price
+  without lowering the list. Asymmetric risk favors the higher list.
+- **Do not publish the paid numbers publicly yet.** The site shows "Start free" and
+  "Talk to us" until 5 to 10 discovery calls validate willingness to pay. This
+  avoids a public low anchor while we learn.
+- Conversion is VALUE-ANCHORED: a prospect pays after seeing the threat on their own
+  site in watch mode, so the paid step-up is justified by demonstrated risk, not
+  sold cold. That is what supports the higher paid numbers.
 
 Why these numbers (the logic, so they are easy to adjust):
 - Priced to sit ABOVE the toy tier (real behavioral defense + AI-agent awareness,
@@ -66,9 +87,11 @@ Why these numbers (the logic, so they are easy to adjust):
 - The Free watch-only tier is the acquisition engine (the "free scan" of this
   product): it costs us little, creates the alarm + the number, and every site it
   protects strengthens the shared threat intelligence.
-- Starter $49 lands a single site at the price of a developer tool but with managed
-  defense. Growth $199 is the volume tier (multi-site, the expected median deal).
-  Scale $749 captures larger sites while still a fraction of a DataDome contract.
+- Starter $99 lands a single site at an easy card-swipe price that still reads as a
+  real product, not a hobby tool. Growth $349 is the volume tier (multi-site, the
+  expected median deal), still about a tenth of a DataDome contract. Scale $1,200
+  captures larger sites with SSO + SLA while still a fraction of the enterprise
+  suites. See the anchoring strategy below for why these are not lower.
 
 ## 4. What is explicitly NOT metered or billed
 
