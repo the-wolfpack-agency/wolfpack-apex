@@ -1,6 +1,9 @@
 # Forcefield Pricing and Packaging (DRAFT, internal, confidential)
 
-Status: DRAFT. Numbers are placeholders marked `[DECISION]` to validate against
+Status: DRAFT. Section 3 now carries RECOMMENDED numbers (anchored to the Oct 2026
+competitive research in section 6); validate them against real cost/margin and 2 to
+3 live conversations before committing. The remaining `[DECISION]` markers are
+genuine open choices. Numbers are proposals to validate against
 real cost/margin before anything is committed or published. Do NOT put prices on
 ogiam.com until this is finalized. No em dashes.
 
@@ -35,21 +38,60 @@ conversation; we do not drop the client's legitimate traffic and we do not
 auto-bill overage. Abuse of the soft cap (not organic growth) is handled under the
 Acceptable Use Policy, not the invoice.
 
-## 3. Tiers (good / better / best)
+## 3. Tiers (recommended numbers, validate in discovery)
 
-Lead with Growth; let Scale anchor up and Starter catch the budget-constrained.
-All tiers include: the edge shim (both adapters), classification + recording, the
-client dashboard, watch mode, and enforce mode (client-controlled).
+Numbers below are a RECOMMENDED starting rate card, anchored to the competitive
+landscape in section 6, not a committed price list. Lead with Growth; let Scale
+anchor up and Free/Starter catch the top of the funnel. All paid tiers include: the
+edge shim (both adapters), classification + recording, the client dashboard, watch
+mode, and enforce mode (client-controlled).
 
-| Tier | Price `[DECISION]` | Sites | Fair-use requests/mo `[DECISION]` | Added capability |
+| Tier | Recommended price | Sites | Fair-use requests/mo | Added capability |
 |---|---|---|---|---|
-| Starter | `$[DECISION]/site/mo` | 1 | e.g. 1M | Dashboard, watch + enforce, email alerts |
-| Growth | `$[DECISION]/site/mo` | up to N | e.g. 10M | Multi-site, API access, priority alerts, 90-day history |
-| Scale | `$[DECISION]/site/mo` or annual | many | e.g. 100M+ | SSO, SLA (see sla.md), named support, longer retention |
-| Enterprise | custom | portfolio | custom | Custom retention, dedicated review, optional usage pricing |
+| Free (watch-only) | $0 | 1 | ~250k | See what is hitting your site: dashboard + watch mode, 7-day history. The funnel wedge; no enforce. |
+| Starter |  $99/site/mo | 1 | ~1M | Watch + enforce, 30-day history, email alerts |
+| Growth |  $349/site/mo | up to 5 | ~10M | Multi-site, API access, priority alerts, 90-day history |
+| Scale |  $1,200/site/mo (or annual) | many | ~100M | SSO, SLA (see sla.md), named support, longer retention |
+| Enterprise | custom | portfolio | custom | Custom retention, dedicated review, BYO/on-prem, optional usage pricing |
 
-Annual commitment: `[DECISION]` (e.g. two months free vs monthly). Nonprofit /
-early-design-partner discount: `[DECISION]`.
+Recommended annual commitment: two months free (about 17 percent) on an annual
+term. Early design partners: free or 50 percent for the first 5 to 10, in exchange
+for a logo/case study and to grow the shared-threat-intel corpus.
+
+### Anchoring strategy (why the paid numbers went UP, not down)
+
+The instinct "we need users so price low" is a trap. Two moves resolve it:
+
+- **The Free (watch-only) tier is the user-acquisition lever, not the paid price.**
+  Adoption, the network-effect corpus, and the "look at all these agents" moment
+  come from Free. That lets us price the PAID tiers at what the value is worth,
+  without anchoring the product low. (A $49 security product also reads as a hobby
+  tool; price signals trust in this category.)
+- **List high, discount tactically.** Raising a low list price later burns the base
+  and signals we underpriced; discounting from a higher list is normal. So we list
+  at the numbers above and run a time-boxed FOUNDING CUSTOMER program (for example
+  50 percent off, grandfathered 12 months) to get users at a low EFFECTIVE price
+  without lowering the list. Asymmetric risk favors the higher list.
+- **Do not publish the paid numbers publicly yet.** The site shows "Start free" and
+  "Talk to us" until 5 to 10 discovery calls validate willingness to pay. This
+  avoids a public low anchor while we learn.
+- Conversion is VALUE-ANCHORED: a prospect pays after seeing the threat on their own
+  site in watch mode, so the paid step-up is justified by demonstrated risk, not
+  sold cold. That is what supports the higher paid numbers.
+
+Why these numbers (the logic, so they are easy to adjust):
+- Priced to sit ABOVE the toy tier (real behavioral defense + AI-agent awareness,
+  not a $20 checkbox) and FAR BELOW enterprise bot management (5x to 50x cheaper
+  than DataDome / Cloudflare Bot Management; see section 6), with PREDICTABLE
+  per-site pricing as the wedge.
+- The Free watch-only tier is the acquisition engine (the "free scan" of this
+  product): it costs us little, creates the alarm + the number, and every site it
+  protects strengthens the shared threat intelligence.
+- Starter $99 lands a single site at an easy card-swipe price that still reads as a
+  real product, not a hobby tool. Growth $349 is the volume tier (multi-site, the
+  expected median deal), still about a tenth of a DataDome contract. Scale $1,200
+  captures larger sites with SSO + SLA while still a fraction of the enterprise
+  suites. See the anchoring strategy below for why these are not lower.
 
 ## 4. What is explicitly NOT metered or billed
 
@@ -65,17 +107,27 @@ early-design-partner discount: `[DECISION]`.
 - **Managed onboarding / white-glove edge wiring**: a one-time services fee for
   clients who want us to deploy the shim. Aligns with the house services motion.
 
-## 6. Competitive anchors (positioning, not matching)
+## 6. Competitive anchors (researched Oct 2026; positioning, not matching)
 
-| Category | Typical price | Note |
-|---|---|---|
-| WAF / bot management (enterprise) | $thousands/mo + usage | Heavy, usage-metered, infra-coupled |
-| CDN bot add-ons | per-request / per-1M | The usage model we deliberately avoid |
-| Niche bot-defense SaaS | $50 to $500+/site/mo | Where flat-per-site sits |
+| Competitor | Published price | Model | Where we sit |
+|---|---|---|---|
+| DataDome | $3,830/mo (Essentials) up to $13,270/mo (Enterprise Plus) | Usage-based, quote on top | We are 5x to 50x cheaper and predictable |
+| Cloudflare Bot Management | ~$250 to $500/mo as a Business add-on; Enterprise contracts ~$5,000/mo, bundled | Bundled into a Cloudflare contract, quote-only at Enterprise | We are standalone, self-serve, not infra-locked |
+| HUMAN, Kasada, Imperva, Akamai | Quote-only | Premium enterprise, traffic + endpoint driven | We serve the segment they price out |
+| AWS WAF Bot Control | ~$10/mo + ~$1 per 1M requests | Pure usage | Cheap but basic + usage-metered (bills more under attack) |
+| Arcjet and developer tools | Free tier then ~$49+/mo | Usage-based, developer-centric | Similar entry price, but we are managed + AI-agent-aware |
 
-Position: predictable per-site defense that never bills you for being attacked,
-live visibility of exactly which agents hit you, and fail-open so it never breaks
-your site. That triplet is the wedge.
+The gap we fill: between the cheap-but-basic usage-metered developer tools and the
+$4k-to-$13k/mo enterprise suites, there is no predictable, self-serve, AI-agent-aware
+defense. Our wedge is the triplet: predictable per-site pricing that NEVER bills you
+for being attacked, live visibility of exactly which agents hit you (good and bad),
+and fail-open so it never breaks your site. Watch-first makes it safe to turn on day
+one, which the enterprise suites cannot claim.
+
+Sources: DataDome pricing (Capterra/G2, 2026), Cloudflare Bot Management pricing
+(Prosopo comparison + Cloudflare plan tiers, 2026), AWS WAF Bot Control (AWS
+pricing), Arcjet (vendor site). Enterprise vendors are largely quote-only; the
+figures above are published list prices and are negotiated in practice.
 
 ## 7. Open decisions before publish
 
