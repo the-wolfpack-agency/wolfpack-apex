@@ -82,3 +82,63 @@ it("auto-connects when a token is already saved in the browser", async () => {
     "x-forcefield-token": "ff_saved",
   });
 });
+
+// --- self-serve onboarding (Setup section via /api/forcefield/my-setup) -------
+
+const SETUP = (connected: boolean) => ({
+  ok: true,
+  tenant: { id: "t1", name: "Before U Trade", siteLabel: "beforeutrade" },
+  quickstart: {
+    cloudflareEnv: { FORCEFIELD_SITE: "beforeutrade", SITE_ANALYTICS_INGEST_TOKEN: "ff_realtoken", FORCEFIELD_ENFORCE: "off" },
+    nextEnv: { FORCEFIELD_SITE: "beforeutrade", SITE_ANALYTICS_INGEST_TOKEN: "ff_realtoken" },
+    nextSnippet: 'export { default as middleware } from "@ogiam/forcefield/next";',
+  },
+  connection: { connected, lastEventAt: connected ? "2026-10-07T00:00:00Z" : null },
+});
+
+// Route the mock by URL so both my-stats and my-setup resolve in one render.
+function routeFetch(connected: boolean) {
+  mockFetch.mockImplementation((url: string) =>
+    Promise.resolve(
+      String(url).includes("/my-setup") ? okResponse(SETUP(connected)) : okResponse(STATS),
+    ),
+  );
+}
+
+it("shows the copy-paste setup + 'Waiting for traffic' until the site is connected", async () => {
+  routeFetch(false);
+  render(<ForcefieldDashboardPage />);
+  fireEvent.change(screen.getByTestId("ff-token-input"), { target: { value: "ff_realtoken" } });
+  fireEvent.click(screen.getByTestId("ff-connect"));
+
+  expect(await screen.findByTestId("ff-setup")).toBeInTheDocument();
+  expect(screen.getByTestId("ff-connection")).toHaveTextContent(/waiting for traffic/i);
+  // the exact copy-paste config carries the client's token, enforcement off (watch-first)
+  expect(screen.getByTestId("ff-setup-cf")).toHaveTextContent("SITE_ANALYTICS_INGEST_TOKEN=ff_realtoken");
+  expect(screen.getByTestId("ff-setup-cf")).toHaveTextContent("FORCEFIELD_ENFORCE=off");
+  expect(screen.getByTestId("ff-setup-next")).toHaveTextContent("@ogiam/forcefield/next");
+});
+
+it("shows Connected and hides the config once traffic is arriving", async () => {
+  routeFetch(true);
+  render(<ForcefieldDashboardPage />);
+  fireEvent.change(screen.getByTestId("ff-token-input"), { target: { value: "ff_realtoken" } });
+  fireEvent.click(screen.getByTestId("ff-connect"));
+
+  await screen.findByTestId("ff-setup");
+  expect(screen.getByTestId("ff-connection")).toHaveTextContent(/connected/i);
+  // when connected, the copy-paste config collapses away
+  expect(screen.queryByTestId("ff-setup-cf")).not.toBeInTheDocument();
+});
+
+it("re-checks the connection on demand", async () => {
+  routeFetch(false);
+  render(<ForcefieldDashboardPage />);
+  fireEvent.change(screen.getByTestId("ff-token-input"), { target: { value: "ff_realtoken" } });
+  fireEvent.click(screen.getByTestId("ff-connect"));
+  await screen.findByTestId("ff-check-connection");
+
+  routeFetch(true); // the shim is now deployed; next check finds traffic
+  fireEvent.click(screen.getByTestId("ff-check-connection"));
+  await waitFor(() => expect(screen.getByTestId("ff-connection")).toHaveTextContent(/connected/i));
+});

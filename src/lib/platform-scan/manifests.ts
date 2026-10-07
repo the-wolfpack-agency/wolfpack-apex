@@ -114,7 +114,9 @@ const WOLFPACK_INSTINCT_API: ApiEndpointSpec[] = [
   // Forcefield control plane. The public-stats aggregate is unauthenticated by
   // design; my-stats needs a tenant token; the admin + ingest endpoints must gate.
   { path: "/api/forcefield/public-stats", method: "GET", journey: "Forcefield public stats (aggregate)", requiresAuth: false },
+  { path: "/api/forcefield/status", method: "GET", journey: "Forcefield control-plane status", requiresAuth: false },
   { path: "/api/forcefield/my-stats", method: "GET", journey: "Forcefield tenant stats (token-scoped)", requiresAuth: true },
+  { path: "/api/forcefield/my-setup", method: "GET", journey: "Forcefield tenant setup (token-scoped)", requiresAuth: true },
   { path: "/api/admin/forcefield/tenants", method: "GET", journey: "Forcefield tenant registry", requiresAuth: true },
   { path: "/api/admin/forcefield/signups", method: "GET", journey: "Forcefield signup review", requiresAuth: true },
   // The public signup must reject an empty/invalid body BEFORE any write.

@@ -102,3 +102,29 @@ export async function getPublicForcefieldStats(
     return empty;
   }
 }
+
+/**
+ * Onboarding connection signal for one tenant: when did we last see an event from
+ * their site, and are we receiving traffic at all. "connected" means at least one
+ * event has ever arrived for this tenant (the shim is wired and reaching us).
+ * Counts-only, tenant-scoped, never throws (degrades to disconnected).
+ */
+export interface TenantConnection {
+  connected: boolean;
+  lastEventAt: string | null;
+}
+
+export async function getTenantConnection(tenantId: string, q: StatsQuery = liveQuery): Promise<TenantConnection> {
+  try {
+    const rows = await q<{ last_event_at: string | null }>(
+      `SELECT max(created_at)::text AS last_event_at
+         FROM site_analytics_events
+        WHERE forcefield_tenant_id = $1`,
+      [tenantId],
+    );
+    const lastEventAt = rows[0]?.last_event_at ?? null;
+    return { connected: lastEventAt != null, lastEventAt };
+  } catch {
+    return { connected: false, lastEventAt: null };
+  }
+}
