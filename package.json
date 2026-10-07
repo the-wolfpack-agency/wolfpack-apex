@@ -67,7 +67,8 @@
     "readiness": "tsx scripts/readiness.ts",
     "readiness:json": "tsx scripts/readiness.ts --json",
     "forcefield:selftest": "npx tsx scripts/forcefield-selftest.ts",
-    "forcefield:redteam": "npx tsx scripts/forcefield-redteam.ts"
+    "forcefield:redteam": "npx tsx scripts/forcefield-redteam.ts",
+    "forcefield:ai-redteam": "npx tsx scripts/forcefield-ai-redteam.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.92.0",

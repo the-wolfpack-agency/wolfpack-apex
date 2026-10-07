@@ -781,6 +781,12 @@ export type InstinctEventType =
   // license (free tier), so the block was withheld and only recorded. Drives the
   // "N blocks withheld - upgrade to enforce" upsell + measures free-tier value.
   | "forcefield.block_withheld_unlicensed"
+  // forcefield.redteam_round_scored { round, generated, hostile, prevented,
+  // preventedPct, slipped, falsePositives } - one round of the offline AI red-team
+  // (scripts/forcefield-ai-redteam.ts): AI attacks our own deterministic engine and
+  // we score the gap it closed. Feeds the gap metric into the learning loop so
+  // hardening is measured over time, not just asserted.
+  | "forcefield.redteam_round_scored"
   // forcefield.fingerprint_autoblocked { fp, reason } - a client fingerprint was
   // auto-added to the distributed block list because it tripped a honeytoken (the
   // highest-confidence hostile signal), so the central ruleset turns it away next.
