@@ -930,6 +930,91 @@ export function weakHash(file: SourceFile): ScanFinding[] {
   return findings;
 }
 
+// --- Campaign-exposure detectors (the "codebase guardian" layer) -------------
+// These recognize the CODE constructs that ENABLE the multi-step agentic attacks
+// Forcefield's runtime campaign detector catches dynamically (recon -> object
+// access -> exfil, id enumeration). The dynamic engine finds the shape "in the
+// wild"; these find the same weakness statically, BEFORE it is exploited. General
+// and platform-agnostic (no apex-only convention), and conservative: each needs
+// several co-occurring signals so a normally-guarded route is not flagged.
+
+const ROUTE_FILE = /(\/api\/|\/pages\/api\/|route\.(t|j)sx?$|handler\.(t|j)sx?$)/i;
+// A sensitive surface in the path: an agent's recon targets these first.
+const SENSITIVE_SURFACE = /\/(admin|internal|private|export|download|backup|users?|accounts?|config|debug|actuator|secrets?|settings|billing|invoices?|orders?)\b/i;
+// An HTTP handler is actually defined in this file (not a type/util).
+const HTTP_HANDLER = /export\s+(async\s+)?function\s+(GET|POST|PUT|PATCH|DELETE|HEAD)\b|export\s+const\s+(GET|POST|PUT|PATCH|DELETE)\s*[:=]|export\s+default\s+(async\s+)?function|module\.exports\s*=|app\.(get|post|put|patch|delete)\s*\(/;
+// A general authorization signal, deliberately broad so a route that checks auth
+// in ANY common way is not flagged (middleware-only auth is the accepted FP edge).
+const AUTH_SIGNAL = /\b(auth|authenticat|authoriz|session|requirecapab\w*|requireauth|getserversession|gettoken|verify(jwt|token|session)|bearer|x-api-key|api[-_]?key|permission|hasrole|isadmin|clerk|nextauth|withauth|guard|currentuser|getuser|req\.user|ctx\.user)\b/i;
+// A data read/mutation: the route actually exposes or changes data.
+const DATA_OP = /\b(prisma|knex|sequelize|mongoose|findunique|findfirst|findmany|\.aggregate\s*\(|\.query\s*\(|select\s+[\s\S]{0,80}\bfrom\b|insert\s+into|update\s+\w+\s+set|delete\s+from|\.find\s*\(|\.findone\s*\()/i;
+
+/**
+ * missingAuthzSensitiveRoute: a server route on a SENSITIVE surface that reads or
+ * mutates data and shows NO authorization check anywhere in the file. This is the
+ * reachability an agent exploits in recon -> access -> exfil (CWE-862 Missing
+ * Authorization / OWASP API5). Medium: authorization may live in middleware, so it
+ * is a "verify this route is gated", not a proven hole.
+ */
+export function missingAuthzSensitiveRoute(file: SourceFile): ScanFinding[] {
+  if (!ROUTE_FILE.test(file.path) || !SENSITIVE_SURFACE.test(file.path)) return [];
+  const content = file.content;
+  if (!HTTP_HANDLER.test(content) || !DATA_OP.test(content)) return [];
+  if (AUTH_SIGNAL.test(content)) return [];
+  const lines = content.split("\n");
+  const handlerLine = lines.findIndex((l) => HTTP_HANDLER.test(l));
+  const i = handlerLine >= 0 ? handlerLine : 0;
+  return [{
+    route: file.path,
+    severity: "medium",
+    category: "security",
+    title: "Sensitive route with no visible authorization check",
+    detail:
+      "A route on a sensitive surface reads or mutates data with no authorization " +
+      "signal in the file. If it is not gated by middleware, an agent reaches it " +
+      "during recon with no credentials, the first step of a recon -> access -> " +
+      "exfiltrate campaign (CWE-862). Confirm an auth/capability check gates it.",
+    evidence: { line: i + 1, snippet: lines[i].trim().slice(0, 200) },
+  }];
+}
+
+// Reads an object id from the request (path param, query, or destructured params).
+const ID_PARAM = /params\.\w*id\b|req\.(query|params)\.\w*id\b|searchParams\.get\(\s*['"][^'"]*id['"]\s*\)|const\s*\{[^}]*\bid\b[^}]*\}\s*=\s*(await\s+)?(params|props\.params|req\.query|req\.params)/i;
+// Looks that object up by id.
+const QUERY_BY_ID = /findunique|findfirst|findbypk|where\s*:\s*\{[^}]*\bid\b|where\s+id\s*=|\.query\s*\(\s*[`'"][\s\S]{0,120}\bwhere\b[\s\S]{0,40}\bid\b/i;
+// An ownership / tenant scope that would make the lookup safe.
+const OWNERSHIP = /\b(userid|user_id|ownerid|owner_id|workspaceid|workspace_id|tenantid|tenant_id|accountid|account_id|belongsto|scopeto|req\.user|ctx\.user|session\.user|currentuser)\b/i;
+
+/**
+ * idorObjectAccess: a handler that reads an object id from the request and looks
+ * it up by that id with NO ownership/tenant scope in the file. This is exactly
+ * what an agent walks in an id-enumeration sweep to read other tenants' objects
+ * (CWE-639 / OWASP API1 Broken Object Level Authorization). High: an unscoped
+ * by-id lookup on a route is a concrete object-access hole.
+ */
+export function idorObjectAccess(file: SourceFile): ScanFinding[] {
+  if (!ROUTE_FILE.test(file.path)) return [];
+  const content = file.content;
+  if (!ID_PARAM.test(content) || !QUERY_BY_ID.test(content)) return [];
+  if (OWNERSHIP.test(content)) return [];
+  const lines = content.split("\n");
+  const q = lines.findIndex((l) => QUERY_BY_ID.test(l));
+  const i = q >= 0 ? q : lines.findIndex((l) => ID_PARAM.test(l));
+  return [{
+    route: file.path,
+    severity: "high",
+    category: "security",
+    title: "Object looked up by id with no ownership scope (IDOR)",
+    detail:
+      "A handler reads an object id from the request and queries by it with no " +
+      "owner/tenant scope (userId/workspaceId/...). An agent walks the id space to " +
+      "read objects it does not own (CWE-639 / Broken Object Level Authorization), " +
+      "the id-enumeration shape Forcefield detects at runtime. Scope the query to " +
+      "the authenticated principal.",
+    evidence: { line: (i >= 0 ? i : 0) + 1, snippet: lines[i >= 0 ? i : 0].trim().slice(0, 200) },
+  }];
+}
+
 /** Compose every detector over one file. */
 export function runDetectors(file: SourceFile): ScanFinding[] {
   return [
@@ -949,5 +1034,7 @@ export function runDetectors(file: SourceFile): ScanFinding[] {
     ...insecureRandomToken(file),
     ...prototypePollution(file),
     ...weakHash(file),
+    ...missingAuthzSensitiveRoute(file),
+    ...idorObjectAccess(file),
   ];
 }
