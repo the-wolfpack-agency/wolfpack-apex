@@ -13,6 +13,12 @@ model (agent-intelligence enrichment and the operator signup summary); both rout
 through the governed model router and are gateable off for a lean launch. See
 `launch-readiness.md`.
 
+A per-deployment AI kill-switch is available: setting `FORCEFIELD_AI_DISABLED`
+(on/true/1) turns the operator AI summary off and guarantees NO model is ever
+called, so a deployment can run with zero AI touchpoints and we can tell a reviewer
+so truthfully. The deterministic runtime never calls a model regardless (enforced
+by a build-failing guardrail).
+
 ## 1. What Forcefield collects (and what it does not)
 
 For each request the edge shim forwards, the engine records request METADATA and a

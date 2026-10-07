@@ -55,3 +55,25 @@ it("any other error -> unavailable, never throws", async () => {
   const client: AIClient = { complete: jest.fn().mockRejectedValue(new Error("timeout")) };
   await expect(summarizeSignupRisk(INPUT, CTX, client)).resolves.toEqual({ ok: false, reason: "unavailable" });
 });
+
+describe("AI kill-switch (FORCEFIELD_AI_DISABLED)", () => {
+  const ORIG = process.env.FORCEFIELD_AI_DISABLED;
+  afterEach(() => { if (ORIG === undefined) delete process.env.FORCEFIELD_AI_DISABLED; else process.env.FORCEFIELD_AI_DISABLED = ORIG; });
+
+  it("isForcefieldAiDisabled reads on/true/1 as disabled", async () => {
+    const { isForcefieldAiDisabled } = await import("../signup-risk-summary");
+    expect(isForcefieldAiDisabled({ FORCEFIELD_AI_DISABLED: "on" })).toBe(true);
+    expect(isForcefieldAiDisabled({ FORCEFIELD_AI_DISABLED: "true" })).toBe(true);
+    expect(isForcefieldAiDisabled({ FORCEFIELD_AI_DISABLED: "1" })).toBe(true);
+    expect(isForcefieldAiDisabled({})).toBe(false);
+    expect(isForcefieldAiDisabled({ FORCEFIELD_AI_DISABLED: "off" })).toBe(false);
+  });
+
+  it("returns disabled WITHOUT calling the model when the switch is on", async () => {
+    process.env.FORCEFIELD_AI_DISABLED = "on";
+    const client = { complete: jest.fn() };
+    const res = await summarizeSignupRisk(INPUT, CTX, client);
+    expect(res).toEqual({ ok: false, reason: "disabled" });
+    expect(client.complete).not.toHaveBeenCalled(); // zero AI calls
+  });
+});

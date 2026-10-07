@@ -28,6 +28,7 @@ const SUMMARY_UNAVAILABLE: Record<string, string> = {
   unavailable: "AI summary unavailable right now.",
   no_provider: "AI summary not configured.",
   over_budget: "AI summary paused (budget reached).",
+  disabled: "AI is turned off for this deployment.",
 };
 
 export default function ForcefieldSignupsPage() {

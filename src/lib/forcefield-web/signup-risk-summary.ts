@@ -27,7 +27,19 @@ export interface SignupRiskInput {
 
 export type SignupRiskResult =
   | { ok: true; summary: string; model: string; degraded: boolean }
-  | { ok: false; reason: "unavailable" | "no_provider" | "over_budget" };
+  | { ok: false; reason: "unavailable" | "no_provider" | "over_budget" | "disabled" };
+
+/**
+ * Per-deployment AI kill-switch. When FORCEFIELD_AI_DISABLED is set, Forcefield
+ * runs with ZERO AI touchpoints: this, the one operator-facing AI aid, is turned
+ * off and no model is ever called. Lets us tell a security reviewer, truthfully,
+ * "this deployment uses no AI at all" (the deterministic runtime already never
+ * does; this covers the operator aid). Values: on / true / 1.
+ */
+export function isForcefieldAiDisabled(env: Record<string, string | undefined> = process.env): boolean {
+  const v = (env.FORCEFIELD_AI_DISABLED ?? "").toLowerCase();
+  return v === "on" || v === "true" || v === "1";
+}
 
 const SYSTEM =
   "You help an operator triage inbound requests for Forcefield, a website bot-defense " +
@@ -56,6 +68,8 @@ export async function summarizeSignupRisk(
   ctx: { workspaceId?: string; actor?: { userId: string; role: string } },
   client: AIClient = getAIClient(),
 ): Promise<SignupRiskResult> {
+  // AI kill-switch: when disabled for this deployment, never call a model.
+  if (isForcefieldAiDisabled()) return { ok: false, reason: "disabled" };
   try {
     const res = await client.complete({
       system: SYSTEM,
