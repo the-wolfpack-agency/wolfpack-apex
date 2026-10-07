@@ -38,10 +38,54 @@ shim in enforce mode, point the script at it, and capture the result. That is th
 one claim the whole pitch rests on; do not market "we block attacks" until this is
 green on a real deployment.
 
-## Layer 3: novel scenarios (AI in the factory, not the product)
+## Layer 3: AI red-team loop (AI in the factory, not the product)
 
-New tradecraft is added to the corpus as cases. This is where our own AI agents
-earn their keep WITHOUT entering the product: offline, in the factory, an agent can
-generate novel attack profiles, which a human reviews and adds to the corpus; the
-engine stays deterministic. The corpus only grows, so coverage only improves, and
-every new profile is gated by layers 1 and 2 forever after.
+`npm run forcefield:ai-redteam` (scripts/forcefield-ai-redteam.ts) is where our own
+AI earns its keep WITHOUT entering the product. Offline, in the factory, it attacks
+our own deterministic engine: each round the model invents novel, obfuscated, and
+encoding-trick attack variants (plus benign lookalikes), the real `decideEnforcement`
+judges them, and the run is scored with the SAME `scoreGap` that CI uses.
+
+- A SLIP (a hostile case the engine did not block) is an open gap: write a rule,
+  confirm the engine blocks it, then move the case into `ai-redteam-corpus.ts`,
+  where it becomes a permanent regression. A gap, once closed, stays closed.
+- A FALSE POSITIVE (a benign lookalike that got blocked) is the opposite gap: a
+  rule is too broad. Same loop, opposite fix.
+- Loop-until-dry: it keeps generating until two rounds in a row find no new gap.
+
+It scales with the news. Pass a threat brief (a pasted disclosure, a CVE, a file of
+recent tradecraft) via `FORCEFIELD_REDTEAM_BRIEF` / `FORCEFIELD_REDTEAM_BRIEF_FILE`
+and the generator steers toward it, so a novel attack in the morning's feed becomes
+a test case the same day.
+
+Boundary: this script is the ONLY part of Forcefield that calls a model, it runs
+offline through the governed model router, and its output is static data a human
+reviews and commits. CI and the runtime never call a model (enforced by
+`ai-decision-path-boundary.test.ts`). AI finds the edges of the cage; the
+deterministic engine is the cage.
+
+## The gap metric (idea into a provable claim)
+
+`src/lib/forcefield-web/gap-metric.ts` computes ONE number, one way: of the
+proven-hostile population, what fraction did the deterministic gate prevent, and
+what slipped. `scoreGap` is pure arithmetic; `runGapCases` runs the real engine.
+Both the offline red-team and (later) a live-traffic reader feed the same scorer,
+so the factory number and the production number are the same measurement.
+
+This is what turns "deterministic tooling closes the gap" from a slogan into a
+defensible claim: "the gate prevented 94% of hostile actions in this envelope,
+auditably, and the slips became rules within N days." The slip rate falling to
+zero across red-team rounds is the hardening, measured.
+
+## Productization: adversarial agents + compliance
+
+The same loop, pointed at a CUSTOMER's own system (first-party, read-only request
+shapes, never a real exploit body), is a continuous adversarial-assurance product:
+an AI attacker that runs against their site on a schedule and reports the gap it
+could and could not get through. The gap-metric output is built to be
+compliance-grade: deterministic, reproducible, timestamped, auditable, which is
+evidence for vulnerability-management and pentest controls.
+
+Honest boundary, do not overclaim: this produces continuous evidence and coverage,
+not a certificate. A formal pentest attestation still needs a qualified human
+assessor to sign. We supply the measured, always-on assurance underneath it.
