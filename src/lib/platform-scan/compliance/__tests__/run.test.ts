@@ -170,6 +170,25 @@ describe("the report", () => {
     expect(res.report.anomaly.findings.some((f) => f.host === "hotjar.com")).toBe(true);
   });
 
+  it("combined scan: supplied code findings fill in the code OWASP categories", async () => {
+    const html = '<html lang="en"><head><title>Acme</title></head><body></body></html>';
+    // Live-only first: A03 Injection is not assessed (no code scan).
+    const liveOnly = await runSiteScan(baseInput(), baseDeps(html));
+    if (!liveOnly.ok) throw new Error("expected ok");
+    const a03LiveOnly = liveOnly.report.securityControls.assessments.find((a) => a.owasp.id === "A03:2021");
+    expect(a03LiveOnly?.status).toBe("not_assessed");
+
+    // Now with a code scan's findings: A03 becomes a gap, and the markdown reflects it.
+    const combined = await runSiteScan(
+      { ...baseInput(), codeFindings: [{ title: "SQL injection: value interpolated into a query string", category: "security" }] },
+      baseDeps(html),
+    );
+    if (!combined.ok) throw new Error("expected ok");
+    const a03 = combined.report.securityControls.assessments.find((a) => a.owasp.id === "A03:2021");
+    expect(a03?.status).toBe("gap");
+    expect(combined.report.postureMarkdown).toMatch(/A03:2021 Injection \| GAP/);
+  });
+
   it("uses the site's own CSP to explain its traffic", async () => {
     const html = '<script src="https://plausible.io/s.js"></script>';
     const res = await runSiteScan(baseInput(), baseDeps(html, { "content-security-policy": "script-src https://plausible.io" }));
