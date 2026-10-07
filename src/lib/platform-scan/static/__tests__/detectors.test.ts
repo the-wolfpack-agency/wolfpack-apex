@@ -564,6 +564,25 @@ describe("codeInjection (eval / new Function)", () => {
     const content = "// audit-safe: sandboxed expression evaluator\nconst v = eval(expr);";
     expect(codeInjection({ path: "src/lib/x.ts", content })).toHaveLength(0);
   });
+
+  // Precision (dogfood): a pattern mentioned in a COMMENT is documentation, not code.
+  it("does NOT flag new Function() inside a block comment (describing a removed workaround)", () => {
+    const content = [
+      "async function load() {",
+      "  /* The previous `new Function(\"return import(x)\")` workaround existed for the",
+      "     bundled case and broke on Vercel. */",
+      "  return import('@react-pdf/renderer');",
+      "}",
+    ].join("\n");
+    expect(codeInjection({ path: "src/lib/export-pdf.ts", content })).toHaveLength(0);
+  });
+  it("does NOT flag eval() in a line comment", () => {
+    expect(codeInjection({ path: "src/lib/x.ts", content: "// do NOT use eval(userInput) here\nconst v = parse(userInput);" })).toHaveLength(0);
+  });
+  it("STILL flags real eval() on a line that also has a trailing comment", () => {
+    const f = codeInjection({ path: "src/lib/x.ts", content: "const v = eval(expr); // FIXME: replace with a parser" });
+    expect(f).toHaveLength(1);
+  });
 });
 
 describe("sqlInjection", () => {

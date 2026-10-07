@@ -578,13 +578,43 @@ export function secretInLogs(file: SourceFile): ScanFinding[] {
  * the factory security dogfood: an `eval(userInput)` change was authored and
  * handed off because nothing flagged it.
  */
+// Blank out comment content line by line (line comments and block comments,
+// including multi-line blocks), so a detector that keys on code keywords never
+// fires on an example in a comment. Dogfooding found a `new Function(...)` inside a
+// block comment, describing a REMOVED workaround, read as live code injection.
+// Naive on purpose (no string-literal awareness): a URL's double-slash may truncate
+// a line early, which can only ever SUPPRESS a finding - the safe direction for a
+// false-positive fix.
+function codeWithoutComments(lines: readonly string[]): string[] {
+  let inBlock = false;
+  return lines.map((raw) => {
+    let line = raw;
+    if (inBlock) {
+      const end = line.indexOf("*/");
+      if (end === -1) return "";
+      line = line.slice(end + 2);
+      inBlock = false;
+    }
+    line = line.replace(/\/\*.*?\*\//g, ""); // inline /* ... */
+    const open = line.indexOf("/*");
+    if (open !== -1) {
+      inBlock = true;
+      line = line.slice(0, open);
+    }
+    const lc = line.indexOf("//");
+    if (lc !== -1) line = line.slice(0, lc);
+    return line;
+  });
+}
+
 export function codeInjection(file: SourceFile): ScanFinding[] {
   const lines = file.content.split("\n");
+  const code = codeWithoutComments(lines); // test code, report the original line
   const findings: ScanFinding[] = [];
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    const isEval = EVAL_CALL.test(line);
-    if (!isEval && !DYNAMIC_FUNCTION.test(line)) continue;
+    const isEval = EVAL_CALL.test(code[i]);
+    if (!isEval && !DYNAMIC_FUNCTION.test(code[i])) continue;
     if (/(audit-safe|eslint-disable)/i.test(`${lines[i - 1] ?? ""}\n${line}`)) continue;
     const which = isEval ? "eval()" : "new Function()";
     findings.push({
