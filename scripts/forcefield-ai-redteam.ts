@@ -115,12 +115,12 @@ async function run(): Promise<number> {
       const res = await client.complete({
         system: SYSTEM,
         messages: [{ role: "user", content: user }],
-        model_tier: "balanced",
+        model_tier: "standard",
         max_tokens: 1800,
         temperature: 0.9, // high: we WANT divergent, surprising attacks
-        sensitivity: "internal",
+        sensitivity: "public", // synthetic attack strings we author; no real data
         latency_target: "batch",
-        metadata: { feature: "forcefield.ai_redteam", round: String(round) },
+        metadata: { feature: "forcefield.ai_redteam" },
       });
       content = res.content;
     } catch (err) {
