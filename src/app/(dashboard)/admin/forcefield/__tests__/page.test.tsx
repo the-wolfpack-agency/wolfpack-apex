@@ -160,11 +160,12 @@ test("threat coverage panel: shows the honest headline, gaps, and per-threat sta
   await waitFor(() => expect(screen.getByTestId("threat-coverage")).toBeInTheDocument());
   // Honest headline: detected / observable (excludes code-level CWEs).
   expect(screen.getByTestId("coverage-headline")).toHaveTextContent(/\d+ \/ \d+ agent-observable threats detected/i);
-  // The gaps callout names the honest frontier gap - the "not caught off guard" part.
-  // LLM02 is now live on the model-output lens (partial), so the named gap moved to
-  // indirect prompt injection, which the inbound edge genuinely cannot see.
+  // The gaps callout still names an honest frontier - the "not caught off guard" part.
+  // Indirect prompt injection is now structurally mitigated by the provenance fence
+  // (partial), so the named gap moved to the enforcement residual: no build-time guard
+  // that EVERY retrieval path is fenced.
   const gaps = screen.getByTestId("coverage-gaps");
-  expect(gaps).toHaveTextContent(/indirect prompt injection/i);
+  expect(gaps).toHaveTextContent(/indirect injection/i);
   expect(gaps).toHaveTextContent(/gaps? to close/i);
   // A covered injection CWE reads "covered"; a code-level CWE reads out-of-scope.
   expect(screen.getByTestId("coverage-row-CWE-89")).toHaveTextContent(/covered/i);
@@ -172,4 +173,6 @@ test("threat coverage panel: shows the honest headline, gaps, and per-threat sta
   // The agent-specific OWASP-LLM classes are present.
   expect(screen.getByTestId("coverage-row-LLM08")).toHaveTextContent(/covered/i);
   expect(screen.getByTestId("coverage-row-CWE-1427")).toHaveTextContent(/covered/i); // prompt injection now live
+  // Indirect prompt injection reads partial now (provenance fence deployed), not covered.
+  expect(screen.getByTestId("coverage-row-LLM01-indirect")).toHaveTextContent(/partial/i);
 });

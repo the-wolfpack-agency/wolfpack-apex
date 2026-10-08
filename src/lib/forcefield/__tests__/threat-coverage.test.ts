@@ -57,12 +57,21 @@ describe("threat-coverage matrix", () => {
     expect(llm02.lenses).toContain("model-output");
   });
 
+  it("credits the deployed provenance fence for indirect injection, without claiming a full solve", () => {
+    const ind = THREAT_COVERAGE.find((e) => e.id === "LLM01-indirect")!;
+    expect(ind.status).toBe("partial"); // structurally mitigated by the fence...
+    expect(ind.status).not.toBe("covered"); // ...but never claimed complete
+    expect(ind.lenses).toContain("provenance-fence");
+    expect(ind.note.toLowerCase()).toContain("partial");
+  });
+
   it("still names an honest frontier gap (never claims completeness)", () => {
-    // Closing LLM02 must not zero out the gap list - the matrix keeps naming what
-    // it does NOT yet cover (here: indirect prompt injection via retrieved content).
+    // Mitigating indirect injection must not zero out the gap list - the matrix
+    // keeps naming the real residual: no guard that EVERY retrieval path is fenced.
     const summary = coverageSummary();
     expect(summary.gap).toBeGreaterThan(0);
-    expect(THREAT_COVERAGE.find((e) => e.id === "LLM01-indirect")!.status).toBe("gap");
+    const residual = THREAT_COVERAGE.find((e) => e.id === "LLM01-indirect-fence-coverage")!;
+    expect(residual.status).toBe("gap");
   });
 
   it("the behavior-lens gaps are now covered (IDOR enumeration, runaway-loop exhaustion)", () => {
