@@ -779,6 +779,12 @@ export type InstinctEventType =
   // forcefield.tenant_platform_set { tenantId, platform } - operator switched which
   // connector door a tenant uses (sites-we-host, Vercel, Cloudflare, WordPress, generic).
   | "forcefield.tenant_platform_set"
+  // forcefield.tenant_enforce_set { tenantId, enforce } - operator toggled a managed
+  // tenant's blocking on/off from the console (watch <-> enforce).
+  | "forcefield.tenant_enforce_set"
+  // forcefield.block_withheld_watch { site, reasonKind } - a hostile request the
+  // engine would block, withheld because the tenant's console enforce toggle is off.
+  | "forcefield.block_withheld_watch"
   // forcefield.block_withheld_unlicensed { site, reasonKind } - the engine proved
   // a request hostile and WOULD have blocked it, but the site's tenant has no live
   // license (free tier), so the block was withheld and only recorded. Drives the

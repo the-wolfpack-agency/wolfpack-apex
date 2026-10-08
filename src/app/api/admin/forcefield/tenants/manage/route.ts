@@ -13,14 +13,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { recordAudit, extractRequestMetadata } from "@/lib/audit-log";
-import { setTenantStatus, rotateTenantToken, setTenantSharesIntel, setTenantPlatform } from "@/lib/forcefield-web/tenants";
+import { setTenantStatus, rotateTenantToken, setTenantSharesIntel, setTenantPlatform, setTenantEnforce } from "@/lib/forcefield-web/tenants";
 import { isConnectorKey } from "@/lib/forcefield-web/connectors";
 import { trackEvent } from "@/lib/analytics";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const ACTIONS = ["disable", "enable", "rotate", "intel_on", "intel_off", "set_platform"] as const;
+const ACTIONS = ["disable", "enable", "rotate", "intel_on", "intel_off", "set_platform", "enforce_on", "enforce_off"] as const;
 type Action = (typeof ACTIONS)[number];
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
@@ -61,6 +61,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     await recordAudit({ ...auditBase, action: "forcefield.tenant_platform_set", afterState: { platform } }).catch(() => {});
     void trackEvent("forcefield.tenant_platform_set", auth.user.id, auth.user.role, { tenantId: id, platform });
     return NextResponse.json({ ok: true, platform });
+  }
+
+  if (action === "enforce_on" || action === "enforce_off") {
+    const enabled = action === "enforce_on";
+    const done = await setTenantEnforce(id, enabled);
+    if (!done) return NextResponse.json({ ok: false, error: "not_found" }, { status: 404 });
+    await recordAudit({ ...auditBase, action: "forcefield.tenant_enforce_set", afterState: { enforceEnabled: enabled } }).catch(() => {});
+    void trackEvent("forcefield.tenant_enforce_set", auth.user.id, auth.user.role, { tenantId: id, enforce: enabled });
+    return NextResponse.json({ ok: true, enforceEnabled: enabled });
   }
 
   if (action === "intel_on" || action === "intel_off") {

@@ -16,11 +16,13 @@ const mockRecordAudit = jest.fn();
 const mockTrack = jest.fn();
 
 jest.mock("@/lib/auth/require-capability", () => ({ requireCapability: (...a: unknown[]) => mockRequireCapability(...a) }));
+const mockSetEnforce = jest.fn();
 jest.mock("@/lib/forcefield-web/tenants", () => ({
   setTenantStatus: (...a: unknown[]) => mockSetStatus(...a),
   rotateTenantToken: (...a: unknown[]) => mockRotate(...a),
   setTenantSharesIntel: jest.fn(),
   setTenantPlatform: (...a: unknown[]) => mockSetPlatform(...a),
+  setTenantEnforce: (...a: unknown[]) => mockSetEnforce(...a),
 }));
 // connectors is pure (no deps); use the REAL isConnectorKey so validation is genuine.
 jest.mock("@/lib/audit-log", () => ({
@@ -138,5 +140,29 @@ describe("set_platform action", () => {
     mockRequireCapability.mockResolvedValueOnce(OK);
     mockSetPlatform.mockResolvedValueOnce(false);
     expect((await POST(post({ id: "nope", action: "set_platform", platform: "hosted" }))).status).toBe(404);
+  });
+})
+
+describe("enforce toggle actions", () => {
+  it("enforce_on sets true + audited + tracked", async () => {
+    mockRequireCapability.mockResolvedValueOnce(OK);
+    mockSetEnforce.mockResolvedValueOnce(true);
+    const res = await POST(post({ id: "t1", action: "enforce_on" }));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, enforceEnabled: true });
+    expect(mockSetEnforce).toHaveBeenCalledWith("t1", true);
+    expect(mockRecordAudit.mock.calls[0][0].action).toBe("forcefield.tenant_enforce_set");
+    expect(mockTrack).toHaveBeenCalledWith("forcefield.tenant_enforce_set", "op-1", "admin", { tenantId: "t1", enforce: true });
+  });
+  it("enforce_off sets false", async () => {
+    mockRequireCapability.mockResolvedValueOnce(OK);
+    mockSetEnforce.mockResolvedValueOnce(true);
+    expect((await (await POST(post({ id: "t1", action: "enforce_off" }))).json()).enforceEnabled).toBe(false);
+    expect(mockSetEnforce).toHaveBeenCalledWith("t1", false);
+  });
+  it("404 when the tenant does not exist", async () => {
+    mockRequireCapability.mockResolvedValueOnce(OK);
+    mockSetEnforce.mockResolvedValueOnce(false);
+    expect((await POST(post({ id: "nope", action: "enforce_on" }))).status).toBe(404);
   });
 })

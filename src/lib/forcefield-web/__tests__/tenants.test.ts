@@ -179,4 +179,31 @@ describe("connector platform", () => {
     expect(await setTenantPlatform("x", "vercel", jest.fn().mockResolvedValueOnce([]))).toBe(false);
     expect(await setTenantPlatform("x", "vercel", jest.fn().mockRejectedValueOnce(new Error("db")))).toBe(false);
   });
+
+  it("resolveTenantByToken + listForcefieldTenants surface sharesIntel + enforceEnabled", async () => {
+    const q: TenantQuery = async () => [{ ...ROW, platform: "hosted", shares_intel: false, enforce_enabled: true }] as never;
+    const t = await resolveTenantByToken("ff_x", q);
+    expect(t!.sharesIntel).toBe(false);
+    expect(t!.enforceEnabled).toBe(true);
+    const [l] = await listForcefieldTenants(q);
+    expect(l.enforceEnabled).toBe(true);
+    // default (column absent) is watch-first: not enforcing.
+    const q2: TenantQuery = async () => [{ ...ROW }] as never;
+    expect((await resolveTenantByToken("ff_y", q2))!.enforceEnabled).toBe(false);
+  });
+})
+
+describe("per-tenant enforce toggle: setTenantEnforce", () => {
+  it("writes the flag and returns true", async () => {
+    const { setTenantEnforce } = await import("../tenants");
+    const q = jest.fn().mockResolvedValueOnce([{ id: "t1" }]);
+    expect(await setTenantEnforce("t1", true, q)).toBe(true);
+    expect(q.mock.calls[0][0]).toMatch(/UPDATE forcefield_tenants SET enforce_enabled/);
+    expect(q.mock.calls[0][1]).toEqual(["t1", true]);
+  });
+  it("returns false for unknown id and never throws", async () => {
+    const { setTenantEnforce } = await import("../tenants");
+    expect(await setTenantEnforce("x", true, jest.fn().mockResolvedValueOnce([]))).toBe(false);
+    expect(await setTenantEnforce("x", true, jest.fn().mockRejectedValueOnce(new Error("db")))).toBe(false);
+  });
 })

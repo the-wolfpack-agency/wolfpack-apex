@@ -56,15 +56,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const expected = process.env.FORCEFIELD_EDGE_TOKEN || "";
   // Authorize by EITHER the shared first-party secret (constant-time) OR a
   // self-serve tenant's own token. A tenant token pins the site to that tenant
-  // (tenantSite below), so the body `site` cannot be spoofed across tenants.
-  let tenantSite: string | null = null;
+  // (tenant.siteLabel below), so the body `site` cannot be spoofed across tenants,
+  // and carries the tenant's intel + enforce settings consulted later.
+  let tenant: Awaited<ReturnType<typeof resolveTenantByToken>> = null;
   let authed = expected.length > 0 && tokenMatches(presented, expected);
   if (!authed && presented) {
-    const tenant = await resolveTenantByToken(presented).catch(() => null);
-    if (tenant) {
-      authed = true;
-      tenantSite = tenant.siteLabel;
-    }
+    tenant = await resolveTenantByToken(presented).catch(() => null);
+    if (tenant) authed = true;
   }
   // No valid token -> do nothing, fail open. A site must never be gated by a
   // Forcefield outage or a misconfigured token.
@@ -86,7 +84,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const country = s("country");
   // A tenant token pins the site to that tenant; only a first-party (shared-secret)
   // caller may name its own site in the body.
-  const site = tenantSite ?? s("site", "unknown");
+  const site = tenant?.siteLabel ?? s("site", "unknown");
   const headerNames = Array.isArray(b.headerNames) ? (b.headerNames as unknown[]).map(String) : [];
   const ip = typeof b.ip === "string" ? (b.ip as string) : undefined;
   const rawUrl = typeof b.rawUrl === "string" ? (b.rawUrl as string) : path;
@@ -96,8 +94,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // The central ruleset: distributed blocklist (dark unless enabled) + the full
   // datacenter prefix set. Fail-safe to defaults so an error never turns real
   // traffic away or breaks classification.
+  // shares_intel opt-out: a tenant that opted OUT does not CONSUME the shared
+  // network blocklist (it still gets full local detection: scanners, payloads,
+  // decoys). Only suppressed when we positively resolved the opt-out, so a lookup
+  // error never silently drops protection.
   let blockedFingerprints: string[] = [];
-  if (process.env.FORCEFIELD_DISTRIBUTE_BLOCKS === "on") {
+  const consumesSharedIntel = !(tenant && tenant.sharesIntel === false);
+  if (process.env.FORCEFIELD_DISTRIBUTE_BLOCKS === "on" && consumesSharedIntel) {
     blockedFingerprints = await getBlockedFingerprints(EDGE_WORKSPACE_ID).catch(() => []);
   }
   const datacenterPrefixes = await getDatacenterPrefixes().catch(() => []);
@@ -131,8 +134,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       // block is pending, so the common path adds no DB read. An unmanaged site
       // (null: our own/first-party, not a SaaS tenant) enforces as configured.
       const licensed = await getSiteBlockEntitlement(site).catch(() => null);
-      if (entitledToBlock(licensed)) {
+      // Managed tenants gate blocking on the console enforce toggle (watch-first);
+      // a first-party site (no tenant) enforces as configured by its shim env.
+      const tenantAllowsEnforce = !tenant || tenant.enforceEnabled === true;
+      if (entitledToBlock(licensed) && tenantAllowsEnforce) {
         action = "block";
+      } else if (entitledToBlock(licensed) && !tenantAllowsEnforce) {
+        // Console enforce toggle OFF: withhold the block, keep the recorded event.
+        void trackEvent("forcefield.block_withheld_watch", `site:${site}`, "forcefield", {
+          site, reasonKind: reasonKind ?? "unknown",
+        });
       } else {
         // Free tier: withhold the block, keep the recorded event, surface the upsell.
         void trackEvent("forcefield.block_withheld_unlicensed", `site:${site}`, "forcefield", {

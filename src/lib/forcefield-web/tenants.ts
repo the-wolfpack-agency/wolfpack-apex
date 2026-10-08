@@ -32,6 +32,10 @@ export interface ForcefieldTenant {
   /** Participates in the shared threat-intel network (default true). Opaque
    *  attacker fingerprints only, never customer data. */
   sharesIntel?: boolean;
+  /** Blocking is turned on for this tenant from the console (default false =
+   *  watch-first). The engine consults this before returning a block for a
+   *  tenant-authorized request. Populated by resolve + the admin listing. */
+  enforceEnabled?: boolean;
 }
 
 /** The ingest token a tenant presents. Prefixed so it is recognizable in a log or
@@ -97,7 +101,7 @@ export async function resolveTenantByToken(token: string, q: TenantQuery = liveQ
   if (!t) return null;
   try {
     const [row] = await q<TenantRow>(
-      `SELECT id, name, site_label, status, created_at::text AS created_at, platform
+      `SELECT id, name, site_label, status, created_at::text AS created_at, platform, shares_intel, enforce_enabled
          FROM forcefield_tenants
         WHERE token_sha256 = $1 AND status = 'active'
         LIMIT 1`,
@@ -113,7 +117,7 @@ export async function resolveTenantByToken(token: string, q: TenantQuery = liveQ
 export async function listForcefieldTenants(q: TenantQuery = liveQuery): Promise<ForcefieldTenant[]> {
   try {
     const rows = await q<TenantRow>(
-      `SELECT id, name, site_label, status, created_at::text AS created_at, platform, plan, subscription_status, shares_intel
+      `SELECT id, name, site_label, status, created_at::text AS created_at, platform, plan, subscription_status, shares_intel, enforce_enabled
          FROM forcefield_tenants ORDER BY created_at DESC`,
     );
     return rows.map(rowToTenant);
@@ -210,6 +214,28 @@ export async function setTenantPlatform(
   }
 }
 
+/**
+ * Turn blocking on or off for a tenant from the console (watch <-> enforce) without
+ * a redeploy. The engine consults this for a tenant-authorized request before it
+ * returns a block, so this is the real "turn protection on" control for a managed
+ * site. Reversible. Never throws.
+ */
+export async function setTenantEnforce(
+  id: string,
+  enabled: boolean,
+  q: TenantQuery = liveQuery,
+): Promise<boolean> {
+  try {
+    const rows = await q<{ id: string }>(
+      `UPDATE forcefield_tenants SET enforce_enabled = $2, updated_at = now() WHERE id = $1 RETURNING id`,
+      [id, enabled],
+    );
+    return rows.length > 0;
+  } catch {
+    return false;
+  }
+}
+
 /** The raw DB shape the SELECTs return; mapped to ForcefieldTenant by rowToTenant.
  *  Optional columns are absent on the leaner SELECTs and default in the mapper. */
 interface TenantRow {
@@ -222,6 +248,7 @@ interface TenantRow {
   plan?: string;
   subscription_status?: string;
   shares_intel?: boolean;
+  enforce_enabled?: boolean;
 }
 
 function rowToTenant(row: TenantRow): ForcefieldTenant {
@@ -237,5 +264,7 @@ function rowToTenant(row: TenantRow): ForcefieldTenant {
     plan: row.plan ?? "none",
     subscriptionStatus: row.subscription_status ?? "none",
     sharesIntel: row.shares_intel !== false,
+    // Watch-first: absent/false -> not enforcing.
+    enforceEnabled: row.enforce_enabled === true,
   };
 }
