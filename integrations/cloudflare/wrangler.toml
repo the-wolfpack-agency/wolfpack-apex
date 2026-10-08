@@ -1,0 +1,31 @@
+# Forcefield edge Worker - puts Forcefield in front of ANY origin (WordPress, PHP,
+# a static host, or a Vercel app) at Cloudflare's edge. Monitor-first + fail-open:
+# any error, or a ruleset that will not load, serves the request. Forcefield can
+# never take the site down.
+#
+# Self-serve deploy:
+#   1. Route your domain through Cloudflare.
+#   2. Set the vars below, and the token as a SECRET (see the bottom).
+#   3. npx wrangler deploy
+#   4. Flip FORCEFIELD_ENFORCE to "on" when ready to block.
+# The engine updates centrally via FORCEFIELD_RULESET_URL - no Worker redeploy to
+# pick up a new scanner signature or trap path.
+
+name = "forcefield-edge"
+# The shared, tested engine adapter (src/lib/forcefield-web/adapters/cloudflare-worker.ts).
+main = "../../src/lib/forcefield-web/adapters/cloudflare-worker.ts"
+compatibility_date = "2026-09-01"
+
+[vars]
+# Your public site label (from /admin/forcefield onboarding).
+FORCEFIELD_SITE = "your-site"
+# Your real origin that allowed requests are proxied to.
+FORCEFIELD_ORIGIN = "https://your-site.example"
+# Central control-plane endpoints (defaults shown; override only for a different deployment).
+FORCEFIELD_INGEST_URL = "https://wolfpack-instinct.vercel.app/api/site-analytics/ingest"
+FORCEFIELD_RULESET_URL = "https://wolfpack-instinct.vercel.app/api/forcefield/ruleset"
+# Watch-first: "on" turns away proven-hostile requests; anything else = monitor only.
+FORCEFIELD_ENFORCE = "off"
+
+# SITE_ANALYTICS_INGEST_TOKEN is your site key and is a SECRET - never put it here.
+# Set it with:  npx wrangler secret put SITE_ANALYTICS_INGEST_TOKEN
