@@ -785,6 +785,9 @@ export type InstinctEventType =
   // forcefield.block_withheld_watch { site, reasonKind } - a hostile request the
   // engine would block, withheld because the tenant's console enforce toggle is off.
   | "forcefield.block_withheld_watch"
+  // forcefield.integration_provisioned { provider, site } - a one-click platform
+  // integration (e.g. Vercel) provisioned a tenant + wrote the site's config.
+  | "forcefield.integration_provisioned"
   // forcefield.block_withheld_unlicensed { site, reasonKind } - the engine proved
   // a request hostile and WOULD have blocked it, but the site's tenant has no live
   // license (free tier), so the block was withheld and only recorded. Drives the
