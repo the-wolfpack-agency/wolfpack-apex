@@ -22,12 +22,12 @@ const CREATED = {
   tenant: { id: "t1", name: "Before U Trade", siteLabel: "beforeutrade", status: "active", platform: "generic", createdAt: "2026-10-06T00:00:00Z" },
   token: "ff_realtoken123",
   quickstart: {
-    token: "ff_realtoken123", ingestUrl: "https://x/api/site-analytics/ingest", rulesetUrl: "https://x/api/forcefield/ruleset",
+    token: "ff_realtoken123", ingestUrl: "https://x/api/site-analytics/ingest", rulesetUrl: "https://x/api/forcefield/ruleset", observeUrl: "https://x/api/forcefield/observe",
     platform: "generic",
     connector: { key: "generic", title: "Other / any stack", description: "Any other stack.", managed: false, emits: { next: true, cloudflare: true }, steps: ["Pick the adapter", "Set env and deploy"] },
     cloudflareEnv: { FORCEFIELD_SITE: "beforeutrade", SITE_ANALYTICS_INGEST_TOKEN: "ff_realtoken123", FORCEFIELD_ENFORCE: "off" },
-    nextEnv: { FORCEFIELD_SITE: "beforeutrade", SITE_ANALYTICS_INGEST_TOKEN: "ff_realtoken123" },
-    nextSnippet: 'export { default as middleware } from "@ogiam/forcefield/next";',
+    nextEnv: { FORCEFIELD_SITE: "beforeutrade", FORCEFIELD_EDGE_TOKEN: "ff_realtoken123", FORCEFIELD_INGEST_URL: "https://x/api/forcefield/observe", FORCEFIELD_ENFORCE: "off" },
+    nextSnippet: 'import { NextResponse } from "next/server";\nexport async function middleware() { /* ... */ }\nexport const config = { matcher: ["/((?!_next/static).*)"] };',
   },
 };
 
@@ -57,7 +57,9 @@ it("issues a key and shows the token + quick-start once", async () => {
   // the quick-start env carries the token + site, enforcement off
   expect(panel).toHaveTextContent("SITE_ANALYTICS_INGEST_TOKEN=ff_realtoken123");
   expect(panel).toHaveTextContent("FORCEFIELD_ENFORCE=off");
-  expect(panel).toHaveTextContent("@ogiam/forcefield/next");
+  // The Next path ships a real self-contained middleware (no non-existent package).
+  expect(panel).toHaveTextContent("export async function middleware");
+  expect(panel).not.toHaveTextContent("@ogiam/forcefield");
   // the tailored connector surface: title + ordered steps
   expect(screen.getByTestId("t-connector")).toHaveTextContent("Other / any stack");
   expect(screen.getByTestId("t-steps")).toHaveTextContent("Pick the adapter");

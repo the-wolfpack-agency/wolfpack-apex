@@ -11,9 +11,14 @@
  *
  * PUBLIC: unauthenticated by design in the session sense - a site's edge calls
  * this before any user session exists, so it is NOT capability-gated. It is
- * locked down by the shared-secret header `x-edge-token` == FORCEFIELD_EDGE_TOKEN
- * (constant-time compare); a missing/mismatched token does nothing. Same posture
- * as forcefield/edge/decide and the site-analytics ingest endpoint.
+ * authorized by the `x-edge-token` header, which may be EITHER:
+ *   - the shared FORCEFIELD_EDGE_TOKEN secret (our own first-party sites), or
+ *   - a self-serve tenant's own ingest token (resolved + hashed via
+ *     resolveTenantByToken). A tenant token scopes the request to that tenant's
+ *     site: the `site` label is taken from the resolved tenant, NOT the body, so
+ *     one tenant can never attribute or decide against another's site.
+ * A missing/mismatched/disabled token does nothing. Constant-time compare for the
+ * shared secret; the tenant lookup is by sha256 hash.
  *
  * FAIL-OPEN on any error - Forcefield must never break a customer's site, so a bad
  * token / bad body / engine throw all return { action: "allow" }.
@@ -27,6 +32,7 @@ import { getBlockedFingerprints } from "@/lib/forcefield/blocked-fingerprints";
 import { getDatacenterPrefixes } from "@/lib/forcefield/datacenter-ranges";
 import { recordSiteEvent } from "@/lib/site-analytics";
 import { entitledToBlock, getSiteBlockEntitlement } from "@/lib/forcefield-web/billing";
+import { resolveTenantByToken } from "@/lib/forcefield-web/tenants";
 import { trackEvent } from "@/lib/analytics";
 
 export const runtime = "nodejs";
@@ -44,12 +50,25 @@ function tokenMatches(got: string, expected: string): boolean {
 }
 
 // PUBLIC: unauthenticated (no user session); authorized by the x-edge-token
-// shared secret only, constant-time compared below. See the file header.
+// header - either the shared secret OR a valid tenant token. See the file header.
 export async function POST(req: NextRequest): Promise<NextResponse> {
+  const presented = req.headers.get("x-edge-token") || "";
   const expected = process.env.FORCEFIELD_EDGE_TOKEN || "";
-  // No token configured, or mismatch -> do nothing, fail open. A site must never
-  // be gated by a Forcefield outage.
-  if (!expected || !tokenMatches(req.headers.get("x-edge-token") || "", expected)) {
+  // Authorize by EITHER the shared first-party secret (constant-time) OR a
+  // self-serve tenant's own token. A tenant token pins the site to that tenant
+  // (tenantSite below), so the body `site` cannot be spoofed across tenants.
+  let tenantSite: string | null = null;
+  let authed = expected.length > 0 && tokenMatches(presented, expected);
+  if (!authed && presented) {
+    const tenant = await resolveTenantByToken(presented).catch(() => null);
+    if (tenant) {
+      authed = true;
+      tenantSite = tenant.siteLabel;
+    }
+  }
+  // No valid token -> do nothing, fail open. A site must never be gated by a
+  // Forcefield outage or a misconfigured token.
+  if (!authed) {
     return NextResponse.json({ action: "allow" }, { status: 401 });
   }
 
@@ -65,7 +84,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const method = s("method", "GET");
   const userAgent = s("userAgent");
   const country = s("country");
-  const site = s("site", "unknown");
+  // A tenant token pins the site to that tenant; only a first-party (shared-secret)
+  // caller may name its own site in the body.
+  const site = tenantSite ?? s("site", "unknown");
   const headerNames = Array.isArray(b.headerNames) ? (b.headerNames as unknown[]).map(String) : [];
   const ip = typeof b.ip === "string" ? (b.ip as string) : undefined;
   const rawUrl = typeof b.rawUrl === "string" ? (b.rawUrl as string) : path;
