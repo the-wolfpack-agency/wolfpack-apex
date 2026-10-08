@@ -27,10 +27,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const auth = await requireCapability(req, "settings.manage_team");
   if (!auth.ok) return auth.response;
-  const body = (await req.json().catch(() => ({}))) as { name?: unknown; siteLabel?: unknown };
+  const body = (await req.json().catch(() => ({}))) as { name?: unknown; siteLabel?: unknown; platform?: unknown };
   const created = await createForcefieldTenant({
     name: String(body.name ?? ""),
     siteLabel: String(body.siteLabel ?? ""),
+    // Optional; an unknown/missing value falls back to the generic shim.
+    platform: typeof body.platform === "string" ? body.platform : undefined,
   });
   if (!created) return NextResponse.json({ ok: false, error: "invalid_name_or_site" }, { status: 400 });
   // Audit the credential issuance (who provisioned which tenant) - NEVER the token.
@@ -43,7 +45,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     ipAddress: meta.ipAddress,
     userAgent: meta.userAgent,
     requestId: meta.requestId,
-    afterState: { name: created.tenant.name, siteLabel: created.tenant.siteLabel },
+    afterState: { name: created.tenant.name, siteLabel: created.tenant.siteLabel, platform: created.tenant.platform },
   }).catch(() => {});
   // The token + quick-start are returned exactly once; the token is stored only as
   // a hash, so this is the one chance to copy the client's ready-to-paste config.

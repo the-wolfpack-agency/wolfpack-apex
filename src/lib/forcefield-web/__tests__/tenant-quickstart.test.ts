@@ -28,4 +28,24 @@ describe("buildTenantQuickstart", () => {
     expect(qs.rulesetUrl).toMatch(/\/api\/forcefield\/ruleset$/);
     expect(qs.nextSnippet).toContain("@ogiam/forcefield/next");
   });
+
+  it("defaults a platform-less tenant to the generic door (both adapters) for back-compat", () => {
+    const qs = buildTenantQuickstart(tenant, "ff_tok");
+    expect(qs.platform).toBe("generic");
+    expect(qs.connector.emits).toEqual({ next: true, cloudflare: true });
+    expect(qs.connector.managed).toBe(false);
+  });
+
+  it("tailors the door to the tenant's platform: Vercel is next-only, not Cloudflare", () => {
+    const qs = buildTenantQuickstart({ ...tenant, platform: "vercel" }, "ff_tok");
+    expect(qs.platform).toBe("vercel");
+    expect(qs.connector.emits).toEqual({ next: true, cloudflare: false });
+    expect(qs.connector.steps.length).toBeGreaterThan(0);
+  });
+
+  it("a hosted (we-host) tenant is managed: nothing to install", () => {
+    const qs = buildTenantQuickstart({ ...tenant, platform: "hosted" }, "ff_tok");
+    expect(qs.connector.managed).toBe(true);
+    expect(qs.connector.emits).toEqual({ next: false, cloudflare: false });
+  });
 });

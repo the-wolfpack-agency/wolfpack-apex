@@ -12,6 +12,7 @@
  */
 import { createHash, randomBytes } from "node:crypto";
 import { safeQuery } from "@/lib/db";
+import { DEFAULT_CONNECTOR, isConnectorKey, type ConnectorKey } from "./connectors";
 
 export interface ForcefieldTenant {
   id: string;
@@ -19,6 +20,11 @@ export interface ForcefieldTenant {
   siteLabel: string;
   status: "active" | "disabled";
   createdAt: string;
+  /** The connector door this tenant uses (sites-we-host, Vercel, Cloudflare,
+   *  WordPress, or the generic shim). Drives the tailored quick-start. Optional on
+   *  the type (consumers fall back to the generic shim) but rowToTenant always
+   *  populates it, so a tenant loaded from the DB always carries a concrete value. */
+  platform?: ConnectorKey;
   /** Commercial state (optional; present on the admin listing). Decoupled from the
    *  ingest path - the hard entitlement kill is `status`. See billing.ts. */
   plan?: string;
@@ -56,19 +62,22 @@ function clean(v: string, max = 120): string {
  * null on invalid input or a write failure (never throws into the caller).
  */
 export async function createForcefieldTenant(
-  input: { name: string; siteLabel: string },
+  input: { name: string; siteLabel: string; platform?: string },
   q: TenantQuery = liveQuery,
 ): Promise<{ tenant: ForcefieldTenant; token: string } | null> {
   const name = clean(input.name);
   const siteLabel = clean(input.siteLabel);
   if (name.length < 2 || siteLabel.length < 2) return null;
+  // Unknown or missing platform falls back to the generic shim (never rejected on
+  // platform alone, and never a raw untrusted value into the column).
+  const platform: ConnectorKey = isConnectorKey(input.platform) ? input.platform : DEFAULT_CONNECTOR;
   const token = generateTenantToken();
   try {
-    const [row] = await q<{ id: string; name: string; site_label: string; status: string; created_at: string }>(
-      `INSERT INTO forcefield_tenants (name, site_label, token_sha256)
-       VALUES ($1, $2, $3)
-       RETURNING id, name, site_label, status, created_at::text AS created_at`,
-      [name, siteLabel, hashToken(token)],
+    const [row] = await q<TenantRow>(
+      `INSERT INTO forcefield_tenants (name, site_label, token_sha256, platform)
+       VALUES ($1, $2, $3, $4)
+       RETURNING id, name, site_label, status, created_at::text AS created_at, platform`,
+      [name, siteLabel, hashToken(token), platform],
     );
     if (!row) return null;
     return { tenant: rowToTenant(row), token };
@@ -87,8 +96,8 @@ export async function resolveTenantByToken(token: string, q: TenantQuery = liveQ
   const t = token?.trim();
   if (!t) return null;
   try {
-    const [row] = await q<{ id: string; name: string; site_label: string; status: string; created_at: string }>(
-      `SELECT id, name, site_label, status, created_at::text AS created_at
+    const [row] = await q<TenantRow>(
+      `SELECT id, name, site_label, status, created_at::text AS created_at, platform
          FROM forcefield_tenants
         WHERE token_sha256 = $1 AND status = 'active'
         LIMIT 1`,
@@ -103,8 +112,8 @@ export async function resolveTenantByToken(token: string, q: TenantQuery = liveQ
 /** Registry listing for an admin surface. NEVER returns the token or its hash. */
 export async function listForcefieldTenants(q: TenantQuery = liveQuery): Promise<ForcefieldTenant[]> {
   try {
-    const rows = await q<{ id: string; name: string; site_label: string; status: string; created_at: string; plan?: string; subscription_status?: string; shares_intel?: boolean }>(
-      `SELECT id, name, site_label, status, created_at::text AS created_at, plan, subscription_status, shares_intel
+    const rows = await q<TenantRow>(
+      `SELECT id, name, site_label, status, created_at::text AS created_at, platform, plan, subscription_status, shares_intel
          FROM forcefield_tenants ORDER BY created_at DESC`,
     );
     return rows.map(rowToTenant);
@@ -178,13 +187,52 @@ export async function setTenantSharesIntel(
   }
 }
 
-function rowToTenant(row: { id: string; name: string; site_label: string; status: string; created_at: string; plan?: string; subscription_status?: string; shares_intel?: boolean }): ForcefieldTenant {
+/**
+ * Switch which connector door a tenant uses. Validated against the registry by the
+ * caller; an unknown key is rejected (returns false) rather than written. Changing
+ * the door only changes the tailored quick-start the client sees, never the
+ * engine or the ingest path. Reversible. Never throws.
+ */
+export async function setTenantPlatform(
+  id: string,
+  platform: ConnectorKey,
+  q: TenantQuery = liveQuery,
+): Promise<boolean> {
+  if (!isConnectorKey(platform)) return false;
+  try {
+    const rows = await q<{ id: string }>(
+      `UPDATE forcefield_tenants SET platform = $2, updated_at = now() WHERE id = $1 RETURNING id`,
+      [id, platform],
+    );
+    return rows.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/** The raw DB shape the SELECTs return; mapped to ForcefieldTenant by rowToTenant.
+ *  Optional columns are absent on the leaner SELECTs and default in the mapper. */
+interface TenantRow {
+  id: string;
+  name: string;
+  site_label: string;
+  status: string;
+  created_at: string;
+  platform?: string;
+  plan?: string;
+  subscription_status?: string;
+  shares_intel?: boolean;
+}
+
+function rowToTenant(row: TenantRow): ForcefieldTenant {
   return {
     id: row.id,
     name: row.name,
     siteLabel: row.site_label,
     status: row.status === "disabled" ? "disabled" : "active",
     createdAt: row.created_at,
+    // Unknown/legacy platform falls back to the generic shim (back-compat).
+    platform: isConnectorKey(row.platform) ? row.platform : DEFAULT_CONNECTOR,
     // Present only on the admin listing (the other SELECTs omit them -> default none).
     plan: row.plan ?? "none",
     subscriptionStatus: row.subscription_status ?? "none",

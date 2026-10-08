@@ -19,10 +19,12 @@ import ForcefieldTenantsPage from "../page";
 
 const CREATED = {
   ok: true,
-  tenant: { id: "t1", name: "Before U Trade", siteLabel: "beforeutrade", status: "active", createdAt: "2026-10-06T00:00:00Z" },
+  tenant: { id: "t1", name: "Before U Trade", siteLabel: "beforeutrade", status: "active", platform: "generic", createdAt: "2026-10-06T00:00:00Z" },
   token: "ff_realtoken123",
   quickstart: {
     token: "ff_realtoken123", ingestUrl: "https://x/api/site-analytics/ingest", rulesetUrl: "https://x/api/forcefield/ruleset",
+    platform: "generic",
+    connector: { key: "generic", title: "Other / any stack", description: "Any other stack.", managed: false, emits: { next: true, cloudflare: true }, steps: ["Pick the adapter", "Set env and deploy"] },
     cloudflareEnv: { FORCEFIELD_SITE: "beforeutrade", SITE_ANALYTICS_INGEST_TOKEN: "ff_realtoken123", FORCEFIELD_ENFORCE: "off" },
     nextEnv: { FORCEFIELD_SITE: "beforeutrade", SITE_ANALYTICS_INGEST_TOKEN: "ff_realtoken123" },
     nextSnippet: 'export { default as middleware } from "@ogiam/forcefield/next";',
@@ -56,6 +58,54 @@ it("issues a key and shows the token + quick-start once", async () => {
   expect(panel).toHaveTextContent("SITE_ANALYTICS_INGEST_TOKEN=ff_realtoken123");
   expect(panel).toHaveTextContent("FORCEFIELD_ENFORCE=off");
   expect(panel).toHaveTextContent("@ogiam/forcefield/next");
+  // the tailored connector surface: title + ordered steps
+  expect(screen.getByTestId("t-connector")).toHaveTextContent("Other / any stack");
+  expect(screen.getByTestId("t-steps")).toHaveTextContent("Pick the adapter");
+});
+
+it("offers the platform picker on the create form and sends it", async () => {
+  render(<ForcefieldTenantsPage />);
+  await screen.findByTestId("tenant-form");
+  fireEvent.change(screen.getByTestId("t-name"), { target: { value: "Acme" } });
+  fireEvent.change(screen.getByTestId("t-site"), { target: { value: "acme" } });
+  fireEvent.change(screen.getByTestId("t-platform"), { target: { value: "vercel" } });
+  mockFetch.mockResolvedValueOnce({ ok: true, json: async () => CREATED }); // POST
+  mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ tenants: [] }) }); // reload
+  fireEvent.click(screen.getByTestId("t-submit"));
+  await screen.findByTestId("t-created");
+  const postCall = mockFetch.mock.calls.find((c) => c[1]?.method === "POST");
+  expect(JSON.parse(postCall![1].body)).toMatchObject({ name: "Acme", siteLabel: "acme", platform: "vercel" });
+});
+
+it("hosted connector shows 'nothing to install' and hides the env blocks", async () => {
+  const hosted = { ...CREATED, quickstart: { ...CREATED.quickstart, platform: "hosted",
+    connector: { key: "hosted", title: "Hosted by us", description: "A site we host.", managed: true, emits: { next: false, cloudflare: false }, steps: ["Nothing to install"] } } };
+  render(<ForcefieldTenantsPage />);
+  await screen.findByTestId("tenant-form");
+  fireEvent.change(screen.getByTestId("t-name"), { target: { value: "Acme" } });
+  fireEvent.change(screen.getByTestId("t-site"), { target: { value: "acme" } });
+  mockFetch.mockResolvedValueOnce({ ok: true, json: async () => hosted });
+  mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ tenants: [] }) });
+  fireEvent.click(screen.getByTestId("t-submit"));
+  await screen.findByTestId("t-managed");
+  expect(screen.getByTestId("t-managed")).toHaveTextContent(/nothing to install/i);
+  expect(screen.queryByTestId("t-cf-env")).not.toBeInTheDocument();
+  expect(screen.queryByTestId("t-next-env")).not.toBeInTheDocument();
+});
+
+it("changes a tenant's platform from the row, POSTing set_platform", async () => {
+  mockFetch.mockReset();
+  mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ tenants: [CREATED.tenant] }) }); // initial list
+  render(<ForcefieldTenantsPage />);
+  const sel = await screen.findByTestId("tn-platform-t1");
+  mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true, platform: "cloudflare" }) }); // manage
+  mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ tenants: [CREATED.tenant] }) }); // reload
+  fireEvent.change(sel, { target: { value: "cloudflare" } });
+  await waitFor(() => {
+    const call = mockFetch.mock.calls.find((c) => typeof c[0] === "string" && c[0].includes("/manage"));
+    expect(call).toBeTruthy();
+    expect(JSON.parse(call![1].body)).toEqual({ id: "t1", action: "set_platform", platform: "cloudflare" });
+  });
 });
 
 it("shows an inline error on a failed create, no token panel", async () => {

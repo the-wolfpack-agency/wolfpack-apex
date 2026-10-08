@@ -776,6 +776,9 @@ export type InstinctEventType =
   // forcefield.tenant_license_updated { tenantId, plan, status, provider } - the
   //   tenant's licensing/subscription state changed (operator manual OR Stripe webhook).
   | "forcefield.tenant_license_updated"
+  // forcefield.tenant_platform_set { tenantId, platform } - operator switched which
+  // connector door a tenant uses (sites-we-host, Vercel, Cloudflare, WordPress, generic).
+  | "forcefield.tenant_platform_set"
   // forcefield.block_withheld_unlicensed { site, reasonKind } - the engine proved
   // a request hostile and WOULD have blocked it, but the site's tenant has no live
   // license (free tier), so the block was withheld and only recorded. Drives the

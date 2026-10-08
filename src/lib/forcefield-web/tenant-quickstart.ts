@@ -5,6 +5,7 @@
  * later. The client picks ONE adapter.
  */
 import type { ForcefieldTenant } from "./tenants";
+import { connectorByKey, DEFAULT_CONNECTOR, type ConnectorKey } from "./connectors";
 
 /** The OGIAM control-plane endpoints a client's adapter points at. Overridable by
  *  env for a different deployment; the defaults are the production endpoints. */
@@ -16,11 +17,27 @@ function controlPlane() {
   };
 }
 
+/** The tenant's chosen connector door, resolved for the tailored quick-start. The
+ *  env blocks below are always built (back-compatible), but `connector.emits` and
+ *  `connector.managed` tell the UI which to SHOW, so a Vercel client is not handed
+ *  Cloudflare config and a hosted client is told there is nothing to install. */
+export interface QuickstartConnector {
+  key: ConnectorKey;
+  title: string;
+  description: string;
+  managed: boolean;
+  emits: { next: boolean; cloudflare: boolean };
+  steps: string[];
+}
+
 export interface TenantQuickstart {
   /** The ingest token the client configures (shown once). */
   token: string;
   ingestUrl: string;
   rulesetUrl: string;
+  /** The tenant's platform + the tailoring metadata for its setup. */
+  platform: ConnectorKey;
+  connector: QuickstartConnector;
   /** Copy-paste env for the Cloudflare Worker adapter (any origin). */
   cloudflareEnv: Record<string, string>;
   /** Copy-paste env for the in-app (Next.js) middleware adapter. */
@@ -31,6 +48,8 @@ export interface TenantQuickstart {
 
 export function buildTenantQuickstart(tenant: ForcefieldTenant, token: string): TenantQuickstart {
   const { ingestUrl, rulesetUrl } = controlPlane();
+  // Resolve the door; a missing/unknown/legacy platform falls back to the generic shim.
+  const meta = connectorByKey(tenant.platform ?? DEFAULT_CONNECTOR) ?? connectorByKey(DEFAULT_CONNECTOR)!;
   const common = {
     FORCEFIELD_SITE: tenant.siteLabel,
     FORCEFIELD_WEB: "on",
@@ -44,6 +63,15 @@ export function buildTenantQuickstart(tenant: ForcefieldTenant, token: string): 
     token,
     ingestUrl,
     rulesetUrl,
+    platform: meta.key,
+    connector: {
+      key: meta.key,
+      title: meta.title,
+      description: meta.description,
+      managed: meta.managed,
+      emits: { ...meta.emits },
+      steps: [...meta.steps],
+    },
     cloudflareEnv: { ...common, FORCEFIELD_ORIGIN: "https://your-site.example" },
     nextEnv: common,
     nextSnippet:
