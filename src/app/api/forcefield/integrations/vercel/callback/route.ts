@@ -11,6 +11,11 @@
  * merging this changes nothing until the integration is registered. Watch-first:
  * the env it writes has FORCEFIELD_ENFORCE=off. Fail-safe: any provisioning failure
  * returns a clean status, never a stack trace, and never a half-trusted redirect.
+ *
+ * PUBLIC: unauthenticated by design - the platform redirects the user's browser
+ * here before any session exists, so it is NOT capability-gated. Authorization is
+ * the one-time OAuth `code` exchange (only a real code issued to our registered
+ * integration succeeds). Same posture as forcefield/observe + the stripe-webhook.
  */
 import { NextRequest, NextResponse } from "next/server";
 import {
@@ -40,6 +45,8 @@ function safeNext(next: string | null, origin: string): string | null {
   }
 }
 
+// PUBLIC: unauthenticated (no user session); authorized by the one-time OAuth
+// code exchange below, not a capability. See the file header.
 export async function GET(req: NextRequest): Promise<NextResponse> {
   if (!isVercelIntegrationConfigured()) {
     // Dark until the integration is registered + its credentials set.
