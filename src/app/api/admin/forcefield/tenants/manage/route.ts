@@ -13,20 +13,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { recordAudit, extractRequestMetadata } from "@/lib/audit-log";
-import { setTenantStatus, rotateTenantToken, setTenantSharesIntel } from "@/lib/forcefield-web/tenants";
+import { setTenantStatus, rotateTenantToken, setTenantSharesIntel, setTenantPlatform } from "@/lib/forcefield-web/tenants";
+import { isConnectorKey } from "@/lib/forcefield-web/connectors";
 import { trackEvent } from "@/lib/analytics";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const ACTIONS = ["disable", "enable", "rotate", "intel_on", "intel_off"] as const;
+const ACTIONS = ["disable", "enable", "rotate", "intel_on", "intel_off", "set_platform"] as const;
 type Action = (typeof ACTIONS)[number];
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const auth = await requireCapability(req, "settings.manage_team");
   if (!auth.ok) return auth.response;
 
-  const body = (await req.json().catch(() => ({}))) as { id?: unknown; action?: unknown };
+  const body = (await req.json().catch(() => ({}))) as { id?: unknown; action?: unknown; platform?: unknown };
   const id = String(body.id ?? "");
   const action = String(body.action ?? "") as Action;
   if (!id || !ACTIONS.includes(action)) {
@@ -48,6 +49,18 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     await recordAudit({ ...auditBase, action: "forcefield.tenant_token_rotated" }).catch(() => {});
     void trackEvent("forcefield.tenant_token_rotated", auth.user.id, auth.user.role, { tenantId: id });
     return NextResponse.json({ ok: true, token: res.token });
+  }
+
+  if (action === "set_platform") {
+    const platform = body.platform;
+    if (!isConnectorKey(platform)) {
+      return NextResponse.json({ ok: false, error: "invalid_platform" }, { status: 400 });
+    }
+    const done = await setTenantPlatform(id, platform);
+    if (!done) return NextResponse.json({ ok: false, error: "not_found" }, { status: 404 });
+    await recordAudit({ ...auditBase, action: "forcefield.tenant_platform_set", afterState: { platform } }).catch(() => {});
+    void trackEvent("forcefield.tenant_platform_set", auth.user.id, auth.user.role, { tenantId: id, platform });
+    return NextResponse.json({ ok: true, platform });
   }
 
   if (action === "intel_on" || action === "intel_off") {

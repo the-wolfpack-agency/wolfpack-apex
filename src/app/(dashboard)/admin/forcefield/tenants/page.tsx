@@ -15,11 +15,17 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getInstinctUser, fetchWithRefresh, jsonHeaders } from "@/lib/client-auth";
 import { GlassPanel, SectionHeader } from "@/components/console";
+import { listForcefieldConnectors, type ConnectorKey } from "@/lib/forcefield-web/connectors";
 
-interface Tenant { id: string; name: string; siteLabel: string; status: string; createdAt: string; plan?: string; subscriptionStatus?: string; sharesIntel?: boolean }
+interface Tenant { id: string; name: string; siteLabel: string; status: string; createdAt: string; platform?: ConnectorKey; plan?: string; subscriptionStatus?: string; sharesIntel?: boolean }
 const PLAN_OPTIONS = ["none", "starter", "growth", "scale", "enterprise"] as const;
+// The supported connector doors, cataloged once in the registry (also the
+// "works with your system" sales surface). Rendered in the create form + per row.
+const CONNECTORS = listForcefieldConnectors();
+interface QuickstartConnector { key: ConnectorKey; title: string; description: string; managed: boolean; emits: { next: boolean; cloudflare: boolean }; steps: string[] }
 interface Quickstart {
   token: string; ingestUrl: string; rulesetUrl: string;
+  platform: ConnectorKey; connector: QuickstartConnector;
   cloudflareEnv: Record<string, string>; nextEnv: Record<string, string>; nextSnippet: string;
 }
 interface Created { tenant: Tenant; token: string; quickstart: Quickstart }
@@ -34,6 +40,7 @@ export default function ForcefieldTenantsPage() {
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [name, setName] = useState("");
   const [siteLabel, setSiteLabel] = useState("");
+  const [platform, setPlatform] = useState<ConnectorKey>("generic");
   const [busy, setBusy] = useState(false);
   const [created, setCreated] = useState<Created | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -58,12 +65,12 @@ export default function ForcefieldTenantsPage() {
     setBusy(true); setError(null); setCreated(null);
     try {
       const res = await fetchWithRefresh("/api/admin/forcefield/tenants", {
-        method: "POST", headers: jsonHeaders(), body: JSON.stringify({ name, siteLabel }),
+        method: "POST", headers: jsonHeaders(), body: JSON.stringify({ name, siteLabel, platform }),
       });
       const body = await res.json().catch(() => ({}));
       if (res.ok && body.ok) {
         setCreated(body as Created);
-        setName(""); setSiteLabel("");
+        setName(""); setSiteLabel(""); setPlatform("generic");
         void load();
       } else {
         setError(body.error === "invalid_name_or_site" ? "Enter a client name and a site label (2+ characters each)." : (body.error || `Could not create (HTTP ${res.status}).`));
@@ -87,6 +94,21 @@ export default function ForcefieldTenantsPage() {
       } else {
         setError(body.error ? `Could not ${action}: ${body.error}` : `Could not ${action} (HTTP ${res.status}).`);
       }
+    } catch (err) { setError((err as Error).message); }
+    setMgmtBusy(null);
+  }
+
+  // Switch which connector door a tenant uses. Changes only the tailored setup the
+  // client is shown, never the engine or the token.
+  async function changePlatform(t: Tenant, next: ConnectorKey) {
+    setMgmtBusy(t.id); setError(null);
+    try {
+      const res = await fetchWithRefresh("/api/admin/forcefield/tenants/manage", {
+        method: "POST", headers: jsonHeaders(), body: JSON.stringify({ id: t.id, action: "set_platform", platform: next }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (res.ok && body.ok) void load();
+      else setError(body.error ? `Could not set platform: ${body.error}` : `Could not set platform (HTTP ${res.status}).`);
     } catch (err) { setError((err as Error).message); }
     setMgmtBusy(null);
   }
@@ -121,7 +143,7 @@ export default function ForcefieldTenantsPage() {
       </p>
 
       <GlassPanel style={{ marginTop: "1.25rem" }}>
-        <form onSubmit={create} data-testid="tenant-form" style={{ display: "grid", gap: "0.75rem", gridTemplateColumns: "1fr 1fr auto", alignItems: "end" }}>
+        <form onSubmit={create} data-testid="tenant-form" style={{ display: "grid", gap: "0.75rem", gridTemplateColumns: "1fr 1fr 1fr auto", alignItems: "end" }}>
           <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: ".8rem", color: "var(--wp-text-dim)" }}>
             Client name
             <input data-testid="t-name" value={name} onChange={(e) => setName(e.target.value)} required
@@ -131,6 +153,13 @@ export default function ForcefieldTenantsPage() {
             Site label (e.g. beforeutrade)
             <input data-testid="t-site" value={siteLabel} onChange={(e) => setSiteLabel(e.target.value)} required
               style={{ padding: ".5rem .6rem", background: "var(--wp-dark-surface)", border: "1px solid var(--wp-border)", borderRadius: 6, color: "var(--wp-text)" }} />
+          </label>
+          <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: ".8rem", color: "var(--wp-text-dim)" }}>
+            Platform
+            <select data-testid="t-platform" value={platform} onChange={(e) => setPlatform(e.target.value as ConnectorKey)}
+              style={{ padding: ".5rem .6rem", background: "var(--wp-dark-surface)", border: "1px solid var(--wp-border)", borderRadius: 6, color: "var(--wp-text)" }}>
+              {CONNECTORS.map((c) => <option key={c.key} value={c.key}>{c.title}{c.status === "coming_soon" ? " (soon)" : ""}</option>)}
+            </select>
           </label>
           <button type="submit" data-testid="t-submit" disabled={busy}
             style={{ background: "var(--wp-gold)", color: "var(--wp-dark)", border: "none", borderRadius: 6, padding: ".6rem 1rem", fontWeight: 600, cursor: busy ? "wait" : "pointer" }}>
@@ -143,15 +172,32 @@ export default function ForcefieldTenantsPage() {
       {created ? (
         <GlassPanel testId="t-created" style={{ marginTop: "1.25rem", border: "1px solid var(--wp-gold)" }}>
           <div style={{ color: "var(--wp-gold)", fontWeight: 600 }}>{created.tenant.name} is onboarded.</div>
-          <p style={{ marginTop: ".4rem", color: "var(--wp-text-dim)", fontSize: ".85rem" }}>
-            Copy this now, it is shown once. The token is stored only as a hash and cannot be recovered.
-          </p>
-          <div style={{ marginTop: ".9rem", fontSize: ".8rem", color: "var(--wp-text-dim)" }}>Ingest token</div>
+          <div data-testid="t-connector" style={{ marginTop: ".35rem", fontSize: ".82rem", color: "var(--wp-text)" }}>
+            {created.quickstart.connector.title}
+            <span style={{ color: "var(--wp-text-dim)" }}> — {created.quickstart.connector.description}</span>
+          </div>
+          <ol data-testid="t-steps" style={{ margin: ".6rem 0 0", paddingLeft: "1.1rem", color: "var(--wp-text-dim)", fontSize: ".82rem", display: "grid", gap: 2 }}>
+            {created.quickstart.connector.steps.map((s, i) => <li key={i}>{s}</li>)}
+          </ol>
+          {created.quickstart.connector.managed ? (
+            <p data-testid="t-managed" style={{ marginTop: ".9rem", color: "var(--wp-success, #22c55e)", fontSize: ".85rem" }}>
+              Nothing to install: we host this site, so protection is already wired in. Turn it on from the console.
+            </p>
+          ) : null}
+          <div style={{ marginTop: ".9rem", fontSize: ".8rem", color: "var(--wp-text-dim)" }}>Site key (shown once, stored only as a hash)</div>
           <pre data-testid="t-token" style={{ marginTop: 4, padding: ".6rem .75rem", background: "var(--wp-dark-surface)", border: "1px solid var(--wp-border)", borderRadius: 6, color: "var(--wp-text)", overflowX: "auto" }}>{created.token}</pre>
-          <div style={{ marginTop: ".9rem", fontSize: ".8rem", color: "var(--wp-text-dim)" }}>Cloudflare Worker env (any site)</div>
-          <pre style={{ marginTop: 4, padding: ".6rem .75rem", background: "var(--wp-dark-surface)", border: "1px solid var(--wp-border)", borderRadius: 6, color: "var(--wp-text)", overflowX: "auto", fontSize: ".78rem" }}>{envBlock(created.quickstart.cloudflareEnv)}</pre>
-          <div style={{ marginTop: ".9rem", fontSize: ".8rem", color: "var(--wp-text-dim)" }}>Next.js middleware</div>
-          <pre style={{ marginTop: 4, padding: ".6rem .75rem", background: "var(--wp-dark-surface)", border: "1px solid var(--wp-border)", borderRadius: 6, color: "var(--wp-text)", overflowX: "auto", fontSize: ".78rem" }}>{created.quickstart.nextSnippet + "\n\n" + envBlock(created.quickstart.nextEnv)}</pre>
+          {created.quickstart.connector.emits.cloudflare ? (
+            <>
+              <div style={{ marginTop: ".9rem", fontSize: ".8rem", color: "var(--wp-text-dim)" }}>Cloudflare Worker env</div>
+              <pre data-testid="t-cf-env" style={{ marginTop: 4, padding: ".6rem .75rem", background: "var(--wp-dark-surface)", border: "1px solid var(--wp-border)", borderRadius: 6, color: "var(--wp-text)", overflowX: "auto", fontSize: ".78rem" }}>{envBlock(created.quickstart.cloudflareEnv)}</pre>
+            </>
+          ) : null}
+          {created.quickstart.connector.emits.next ? (
+            <>
+              <div style={{ marginTop: ".9rem", fontSize: ".8rem", color: "var(--wp-text-dim)" }}>Next.js middleware</div>
+              <pre data-testid="t-next-env" style={{ marginTop: 4, padding: ".6rem .75rem", background: "var(--wp-dark-surface)", border: "1px solid var(--wp-border)", borderRadius: 6, color: "var(--wp-text)", overflowX: "auto", fontSize: ".78rem" }}>{created.quickstart.nextSnippet + "\n\n" + envBlock(created.quickstart.nextEnv)}</pre>
+            </>
+          ) : null}
         </GlassPanel>
       ) : null}
 
@@ -172,13 +218,20 @@ export default function ForcefieldTenantsPage() {
         ) : (
           <table data-testid="t-list" style={{ width: "100%", borderCollapse: "collapse", fontSize: ".85rem" }}>
             <thead><tr style={{ textAlign: "left", color: "var(--wp-text-dim)" }}>
-              <th style={{ padding: ".4rem .5rem" }}>Client</th><th style={{ padding: ".4rem .5rem" }}>Site</th><th style={{ padding: ".4rem .5rem" }}>Status</th><th style={{ padding: ".4rem .5rem" }}>Plan</th><th style={{ padding: ".4rem .5rem" }}>Onboarded</th><th style={{ padding: ".4rem .5rem" }}></th>
+              <th style={{ padding: ".4rem .5rem" }}>Client</th><th style={{ padding: ".4rem .5rem" }}>Site</th><th style={{ padding: ".4rem .5rem" }}>Platform</th><th style={{ padding: ".4rem .5rem" }}>Status</th><th style={{ padding: ".4rem .5rem" }}>Plan</th><th style={{ padding: ".4rem .5rem" }}>Onboarded</th><th style={{ padding: ".4rem .5rem" }}></th>
             </tr></thead>
             <tbody>
               {tenants.map((t) => (
                 <tr key={t.id} data-testid={`tn-row-${t.id}`} style={{ borderTop: "1px solid var(--wp-border)", color: "var(--wp-text)" }}>
                   <td style={{ padding: ".4rem .5rem" }}>{t.name}</td>
                   <td style={{ padding: ".4rem .5rem" }}>{t.siteLabel}</td>
+                  <td style={{ padding: ".4rem .5rem" }}>
+                    <select data-testid={`tn-platform-${t.id}`} value={t.platform ?? "generic"} disabled={mgmtBusy === t.id}
+                      onChange={(e) => changePlatform(t, e.target.value as ConnectorKey)}
+                      style={{ background: "var(--wp-dark-surface)", color: "var(--wp-text)", border: "1px solid var(--wp-border)", borderRadius: 6, padding: ".2rem .3rem", fontSize: ".8rem" }}>
+                      {CONNECTORS.map((c) => <option key={c.key} value={c.key}>{c.title}</option>)}
+                    </select>
+                  </td>
                   <td style={{ padding: ".4rem .5rem" }}>{t.status}</td>
                   <td style={{ padding: ".4rem .5rem" }}>
                     <select data-testid={`tn-plan-${t.id}`} value={t.plan ?? "none"} disabled={mgmtBusy === t.id}

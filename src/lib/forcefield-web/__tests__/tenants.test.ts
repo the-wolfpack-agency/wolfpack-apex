@@ -133,3 +133,50 @@ describe("shared-intel opt-out: setTenantSharesIntel", () => {
     expect(await setTenantSharesIntel("x", true, jest.fn().mockRejectedValueOnce(new Error("db")))).toBe(false);
   });
 })
+
+describe("connector platform", () => {
+  it("createForcefieldTenant persists a valid platform and surfaces it on the tenant", async () => {
+    let writtenPlatform = "";
+    const q: TenantQuery = async (sql, params) => {
+      expect(sql).toContain("platform");
+      writtenPlatform = (params as string[])[3];
+      return [{ ...ROW, platform: "vercel" }] as never;
+    };
+    const res = await createForcefieldTenant({ name: "Acme", siteLabel: "acme", platform: "vercel" }, q);
+    expect(writtenPlatform).toBe("vercel");
+    expect(res!.tenant.platform).toBe("vercel");
+  });
+
+  it("falls back to the generic shim for a missing or unknown platform (never writes a raw untrusted value)", async () => {
+    const seen: string[] = [];
+    const q: TenantQuery = async (_sql, params) => { seen.push((params as string[])[3]); return [{ ...ROW, platform: "generic" }] as never; };
+    await createForcefieldTenant({ name: "Acme", siteLabel: "acme" }, q);
+    await createForcefieldTenant({ name: "Acme", siteLabel: "acme", platform: "not-a-platform" }, q);
+    expect(seen).toEqual(["generic", "generic"]);
+  });
+
+  it("listForcefieldTenants selects platform and maps a legacy/null platform to generic", async () => {
+    const q: TenantQuery = async () => [
+      { ...ROW, id: "a", platform: "cloudflare" },
+      { ...ROW, id: "b", platform: null },
+    ] as never;
+    const rows = await listForcefieldTenants(q);
+    expect(rows.find((t) => t.id === "a")!.platform).toBe("cloudflare");
+    expect(rows.find((t) => t.id === "b")!.platform).toBe("generic");
+  });
+
+  it("setTenantPlatform writes a valid key, rejects an invalid one without a write, and never throws", async () => {
+    const { setTenantPlatform } = await import("../tenants");
+    const q = jest.fn().mockResolvedValueOnce([{ id: "t1" }]);
+    expect(await setTenantPlatform("t1", "cloudflare", q)).toBe(true);
+    expect(q.mock.calls[0][0]).toMatch(/UPDATE forcefield_tenants SET platform/);
+    expect(q.mock.calls[0][1]).toEqual(["t1", "cloudflare"]);
+    // invalid key never reaches the DB
+    const q2 = jest.fn();
+    expect(await setTenantPlatform("t1", "aws" as never, q2)).toBe(false);
+    expect(q2).not.toHaveBeenCalled();
+    // unknown id + db error both return false
+    expect(await setTenantPlatform("x", "vercel", jest.fn().mockResolvedValueOnce([]))).toBe(false);
+    expect(await setTenantPlatform("x", "vercel", jest.fn().mockRejectedValueOnce(new Error("db")))).toBe(false);
+  });
+})

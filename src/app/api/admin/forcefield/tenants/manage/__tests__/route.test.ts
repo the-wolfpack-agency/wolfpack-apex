@@ -11,6 +11,7 @@ import { NextRequest } from "next/server";
 const mockRequireCapability = jest.fn();
 const mockSetStatus = jest.fn();
 const mockRotate = jest.fn();
+const mockSetPlatform = jest.fn();
 const mockRecordAudit = jest.fn();
 const mockTrack = jest.fn();
 
@@ -19,7 +20,9 @@ jest.mock("@/lib/forcefield-web/tenants", () => ({
   setTenantStatus: (...a: unknown[]) => mockSetStatus(...a),
   rotateTenantToken: (...a: unknown[]) => mockRotate(...a),
   setTenantSharesIntel: jest.fn(),
+  setTenantPlatform: (...a: unknown[]) => mockSetPlatform(...a),
 }));
+// connectors is pure (no deps); use the REAL isConnectorKey so validation is genuine.
 jest.mock("@/lib/audit-log", () => ({
   recordAudit: (...a: unknown[]) => mockRecordAudit(...a),
   extractRequestMetadata: () => ({ ipAddress: "1.2.3.4", userAgent: "jest", requestId: "r1" }),
@@ -102,5 +105,38 @@ describe("intel opt-out actions", () => {
     const mod = jest.requireMock("@/lib/forcefield-web/tenants") as { setTenantSharesIntel: jest.Mock };
     mod.setTenantSharesIntel.mockResolvedValueOnce(true);
     expect((await (await POST(post({ id: "t1", action: "intel_on" }))).json()).sharesIntel).toBe(true);
+  });
+})
+
+describe("set_platform action", () => {
+  it("sets a valid platform -> 200, audited, token never involved", async () => {
+    mockRequireCapability.mockResolvedValueOnce(OK);
+    mockSetPlatform.mockResolvedValueOnce(true);
+    const res = await POST(post({ id: "t1", action: "set_platform", platform: "vercel" }));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, platform: "vercel" });
+    expect(mockSetPlatform).toHaveBeenCalledWith("t1", "vercel");
+    expect(mockRecordAudit.mock.calls[0][0].action).toBe("forcefield.tenant_platform_set");
+    expect(mockTrack).toHaveBeenCalledWith("forcefield.tenant_platform_set", "op-1", "admin", { tenantId: "t1", platform: "vercel" });
+  });
+
+  it("rejects an unknown platform with 400 and never touches the DB", async () => {
+    mockRequireCapability.mockResolvedValueOnce(OK);
+    const res = await POST(post({ id: "t1", action: "set_platform", platform: "aws" }));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("invalid_platform");
+    expect(mockSetPlatform).not.toHaveBeenCalled();
+  });
+
+  it("missing platform -> 400 invalid_platform", async () => {
+    mockRequireCapability.mockResolvedValueOnce(OK);
+    expect((await POST(post({ id: "t1", action: "set_platform" }))).status).toBe(400);
+    expect(mockSetPlatform).not.toHaveBeenCalled();
+  });
+
+  it("404 when the tenant does not exist", async () => {
+    mockRequireCapability.mockResolvedValueOnce(OK);
+    mockSetPlatform.mockResolvedValueOnce(false);
+    expect((await POST(post({ id: "nope", action: "set_platform", platform: "hosted" }))).status).toBe(404);
   });
 })
