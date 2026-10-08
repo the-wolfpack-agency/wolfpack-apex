@@ -8,11 +8,13 @@ const mockClient = jest.fn();
 const mockGetBranchHead = jest.fn();
 const mockCountFix = jest.fn();
 const mockListChanged = jest.fn();
+const mockTrigger = jest.fn();
 jest.mock("@/lib/github-client", () => ({
   workspaceGithubClient: (...a: unknown[]) => mockClient(...a),
   getBranchHead: (...a: unknown[]) => mockGetBranchHead(...a),
   countBranchCommitsMatching: (...a: unknown[]) => mockCountFix(...a),
   listChangedFiles: (...a: unknown[]) => mockListChanged(...a),
+  triggerWorkflow: (...a: unknown[]) => mockTrigger(...a),
 }));
 const mockCi = jest.fn();
 const mockAttr = jest.fn();
@@ -50,6 +52,7 @@ beforeEach(() => {
   mockGetBranchHead.mockResolvedValue("sha");
   mockCountFix.mockResolvedValue(0);
   mockListChanged.mockResolvedValue([]);
+  mockTrigger.mockResolvedValue({ run_id: null });
   mockAttr.mockResolvedValue({ introduced: ["agenticqa-full-pipeline"], preexisting: [], indeterminate: [], fixed: [], baselineKnown: true, baselineHealthy: false, clean: false });
   mockGather.mockResolvedValue({ detail: "FAIL x\nExpected 5 Received NaN", files: [] });
   mockParse.mockReturnValue([{ path: "src/x.ts", content: "export const x = 1;" }]);
@@ -146,3 +149,23 @@ it("require_human: model produced no usable changes", async () => {
   expect(r.reason).toMatch(/no usable fix/i);
   expect(mockCommit).not.toHaveBeenCalled();
 });
+
+it("auto_fix (no model): a lint failure with a deterministic workflow dispatches it instead of the model", async () => {
+  const orig = process.env.DETERMINISTIC_FIX_WORKFLOW;
+  process.env.DETERMINISTIC_FIX_WORKFLOW = "factory-deterministic-fix.yml";
+  try {
+    mockCi.mockResolvedValue(red(["lint"]));
+    mockAttr.mockResolvedValue({ introduced: ["lint"], preexisting: [], indeterminate: [], fixed: [], baselineKnown: true, baselineHealthy: false, clean: false });
+    mockGather.mockResolvedValue({ detail: "eslint: 'x' is assigned a value but never used @typescript-eslint/no-unused-vars", files: [] });
+    const r = await runGate(ciAutofixGate, input, ctx());
+    expect(r.verdict).toBe("auto_fix");
+    expect(r.reason).toMatch(/deterministic fixer/i);
+    expect(mockTrigger).toHaveBeenCalledWith(expect.anything(), "o/r", "factory-deterministic-fix.yml", "factory/x");
+    expect(agent.complete).not.toHaveBeenCalled(); // the model was NOT used
+    expect(mockCommit).not.toHaveBeenCalled();      // the workflow commits, not us
+    expect(r.transparency.modelInvoked).toBeNull();
+  } finally {
+    if (orig === undefined) delete process.env.DETERMINISTIC_FIX_WORKFLOW; else process.env.DETERMINISTIC_FIX_WORKFLOW = orig;
+  }
+});
+
