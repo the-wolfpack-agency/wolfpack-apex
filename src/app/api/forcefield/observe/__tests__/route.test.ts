@@ -10,6 +10,7 @@ const getBlockedFingerprints = jest.fn();
 const getDatacenterPrefixes = jest.fn();
 const getSiteBlockEntitlement = jest.fn();
 const trackEvent = jest.fn();
+const resolveTenantByToken = jest.fn();
 
 jest.mock("@/lib/site-analytics", () => ({ recordSiteEvent: (...a: unknown[]) => recordSiteEvent(...a) }));
 jest.mock("@/lib/forcefield/blocked-fingerprints", () => ({ getBlockedFingerprints: (...a: unknown[]) => getBlockedFingerprints(...a) }));
@@ -19,6 +20,7 @@ jest.mock("@/lib/forcefield-web/billing", () => ({
   getSiteBlockEntitlement: (...a: unknown[]) => getSiteBlockEntitlement(...a),
   entitledToBlock: (licensed: boolean | null) => licensed !== false,
 }));
+jest.mock("@/lib/forcefield-web/tenants", () => ({ resolveTenantByToken: (...a: unknown[]) => resolveTenantByToken(...a) }));
 jest.mock("@/lib/analytics", () => ({ trackEvent: (...a: unknown[]) => trackEvent(...a) }));
 
 import { NextRequest } from "next/server";
@@ -32,6 +34,7 @@ beforeEach(() => {
   getDatacenterPrefixes.mockResolvedValue([]);
   recordSiteEvent.mockResolvedValue(undefined);
   getSiteBlockEntitlement.mockResolvedValue(null); // default: unmanaged site -> enforce.
+  resolveTenantByToken.mockResolvedValue(null); // default: a non-secret token resolves to no tenant.
 });
 afterAll(() => { process.env = OLD; });
 
@@ -49,6 +52,32 @@ test("401 + fail-open (allow) on a bad edge token", async () => {
   expect(res.status).toBe(401);
   expect((await res.json()).action).toBe("allow");
   expect(recordSiteEvent).not.toHaveBeenCalled();
+});
+
+describe("per-tenant token auth (self-serve onboarding)", () => {
+  test("accepts a valid tenant token and PINS the site to the tenant (body site ignored)", async () => {
+    resolveTenantByToken.mockResolvedValueOnce({ id: "t1", name: "Acme", siteLabel: "acme", status: "active" });
+    // Token is NOT the shared secret; body claims a different site, which must be ignored.
+    const res = await POST(post({ ...sqlmap, site: "someone-elses-site" }, "ff_tenanttoken"));
+    expect(res.status).toBe(200);
+    expect((await res.json()).action).toBe("block"); // sqlmap still blocks
+    expect(resolveTenantByToken).toHaveBeenCalledWith("ff_tenanttoken");
+    // The enforce-to-paid resolver was asked about the TENANT's site, not the body's.
+    expect(getSiteBlockEntitlement).toHaveBeenCalledWith("acme");
+  });
+
+  test("a token that is neither the secret nor a known tenant -> 401 fail-open, nothing recorded", async () => {
+    resolveTenantByToken.mockResolvedValueOnce(null); // unknown or disabled tenant
+    const res = await POST(post(sqlmap, "ff_bogus"));
+    expect(res.status).toBe(401);
+    expect((await res.json()).action).toBe("allow");
+    expect(recordSiteEvent).not.toHaveBeenCalled();
+  });
+
+  test("the shared secret path never does a tenant lookup", async () => {
+    await POST(post(sqlmap)); // correct secret
+    expect(resolveTenantByToken).not.toHaveBeenCalled();
+  });
 });
 
 test("classifies + RECORDS centrally, and blocks a named attack tool", async () => {

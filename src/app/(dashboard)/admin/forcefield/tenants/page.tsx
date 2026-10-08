@@ -24,7 +24,7 @@ const PLAN_OPTIONS = ["none", "starter", "growth", "scale", "enterprise"] as con
 const CONNECTORS = listForcefieldConnectors();
 interface QuickstartConnector { key: ConnectorKey; title: string; description: string; managed: boolean; emits: { next: boolean; cloudflare: boolean }; steps: string[] }
 interface Quickstart {
-  token: string; ingestUrl: string; rulesetUrl: string;
+  token: string; ingestUrl: string; rulesetUrl: string; observeUrl?: string;
   platform: ConnectorKey; connector: QuickstartConnector;
   cloudflareEnv: Record<string, string>; nextEnv: Record<string, string>; nextSnippet: string;
 }
