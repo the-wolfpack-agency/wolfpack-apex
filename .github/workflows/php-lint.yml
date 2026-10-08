@@ -1,0 +1,30 @@
+name: php-lint
+
+# Syntax-checks the WordPress plugin with real PHP (php -l). The apex repo has no
+# PHP toolchain locally, so this is where the plugin's syntax is actually verified.
+on:
+  pull_request:
+    paths: ["integrations/wordpress/**"]
+  push:
+    branches: [main]
+    paths: ["integrations/wordpress/**"]
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: php -l every plugin file
+        run: |
+          php -v
+          found=0
+          while IFS= read -r f; do
+            found=1
+            echo "linting $f"
+            php -l "$f"
+          done < <(find integrations/wordpress -name '*.php')
+          if [ "$found" = "0" ]; then echo "::error::no PHP files found to lint"; exit 1; fi
