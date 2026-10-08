@@ -95,6 +95,22 @@ it("hosted connector shows 'nothing to install' and hides the env blocks", async
   expect(screen.queryByTestId("t-next-env")).not.toBeInTheDocument();
 });
 
+it("toggles blocking (enforce) from the row, POSTing enforce_on when currently off", async () => {
+  mockFetch.mockReset();
+  mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ tenants: [{ ...CREATED.tenant, enforceEnabled: false }] }) }); // initial list
+  render(<ForcefieldTenantsPage />);
+  const btn = await screen.findByTestId("tn-enforce-t1");
+  expect(btn).toHaveTextContent(/Blocking: off/i);
+  mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true, enforceEnabled: true }) }); // manage
+  mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ tenants: [{ ...CREATED.tenant, enforceEnabled: true }] }) }); // reload
+  fireEvent.click(btn);
+  await waitFor(() => {
+    const call = mockFetch.mock.calls.find((c) => typeof c[0] === "string" && c[0].includes("/manage"));
+    expect(call).toBeTruthy();
+    expect(JSON.parse(call![1].body)).toEqual({ id: "t1", action: "enforce_on" });
+  });
+});
+
 it("changes a tenant's platform from the row, POSTing set_platform", async () => {
   mockFetch.mockReset();
   mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ tenants: [CREATED.tenant] }) }); // initial list

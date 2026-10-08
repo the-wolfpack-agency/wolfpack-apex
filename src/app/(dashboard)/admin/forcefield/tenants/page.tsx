@@ -17,7 +17,7 @@ import { getInstinctUser, fetchWithRefresh, jsonHeaders } from "@/lib/client-aut
 import { GlassPanel, SectionHeader } from "@/components/console";
 import { listForcefieldConnectors, type ConnectorKey } from "@/lib/forcefield-web/connectors";
 
-interface Tenant { id: string; name: string; siteLabel: string; status: string; createdAt: string; platform?: ConnectorKey; plan?: string; subscriptionStatus?: string; sharesIntel?: boolean }
+interface Tenant { id: string; name: string; siteLabel: string; status: string; createdAt: string; platform?: ConnectorKey; plan?: string; subscriptionStatus?: string; sharesIntel?: boolean; enforceEnabled?: boolean }
 const PLAN_OPTIONS = ["none", "starter", "growth", "scale", "enterprise"] as const;
 // The supported connector doors, cataloged once in the registry (also the
 // "works with your system" sales surface). Rendered in the create form + per row.
@@ -81,7 +81,7 @@ export default function ForcefieldTenantsPage() {
 
   // Token lifecycle: kill a leaked token (disable), restore it (enable), or rotate
   // to a brand-new token (shown once). The response to a suspected compromise.
-  async function manage(t: Tenant, action: "disable" | "enable" | "rotate" | "intel_on" | "intel_off") {
+  async function manage(t: Tenant, action: "disable" | "enable" | "rotate" | "intel_on" | "intel_off" | "enforce_on" | "enforce_off") {
     setMgmtBusy(t.id); setError(null); setRotated(null);
     try {
       const res = await fetchWithRefresh("/api/admin/forcefield/tenants/manage", {
@@ -258,8 +258,13 @@ export default function ForcefieldTenantsPage() {
                       style={{ background: "transparent", color: "var(--wp-gold)", border: "1px solid var(--wp-border)", borderRadius: 6, padding: ".3rem .6rem", cursor: "pointer", marginRight: 6 }}>Rotate</button>
                     <button data-testid={`tn-intel-${t.id}`} onClick={() => manage(t, t.sharesIntel === false ? "intel_on" : "intel_off")} disabled={mgmtBusy === t.id}
                       title="Shared threat-intel network participation (opaque attacker fingerprints only)"
-                      style={{ background: "transparent", color: "var(--wp-text-dim)", border: "1px solid var(--wp-border)", borderRadius: 6, padding: ".3rem .6rem", cursor: "pointer" }}>
+                      style={{ background: "transparent", color: "var(--wp-text-dim)", border: "1px solid var(--wp-border)", borderRadius: 6, padding: ".3rem .6rem", cursor: "pointer", marginRight: 6 }}>
                       {t.sharesIntel === false ? "Intel: off" : "Intel: on"}
+                    </button>
+                    <button data-testid={`tn-enforce-${t.id}`} onClick={() => manage(t, t.enforceEnabled ? "enforce_off" : "enforce_on")} disabled={mgmtBusy === t.id}
+                      title="Turn blocking on/off from the console (watch-first). Off = record only; On = turn away proven-hostile requests."
+                      style={{ background: "transparent", color: t.enforceEnabled ? "var(--wp-success, #22c55e)" : "var(--wp-text-dim)", border: "1px solid var(--wp-border)", borderRadius: 6, padding: ".3rem .6rem", cursor: "pointer" }}>
+                      {t.enforceEnabled ? "Blocking: on" : "Blocking: off"}
                     </button>
                   </td>
                 </tr>

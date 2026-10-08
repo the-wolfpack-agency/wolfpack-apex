@@ -56,7 +56,8 @@ test("401 + fail-open (allow) on a bad edge token", async () => {
 
 describe("per-tenant token auth (self-serve onboarding)", () => {
   test("accepts a valid tenant token and PINS the site to the tenant (body site ignored)", async () => {
-    resolveTenantByToken.mockResolvedValueOnce({ id: "t1", name: "Acme", siteLabel: "acme", status: "active" });
+    // enforce ON so the managed tenant actually blocks (see the enforce-gate tests below).
+    resolveTenantByToken.mockResolvedValueOnce({ id: "t1", name: "Acme", siteLabel: "acme", status: "active", sharesIntel: true, enforceEnabled: true });
     // Token is NOT the shared secret; body claims a different site, which must be ignored.
     const res = await POST(post({ ...sqlmap, site: "someone-elses-site" }, "ff_tenanttoken"));
     expect(res.status).toBe(200);
@@ -77,6 +78,41 @@ describe("per-tenant token auth (self-serve onboarding)", () => {
   test("the shared secret path never does a tenant lookup", async () => {
     await POST(post(sqlmap)); // correct secret
     expect(resolveTenantByToken).not.toHaveBeenCalled();
+  });
+});
+
+describe("per-tenant enforce toggle (watch-first console control)", () => {
+  test("a managed tenant with enforce OFF withholds the block (watch), keeps the event", async () => {
+    resolveTenantByToken.mockResolvedValueOnce({ id: "t1", name: "Acme", siteLabel: "acme", status: "active", sharesIntel: true, enforceEnabled: false });
+    const res = await POST(post(sqlmap, "ff_tenanttoken"));
+    const body = await res.json();
+    expect(body.action).toBe("allow");   // withheld: console toggle off
+    expect(body.wouldBlock).toBe(true);   // but the engine proved it hostile
+    expect(recordSiteEvent).toHaveBeenCalledTimes(1); // still recorded
+    expect(trackEvent).toHaveBeenCalledWith("forcefield.block_withheld_watch", "site:acme", "forcefield", expect.objectContaining({ site: "acme" }));
+  });
+
+  test("a managed tenant with enforce ON blocks", async () => {
+    resolveTenantByToken.mockResolvedValueOnce({ id: "t1", name: "Acme", siteLabel: "acme", status: "active", sharesIntel: true, enforceEnabled: true });
+    expect((await (await POST(post(sqlmap, "ff_tenanttoken"))).json()).action).toBe("block");
+  });
+
+  test("a first-party (shared-secret) site is unaffected by the tenant toggle - still blocks", async () => {
+    expect((await (await POST(post(sqlmap))).json()).action).toBe("block");
+  });
+});
+
+describe("shares_intel opt-out (does not CONSUME the shared blocklist)", () => {
+  test("an opted-out tenant never fetches the distributed blocklist", async () => {
+    resolveTenantByToken.mockResolvedValueOnce({ id: "t1", name: "Acme", siteLabel: "acme", status: "active", sharesIntel: false, enforceEnabled: true });
+    await POST(post({ site: "acme", path: "/", method: "GET", userAgent: "Mozilla/5.0", headerNames: ["host"] }, "ff_tenanttoken"));
+    expect(getBlockedFingerprints).not.toHaveBeenCalled();
+  });
+
+  test("a sharing tenant DOES fetch the distributed blocklist", async () => {
+    resolveTenantByToken.mockResolvedValueOnce({ id: "t1", name: "Acme", siteLabel: "acme", status: "active", sharesIntel: true, enforceEnabled: true });
+    await POST(post({ site: "acme", path: "/", method: "GET", userAgent: "Mozilla/5.0", headerNames: ["host"] }, "ff_tenanttoken"));
+    expect(getBlockedFingerprints).toHaveBeenCalled();
   });
 });
 
