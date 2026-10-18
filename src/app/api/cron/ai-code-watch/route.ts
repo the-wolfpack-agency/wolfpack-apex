@@ -18,6 +18,8 @@ import { resolveEntitlement } from "@/lib/tenancy/entitlements";
 import { driveCiFixStep } from "@/lib/ai-code/ci-fix-runner";
 import { listAllEnabledWatched, mergeWatchTargets } from "@/lib/ai-code/watched-repos";
 import { runAiCodeWatch, type WatchTarget } from "@/lib/ai-code/watch";
+import { isParked, parkPr } from "@/lib/ai-code/watch-parking";
+import { trackEvent } from "@/lib/analytics";
 
 function isAuthorizedCron(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET;
@@ -72,8 +74,17 @@ async function runWatch(): Promise<NextResponse> {
         workspaceId: t.workspaceId || undefined,
         actor: SYSTEM_ACTOR,
       });
-      const decision = (body.decision ?? {}) as { action?: string };
-      return { action: decision.action, terminal: body.terminal as boolean | undefined };
+      const decision = (body.decision ?? {}) as { action?: string; reason?: string };
+      return { action: decision.action, terminal: body.terminal as boolean | undefined, reason: decision.reason };
+    },
+    // A dead end is remembered at the PR's head commit, so the model is not asked
+    // the same question every tick (see watch-parking.ts / migration 290).
+    isParked: (t, pr) => isParked(t.workspaceId || "default", t.repo, pr.number, pr.headSha),
+    park: async (t, pr, r) => {
+      await parkPr(t.workspaceId || "default", t.repo, pr.number, pr.headSha, r.action ?? "escalate_human", r.reason);
+      trackEvent("ai_code.ci_fix_parked", SYSTEM_ACTOR.userId, SYSTEM_ACTOR.role, {
+        workspace_id: t.workspaceId || "default", repo: t.repo, pr: pr.number, head_sha: pr.headSha, reason: r.reason ?? "",
+      });
     },
   });
   return NextResponse.json({ summary });

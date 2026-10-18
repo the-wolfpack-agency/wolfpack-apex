@@ -693,6 +693,10 @@ export type InstinctEventType =
   //   needed. Aggregating the escalations by class IS the automation backlog that
   //   dogfooding surfaces - the data that tells us what to automate next.
   | "ai_code.ci_fix_resolved"
+  // ai_code.ci_fix_parked { workspace_id, repo, pr, head_sha, reason } - the watcher
+  //   parked a PR at its head commit after a terminal escalate_human, so it stops
+  //   re-asking the model until the PR changes. Once per park, not per tick.
+  | "ai_code.ci_fix_parked"
   // ai_code.watched_repo_set { workspace_id, repo, enabled } - a workspace enrolled,
   // paused, or removed a repo from the autonomous watcher (SaaS config, per workspace).
   | "ai_code.watched_repo_set"

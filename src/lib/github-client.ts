@@ -325,6 +325,8 @@ export interface OpenPullRequestRef {
   number: number;
   headRef: string;
   baseRef: string;
+  /** The PR's head commit (the watcher parks a terminal outcome at this commit). */
+  headSha: string;
   title: string;
   /** Label names on the PR (drives the watcher's `ci-autofix` opt-in). */
   labels: string[];
@@ -408,7 +410,7 @@ export async function mergePullRequest(
 }
 
 export async function listOpenPullRequests(client: GithubClient, repoFullName: string): Promise<OpenPullRequestRef[]> {
-  const raw = await gh<Array<{ number: number; title: string; head: { ref: string }; base: { ref: string }; labels?: Array<{ name: string }> }>>(
+  const raw = await gh<Array<{ number: number; title: string; head: { ref: string; sha: string }; base: { ref: string }; labels?: Array<{ name: string }> }>>(
     client,
     "GET",
     `/repos/${repoFullName}/pulls?state=open&per_page=100`,
@@ -417,6 +419,7 @@ export async function listOpenPullRequests(client: GithubClient, repoFullName: s
     number: p.number,
     headRef: p.head.ref,
     baseRef: p.base.ref,
+    headSha: p.head.sha,
     title: p.title,
     labels: (p.labels ?? []).map((l) => l.name),
   }));
