@@ -79,3 +79,24 @@ export async function ghPaginate<T>(path: string, itemsKey?: string): Promise<Gh
     return { ok: false, status: null, message: "paginated response was not JSON" };
   }
 }
+
+/**
+ * GET a binary body (an Actions artifact zip) straight to `destFile`. gh
+ * follows the 302 to the signed blob URL; stdout goes to the file, so the bytes
+ * never pass through a JS string. Still a GET: no -X, no body.
+ */
+export function ghDownload(path: string, destFile: string): Promise<GhResult<string>> {
+  return new Promise((resolve) => {
+    execFile(
+      "sh",
+      ["-c", 'gh api "$1" > "$2"', "sh", path, destFile],
+      { maxBuffer: MAX_BUFFER, env: process.env },
+      (err, stdout, stderr) => {
+        if (err) {
+          const msg = String(stderr || err.message);
+          resolve({ ok: false, status: parseGhStatus(msg), message: msg.trim().slice(0, 300) });
+        } else resolve({ ok: true, data: destFile });
+      },
+    );
+  });
+}
