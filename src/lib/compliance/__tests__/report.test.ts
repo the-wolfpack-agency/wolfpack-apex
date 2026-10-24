@@ -7,40 +7,10 @@
 import { generateReport } from "../report";
 import { FRAMEWORKS, ALL_FRAMEWORKS } from "../frameworks";
 import type { EvidenceInputs } from "../types";
+import { HEALTHY, COLD } from "./evidence-fixtures";
 
-const healthy: EvidenceInputs = {
-  auditChainValid: true,
-  auditEntries: 1200,
-  gateDecisions: 5000,
-  gateWouldBlock: 80,
-  enforceCapabilities: 6,
-  redteamPassRate: 1,
-  redteamRecent: true,
-  aiSurfacesTotal: 40,
-  ungovernedAiSurfaces: 0,
-  signingActive: true,
-  signingAlgorithm: "ES256",
-  secretsEncryptedAtRest: true,
-  tenantIsolationEnforced: true,
-  tenantScopedTables: 44,
-};
-
-const cold: EvidenceInputs = {
-  auditChainValid: false,
-  auditEntries: 0,
-  gateDecisions: 0,
-  gateWouldBlock: 0,
-  enforceCapabilities: 0,
-  redteamPassRate: null,
-  redteamRecent: false,
-  aiSurfacesTotal: 0,
-  ungovernedAiSurfaces: 0,
-  signingActive: false,
-  signingAlgorithm: "none",
-  secretsEncryptedAtRest: false,
-  tenantIsolationEnforced: false,
-  tenantScopedTables: 0,
-};
+const healthy: EvidenceInputs = HEALTHY;
+const cold: EvidenceInputs = COLD;
 
 test("a healthy system reports high coverage across every framework", () => {
   for (const fw of ALL_FRAMEWORKS) {

@@ -16,6 +16,10 @@ import { summarizeSurfaces } from "@/lib/ai-surface/store";
 import { getSigner } from "@/lib/ogiam/signing";
 import { encryptSecret, decryptSecret } from "@/lib/crypto/secret-storage";
 import isolationBaseline from "@/lib/db/__generated__/tenant-isolation-baseline.json";
+import { hasDatabase, query } from "@/lib/db";
+import { RED_TEAM_SUITE } from "@/lib/ai-redteam/suite";
+import { collectPlatformEvidence, dbRlsEnforced, type PlatformEvidence } from "./platform-evidence";
+import type { EvidenceExecutor } from "./evidence-window";
 import type { EvidenceInputs } from "./types";
 
 const RECENT_MS = 7 * 24 * 60 * 60 * 1000;
@@ -77,12 +81,23 @@ export function isolationPosture(): { tenantIsolationEnforced: boolean; tenantSc
   };
 }
 
-export async function collectEvidence(workspaceId: string, nowMs = Date.now()): Promise<EvidenceInputs> {
+/** The real executor (throws on failure), or null without a database. */
+function defaultExecutor(): EvidenceExecutor | null {
+  if (!hasDatabase()) return null;
+  return async (sql, params) => query(sql, params);
+}
+
+export async function collectEvidence(
+  workspaceId: string,
+  nowMs = Date.now(),
+  exec: EvidenceExecutor | null = defaultExecutor(),
+): Promise<EvidenceInputs> {
+  const platformPromise: Promise<PlatformEvidence | null> = collectPlatformEvidence(workspaceId, exec, nowMs).catch(() => null);
   const [chain, decisions, posture, runs, surfaces] = await Promise.all([
     safe(() => verifyChain(), { valid: false, checkedCount: 0 } as { valid: boolean; checkedCount: number }),
     safe(() => summarizeDecisions(workspaceId), { total: 0, would_block: 0, by_tier: {}, by_outcome: {} }),
     safe(() => listEnforcementPolicy(workspaceId), [] as Array<{ mode: string }>),
-    safe(() => listRuns(workspaceId, 1), [] as Array<{ passRate: number; createdAt: string }>),
+    safe(() => listRuns(workspaceId, 1), [] as Array<{ passRate: number; createdAt: string; attacksRun?: number }>),
     safe(() => summarizeSurfaces(workspaceId), { total: 0, ungoverned: 0, byKind: {}, byProvider: {}, byRisk: {} }),
   ]);
 
@@ -91,6 +106,17 @@ export async function collectEvidence(workspaceId: string, nowMs = Date.now()): 
 
   const crypto = cryptoPosture();
   const isolation = isolationPosture();
+  const platform = await platformPromise;
+
+  const gate = platform?.gate ?? null;
+  const signingProven = platform?.signedCheckpoints.state === "fresh";
+  const storedOauthPlaintext = platform?.oauthTokens ? platform.oauthTokens.plaintext : null;
+  const storedConnectorPlaintext = platform?.connectorCredentials ? platform.connectorCredentials.plaintext : null;
+  const kek = platform?.kekSource ?? "dev-literal";
+  // Encryption counts only when the library works, the key is real, and nothing
+  // stored is plaintext. Unknown (null) stored counts are NOT a pass.
+  const secretsEncryptedAtRest =
+    crypto.secretsEncryptedAtRest && kek !== "dev-literal" && storedOauthPlaintext === 0 && storedConnectorPlaintext === 0;
 
   return {
     auditChainValid: chain.valid && chain.checkedCount > 0,
@@ -102,10 +128,25 @@ export async function collectEvidence(workspaceId: string, nowMs = Date.now()): 
     redteamRecent,
     aiSurfacesTotal: surfaces.total,
     ungovernedAiSurfaces: surfaces.ungoverned,
-    signingActive: crypto.signingActive,
+    signingActive: crypto.signingActive && signingProven,
     signingAlgorithm: crypto.signingAlgorithm,
-    secretsEncryptedAtRest: crypto.secretsEncryptedAtRest,
+    secretsEncryptedAtRest,
     tenantIsolationEnforced: isolation.tenantIsolationEnforced,
     tenantScopedTables: isolation.tenantScopedTables,
+    gateWindowMeasured: gate !== null,
+    gateWindowDays: gate?.windowDays ?? 0,
+    gateDecisionsWindow: gate?.decisions ?? 0,
+    gateEnforcedWindow: gate?.enforced ?? 0,
+    gateEnforcedBlocksWindow: gate?.enforcedBlocks ?? 0,
+    gateEnforcedEscalationsWindow: gate?.enforcedEscalations ?? 0,
+    gateWouldBlockWindow: gate?.wouldBlock ?? 0,
+    redteamKind: latest ? RED_TEAM_SUITE.kind : null,
+    redteamCases: latest ? latest.attacksRun ?? RED_TEAM_SUITE.cases : null,
+    redteamLastRunAt: latest ? latest.createdAt : null,
+    signingProven,
+    kekSource: kek,
+    storedOauthPlaintext,
+    storedConnectorPlaintext,
+    dbRlsEnforced: platform ? dbRlsEnforced(platform.rls) : null,
   };
 }
