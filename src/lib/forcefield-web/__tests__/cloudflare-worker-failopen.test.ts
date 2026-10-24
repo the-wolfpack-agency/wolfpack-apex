@@ -10,7 +10,7 @@
  *
  * Drives the real Worker entrypoint with fetch mocked for the ruleset + origin.
  */
-import { forcefieldWorker } from "../adapters/cloudflare-worker";
+import { forcefieldWorker, createForcefieldWorker } from "../adapters/cloudflare-worker";
 import { DEFAULT_RULESET } from "../ruleset";
 
 const ORIGIN_BODY = "ORIGIN_SERVED";
@@ -74,4 +74,23 @@ it("a benign request is forwarded even with enforce on", async () => {
   const res = await forcefieldWorker.fetch(benignReq(), env("on"), ctx);
   expect(res.status).toBe(200);
   expect(await res.text()).toBe(ORIGIN_BODY);
+});
+
+it("SIGNED-IN: a site-attested signed-in user is never blocked, even on a hostile request with enforce on", async () => {
+  mockFetch();
+  const worker = createForcefieldWorker({ platform: "wordpress", isAuthenticated: () => true });
+  const res = await worker.fetch(trapReq(), env("on"), ctx);
+  expect(res.status).toBe(200);
+  expect(await res.text()).toBe(ORIGIN_BODY);
+});
+
+it("FAIL-OPEN: an attestation hook that throws treats the request as anonymous and never breaks the site", async () => {
+  mockFetch();
+  const worker = createForcefieldWorker({ isAuthenticated: () => { throw new Error("session store down"); } });
+  const benign = await worker.fetch(benignReq(), env("on"), ctx);
+  expect(benign.status).toBe(200);
+  expect(await benign.text()).toBe(ORIGIN_BODY);
+  // anonymous, so a proven-hostile request is still blocked
+  const hostile = await worker.fetch(trapReq(), env("on"), ctx);
+  expect(hostile.status).toBe(403);
 });
