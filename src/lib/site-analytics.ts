@@ -43,6 +43,23 @@ export function isSiteEventType(v: unknown): v is SiteEventType {
   return typeof v === "string" && (SITE_EVENT_TYPES as readonly string[]).includes(v);
 }
 
+/** The event types that are hostile TRADECRAFT on their own (probed a sensitive
+ *  path, sent a payload, tripped a decoy, hit a form honeypot / inhuman submit).
+ *  One list, used by every hostile count on the board, so the headline and the
+ *  origin map can never disagree about what "hostile" means. A high-rate burst
+ *  is deliberately NOT here: rate alone is report-only (a shared NAT is bursty). */
+export const HOSTILE_EVENT_TYPES: readonly SiteEventType[] = [
+  "site.agent_probed_sensitive",
+  "site.agent_payload_attack",
+  "site.agent_trap_tripped",
+  "site.agent_form_honeypot",
+  "site.agent_form_too_fast",
+];
+const HOSTILE_IN = HOSTILE_EVENT_TYPES.map((t) => `'${t}'`).join(",");
+/** A row is hostile when its type is hostile tradecraft OR the engine proved it
+ *  is impersonating a known agent (props.impersonating). */
+const HOSTILE_ROW = `(event_type IN (${HOSTILE_IN}) OR props->>'impersonating' IS NOT NULL OR props->>'agent_verification' = 'impersonation')`;
+
 export interface RecordSiteEventInput {
   eventType: SiteEventType;
   /** Page path, e.g. "/ogiam-iam". Trimmed + length-capped by the caller. */
@@ -114,6 +131,10 @@ export interface SiteAnalyticsSummary {
     flagged: number;
     trapped: number;
     blocked: number;
+    /* Requests enforcement WOULD have turned away, but watch mode or the plan
+       held the block back (props.would_block). Shown next to blocked so a
+       watch-mode site sees exactly what turning protection on would do. */
+    wouldBlock: number;
     /* The truthful threat headline: DISTINCT operators that exhibited hostile
        tradecraft (probe / decoy trip / payload / honeypot). "flagged" is a weak
        heuristic (unidentified automation) and is mostly benign; hostileOperators
@@ -170,6 +191,50 @@ export interface SiteAnalyticsSummary {
      in the window (from forcefield.verdict_false_positive learning events), so a
      "confirmed hostile" board's error rate is visible, never taken on faith. */
   verdictFeedback: { falsePositives: number };
+  /* What the edge engine did and saw, from the enforcement-era props: blocks vs
+     withheld blocks by rule, fast-agent bursts, claimed-vs-verified agent
+     identity, the probe labels the engine matched, and the network (ASN) the
+     agent traffic came from when the site runs behind Cloudflare. */
+  defense: DefenseSignals;
+}
+
+export interface DefenseSignals {
+  enforcement: {
+    blocked: number;
+    wouldBlock: number;
+    /* By the rule that fired (props.reason_kind: payload, decoy, attack_tool, ...). */
+    byReason: Array<{ reason: string; blocked: number; wouldBlock: number }>;
+  };
+  highRate: {
+    bursts: number;
+    operators: number;
+    /* Highest request count seen in one burst window, and that window's length. */
+    peakRate: number;
+    windowSeconds: number | null;
+    /* Bursts counted at the ingest for vendored sites (props.source = "ingest"). */
+    fromIngest: number;
+  };
+  identity: {
+    verified: number;
+    impersonation: number;
+    unverifiable: number;
+    signed: number;
+    /* Per claimed agent id: how often its identity held up. */
+    byAgent: Array<{ agent: string; verified: number; impersonation: number; unverifiable: number; signed: number }>;
+  };
+  probes: Array<{ probe: string; count: number }>;
+  networks: Array<{ asn: string; org: string | null; count: number; hostile: number }>;
+}
+
+const EMPTY_DEFENSE: DefenseSignals = {
+  enforcement: { blocked: 0, wouldBlock: 0, byReason: [] },
+  highRate: { bursts: 0, operators: 0, peakRate: 0, windowSeconds: null, fromIngest: 0 },
+  identity: { verified: 0, impersonation: 0, unverifiable: 0, signed: 0, byAgent: [] },
+  probes: [],
+  networks: [],
+};
+export function emptyDefenseSignals(): DefenseSignals {
+  return JSON.parse(JSON.stringify(EMPTY_DEFENSE)) as DefenseSignals;
 }
 
 /** Per-operator principal verdict surfaced to the board. "verified" = the
@@ -218,6 +283,124 @@ async function operatorTriageStates(
   return out;
 }
 
+/** The journey query's row (props flattened to text by ->>). */
+interface JourneyQueryRow {
+  event_type: string; path: string | null; created_at: string; sig: string | null; nonce: string | null; agent: string | null;
+  attack: string | null; tool: string | null; client_type: string | null; principal_status: string | null; principal: string | null;
+  principal_issuer: string | null; principal_scopes: string | null; site: string | null;
+  blocked: string | null; would_block: string | null; impersonating: string | null; agent_verification: string | null;
+  signed_agent: string | null; probe: string | null; rate: string | null;
+}
+
+/**
+ * The analyst false-positive count (forcefield.verdict_false_positive learning
+ * events) for one workspace over the window. instinct_events' time column is
+ * `timestamp`, NOT created_at: the old query named created_at, errored on every
+ * call, and safeQuery swallowed it, so the board always read 0. The schema test
+ * in __tests__/site-analytics-schema.test.ts now checks every query here against
+ * the migrations so that class of bug fails the build.
+ */
+export async function countVerdictFalsePositives(workspaceId: string, days: number): Promise<number> {
+  const r = await safeQuery<{ n: string }>(
+    `SELECT count(*)::text AS n FROM instinct_events
+      WHERE event_type = 'forcefield.verdict_false_positive'
+        AND metadata->>'workspace_id' = $1
+        AND timestamp > now() - ($2::int * interval '1 day')`,
+    [workspaceId, clampDays(days)],
+  );
+  return r?.rows?.[0] ? Number(r.rows[0].n) : 0;
+}
+
+/** A numeric props value as SQL, or NULL when it is not a plain number (never
+ *  a cast that can fail the whole query on one malformed row). */
+const numProp = (k: string) => `CASE WHEN props->>'${k}' ~ '^[0-9]+(\\.[0-9]+)?$' THEN (props->>'${k}')::numeric END`;
+
+/**
+ * The enforcement-era signals, read as plain props so the board renders them
+ * whether or not the edge emitting them is the newest engine: blocks vs withheld
+ * blocks by rule, fast-agent bursts, claimed-vs-verified identity, the engine's
+ * probe labels, and the source network (ASN, Cloudflare sites only). Degrades to
+ * empty on any DB error (safeQuery), never throws.
+ */
+async function getDefenseSignals(sinceClause: string, surfaceClause: string, params: string[]): Promise<DefenseSignals> {
+  const where = `WHERE ${sinceClause}${surfaceClause}`;
+  const [reasons, rate, identity, probes, networks] = await Promise.all([
+    safeQuery<{ reason: string; blocked: string; would_block: string }>(
+      `SELECT coalesce(props->>'reason_kind', 'unspecified') AS reason,
+              count(*) FILTER (WHERE props->>'blocked' = 'true') AS blocked,
+              count(*) FILTER (WHERE props->>'would_block' = 'true' AND coalesce(props->>'blocked', '') <> 'true') AS would_block
+         FROM site_analytics_events
+        ${where} AND (props->>'blocked' = 'true' OR props->>'would_block' = 'true')
+        GROUP BY 1 ORDER BY count(*) DESC LIMIT 20`,
+      params,
+    ),
+    safeQuery<{ bursts: string; operators: string; peak: string | null; window_s: string | null; from_ingest: string }>(
+      `SELECT count(*) AS bursts,
+              count(DISTINCT coalesce(props->>'fp', props->>'sig')) AS operators,
+              max(${numProp("rate")}) AS peak,
+              max(${numProp("window_s")}) AS window_s,
+              count(*) FILTER (WHERE props->>'source' = 'ingest') AS from_ingest
+         FROM site_analytics_events
+        ${where} AND event_type = 'site.agent_high_rate'`,
+      params,
+    ),
+    safeQuery<{ agent: string; verified: string; impersonation: string; unverifiable: string; signed: string }>(
+      `SELECT coalesce(props->>'impersonating', props->>'agent', 'unidentified') AS agent,
+              count(*) FILTER (WHERE props->>'agent_verification' = 'verified') AS verified,
+              count(*) FILTER (WHERE props->>'agent_verification' = 'impersonation' OR props->>'impersonating' IS NOT NULL) AS impersonation,
+              count(*) FILTER (WHERE props->>'agent_verification' = 'unverifiable') AS unverifiable,
+              count(*) FILTER (WHERE props->>'signed_agent' = 'true') AS signed
+         FROM site_analytics_events
+        ${where} AND (props->>'agent_verification' IS NOT NULL OR props->>'impersonating' IS NOT NULL OR props->>'signed_agent' = 'true')
+        GROUP BY 1 ORDER BY count(*) DESC LIMIT 20`,
+      params,
+    ),
+    safeQuery<{ probe: string; count: string }>(
+      `SELECT props->>'probe' AS probe, count(*) AS count
+         FROM site_analytics_events
+        ${where} AND props->>'probe' IS NOT NULL AND props->>'probe' <> ''
+        GROUP BY 1 ORDER BY count(*) DESC LIMIT 20`,
+      params,
+    ),
+    safeQuery<{ asn: string; org: string | null; count: string; hostile: string }>(
+      `SELECT props->>'asn' AS asn, max(props->>'as_org') AS org, count(*) AS count,
+              count(*) FILTER (WHERE ${HOSTILE_ROW}) AS hostile
+         FROM site_analytics_events
+        ${where} AND event_type LIKE 'site.agent_%' AND props->>'asn' IS NOT NULL AND props->>'asn' <> ''
+        GROUP BY 1 ORDER BY count(*) DESC LIMIT 15`,
+      params,
+    ),
+  ]);
+  const out = emptyDefenseSignals();
+  for (const r of reasons.rows) {
+    const b = Number(r.blocked), w = Number(r.would_block);
+    out.enforcement.blocked += b;
+    out.enforcement.wouldBlock += w;
+    out.enforcement.byReason.push({ reason: r.reason, blocked: b, wouldBlock: w });
+  }
+  const hr = rate.rows[0];
+  if (hr) {
+    out.highRate = {
+      bursts: Number(hr.bursts),
+      operators: Number(hr.operators),
+      peakRate: hr.peak !== null ? Number(hr.peak) : 0,
+      windowSeconds: hr.window_s !== null ? Number(hr.window_s) : null,
+      fromIngest: Number(hr.from_ingest),
+    };
+  }
+  for (const r of identity.rows) {
+    const e = { agent: r.agent, verified: Number(r.verified), impersonation: Number(r.impersonation), unverifiable: Number(r.unverifiable), signed: Number(r.signed) };
+    out.identity.verified += e.verified;
+    out.identity.impersonation += e.impersonation;
+    out.identity.unverifiable += e.unverifiable;
+    out.identity.signed += e.signed;
+    out.identity.byAgent.push(e);
+  }
+  out.probes = probes.rows.map((r) => ({ probe: r.probe, count: Number(r.count) }));
+  out.networks = networks.rows.map((r) => ({ asn: r.asn, org: r.org ?? null, count: Number(r.count), hostile: Number(r.hostile) }));
+  return out;
+}
+
 /**
  * Aggregate the last `rangeDays` of site telemetry into the shapes the admin
  * page renders. Pure SQL aggregation; reads only. Degrades to empty arrays when
@@ -244,7 +427,7 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
     `${ap} LIKE '/_next/%' OR ${ap} IN ('/sw.js','/manifest.json','/favicon.ico') OR ` +
     `${ap} ~* '\\.(js|mjs|css|map|png|jpe?g|gif|svg|ico|webp|avif|woff2?|ttf|otf|eot|webmanifest)$'))`;
 
-  const [hour, page, country, type, totals, ff, ffAgents, journeyRows, agentOriginRows, payloadRows, surfacesRows, pvExists, learnedSig, agentIntel] = await Promise.all([
+  const [hour, page, country, type, totals, ff, ffAgents, journeyRows, agentOriginRows, payloadRows, surfacesRows, pvExists, learnedSig, agentIntel, defense] = await Promise.all([
     safeQuery<{ hour: number; count: string }>(
       `SELECT EXTRACT(HOUR FROM created_at AT TIME ZONE 'UTC')::int AS hour, count(*) AS count
          FROM site_analytics_events
@@ -281,7 +464,7 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
         WHERE ${sinceClause}${surfaceClause}`,
       params,
     ),
-    safeQuery<{ welcomed: string; flagged: string; trapped: string; blocked: string; hostile_operators: string; hostile_events: string }>(
+    safeQuery<{ welcomed: string; flagged: string; trapped: string; blocked: string; would_block: string; hostile_operators: string; hostile_events: string }>(
       /* welcomed/flagged/trapped/blocked are event tallies. hostile_operators is
          the number that actually matters: DISTINCT fingerprints that exhibited
          hostile TRADECRAFT (probed a sensitive path, tripped a decoy, sent a
@@ -294,8 +477,9 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
          count(*) FILTER (WHERE event_type = 'site.agent_flagged')      AS flagged,
          count(*) FILTER (WHERE event_type = 'site.agent_trap_tripped') AS trapped,
          count(*) FILTER (WHERE props->>'blocked' = 'true')             AS blocked,
-         count(DISTINCT props->>'fp') FILTER (WHERE event_type IN ('site.agent_probed_sensitive','site.agent_payload_attack','site.agent_trap_tripped','site.agent_form_honeypot','site.agent_form_too_fast') AND props->>'fp' IS NOT NULL) AS hostile_operators,
-         count(*) FILTER (WHERE event_type IN ('site.agent_probed_sensitive','site.agent_payload_attack','site.agent_trap_tripped','site.agent_form_honeypot','site.agent_form_too_fast')) AS hostile_events
+         count(*) FILTER (WHERE props->>'would_block' = 'true' AND coalesce(props->>'blocked', '') <> 'true') AS would_block,
+         count(DISTINCT props->>'fp') FILTER (WHERE ${HOSTILE_ROW} AND props->>'fp' IS NOT NULL) AS hostile_operators,
+         count(*) FILTER (WHERE ${HOSTILE_ROW}) AS hostile_events
          FROM site_analytics_events
         WHERE ${sinceClause}${surfaceClause}${notAssetFlag}`,
       params,
@@ -304,6 +488,7 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
       `SELECT coalesce(props->>'agent', '(unidentified)') AS agent, count(*) AS count
          FROM site_analytics_events
         WHERE ${sinceClause}${surfaceClause} AND event_type = 'site.agent_welcomed'
+          AND props->>'impersonating' IS NULL AND coalesce(props->>'agent_verification', '') <> 'impersonation'
         GROUP BY 1 ORDER BY count(*) DESC LIMIT 10`,
       params,
     ),
@@ -312,15 +497,19 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
        ones (and every RECENT agent) never appear. Instead take the most-recent N
        events PER SITE, so every property is represented and newest agents always
        show, then order ascending for the journey reconstruction. */
-    safeQuery<{ event_type: string; path: string | null; created_at: string; sig: string | null; nonce: string | null; agent: string | null; attack: string | null; tool: string | null; client_type: string | null; principal_status: string | null; principal: string | null; principal_issuer: string | null; principal_scopes: string | null; site: string | null }>(
+    safeQuery<JourneyQueryRow>(
       `SELECT event_type, path, created_at::text AS created_at, sig, nonce, agent, attack, tool, client_type,
-              principal_status, principal, principal_issuer, principal_scopes, site
+              principal_status, principal, principal_issuer, principal_scopes, site,
+              blocked, would_block, impersonating, agent_verification, signed_agent, probe, rate
          FROM (
            SELECT event_type, path, created_at,
                   props->>'sig' AS sig, props->>'nonce' AS nonce, props->>'agent' AS agent, props->>'attack' AS attack,
                   props->>'tool' AS tool, props->>'client_type' AS client_type,
                   props->>'principal_status' AS principal_status, props->>'principal' AS principal,
                   props->>'principal_issuer' AS principal_issuer, props->>'principal_scopes' AS principal_scopes,
+                  props->>'blocked' AS blocked, props->>'would_block' AS would_block,
+                  props->>'impersonating' AS impersonating, props->>'agent_verification' AS agent_verification,
+                  props->>'signed_agent' AS signed_agent, props->>'probe' AS probe, props->>'rate' AS rate,
                   coalesce(props->>'site', 'ogiam.com') AS site,
                   ROW_NUMBER() OVER (PARTITION BY coalesce(props->>'site', 'ogiam.com') ORDER BY created_at DESC) AS rn
              FROM site_analytics_events
@@ -338,9 +527,9 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
       `SELECT country,
               count(*) AS total,
               count(*) FILTER (WHERE event_type = 'site.agent_welcomed') AS welcomed,
-              count(*) FILTER (WHERE event_type = 'site.agent_welcomed' AND props->>'verified' = 'true') AS welcomed_verified,
+              count(*) FILTER (WHERE event_type = 'site.agent_welcomed' AND (props->>'verified' = 'true' OR props->>'agent_verification' = 'verified')) AS welcomed_verified,
               count(*) FILTER (WHERE event_type = 'site.agent_flagged')  AS flagged,
-              count(*) FILTER (WHERE event_type IN ('site.agent_trap_tripped', 'site.agent_probed_sensitive', 'site.agent_form_honeypot', 'site.agent_form_too_fast')) AS hostile
+              count(*) FILTER (WHERE ${HOSTILE_ROW}) AS hostile
          FROM site_analytics_events
         WHERE ${sinceClause}${surfaceClause}${notAssetFlag} AND event_type LIKE 'site.agent_%' AND country IS NOT NULL AND country <> ''
         GROUP BY country ORDER BY count(*) DESC LIMIT 100`,
@@ -389,6 +578,7 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
     // Deeper agent intelligence across the live edge stream (cross-site campaigns,
     // automation/AI/script mix, adaptive reactions). Not a query - a rollup.
     liveAgentIntelligence(days),
+    getDefenseSignals(sinceClause, surfaceClause, params),
   ]);
 
   const t = totals.rows[0];
@@ -402,8 +592,16 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
         if (r.principal_scopes) {
           try { const parsed = JSON.parse(r.principal_scopes); if (Array.isArray(parsed)) principalScopes = parsed.filter((x): x is string => typeof x === "string"); } catch { /* ignore malformed */ }
         }
-        const principalStatus = r.principal_status === "verified" || r.principal_status === "claimed" || r.principal_status === "absent" ? r.principal_status : undefined;
-        return { key, keyKind, type: r.event_type, path: r.path ?? "", at: r.created_at, nonceLinked: !!nonce, agent: r.agent ?? undefined, attack: r.attack ?? undefined, tool: r.tool ?? undefined, clientType: r.client_type ?? undefined, principalStatus, principal: r.principal ?? undefined, principalIssuer: r.principal_issuer ?? undefined, principalScopes, site: r.site ?? undefined };
+        const principalStatus = r.principal_status === "verified" || r.principal_status === "claimed" || r.principal_status === "absent" ? (r.principal_status as "verified" | "claimed" | "absent") : undefined;
+        const rate = r.rate !== null && r.rate !== "" && Number.isFinite(Number(r.rate)) ? Number(r.rate) : undefined;
+        return {
+          key, keyKind, type: r.event_type, path: r.path ?? "", at: r.created_at, nonceLinked: !!nonce,
+          agent: r.agent ?? undefined, attack: r.attack ?? undefined, tool: r.tool ?? undefined, clientType: r.client_type ?? undefined,
+          principalStatus, principal: r.principal ?? undefined, principalIssuer: r.principal_issuer ?? undefined, principalScopes, site: r.site ?? undefined,
+          blocked: r.blocked === "true", wouldBlock: r.would_block === "true" && r.blocked !== "true",
+          impersonating: r.impersonating ?? undefined, agentVerification: r.agent_verification ?? undefined,
+          signedAgent: r.signed_agent === "true", probe: r.probe ?? undefined, rate,
+        };
       }).filter((r) => r.key !== ""),
     ).slice(0, 25).map((j) => ({ ...j, profile: buildAgentProfile(j) })),
     workspaceId,
@@ -414,14 +612,7 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
     ? await getNetworkReputation(workspaceId, Array.from(new Set(journeys.map((j) => j.profile.operatorKey))))
     : {};
   const networkTradecraft = workspaceId ? await getNetworkTradecraft(workspaceId) : [];
-  const fpRows = await safeQuery<{ n: string }>(
-    `SELECT count(*)::text AS n FROM instinct_events
-      WHERE event_type = 'forcefield.verdict_false_positive'
-        AND metadata->>'workspace_id' = $1
-        AND created_at > NOW() - ($2::int * INTERVAL '1 day')`,
-    [workspaceId ?? "", rangeDays],
-  );
-  const falsePositives = fpRows?.rows?.[0] ? Number(fpRows.rows[0].n) : 0;
+  const falsePositives = workspaceId ? await countVerdictFalsePositives(workspaceId, days) : 0;
   // Aggregate the per-session principal verdicts up to the operator. When an
   // operator has multiple sessions, the most security-relevant wins: a mandate
   // violation outranks a bare claimed credential, which outranks a clean verify.
@@ -460,6 +651,7 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
       flagged: ff.rows[0] ? Number(ff.rows[0].flagged) : 0,
       trapped: ff.rows[0] ? Number(ff.rows[0].trapped) : 0,
       blocked: ff.rows[0] ? Number(ff.rows[0].blocked) : 0,
+      wouldBlock: ff.rows[0] ? Number(ff.rows[0].would_block ?? 0) : 0,
       hostileOperators: ff.rows[0] ? Number(ff.rows[0].hostile_operators) : 0,
       hostileEvents: ff.rows[0] ? Number(ff.rows[0].hostile_events) : 0,
       topAgents: ffAgents.rows.map((r) => ({ agent: r.agent, count: Number(r.count) })),
@@ -476,6 +668,7 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
     networkReputation,
     networkTradecraft,
     verdictFeedback: { falsePositives },
+    defense,
     principalByOperator,
     agentOrigins: agentOriginRows.rows.map((r) => ({
       country: r.country,

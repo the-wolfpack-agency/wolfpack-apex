@@ -7,7 +7,9 @@ const mockRequireCapability = jest.fn();
 const mockTrackEvent = jest.fn();
 const mockRecordAudit = jest.fn();
 jest.mock("@/lib/auth/require-capability", () => ({ requireCapability: (...a: unknown[]) => mockRequireCapability(...a) }));
-jest.mock("@/lib/analytics", () => ({ trackEvent: (...a: unknown[]) => mockTrackEvent(...a) }));
+jest.mock("@/lib/analytics", () => ({ trackEventAwait: (...a: unknown[]) => mockTrackEvent(...a) }));
+const mockSafeQuery = jest.fn();
+jest.mock("@/lib/db", () => ({ query: jest.fn(), safeQuery: (...a: unknown[]) => mockSafeQuery(...a) }));
 jest.mock("@/lib/audit-log", () => ({ recordAudit: (...a: unknown[]) => mockRecordAudit(...a), extractRequestMetadata: () => ({ ip: "0.0.0.0" }) }));
 
 import { POST } from "../route";
@@ -39,4 +41,26 @@ it("records a learning event + an audit entry, workspace-scoped", async () => {
     expect.objectContaining({ workspace_id: "w1", operatorKey: "op_abc", findingKey: "fp1", reason: "known good crawler" }),
   );
   expect(mockRecordAudit).toHaveBeenCalledWith(expect.objectContaining({ action: "forcefield.verdict_false_positive", resourceId: "op_abc" }));
+});
+
+it("writes the workspace where the board's false-positive counter reads it (round trip)", async () => {
+  mockTrackEvent.mockResolvedValue(undefined);
+  await POST(mkReq({ operatorKey: "op_rt" }));
+  const [eventType, , , metadata] = mockTrackEvent.mock.calls[0];
+  // The board counts this exact event type, filtered on metadata.<key> = workspace.
+  const { countVerdictFalsePositives } = jest.requireActual("@/lib/site-analytics") as typeof import("@/lib/site-analytics");
+  mockSafeQuery.mockResolvedValue({ rows: [{ n: "1" }] });
+  await countVerdictFalsePositives("w1", 30);
+  const [sql, params] = mockSafeQuery.mock.calls[0];
+  expect(sql).toContain(`event_type = '${eventType}'`);
+  const key = /metadata->>'([a-z_]+)' = \$1/.exec(String(sql))?.[1];
+  expect(key).toBe("workspace_id");
+  expect((metadata as Record<string, unknown>)[key!]).toBe(params[0]);
+});
+
+it("awaits the learning write so a serverless freeze cannot drop it", async () => {
+  let settled = false;
+  mockTrackEvent.mockImplementation(() => new Promise<void>((r) => setTimeout(() => { settled = true; r(); }, 5)));
+  await POST(mkReq({ operatorKey: "op_await" }));
+  expect(settled).toBe(true);
 });

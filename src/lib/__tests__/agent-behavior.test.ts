@@ -291,3 +291,40 @@ describe("inferred-accuracy battery (path-derived IDOR detection): false positiv
     expect(classifySession(session(["/api/users/1", "/api/users/2", "/api/users/3"])).confidence).toBe("inferred");
   });
 });
+
+describe("enforcement-era props on journeys", () => {
+  const row = (o: Partial<import("@/lib/agent-behavior").JourneyRow>) => ({ key: "k", keyKind: "fingerprint" as const, type: "site.agent_flagged", path: "/", at: "2026-10-20T10:00:00Z", ...o });
+
+  it("buildJourneys carries every event field (the principal verdict used to be dropped)", () => {
+    const [j] = buildJourneys([
+      row({ type: "site.agent_welcomed", path: "/reports", principalStatus: "verified", principal: "alice", principalIssuer: "acme", principalScopes: ["/reports"] }),
+      row({ type: "site.agent_probed_sensitive", path: "/admin", at: "2026-10-20T10:00:01Z" }),
+    ]);
+    expect(j.principal?.status).toBe("verified");
+    expect(j.insights.some((i) => i.kind === "mandate_exceeded")).toBe(true);
+  });
+
+  it("a verified impersonation is an insight even with no hostile behavior", () => {
+    const [j] = buildJourneys([row({ type: "site.agent_welcomed", agent: "GPTBot", impersonating: "GPTBot", agentVerification: "impersonation" })]);
+    const imp = j.insights.find((i) => i.kind === "impersonation");
+    expect(imp).toBeDefined();
+    expect(imp && "detail" in imp ? imp.detail : "").toMatch(/published network/);
+  });
+
+  it("an unverified claim with no hostile behavior is NOT called impersonation", () => {
+    const [j] = buildJourneys([row({ type: "site.agent_welcomed", agent: "Claude-User", agentVerification: "unverifiable" })]);
+    expect(j.insights.some((i) => i.kind === "impersonation")).toBe(false);
+  });
+
+  it("steps carry blocked vs would-block, the probe label and the burst rate", () => {
+    const [j] = buildJourneys([
+      row({ type: "site.agent_payload_attack", path: "/a", attack: "php_cgi_injection", blocked: true }),
+      row({ type: "site.agent_probed_sensitive", path: "/b", at: "2026-10-20T10:00:01Z", probe: "next_server_action", wouldBlock: true }),
+      row({ type: "site.agent_high_rate", path: "/c", at: "2026-10-20T10:00:02Z", rate: 61 }),
+    ]);
+    expect(j.steps[0]).toMatchObject({ path: "/a", attack: "php_cgi_injection", blocked: true });
+    expect(j.steps[0].wouldBlock).toBeUndefined();
+    expect(j.steps[1]).toMatchObject({ probe: "next_server_action", wouldBlock: true });
+    expect(j.steps[2]).toMatchObject({ signal: "high_rate", rate: 61 });
+  });
+});
