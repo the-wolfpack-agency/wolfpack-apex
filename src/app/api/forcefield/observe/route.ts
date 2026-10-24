@@ -25,11 +25,13 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { timingSafeEqual } from "crypto";
-import { observeRequest } from "@/lib/forcefield-web/observe";
+import { observeRequest, withEnforcement, clientKeys, isStaticAsset, type ObserveInput } from "@/lib/forcefield-web/observe";
 import { decideEnforcement } from "@/lib/forcefield-web/enforce";
 import { DEFAULT_RULESET } from "@/lib/forcefield-web/ruleset";
 import { getBlockedFingerprints } from "@/lib/forcefield/blocked-fingerprints";
 import { getDatacenterPrefixes } from "@/lib/forcefield/datacenter-ranges";
+import { getCrawlerRanges } from "@/lib/forcefield/crawler-ranges";
+import { noteRequest, rateKey } from "@/lib/forcefield/rate-window";
 import { recordSiteEvent } from "@/lib/site-analytics";
 import { entitledToBlock, getSiteBlockEntitlement } from "@/lib/forcefield-web/billing";
 import { resolveTenantByToken } from "@/lib/forcefield-web/tenants";
@@ -72,7 +74,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   let b: Record<string, unknown>;
   try {
-    b = (await req.json()) as Record<string, unknown>;
+    const parsed = (await req.json()) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("not an object");
+    b = parsed as Record<string, unknown>;
   } catch {
     return NextResponse.json({ action: "allow" }, { status: 400 });
   }
@@ -90,10 +94,23 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const rawUrl = typeof b.rawUrl === "string" ? (b.rawUrl as string) : path;
   const accept = typeof b.accept === "string" ? (b.accept as string) : undefined;
   const secFetchDest = typeof b.secFetchDest === "string" ? (b.secFetchDest as string) : undefined;
+  // SITE-ATTESTED by the shim (it verified a session / service credential / a
+  // synthetic-monitor token locally; no credential crosses the wire). Boolean
+  // only: anything else is anonymous.
+  const authenticated = b.authenticated === true;
+  // The site's platform ("wordpress"), so its native paths are not recon. A
+  // short id only; anything else is ignored.
+  const platformRaw = s("platform").toLowerCase();
+  const platform = /^[a-z0-9_-]{1,32}$/.test(platformRaw) ? platformRaw : undefined;
+  // Edge-supplied network attribution (Cloudflare request.cf.asn / asOrganization).
+  // Stamped as-is for the board; never used to block.
+  const asn = typeof b.asn === "number" && Number.isInteger(b.asn) && b.asn >= 0 && b.asn <= 4_294_967_295 ? (b.asn as number) : undefined;
+  const asOrg = typeof b.asOrg === "string" && b.asOrg.trim() ? (b.asOrg as string).trim().slice(0, 80) : undefined;
 
   // The central ruleset: distributed blocklist (dark unless enabled) + the full
-  // datacenter prefix set. Fail-safe to defaults so an error never turns real
-  // traffic away or breaks classification.
+  // datacenter prefix set + the crawler ranges for verified-agent identity.
+  // Fail-safe to defaults so an error never turns real traffic away or breaks
+  // classification.
   // shares_intel opt-out: a tenant that opted OUT does not CONSUME the shared
   // network blocklist (it still gets full local detection: scanners, payloads,
   // decoys). Only suppressed when we positively resolved the opt-out, so a lookup
@@ -104,7 +121,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     blockedFingerprints = await getBlockedFingerprints(EDGE_WORKSPACE_ID).catch(() => []);
   }
   const datacenterPrefixes = await getDatacenterPrefixes().catch(() => []);
-  const ruleset = { ...DEFAULT_RULESET, blockedFingerprints, datacenterPrefixes };
+  // Per-request path: never waits on the vendors (a cold instance answers
+  // "unverifiable" while one background refresh warms the cache).
+  const verifiedAgentRanges = await getCrawlerRanges({ waitMs: 0 }).catch(() => ({}));
+  const ruleset = { ...DEFAULT_RULESET, blockedFingerprints, datacenterPrefixes, verifiedAgentRanges };
 
   let action: "allow" | "block" = "allow";
   let eventType: string | null = null;
@@ -114,18 +134,18 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // the block - so the free tier can show "we would have blocked this".
   let wouldBlock = false;
   try {
-    // The ENGINE: classify + stamp the stable operator fingerprint, then record.
-    const obs = observeRequest(
-      { site, path, method, userAgent, country, headerNames, accept, secFetchDest, ip, nowMs: Date.now() },
+    const nowMs = Date.now();
+    const input: ObserveInput = {
+      site, path, method, userAgent, country, headerNames, accept, secFetchDest, ip, rawUrl, authenticated, platform, nowMs,
+    };
+    // 1. The DECISION first (deterministic policy, not a model): decoy / payload
+    //    / header attack / attack tool / an admin-blocked operator fingerprint.
+    //    Decided BEFORE recording so the stored row says what actually happened.
+    const decision = decideEnforcement(
+      { path, method, userAgent, headerNames, rawUrl, authenticated, ip },
       ruleset,
+      { blockedFingerprints },
     );
-    if (obs) {
-      eventType = obs.type;
-      await recordSiteEvent({ eventType: obs.type, path: obs.path, country: country || null, props: obs.props }).catch(() => {});
-    }
-    // The DECISION (deterministic policy, not a model): decoy / attack tool /
-    // payload / an admin-blocked operator fingerprint.
-    const decision = decideEnforcement({ path, method, userAgent, headerNames, rawUrl }, ruleset, { blockedFingerprints });
     if (decision.block) {
       wouldBlock = true;
       reasonKind = decision.reasonKind ?? null;
@@ -149,6 +169,42 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         void trackEvent("forcefield.block_withheld_unlicensed", `site:${site}`, "forcefield", {
           site, reasonKind: reasonKind ?? "unknown",
         });
+      }
+    }
+
+    // 2. The ENGINE: classify + stamp the stable operator fingerprint, then the
+    //    enforcement outcome (blocked, or would_block when a gate withheld it).
+    //    A blocked request with no other tell is still recorded.
+    const obs = withEnforcement(observeRequest(input, ruleset), input, ruleset, {
+      wouldBlock,
+      blocked: action === "block",
+      reasonKind: decision.reasonKind,
+      attack: decision.attack,
+    });
+    if (obs) {
+      eventType = obs.type;
+      const props = { ...obs.props };
+      if (asn !== undefined && obs.type !== "site.page_viewed") props.asn = asn;
+      if (asOrg && obs.type !== "site.page_viewed") props.as_org = asOrg;
+      await recordSiteEvent({ eventType: obs.type, path: obs.path, country: country || null, props }).catch(() => {});
+    }
+
+    // 3. LIVE RATE: a client making requests faster than a person can (an
+    //    autonomous agent, a path sweep) reports once per 10s window. Static page
+    //    sub-resources are not counted; authenticated traffic (our own monitors,
+    //    signed-in app XHR) is skipped. Report-only, keyed in memory (IP never
+    //    stored). Needs the client IP: without it every visitor sharing a browser
+    //    UA would collapse into one key and add up to a false burst.
+    if (ip && !authenticated && !isStaticAsset(path)) {
+      const hit = noteRequest(rateKey(site, ip, userAgent), nowMs);
+      if (hit) {
+        const k = clientKeys(input, ruleset);
+        await recordSiteEvent({
+          eventType: "site.agent_high_rate",
+          path,
+          country: country || null,
+          props: { site, sig: k.sig, fp: k.fp, client_type: k.client.clientType, rate: hit.count, window_s: Math.round(hit.windowMs / 1000) },
+        }).catch(() => {});
       }
     }
   } catch {
