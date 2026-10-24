@@ -31,6 +31,13 @@ Collected:
 - Coarse geo: the country from the edge (`x-vercel-ip-country`), when present.
 - A derived operator fingerprint (a stable hash over header-name shape + client
   classification), used to group an agent's activity.
+- Forwarded by the connectors for classification: the `Accept` and
+  `Sec-Fetch-Dest` header values (page view or script), the platform the site
+  runs on (e.g. `wordpress`), a yes/no flag for whether the SITE verified a
+  signed-in session (never who), and, when the edge knows them, the client
+  network number (ASN) and operator name.
+- The client IP, used only to classify the network (hosting provider, verified
+  crawler range) and then discarded; it is not stored in the event record.
 - The classification outcome and event type (e.g. `site.agent_welcomed`,
   `site.agent_trap_tripped`, `site.agent_payload_attack`) and counts.
 
