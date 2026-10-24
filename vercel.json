@@ -103,6 +103,10 @@
     {
       "path": "/api/cron/ai-code-reuse-index",
       "schedule": "41 */6 * * *"
+    },
+    {
+      "path": "/api/cron/ai-spend-anomaly",
+      "schedule": "15 10 * * *"
     }
   ]
 }

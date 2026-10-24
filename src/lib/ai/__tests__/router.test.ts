@@ -423,7 +423,11 @@ describe("router — failover", () => {
         metadata: { feature: "failover.both.fail" },
       }),
     ).rejects.toMatchObject({ message: expect.stringContaining("anth-down") });
-    expect(mockTrackEvent).not.toHaveBeenCalled();
+    /* No completion was recorded, because none happened. The one event that
+       may fire is the sampled ai.request_unattributed trace: this call carries
+       no workspace_id, and that is recorded before any provider is asked. */
+    const names = mockTrackEvent.mock.calls.map((c) => c[0]);
+    expect(names.filter((n) => n !== "ai.request_unattributed")).toEqual([]);
   });
 });
 

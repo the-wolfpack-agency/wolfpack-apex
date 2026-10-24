@@ -16,6 +16,12 @@ on their own tasks ("R&D as a service").
   registry, tiering, cost estimate, budget refusal (402), residency, escalation,
   degrade reporting, `getAIClient().complete()` as the one seam every feature uses
   (Forcefield's signup summary already dogfoods it).
+- Runaway-spend / LLMjacking guard: a $1,000/month platform default cap sized
+  from measured spend (`OGIAM_DEFAULT_MONTHLY_BUDGET_USD`), calls with no
+  workspace governed under a shared `__unattributed__` bucket
+  (`OGIAM_UNATTRIBUTED_MONTHLY_BUDGET_USD`), a traced fail-open when the spend
+  read fails, and a daily spike alert (`/api/cron/ai-spend-anomaly`, rule in
+  `src/lib/ai/spend-anomaly.ts`).
 - `src/app/api/admin/ai-code/fitness` + `/admin/ai-code/fitness` - a fitness surface.
 - The gate labels / verdict data that a limitation profile is derived from
   (confirm current coverage in `src/lib/ai-redteam` + gate decision stores).

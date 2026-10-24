@@ -3307,6 +3307,28 @@ export type InstinctEventType =
      month_spend_usd, budget_usd, requested_tier, served_tier, state,
      feature }. */
   | "ai.budget_degraded"
+  /* The spend read behind the budget governor failed, so the call was let
+     through UNGOVERNED (fail open). At most once per bucket per 15 minutes,
+     in-process. A cap that silently stopped applying looks exactly like one
+     that is working; this is what makes the difference visible. Metadata:
+     { workspace_id (or __unattributed__), unattributed, budget_usd, feature,
+     error, suppressed_since_last }. */
+  | "ai.budget_check_degraded"
+  /* An AI call arrived with no metadata.workspace_id, so it was governed under
+     the shared __unattributed__ bucket instead of a workspace's own budget.
+     Sampled: at most once per feature per 15 minutes, in-process, carrying how
+     many were held back, so the call sites to fix rank by volume. Metadata:
+     { feature, requested_tier, suppressed_since_last, window_minutes }. */
+  | "ai.request_unattributed"
+  /* The daily spend-anomaly scan found a bucket whose last-24h AI spend is a
+     spike against its trailing 7-day daily mean (or a large first day with no
+     history). Also the per-day dedupe ledger the scan reads back. Metadata:
+     { bucket, day, reason, last_24h_usd, trailing_mean_daily_usd,
+     trailing_7d_usd, multiple, last_24h_calls }. */
+  | "ai.spend_anomaly_detected"
+  /* The spend-anomaly alert was fanned out through the team notification
+     layer. Fired by fanoutToTeam with recipient_count. */
+  | "ai.spend_anomaly_alert_dispatched"
   // Per-client GitHub App credential resolution (replaces the shared PAT for
   // client repos). { workspace_id, installation_id } / removed { workspace_id }
   | "platform.github_installation_linked"
