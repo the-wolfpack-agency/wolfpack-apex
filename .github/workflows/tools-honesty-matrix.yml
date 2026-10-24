@@ -46,7 +46,7 @@ jobs:
         run: npx playwright test tests/e2e/tools-honesty-matrix.spec.ts --reporter=github
 
       - name: Upload playwright report on failure
-        if: failure()
+        if: (failure()) && github.event.repository.private
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         continue-on-error: true # diagnostic upload; a transient artifact-service timeout must not fail the job
         with:
