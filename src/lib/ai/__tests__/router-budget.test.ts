@@ -10,7 +10,10 @@
  *   - under budget -> proceeds, provider called, no block event.
  *   - no budget set (monthly_budget_usd null) -> proceeds, no enforcement.
  *   - no policy row -> proceeds, no enforcement.
- *   - no workspace_id on the request -> proceeds, deps never consulted.
+ *   - no workspace_id on the request -> governed under the shared
+ *     __unattributed__ bucket (same governor), sampled trace emitted.
+ *   - spend read fails -> fails OPEN with an ai.budget_check_degraded trace,
+ *     rate-limited per bucket per 15 minutes.
  *   - block event carries { workspace_id, month_spend_usd, budget_usd, feature }.
  *
  * The provider SDKs are mocked; no real model is ever called.
@@ -49,8 +52,10 @@ jest.mock("@/lib/analytics", () => ({
 import {
   _buildAIClientWithBudgetDepsForTests,
   _resetAIClientForTests,
+  _resetSpendTracesForTests,
   BudgetExceededError,
 } from "@/lib/ai/router";
+import { UNATTRIBUTED_BUCKET } from "@/lib/ai/spend-guard";
 import type { WorkspaceAIPolicy } from "@/lib/ai/workspace-policy";
 
 const originalFetch = global.fetch;
@@ -76,6 +81,7 @@ function policy(over: Partial<WorkspaceAIPolicy>): WorkspaceAIPolicy {
 beforeEach(() => {
   jest.clearAllMocks();
   _resetAIClientForTests(null);
+  _resetSpendTracesForTests();
   process.env.ANTHROPIC_API_KEY = "test-key";
   delete process.env.AZURE_OPENAI_ENDPOINT;
   delete process.env.AZURE_OPENAI_API_KEY;
@@ -262,7 +268,7 @@ describe("router - workspace budget enforcement", () => {
   it("BACKSTOP: an unconfigured workspace over 2x the platform default is REFUSED", async () => {
     const client = _buildAIClientWithBudgetDepsForTests({
       loadPolicy: jest.fn().mockResolvedValue(policy({ monthly_budget_usd: null })),
-      monthSpend: jest.fn().mockResolvedValue(60_000), // > 2 x the 25k default backstop
+      monthSpend: jest.fn().mockResolvedValue(60_000), // > 2 x the platform default backstop
     });
     await expect(
       client.complete({
@@ -291,10 +297,10 @@ describe("router - workspace budget enforcement", () => {
     expect(mockMessagesCreate).toHaveBeenCalledTimes(1);
   });
 
-  it("PROCEEDS with NO workspace_id - gate never consults deps (no regression)", async () => {
+  it("NO workspace_id is governed under the __unattributed__ bucket, and a normal call still PROCEEDS", async () => {
     mockMessagesCreate.mockResolvedValueOnce(fakeOk("ok"));
     const loadPolicy = jest.fn();
-    const monthSpend = jest.fn();
+    const monthSpend = jest.fn().mockResolvedValue(10);
     const client = _buildAIClientWithBudgetDepsForTests({
       loadPolicy,
       monthSpend,
@@ -308,9 +314,217 @@ describe("router - workspace budget enforcement", () => {
     });
 
     expect(out.provider_used).toBe("anthropic");
+    /* There is no workspace row to load, but there IS a bucket to read. This
+       used to be "deps never consulted", which was the gap: no workspace, no
+       limit. */
     expect(loadPolicy).not.toHaveBeenCalled();
-    expect(monthSpend).not.toHaveBeenCalled();
+    expect(monthSpend).toHaveBeenCalledWith(UNATTRIBUTED_BUCKET);
     expect(mockMessagesCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("an unattributed bucket over its cap DEGRADES rather than refuses (callers do not break)", async () => {
+    mockMessagesCreate.mockResolvedValueOnce({
+      content: [{ type: "text", text: "still working" }],
+      usage: { input_tokens: 10, output_tokens: 5 },
+      model: "claude-haiku-4-5",
+    });
+    const client = _buildAIClientWithBudgetDepsForTests({
+      loadPolicy: jest.fn(),
+      monthSpend: jest.fn().mockResolvedValue(1_200), // over the 1,000 default, under the 2,000 ceiling
+    });
+    const res = await client.complete({
+      messages: [{ role: "user", content: "x" }],
+      max_tokens: 10,
+      model_tier: "premium",
+      metadata: { feature: "budget.unattributed.over" },
+    });
+    expect(res.content).toBe("still working");
+    expect(mockMessagesCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ model: "claude-haiku-4-5" }),
+    );
+    const degraded = mockTrackEvent.mock.calls.find((c) => c[0] === "ai.budget_degraded");
+    expect(degraded?.[3]).toMatchObject({ workspace_id: UNATTRIBUTED_BUCKET, state: "over" });
+  });
+
+  it("an unattributed bucket at 2x the cap is STOPPED, with a message that says how to fix the caller", async () => {
+    const client = _buildAIClientWithBudgetDepsForTests({
+      loadPolicy: jest.fn(),
+      monthSpend: jest.fn().mockResolvedValue(2_000),
+    });
+    const err: unknown = await client
+      .complete({
+        messages: [{ role: "user", content: "x" }],
+        max_tokens: 10,
+        model_tier: "standard",
+        metadata: { feature: "budget.unattributed.runaway" },
+      })
+      .then(() => null)
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(BudgetExceededError);
+    expect((err as Error).message).toContain("metadata.workspace_id");
+    expect((err as BudgetExceededError).details).toMatchObject({ workspace_id: UNATTRIBUTED_BUCKET, budget_usd: 1_000 });
+    expect(mockMessagesCreate).not.toHaveBeenCalled();
+    const names = mockTrackEvent.mock.calls.map((c) => c[0]);
+    expect(names).toContain("ai.request_blocked_over_budget");
+  });
+
+  it("honors OGIAM_UNATTRIBUTED_MONTHLY_BUDGET_USD for the unattributed bucket only", async () => {
+    process.env.OGIAM_UNATTRIBUTED_MONTHLY_BUDGET_USD = "10";
+    try {
+      const client = _buildAIClientWithBudgetDepsForTests({
+        loadPolicy: jest.fn().mockResolvedValue(null),
+        monthSpend: jest.fn().mockResolvedValue(25),
+      });
+      await expect(
+        client.complete({
+          messages: [{ role: "user", content: "x" }],
+          max_tokens: 10,
+          model_tier: "standard",
+          metadata: { feature: "budget.unattributed.env" },
+        }),
+      ).rejects.toBeInstanceOf(BudgetExceededError);
+
+      /* The same spend against a real workspace is well under the platform
+         default, so the override did not leak into workspace caps. */
+      mockMessagesCreate.mockResolvedValueOnce(fakeOk("ok"));
+      const out = await client.complete({
+        messages: [{ role: "user", content: "x" }],
+        max_tokens: 10,
+        model_tier: "standard",
+        metadata: { feature: "budget.unattributed.env", workspace_id: "ws_client" },
+      });
+      expect(out.provider_used).toBe("anthropic");
+    } finally {
+      delete process.env.OGIAM_UNATTRIBUTED_MONTHLY_BUDGET_USD;
+    }
+  });
+
+  it("emits ai.request_unattributed at most once per feature per 15 minutes, carrying the held-back count", async () => {
+    const nowSpy = jest.spyOn(Date, "now");
+    try {
+      const client = _buildAIClientWithBudgetDepsForTests({
+        loadPolicy: jest.fn(),
+        monthSpend: jest.fn().mockResolvedValue(0),
+      });
+      const call = (feature: string) => {
+        mockMessagesCreate.mockResolvedValueOnce(fakeOk("ok"));
+        return client.complete({
+          messages: [{ role: "user", content: "x" }],
+          max_tokens: 10,
+          model_tier: "cheap",
+          metadata: { feature, user_id: "u-1", user_role: "member" },
+        });
+      };
+      const traces = () => mockTrackEvent.mock.calls.filter((c) => c[0] === "ai.request_unattributed");
+
+      nowSpy.mockReturnValue(1_000_000);
+      await call("brain.retrieval_relevance");
+      await call("brain.retrieval_relevance");
+      await call("brain.retrieval_relevance");
+      await call("assistant_chat"); // a different feature is its own window
+      expect(traces()).toHaveLength(2);
+      expect(traces()[0][1]).toBe("u-1");
+      expect(traces()[0][3]).toMatchObject({ feature: "brain.retrieval_relevance", suppressed_since_last: 0 });
+      expect(traces()[1][3]).toMatchObject({ feature: "assistant_chat" });
+
+      nowSpy.mockReturnValue(1_000_000 + 15 * 60_000);
+      await call("brain.retrieval_relevance");
+      expect(traces()).toHaveLength(3);
+      expect(traces()[2][3]).toMatchObject({ feature: "brain.retrieval_relevance", suppressed_since_last: 2 });
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it("an attributed call emits NO unattributed trace, and 'default' is a real workspace, not unattributed", async () => {
+    const monthSpend = jest.fn().mockResolvedValue(0);
+    const client = _buildAIClientWithBudgetDepsForTests({
+      loadPolicy: jest.fn().mockResolvedValue(null),
+      monthSpend,
+    });
+    mockMessagesCreate.mockResolvedValueOnce(fakeOk("ok"));
+    await client.complete({
+      messages: [{ role: "user", content: "x" }],
+      max_tokens: 10,
+      model_tier: "cheap",
+      metadata: { feature: "budget.default_ws", workspace_id: "default" },
+    });
+    expect(monthSpend).toHaveBeenCalledWith("default");
+    const names = mockTrackEvent.mock.calls.map((c) => c[0]);
+    expect(names).not.toContain("ai.request_unattributed");
+  });
+
+  it("ai.completion carries workspace_id when the caller gave one, and omits it when not", async () => {
+    const client = _buildAIClientWithBudgetDepsForTests({
+      loadPolicy: jest.fn().mockResolvedValue(null),
+      monthSpend: jest.fn().mockResolvedValue(0),
+    });
+    mockMessagesCreate.mockResolvedValueOnce(fakeOk("ok"));
+    await client.complete({
+      messages: [{ role: "user", content: "x" }],
+      max_tokens: 10,
+      model_tier: "cheap",
+      metadata: { feature: "budget.attr", workspace_id: "ws_client" },
+    });
+    mockMessagesCreate.mockResolvedValueOnce(fakeOk("ok"));
+    await client.complete({
+      messages: [{ role: "user", content: "x" }],
+      max_tokens: 10,
+      model_tier: "cheap",
+      metadata: { feature: "budget.attr" },
+    });
+    const completions = mockTrackEvent.mock.calls.filter((c) => c[0] === "ai.completion");
+    expect(completions).toHaveLength(2);
+    expect(completions[0][3].workspace_id).toBe("ws_client");
+    /* Absent, not "default": the absent key is what the unattributed bucket
+       sums, and "default" is a real workspace. */
+    expect("workspace_id" in completions[1][3]).toBe(false);
+  });
+
+  it("a FAILED spend read fails OPEN and leaves an ai.budget_check_degraded trace, once per bucket per 15 minutes", async () => {
+    const nowSpy = jest.spyOn(Date, "now");
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const client = _buildAIClientWithBudgetDepsForTests({
+        loadPolicy: jest.fn().mockResolvedValue(policy({ monthly_budget_usd: 100 })),
+        monthSpend: jest.fn().mockRejectedValue(new Error("connection terminated")),
+      });
+      const call = () => {
+        mockMessagesCreate.mockResolvedValueOnce(fakeOk("ok"));
+        return client.complete({
+          messages: [{ role: "user", content: "x" }],
+          max_tokens: 10,
+          model_tier: "premium",
+          metadata: { feature: "budget.degraded", workspace_id: "ws_client" },
+        });
+      };
+      const traces = () => mockTrackEvent.mock.calls.filter((c) => c[0] === "ai.budget_check_degraded");
+
+      nowSpy.mockReturnValue(5_000_000);
+      const out = await call();
+      /* Still answered: a read failure must never take down AI traffic. */
+      expect(out.provider_used).toBe("anthropic");
+      await call();
+      expect(traces()).toHaveLength(1);
+      expect(traces()[0][3]).toMatchObject({
+        workspace_id: "ws_client",
+        unattributed: false,
+        budget_usd: 100,
+        feature: "budget.degraded",
+        error: "connection terminated",
+        suppressed_since_last: 0,
+      });
+      expect(warn).toHaveBeenCalled();
+
+      nowSpy.mockReturnValue(5_000_000 + 15 * 60_000);
+      await call();
+      expect(traces()).toHaveLength(2);
+      expect(traces()[1][3]).toMatchObject({ suppressed_since_last: 1 });
+      expect(mockMessagesCreate).toHaveBeenCalledTimes(3);
+    } finally {
+      nowSpy.mockRestore();
+      warn.mockRestore();
+    }
   });
 
   it("spend exactly at budget is NOT over -> proceeds", async () => {

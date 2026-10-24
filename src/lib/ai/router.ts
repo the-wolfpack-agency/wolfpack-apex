@@ -58,10 +58,16 @@ import { BudgetExceededError, NoProviderAvailableError } from "./types";
 import {
   isOverBudget,
   loadWorkspacePolicy,
-  monthSpendUsd,
   type WorkspaceAIPolicy,
 } from "./workspace-policy";
 import { governTier, CEILING_MULTIPLE, type BudgetDecision } from "./budget";
+import {
+  createSpendReader,
+  createTraceThrottle,
+  isUnattributed,
+  spendBucketFor,
+  type SpendQueryFn,
+} from "./spend-guard";
 import { recordRouterCall } from "./audit-record-writer";
 import {
   mayServe,
@@ -393,14 +399,33 @@ export function retryDelayMs(err: unknown, attempt: number): number {
  */
 interface BudgetDeps {
   loadPolicy: (workspaceId: string) => Promise<WorkspaceAIPolicy | null>;
+  /** Called with a workspace id, or with UNATTRIBUTED_BUCKET for a call that
+   *  carries none. MAY THROW: a throw is a failed read, which the gate turns
+   *  into a fail-open with a trace, never into a refused call. */
   monthSpend: (workspaceId: string) => Promise<number>;
 }
 
+/* One reader per process, so the 30-second cache is shared by every call
+   rather than rebuilt per request. See lib/ai/spend-guard.ts. */
+const liveSpendReader = createSpendReader({
+  resolveQuery: async (): Promise<SpendQueryFn | null> => {
+    if (!process.env.DATABASE_URL) return null;
+    const { query } = await import("@/lib/db");
+    return (sql, params) => query<{ month_spend_usd: number | string | null }>(sql, params);
+  },
+});
+
 /**
  * Real-DB budget deps. Lazily imports db so the pure router tests that never
- * set DATABASE_URL don't pull in pg; loadWorkspacePolicy + monthSpendUsd both
- * fail OPEN (return null / 0) when the DB is unreachable, so a flaky cost view
- * never wedges live AI traffic.
+ * set DATABASE_URL don't pull in pg. loadWorkspacePolicy fails OPEN (null) on
+ * its own.
+ *
+ * monthSpend used to be monthSpendUsd, which also returned 0 on any failure,
+ * and that made the router's degraded-open branch dead code: a database that
+ * could not be read and a workspace that had spent nothing were the same 0.
+ * The live reader THROWS on a failed read so checkBudget can fail open AND
+ * say so. No database at all (shadow, preview, unit tests) is still 0, because
+ * that is nothing recorded rather than something unreadable.
  */
 function defaultBudgetDeps(): BudgetDeps {
   return {
@@ -412,9 +437,15 @@ function defaultBudgetDeps(): BudgetDeps {
         return { rows: r.rows as unknown as WorkspaceAIPolicy[] };
       });
     },
-    monthSpend: (workspaceId) => monthSpendUsd(workspaceId),
+    monthSpend: (bucket) => liveSpendReader.read(bucket),
   };
 }
+
+/* In-process trace throttles: one degraded-read trace per bucket, and one
+   unattributed-call trace per feature, per 15 minutes. Per process is enough:
+   the point is that the signal exists in data, not that it is exact. */
+const degradedTrace = createTraceThrottle();
+const unattributedTrace = createTraceThrottle();
 
 /**
  * Enforcement-point design (see CTO directive - never escalate, fail cheap):
@@ -434,18 +465,85 @@ function defaultBudgetDeps(): BudgetDeps {
  * analytics store hiccupping can never take down all AI traffic. resolvePolicy
  * continues to own tier clamping; this gate only owns the absolute ceiling.
  */
-/** Platform-wide default monthly AI budget (USD) applied to a workspace with NO
- *  configured budget, so an unconfigured account is still bounded. Env-overridable
- *  via OGIAM_DEFAULT_MONTHLY_BUDGET_USD; the hard default is deliberately generous
- *  - a runaway backstop, not a day-to-day cap. Returns null only if an operator
- *  explicitly sets the env to a non-numeric / negative value to opt out. */
+/**
+ * Platform-wide default monthly AI budget (USD) applied to a workspace with NO
+ * configured budget, so an unconfigured account is still bounded.
+ * Env-overridable via OGIAM_DEFAULT_MONTHLY_BUDGET_USD. Returns null only if an
+ * operator explicitly sets the env to a non-numeric / negative value to opt out.
+ *
+ * SIZED FROM WHAT THIS DEPLOYMENT HAS ACTUALLY SPENT, NOT FROM A GUESS.
+ *
+ * This was $25,000. Under the governor that means nothing changes until $20,000
+ * and nothing stops until $50,000, which is not a backstop, it is a number
+ * chosen so that it would never fire. An LLMjacking loop on a stolen key, or
+ * our own CI fixer stuck in a retry, would have had a month and five figures of
+ * headroom.
+ *
+ * Measured 2026-10-24 against production, read-only, summing cost_usd over
+ * every ai.completion event ever recorded (2026-04-28 to 2026-10-24, 20,471
+ * calls, all azure-openai in practice):
+ *
+ *   2026-04  $0.22     2026-07  $0.04     2026-10  $263.76  (month to date)
+ *   2026-05  $0.23     2026-08  $1.69
+ *   2026-06  $0.06     2026-09  $7.47
+ *
+ *   highest single day  $24.00 on 2026-10-11
+ *
+ * October is the peak by two orders of magnitude, and it is the dogfooding:
+ * 2026-10-08 through 2026-10-18 ran at about $24 a day, almost all of it
+ * ai-code-ci-fix ($241.77 of $263.76). Since 2026-10-19 it has been about
+ * $0.30 a day. So the heaviest legitimate month this deployment has seen,
+ * counting that run as legitimate, is $263.76.
+ *
+ * $1,000 is 3.8 times that. The governor's lines then sit at: clamp from $800,
+ * cheapest tier only from $1,000, stopped at $2,000. October's dogfooding would
+ * not have reached even the first line. A month at three times October still
+ * would not. A runaway at $24 a day takes five weeks to reach the clamp, and
+ * one at $500 a day is stopped inside four days, rather than never.
+ *
+ * The cap is a budget, not a ruling on what heavy use is. A workspace that
+ * legitimately needs more gets a monthly_budget_usd row; an operator who wants
+ * a different platform floor sets the env.
+ */
+export const PLATFORM_DEFAULT_MONTHLY_BUDGET_USD = 1_000;
+
 export function platformDefaultBudgetUsd(env: NodeJS.ProcessEnv = process.env): number | null {
   const raw = env.OGIAM_DEFAULT_MONTHLY_BUDGET_USD;
   if (raw !== undefined) {
     const n = Number(raw);
     return Number.isFinite(n) && n >= 0 ? n : null;
   }
-  return 25_000;
+  return PLATFORM_DEFAULT_MONTHLY_BUDGET_USD;
+}
+
+/**
+ * The cap on the UNATTRIBUTED bucket: every call that arrived with no
+ * metadata.workspace_id, summed together.
+ *
+ * Those calls used to skip the governor entirely, and on 2026-10-24 that was
+ * all of them (ai.completion did not record workspace_id, see
+ * lib/ai/spend-guard.ts), so the platform default above is also the right
+ * figure here: the unattributed bucket IS the platform's measured spend today.
+ * Separately overridable via OGIAM_UNATTRIBUTED_MONTHLY_BUDGET_USD, because
+ * once callers are attributed this bucket should shrink toward zero and an
+ * operator may want to tighten it without touching every workspace's floor.
+ * Same opt-out semantics as the platform default.
+ */
+export function unattributedBudgetUsd(env: NodeJS.ProcessEnv = process.env): number | null {
+  const raw = env.OGIAM_UNATTRIBUTED_MONTHLY_BUDGET_USD;
+  if (raw !== undefined) {
+    const n = Number(raw);
+    return Number.isFinite(n) && n >= 0 ? n : null;
+  }
+  return platformDefaultBudgetUsd(env);
+}
+
+/** Test-only: forget which traces have been emitted, so each test starts with
+ *  a fresh 15-minute window. */
+export function _resetSpendTracesForTests(): void {
+  degradedTrace.reset();
+  unattributedTrace.reset();
+  liveSpendReader.reset();
 }
 
 async function checkBudget(
@@ -465,19 +563,46 @@ async function checkBudget(
     fraction: null,
   };
 
-  const workspaceId = req.metadata?.workspace_id;
-  // No workspace attribution -> behave exactly as before (no enforcement).
-  if (!workspaceId || workspaceId.trim() === "") return passthrough;
+  const feature = req.metadata?.feature ?? "unknown";
+  const actorId = req.metadata?.user_id ?? "system";
+  const actorRole = req.metadata?.user_role ?? "system";
 
-  const policy = preloaded;
+  /* NO WORKSPACE IS NOT NO LIMIT.
+   *
+   * A call without metadata.workspace_id used to return here, ungoverned. That
+   * is the exact shape of LLMjacking: whoever holds a key, or a loop that lost
+   * its context, spends with nobody's name on it and therefore nobody's cap.
+   * Those calls now share one bucket, __unattributed__, under the same
+   * governor (degrade before stop), so no existing caller breaks: they keep
+   * being answered until the bucket is a malfunction.
+   *
+   * And they are made findable. One ai.request_unattributed per feature per
+   * 15 minutes, carrying how many were held back, so the call sites that need
+   * a workspace_id show up in data ranked by volume instead of by grep. */
+  const unattributed = isUnattributed(req.metadata?.workspace_id);
+  const bucket = spendBucketFor(req.metadata?.workspace_id);
+  if (unattributed) {
+    const t = unattributedTrace.take(feature, Date.now());
+    if (t.emit) {
+      trackEvent("ai.request_unattributed", actorId, actorRole, {
+        feature,
+        requested_tier: req.model_tier,
+        suppressed_since_last: t.suppressed,
+        window_minutes: 15,
+      });
+    }
+  }
+
+  const policy = unattributed ? null : preloaded;
   /* A per-workspace budget wins; otherwise a platform-wide DEFAULT still bounds
      the workspace, so an UNCONFIGURED account is never uncapped - the runaway
      backstop this used to lack (a compromised or looping agent could spend
-     without limit). The default is generous (it catches egregious runaway, not
-     normal use) and env-overridable; only when neither a workspace budget nor a
-     platform default exists is there truly no cap. */
-  const capUsd =
-    policy && policy.monthly_budget_usd !== null
+     without limit). Sized from measured spend, see platformDefaultBudgetUsd.
+     Only when neither a workspace budget nor a platform default exists is
+     there truly no cap. */
+  const capUsd = unattributed
+    ? unattributedBudgetUsd()
+    : policy && policy.monthly_budget_usd !== null
       ? policy.monthly_budget_usd
       : platformDefaultBudgetUsd();
   if (capUsd === null) return passthrough;
@@ -486,14 +611,31 @@ async function checkBudget(
      down all AI traffic. Only a CONFIRMED over-spend blocks. */
   let spend: number;
   try {
-    spend = await deps.monthSpend(workspaceId);
+    spend = await deps.monthSpend(bucket);
   } catch (err) {
-    // Degrade OPEN, but say so: a spend-read failure must not silently disable
-    // the budget backstop without leaving a trace someone can find.
+    /* Degrade OPEN, and leave a trace in DATA, not only in a log line nobody
+       reads. A cap that quietly stopped applying looks exactly like a cap that
+       is working. ai.budget_check_degraded at most once per bucket per 15
+       minutes, so a database outage is one row per bucket per window rather
+       than one per call. If the database is what failed, this insert may fail
+       too; the warn below is the floor, the event is what makes it queryable
+       whenever the store is up. */
+    const message = err instanceof Error ? err.message : String(err);
     console.warn(
-      `[router] budget check degraded open for workspace ${workspaceId}: monthSpend read failed`,
+      `[router] budget check degraded open for ${bucket}: monthSpend read failed`,
       err,
     );
+    const t = degradedTrace.take(bucket, Date.now());
+    if (t.emit) {
+      trackEvent("ai.budget_check_degraded", actorId, actorRole, {
+        workspace_id: bucket,
+        unattributed,
+        budget_usd: capUsd,
+        feature,
+        error: message.slice(0, 200),
+        suppressed_since_last: t.suppressed,
+      });
+    }
     return passthrough;
   }
 
@@ -516,18 +658,16 @@ async function checkBudget(
     requestedTier: req.model_tier,
   });
 
-  const feature = req.metadata?.feature ?? "unknown";
-
   if (decision.state === "approaching" || decision.state === "over") {
     /* Recorded so a degraded answer is never invisible: somebody comparing
        this week's answers with last week's deserves to find the reason in
        data rather than guess at it. */
     trackEvent(
       "ai.budget_degraded",
-      req.metadata?.user_id ?? "system",
-      req.metadata?.user_role ?? "system",
+      actorId,
+      actorRole,
       {
-        workspace_id: workspaceId,
+        workspace_id: bucket,
         month_spend_usd: spend,
         budget_usd: capUsd,
         requested_tier: req.model_tier,
@@ -544,10 +684,10 @@ async function checkBudget(
   // dashboard see every block (fire-and-forget, never blocks the refusal).
   trackEvent(
     "ai.request_blocked_over_budget",
-    req.metadata?.user_id ?? "system",
-    req.metadata?.user_role ?? "system",
+    actorId,
+    actorRole,
     {
-      workspace_id: workspaceId,
+      workspace_id: bucket,
       month_spend_usd: spend,
       budget_usd: capUsd,
       feature,
@@ -555,9 +695,11 @@ async function checkBudget(
   );
 
   throw new BudgetExceededError(
-    `Workspace ${workspaceId} has reached ${CEILING_MULTIPLE} times its monthly AI budget ($${spend.toFixed(2)} of ${capUsd}) and is paused.`,
+    unattributed
+      ? `AI calls with no workspace attribution have reached ${CEILING_MULTIPLE} times the platform limit for unattributed use ($${spend.toFixed(2)} of ${capUsd}) and are paused. Pass metadata.workspace_id so the call is governed by its own workspace's budget.`
+      : `Workspace ${bucket} has reached ${CEILING_MULTIPLE} times its monthly AI budget ($${spend.toFixed(2)} of ${capUsd}) and is paused.`,
     {
-      workspace_id: workspaceId,
+      workspace_id: bucket,
       month_spend_usd: spend,
       budget_usd: capUsd,
       feature,
@@ -1558,6 +1700,15 @@ function emitCompletionEvent(
   const userRole = req.metadata?.user_role ?? "system";
   const metadata: Record<string, string | number | boolean> = {
     feature,
+    /* WHOSE SPEND THIS IS. Every budget read sums cost_usd off this event, and
+       until 2026-10-24 it never carried workspace_id, so v_ai_cost_daily put
+       all 20,471 completions under 'default' and a per-workspace cap read $0
+       for every real workspace, forever. Omitted, not defaulted, when the
+       caller gave none: an absent key is what puts the call in the
+       __unattributed__ bucket rather than in somebody's real workspace. */
+    ...(isUnattributed(req.metadata?.workspace_id)
+      ? {}
+      : { workspace_id: spendBucketFor(req.metadata?.workspace_id) }),
     provider: response.provider_used,
     model: response.model_used,
     tier: req.model_tier,
