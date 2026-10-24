@@ -42,6 +42,14 @@ describe("report", () => {
     expect(md).not.toContain("**Findings:**");
   });
 
+  it("escapes a backslash before a pipe so the cell cannot be broken out of", () => {
+    const r = newReport("t");
+    r.findings = [{ severity: "low", rule: "r", subject: "x", detail: "a\\|b" }];
+    const md = renderMarkdown(r);
+    expect(md).toContain("a\\\\\\|b");
+    expect(md.split("\n").find((l) => l.includes("a\\"))!.split(/(?<!\\)\|/).length).toBe(7);
+  });
+
   it("escapes pipes inside table cells", () => {
     const r = newReport("t");
     r.findings = [f("high")];

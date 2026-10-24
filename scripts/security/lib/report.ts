@@ -78,7 +78,7 @@ export function countBySeverity(findings: Finding[]): Record<Severity, number> {
 
 /** Markdown cells cannot hold a raw pipe or newline. */
 function cell(s: string): string {
-  return s.replace(/\|/g, "\\|").replace(/\r?\n/g, " ");
+  return s.replace(/\\/g, "\\\\").replace(/\|/g, "\\|").replace(/\r?\n/g, " ");
 }
 
 export function renderMarkdown(r: CheckReport): string {
