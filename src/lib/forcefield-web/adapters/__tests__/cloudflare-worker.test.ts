@@ -6,7 +6,7 @@
  * call the same engine; these tests pin that the Worker's request-mapping feeds
  * the engine correctly, against the REAL bundled ruleset (no mocks of the engine).
  */
-import { requestSignals, evaluateRequest, shouldBlock, resolveAuthenticated } from "../cloudflare-worker";
+import { requestSignals, evaluateRequest, shouldBlock, workerAuthenticated } from "../cloudflare-worker";
 import { DEFAULT_RULESET } from "../../ruleset";
 
 const AT = 1_700_000_000_000; // fixed nowMs for determinism
@@ -122,14 +122,14 @@ describe("new contract fields (ip, asn/asOrg, authenticated, platform)", () => {
     expect(shouldBlock({ block: false, reason: "ok" }, anon, true)).toBe(false);
   });
 
-  it("resolveAuthenticated: only a literal true counts; a throw or rejection is anonymous", async () => {
+  it("workerAuthenticated: only a literal true counts; a throw or rejection is anonymous", async () => {
     const env = { FORCEFIELD_SITE: "s", FORCEFIELD_ORIGIN: "https://o" };
     const r = req("https://site.example/", { cookie: "session=1" });
-    expect(await resolveAuthenticated(r, env, {})).toBe(false); // a cookie alone proves nothing
-    expect(await resolveAuthenticated(r, env, { isAuthenticated: async () => true })).toBe(true);
-    expect(await resolveAuthenticated(r, env, { isAuthenticated: () => { throw new Error("x"); } })).toBe(false);
-    expect(await resolveAuthenticated(r, env, { isAuthenticated: () => Promise.reject(new Error("x")) })).toBe(false);
-    expect(await resolveAuthenticated(r, env, { isAuthenticated: () => 1 as unknown as boolean })).toBe(false);
+    expect(await workerAuthenticated(r, env, {})).toBe(false); // a cookie alone proves nothing
+    expect(await workerAuthenticated(r, env, { isAuthenticated: async () => true })).toBe(true);
+    expect(await workerAuthenticated(r, env, { isAuthenticated: () => { throw new Error("x"); } })).toBe(false);
+    expect(await workerAuthenticated(r, env, { isAuthenticated: () => Promise.reject(new Error("x")) })).toBe(false);
+    expect(await workerAuthenticated(r, env, { isAuthenticated: () => 1 as unknown as boolean })).toBe(false);
   });
 
   it("evaluateRequest still produces an observation for a WordPress origin with the platform declared", () => {

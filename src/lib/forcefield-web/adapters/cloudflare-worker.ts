@@ -31,6 +31,7 @@ import { observeRequest, type Observation, type ObserveInput } from "../observe"
 import { decideEnforcement, type EnforcementDecision, type EnforceInput } from "../enforce";
 import { fetchRuleset } from "../ruleset";
 import { operatorFingerprint } from "../fingerprint";
+import { resolveAuthenticated } from "../shim";
 
 /** Env bindings the Worker reads. Platform-neutral names (no VERCEL_*), matching
  *  the shim's env so a site can move between adapters without renaming secrets. */
@@ -125,17 +126,13 @@ export function requestSignals(request: Request, nowMs: number, opts: { authenti
 
 /** Run the site's sign-in attestation. Only a literal `true` counts; a missing
  *  hook, a throw, a rejection or any other value means anonymous. Never throws. */
-export async function resolveAuthenticated(
+export async function workerAuthenticated(
   request: Request,
   env: ForcefieldWorkerEnv,
   opts: ForcefieldWorkerOptions,
 ): Promise<boolean> {
-  if (!opts.isAuthenticated) return false;
-  try {
-    return (await opts.isAuthenticated(request, env)) === true;
-  } catch {
-    return false;
-  }
+  const check = opts.isAuthenticated;
+  return resolveAuthenticated(request, { isAuthenticated: check ? (r) => check(r, env) : undefined });
 }
 
 /** PURE: should this request be turned away? Only when the engine proved it
@@ -246,7 +243,7 @@ export function createForcefieldWorker(options: ForcefieldWorkerOptions = {}) {
           return new Response("Forcefield: FORCEFIELD_ORIGIN is not configured.", { status: 500 });
         }
         const ruleset = await fetchRuleset(env.FORCEFIELD_RULESET_URL ?? "");
-        const authenticated = await resolveAuthenticated(request, env, options);
+        const authenticated = await workerAuthenticated(request, env, options);
         const s = requestSignals(request, Date.now(), { authenticated });
         const { verdict, observation } = evaluateRequest(env.FORCEFIELD_SITE, s, ruleset, { platform: options.platform });
 
