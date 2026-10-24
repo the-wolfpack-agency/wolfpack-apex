@@ -30,14 +30,29 @@ export {
 } from "./decoy";
 export {
   observeRequest,
+  withEnforcement,
+  isStaticAsset,
   type Observation,
   type ObserveInput,
   type ForcefieldEventType,
+  type EnforcementOutcome,
 } from "./observe";
 export {
   forcefieldMonitor,
+  forcefieldGuard,
+  isSyntheticMonitor,
+  SYNTHETIC_HEADER,
   type MonitorRequestLike,
+  type ForcefieldArgs,
 } from "./monitor";
+export {
+  decideEnforcement,
+  detectPayload,
+  detectHeaderAttack,
+  type EnforcementDecision,
+  type BlockReasonKind,
+} from "./enforce";
+export { verifyAgentByRanges, type AgentVerification } from "./hosting";
 export {
   fetchRuleset,
   coerceRuleset,

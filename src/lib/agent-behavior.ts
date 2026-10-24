@@ -67,6 +67,16 @@ export interface JourneyStep {
   path: string;
   signal: AgentSignal | null;
   attack?: string;
+  /** Enforcement actually turned this request away (props.blocked). */
+  blocked?: boolean;
+  /** Enforcement WOULD have blocked it, but watch mode / the plan held it back
+   *  (props.would_block). Never true together with blocked. */
+  wouldBlock?: boolean;
+  /** The probe label the engine matched (props.probe), e.g. "/.env" or
+   *  "next_server_action". */
+  probe?: string;
+  /** Requests in the burst window (props.rate), on a high-rate step. */
+  rate?: number;
 }
 
 /** How a session's events were tied together. A nonce is deterministic (the
@@ -101,6 +111,19 @@ export interface SessionEvent {
   principal?: string;
   principalIssuer?: string;
   principalScopes?: string[];
+  /** Enforcement outcome on this request (props.blocked / props.would_block). */
+  blocked?: boolean;
+  wouldBlock?: boolean;
+  /** The agent id this request CLAIMED and failed to verify (props.impersonating). */
+  impersonating?: string;
+  /** props.agent_verification: "verified" | "impersonation" | "unverifiable". */
+  agentVerification?: string;
+  /** props.signed_agent: a valid signed-agent identity was presented. */
+  signedAgent?: boolean;
+  /** props.probe: the probe label the engine matched. */
+  probe?: string;
+  /** props.rate on a site.agent_high_rate event. */
+  rate?: number;
 }
 
 export interface AgentSessionInput {
@@ -190,7 +213,17 @@ function deriveInsights(
   const out: JourneyInsight[] = [];
   const hostilePresent = signals.some((s) => HOSTILE.has(s));
 
-  if (has("identified_agent") && hostilePresent) {
+  // Proven impersonation: the engine checked the claimed agent against its
+  // published network and it failed. This needs no hostile behavior to be true.
+  const proven = events.find((e) => e.impersonating || e.agentVerification === "impersonation");
+  if (proven) {
+    const claimed = proven.impersonating || proven.agent || "a known agent";
+    out.push({
+      kind: "impersonation",
+      claimedAgent: claimed,
+      detail: `Claimed to be ${claimed}, but the request did not come from ${claimed}'s published network. A verified check, not a guess: this is a different client wearing ${claimed}'s identity.`,
+    });
+  } else if (has("identified_agent") && hostilePresent) {
     const claimed = events.find((e) => signalOf(e) === "identified_agent" && e.agent)?.agent ?? "a known crawler";
     out.push({
       kind: "impersonation",
@@ -328,7 +361,15 @@ export function classifySession(input: AgentSessionInput): AgentJourney {
     const sig = signalOf(e);
     const prev = steps[steps.length - 1];
     if (prev && !sig && !prev.signal && prev.path === e.path) continue;
-    steps.push({ at: e.at, path: e.path, signal: sig, ...(e.attack ? { attack: e.attack } : {}) });
+    steps.push({
+      at: e.at,
+      path: e.path,
+      signal: sig,
+      ...(e.attack ? { attack: e.attack } : {}),
+      ...(e.blocked ? { blocked: true } : e.wouldBlock ? { wouldBlock: true } : {}),
+      ...(e.probe ? { probe: e.probe } : {}),
+      ...(typeof e.rate === "number" ? { rate: e.rate } : {}),
+    });
     if (steps.length >= STEP_CAP) break;
   }
 
@@ -449,9 +490,9 @@ function summarize(cls: BehaviorClass, conf: Confidence, signals: readonly Agent
  * are bucketed by their correlation key. A key that came from a nonce is proven;
  * otherwise a fingerprint (inferred). Returns journeys newest-activity first.
  */
-export function buildJourneys(
-  rows: ReadonlyArray<{ key: string; keyKind: CorrelationKind; type: string; path: string; at: string; nonceLinked?: boolean; agent?: string; attack?: string; tool?: string; clientType?: string; site?: string }>,
-): AgentJourney[] {
+export type JourneyRow = Omit<SessionEvent, "type" | "path" | "at"> & { key: string; keyKind: CorrelationKind; type: string; path: string; at: string };
+
+export function buildJourneys(rows: ReadonlyArray<JourneyRow>): AgentJourney[] {
   const byKey = new Map<string, AgentSessionInput>();
   for (const r of rows) {
     let s = byKey.get(r.key);
@@ -461,7 +502,12 @@ export function buildJourneys(
     }
     // A nonce grouping always wins over a fingerprint grouping for the same key.
     if (r.keyKind === "nonce") (s as { keyKind: CorrelationKind }).keyKind = "nonce";
-    (s.events as SessionEvent[]).push({ type: r.type, path: r.path, at: r.at, nonceLinked: r.nonceLinked, agent: r.agent, attack: r.attack, tool: r.tool, clientType: r.clientType, site: r.site });
+    // Carry EVERY event field through. This used to copy a fixed subset, which
+    // silently dropped the principal verdict the board's query selected, so
+    // "Know the Principal" never fired on live journeys.
+    const { key: _k, keyKind: _kk, ...event } = r;
+    void _k; void _kk;
+    (s.events as SessionEvent[]).push(event);
   }
   return Array.from(byKey.values())
     .map(classifySession)

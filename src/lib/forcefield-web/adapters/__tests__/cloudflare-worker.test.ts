@@ -6,7 +6,7 @@
  * call the same engine; these tests pin that the Worker's request-mapping feeds
  * the engine correctly, against the REAL bundled ruleset (no mocks of the engine).
  */
-import { requestSignals, evaluateRequest } from "../cloudflare-worker";
+import { requestSignals, evaluateRequest, shouldBlock, workerAuthenticated } from "../cloudflare-worker";
 import { DEFAULT_RULESET } from "../../ruleset";
 
 const AT = 1_700_000_000_000; // fixed nowMs for determinism
@@ -72,5 +72,70 @@ describe("evaluateRequest (reuses the real engine + bundled ruleset)", () => {
     const s = requestSignals(req("https://site.example/.env", { "User-Agent": "Mozilla/5.0" }), AT);
     const { verdict } = evaluateRequest("beforeutrade", s, DEFAULT_RULESET);
     expect(verdict.block).toBe(false); // precision-first: a probe hint is not proof
+  });
+});
+
+describe("new contract fields (ip, asn/asOrg, authenticated, platform)", () => {
+  function cfReq(url: string, headers: Record<string, string>, cf?: Record<string, unknown>): Request {
+    const r = new Request(url, { headers });
+    if (cf) Object.defineProperty(r, "cf", { value: cf });
+    return r;
+  }
+
+  it("reads asn + asOrg from request.cf when Cloudflare provides them", () => {
+    const s = requestSignals(cfReq("https://site.example/", { "CF-Connecting-IP": "203.0.113.9" }, { asn: 16509, asOrganization: "Amazon.com, Inc." }), AT);
+    expect(s.ip).toBe("203.0.113.9");
+    expect(s.asn).toBe(16509);
+    expect(s.asOrg).toBe("Amazon.com, Inc.");
+  });
+
+  it("omits asn/asOrg when request.cf is absent or malformed", () => {
+    expect(requestSignals(req("https://site.example/"), AT).asn).toBeUndefined();
+    const s = requestSignals(cfReq("https://site.example/", {}, { asn: "16509", asOrganization: 42 }), AT);
+    expect(s.asn).toBeUndefined();
+    expect(s.asOrg).toBeUndefined();
+  });
+
+  it("takes the client IP ONLY from CF-Connecting-IP, never from forgeable X-Forwarded-For / X-Real-IP", () => {
+    const s = requestSignals(req("https://site.example/", { "X-Forwarded-For": "66.249.66.1", "X-Real-IP": "66.249.66.1" }), AT);
+    expect(s.ip).toBe("");
+  });
+
+  it("authenticated defaults to false and is true only when attested", () => {
+    expect(requestSignals(req("https://site.example/"), AT).authenticated).toBe(false);
+    expect(requestSignals(req("https://site.example/"), AT, { authenticated: true }).authenticated).toBe(true);
+  });
+
+  it("NEVER blocks an attested signed-in request, even a proven-hostile one with enforce on", () => {
+    const trap = DEFAULT_RULESET.trapPaths[0];
+    const s = requestSignals(req(`https://site.example${trap}`, { "User-Agent": "curl/8" }), AT, { authenticated: true });
+    const { verdict } = evaluateRequest("beforeutrade", s, DEFAULT_RULESET);
+    expect(verdict.block).toBe(true); // the engine still sees it for what it is
+    expect(shouldBlock(verdict, s, true)).toBe(false); // but the connector never blocks a signed-in user
+  });
+
+  it("shouldBlock: blocks only a hostile verdict, with enforce on, for an anonymous request", () => {
+    const anon = requestSignals(req("https://site.example/"), AT);
+    const hostile = { block: true, reason: "x" };
+    expect(shouldBlock(hostile, anon, true)).toBe(true);
+    expect(shouldBlock(hostile, anon, false)).toBe(false); // watch-first
+    expect(shouldBlock({ block: false, reason: "ok" }, anon, true)).toBe(false);
+  });
+
+  it("workerAuthenticated: only a literal true counts; a throw or rejection is anonymous", async () => {
+    const env = { FORCEFIELD_SITE: "s", FORCEFIELD_ORIGIN: "https://o" };
+    const r = req("https://site.example/", { cookie: "session=1" });
+    expect(await workerAuthenticated(r, env, {})).toBe(false); // a cookie alone proves nothing
+    expect(await workerAuthenticated(r, env, { isAuthenticated: async () => true })).toBe(true);
+    expect(await workerAuthenticated(r, env, { isAuthenticated: () => { throw new Error("x"); } })).toBe(false);
+    expect(await workerAuthenticated(r, env, { isAuthenticated: () => Promise.reject(new Error("x")) })).toBe(false);
+    expect(await workerAuthenticated(r, env, { isAuthenticated: () => 1 as unknown as boolean })).toBe(false);
+  });
+
+  it("evaluateRequest still produces an observation for a WordPress origin with the platform declared", () => {
+    const s = requestSignals(req("https://site.example/wp-login.php", { "User-Agent": "Mozilla/5.0", "CF-Connecting-IP": "203.0.113.9" }), AT);
+    const { verdict, observation } = evaluateRequest("blog", s, DEFAULT_RULESET, { platform: "wordpress" });
+    expect(verdict.block).toBe(false);
+    expect(observation).not.toBeNull();
   });
 });

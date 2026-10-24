@@ -12,15 +12,15 @@ import { GlowNode } from "@/components/forcefield/intel-visuals";
 
 type Control = { id: string; title: string; status: "active" | "partial" | "gap"; detail: string; enablement?: string };
 type Scenario = { id: string; attack: string; control: string; defended: boolean; detail: string };
-type Breach = { id: string; attack: string; realWorld: string; coverage: "prevented" | "detected" | "out_of_scope"; control: string; detail: string };
+type Breach = { id: string; attack: string; realWorld: string; coverage: "prevented" | "detected" | "missed" | "out_of_scope"; control: string; detail: string };
 type Data = {
   assurance: { controls: Control[]; activeCount: number; partialCount: number; gapCount: number; total: number; score: number };
   adversarial: { results: Scenario[]; defendedCount: number; total: number; allDefended: boolean };
-  breaches: { results: Breach[]; prevented: number; detected: number; outOfScope: number; total: number };
+  breaches: { results: Breach[]; prevented: number; detected: number; missed?: number; outOfScope: number; total: number };
   lowAndSlow: { profiles: { id: string; name: string; evasive: boolean; detected: boolean; outcome: string }[]; detected: number; total: number; rate: number; evasiveRate: number; note: string };
 };
-const COVERAGE_COLOR = { prevented: "#30a46c", detected: "#f5a623", out_of_scope: "#9ca3af" } as const;
-const COVERAGE_LABEL = { prevented: "prevented", detected: "detected", out_of_scope: "out of scope" } as const;
+const COVERAGE_COLOR = { prevented: "#30a46c", detected: "#f5a623", missed: "#e5484d", out_of_scope: "#9ca3af" } as const;
+const COVERAGE_LABEL = { prevented: "prevented", detected: "detected", missed: "MISSED", out_of_scope: "out of scope" } as const;
 
 const STATUS_COLOR = { active: "#30a46c", partial: "#f5a623", gap: "#ef4444" } as const;
 
@@ -101,7 +101,7 @@ export function ForcefieldAssurance() {
             {/* known-attack coverage (famous-breach corpus) - honest by design */}
             <div>
               <div style={{ fontSize: "0.62rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--wp-text-muted, #9ca3af)", marginBottom: "0.5rem" }}>
-                Known-attack coverage &middot; {data.breaches.prevented} prevented &middot; {data.breaches.detected} detected &middot; {data.breaches.outOfScope} honestly out of scope
+                Known-attack coverage &middot; {data.breaches.prevented} prevented &middot; {data.breaches.detected} detected{(data.breaches.missed ?? 0) > 0 ? <> &middot; <span data-testid="breach-missed" style={{ color: COVERAGE_COLOR.missed, fontWeight: 800 }}>{data.breaches.missed} MISSED</span></> : null} &middot; {data.breaches.outOfScope} honestly out of scope
               </div>
               <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: "0.35rem" }}>
                 {data.breaches.results.map((b) => (

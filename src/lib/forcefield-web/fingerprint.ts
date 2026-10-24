@@ -80,6 +80,10 @@ const KNOWN_CRAWLER_MARKERS = [
   "googlebot", "bingbot", "duckduckbot", "yandexbot", "baiduspider", "applebot",
   "gptbot", "oai-searchbot", "chatgpt-user", "claudebot", "perplexitybot",
   "amazonbot", "bytespider", "facebookexternalhit", "meta-externalagent",
+  // Vendor-documented AI agents / fetchers (sources cited in ruleset.ts
+  // knownAgents): Anthropic, Perplexity, Mistral, DuckDuckGo, Meta, Google.
+  "claude-user", "claude-searchbot", "perplexity-user", "mistralai-user",
+  "duckassistbot", "meta-externalfetcher", "google-cloudvertexbot",
 ];
 
 /** The header trinity a mainstream browser sends together. Their joint presence

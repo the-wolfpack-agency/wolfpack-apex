@@ -99,3 +99,52 @@ export function _resetHostingCache(): void {
   _cacheRaw = null;
   _cacheParsed = [];
 }
+
+/** Verified-agent outcome for a request whose UA claims an allowlisted agent:
+ *  verified (IPv4 inside the vendor's own published ranges), impersonation
+ *  (vendor publishes ranges and the IP is outside them), unverifiable (the
+ *  vendor publishes none, or there is no IPv4 to check - never guessed). */
+export type AgentVerification = "verified" | "impersonation" | "unverifiable";
+
+// Parsed per-agent range cache, keyed by the ruleset's array REFERENCE (stable
+// within a ruleset cache window), so each agent's list is parsed once, not per
+// request. A WeakMap so a replaced ruleset's arrays are collected.
+const _agentRangeCache = new WeakMap<readonly string[], DatacenterPrefix[]>();
+
+function parseCompactPrefixes(list: readonly string[]): DatacenterPrefix[] {
+  const cached = _agentRangeCache.get(list);
+  if (cached) return cached;
+  const parsed: DatacenterPrefix[] = [];
+  for (const s of list) {
+    const slash = s.indexOf("/");
+    if (slash < 0) continue;
+    const base = Number(s.slice(0, slash));
+    const bits = Number(s.slice(slash + 1));
+    if (Number.isFinite(base) && Number.isInteger(bits) && bits >= 0 && bits <= 32) parsed.push({ base: base >>> 0, bits });
+  }
+  _agentRangeCache.set(list, parsed);
+  return parsed;
+}
+
+/**
+ * Verify a claimed agent identity by the vendor's PUBLISHED IP ranges
+ * (ruleset.verifiedAgentRanges, compact "base/bits"). Bounded cost: only the
+ * claimed agent's own list is scanned, parsed once per ruleset window. Pure.
+ * An empty or malformed list is "unverifiable" (never an impersonation), so a
+ * failed range refresh can never turn a real crawler into a suspect.
+ */
+export function verifyAgentByRanges(
+  agentId: string | undefined,
+  ip: string | null | undefined,
+  ranges: Record<string, readonly string[]> | undefined,
+): AgentVerification {
+  if (!agentId || !ranges) return "unverifiable";
+  const list = ranges[agentId];
+  if (!Array.isArray(list) || list.length === 0) return "unverifiable";
+  const prefixes = parseCompactPrefixes(list);
+  if (prefixes.length === 0) return "unverifiable";
+  const ipInt = ip ? ipv4ToInt(ip) : null;
+  if (ipInt === null) return "unverifiable";
+  for (const p of prefixes) if (ipInPrefix(ipInt, p)) return "verified";
+  return "impersonation";
+}

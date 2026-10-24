@@ -8,10 +8,41 @@ caught on any protected site is turned away on all of them. No em dashes.
 
 The detection engine lives ONCE on the Instinct control plane
 (`wolfpack-instinct.vercel.app`). Each protected site runs a thin SHIM in its own
-edge (Next.js middleware or a Cloudflare Worker) that does two things per request:
-forward the request SHAPE (path, method, header names, UA, country) to the engine,
-and apply the verdict. The site carries no detection logic, so every engine
-improvement is one deploy, live on every site at once.
+edge (Next.js middleware, a Cloudflare Worker, or the WordPress plugin) that does
+two things per request: forward the request SHAPE to the engine, and apply the
+verdict. The site carries no detection logic, so every engine improvement is one
+deploy, live on every site at once.
+
+### What a connector sends (POST /api/forcefield/observe)
+
+| Field | Meaning |
+|---|---|
+| `site`, `path`, `rawUrl`, `method` | Which site, and the request target (path plus query, so a payload in the query is seen) |
+| `userAgent`, `headerNames`, `country` | The user-agent, the NAMES of the request headers (never values), the edge country |
+| `accept`, `secFetchDest` | The two headers that tell a real page view from a script |
+| `ip` | The client IP. Classified by the engine (hosting network or not, verified crawler range or not) and then discarded, never stored |
+| `asn`, `asOrg` | The client network number and operator name, only when the edge knows them (Cloudflare does) |
+| `platform` | What the site runs on, e.g. `"wordpress"`. The engine then treats that platform's own paths (`/wp-login.php`, `/wp-admin`, `/xmlrpc.php`, `/wp-json`, ...) as the site's, not as recon |
+| `authenticated` | `true` ONLY when the site itself verified a real signed-in session. Never set from a cookie or Authorization header merely being present, since anyone can send those |
+
+The engine suppresses weak bot tells for an authenticated request but still
+records payloads, decoy trips, named scanners and probes.
+
+### The signed-in user guarantee
+
+No connector ever blocks a request the site attested as signed in, in any mode.
+The request is still reported (marked authenticated) so the engine sees what a
+compromised or misused account does, but it is always served. Sign-in is attested
+by the site's own session check:
+
+- WordPress plugin: `is_user_logged_in()`, which validates the signed WordPress
+  auth cookie.
+- Generic shim (`src/lib/forcefield-web/shim.ts`): the `isAuthenticated(req)`
+  option you pass to `forcefieldCheck`.
+- Cloudflare Worker: the `isAuthenticated(request, env)` option of
+  `createForcefieldWorker`.
+
+A hook that throws or returns anything other than `true` means anonymous.
 
 Watch-first by design: the shim is dark until `FORCEFIELD_WEB=on`, and it only ever
 returns a block when `FORCEFIELD_ENFORCE=on`. A site watches first (records what it
@@ -79,11 +110,82 @@ export async function middleware(req: NextRequest, ev: NextFetchEvent): Promise<
 export const config = { matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"] };
 ```
 
+### Generic shim (any JS edge)
+
+`src/lib/forcefield-web/shim.ts` is the same flow as a library. `forcefieldCheck`
+extracts the signals, runs your sign-in check, asks the engine, and returns
+whether to block. It fails open and never blocks a signed-in request.
+
+```ts
+import { forcefieldCheck } from "./shim";
+
+const block = await forcefieldCheck(req, {
+  endpoint: process.env.FORCEFIELD_INGEST_URL!,
+  token: process.env.FORCEFIELD_EDGE_TOKEN!,
+  site: process.env.FORCEFIELD_SITE || "site",
+  platform: "wordpress",                         // optional: what the origin runs
+  isAuthenticated: (r) => verifySession(r),      // optional: YOUR session check
+}, { ip: trustedClientIp });                     // pass the IP from your platform when you have one
+```
+
+Pass `ip` from your platform's trusted source. The fallback reads the first
+X-Forwarded-For hop, which is only safe on an edge that overwrites that header
+itself (Vercel does).
+
 ### Cloudflare Worker
 
-Use the same request shape and the same two env vars; the apex adapter at
-`src/lib/forcefield-web/adapters/cloudflare-worker.ts` is the reference implementation
-(observe + apply), vendored per site.
+The apex adapter at `src/lib/forcefield-web/adapters/cloudflare-worker.ts` is the
+reference implementation (observe + apply), vendored per site. It reads the client
+IP ONLY from `CF-Connecting-IP` (set by Cloudflare, not forgeable by the client),
+and the network number and operator from `request.cf.asn` and
+`request.cf.asOrganization`. The default export needs no code. To declare the
+origin's platform and attest signed-in users, export a configured Worker instead:
+
+```ts
+import { createForcefieldWorker } from "./cloudflare-worker";
+
+export default createForcefieldWorker({
+  platform: "wordpress",
+  isAuthenticated: (request, env) => verifySessionCookie(request, env), // your own check
+});
+```
+
+The Worker is also the way to cover the two WordPress installer screens the plugin
+cannot see (below).
+
+### WordPress plugin
+
+`integrations/wordpress/ogiam-forcefield/` (version 0.2.0). Install, paste the
+site label and key under Settings -> Forcefield, save. It declares
+`platform: "wordpress"` and sends every field in the table above except
+`asn`/`asOrg`.
+
+What it covers: the guard runs on the WordPress `init` hook at priority 0, so it
+sees every request WordPress handles: pages, `wp-login.php`, `xmlrpc.php`,
+`wp-admin/admin-ajax.php`, the REST API (`/wp-json/` and `?rest_route=`) and
+`wp-admin`. Version 0.1.0 used `template_redirect` and skipped `is_admin()`, so it
+was blind to exactly those paths. `init` is the earliest hook where
+`is_user_logged_in()` is reliable: WordPress sets up the current user right before
+firing it.
+
+What it does not cover: `wp-admin/install.php` and `wp-admin/setup-config.php`
+load WordPress in installing mode, where no regular plugin runs. Put the
+Cloudflare Worker in front of the site to cover them.
+
+What it skips on purpose: WP-CLI, cron runs (`wp-cron.php`), and an administrator
+saving the plugin's own settings (so a wrong key can always be fixed).
+
+Client IP: `REMOTE_ADDR` by default. A proxy header (CF-Connecting-IP, X-Real-IP,
+or the last X-Forwarded-For hop) is used only when the site owner picks it under
+Client IP source, because on a server reachable directly any visitor can forge
+those headers.
+
+Block response, enforce mode only, anonymous requests only: a JSON 403 for the REST
+API and admin-ajax, an XML-RPC fault with a 403 for `xmlrpc.php`, a plain 403 page
+elsewhere. The text is fixed; no rule or engine detail is shown. Watch mode posts
+fire-and-forget (non-blocking, 0.3 second timeout). Enforce mode waits up to 2
+seconds and serves the request on any error, timeout, non-200 or unreadable
+answer.
 
 ## Step 3: watch, then enforce
 
@@ -105,6 +207,9 @@ every site stronger.
 
 - Dark by default; watch-first; fail-open at every step. Forcefield can never take a
   site down.
-- The shim sends only request SHAPE (no bodies, no header values, no PII).
+- The shim sends only request SHAPE (no bodies, no cookies, no header values other
+  than user-agent, accept and sec-fetch-dest). The client IP is classified and
+  discarded, never stored.
+- A request the site attests as signed in is never blocked by any connector.
 - Enforce blocks ONLY proven-hostile requests (decoy trip, named scanner, injection
   payload, admin-blocked fingerprint). A real visitor is never turned away.

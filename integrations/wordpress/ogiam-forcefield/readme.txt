@@ -4,7 +4,7 @@ Tags: security, bots, ai, firewall, bot-protection
 Requires at least: 6.0
 Tested up to: 6.7
 Requires PHP: 7.4
-Stable tag: 0.1.0
+Stable tag: 0.2.0
 License: Proprietary
 
 Protect your site from hostile AI agents and bots. Install, paste your site key, done. Watch-first and fail-open: it never takes your site down.
@@ -12,17 +12,28 @@ Protect your site from hostile AI agents and bots. Install, paste your site key,
 == Description ==
 
 OGIAM Forcefield puts your site behind a central agent-and-bot defense engine. On
-each front-end request it forwards the request SHAPE (path, method, header names,
-user-agent, country) to the engine with your site key and applies the verdict. It
-sends no request bodies, no header values, and no PII.
+each request WordPress handles it forwards the request SHAPE (path, method, header
+names, user-agent, accept, sec-fetch-dest, country, client IP) to the engine with
+your site key and applies the verdict. It sends no request bodies, no cookies, and
+no other header values. The client IP is used only to classify the network (for
+example a hosting provider) and is then discarded, never stored.
+
+It covers the paths attackers hit hardest on WordPress: wp-login.php, xmlrpc.php,
+admin-ajax.php, the REST API (wp-json) and wp-admin, as well as normal pages. The
+engine knows these are your site's own WordPress paths, so a visit to them alone is
+never treated as an attack; only proven-hostile requests (named scanners, injection
+payloads, decoy trips) are turned away.
 
 Detection lives centrally, so new scanner signatures and trap paths go live without
 updating the plugin.
 
 * Dark until configured: no key set, it does nothing.
 * Watch-first: it only blocks once you turn Blocking on.
-* Fail-open: any error serves the request. It can never take your site down.
-* Never gates wp-admin.
+* Never blocks a signed-in user: requests from a signed-in WordPress session are
+  reported but always served, in every mode.
+* Fail-open: any error, timeout or unexpected answer serves the request. It can
+  never take your site down.
+* Stays out of the way of WP-CLI, cron runs and saving its own settings.
 
 == Installation ==
 
@@ -45,15 +56,54 @@ fails open and serves the request.
 
 = What data leaves my site? =
 
-Only the request SHAPE: path, HTTP method, the NAMES of request headers, the
-user-agent, and the country. No request bodies, no header values, no PII.
+Only the request SHAPE: path and query, HTTP method, the NAMES of request
+headers, the user-agent, the accept and sec-fetch-dest headers, the country,
+whether the visitor is signed in (yes or no, never who), and the client IP, which
+the engine classifies and then discards. No request bodies, no cookies, no other
+header values, no account details.
 
 = Does it cover the REST API and wp-admin? =
 
-This version guards front-end page requests and never gates wp-admin. REST API
-coverage is planned for a later version.
+Yes, from version 0.2.0. It runs on the WordPress `init` hook, so it sees
+wp-login.php, xmlrpc.php, admin-ajax.php, the REST API and wp-admin, not only
+front-end pages. A blocked REST or admin-ajax call gets a JSON 403, a blocked
+XML-RPC call gets an XML-RPC fault with a 403, and a blocked page gets a plain
+403 page. No internal detail is shown.
+
+Two installer screens, wp-admin/install.php and wp-admin/setup-config.php, run
+before WordPress loads any plugin, so no plugin can see them. To cover those too,
+use the OGIAM Forcefield Cloudflare connector in front of the site.
+
+= Can it lock me out of my own site? =
+
+No. A signed-in user is never blocked, in any mode. Saving the plugin's settings
+is never checked, so a wrong key or engine URL can always be corrected. If the
+engine is unreachable or slow, the request is served.
+
+= My site is behind Cloudflare or a load balancer. Which client IP is used? =
+
+By default the plugin uses the direct connection address (REMOTE_ADDR), which a
+visitor cannot forge. If every request reaches your server through Cloudflare or a
+reverse proxy, choose it under Client IP source. Do not choose a proxy if visitors
+can reach your server directly: they could then send a fake IP header.
 
 == Changelog ==
+
+= 0.2.0 =
+* Coverage: the guard now runs on `init` (priority 0) instead of
+  `template_redirect`, so wp-login.php, xmlrpc.php, admin-ajax.php, the REST API
+  and wp-admin are protected, not only front-end pages.
+* Signed-in users are never blocked in any mode, and are reported as
+  authenticated so the engine does not treat them as bots.
+* The engine is told the site runs WordPress, so WordPress's own paths are not
+  reported as reconnaissance.
+* Sends the client IP (REMOTE_ADDR by default; a proxy header only when you choose
+  one), the accept and sec-fetch-dest headers and the full request URL.
+* Context-aware 403: JSON for the REST API and admin-ajax, an XML-RPC fault for
+  xmlrpc.php, a plain page elsewhere. No internal detail is shown.
+* Skips WP-CLI, cron runs and saving the plugin's own settings.
+* Fails open on a non-200 engine answer as well as on network errors.
+* Settings are sanitized on save; the engine URL must be https.
 
 = 0.1.0 =
 * Initial release: watch-first, fail-open front-end protection via the central engine.

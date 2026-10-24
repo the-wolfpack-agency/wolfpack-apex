@@ -31,13 +31,24 @@ Collected:
 - Coarse geo: the country from the edge (`x-vercel-ip-country`), when present.
 - A derived operator fingerprint (a stable hash over header-name shape + client
   classification), used to group an agent's activity.
+- Forwarded by the connectors for classification: the `Accept` and
+  `Sec-Fetch-Dest` header values (page view or script), the platform the site
+  runs on (e.g. `wordpress`), a yes/no flag for whether the SITE verified a
+  signed-in session (never who), and, when the edge knows them, the client
+  network number (ASN) and operator name.
+- The client IP, used only to classify the network (hosting provider, verified
+  crawler range) and then discarded; it is not stored in the event record.
 - The classification outcome and event type (e.g. `site.agent_welcomed`,
   `site.agent_trap_tripped`, `site.agent_payload_attack`) and counts.
 
 NOT collected by the engine:
 - Page content, response bodies, or rendered HTML.
 - Header VALUES (only the names), cookies, authorization headers, or tokens.
-- Form field values, query-string contents beyond the path, or request bodies.
+- Form field values or request bodies.
+- Query-string contents in the stored record. Connectors send the request target
+  (path plus query string, length-capped) so the engine can match attack payloads
+  such as SQL injection in a parameter; it is inspected in memory and discarded.
+  The event keeps only the path and the attack class name (e.g. `sqli`).
 - Visitor identity, account identifiers, or any field we would treat as PII by
   design. Coarse country is the only location signal; no precise IP is stored in
   the event record.

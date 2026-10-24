@@ -150,3 +150,117 @@ describe("detectPayload - catches encoded and decoded forms", () => {
     expect(detectPayload("/x?p=%zz")).toBeNull();
   });
 });
+
+import { detectHeaderAttack } from "@/lib/forcefield-web/enforce";
+import { parseCidr } from "@/lib/forcefield-web/hosting";
+
+describe("welcome-lane hole (regression): a UA claim never exempts a request from proof", () => {
+  const googlebotUa = "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)";
+
+  it("BLOCKS SQLi from a spoofed 'Googlebot' UA (used to ALLOW before the payload check)", () => {
+    const d = decideEnforcement({ ...base, userAgent: googlebotUa, path: "/p", rawUrl: "/p?id=1%20UNION%20SELECT%20pw%20FROM%20users" }, R);
+    expect(d.block).toBe(true);
+    expect(d.reasonKind).toBe("payload");
+    expect(d.attack).toBe("sql_injection");
+  });
+
+  it("BLOCKS a decoy trip and a middleware-bypass header from a 'GPTBot' UA", () => {
+    expect(decideEnforcement({ ...base, userAgent: "GPTBot/1.2", path: "/_ff/records" }, R).reasonKind).toBe("decoy");
+    const d = decideEnforcement({ ...base, userAgent: "GPTBot/1.2", path: "/admin", headerNames: [...base.headerNames, "x-middleware-subrequest"] }, R);
+    expect(d.block).toBe(true);
+    expect(d.attack).toBe("nextjs_middleware_bypass");
+  });
+
+  const compact = (c: string) => { const p = parseCidr(c)!; return `${p.base >>> 0}/${p.bits}`; };
+  const withRanges = { ...R, verifiedAgentRanges: { Googlebot: [compact("66.249.64.0/19")] } };
+  const fpOf = (h: string[]) => operatorFingerprint(h, undefined, "known_crawler");
+  const H = ["host", "user-agent"];
+
+  it("a VERIFIED Googlebot keeps the welcome lane even with a blocked fingerprint", () => {
+    const d = decideEnforcement({ ...base, userAgent: googlebotUa, headerNames: H, path: "/", ip: "66.249.66.1" }, withRanges, { blockedFingerprints: [fpOf(H)] });
+    expect(d.block).toBe(false);
+  });
+
+  it("a PROVEN impersonator (Googlebot UA, IP outside Google's ranges) loses the welcome lane", () => {
+    const d = decideEnforcement({ ...base, userAgent: googlebotUa, headerNames: H, path: "/", ip: "203.0.113.9" }, withRanges, { blockedFingerprints: [fpOf(H)] });
+    expect(d.block).toBe(true);
+    expect(d.reasonKind).toBe("blocked_fingerprint");
+  });
+
+  it("an unverifiable claim (no ranges published) keeps the lane", () => {
+    const d = decideEnforcement({ ...base, userAgent: googlebotUa, headerNames: H, path: "/", ip: "203.0.113.9" }, R, { blockedFingerprints: [fpOf(H)] });
+    expect(d.block).toBe(false);
+  });
+});
+
+describe("new payload rules", () => {
+  it("CVE-2025-29927: x-middleware-subrequest from a client is a payload attack", () => {
+    expect(detectHeaderAttack(["host", "X-Middleware-Subrequest"])).toBe("nextjs_middleware_bypass");
+    expect(detectHeaderAttack(["host", "x-middleware-prefetch", "next-action"])).toBeNull();
+    const d = decideEnforcement({ ...base, path: "/dashboard", headerNames: [...base.headerNames, "x-middleware-subrequest"] }, R);
+    expect(d).toMatchObject({ block: true, reasonKind: "payload", attack: "nextjs_middleware_bypass" });
+  });
+
+  it("CVE-2024-4577 / CVE-2012-1823: PHP-CGI argument injection, soft-hyphen and plain forms", () => {
+    // Verbatim watchTowr PoC query string.
+    expect(detectPayload("/index.php?%ADd+allow_url_include%3d1+-d+auto_prepend_file%3dphp://input")).toBe("php_cgi_injection");
+    expect(detectPayload("/cgi-bin/php-cgi.exe?%ADd+allow_url_include%3d1+%ADd+auto_prepend_file%3dphp://input")).toBe("php_cgi_injection");
+    expect(detectPayload("/index.php?-d+allow_url_include%3don+-d+auto_prepend_file%3dphp%3a//input")).toBe("php_cgi_injection");
+    expect(detectPayload("/x.php?-d allow_url_include=1")).toBe("php_cgi_injection");
+  });
+
+  it("_next/image SSRF to loopback / private / metadata / *.internal joins the ssrf family", () => {
+    expect(detectPayload("/_next/image?url=http://127.0.0.1:3000/admin&w=64&q=75")).toBe("ssrf");
+    expect(detectPayload("/_next/image?url=http%3A%2F%2F169.254.169.254%2Flatest%2Fmeta-data&w=64&q=75")).toBe("ssrf");
+    expect(detectPayload("/_next/image?w=64&url=http://10.0.0.5/x.png")).toBe("ssrf");
+    expect(detectPayload("/_next/image?url=http://redis.internal:6379/&w=64")).toBe("ssrf");
+    expect(detectPayload("/_next/image?url=http://localhost/x&w=64")).toBe("ssrf");
+  });
+
+  it("OAST callback hosts in a parameter are blind-SSRF tooling", () => {
+    expect(detectPayload("/fetch?u=http://abc123.oast.fun/x")).toBe("ssrf");
+  });
+
+  it("NO false positives on real-browser URLs that look superficially similar", () => {
+    const benign = [
+      "/_next/image?url=%2Fimages%2Fhero.png&w=1920&q=75",
+      "/_next/image?url=https%3A%2F%2Fcdn.example.com%2Fa.png&w=640&q=75",
+      "/_next/image?url=/logo.svg&w=128&q=75",
+      "/search?q=how+to+set+allow_url_include+safely",
+      "/docs/php-cgi?section=-d-flags",
+      "/blog/the-internal-memo?ref=10.5",
+      "/products?id=10&sort=-date",
+      "/search?q=co%C2%ADdirect",
+      "/login?next=/dashboard",
+    ];
+    for (const u of benign) expect([u, detectPayload(u)]).toEqual([u, null]);
+    for (const u of benign) expect(decideEnforcement({ ...base, path: u.split("?")[0], rawUrl: u }, R).block).toBe(false);
+  });
+});
+
+describe("authenticated requests (site-attested)", () => {
+  const PW = ["host", "connection", "sec-ch-ua", "sec-ch-ua-mobile", "sec-ch-ua-platform", "upgrade-insecure-requests", "user-agent", "accept", "sec-fetch-site", "sec-fetch-mode", "sec-fetch-user", "sec-fetch-dest", "accept-encoding", "accept-language"];
+  const pwUa = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/131.0.0.0 Safari/537.36";
+  const pwFp = operatorFingerprint(PW, "HeadlessChrome", "headless");
+
+  it("Playwright default headers + an admin-blocked headless fp -> BLOCKED when anonymous", () => {
+    const d = decideEnforcement({ ...base, path: "/login", userAgent: pwUa, headerNames: PW }, R, { blockedFingerprints: [pwFp] });
+    expect(d.reasonKind).toBe("blocked_fingerprint");
+  });
+
+  it("same request, authenticated (e.g. a valid synthetic-monitor token) -> ALLOWED", () => {
+    const d = decideEnforcement({ ...base, path: "/login", userAgent: pwUa, headerNames: PW, authenticated: true }, R, { blockedFingerprints: [pwFp] });
+    expect(d.block).toBe(false);
+  });
+
+  it("authenticated + SQLi / decoy / bypass header -> STILL blocked", () => {
+    expect(decideEnforcement({ ...base, authenticated: true, path: "/p", rawUrl: "/p?id=1 UNION SELECT 1" }, R).attack).toBe("sql_injection");
+    expect(decideEnforcement({ ...base, authenticated: true, path: "/_ff/records" }, R).reasonKind).toBe("decoy");
+    expect(decideEnforcement({ ...base, authenticated: true, path: "/", headerNames: [...base.headerNames, "x-middleware-subrequest"] }, R).attack).toBe("nextjs_middleware_bypass");
+  });
+
+  it("authenticated named tool (our own DAST with credentials) is not blocked by the attack-tool rule", () => {
+    expect(decideEnforcement({ ...base, authenticated: true, path: "/", userAgent: "Nuclei - Open-source project" }, R).block).toBe(false);
+    expect(decideEnforcement({ ...base, path: "/", userAgent: "Nuclei - Open-source project" }, R).reasonKind).toBe("attack_tool");
+  });
+});

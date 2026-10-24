@@ -40,33 +40,122 @@ export interface ForcefieldRuleset {
    *  coverage update ships to all client sites via one ruleset refresh, no
    *  re-vendor. Optional; a site with none falls back to its bundled seed. */
   datacenterPrefixes?: string[];
+  /** Paths NATIVE to a platform (keyed by platform id, e.g. "wordpress"): on a
+   *  site that declares that platform these are its own real paths, not recon, so
+   *  they are never reported as a sensitive probe there. Optional. */
+  platformPaths?: Record<string, string[]>;
+  /** Published IPv4 ranges ("base/bits", same compact shape as
+   *  datacenterPrefixes) per allowlisted agent id. A request whose UA claims an
+   *  agent that has ranges here is VERIFIED when its IP falls inside them and an
+   *  IMPERSONATION when it does not; an agent with no ranges is "unverifiable".
+   *  Distributed centrally so every site verifies against current lists.
+   *  Optional. */
+  verifiedAgentRanges?: Record<string, string[]>;
 }
 
 /** The bundled fallback baked into every site. Kept deliberately broad so a site
- *  running on defaults alone still detects the common cases. */
+ *  running on defaults alone still detects the common cases. Every entry below is
+ *  DATA, so a change reaches every connected site on the next ruleset refresh
+ *  (no re-vendor). Each group cites where the indicator comes from. */
 export const DEFAULT_RULESET: ForcefieldRuleset = {
-  version: "bundled-1",
+  version: "bundled-2",
   knownAgents: [
+    // Only vendor-DOCUMENTED tokens. Most-specific first is not needed: every
+    // token is distinct (Claude-User does not contain ClaudeBot, etc.).
     { id: "Googlebot", uaMatch: "Googlebot" },
+    // https://developers.google.com/search/docs/crawling-indexing/google-common-crawlers
+    { id: "Google-CloudVertexBot", uaMatch: "Google-CloudVertexBot" },
     { id: "Bingbot", uaMatch: "bingbot" },
+    // OpenAI: https://platform.openai.com/docs/bots
     { id: "GPTBot", uaMatch: "GPTBot" },
     { id: "OAI-SearchBot", uaMatch: "OAI-SearchBot" },
     { id: "ChatGPT-User", uaMatch: "ChatGPT-User" },
+    // Anthropic: https://support.claude.com/en/articles/8896518
     { id: "ClaudeBot", uaMatch: "ClaudeBot" },
+    { id: "Claude-User", uaMatch: "Claude-User" },
+    { id: "Claude-SearchBot", uaMatch: "Claude-SearchBot" },
+    // Perplexity: https://docs.perplexity.ai/guides/bots
     { id: "PerplexityBot", uaMatch: "PerplexityBot" },
+    { id: "Perplexity-User", uaMatch: "Perplexity-User" },
+    // Mistral: https://docs.mistral.ai/robots
+    { id: "MistralAI-User", uaMatch: "MistralAI-User" },
     { id: "Applebot", uaMatch: "Applebot" },
     { id: "DuckDuckBot", uaMatch: "DuckDuckBot" },
+    // https://duckduckgo.com/duckduckgo-help-pages/results/duckassistbot
+    { id: "DuckAssistBot", uaMatch: "DuckAssistBot" },
     { id: "Amazonbot", uaMatch: "Amazonbot" },
+    // Meta: https://developers.facebook.com/docs/sharing/webmasters/web-crawlers
+    { id: "Meta-ExternalAgent", uaMatch: "meta-externalagent" },
+    { id: "Meta-ExternalFetcher", uaMatch: "meta-externalfetcher" },
   ],
   trapPaths: ["/_ff/records"],
   sensitivePaths: [
+    // Classic recon. "/.env" also matches every "/.env.<suffix>" and "/.env~"
+    // through the dotfile rule in observe.ts; the explicit variants below are the
+    // ones seen in our own production telemetry (2026-10) and reach sites still
+    // running an older vendored core that lacks that rule.
     "/wp-login.php", "/xmlrpc.php", "/wp-admin", "/.env", "/.git", "/.git/config",
     "/config.json", "/backup", "/.aws/credentials", "/.ssh", "/phpmyadmin",
     "/admin.php", "/vendor/", "/.vscode", "/.DS_Store", "/server-status",
+    "/.env.production", "/.env.local", "/.env.backup", "/.env.bak", "/.env.old",
+    "/.env.save", "/.env.swp", "/.env.dev", "/.env.development", "/.env.prod",
+    "/.env.example", "/.env~", "/.git/HEAD",
+    // wp-config.php is not a dotfile, so its editor/backup copies are listed
+    // explicitly (they leak DB credentials when served as text).
+    "/wp-config.php", "/wp-config.php.bak", "/wp-config.php.old", "/wp-config.php.save",
+    "/wp-config.php.swp", "/wp-config.php~", "/wp-config.php.orig", "/wp-config.bak",
+    "/wp-config.old", "/.wp-config.php.swp",
+    // WordPress plugin recon on a NON-WordPress site (on a site that declares
+    // platform "wordpress" these fall under platformPaths and are not recon).
+    // The two named plugins are this month's mass-targeted ones, listed before
+    // the generic /wp-content so the probe names them:
+    //   UpdraftCentral stolen-key backdooring:
+    //   https://patchstack.com/articles/updraftcentral-key-compromise-wordpress-backdoors/
+    //   Rank Math PRO 3.0.123 supply-chain backdoor (CVE-2026-111862), no public
+    //   inbound request indicators (Patchstack: "a rule is not possible"):
+    //   https://patchstack.com/database/wordpress/plugin/seo-by-rank-math-pro/vulnerability/wordpress-rank-math-seo-pro-plugin-3-0-123-unauthenticated-embedded-malicious-code-vulnerability
+    "/wp-content/plugins/updraftplus", "/wp-content/plugins/seo-by-rank-math-pro",
+    "/wp-content", "/wp-includes", "/wp-json", "/wp-cron.php", "/wp-signup.php",
+    // LLMjacking / exposed-AI-endpoint scanning. Paths seen in honeypots:
+    //   Zenity, "Scanning for AI": /v1/chat/completions, /v1/messages, /v1/models,
+    //   /api/tags, /api/chat, /api/generate, /api/version
+    //   (https://labs.zenity.io/p/scanning-for-ai-live-campaigns-mapping-the-internet-s-exposed-llm-backends)
+    //   SANS ISC diary 33150: POST /mcp, /sse, /v1/models, /api/tags and AI
+    //   assistant config/credential files (https://isc.sans.edu/diary/33150)
+    //   Symantec LLMjacking agent context:
+    //   https://www.infosecurity-magazine.com/news/symantec-ai-agent-llmjacking/
+    // plus the rest of the same servers' documented API surface (Ollama native
+    // + OpenAI-compatible: /api/ps, /api/show, /api/pull, /api/embed,
+    // /v1/completions, /v1/embeddings - https://github.com/ollama/ollama/blob/main/docs/api.md,
+    // https://github.com/ollama/ollama/blob/main/docs/openai.md). "/api/version"
+    // is deliberately ABSENT: it is a real Instinct route (guarded by the
+    // route-collision test).
+    "/v1/models", "/v1/chat/completions", "/v1/completions", "/v1/embeddings", "/v1/messages",
+    "/api/v1/models", "/api/tags", "/api/ps", "/api/generate", "/api/chat", "/api/show",
+    "/api/pull", "/api/embed", "/mcp", "/sse",
+    "/.claude", "/.config/claude", "/.cursor", "/.mcp",
+    // ComfyUI botnet recon + Manager abuse, from the attacker's own script:
+    // https://censys.com/blog/comfyui-servers-cryptomining-proxy-botnet/
+    "/object_info", "/system_stats", "/customnode/install", "/manager/reboot",
   ],
   toolSignatures: [...DEFAULT_TOOL_SIGNATURES],
   blockedFingerprints: [],
   datacenterPrefixes: [],
+  // Paths NATIVE to WordPress core: on a site that declares platform
+  // "wordpress" a request here is the site's own surface, not recon (watch-first
+  // WP plugin, see the WordPress adapter). Backup copies of wp-config.php are NOT
+  // listed, so they stay a probe on WordPress too.
+  platformPaths: {
+    wordpress: [
+      "/wp-login.php", "/wp-admin", "/xmlrpc.php", "/wp-json", "/wp-content", "/wp-includes",
+      "/wp-cron.php", "/wp-signup.php", "/wp-activate.php", "/wp-comments-post.php",
+      "/wp-trackback.php", "/wp-links-opml.php", "/wp-mail.php", "/wp-load.php",
+    ],
+  },
+  // Served live by the ruleset/observe routes from the vendors' published lists
+  // (src/lib/forcefield/crawler-ranges.ts). Empty in the bundle = every claimed
+  // agent is "unverifiable", never an impersonation.
+  verifiedAgentRanges: {},
 };
 
 /** Validate + coerce an untrusted payload into a ruleset, or null if it is not
@@ -96,6 +185,17 @@ export function coerceRuleset(data: unknown): ForcefieldRuleset | null {
   // still validates and a bad field can't accidentally enable enforcement.
   const blockedFingerprints = strArr(d.blockedFingerprints) ?? [];
   const datacenterPrefixes = strArr(d.datacenterPrefixes) ?? [];
+  const strArrMap = (v: unknown): Record<string, string[]> => {
+    if (!v || typeof v !== "object" || Array.isArray(v)) return {};
+    const out: Record<string, string[]> = {};
+    for (const [k, arr] of Object.entries(v as Record<string, unknown>)) {
+      const a = strArr(arr);
+      if (a) out[k] = a;
+    }
+    return out;
+  };
+  const platformPaths = strArrMap(d.platformPaths);
+  const verifiedAgentRanges = strArrMap(d.verifiedAgentRanges);
   return {
     version: typeof d.version === "string" ? d.version : "remote",
     knownAgents: agents,
@@ -104,6 +204,8 @@ export function coerceRuleset(data: unknown): ForcefieldRuleset | null {
     toolSignatures: sigs,
     blockedFingerprints,
     datacenterPrefixes,
+    platformPaths,
+    verifiedAgentRanges,
   };
 }
 

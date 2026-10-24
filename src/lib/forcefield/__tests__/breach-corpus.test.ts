@@ -26,6 +26,7 @@ describe("famous-breach corpus", () => {
     const r = await runBreachCorpus();
     expect(r.prevented).toBe(4);
     expect(r.detected).toBe(4);
+    expect(r.missed).toBe(0);
     expect(r.outOfScope).toBe(2);
     expect(r.total).toBe(10);
   });
@@ -36,5 +37,20 @@ describe("famous-breach corpus", () => {
       expect(r.control.length).toBeGreaterThan(15);
       expect(r.attack.length).toBeGreaterThan(15);
     }
+  });
+
+  it("injection and credential stuffing are driven through the real detectors, not pre-labeled events", async () => {
+    const byId = Object.fromEntries((await runBreachCorpus()).results.map((r) => [r.id, r]));
+    expect(byId["injection"].detail).toMatch(/detector: sql_injection/);
+    expect(byId["credential-stuffing"].detail).toMatch(/rate window: 40 requests in 10s/);
+  });
+});
+
+describe("a broken detector reads as MISSED, never as out of scope", () => {
+  it("only the two by-design classes are out_of_scope; every other non-prevented result is detected or missed", async () => {
+    const r = await runBreachCorpus();
+    const oos = r.results.filter((x) => x.coverage === "out_of_scope").map((x) => x.id).sort();
+    expect(oos).toEqual(["authorized-insider", "supply-chain"]);
+    expect(r.prevented + r.detected + r.missed + r.outOfScope).toBe(r.total);
   });
 });
