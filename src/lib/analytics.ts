@@ -3329,6 +3329,30 @@ export type InstinctEventType =
   /* The spend-anomaly alert was fanned out through the team notification
      layer. Fired by fanoutToTeam with recipient_count. */
   | "ai.spend_anomaly_alert_dispatched"
+  // --- Stream 3 (2026-10-24): AI data enforcement and the CI-fixer thrash stop ---
+  /* A restricted request whose first-choice provider does not qualify as
+     zero-retention was pinned to one that does, before anything was sent.
+     Metadata: { feature, workspace_id, sensitivity, from_provider,
+     to_provider, mode }. */
+  | "ai.retention_rerouted"
+  /* The primary failed and the fallback pickFallback chose was refused by the
+     retention (enforce mode) or residency gate, so the router retried the
+     primary instead of sending restricted data somewhere unapproved.
+     Metadata: { feature, workspace_id, primary, fallback, gate, reason, mode }. */
+  | "ai.failover_refused"
+  /* The ai-code watcher stopped driving one PR at one head SHA: the step was
+     terminal, or the SHA used its attempt budget. Fired once at the
+     transition, never per skipped tick. Metadata: { workspace_id, repo, pr,
+     head_sha, reason, action, attempts }. */
+  | "ai.code_watch_parked"
+  /* A PR reached the watcher's per-day drive cap. Fired once per PR per day.
+     Metadata: { workspace_id, repo, pr, day, attempts, cap }. */
+  | "ai.code_watch_daily_cap_reached"
+  /* An authored CI fix touched a protected path (tests, workflows, gate or
+     policy code, build config) and was refused before commit. Metadata:
+     { workspace_id, repo, ref, paths }. */
+  | "ai.code_fix_protected_path_refused"
+  // --- end Stream 3 ---
   // Per-client GitHub App credential resolution (replaces the shared PAT for
   // client repos). { workspace_id, installation_id } / removed { workspace_id }
   | "platform.github_installation_linked"

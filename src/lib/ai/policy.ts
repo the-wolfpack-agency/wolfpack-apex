@@ -281,6 +281,60 @@ export function policyFor(profile: string | null | undefined): readonly PolicyRu
   return POLICY_PROFILES[key] ?? BASELINE_RULES;
 }
 
+/**
+ * WHO READS THIS FEATURE'S OUTPUT, and therefore whether these rules apply.
+ *
+ * Every rule in this file is about a sentence a business's CUSTOMER reads. In
+ * October 2026 the router applied them to every completion, including the code
+ * factory's: price_guarantee matched "guarantee" in generated code and
+ * comments and withheld 7,346 CI fixes on ai-code-ci-fix, which the fixer read
+ * as an empty fix, escalated, and re-drove every ten minutes for ten days.
+ *
+ *   customer_facing  prose a person reads as the business speaking: the
+ *                    assistant, the external gate, support drafts, routines.
+ *                    The DEFAULT, so a new feature nobody classified keeps the
+ *                    gate rather than silently losing it.
+ *   code             generated source, diffs, plans for the factory. Gated by
+ *                    the code gate (src/lib/ai-code/assess.ts), not by prose
+ *                    rules that cannot tell a comment from a promise.
+ *   machine          output read by our own code, never shown as an answer: a
+ *                    relevance verdict, a query rewrite, a category label, a
+ *                    probe's next path. Withholding it breaks the caller and
+ *                    protects nobody.
+ */
+export type PolicyAudience = "customer_facing" | "code" | "machine";
+
+/** Feature names for generated code. Matches the factory's naming (ai-code-*,
+ *  ai_code.*, factory*, dogfood*) and the CI auto-fix gate. */
+const CODE_FEATURE = /^(?:ai-code|ai_code|factory|dogfood|gate-ci-autofix)/i;
+
+/** Features whose output only our own code reads. Exact names, so a new
+ *  feature has to be added here on purpose. */
+const MACHINE_FEATURES: ReadonlySet<string> = new Set([
+  "brain.retrieval_relevance",
+  "brain.query_expansion",
+  "support.categorize",
+  "agent_probe",
+]);
+
+export function contentPolicyAudience(feature: string | null | undefined): PolicyAudience {
+  const f = String(feature ?? "").trim();
+  if (CODE_FEATURE.test(f)) return "code";
+  if (MACHINE_FEATURES.has(f)) return "machine";
+  return "customer_facing";
+}
+
+/**
+ * The rules that apply to one feature's output: the tenant's profile for a
+ * customer-facing feature, nothing for code or machine-read output.
+ */
+export function rulesForFeature(
+  feature: string | null | undefined,
+  rules: readonly PolicyRule[],
+): readonly PolicyRule[] {
+  return contentPolicyAudience(feature) === "customer_facing" ? rules : [];
+}
+
 /** Severity order, so the verdict is the worst finding rather than the first. */
 const SEVERITY: Record<Exclude<PolicyAction, "allow">, number> = {
   redact: 1,
