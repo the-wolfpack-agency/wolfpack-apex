@@ -35,6 +35,7 @@
     "security:entra-audit": "npx tsx scripts/security/entra-audit.ts",
     "security:ai-spend": "npx tsx scripts/security/ai-spend.ts",
     "security:surface": "npx tsx scripts/security/surface.ts",
+    "security:revoke-session": "npx tsx scripts/security/revoke-session.ts",
     "pr:status": "npx tsx scripts/pr-status.ts",
     "self-scan": "npx tsx scripts/self-scan-ai-surfaces.ts",
     "start": "next start",
