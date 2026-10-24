@@ -242,6 +242,12 @@ describeIfDb("migrations 296/297: workspace RLS policies", () => {
       let rowsB: string[] = [];
       let unbound = -1;
       await jest.isolateModulesAsync(async () => {
+        // db.ts forces sslmode=verify-full for Neon; the CI Postgres has no TLS.
+        // Pass the URL through unchanged so the REAL query() path is what runs.
+        jest.doMock("@/lib/db-url", () => ({
+          ...jest.requireActual("@/lib/db-url"),
+          normalizeDatabaseUrlSsl: (url: string | undefined) => url,
+        }));
         const db = await import("@/lib/db");
         const rw = await import("@/lib/db/request-workspace");
         rowsA = (await rw.runWithRequestWorkspace(WS_A, () => db.query(`SELECT id FROM lms_courses ORDER BY id`))).rows.map((r) => String(r.id));
