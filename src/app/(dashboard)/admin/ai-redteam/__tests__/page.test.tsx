@@ -79,3 +79,32 @@ test("a run with vulns shows the regression callout", async () => {
   await waitFor(() => expect(screen.getByTestId("ai-redteam-vulns")).toBeInTheDocument());
   expect(screen.getByText(/exfil-secret-via-mail/)).toBeInTheDocument();
 });
+
+const SUITE = {
+  kind: "fixed_regression",
+  cases: 8,
+  label: "Fixed gate regression set (8 cases)",
+  description: "8 fixed, hand-written agent actions.",
+  limits: "It never calls a model and never generates new attacks, so a pass means the policy still blocks these known cases. It is not red-team coverage.",
+};
+
+test("says what it is: a fixed regression set of N cases, not red-team coverage, with the last run date", async () => {
+  mockFetch.mockImplementation(routeByMethod({ runs: [run({ createdAt: "2026-10-20T06:00:00.000Z" })], suite: SUITE }));
+  render(<AiRedteamPage />);
+  const scope = await screen.findByTestId("ai-redteam-scope");
+  expect(scope).toHaveAttribute("data-kind", "fixed_regression");
+  expect(scope).toHaveTextContent("Fixed gate regression set (8 cases)");
+  expect(scope).toHaveTextContent(/not red-team coverage/);
+  await waitFor(() => expect(screen.getByTestId("ai-redteam-last-run")).toHaveTextContent("Last run: 2026-10-20."));
+  expect(screen.getByText("Pass rate (fixed set, 8 cases)")).toBeInTheDocument();
+  // The fixed set is never presented as red-teaming.
+  expect(screen.queryByRole("heading", { name: "AI Red-Team" })).toBeNull();
+  expect(screen.queryByText(/prove it holds/i)).toBeNull();
+});
+
+test("no runs: says never run instead of implying a pass", async () => {
+  mockFetch.mockImplementation(routeByMethod({ runs: [], suite: SUITE }));
+  render(<AiRedteamPage />);
+  await screen.findByTestId("ai-redteam-empty");
+  expect(screen.getByTestId("ai-redteam-last-run")).toHaveTextContent("Never run.");
+});

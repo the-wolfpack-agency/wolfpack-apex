@@ -54,3 +54,12 @@ test("GET returns the run history", async () => {
   expect((await res.json()).runs).toHaveLength(1);
   expect(mockList).toHaveBeenCalledWith("w-1");
 });
+
+test("GET says what the suite is: a fixed regression set, its case count matching the corpus", async () => {
+  mockRequireCapability.mockResolvedValue(okAuth());
+  const body = await (await GET(req("GET"))).json();
+  const { RED_TEAM_ATTACKS } = jest.requireActual("@/lib/ai-redteam/corpus");
+  expect(body.suite.kind).toBe("fixed_regression");
+  expect(body.suite.cases).toBe(RED_TEAM_ATTACKS.length);
+  expect(body.suite.limits).toMatch(/not red-team coverage/);
+});

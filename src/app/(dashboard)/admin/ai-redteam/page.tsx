@@ -1,12 +1,15 @@
 "use client";
 
 /**
- * /admin/ai-redteam: continuous AI red-team assurance (demo beat "Assure").
+ * /admin/ai-redteam: the gate regression set.
  *
- * The standing proof that the gate holds: an adversarial corpus is run against
- * the real OGIAM gate and the result is shown. Healthy = 100% blocked, 0 vulns.
- * A vuln means a policy regression let an attack through. The headline screen for
- * "we don't ask you to trust it, we prove it, on a schedule."
+ * What this page shows, stated plainly: a FIXED set of N hand-written agent
+ * actions (src/lib/ai-redteam/corpus.ts) sent through the real OGIAM decide()
+ * path. A 100% pass means the policy still blocks those known cases. It never
+ * calls a model and never generates a new attack, so it is a regression check,
+ * not red-team coverage, and the page must never label it as such. The suite
+ * descriptor (kind, case count, limits) comes from the API, and the date of the
+ * last run is always shown so a stale 100% cannot pass for a current one.
  *
  * GET /api/admin/ai-redteam/run for the history; POST to run on demand. Every
  * fetch goes through fetchWithRefresh; the (dashboard) layout enforces auth.
@@ -42,6 +45,14 @@ interface Finding {
   ruleId: string;
 }
 
+interface Suite {
+  kind: "fixed_regression" | "live_adversarial";
+  cases: number;
+  label: string;
+  description: string;
+  limits: string;
+}
+
 interface Report {
   attacksRun: number;
   blocked: number;
@@ -63,6 +74,7 @@ function pct(n: number): string {
 
 export default function AiRedteamPage() {
   const [runs, setRuns] = useState<RunRecord[]>([]);
+  const [suite, setSuite] = useState<Suite | null>(null);
   const [report, setReport] = useState<Report | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
   const [running, setRunning] = useState(false);
@@ -72,7 +84,9 @@ export default function AiRedteamPage() {
     try {
       const res = await fetchWithRefresh("/api/admin/ai-redteam/run");
       if (!res.ok) throw new Error(`status ${res.status}`);
-      setRuns((await res.json()).runs ?? []);
+      const body = (await res.json()) as { runs?: RunRecord[]; suite?: Suite };
+      setRuns(body.runs ?? []);
+      setSuite(body.suite ?? null);
       setState("ready");
     } catch {
       setState("error");
@@ -99,13 +113,20 @@ export default function AiRedteamPage() {
   const latestPass = report ? report.passRate : runs[0]?.passRate ?? null;
   const latestVulns = report ? report.vulns.length : runs[0]?.vulns ?? null;
   const healthy = latestVulns === 0;
+  const lastRunAt = runs[0]?.createdAt ?? null;
+  const cases = suite?.cases ?? report?.attacksRun ?? runs[0]?.attacksRun ?? null;
+  const isFixed = (suite?.kind ?? "fixed_regression") === "fixed_regression";
 
   return (
     <div data-testid="ai-redteam-root" className="mx-auto max-w-7xl px-6 py-10 lg:px-8">
       <SectionHeader
-        eyebrow="Continuous Assurance"
-        title="AI Red-Team"
-        subtitle="We attack your own gate with the known AI attack classes and prove it holds."
+        eyebrow={isFixed ? "Gate regression set" : "Live adversarial testing"}
+        title={isFixed ? "Gate Regression Set" : "AI Red-Team"}
+        subtitle={
+          isFixed
+            ? `A fixed set of ${cases ?? "N"} known agent attacks sent through the real gate policy on a schedule. It checks that the policy still blocks them. It is not red-team coverage.`
+            : "Live adversarial runs against the gate."
+        }
         actions={
           <button
             type="button"
@@ -114,7 +135,7 @@ export default function AiRedteamPage() {
             data-testid="ai-redteam-run"
             className="rounded-md border border-hairline px-3 py-1.5 font-mono text-[11px] uppercase tracking-[0.18em] text-muted transition-colors hover:text-ink disabled:opacity-50"
           >
-            {running ? "Running…" : "Run red-team now"}
+            {running ? "Running…" : "Run the regression set now"}
           </button>
         }
       />
@@ -127,9 +148,21 @@ export default function AiRedteamPage() {
 
       {state !== "error" && (
         <>
-          <ConsoleGrid testId="ai-redteam-summary" className="mt-8">
+          <div
+            data-testid="ai-redteam-scope"
+            data-kind={suite?.kind ?? "fixed_regression"}
+            className="mt-6 rounded-md border border-hairline px-4 py-3 text-sm text-ink-soft"
+          >
+            <span className="font-semibold">{suite?.label ?? `Fixed gate regression set (${cases ?? "?"} cases)`}.</span>{" "}
+            {suite?.limits ?? "It never calls a model and never generates new attacks, so a pass means the policy still blocks these known cases. It is not red-team coverage."}
+            <span data-testid="ai-redteam-last-run" className="ml-1 font-mono text-[12px] text-muted">
+              {lastRunAt ? `Last run: ${lastRunAt.slice(0, 10)}.` : state === "loading" ? "" : "Never run."}
+            </span>
+          </div>
+
+          <ConsoleGrid testId="ai-redteam-summary" className="mt-6">
             <MetricTile
-              label="Pass rate"
+              label={isFixed ? `Pass rate (fixed set, ${cases ?? "?"} cases)` : "Pass rate"}
               display={latestPass === null ? "—" : pct(latestPass)}
               accent={latestPass === 1 ? TONE_VAR.success : latestPass !== null ? TONE_VAR.warning : undefined}
             />
@@ -138,7 +171,7 @@ export default function AiRedteamPage() {
               value={latestVulns ?? 0}
               accent={!healthy && latestVulns !== null ? TONE_VAR.error : undefined}
             />
-            <MetricTile label="Attacks" value={report?.attacksRun ?? runs[0]?.attacksRun ?? 0} />
+            <MetricTile label={isFixed ? "Fixed cases" : "Attacks"} value={report?.attacksRun ?? runs[0]?.attacksRun ?? 0} />
             <MetricTile label="Runs recorded" value={runs.length} />
           </ConsoleGrid>
 
@@ -163,7 +196,7 @@ export default function AiRedteamPage() {
           <GlassPanel className="mt-8" title="Run history" subtitle={state === "loading" ? "Loading…" : `${runs.length} run(s)`}>
             {state === "ready" && runs.length === 0 ? (
               <p data-testid="ai-redteam-empty" className="py-6 text-sm text-muted">
-                No red-team runs yet. Run one now, or the scheduled sweep will populate this.
+                No regression runs yet. Run one now, or the scheduled sweep will populate this.
               </p>
             ) : (
               <div className="overflow-x-auto">
