@@ -174,8 +174,12 @@ jobs:
           echo "::error::next start did not answer on :3217"; tail -50 next-start.log; exit 1
 
       - name: Run the defense panel E2E against the PR build
+        # The live layer needs a real sign-in against production; it runs in the
+        # live job above on schedule / on demand, so only the deterministic layer
+        # (stubbed session + fixed data, every state) runs against the PR build.
         run: >-
           npx playwright test
           tests/e2e/site-analytics-defense.spec.ts
+          --grep-invert "real sign-in, real board API"
           --config=playwright.config.ts
           --reporter=github
