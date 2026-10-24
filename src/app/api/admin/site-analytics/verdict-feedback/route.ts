@@ -14,7 +14,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { recordAudit, extractRequestMetadata } from "@/lib/audit-log";
-import { trackEvent } from "@/lib/analytics";
+import { trackEventAwait } from "@/lib/analytics";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -36,8 +36,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const findingKey = typeof body.findingKey === "string" ? body.findingKey.slice(0, 200) : null;
   const reason = typeof body.reason === "string" ? body.reason.slice(0, 500) : null;
 
-  // Learning signal: a verdict the detectors got wrong. Workspace-scoped.
-  trackEvent("forcefield.verdict_false_positive", auth.user.id, auth.user.role, {
+  // Learning signal: a verdict the detectors got wrong. Workspace-scoped: the
+  // board's false-positive counter reads metadata.workspace_id. AWAITED, because
+  // a fire-and-forget insert is routinely dropped when the serverless response
+  // returns first, and this row IS the measured false-positive rate.
+  await trackEventAwait("forcefield.verdict_false_positive", auth.user.id, auth.user.role, {
     workspace_id: auth.user.workspaceId,
     operatorKey,
     findingKey: findingKey ?? "",

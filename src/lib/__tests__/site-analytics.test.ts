@@ -14,6 +14,9 @@ import {
   recordSiteEvent,
   getSiteAnalyticsSummary,
   isSiteEventType,
+  countVerdictFalsePositives,
+  HOSTILE_EVENT_TYPES,
+  SITE_EVENT_TYPES,
 } from "@/lib/site-analytics";
 
 const ORIGINAL_DB = process.env.DATABASE_URL;
@@ -63,6 +66,7 @@ describe("recordSiteEvent", () => {
 
 describe("getSiteAnalyticsSummary", () => {
   it("aggregates rows into the heatmap + breakdown shapes", async () => {
+    mockSafeQuery.mockResolvedValue({ rows: [] }); // anything not scripted below
     mockSafeQuery
       .mockResolvedValueOnce({ rows: [{ hour: 9, count: "12" }, { hour: 14, count: "30" }] }) // byHour
       .mockResolvedValueOnce({ rows: [{ path: "/ogiam-iam", count: "40" }] }) // byPage
@@ -104,7 +108,7 @@ describe("getSiteAnalyticsSummary", () => {
     expect(summary.surfaces).toEqual(["ogiam.com", "instinct"]);
     expect(summary.surface).toBe("all");
     expect(summary.forcefield).toEqual({
-      welcomed: 3, flagged: 5, trapped: 2, blocked: 1, hostileOperators: 2, hostileEvents: 4, topAgents: [{ agent: "GPTBot", count: 3 }],
+      welcomed: 3, flagged: 5, trapped: 2, blocked: 1, wouldBlock: 0, hostileOperators: 2, hostileEvents: 4, topAgents: [{ agent: "GPTBot", count: 3 }],
     });
     expect(summary.learnedSignatures).toEqual({ shadow: 2, enforcing: 1, autoBlocked: 3 });
     // The two correlated events (same fingerprint) fuse into one classified journey.
@@ -191,5 +195,129 @@ describe("getSiteAnalyticsSummary - per-site (surface) filter", () => {
     await getSiteAnalyticsSummary(30, undefined, "all");
     const filtered = mockSafeQuery.mock.calls.filter(([sql]) => /= \$2/.test(String(sql)));
     expect(filtered).toHaveLength(0); // nothing is surface-scoped
+  });
+});
+
+describe("verdict false-positive counter (regression: always read 0)", () => {
+  it("reads instinct_events by its real time column `timestamp`, never created_at", async () => {
+    mockSafeQuery.mockResolvedValue({ rows: [{ n: "4" }] });
+    expect(await countVerdictFalsePositives("ws-1", 30)).toBe(4);
+    const [sql, params] = mockSafeQuery.mock.calls[0];
+    expect(sql).toMatch(/FROM instinct_events/);
+    expect(sql).toMatch(/\btimestamp\s*>/);
+    expect(sql).not.toMatch(/created_at/);
+    // workspace scope is read from metadata.workspace_id, exactly as the
+    // verdict-feedback route writes it.
+    expect(sql).toMatch(/metadata->>'workspace_id' = \$1/);
+    expect(params).toEqual(["ws-1", 30]);
+  });
+
+  it("is surfaced on the summary for a workspace", async () => {
+    mockSafeQuery.mockImplementation((sql: string) =>
+      Promise.resolve(String(sql).includes("forcefield.verdict_false_positive") ? { rows: [{ n: "2" }] } : { rows: [] }),
+    );
+    const summary = await getSiteAnalyticsSummary(30, "ws-1");
+    expect(summary.verdictFeedback.falsePositives).toBe(2);
+  });
+
+  it("is not queried without a workspace (nothing to scope to)", async () => {
+    mockSafeQuery.mockResolvedValue({ rows: [] });
+    const summary = await getSiteAnalyticsSummary(30);
+    expect(summary.verdictFeedback.falsePositives).toBe(0);
+    expect(mockSafeQuery.mock.calls.some(([sql]) => String(sql).includes("instinct_events"))).toBe(false);
+  });
+});
+
+describe("hostile counts share one definition", () => {
+  it("every hostile type is a real site event type, and payload attacks count as hostile on the origin map too", async () => {
+    for (const t of HOSTILE_EVENT_TYPES) expect(SITE_EVENT_TYPES).toContain(t);
+    mockSafeQuery.mockResolvedValue({ rows: [] });
+    await getSiteAnalyticsSummary(30);
+    const origin = mockSafeQuery.mock.calls.map(([sql]) => String(sql)).find((sql) => sql.includes("welcomed_verified"))!;
+    expect(origin).toContain("'site.agent_payload_attack'");
+    expect(origin).toContain("props->>'impersonating' IS NOT NULL");
+    // the verified welcome reads the engine's agent_verification label too
+    expect(origin).toContain("props->>'agent_verification' = 'verified'");
+  });
+});
+
+describe("enforcement-era props reach the board", () => {
+  function route(map: Record<string, unknown[]>) {
+    mockSafeQuery.mockImplementation((sql: string) => {
+      for (const [needle, rows] of Object.entries(map)) if (String(sql).includes(needle)) return Promise.resolve({ rows });
+      return Promise.resolve({ rows: [] });
+    });
+  }
+
+  it("shapes blocks vs withheld blocks, bursts, identity, probes and networks", async () => {
+    route({
+      "props->>'reason_kind'": [{ reason: "payload", blocked: "3", would_block: "1" }, { reason: "decoy", blocked: "0", would_block: "2" }],
+      "event_type = 'site.agent_high_rate'": [{ bursts: "5", operators: "2", peak: "88", window_s: "10", from_ingest: "3" }],
+      "props->>'signed_agent' = 'true') AS signed": [
+        { agent: "GPTBot", verified: "4", impersonation: "2", unverifiable: "0", signed: "0" },
+        { agent: "Claude-User", verified: "0", impersonation: "0", unverifiable: "1", signed: "1" },
+      ],
+      "props->>'probe' AS probe": [{ probe: "next_server_action", count: "7" }],
+      "props->>'asn' AS asn": [{ asn: "16509", org: "AMAZON-02", count: "9", hostile: "4" }],
+    });
+    const { defense } = await getSiteAnalyticsSummary(30);
+    expect(defense.enforcement).toEqual({ blocked: 3, wouldBlock: 3, byReason: [{ reason: "payload", blocked: 3, wouldBlock: 1 }, { reason: "decoy", blocked: 0, wouldBlock: 2 }] });
+    expect(defense.highRate).toEqual({ bursts: 5, operators: 2, peakRate: 88, windowSeconds: 10, fromIngest: 3 });
+    expect(defense.identity).toMatchObject({ verified: 4, impersonation: 2, unverifiable: 1, signed: 1 });
+    expect(defense.identity.byAgent[0]).toEqual({ agent: "GPTBot", verified: 4, impersonation: 2, unverifiable: 0, signed: 0 });
+    expect(defense.probes).toEqual([{ probe: "next_server_action", count: 7 }]);
+    expect(defense.networks).toEqual([{ asn: "16509", org: "AMAZON-02", count: 9, hostile: 4 }]);
+  });
+
+  it("an empty window is an honest empty, not an error", async () => {
+    mockSafeQuery.mockResolvedValue({ rows: [] });
+    const { defense } = await getSiteAnalyticsSummary(30);
+    expect(defense.enforcement.blocked).toBe(0);
+    expect(defense.highRate.windowSeconds).toBeNull();
+    expect(defense.identity.byAgent).toEqual([]);
+    expect(defense.networks).toEqual([]);
+  });
+
+  it("never casts a props value in SQL (one bad row must not zero a panel)", async () => {
+    mockSafeQuery.mockResolvedValue({ rows: [] });
+    await getSiteAnalyticsSummary(30);
+    for (const [sql] of mockSafeQuery.mock.calls) {
+      // a guarded numeric CASE is the only allowed props cast
+      const unguarded = String(sql).replace(/CASE WHEN props->>'[a-z_]+' ~ [^]*? END/g, "");
+      expect(unguarded).not.toMatch(/\(props->>'[a-z_]+'\)::/);
+    }
+  });
+
+  it("carries blocked / would_block / impersonation / probe / rate through to journeys and steps", async () => {
+    route({
+      "ROW_NUMBER()": [
+        { event_type: "site.agent_welcomed", path: "/", created_at: "2026-10-20T10:00:00Z", sig: "s1", nonce: null, agent: "GPTBot", impersonating: "GPTBot", agent_verification: "impersonation", blocked: null, would_block: null },
+        { event_type: "site.agent_payload_attack", path: "/api/x", created_at: "2026-10-20T10:00:01Z", sig: "s1", nonce: null, attack: "nextjs_middleware_bypass", blocked: "true", would_block: null },
+        { event_type: "site.agent_probed_sensitive", path: "/_next/action", created_at: "2026-10-20T10:00:02Z", sig: "s1", nonce: null, probe: "next_server_action", blocked: null, would_block: "true" },
+        { event_type: "site.agent_high_rate", path: "/", created_at: "2026-10-20T10:00:03Z", sig: "s1", nonce: null, rate: "52" },
+      ],
+    });
+    const { journeys } = await getSiteAnalyticsSummary(30);
+    expect(journeys).toHaveLength(1);
+    const j = journeys[0];
+    const imp = j.insights.find((i) => i.kind === "impersonation");
+    expect(imp && "claimedAgent" in imp ? imp.claimedAgent : null).toBe("GPTBot");
+    const byPath = (p: string) => j.steps.find((st) => st.path === p)!;
+    expect(byPath("/api/x")).toMatchObject({ attack: "nextjs_middleware_bypass", blocked: true });
+    expect(byPath("/_next/action")).toMatchObject({ probe: "next_server_action", wouldBlock: true });
+    expect(byPath("/_next/action").blocked).toBeUndefined();
+    expect(j.steps.find((st) => st.signal === "high_rate")?.rate).toBe(52);
+  });
+
+  it("the principal verdict the query selects reaches the journey (it used to be dropped)", async () => {
+    route({
+      "ROW_NUMBER()": [
+        { event_type: "site.agent_welcomed", path: "/reports", created_at: "2026-10-20T10:00:00Z", sig: "s2", nonce: null, principal_status: "verified", principal: "alice", principal_issuer: "acme", principal_scopes: JSON.stringify(["/reports"]) },
+        { event_type: "site.agent_probed_sensitive", path: "/admin", created_at: "2026-10-20T10:00:01Z", sig: "s2", nonce: null },
+      ],
+    });
+    const summary = await getSiteAnalyticsSummary(30);
+    expect(summary.journeys[0].principal?.status).toBe("verified");
+    expect(summary.journeys[0].insights.some((i) => i.kind === "mandate_exceeded")).toBe(true);
   });
 });
