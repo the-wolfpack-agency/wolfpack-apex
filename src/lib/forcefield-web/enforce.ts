@@ -81,6 +81,14 @@ const ALLOW: EnforcementDecision = { block: false, reason: "no proven-hostile si
 const WS = "(?:\\s|%20|%09|%0a|%0d|\\+)";
 const PAYLOAD_SIGNATURES: ReadonlyArray<{ attack: string; patterns: readonly RegExp[]; except?: RegExp }> = [
   {
+    // XXE (CWE-611): an XML external-entity declaration. Runs FIRST: an XXE
+    // payload usually targets /etc/passwd and would otherwise be classed as
+    // traversal. Ported from ogiam.com's payload engine so client sites get the
+    // same coverage (one engine, not two).
+    attack: "xxe",
+    patterns: [/<!entity\b/i, /<!doctype[^>]*\[/i, /<!doctype[^>]+\bsystem\b/i, /\bsystem\s+["']?(?:file|php|expect):/i],
+  },
+  {
     attack: "path_traversal",
     patterns: [/\.\.[/\\]/, /%2e%2e[/\\%]/i, /\/etc\/passwd/i, /\/proc\/self\//i, /php:\/\/filter/i, /dompdf\.php/i, /eval-stdin\.php/i],
   },
@@ -198,7 +206,54 @@ const PAYLOAD_SIGNATURES: ReadonlyArray<{ attack: string; patterns: readonly Reg
       /\bauto_(?:prepend|append)_file(?:\s*=|%3d)\s*(?:php|data)(?::|%3a)/i,
     ],
   },
+  {
+    // Unrestricted upload (CWE-434): a filename parameter carrying a server-side
+    // executable extension. A real upload form posts the file in the body; a
+    // filename= in the request TARGET with .php/.jsp/... is a webshell drop probe.
+    attack: "unrestricted_upload",
+    patterns: [/\bfilename\s*=\s*["']?[^"'&]+\.(?:php\d?|phtml|phar|jsp|jspx|asp|aspx|ashx|cgi|shtml|war)\b/i],
+  },
+  {
+    // Prompt injection (CWE-1427) aimed at an AI feature behind the site (a
+    // search box or chat endpoint that feeds a model). BLOCK tier only: an
+    // instruction-override phrase with a prompt/rule target, a system-prompt
+    // exfiltration ask, or a chat-template delimiter. Deliberately NOT here: bare
+    // tokens like "jailbreak" or "DAN mode", which a person can legitimately
+    // search for on a blog; ogiam.com's engine blocks those, client sites must not.
+    attack: "prompt_injection",
+    patterns: [
+      /\b(?:ignore|disregard|forget|override)\s+(?:all\s+|the\s+|your\s+|any\s+)?(?:previous|prior|above|earlier|initial|system)\s+(?:instructions?|prompts?|messages?|context|rules?|directions?)\b/i,
+      /\b(?:reveal|print|show|repeat|leak|expose|output)\s+(?:your\s+|the\s+)?(?:system\s*prompt|initial\s+(?:instructions?|prompt)|hidden\s+prompt)\b/i,
+      /<\|(?:im_start|im_end|system|endoftext)\|>/i,
+      /\[\/?(?:inst|sys)\]/i,
+    ],
+  },
 ];
+
+/** The CWE each payload / header attack family maps to, so a recorded block
+ *  carries a standard identifier (feeds the threat-coverage matrix). Kept total
+ *  by a test: every family in PAYLOAD_SIGNATURES and every header attack has an
+ *  entry. */
+export const PAYLOAD_CWE: Readonly<Record<string, string>> = {
+  xxe: "CWE-611",
+  path_traversal: "CWE-22",
+  sql_injection: "CWE-89",
+  xss: "CWE-79",
+  open_redirect: "CWE-601",
+  command_injection: "CWE-78",
+  ssti: "CWE-1336",
+  log4shell: "CWE-917",
+  crlf_injection: "CWE-113",
+  nosql_injection: "CWE-943",
+  ssrf: "CWE-918",
+  php_cgi_injection: "CWE-88",
+  unrestricted_upload: "CWE-434",
+  prompt_injection: "CWE-1427",
+  nextjs_middleware_bypass: "CWE-288",
+};
+
+/** The attack families the payload engine can return, in match order. */
+export const PAYLOAD_FAMILIES: readonly string[] = PAYLOAD_SIGNATURES.map((p) => p.attack);
 
 /**
  * Header-borne attacks, detected from header NAMES alone (values are never read

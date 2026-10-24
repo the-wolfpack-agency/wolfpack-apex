@@ -16,7 +16,7 @@
 import { classifyWebRequest } from "./classify";
 import { classifyClient, headerSignature, operatorFingerprint, type ClientFingerprint } from "./fingerprint";
 import { classifyHosting, datacenterPrefixesFrom, verifyAgentByRanges, type AgentVerification } from "./hosting";
-import { detectHeaderAttack, detectPayload } from "./enforce";
+import { detectHeaderAttack, detectPayload, PAYLOAD_CWE } from "./enforce";
 import type { ForcefieldRuleset } from "./ruleset";
 
 export type ForcefieldEventType =
@@ -308,7 +308,10 @@ export function observeRequest(input: ObserveInput, ruleset: ForcefieldRuleset):
 
   const props = agentProps(input, ruleset, verdict.matchedAgentId ?? (signedAgent ? "signed_agent" : undefined));
   if (probe) props.probe = probe;
-  if (attack) props.attack = attack;
+  if (attack) {
+    props.attack = attack;
+    if (PAYLOAD_CWE[attack]) props.cwe = PAYLOAD_CWE[attack];
+  }
   if (verification) props.agent_verification = verification;
   if (verification === "impersonation" && verdict.matchedAgentId) props.impersonating = verdict.matchedAgentId;
   if (signedAgent) props.signed_agent = true;
@@ -353,7 +356,10 @@ export function withEnforcement(
   }
   const props = { ...base.props };
   if (outcome.reasonKind) props.reason_kind = outcome.reasonKind;
-  if (outcome.attack && props.attack === undefined) props.attack = outcome.attack;
+  if (outcome.attack && props.attack === undefined) {
+    props.attack = outcome.attack;
+    if (PAYLOAD_CWE[outcome.attack]) props.cwe = PAYLOAD_CWE[outcome.attack];
+  }
   if (outcome.blocked) {
     props.blocked = true;
     props.action = "block";
