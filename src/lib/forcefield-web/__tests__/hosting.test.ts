@@ -40,3 +40,27 @@ describe("datacenterPrefixesFrom (ruleset distribution = united rollout)", () =>
     expect(datacenterPrefixesFrom(["garbage", "x/y"])).toBe(SEED2);
   });
 });
+
+import { verifyAgentByRanges } from "../hosting";
+
+describe("verifyAgentByRanges - crawler identity by the vendor's published ranges", () => {
+  const compact = (cidr: string) => { const p = parseCidr(cidr)!; return `${p.base >>> 0}/${p.bits}`; };
+  const ranges = { Googlebot: [compact("66.249.64.0/19")], GPTBot: [] as string[] };
+
+  it("verified: claimed agent from inside its published range", () => {
+    expect(verifyAgentByRanges("Googlebot", "66.249.66.1", ranges)).toBe("verified");
+  });
+  it("impersonation: claimed agent from outside its published range", () => {
+    expect(verifyAgentByRanges("Googlebot", "203.0.113.9", ranges)).toBe("impersonation");
+  });
+  it("unverifiable: vendor publishes nothing, an empty list, no IP, or IPv6 - never an impersonation", () => {
+    expect(verifyAgentByRanges("Amazonbot", "203.0.113.9", ranges)).toBe("unverifiable");
+    expect(verifyAgentByRanges("GPTBot", "203.0.113.9", ranges)).toBe("unverifiable");
+    expect(verifyAgentByRanges("Googlebot", undefined, ranges)).toBe("unverifiable");
+    expect(verifyAgentByRanges("Googlebot", "2001:4860:4801::1", ranges)).toBe("unverifiable");
+    expect(verifyAgentByRanges("Googlebot", "66.249.66.1", undefined)).toBe("unverifiable");
+  });
+  it("a wholly malformed list is unverifiable, not an impersonation (a bad refresh can't convict a crawler)", () => {
+    expect(verifyAgentByRanges("Googlebot", "203.0.113.9", { Googlebot: ["garbage", "1.2.3.4"] })).toBe("unverifiable");
+  });
+});
