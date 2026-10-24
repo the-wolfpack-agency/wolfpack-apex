@@ -3346,7 +3346,7 @@ export type InstinctEventType =
   | "assurance.report_computed"
   // assurance.posture_parity_checked { claims, proven, in_progress, violations } -
   // the security-posture claims were checked against their evidence keys.
-  | "assurance.posture_parity_checked";
+  | "assurance.posture_parity_checked"
 
   // STREAM 1 (Forcefield alerts, safe blocking, tripwire).
   // forcefield.web_alert_notified { kind, fingerprint, recipient_count } - the
