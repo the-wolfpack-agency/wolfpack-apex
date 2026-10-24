@@ -1717,6 +1717,34 @@ export type InstinctEventType =
   | "auth.mfa_verified"
   | "auth.mfa_disabled"
   | "auth.mfa_challenge_failed"
+  // ── STREAM 6 (security basics: Graph token sealing, admin MFA enforcement,
+  //    session-var RLS). Prefixes owned here: auth.mfa_*, security.* (except
+  //    security.session_family_revoked, owned by another stream). ──────────
+  /* An admin-capable caller was refused by the MFA gate in requireCapability.
+     Metadata: { reason: "enroll" | "challenge", capability, route }. */
+  | "auth.mfa_enforcement_blocked"
+  /* A confirmed enrollment passed a sign-in challenge (TOTP or a single-use
+     recovery code) and was issued an MFA proof. Metadata:
+     { used_recovery_code, recovery_codes_remaining }. */
+  | "auth.mfa_challenge_passed"
+  /* Too many failed MFA codes for one user inside the window. Metadata:
+     { window_seconds, max_failures }. */
+  | "auth.mfa_challenge_rate_limited"
+  /* An admin-capable caller was let through the MFA gate because their email
+     is on the operator-held MFA_EXEMPT_EMAILS list (CI smoke accounts).
+     Once per user per process per hour. Metadata: { capability, route }. */
+  | "auth.mfa_exemption_applied"
+  /* A legacy plaintext Microsoft Graph token row was re-sealed (AES-256-GCM).
+     Once per row by construction. Metadata: { user_email, source:
+     "lazy_read" | "refresh_write" | "operator_script" }. */
+  | "security.graph_token_encrypted"
+  /* A sealed Graph token failed to authenticate on read (tampered, or the key
+     changed). The connection reads as unavailable. Metadata: { user_email, field }. */
+  | "security.graph_token_decrypt_failed"
+  /* Setting the per-request RLS session context (app.workspace_id) failed, so
+     the query was refused rather than run without it. Metadata: { error }. */
+  | "security.rls_context_failed"
+  // ── end STREAM 6 ───────────────────────────────────────────────────────
   // Client-side polling efficiency (badge coalesce + adaptive cadence).
   // Emitted periodically so the learning loop can track real-world idle
   // request volume + the wins from the May 2026 optimization pass.

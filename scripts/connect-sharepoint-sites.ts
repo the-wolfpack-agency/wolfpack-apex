@@ -35,6 +35,7 @@ import "./load-env";
 
 import { Client } from "pg";
 import { siteOf } from "@/lib/connectors/sharepoint/coverage";
+import { openGraphToken } from "@/lib/crypto/graph-token-storage";
 
 /** Graph returns at most 200 hits per request; three pages is a decent floor. */
 const PAGES = 3;
@@ -139,7 +140,15 @@ async function main(): Promise<void> {
     const found = new Map<string, Discovered>();
     for (const account of accounts) {
       for (let page = 0; page < PAGES; page++) {
-        const hits = await search(account.access_token, page * PAGE_SIZE);
+        /* Tokens are sealed at rest (AES-256-GCM, secret-storage key). Legacy
+           plaintext rows still open; a sealed row that fails to open means the
+           key in this shell is not the app's key, so the account is skipped. */
+        const opened = openGraphToken(account.access_token);
+        if (!opened.ok || !opened.value) {
+          console.error(`Skipping ${account.user_email}: stored token could not be opened with this environment's INSTINCT_SECRET_KEY / INSTINCT_JWT_SECRET.`);
+          break;
+        }
+        const hits = await search(opened.value, page * PAGE_SIZE);
         if (hits.length === 0) break;
         for (const raw of hits) {
           const h = raw as {
