@@ -1,49 +1,76 @@
-# Wolfpack Instinct — Security Posture
+# Wolfpack Instinct: Security Posture
 
 ## Executive Summary
 
-Wolfpack Instinct is designed crypto-agile and post-quantum migration-ready. All data in transit is protected by hybrid TLS (classical ECDH + ML-KEM-768 where the client supports it). Secrets held on a customer's behalf, meaning integration credentials, OAuth refresh tokens, multi-factor seeds and compliance evidence, are encrypted by the application with AES-256-GCM before they are written. The remaining application data is protected by the managed database's own volume encryption rather than by per-column encryption, and the difference is set out in the table below. Session tokens are short-lived by design so the harvest-now-decrypt-later attack window for authentication material is minutes, not years.
+Wolfpack Instinct is designed to be crypto-agile and post-quantum migration-ready. Data in transit is protected by hybrid TLS (classical ECDH + ML-KEM-768 where the client supports it). Integration credentials and multi-factor seeds are encrypted by the application with AES-256-GCM before they are written; moving that encryption onto a dedicated key is in progress. Microsoft Graph and QuickBooks OAuth tokens are not yet encrypted by the application; that work is in progress. The remaining application data is protected by the managed database's own volume encryption rather than by per-column encryption, and the difference is set out in the table below. Session tokens are short-lived by design, so the harvest-now-decrypt-later window for authentication material is minutes, not years.
+
+This page states what is true today. Each control below names the evidence that proves it, and an automated parity check compares this page with that evidence: a control may only be listed as "In place" while its evidence check passes. Work that has started but is not finished is listed as "In progress", never as done.
+
+## Control status
+
+| Control | Status | Evidence key |
+|---|---|---|
+| Data in transit protected by hybrid post-quantum TLS (X25519MLKEM768) where the client supports it | In place. A TLS 1.3 handshake to the production domain negotiated X25519MLKEM768 on 2026-10-24 | `tls.hybrid_kex` |
+| Hybrid TLS asserted continuously in CI | Not in place. The CI handshake check exists but is not yet configured to run | `tls.hybrid_ci_asserted` |
+| Integration credentials and MFA seeds encrypted by the application under a dedicated key | In progress. Stored as AES-256-GCM ciphertext; the move to a dedicated key is not finished | `secrets.app_encrypted` |
+| Microsoft Graph and QuickBooks OAuth tokens encrypted by the application | In progress. These tokens are stored without application-level encryption today | `secrets.oauth_tokens_encrypted` |
+| Tenant isolation by a workspace predicate on every workspace-scoped query, enforced by a build-failing guardrail | In place | `isolation.app_predicate` |
+| Database row-level security enforcing tenant isolation | Not in place. Some tables have row-level security enabled with permissive policies, which do not isolate tenants | `isolation.db_rls` |
+| Multi-factor authentication enforced for administrators | Not in place. Enrollment exists; sign-in does not yet require a second factor | `auth.mfa_enforced` |
+| Session access tokens expire after 15 minutes | In place | `auth.short_access_tokens` |
+| Append-only, hash-chained audit log, verified on a schedule | In place | `audit.hash_chain` |
+| Agent-action ledger checkpoints cryptographically signed | Not in place. The signing path is built; production checkpoints are not yet signed | `signing.ledger_checkpoints` |
+| CodeQL findings fail the build | Not in place. CodeQL runs on every pull request but is not a required check | `ci.codeql_required` |
 
 ## Current Crypto Inventory
 
 | Asset | Algorithm | Quantum-Resistant? | Notes |
 |---|---|---|---|
-| TLS in transit | TLS 1.3 + X25519MLKEM768 (hybrid KEX) | Yes (hybrid) | Classical fallback to X25519 when client does not support PQ extension |
-| Integration credentials, OAuth refresh tokens, MFA seeds, compliance evidence | AES-256-GCM, encrypted by the application | Yes | Grover's algorithm halves effective key size to 128 bits, which is still beyond brute-force reach. Ciphertext is what reaches the database, so a database read alone does not yield the secret |
-| Other application data at rest (messages, documents, records) | AES-256 at the storage volume, managed by the database provider | Yes | Protects against loss of the physical media. It is NOT per-column encryption: anything able to query the database reads plaintext, so access control and the audit log are the controls that matter here, not cryptography |
-| Session tokens | JWT (HS256), 15-minute TTL | Partial | HS256 uses a symmetric key; HMAC-SHA256 is quantum-resistant. Short TTL limits harvest risk. |
+| TLS in transit | TLS 1.3 + X25519MLKEM768 (hybrid KEX) | Yes (hybrid) | Classical fallback to X25519 when the client does not support the PQ extension |
+| Integration credentials, MFA seeds | AES-256-GCM, encrypted by the application | Yes | Grover's algorithm halves effective key size to 128 bits, still beyond brute-force reach. Moving to a dedicated encryption key is in progress |
+| Microsoft Graph and QuickBooks OAuth tokens | None at the application layer today; storage-volume encryption only | Not applicable | Application-level encryption is in progress. Until it lands, anything able to query the database can read these tokens |
+| Other application data at rest (messages, documents, records, compliance evidence) | AES-256 at the storage volume, managed by the database provider | Yes | Protects against loss of the physical media. It is NOT per-column encryption: anything able to query the database reads plaintext, so access control and the audit log are the controls that matter here, not cryptography |
+| Session tokens | JWT (HS256), 15-minute TTL | Partial | HS256 uses a symmetric key; HMAC-SHA256 is quantum-resistant. Short TTL limits harvest risk |
 | Refresh tokens | Opaque random (256-bit), single-use rotation | Yes | Rotation + revocation means a stolen token has a narrow replay window |
 | Password hashing | bcrypt (cost 12) | Yes | Bcrypt's work factor limits quantum speedup; argon2id migration planned (2027) |
-| Signed documents / JWTs with long TTL | ECDSA P-256 | No (Shor-breakable) | Mitigation: no long-lived JWTs issued; crypto-agility wrapper reserves ML-DSA slot |
+| Agent delegation credentials and ledger checkpoints | ECDSA P-256 (ES256) | No (Shor-breakable) | Delegations from ES256 issuers are verified with ECDSA. Ledger checkpoint signing is built but not yet active in production. The crypto-agility wrapper reserves an ML-DSA slot |
 
 ## Known Weaknesses
 
-- **ECDSA / RSA signatures** — Shor's algorithm on a Cryptographically Relevant Quantum Computer (CRQC) can break P-256 and RSA-2048 in polynomial time. No CRQC exists today; current estimates put CRQC capability at 2030–2035 at the earliest.
-- **Harvest-now-decrypt-later (HNDL)** for auth tokens — an adversary archiving today's encrypted traffic could attempt to decrypt session tokens once a CRQC is available. Our mitigation: 15-minute JWT TTL means archived tokens expire before a CRQC could be weaponised.
-- **bcrypt vs argon2id** — bcrypt is not memory-hard; argon2id provides better resistance to GPU/quantum-accelerated cracking. Migration is planned.
+- **OAuth tokens without application-level encryption.** Microsoft Graph and QuickBooks tokens are protected only by storage-volume encryption today. Application-level encryption is in progress.
+- **No database-level tenant isolation.** Tenant isolation is enforced in the application by a workspace predicate on every query and a build-failing guardrail. Row-level security in the database does not enforce it.
+- **MFA is not enforced.** Administrators can enroll a second factor, but sign-in does not require it yet.
+- **ECDSA / RSA signatures.** Shor's algorithm on a Cryptographically Relevant Quantum Computer (CRQC) can break P-256 and RSA-2048 in polynomial time. No CRQC exists today; current estimates put CRQC capability at 2030 to 2035 at the earliest.
+- **Harvest-now-decrypt-later (HNDL) for auth tokens.** An adversary archiving today's encrypted traffic could attempt to decrypt session tokens once a CRQC is available. Our mitigation: the 15-minute JWT TTL means archived tokens expire long before a CRQC could be used.
+- **bcrypt vs argon2id.** bcrypt is not memory-hard; argon2id provides better resistance to GPU-accelerated cracking. Migration is planned.
 
 ## Migration Roadmap
 
 | Year | Action |
 |---|---|
-| 2026 (now) | Crypto-agility wrapper deployed with ML-DSA (FIPS 204) slot reserved; hybrid TLS active |
+| 2026 (now) | Crypto-agility wrapper deployed with ML-DSA (FIPS 204) slot reserved; hybrid TLS active; application-level encryption of OAuth tokens in progress |
 | 2027 | Evaluate production-grade ML-DSA signing libraries for Node.js; pilot on internal signing paths |
-| 2028–2029 | Migrate all signature operations to ML-DSA once FIPS 204 library ecosystem matures |
+| 2028 to 2029 | Migrate all signature operations to ML-DSA once the FIPS 204 library ecosystem matures |
 | 2029+ | Rotate remaining ECDSA keys; deprecate RSA; full PQ posture achieved |
 | Ongoing | Quarterly key rotation; annual crypto inventory review |
 
 ## What This Means for Customers
 
-Any data you transmit to Wolfpack Instinct today is protected by hybrid TLS, a combination of classical elliptic-curve cryptography and the post-quantum ML-KEM-768 algorithm. Even if a quantum computer became available tomorrow, an attacker who captured your traffic today could not decrypt it.
+Any data you transmit to Wolfpack Instinct today is protected by hybrid TLS, a combination of classical elliptic-curve cryptography and the post-quantum ML-KEM-768 algorithm, when your client supports it. An attacker who captured that traffic today could not decrypt it with a future quantum computer.
 
-Once your data is stored, two different protections apply and it is worth being precise about which. Credentials we hold on your behalf are encrypted by the application before they are written, so the database holds ciphertext and reading the database is not enough to recover them. Your ordinary content is protected by encryption of the underlying storage, which defends against loss of the physical media and does not defend against anything holding a valid database connection. For that content the controls that matter are access control, tenant isolation and the append-only audit log, and we would rather say so than describe it as encrypted and let you assume the stronger meaning.
+Once your data is stored, different protections apply and it is worth being precise about which. Integration credentials we hold on your behalf are encrypted by the application before they are written. Microsoft Graph and QuickBooks connection tokens are not yet encrypted by the application; that work is in progress, and until it is finished they are protected by storage encryption and database access control only. Your ordinary content is protected by encryption of the underlying storage, which defends against loss of the physical media and does not defend against anything holding a valid database connection. For that content the controls that matter are access control, tenant isolation in the application, and the append-only audit log, and we would rather say so than describe it as encrypted and let you assume the stronger meaning.
 
 Short-lived session tokens mean the worst-case exposure window for authentication material is 15 minutes. Refresh tokens are single-use and rotated on every use, so a stolen token can only be replayed once before it is invalidated.
 
 ## Transparency
 
-This document is maintained by the Wolfpack engineering team and updated at least quarterly. It is publicly accessible at `/security-posture`.
+This document is maintained by the Wolfpack engineering team and updated at least quarterly. It is publicly accessible at `/security-posture`. The Control status table is checked against measured evidence by an automated parity check; a control is moved to "In place" only in the same change that makes its evidence check pass.
 
 **Follow-up actions (not yet complete):**
-- After HSTS has been live in production for >1 week, submit the domain to [https://hstspreload.org](https://hstspreload.org) to be included in browser preload lists.
-- Monitor the [NIST PQC standards](https://csrc.nist.gov/projects/post-quantum-cryptography) for final FIPS 204 (ML-DSA) and FIPS 205 (SLH-DSA) publications.
+- Encrypt Microsoft Graph and QuickBooks OAuth tokens at the application layer, with a backfill of existing rows.
+- Move application-level encryption onto a dedicated key and re-encrypt existing ciphertext.
+- Enforce MFA at sign-in for administrators.
+- Configure the CI hybrid-TLS handshake check so the TLS claim is asserted continuously.
+- Make CodeQL a required check on the main branch.
+- Submit the domain to [https://hstspreload.org](https://hstspreload.org) for browser preload lists (HSTS with preload is already served).
+- Monitor the [NIST PQC standards](https://csrc.nist.gov/projects/post-quantum-cryptography) for FIPS 204 (ML-DSA) and FIPS 205 (SLH-DSA) library maturity.

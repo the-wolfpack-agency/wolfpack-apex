@@ -22,7 +22,7 @@ export function generateReport(framework: ComplianceFramework, evidence: Evidenc
   return {
     framework,
     generatedNote:
-      "Status is derived from measured OGIAM evidence (audit chain, gate decisions, red-team, AI inventory). Representative controls; not a blanket compliance attestation.",
+      "Status is derived from execution evidence inside a window (enforced gate decisions, a verified audit chain, signed checkpoints, plaintext-secret counts, database RLS). Configuration alone never reads covered, and the fixed gate regression set is not red-team coverage. Representative controls; not a blanket compliance attestation.",
     controls: results,
     covered,
     partial,

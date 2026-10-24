@@ -37,20 +37,57 @@ export interface EvidenceInputs {
   /** Discovered AI touchpoints and how many are ungoverned. */
   aiSurfacesTotal: number;
   ungovernedAiSurfaces: number;
-  /** A real (non-null) signer is active, so the ledger + evidence exports are
-   *  cryptographically signed and independently verifiable (data-protection). */
+  /** A real (non-null) signer is configured AND ledger checkpoints were actually
+   *  signed inside the window (signingProven). A configured signer alone is not
+   *  evidence. */
   signingActive: boolean;
   /** The signing algorithm in force (ES256 via Key Vault in prod, HS256-local in
    *  dev, "none" when no signer is configured). */
   signingAlgorithm: string;
-  /** At-rest secret encryption is operational (an encrypt/decrypt probe round-
-   *  trips and the ciphertext differs from the plaintext). */
+  /** At-rest secret encryption is operational AND applied: the encrypt/decrypt
+   *  probe round-trips, the key is not the development literal, and no stored
+   *  OAuth token or connector credential is plaintext. A round-trip alone proves
+   *  only that the library works, not that the data is protected. */
   secretsEncryptedAtRest: boolean;
   /** Repo-wide tenant-isolation guardrail: every workspace-scoped query is
    *  classified (0 unclassified) as of the last CI-verified scan. */
   tenantIsolationEnforced: boolean;
   /** Count of workspace-scoped tables under the guardrail. */
   tenantScopedTables: number;
+
+  // ---- windowed execution evidence (the only inputs a "covered" may rest on) ----
+  /** The gate-decision window could be measured (false = unknown, reads as gap). */
+  gateWindowMeasured: boolean;
+  gateWindowDays: number;
+  /** Gate decisions inside the window (self-test and red-team surfaces excluded). */
+  gateDecisionsWindow: number;
+  /** Decisions taken in enforce mode inside the window. */
+  gateEnforcedWindow: number;
+  /** Enforced decisions whose effective outcome was deny or escalate. */
+  gateEnforcedBlocksWindow: number;
+  /** Enforced decisions that escalated to a human. */
+  gateEnforcedEscalationsWindow: number;
+  /** Decisions the gate WOULD have blocked (monitor included). */
+  gateWouldBlockWindow: number;
+  /** What the red-team actually is. "fixed_regression" = a fixed set of literal
+   *  cases through the policy function; it never touches a model. Only a
+   *  "live_adversarial" run may count as adversarial testing coverage. */
+  redteamKind: "fixed_regression" | "live_adversarial" | null;
+  /** Number of cases in the suite that ran. */
+  redteamCases: number | null;
+  redteamLastRunAt: string | null;
+  /** Ledger checkpoints were actually signed inside the window (not just a
+   *  signer configured). */
+  signingProven: boolean;
+  /** Where the at-rest key comes from; the development literal is not protection. */
+  kekSource: "dedicated" | "derived-from-jwt" | "dev-literal";
+  /** Stored OAuth tokens that are not ciphertext (null = could not be measured). */
+  storedOauthPlaintext: number | null;
+  /** Stored connector credentials that are not ciphertext (null = unknown). */
+  storedConnectorPlaintext: number | null;
+  /** Database-level RLS is real: non-trivial policies, forced, and the app role
+   *  does not bypass it (null = could not be measured). */
+  dbRlsEnforced: boolean | null;
 }
 
 /** One framework control mapped to an OGIAM capability + an evidence-driven

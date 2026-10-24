@@ -19,6 +19,7 @@ jest.mock("@/lib/crypto/secret-storage", () => ({
 import { cryptoPosture, isolationPosture } from "../evidence";
 import { generateReport } from "../report";
 import type { EvidenceInputs } from "../types";
+import { HEALTHY } from "./evidence-fixtures";
 
 beforeEach(() => {
   jest.resetAllMocks();
@@ -62,30 +63,25 @@ describe("isolationPosture (real committed baseline)", () => {
 });
 
 /** A full, healthy evidence object; override per assertion. */
-const healthy: EvidenceInputs = {
-  auditChainValid: true, auditEntries: 100, gateDecisions: 10, gateWouldBlock: 2,
-  enforceCapabilities: 3, redteamPassRate: 1, redteamRecent: true,
-  aiSurfacesTotal: 10, ungovernedAiSurfaces: 0,
-  signingActive: true, signingAlgorithm: "ES256", secretsEncryptedAtRest: true,
-  tenantIsolationEnforced: true, tenantScopedTables: 44,
-};
+const healthy: EvidenceInputs = HEALTHY;
 const statusOf = (fw: Parameters<typeof generateReport>[0], id: string, e: EvidenceInputs) =>
   generateReport(fw, e).controls.find((c) => c.id === id)?.status;
 
 describe("new crosswalk controls track the evidence", () => {
   test("tenant isolation: enforced->covered, scoped-but-unclassified->partial, none->gap", () => {
     expect(statusOf("SOC2", "SOC2-CC6.6", healthy)).toBe("covered");
-    expect(statusOf("SOC2", "SOC2-CC6.6", { ...healthy, tenantIsolationEnforced: false })).toBe("partial");
+    expect(statusOf("SOC2", "SOC2-CC6.6", { ...healthy, dbRlsEnforced: false })).toBe("partial");
     expect(statusOf("SOC2", "SOC2-CC6.6", { ...healthy, tenantIsolationEnforced: false, tenantScopedTables: 0 })).toBe("gap");
   });
   test("encryption: both->covered, one->partial, neither->gap (SOC2 + ISO mirror)", () => {
     expect(statusOf("SOC2", "SOC2-CC6.7", healthy)).toBe("covered");
     expect(statusOf("SOC2", "SOC2-CC6.7", { ...healthy, secretsEncryptedAtRest: false })).toBe("partial");
-    expect(statusOf("ISO42001", "ISO42001-A.8.3", { ...healthy, signingActive: false, secretsEncryptedAtRest: false })).toBe("gap");
+    expect(statusOf("ISO42001", "ISO42001-A.8.3", { ...healthy, signingActive: false, signingProven: false, secretsEncryptedAtRest: false })).toBe("gap");
   });
   test("record integrity: ledger+signing->covered, ledger only->partial, no ledger->gap", () => {
     expect(statusOf("EU_AI_ACT", "EUAIACT-ART12-INTEGRITY", healthy)).toBe("covered");
     expect(statusOf("EU_AI_ACT", "EUAIACT-ART12-INTEGRITY", { ...healthy, signingActive: false })).toBe("partial");
+    expect(statusOf("EU_AI_ACT", "EUAIACT-ART12-INTEGRITY", { ...healthy, signingProven: false })).toBe("partial");
     expect(statusOf("EU_AI_ACT", "EUAIACT-ART12-INTEGRITY", { ...healthy, auditChainValid: false, auditEntries: 0, signingActive: false })).toBe("gap");
   });
 });
