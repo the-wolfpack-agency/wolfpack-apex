@@ -1,0 +1,152 @@
+/**
+ * Pure rules for the deployed-surface probe. The runner makes GET, HEAD and
+ * OPTIONS requests and hands the responses here; nothing in this file touches
+ * the network, so every verdict is testable from a fixture.
+ */
+import type { Finding } from "./report";
+
+export interface SiteConfig {
+  name: string;
+  repo?: string;
+  url: string;
+  protectedPath: string | null;
+}
+
+/** Response headers as a lower-cased map. */
+export type HeaderMap = Record<string, string>;
+
+export function toHeaderMap(h: Headers): HeaderMap {
+  const out: HeaderMap = {};
+  h.forEach((v, k) => {
+    out[k.toLowerCase()] = v;
+  });
+  return out;
+}
+
+const MIN_HSTS_SECONDS = 15552000; // 180 days
+
+/** The core security headers on the site's landing document. */
+export function headerFindings(site: string, h: HeaderMap): Finding[] {
+  const out: Finding[] = [];
+  const add = (severity: Finding["severity"], rule: string, detail: string) =>
+    out.push({ severity, rule, subject: site, detail, source: "response headers on the landing page" });
+
+  const csp = h["content-security-policy"];
+  if (!csp) {
+    if (h["content-security-policy-report-only"]) {
+      add("low", "headers.csp-report-only", "Content-Security-Policy is report-only: violations are logged but nothing is blocked.");
+    } else {
+      add("medium", "headers.csp-missing", "No Content-Security-Policy. An injected script runs with the page's full authority.");
+    }
+  }
+  const hsts = h["strict-transport-security"];
+  if (!hsts) add("medium", "headers.hsts-missing", "No Strict-Transport-Security, so a first visit can be downgraded to plain HTTP.");
+  else {
+    const m = /max-age=(\d+)/i.exec(hsts);
+    if (!m || Number(m[1]) < MIN_HSTS_SECONDS) add("low", "headers.hsts-short", `Strict-Transport-Security max-age is under 180 days: "${hsts}".`);
+  }
+  if ((h["x-content-type-options"] ?? "").toLowerCase() !== "nosniff") {
+    add("low", "headers.nosniff-missing", "X-Content-Type-Options: nosniff is missing, so a browser may guess a response's type.");
+  }
+  const xfo = (h["x-frame-options"] ?? "").toLowerCase();
+  const frameAncestors = /frame-ancestors\s+[^;]+/i.test(csp ?? "");
+  if (!frameAncestors && xfo !== "deny" && xfo !== "sameorigin") {
+    add("medium", "headers.frame-protection-missing", "Neither X-Frame-Options nor CSP frame-ancestors is set, so the site can be framed by another origin (clickjacking).");
+  }
+  if (!h["referrer-policy"]) add("low", "headers.referrer-policy-missing", "No Referrer-Policy; full URLs may leak to other sites in the Referer header.");
+
+  const powered = h["x-powered-by"];
+  if (powered) {
+    const versioned = /\d/.test(powered) || /php|express|asp\.net/i.test(powered);
+    add(versioned ? "medium" : "low", "headers.x-powered-by", `X-Powered-By discloses "${powered}". Remove it (Next.js: poweredByHeader: false).`);
+  }
+  const server = h["server"];
+  if (server && /\d/.test(server)) add("medium", "headers.server-version", `Server header discloses a version: "${server}".`);
+  return out;
+}
+
+/** /.env and /.git/config must never be served. */
+export function secretPathFinding(site: string, path: string, status: number, contentType: string, body: string): Finding | null {
+  if (status >= 300) return null; // 3xx (to login), 401, 403, 404 are all fine
+  const looksLikeEnv = /^\s*[A-Z][A-Z0-9_]{2,}\s*=/m.test(body) && !/<html/i.test(body);
+  const looksLikeGit = /^\s*\[core\]/m.test(body) || /repositoryformatversion/.test(body);
+  if ((path.includes(".env") && looksLikeEnv) || (path.includes(".git") && looksLikeGit)) {
+    return {
+      severity: "critical",
+      rule: "exposure.secret-file-served",
+      subject: site,
+      detail: `${path} is served (HTTP ${status}) and its content looks like the real file. Take it down, then rotate everything it contains.`,
+      source: path,
+    };
+  }
+  return {
+    severity: "low",
+    rule: "exposure.secret-path-2xx",
+    subject: site,
+    detail: `${path} answers HTTP ${status} (${contentType || "no content type"}), though the body does not look like the real file (likely an app fallback page). Prefer a 404 so scanners and people can tell at a glance.`,
+    source: path,
+  };
+}
+
+/**
+ * /_next/image must not fetch an arbitrary external URL. Next answers 400
+ * ("url" parameter is not allowed) when the host is not in images.remotePatterns;
+ * a 200 image means the site will proxy, resize and serve anyone's content,
+ * which is an open proxy and an SSRF foothold.
+ */
+export function imageProxyFinding(site: string, status: number, contentType: string, externalUrl: string): Finding | null {
+  if (status === 200 && /^image\//i.test(contentType)) {
+    return {
+      severity: "high",
+      rule: "exposure.next-image-open-proxy",
+      subject: site,
+      detail: `/_next/image fetched and served an external image (${externalUrl}). Restrict images.remotePatterns to the hosts the site actually uses.`,
+      source: "/_next/image",
+    };
+  }
+  return null;
+}
+
+export interface ProbeResponse {
+  status: number;
+  location: string | null;
+}
+
+/** Did the request get refused (redirect elsewhere, 401, 403)? */
+export function isRefused(r: ProbeResponse): boolean {
+  return r.status === 401 || r.status === 403 || (r.status >= 300 && r.status < 400);
+}
+
+/**
+ * CVE-2025-29927: Next.js middleware trusted the internal
+ * x-middleware-subrequest header, so a request carrying it skipped middleware,
+ * auth included. Compare the same protected request with and without it.
+ */
+export function middlewareBypassFinding(site: string, path: string, baseline: ProbeResponse, withHeader: ProbeResponse, headerValue: string): Finding | null {
+  if (!isRefused(baseline)) return null; // nothing to bypass
+  if (withHeader.status >= 200 && withHeader.status < 300) {
+    return {
+      severity: "critical",
+      rule: "auth.middleware-subrequest-bypass",
+      subject: site,
+      detail: `${path} refuses an anonymous request (HTTP ${baseline.status}) but serves HTTP ${withHeader.status} when the request carries x-middleware-subrequest: ${headerValue}. Middleware auth is being skipped (CVE-2025-29927). Upgrade Next.js and strip the header at the edge.`,
+      source: "https://github.com/advisories/GHSA-f82v-jwr5-mffw",
+    };
+  }
+  return null;
+}
+
+/**
+ * Header values that skipped middleware across the affected Next.js versions
+ * (the recursion-depth form for 13.2+, the path forms for older ones), plus
+ * the same forms for Next 16's renamed proxy file in case the bug class
+ * returns under the new name.
+ */
+export const MIDDLEWARE_SUBREQUEST_VALUES = [
+  "middleware:middleware:middleware:middleware:middleware",
+  "src/middleware:src/middleware:src/middleware:src/middleware:src/middleware",
+  "proxy:proxy:proxy:proxy:proxy",
+  "src/proxy:src/proxy:src/proxy:src/proxy:src/proxy",
+  "pages/_middleware",
+  "middleware",
+];

@@ -1,0 +1,129 @@
+{
+  "$comment": "Curated list of package releases and container images known to be malicious, checked by `npm run security:supply-chain` against every lockfile, Dockerfile and compose file in the the-wolfpack-agency org. OSV (https://osv.dev) already covers most of these through MAL- advisories; this file exists so a release we have read about is caught on the day we read about it, before or regardless of an advisory database. Add an entry only after confirming it in a primary source (the maintainer's own incident post, the advisory database record, or the original researcher's write-up) and cite that source. versions [\"*\"] means every version of the package is malicious (a package that only ever existed to attack).",
+  "updated": "2026-10-24",
+  "packages": [
+    {
+      "id": "litellm-2026-10-21",
+      "ecosystem": "PyPI",
+      "name": "litellm",
+      "versions": ["1.107.0", "1.82.7", "1.82.8"],
+      "summary": "litellm 1.107.0 (all seven wheels) published to PyPI on 2026-10-21 between 11:39:51 and 11:40:13 UTC, quarantined by 13:23 UTC, ships cook.pth (credential stealer that runs on every Python start, even without importing litellm) and sitecustomize.py (hourly remote code loader). Built from a lookalike repository Berri-AI/litellm, not from the official v1.107.0 tag. 1.82.7 and 1.82.8 are the earlier March 2026 compromise, listed in the same OSV record. Last safe version 1.106.2. If it ran: rebuild from scratch (do not run pip in the affected environment first) and rotate every secret the host could read.",
+      "safeVersion": "1.106.2",
+      "osv": ["MAL-2026-2144"],
+      "iocs": ["cook.pth", "cook.py", "sitecustomize.py", "/tmp/remote_code_loader.lock", "github.com/Berri-AI/litellm"],
+      "sources": [
+        "https://docs.litellm.ai/blog/security-incident-oct-21-2026",
+        "https://docs.litellm.ai/blog/security-incident-oct-21-2026-attack-chain",
+        "https://github.com/BerriAI/litellm/issues/47826",
+        "https://osv.dev/vulnerability/MAL-2026-2144"
+      ]
+    },
+    {
+      "id": "subql-common-2026-10-05",
+      "ecosystem": "npm",
+      "name": "@subql/common",
+      "versions": ["5.8.3"],
+      "summary": "@subql/common 5.8.3 published 2026-10-05 11:56:29 UTC after the attacker gained push access to subquery/subql and altered its publishing workflow. Payload dist/project/readers/manifest-cache.js runs at install (postinstall) and at import, steals .npmrc, .env, AWS, SSH, kubeconfig and GitHub Actions runner secrets, and opens a remote shell to ci-artifacts.dev. Removed from npm about 50 minutes later. @subql/cli 6.6.3, @subql/node-core 19.3.1 and other @subql packages could resolve to it through ~5.8.2 ranges, so check lockfiles, not manifests. 5.8.2 is the clean baseline.",
+      "safeVersion": "5.8.2",
+      "osv": ["MAL-2026-17571", "GHSA-9333-3c4x-x3h5"],
+      "iocs": ["ci-artifacts.dev", "dist/project/readers/manifest-cache.js", "tmp.ts018051808.lock", ".github/workflows/codeql_analysis.yml (injected workflow name; the name alone is not proof)"],
+      "sources": [
+        "https://www.stepsecurity.io/blog/subql-ecosystem-compromised",
+        "https://flatt.tech/research/posts/subql-common-npm-supply-chain-attack/",
+        "https://osv.dev/vulnerability/MAL-2026-17571"
+      ]
+    },
+    {
+      "id": "tensorlake-2026-10-08",
+      "ecosystem": "npm",
+      "name": "tensorlake",
+      "versions": ["0.5.144"],
+      "summary": "tensorlake 0.5.144 on npm (published 2026-10-08, not an authorized Tensorlake release) carries a Shai-Hulud worm variant run from a preinstall hook: harvests npm, GitHub, cloud, SSH and wallet credentials and can republish packages it can reach. Replaced by 0.5.145. Aikido found no sign the PyPI or Cargo distributions were affected, so only the npm package is listed; OSV still checks the PyPI package on every run.",
+      "safeVersion": "0.5.145",
+      "osv": ["MAL-2026-17650", "GHSA-rqxj-g25x-4v9v"],
+      "iocs": ["iseekaigogo.com", "lib/setup.mjs", "lib/Math_Symbol.js"],
+      "sources": [
+        "https://www.aikido.dev/blog/tensorlake-npm-package-compromised",
+        "https://osv.dev/vulnerability/MAL-2026-17650"
+      ]
+    },
+    {
+      "id": "apex-accelerator-cli",
+      "ecosystem": "npm",
+      "name": "@apexacc/cli",
+      "versions": ["*"],
+      "summary": "\"Apex Copilot\" CLI from the fake Apex Accelerator (a fake Web3 accelerator). Repackages a real open-source coding agent so it works as advertised, while installing macOS (CloudSyncD) and Windows stealers, routing the coding agent's model requests through attacker servers, and persisting a remote MCP entry named apex-copilot in ~/.apex/agent/mcp.json. Every version is malicious. Unrelated to this repository's old code name.",
+      "osv": ["MAL-2026-17924"],
+      "iocs": ["apexaccs.org", "arena.apexaccs.org", "token.apexaccs.org", "vrf.apexaccs.org", "arena.apexfdn.xyz", "verify.apexfdn.xyz", "main.router-apex.com", "update.apex-arena-router.com", "ccmihr.com", "~/.apex/agent/mcp.json"],
+      "sources": [
+        "https://www.elastic.co/security-labs/threat-command/apex-accelerator-malicious-npm-packages",
+        "https://osv.dev/vulnerability/MAL-2026-17924"
+      ]
+    },
+    {
+      "id": "apex-accelerator-audit",
+      "ecosystem": "npm",
+      "name": "@apexacc/audit",
+      "versions": ["*"],
+      "summary": "\"Apex Audit\" MCP server from the fake Apex Accelerator. Presents 18 security-audit tools that return fabricated findings while delivering the same stealers as @apexacc/cli. Every version is malicious.",
+      "osv": ["MAL-2026-17923"],
+      "iocs": ["apex-audit (local MCP server name)", "apexaccs.org", "apexfdn.xyz"],
+      "sources": [
+        "https://www.elastic.co/security-labs/threat-command/apex-accelerator-malicious-npm-packages",
+        "https://osv.dev/vulnerability/MAL-2026-17923"
+      ]
+    },
+    {
+      "id": "apex-accelerator-copilot-mcp",
+      "ecosystem": "npm",
+      "name": "@copilot-mcp/apex",
+      "versions": ["*"],
+      "summary": "Earlier \"copilot MCP\" package tied to the same Apex campaign (cited in Elastic's references through SafeDep's report). OSV marks it malicious. Every version is treated as malicious.",
+      "osv": ["MAL-2026-12314"],
+      "iocs": [],
+      "sources": [
+        "https://osv.dev/vulnerability/MAL-2026-12314",
+        "https://www.elastic.co/security-labs/threat-command/apex-accelerator-malicious-npm-packages"
+      ]
+    },
+    {
+      "id": "apex-foundation-apex",
+      "ecosystem": "npm",
+      "name": "@apexfdn/apex",
+      "versions": ["*"],
+      "summary": "Apex Foundation package from the same publisher family (apexfdn.xyz infrastructure appears in Elastic's IOCs). OSV marks it malicious. Every version is treated as malicious.",
+      "osv": ["MAL-2026-10979", "GHSA-w63r-vpcf-2wwf"],
+      "iocs": ["apexfdn.xyz"],
+      "sources": [
+        "https://osv.dev/vulnerability/MAL-2026-10979",
+        "https://www.elastic.co/security-labs/threat-command/apex-accelerator-malicious-npm-packages"
+      ]
+    }
+  ],
+  "images": [
+    {
+      "id": "litellm-image-2026-10-21",
+      "images": ["ghcr.io/berriai/litellm", "ghcr.io/berriai/litellm-database", "ghcr.io/berriai/litellm-non_root", "litellm/litellm", "docker.io/litellm/litellm"],
+      "tags": ["v1.107.0"],
+      "movingTags": ["latest", "main-latest", "main-stable"],
+      "digests": ["sha256:1bbcb1443bc962e45f5aad53fe3d2c30600e0379715fb6c664cdd3ac126c339e"],
+      "summary": "LiteLLM images tagged v1.107.0, and the moving tags latest, main-latest and main-stable, pointed at the malicious build on 2026-10-21 from about 11:46:56 UTC until 13:51 (GHCR) and 14:20 UTC (Docker Hub). The moving tags have been repointed to clean images, so a reference to them is reported as low (check what was pulled in that window); v1.107.0 or the listed digest is critical. Docker Hub repository name litellm/litellm confirmed via hub.docker.com; the incident post does not name it.",
+      "sources": [
+        "https://docs.litellm.ai/blog/security-incident-oct-21-2026",
+        "https://docs.litellm.ai/blog/security-incident-oct-21-2026-attack-chain"
+      ]
+    }
+  ],
+  "workflowIndicators": [
+    {
+      "fileName": "codeql_analysis.yml",
+      "summary": "Workflow name injected into subquery/subql to publish @subql/common 5.8.3. A legitimate CodeQL workflow can share the name, so a match only adds weight to a commit that is already outside a merged pull request.",
+      "sources": ["https://www.stepsecurity.io/blog/subql-ecosystem-compromised"]
+    },
+    {
+      "fileName": "security-audit.yml",
+      "summary": "Deceptive workflow name reported in the October 2026 GhostAction wave, pushed with stolen tokens to make an exfiltration workflow look like a scan. Same caveat: the name alone is not proof.",
+      "sources": ["https://www.scworld.com/brief/ghostaction-campaign-escalates-targeting-over-30000-github-repositories", "https://blog.gitguardian.com/ghostaction-campaign-3-325-secrets-stolen/"]
+    }
+  ]
+}

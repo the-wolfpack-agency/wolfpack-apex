@@ -1,0 +1,79 @@
+name: Security - AI spend tripwire
+
+# Daily: Azure Cost Management daily cost per AI resource (Cognitive Services,
+# Azure OpenAI, AI Foundry, Machine Learning, Copilot Studio) over the last nine
+# days. Fails when a resource's latest day is > 3x its trailing 7-day mean and
+# > $5, or a new AI resource appears. A stolen model key shows up here first.
+#
+# Read-only (the Cost Management query endpoint is a POST that only reads).
+# Rules: scripts/security/lib/ai-spend.ts.
+#
+# DARK UNTIL CONFIGURED. Same OIDC identity as the Entra audit, with the
+# Cost Management Reader role on the subscription. Secrets AZURE_CLIENT_ID,
+# AZURE_TENANT_ID, optional AZURE_SUBSCRIPTION_ID. Setup:
+# docs/security/scheduled-checks.md.
+
+on:
+  schedule:
+    - cron: "40 12 * * *" # daily 12:40 UTC, after the overnight cost refresh
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  id-token: write # OIDC token for azure/login; grants nothing in GitHub
+
+concurrency:
+  group: security-ai-spend
+  cancel-in-progress: false
+
+jobs:
+  spend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      HAS_AZURE: ${{ secrets.AZURE_CLIENT_ID != '' && secrets.AZURE_TENANT_ID != '' }}
+    steps:
+      - name: Skip until AZURE_CLIENT_ID and AZURE_TENANT_ID are configured
+        if: env.HAS_AZURE != 'true'
+        run: |
+          {
+            echo "## Security check: ai-spend"
+            echo ""
+            echo "**SKIPPED.** Add repository secrets AZURE_CLIENT_ID and AZURE_TENANT_ID (optional AZURE_SUBSCRIPTION_ID) for the read-only OIDC identity with Cost Management Reader. Steps: docs/security/scheduled-checks.md"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice::security:ai-spend skipped: Azure OIDC secrets are not configured."
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        if: env.HAS_AZURE == 'true'
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v4.0.4
+        if: env.HAS_AZURE == 'true'
+        with:
+          node-version: 20
+
+      - name: Azure sign-in (OIDC, no stored secret)
+        if: env.HAS_AZURE == 'true'
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          allow-no-subscriptions: true
+
+      - name: Run security:ai-spend
+        if: env.HAS_AZURE == 'true'
+        env:
+          SECURITY_REPORT_PUBLIC: ${{ github.event.repository.private && 'false' || 'true' }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          npm_config_yes: "true"
+        run: npm run security:ai-spend -- --out security-reports
+
+      - name: Keep the report
+        continue-on-error: true
+        if: always() && env.HAS_AZURE == 'true' && github.event.repository.private
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: security-ai-spend-${{ github.run_id }}
+          path: security-reports/
+          retention-days: 90
+          if-no-files-found: ignore

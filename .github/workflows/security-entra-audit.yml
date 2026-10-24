@@ -1,0 +1,78 @@
+name: Security - Entra app audit
+
+# Monthly audit of every Entra app registration holding a secret or certificate:
+#   (a) live credential but no sign-in for 90 days
+#   (b) tenant-wide Graph application permissions on Mail.*, Files.*, Sites.*,
+#       User.Read.All, Directory.ReadWrite.All
+#   (c) credential lifetime over 12 months   (d) credential expiring within 30 days
+#
+# Read-only Graph GETs. Rules: scripts/security/lib/entra.ts.
+#
+# DARK UNTIL CONFIGURED. Signs in with GitHub OIDC (azure/login, no stored
+# secret) as a dedicated read-only app with Application.Read.All and
+# AuditLog.Read.All. Needs repository secrets AZURE_CLIENT_ID and AZURE_TENANT_ID.
+# One-time setup: docs/security/scheduled-checks.md. Without them the job writes
+# SKIPPED to the run summary and exits green.
+
+on:
+  schedule:
+    - cron: "0 14 1 * *" # 1st of each month, 14:00 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  id-token: write # OIDC token for azure/login; grants nothing in GitHub
+
+concurrency:
+  group: security-entra-audit
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      HAS_AZURE: ${{ secrets.AZURE_CLIENT_ID != '' && secrets.AZURE_TENANT_ID != '' }}
+    steps:
+      - name: Skip until AZURE_CLIENT_ID and AZURE_TENANT_ID are configured
+        if: env.HAS_AZURE != 'true'
+        run: |
+          {
+            echo "## Security check: entra-audit"
+            echo ""
+            echo "**SKIPPED.** Add repository secrets AZURE_CLIENT_ID and AZURE_TENANT_ID for the read-only OIDC identity (Graph Application.Read.All + AuditLog.Read.All). Steps: docs/security/scheduled-checks.md"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice::security:entra-audit skipped: Azure OIDC secrets are not configured."
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        if: env.HAS_AZURE == 'true'
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v4.0.4
+        if: env.HAS_AZURE == 'true'
+        with:
+          node-version: 20
+
+      - name: Azure sign-in (OIDC, no stored secret)
+        if: env.HAS_AZURE == 'true'
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+
+      - name: Run security:entra-audit
+        if: env.HAS_AZURE == 'true'
+        env:
+          SECURITY_REPORT_PUBLIC: ${{ github.event.repository.private && 'false' || 'true' }}
+          npm_config_yes: "true"
+        run: npm run security:entra-audit -- --out security-reports
+
+      - name: Keep the report
+        continue-on-error: true
+        if: always() && env.HAS_AZURE == 'true' && github.event.repository.private
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: security-entra-audit-${{ github.run_id }}
+          path: security-reports/
+          retention-days: 90
+          if-no-files-found: ignore
