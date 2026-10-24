@@ -11,7 +11,7 @@
  * A PR diff is real unified-diff text, so invariant evaluation runs in full
  * (unlike files-mode, which cannot derive a net dependency delta).
  */
-import { assessChange, type ChangeAssessment } from "./assess";
+import { assessChange, type ChangeAssessment, type AssessChangeContext } from "./assess";
 import { parseAddedLines } from "./detect";
 import { applyDenyRules, touchesPolicyProtectedPaths, DEFAULT_CODE_GATE_POLICY, type CodeGatePolicy } from "./policy";
 import { loadCodeGatePolicy } from "./policy-store";
@@ -47,9 +47,43 @@ function reasonFor(a: ChangeAssessment): string {
       return `Engineering invariant ${a.invariantRuleId}`;
     case "deep-scan":
       return `Deep scan found ${a.deepScanCritical} critical`;
+    case "missing-auth":
+      return `Missing authorization on ${a.missingAuth?.findings.length ?? 0} protected route(s) (CWE-862)`;
+    case "compromised-dependency":
+      return `Known-compromised package version in a lockfile (${a.compromisedDependencies?.findings.length ?? 0})`;
     default:
       return "Passed every gate layer";
   }
+}
+
+/** Summary lines for the CWE-862 layer (omitted when the assessment predates it). */
+function missingAuthLines(a: ChangeAssessment): string[] {
+  const m = a.missingAuth;
+  if (!m) return [];
+  if (!m.evaluated) return ["- Missing authorization (CWE-862): not evaluated (this repo's protected-module convention is unknown)"];
+  if (m.findings.length === 0) return ["- Missing authorization (CWE-862): clear"];
+  return [
+    `- Missing authorization (CWE-862): **blocked** (${m.findings.length} route${m.findings.length === 1 ? "" : "s"})`,
+    ...m.findings.slice(0, 10).map((f) => `  - ${f.route}`),
+  ];
+}
+
+/** Summary lines for the known-compromised lockfile layer, advisory source included. */
+function compromisedLines(a: ChangeAssessment): string[] {
+  const c = a.compromisedDependencies;
+  if (!c || c.status === "not_applicable") return [];
+  if (c.status === "list_missing") {
+    return [`- Known-compromised packages: NOT CHECKED (${c.reason ?? "list unavailable"}). ${c.entriesChecked} lockfile entr${c.entriesChecked === 1 ? "y" : "ies"} unverified.`];
+  }
+  if (c.findings.length === 0) {
+    return [`- Known-compromised packages: clear (${c.entriesChecked} added or changed lockfile entr${c.entriesChecked === 1 ? "y" : "ies"} checked, list updated ${c.listUpdated || "unknown"})`];
+  }
+  return [
+    `- Known-compromised packages: **blocked** (${c.findings.length})`,
+    ...c.findings.slice(0, 10).map(
+      (f) => `  - ${f.evidence.package ?? "?"}@${f.evidence.version ?? "?"} in ${f.route} [${f.evidence.advisory_id ?? "?"}] advisory: ${f.evidence.source ?? "see security/known-compromised.json"}`,
+    ),
+  ];
 }
 
 /** Pure: turn a gate assessment into a Check Run verdict. */
@@ -66,6 +100,8 @@ export function assessmentToVerdict(a: ChangeAssessment): PrGateVerdict {
     `- Security: ${a.securityOutcome}`,
     `- Engineering invariant: ${a.invariantBlocked ? `blocked (${a.invariantRuleId})` : "clear"}`,
     `- Deep static scan: ${a.deepScanBlocking ? `blocked (${a.deepScanCritical} critical)` : "clear"}`,
+    ...missingAuthLines(a),
+    ...compromisedLines(a),
     "",
     a.handoffAllowed
       ? "This change clears every rule. Safe to merge once a human approves."
@@ -121,8 +157,11 @@ export function applyPolicyToVerdict(base: PrGateVerdict, policy: PrGatePolicyRe
   return { ...base, conclusion: "action_required", title, summary: lines.join("\n"), policy };
 }
 
-export async function gatePullRequestDiff(diff: string, opts: { workspaceId?: string } = {}): Promise<PrGateVerdict> {
-  const assessment = await assessChange(diff);
+export async function gatePullRequestDiff(
+  diff: string,
+  opts: { workspaceId?: string } & Pick<AssessChangeContext, "changedFiles" | "repoFullName"> = {},
+): Promise<PrGateVerdict> {
+  const assessment = await assessChange(diff, {}, { changedFiles: opts.changedFiles, repoFullName: opts.repoFullName });
   const base = assessmentToVerdict(assessment);
   if (!opts.workspaceId) return base;
   // Load the workspace's policy (never throws; degrades to the empty default,

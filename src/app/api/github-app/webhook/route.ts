@@ -18,7 +18,16 @@
  *
  * We never 500 a delivery: an unknown installation, an unentitled tenant, a
  * missing token, or an internal error are all acknowledged (200) so GitHub does
- * not retry-storm; the reason is recorded, not thrown.
+ * not retry-storm. None of them is silent: each one fires ai_code.pr_gate_skipped
+ * with its reason, and wherever a GitHub token is available it posts a Check Run
+ * that says why the PR was NOT gated (neutral for a setup gap the PR author
+ * cannot fix: unknown installation, not entitled; failure for an internal gate
+ * error, because an unverified PR must not read as a pass). A PR with no check
+ * at all is indistinguishable from "the gate is not installed".
+ *
+ * Deep scan of MODIFIED files: the gate is handed the post-image of every file
+ * the diff touches, fetched at the PR head, so an edit to an existing file is
+ * deep-scanned (not just new files).
  */
 import { NextRequest, NextResponse } from "next/server";
 import { verifyWebhookSignature } from "@/lib/github-app/webhook-verify";
@@ -26,11 +35,16 @@ import { getWorkspaceByInstallation } from "@/lib/github-app/storage";
 import { resolveEntitlement } from "@/lib/tenancy/entitlements";
 import {
   workspaceGithubClient,
+  installationGithubClient,
   fetchPullRequestDiff,
+  fetchPostImages,
   createCheckRun,
   createPrComment,
+  type GithubClient,
+  type CheckRunInput,
 } from "@/lib/github-client";
 import { gatePullRequestDiff, PR_GATE_CHECK_NAME } from "@/lib/ai-code/pr-gate";
+import { changedPathsFromDiff } from "@/lib/ai-code/assess";
 import { isOurRepo, selfHostMode } from "@/lib/ai-code/selfhost-mode";
 import { authorize } from "@/lib/ogiam/authorize";
 import { recordActionOutcome } from "@/lib/ogiam/ledger";
@@ -54,6 +68,79 @@ interface PullRequestEvent {
 
 function ack(body: Record<string, unknown>): NextResponse {
   return NextResponse.json(body, { status: 200 });
+}
+
+type SkipReason = "unknown_installation" | "not_entitled" | "no_token" | "gate_error";
+
+/** Why the PR was not gated, as the check the PR author sees. */
+const SKIP_CHECK: Record<SkipReason, { conclusion: CheckRunInput["conclusion"]; title: string; summary: string }> = {
+  unknown_installation: {
+    conclusion: "neutral",
+    title: "Not gated: this installation is not linked to a workspace",
+    summary:
+      "Secure Agent is installed on this repository, but the installation is not linked to a Wolfpack Instinct workspace, so this PR was NOT checked. An administrator links the installation from the GitHub App setup page. This check does not mean the PR passed.",
+  },
+  not_entitled: {
+    conclusion: "neutral",
+    title: "Not gated: Secure Agent is not enabled for this workspace",
+    summary:
+      "The workspace this installation belongs to does not have Secure Agent enabled, so this PR was NOT checked. This check does not mean the PR passed.",
+  },
+  no_token: {
+    conclusion: "neutral",
+    title: "Not gated: no GitHub access token",
+    summary: "The gate could not obtain a GitHub token for this repository, so this PR was NOT checked.",
+  },
+  gate_error: {
+    conclusion: "failure",
+    title: "Not gated: the gate hit an internal error",
+    summary:
+      "The Secure Agent gate failed while checking this PR, so it is NOT verified. Push a new commit or re-run the check. This is a gate error, not a finding in the PR.",
+  },
+};
+
+/**
+ * Record (always) and explain (when a token is available) a PR the gate could
+ * not gate. Never throws: posting the explanatory check is best effort.
+ */
+async function reportSkip(input: {
+  reason: SkipReason;
+  client: GithubClient | null;
+  repo: string;
+  prNumber: number;
+  headSha: string;
+  actorId: string;
+  workspaceId?: string;
+  observe?: boolean;
+  detail?: string;
+}): Promise<boolean> {
+  const base = SKIP_CHECK[input.reason];
+  const conclusion = input.observe ? "neutral" : base.conclusion;
+  let posted = false;
+  if (input.client?.token) {
+    try {
+      await createCheckRun(input.client, input.repo, {
+        headSha: input.headSha,
+        name: PR_GATE_CHECK_NAME,
+        conclusion,
+        title: input.observe ? `[observe] ${base.title}` : base.title,
+        summary: base.summary,
+      });
+      posted = true;
+    } catch (err) {
+      console.warn(`[pr-gate] could not post the ${input.reason} check:`, (err as Error).message);
+    }
+  }
+  trackEvent("ai_code.pr_gate_skipped", input.actorId, "system", {
+    reason: input.reason,
+    repo: input.repo,
+    pr_number: String(input.prNumber),
+    check_posted: posted,
+    conclusion: posted ? conclusion : "none",
+    ...(input.workspaceId ? { workspace_id: input.workspaceId } : {}),
+    ...(input.detail ? { detail: input.detail.slice(0, 200) } : {}),
+  });
+  return posted;
 }
 
 export async function POST(req: NextRequest) {
@@ -97,12 +184,25 @@ export async function POST(req: NextRequest) {
 
   // Resolve the tenant from the installation. Unknown installation = not ours.
   const install = await getWorkspaceByInstallation(installationId);
-  if (!install) return ack({ ok: true, ignored: "unknown_installation" });
+  if (!install) {
+    // No workspace claims this installation, but the App IS installed on the
+    // repo, so an installation token (minted from the payload's id) can still
+    // explain on the PR why it was not gated.
+    const client = await installationGithubClient(installationId);
+    const checkPosted = await reportSkip({
+      reason: "unknown_installation", client, repo, prNumber, headSha, actorId: "secure-agent", observe: selfHostObserve,
+    });
+    return ack({ ok: true, ignored: "unknown_installation", check_posted: checkPosted });
+  }
   const workspaceId = install.workspaceId;
 
   // Only gate for tenants entitled to Secure Agent.
   if (!(await resolveEntitlement(workspaceId, "secure_agent"))) {
-    return ack({ ok: true, ignored: "not_entitled" });
+    const client = await installationGithubClient(installationId);
+    const checkPosted = await reportSkip({
+      reason: "not_entitled", client, repo, prNumber, headSha, actorId: install.linkedBy, workspaceId, observe: selfHostObserve,
+    });
+    return ack({ ok: true, ignored: "not_entitled", check_posted: checkPosted });
   }
 
   // Governed decision on the OGIAM ledger, the same PEP the factory uses.
@@ -135,18 +235,24 @@ export async function POST(req: NextRequest) {
     }).catch(() => {});
   };
 
+  let client: GithubClient | null = null;
   try {
-    const client = await workspaceGithubClient(workspaceId);
+    client = await workspaceGithubClient(workspaceId);
     if (!client.token) {
       await recordOutcome(false, "no_token", "no GitHub token for gate");
-      return ack({ ok: true, ignored: "no_token" });
+      // No token means no check can be posted; the event is the record.
+      await reportSkip({ reason: "no_token", client: null, repo, prNumber, headSha, actorId: install.linkedBy, workspaceId });
+      return ack({ ok: true, ignored: "no_token", check_posted: false });
     }
 
     const diff = await fetchPullRequestDiff(client, repo, prNumber);
+    // Post-images at the PR head so MODIFIED files are deep-scanned too.
+    // Best effort and bounded: an unreadable file is scanned diff-only.
+    const changedFiles = await fetchPostImages(client, repo, changedPathsFromDiff(diff), headSha);
     // Govern the PR under THIS workspace's code-gate policy (deny rules +
     // protected paths), not just the built-in gate - so a client's own rules
     // apply to any PR author (Copilot/Cursor/Devin/human). Empty policy = no-op.
-    const verdict = await gatePullRequestDiff(diff, { workspaceId });
+    const verdict = await gatePullRequestDiff(diff, { workspaceId, changedFiles, repoFullName: repo });
 
     // Self-host observe: post the would-be verdict as a NEUTRAL, non-blocking
     // check so we watch it on our own live PRs without ever blocking a merge.
@@ -215,7 +321,19 @@ export async function POST(req: NextRequest) {
     return ack({ ok: true, repo, pr: prNumber, conclusion: verdict.conclusion });
   } catch (err) {
     await recordOutcome(false, "gate_error", (err as Error).message);
-    // Never 500 a webhook delivery on our internal error: acknowledge softly.
-    return ack({ ok: false, error: "gate_error" });
+    // Never 500 a webhook delivery on our internal error: acknowledge softly,
+    // but say on the PR that it was NOT verified (fail closed, not a silent pass).
+    const checkPosted = await reportSkip({
+      reason: "gate_error",
+      client,
+      repo,
+      prNumber,
+      headSha,
+      actorId: install.linkedBy,
+      workspaceId,
+      observe: selfHostObserve,
+      detail: (err as Error)?.message,
+    }).catch(() => false);
+    return ack({ ok: false, error: "gate_error", check_posted: checkPosted });
   }
 }
