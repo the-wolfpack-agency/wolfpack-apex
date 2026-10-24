@@ -16,6 +16,8 @@ import { liveSightingFor } from "@/lib/agent-profile";
 import { analyzeAgent, type AgentIntelEvent } from "@/lib/forcefield/agent-intelligence";
 import type { ScaffoldingSignature } from "@/lib/agent-probe";
 import type { ToolCompositionReport } from "@/lib/agent-tool-composition";
+import type { AgentSignal } from "@/lib/agent-behavior";
+import type { SiteEventType } from "@/lib/site-analytics";
 
 /** Persist one sighting. Best effort: no DATABASE_URL -> skip; never throws so
  *  a storage hiccup cannot break the probe response. Returns the operator key. */
@@ -98,10 +100,11 @@ export async function liveOperatorDossiers(rangeDays = 30): Promise<AttributionD
   if (!process.env.DATABASE_URL) return [];
   const days = clampDays(rangeDays);
   try {
-    const { rows } = await safeQuery<{ event_type: string; path: string | null; created_at: string; sig: string | null; nonce: string | null; agent: string | null; attack: string | null; tool: string | null; client_type: string | null; site: string | null }>(
+    const { rows } = await safeQuery<{ event_type: string; path: string | null; created_at: string; sig: string | null; nonce: string | null; agent: string | null; attack: string | null; tool: string | null; client_type: string | null; site: string | null; impersonating: string | null; verification: string | null }>(
       `SELECT event_type, path, created_at::text AS created_at,
               props->>'sig' AS sig, props->>'nonce' AS nonce, props->>'agent' AS agent, props->>'attack' AS attack,
-              props->>'tool' AS tool, props->>'client_type' AS client_type, coalesce(props->>'site', 'ogiam.com') AS site
+              props->>'tool' AS tool, props->>'client_type' AS client_type, coalesce(props->>'site', 'ogiam.com') AS site,
+              props->>'impersonating' AS impersonating, props->>'agent_verification' AS verification
          FROM site_analytics_events
         WHERE created_at > now() - ($1 || ' days')::interval
           AND (props->>'sig' IS NOT NULL OR props->>'nonce' IS NOT NULL)
@@ -114,7 +117,7 @@ export async function liveOperatorDossiers(rangeDays = 30): Promise<AttributionD
       const nonce = r.nonce ?? undefined;
       const key = nonce ?? r.sig ?? "";
       if (key && r.site) siteByKey.set(key, r.site);
-      return { key, keyKind: (nonce ? "nonce" : "fingerprint") as CorrelationKind, type: r.event_type, path: r.path ?? "", at: r.created_at, nonceLinked: !!nonce, agent: r.agent ?? undefined, attack: r.attack ?? undefined, tool: r.tool ?? undefined, clientType: r.client_type ?? undefined };
+      return { key, keyKind: (nonce ? "nonce" : "fingerprint") as CorrelationKind, type: r.event_type, path: r.path ?? "", at: r.created_at, nonceLinked: !!nonce, agent: r.agent ?? undefined, attack: r.attack ?? undefined, tool: r.tool ?? undefined, clientType: r.client_type ?? undefined, impersonating: r.impersonating ?? undefined, agentVerification: r.verification ?? undefined };
     }).filter((r) => r.key !== "");
     const journeys = buildJourneys(jrows);
     const sightings = journeys.map((j) => liveSightingFor(j, siteByKey.get(j.key) ?? "edge"));
@@ -167,8 +170,10 @@ export async function isOperatorBlocked(workspaceId: string, operatorKey: string
   return (await listBlockedOperatorKeys(workspaceId)).has(operatorKey);
 }
 
-/** The event_type -> structural signal map, for the intelligence rollup. */
-const INTEL_SIGNAL_OF: Record<string, string> = {
+/** The event_type -> structural signal map, for the intelligence rollup. Typed
+ *  against the real vocabularies (SiteEventType from the ingest allowlist,
+ *  AgentSignal from the behavior classifier) so neither side can drift. */
+const INTEL_SIGNAL_OF: Partial<Record<SiteEventType, AgentSignal>> = {
   "site.agent_probed_sensitive": "probed_sensitive",
   "site.agent_trap_tripped": "tripped_decoy",
   "site.agent_payload_attack": "payload_attack",
@@ -178,6 +183,9 @@ const INTEL_SIGNAL_OF: Record<string, string> = {
   "site.agent_form_honeypot": "form_honeypot",
   "site.agent_form_too_fast": "form_too_fast",
 };
+export function intelSignalOf(eventType: string): AgentSignal | undefined {
+  return INTEL_SIGNAL_OF[eventType as SiteEventType];
+}
 
 export interface AgentIntelSummary {
   operators: number;
@@ -185,6 +193,13 @@ export interface AgentIntelSummary {
   automationFleet: number; // headless / framework operators
   aiAgents: number;
   scripts: number;
+  /** Named recon / vulnerability scanners (sqlmap, Nuclei, ...). */
+  scanners: number;
+  /** Operators that claimed a known agent's identity and failed verification. */
+  impersonators: number;
+  /** Operators whose claimed agent identity was verified, or that presented a
+   *  valid signed-agent identity. */
+  verifiedAgents: number;
   datacenterOperators: number; // operators whose traffic came from a datacenter/cloud network
   persistedAfterBlock: number; // kept going after we turned it away
   escalatedAfterBlock: number; // brought a NEW hostile technique after a block
@@ -192,7 +207,7 @@ export interface AgentIntelSummary {
   topCampaigns: Array<{ fp: string; sites: string[]; clientClass: string; rhythm: string }>;
 }
 
-const EMPTY_INTEL: AgentIntelSummary = { operators: 0, campaigns: 0, automationFleet: 0, aiAgents: 0, scripts: 0, datacenterOperators: 0, persistedAfterBlock: 0, escalatedAfterBlock: 0, topCampaigns: [] };
+const EMPTY_INTEL: AgentIntelSummary = { operators: 0, campaigns: 0, automationFleet: 0, aiAgents: 0, scripts: 0, scanners: 0, impersonators: 0, verifiedAgents: 0, datacenterOperators: 0, persistedAfterBlock: 0, escalatedAfterBlock: 0, topCampaigns: [] };
 
 /**
  * Deeper agent intelligence rolled up across the LIVE edge stream: cross-site
@@ -206,10 +221,14 @@ export async function liveAgentIntelligence(rangeDays = 7): Promise<AgentIntelSu
   try {
     // Cross-site by design: NOT scoped to a surface (a campaign spans properties),
     // so the site is selected raw and coalesced in JS rather than in SQL.
-    const { rows } = await safeQuery<{ at: string; site: string | null; fp: string; blocked: boolean | null; tool: string | null; ctype: string | null; hosting: string | null; event_type: string }>(
+    // blocked is compared as text, never cast: one malformed props.blocked value
+    // would otherwise fail the whole cast and zero the panel.
+    const { rows } = await safeQuery<{ at: string; site: string | null; fp: string; blocked: boolean | null; tool: string | null; ctype: string | null; hosting: string | null; event_type: string; agent: string | null; impersonating: string | null; verification: string | null; signed: boolean | null }>(
       `SELECT created_at::text AS at, props->>'site' AS site, props->>'fp' AS fp,
-              (props->>'blocked')::boolean AS blocked, props->>'tool' AS tool, props->>'client_type' AS ctype,
-              props->>'hosting' AS hosting, event_type
+              (props->>'blocked' = 'true') AS blocked, props->>'tool' AS tool, props->>'client_type' AS ctype,
+              props->>'hosting' AS hosting, event_type,
+              props->>'agent' AS agent, props->>'impersonating' AS impersonating,
+              props->>'agent_verification' AS verification, (props->>'signed_agent' = 'true') AS signed
          FROM site_analytics_events
         WHERE created_at > now() - ($1 || ' days')::interval
           AND event_type LIKE 'site.agent_%'
@@ -222,8 +241,12 @@ export async function liveAgentIntelligence(rangeDays = 7): Promise<AgentIntelSu
     for (const r of rows) {
       let arr = byFp.get(r.fp);
       if (!arr) byFp.set(r.fp, (arr = []));
-      const sig = INTEL_SIGNAL_OF[r.event_type];
-      arr.push({ at: r.at, site: r.site ?? "ogiam.com", blocked: r.blocked === true, tool: r.tool ?? undefined, clientType: r.ctype ?? undefined, hosting: r.hosting ?? undefined, signals: sig ? [sig] : [] });
+      const sig = intelSignalOf(r.event_type);
+      arr.push({
+        at: r.at, site: r.site ?? "ogiam.com", blocked: r.blocked === true, tool: r.tool ?? undefined, clientType: r.ctype ?? undefined,
+        hosting: r.hosting ?? undefined, signals: sig ? [sig] : [],
+        agent: r.agent ?? undefined, impersonating: r.impersonating ?? undefined, agentVerification: r.verification ?? undefined, signedAgent: r.signed === true,
+      });
     }
     const out = { ...EMPTY_INTEL, operators: byFp.size, topCampaigns: [] as AgentIntelSummary["topCampaigns"] };
     const campaigns: AgentIntelSummary["topCampaigns"] = [];
@@ -233,6 +256,9 @@ export async function liveAgentIntelligence(rangeDays = 7): Promise<AgentIntelSu
       if (a.client.clientClass === "automation_framework") out.automationFleet++;
       else if (a.client.clientClass === "ai_agent") out.aiAgents++;
       else if (a.client.clientClass === "script") out.scripts++;
+      else if (a.client.clientClass === "scanner") out.scanners++;
+      else if (a.client.clientClass === "impersonator") out.impersonators++;
+      if (a.client.clientClass === "ai_agent" && events.some((e) => e.agentVerification === "verified" || e.signedAgent)) out.verifiedAgents++;
       if (a.adaptive.reaction === "persisted") out.persistedAfterBlock++;
       else if (a.adaptive.reaction === "escalated") out.escalatedAfterBlock++;
       if (events.some((e) => e.hosting === "datacenter")) out.datacenterOperators++;
