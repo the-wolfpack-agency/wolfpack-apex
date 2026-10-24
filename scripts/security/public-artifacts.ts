@@ -21,7 +21,7 @@
  * Exit: 0 clean, 1 findings at or above --fail-on (default medium), 2 error.
  */
 import { execFile } from "node:child_process";
-import { mkdtempSync, openSync, readSync, closeSync, readdirSync, readFileSync, rmSync, statSync, mkdirSync } from "node:fs";
+import { mkdtempSync, openSync, readSync, closeSync, fstatSync, readdirSync, rmSync, statSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { ghDownload, ghGet, ghPaginate, type GhResult } from "./lib/gh";
@@ -66,17 +66,6 @@ function sh(cmd: string, args: string[]): Promise<{ code: number; stdout: string
   });
 }
 
-function zipHead(path: string): Uint8Array {
-  const fd = openSync(path, "r");
-  try {
-    const buf = Buffer.alloc(4);
-    readSync(fd, buf, 0, 4, 0);
-    return buf;
-  } finally {
-    closeSync(fd);
-  }
-}
-
 /** Unzip `zip` into `dir`. Info-ZIP strips ../ components, so entries cannot escape `dir`. */
 async function unzip(zip: string, dir: string): Promise<string | null> {
   const list = await sh("unzip", ["-l", zip]);
@@ -104,13 +93,33 @@ interface ScanCounts {
   problems: string[];
 }
 
+/** Size and up to MAX_FILE_BYTES of content, read through a single descriptor. */
+function readCapped(path: string): { size: number; text: string } {
+  const fd = openSync(path, "r");
+  try {
+    const size = fstatSync(fd).size;
+    const buf = Buffer.alloc(Math.min(size, MAX_FILE_BYTES));
+    let off = 0;
+    while (off < buf.length) {
+      const n = readSync(fd, buf, off, buf.length - off, off);
+      if (n === 0) break;
+      off += n;
+    }
+    return { size, text: buf.subarray(0, off).toString("latin1") };
+  } finally {
+    closeSync(fd);
+  }
+}
+
 /** Scan every file under `dir`, unzipping nested zips in place. */
 async function scanTree(a: ArtifactRef, root: string, dir: string, depth: number, counts: ScanCounts, report: ReturnType<typeof newReport>) {
   for (const file of walk(dir)) {
     const rel = relative(root, file);
-    const size = statSync(file).size;
+    // One descriptor for stat, header and content, so the bytes scanned are the
+    // bytes measured (no check-then-use race between separate path lookups).
+    const { size, text } = readCapped(file);
     if (size === 0) continue;
-    if (isZipHeader(zipHead(file))) {
+    if (isZipHeader(Buffer.from(text.slice(0, 4), "latin1"))) {
       if (depth >= MAX_NEST) {
         counts.problems.push(`${rel}: nested zip deeper than ${MAX_NEST}, not opened`);
         continue;
@@ -125,7 +134,6 @@ async function scanTree(a: ArtifactRef, root: string, dir: string, depth: number
       continue;
     }
     counts.files += 1;
-    const text = size > MAX_FILE_BYTES ? readFileSync(file).subarray(0, MAX_FILE_BYTES).toString("latin1") : readFileSync(file, "latin1");
     if (size > MAX_FILE_BYTES) counts.problems.push(`${rel}: only the first ${MAX_FILE_BYTES / 1048576} MB scanned`);
     for (const hit of scanText(text)) report.findings.push(hitFinding(a, rel.replace(/\.unzipped(?=\/|$)/g, ""), hit));
   }
