@@ -19,8 +19,8 @@
  *                                from the request - that would be SSRF)
  *   FORCEFIELD_RULESET_URL       central ruleset endpoint (unset => bundled defaults)
  */
-import { observeRequest } from "./observe";
-import { fetchRuleset } from "./ruleset";
+import { observeRequest, withEnforcement, type ObserveInput } from "./observe";
+import { fetchRuleset, type ForcefieldRuleset } from "./ruleset";
 import { decideEnforcement, type EnforcementDecision } from "./enforce";
 
 /** The subset of a NextRequest this needs - structural, so a NextRequest fits
@@ -35,41 +35,142 @@ export interface MonitorRequestLike {
   url?: string;
 }
 
+export interface ForcefieldArgs {
+  site: string;
+  req: MonitorRequestLike;
+  /** SITE-ATTESTED: the site verified a real session / service credential for
+   *  this request (never inferred from header presence). */
+  authenticated?: boolean;
+  /** The platform the site runs on (e.g. "wordpress"), so its native paths are
+   *  not reported as recon. */
+  platform?: string;
+  /** True when the caller did NOT run forcefieldGuard for this request (e.g. the
+   *  Forcefield control-plane paths), so the monitor never records a block that
+   *  did not happen. */
+  skipEnforcement?: boolean;
+}
+
+/** The header a VERIFIED synthetic monitor (our own Playwright smoke tests,
+ *  canaries, uptime monitors) presents. Its value is compared and discarded:
+ *  never logged, never forwarded (only header NAMES ever leave this module). */
+export const SYNTHETIC_HEADER = "x-forcefield-synthetic";
+
+/** Constant-time string equality without Node's crypto (the portable core runs
+ *  in any edge runtime). Length is not secret; the per-char compare does not
+ *  short-circuit. Exported so a host middleware comparing its own service
+ *  secrets at the edge reuses this one primitive. */
+export function constantTimeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+/**
+ * Synthetic-monitor attestation. True only when FORCEFIELD_SYNTHETIC_TOKEN is
+ * configured (>= 32 chars; shorter or unset = feature OFF) and the request's
+ * x-forcefield-synthetic header equals it. A headless Playwright check shares
+ * its header shape with every other headless Chrome, so a distributed operator
+ * block on that shape turned our own production smoke tests away; this lets a
+ * monitor PROVE it is ours instead of us weakening the block. Never throws.
+ */
+export function isSyntheticMonitor(headers: Headers): boolean {
+  try {
+    const expected = process.env.FORCEFIELD_SYNTHETIC_TOKEN ?? "";
+    if (expected.length < 32) return false;
+    const presented = headers.get(SYNTHETIC_HEADER) ?? "";
+    if (!presented) return false;
+    return constantTimeEqual(presented, expected);
+  } catch {
+    return false;
+  }
+}
+
+/** The request target the payload scan sees: path + query. The full req.url is
+ *  authoritative (nextUrl.search can be empty at the edge); the host is dropped.
+ *  Falls back to nextUrl.search when req.url is absent (tests). */
+export function requestTarget(req: MonitorRequestLike): string {
+  let rawUrl = req.nextUrl.pathname + (req.nextUrl.search ?? "");
+  if (req.url) {
+    try {
+      const u = new URL(req.url);
+      rawUrl = u.pathname + u.search;
+    } catch {
+      /* keep the nextUrl-derived value */
+    }
+  }
+  return rawUrl;
+}
+
+/** Build the ObserveInput for a request (one derivation shared by monitor and
+ *  guard so the recorded event and the block decision see the same request). */
+function observeInputFor(args: ForcefieldArgs): ObserveInput {
+  const { req } = args;
+  // Client IP for hosting classification + crawler verification only - used in
+  // observeRequest/decideEnforcement and discarded; never stored. First hop of
+  // x-forwarded-for is the client.
+  const ip = (req.headers.get("x-forwarded-for") ?? req.headers.get("x-real-ip") ?? "").split(",")[0].trim();
+  return {
+    site: args.site,
+    path: req.nextUrl.pathname,
+    rawUrl: requestTarget(req),
+    method: req.method,
+    userAgent: req.headers.get("user-agent") ?? "",
+    country: req.headers.get("x-vercel-ip-country") ?? "",
+    headerNames: Array.from(req.headers.keys()),
+    accept: req.headers.get("accept") ?? "",
+    secFetchDest: req.headers.get("sec-fetch-dest") ?? "",
+    ip: ip || undefined,
+    authenticated: args.authenticated === true || isSyntheticMonitor(req.headers),
+    platform: args.platform,
+    nowMs: Date.now(),
+  };
+}
+
+function decide(input: ObserveInput, ruleset: ForcefieldRuleset): EnforcementDecision {
+  // decideEnforcement computes the operator fingerprint itself (header shape
+  // bound to the client's tool), matching what observe.ts stamps on events, so
+  // an admin block distributed via ruleset.blockedFingerprints is enforced here.
+  return decideEnforcement(
+    {
+      path: input.path,
+      rawUrl: input.rawUrl,
+      method: input.method,
+      userAgent: input.userAgent,
+      headerNames: input.headerNames,
+      authenticated: input.authenticated,
+      ip: input.ip,
+    },
+    ruleset,
+    { blockedFingerprints: ruleset.blockedFingerprints },
+  );
+}
+
 /**
  * Classify one request and forward the observation to the analytics ingest.
  * Returns a promise the caller should hand to event.waitUntil so the forward
  * survives the response. Never throws; a no-op unless fully configured + enabled.
+ * When enforcement is on (FORCEFIELD_ENFORCE=on) it recomputes the same pure
+ * block decision the guard acted on and stamps it, so a blocked request is
+ * recorded AS blocked (and recorded at all, even with no other tell).
  */
-export async function forcefieldMonitor(args: { site: string; req: MonitorRequestLike; authenticated?: boolean; platform?: string }): Promise<void> {
+export async function forcefieldMonitor(args: ForcefieldArgs): Promise<void> {
   try {
     if (process.env.FORCEFIELD_WEB !== "on") return;
     const token = process.env.SITE_ANALYTICS_INGEST_TOKEN;
     const ingestUrl = process.env.FORCEFIELD_INGEST_URL;
     if (!token || !ingestUrl) return;
 
-    const { req } = args;
-    const country = req.headers.get("x-vercel-ip-country") ?? "";
-    // Client IP for hosting classification only - classified in observeRequest and
-    // discarded there; never stored. First hop of x-forwarded-for is the client.
-    const ip = (req.headers.get("x-forwarded-for") ?? req.headers.get("x-real-ip") ?? "").split(",")[0].trim();
     const ruleset = await fetchRuleset(process.env.FORCEFIELD_RULESET_URL ?? "");
-    const obs = observeRequest(
-      {
-        site: args.site,
-        path: req.nextUrl.pathname,
-        method: req.method,
-        userAgent: req.headers.get("user-agent") ?? "",
-        country,
-        headerNames: Array.from(req.headers.keys()),
-        accept: req.headers.get("accept") ?? "",
-        secFetchDest: req.headers.get("sec-fetch-dest") ?? "",
-        ip: ip || undefined,
-        nowMs: Date.now(),
-      },
-      ruleset,
-    );
+    const input = observeInputFor(args);
+    let obs = observeRequest(input, ruleset);
+    if (process.env.FORCEFIELD_ENFORCE === "on" && !args.skipEnforcement) {
+      const d = decide(input, ruleset);
+      obs = withEnforcement(obs, input, ruleset, { wouldBlock: d.block, blocked: d.block, reasonKind: d.reasonKind, attack: d.attack });
+    }
     if (!obs) return;
 
+    const country = input.country;
     await fetch(ingestUrl, {
       method: "POST",
       headers: { "content-type": "application/json", "x-ingest-token": token },
@@ -90,39 +191,11 @@ export async function forcefieldMonitor(args: { site: string; req: MonitorReques
  * returns null (allow), so enforcement can never itself break the site. The
  * caller (middleware) builds the 403 response and still reports the block.
  */
-export async function forcefieldGuard(args: { site: string; req: MonitorRequestLike; authenticated?: boolean; platform?: string }): Promise<EnforcementDecision | null> {
+export async function forcefieldGuard(args: ForcefieldArgs): Promise<EnforcementDecision | null> {
   try {
     if (process.env.FORCEFIELD_WEB !== "on" || process.env.FORCEFIELD_ENFORCE !== "on") return null;
-    const { req } = args;
     const ruleset = await fetchRuleset(process.env.FORCEFIELD_RULESET_URL ?? "");
-    const pathname = req.nextUrl.pathname;
-    // Authoritative query source: the full req.url (nextUrl.search can be empty
-    // at the edge). Reduce to path+query so the payload scan sees the query but
-    // not the host. Fall back to nextUrl.search when req.url is absent (tests).
-    let rawUrl = pathname + (req.nextUrl.search ?? "");
-    if (req.url) {
-      try {
-        const u = new URL(req.url);
-        rawUrl = u.pathname + u.search;
-      } catch {
-        /* keep the nextUrl-derived value */
-      }
-    }
-    const headerNames = Array.from(req.headers.keys());
-    // decideEnforcement computes the operator fingerprint itself (header shape
-    // bound to the client's tool), matching what observe.ts stamps on events, so
-    // an admin block distributed via ruleset.blockedFingerprints is enforced here.
-    const decision = decideEnforcement(
-      {
-        path: pathname,
-        rawUrl,
-        method: req.method,
-        userAgent: req.headers.get("user-agent") ?? "",
-        headerNames,
-      },
-      ruleset,
-      { blockedFingerprints: ruleset.blockedFingerprints },
-    );
+    const decision = decide(observeInputFor(args), ruleset);
     return decision.block ? decision : null;
   } catch {
     return null; // fail-open: enforcement must never break the site.
