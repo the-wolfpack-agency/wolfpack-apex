@@ -103,7 +103,7 @@ jobs:
         run: >-
           npx playwright test
           tests/e2e/site-analytics-agent-profile.spec.ts
-          tests/e2e/site-analytics-defense.spec.ts
+          ${{ github.event_name != 'pull_request' && 'tests/e2e/site-analytics-defense.spec.ts' || '' }}
           --config=playwright.config.ts
           --reporter=github
 
@@ -118,3 +118,64 @@ jobs:
             test-results/
           retention-days: 14
           if-no-files-found: ignore
+
+  # The defense panel spec stubs the session and board data, so it needs the PR's
+  # OWN build, not production: before merge, production does not have the panel
+  # yet and the spec could only ever fail there. This job builds the PR and serves
+  # it locally (no database, no secrets); the live job above runs the same spec
+  # against production on the daily schedule and on demand.
+  defense-pr:
+    name: E2E (defense panel, PR build)
+    if: github.event_name == 'pull_request' && github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CI: "true"
+      PROD_URL: http://localhost:3217
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v4.0.4
+        with:
+          node-version: 20
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Cache Playwright browsers
+        id: pw-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Install Playwright browser
+        if: steps.pw-cache.outputs.cache-hit != 'true'
+        timeout-minutes: 8
+        run: npx playwright install chromium
+
+      - name: Install OS libraries for Chromium
+        timeout-minutes: 6
+        continue-on-error: true
+        run: |
+          timeout 150 npx playwright install-deps chromium \
+            || echo "::warning::playwright install-deps failed (apt mirror). A missing library surfaces as a browser launch failure next."
+
+      - name: Build and serve the PR
+        timeout-minutes: 15
+        run: |
+          # A throwaway per-run signing secret: the spec stubs the session, nothing
+          # here verifies a real token, and no database is configured.
+          export INSTINCT_JWT_SECRET="$(openssl rand -hex 32)"
+          npx next build
+          nohup npx next start -p 3217 > next-start.log 2>&1 &
+          for i in $(seq 1 60); do curl -sf -o /dev/null http://localhost:3217/login && exit 0; sleep 2; done
+          echo "::error::next start did not answer on :3217"; tail -50 next-start.log; exit 1
+
+      - name: Run the defense panel E2E against the PR build
+        run: >-
+          npx playwright test
+          tests/e2e/site-analytics-defense.spec.ts
+          --config=playwright.config.ts
+          --reporter=github

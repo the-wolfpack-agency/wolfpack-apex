@@ -220,6 +220,16 @@ describe("platform awareness (ruleset.platformPaths)", () => {
     expect(observeRequest({ ...base, path: "/", method: "POST", userAgent: genuine }, R)!.props.probe).toBe("updraftcentral_command");
     expect(observeRequest({ ...base, path: "/", method: "POST", userAgent: genuine, platform: "wordpress" }, R)?.props.probe).toBeUndefined();
   });
+  it("UpdraftCentral: mentioning teamupdraft.com anywhere is not enough; the dashboard HOST must be it", () => {
+    for (const spoof of [
+      "WordPress/6.8.5; class-udrpc.php/2.0; https://evil.example/?teamupdraft.com",
+      "WordPress/6.8.5; class-udrpc.php/2.0; https://teamupdraft.com.evil.example",
+      "teamupdraft.com WordPress/6.8.5; class-udrpc.php",
+    ]) {
+      expect(observeRequest({ ...base, path: "/", method: "POST", userAgent: spoof, platform: "wordpress" }, R)!.props.probe).toBe("updraftcentral_forged_client");
+    }
+    expect(observeRequest({ ...base, path: "/", method: "POST", userAgent: "WordPress/6.8.5; class-udrpc.php/2.0.1; https://app.teamupdraft.com/dash", platform: "wordpress" }, R)?.props.probe).toBeUndefined();
+  });
   it("UpdraftCentral backdoor trigger shape is reported on WP only", () => {
     const rawUrl = "/?_ab12cd=" + "a".repeat(32);
     expect(observeRequest({ ...chrome, path: "/", rawUrl, platform: "wordpress" }, R)!.props.probe).toBe("wp_backdoor_trigger");

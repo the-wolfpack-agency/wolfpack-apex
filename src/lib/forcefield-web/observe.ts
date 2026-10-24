@@ -149,11 +149,16 @@ function presentsSignedAgent(names: ReadonlySet<string>): boolean {
  *  stolen-key attacker's UA carries "class-udrpc.php" WITHOUT the version and URL
  *  (Patchstack: https://patchstack.com/articles/updraftcentral-key-compromise-wordpress-backdoors/).
  *  On a non-WordPress site any UpdraftCentral command is recon. Report-only. */
+/** A genuine client: a version right after the script name, then the dashboard
+ *  URL whose HOST is teamupdraft.com (or a subdomain). Anchored on the host so a
+ *  forger cannot pass by mentioning "teamupdraft.com" anywhere in the string. */
+const GENUINE_UDRPC_UA = /class-udrpc\.php\/\d[\d.]*;\s*https?:\/\/(?:[a-z0-9-]+\.)*teamupdraft\.com(?:[/:?#\s]|$)/;
+
 function updraftCentralProbe(userAgent: string, platform: string | undefined): string | null {
   const ua = (userAgent ?? "").toLowerCase();
   if (!ua.includes("class-udrpc.php")) return null;
   if (platform !== "wordpress") return "updraftcentral_command";
-  return /class-udrpc\.php\/\d/.test(ua) && ua.includes("teamupdraft.com") ? null : "updraftcentral_forged_client";
+  return GENUINE_UDRPC_UA.test(ua) ? null : "updraftcentral_forged_client";
 }
 
 /** The planted UpdraftCentral backdoors are triggered by a query parameter whose
