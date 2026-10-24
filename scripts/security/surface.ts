@@ -4,6 +4,14 @@
  *   npm run security:surface                               # every site in surface-sites.json
  *   npm run security:surface -- --site instinct,fdos       # some of them
  *   npm run security:surface -- --url https://preview.example.com --protected-path /admin
+ *   npm run security:surface -- --post-deploy --site instinct --expect-sha <sha>
+ *
+ * --post-deploy also asserts what a fresh deploy must get right: `/` and the
+ * site's loginPath answer 200 after redirects; on a site marked
+ * enforcesForcefield, /?q=ignore%20all%20previous%20instructions is refused
+ * with 403 and x-forcefield: blocked:payload; and with --expect-sha, the
+ * site's versionPath (/api/version) reports that commit. With --url, pass
+ * --login-path, --enforces-forcefield and --version-path for the same checks.
  *
  * Per site: core security headers (CSP, HSTS, nosniff, frame protection,
  * Referrer-Policy), no version-leaking X-Powered-By or Server banner, /.env and
@@ -21,8 +29,12 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { emitReport, newReport, parseCliOptions } from "./lib/report";
 import {
+  INJECTION_PROBE_PATH,
   MIDDLEWARE_SUBREQUEST_VALUES,
   headerFindings,
+  injectionProbeFinding,
+  postDeployStatusFinding,
+  versionFinding,
   imageProxyFinding,
   middlewareBypassFinding,
   secretPathFinding,
@@ -37,6 +49,8 @@ const argValue = (flag: string) => {
   const i = argv.indexOf(flag);
   return i > -1 ? argv[i + 1] : undefined;
 };
+const POST_DEPLOY = argv.includes("--post-deploy");
+const EXPECT_SHA = argValue("--expect-sha");
 const CONFIG = resolve(argValue("--config") ?? "scripts/security/surface-sites.json");
 const EXTERNAL_IMAGE = "https://www.google.com/images/branding/googlelogo/2x/googlelogo_color_92x30dp.png";
 const TIMEOUT_MS = 20_000;
@@ -68,11 +82,60 @@ async function probe(url: string, init: { method?: "GET" | "HEAD" | "OPTIONS"; h
 function loadSites(): SiteConfig[] {
   const adhoc = argValue("--url");
   if (adhoc) {
-    return [{ name: argValue("--name") ?? new URL(adhoc).host, url: adhoc.replace(/\/$/, ""), protectedPath: argValue("--protected-path") ?? null }];
+    return [
+      {
+        name: argValue("--name") ?? new URL(adhoc).host,
+        url: adhoc.replace(/\/$/, ""),
+        protectedPath: argValue("--protected-path") || null,
+        loginPath: argValue("--login-path") || null,
+        enforcesForcefield: argv.includes("--enforces-forcefield"),
+        versionPath: argValue("--version-path") || null,
+      },
+    ];
   }
   const all = (JSON.parse(readFileSync(CONFIG, "utf8")) as { sites: SiteConfig[] }).sites;
   const only = argValue("--site")?.split(",").map((s) => s.trim());
   return only ? all.filter((s) => only.includes(s.name)) : all;
+}
+
+/** --post-deploy and --expect-sha. Returns the number of requests made. */
+async function postDeployChecks(site: SiteConfig, base: string, landingStatus: number, report: ReturnType<typeof newReport>): Promise<number> {
+  let n = 0;
+  if (POST_DEPLOY) {
+    const root = postDeployStatusFinding(site.name, "/", landingStatus);
+    if (root) report.findings.push(root);
+    if (site.loginPath) {
+      const r = await probe(`${base}${site.loginPath}`, { follow: true });
+      n += 1;
+      const f = postDeployStatusFinding(site.name, site.loginPath, r.ok ? r.status : null, r.ok ? undefined : r.error);
+      if (f) report.findings.push(f);
+    } else report.notes.push(`${site.name}: no loginPath configured; the login page check was not run.`);
+
+    const inj = await probe(`${base}${INJECTION_PROBE_PATH}`);
+    n += 1;
+    const status = inj.ok ? inj.status : null;
+    const marker = inj.ok ? (inj.headers["x-forcefield"] ?? null) : null;
+    const f = injectionProbeFinding(site.name, site.enforcesForcefield === true, status, marker);
+    if (f) report.findings.push(f);
+    if (!site.enforcesForcefield) {
+      report.notes.push(`${site.name}: not marked enforcesForcefield; the injection probe answered ${inj.ok ? `HTTP ${inj.status}` : inj.error} and was not asserted.`);
+    }
+  }
+  if (EXPECT_SHA) {
+    let status: number | null = null;
+    let body = "";
+    if (site.versionPath) {
+      const r = await probe(`${base}${site.versionPath}`, { follow: true });
+      n += 1;
+      if (r.ok) {
+        status = r.status;
+        body = r.body;
+      }
+    }
+    const f = versionFinding(site.name, EXPECT_SHA, site.versionPath, status, body);
+    if (f) report.findings.push(f);
+  }
+  return n;
 }
 
 async function main(): Promise<number> {
@@ -80,6 +143,10 @@ async function main(): Promise<number> {
   const sites = loadSites();
   if (!sites.length) {
     process.stderr.write("No sites selected.\n");
+    return 2;
+  }
+  if (EXPECT_SHA && sites.length > 1) {
+    process.stderr.write("--expect-sha names one deployment's commit: pick one site with --site <name> or --url.\n");
     return 2;
   }
   let probes = 0;
@@ -98,6 +165,10 @@ async function main(): Promise<number> {
       continue;
     }
     report.stats[`${site.name}`] = `${base} -> HTTP ${landing.status} at ${landing.finalUrl}`;
+
+    if (POST_DEPLOY || EXPECT_SHA) {
+      probes += await postDeployChecks(site, base, landing.status, report);
+    }
     report.findings.push(...headerFindings(site.name, landing.headers));
 
     for (const path of ["/.env", "/.git/config"]) {
