@@ -1,0 +1,111 @@
+name: Security - deployed surface
+
+# Read-only probes (GET/HEAD/OPTIONS) of our deployed sites: security headers,
+# version banners, /.env and /.git/config, /_next/image open proxy, and the
+# x-middleware-subrequest auth bypass (CVE-2025-29927).
+# Sites: scripts/security/surface-sites.json. Rules: scripts/security/lib/surface.ts.
+#
+# Runs weekly, on every published release of this repository, on demand, and
+# as a reusable workflow other repositories call after they deploy:
+#
+#   jobs:
+#     surface:
+#       needs: deploy
+#       uses: the-wolfpack-agency/wolfpack-apex/.github/workflows/security-surface.yml@main
+#       with:
+#         url: https://www.weekendwithporsche.com
+#         protected_path: /admin
+#
+# Needs no secrets.
+
+on:
+  schedule:
+    - cron: "25 13 * * 1" # Mondays 13:25 UTC
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      site:
+        description: "Comma-separated site names from surface-sites.json (blank = all)"
+        required: false
+        default: ""
+      url:
+        description: "Probe this URL instead of the configured list"
+        required: false
+        default: ""
+      protected_path:
+        description: "With url: a path that refuses anonymous requests (e.g. /admin)"
+        required: false
+        default: ""
+      fail_on:
+        description: "Lowest severity that fails the run (critical, high, medium, low)"
+        required: false
+        default: "medium"
+  workflow_call:
+    inputs:
+      site:
+        description: "Comma-separated site names from surface-sites.json (blank = all)"
+        type: string
+        required: false
+        default: ""
+      url:
+        description: "Deployed URL to probe (blank = every site in surface-sites.json)"
+        type: string
+        required: false
+        default: ""
+      protected_path:
+        description: "A path on that URL that refuses anonymous requests (e.g. /admin)"
+        type: string
+        required: false
+        default: ""
+      fail_on:
+        description: "Lowest severity that fails the job"
+        type: string
+        required: false
+        default: "medium"
+
+permissions:
+  contents: read
+
+jobs:
+  surface:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # Called from another repository, checkout would default to the caller.
+      # The probe lives here, so always check out this repository.
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: the-wolfpack-agency/wolfpack-apex
+          ref: ${{ github.repository == 'the-wolfpack-agency/wolfpack-apex' && github.sha || 'main' }}
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v4.0.4
+        with:
+          node-version: 20
+
+      - name: Run security:surface
+        env:
+          SITE: ${{ inputs.site || '' }}
+          URL: ${{ inputs.url || '' }}
+          PROTECTED_PATH: ${{ inputs.protected_path || '' }}
+          FAIL_ON: ${{ inputs.fail_on || 'medium' }}
+          npm_config_yes: "true"
+        run: |
+          args=(--out security-reports --fail-on "$FAIL_ON")
+          if [ -n "$URL" ]; then
+            args+=(--url "$URL")
+            if [ -n "$PROTECTED_PATH" ]; then args+=(--protected-path "$PROTECTED_PATH"); fi
+          elif [ -n "$SITE" ]; then
+            args+=(--site "$SITE")
+          fi
+          npm run security:surface -- "${args[@]}"
+
+      - name: Keep the report
+        continue-on-error: true
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: security-surface-${{ github.run_id }}
+          path: security-reports/
+          retention-days: 90
+          if-no-files-found: ignore

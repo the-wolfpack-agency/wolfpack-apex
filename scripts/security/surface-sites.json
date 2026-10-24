@@ -1,0 +1,35 @@
+{
+  "$comment": "Deployed sites probed by `npm run security:surface`. Probes are GET, HEAD and OPTIONS only. protectedPath is a path that refuses an anonymous request (a redirect to login, 401 or 403); it is used to check that an x-middleware-subrequest header does not skip the auth check (CVE-2025-29927). Leave protectedPath null when the site has none. Each URL was confirmed to resolve on 2026-10-24.",
+  "sites": [
+    {
+      "name": "instinct",
+      "repo": "the-wolfpack-agency/wolfpack-apex",
+      "url": "https://wolfpack-instinct.vercel.app",
+      "protectedPath": "/api/dashboard"
+    },
+    {
+      "name": "weekend-with-porsche",
+      "repo": "the-wolfpack-agency/wolfpack-porsche-weekend",
+      "url": "https://www.weekendwithporsche.com",
+      "protectedPath": "/admin"
+    },
+    {
+      "name": "ogiam",
+      "repo": "the-wolfpack-agency/OGIAM",
+      "url": "https://ogiam.com",
+      "protectedPath": null
+    },
+    {
+      "name": "aidan-mulready",
+      "repo": "the-wolfpack-agency/wolfpack-aidan-mulready",
+      "url": "https://aidanmulready.com",
+      "protectedPath": "/admin"
+    },
+    {
+      "name": "fdos",
+      "repo": "the-wolfpack-agency/wolfpack-ford",
+      "url": "https://fdos.vercel.app",
+      "protectedPath": "/"
+    }
+  ]
+}
