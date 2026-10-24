@@ -41,3 +41,22 @@ it("fires the trust_center_viewed reviewer-interest signal on mount", async () =
     expect((call![1] as RequestInit).body).toContain("forcefield.trust_center_viewed");
   });
 });
+
+it("states only what is true today (the audit's false claims are gone)", async () => {
+  render(<TrustCenterPage />);
+  const page = await screen.findByTestId("trust-center");
+  const text = page.textContent ?? "";
+  // CodeQL is not a required check, so it must not be said to fail the build.
+  expect(text).not.toMatch(/CodeQL[^.]*fail the build/i);
+  expect(screen.getByTestId("trust-security-posture")).toHaveTextContent(/CodeQL runs on every pull request but is not yet a required check/);
+  // The browser platform scan does not run on every change.
+  expect(text).not.toMatch(/browser platform scan/i);
+  // RLS and MFA are stated as not enforced.
+  expect(screen.getByTestId("trust-security-posture")).toHaveTextContent(/row-level security does not enforce it yet/);
+  expect(screen.getByTestId("trust-security-posture")).toHaveTextContent(/sign-in does not enforce it yet/);
+  // The fixed regression set is never called red-team coverage.
+  expect(text).not.toMatch(/red-team runs/i);
+  expect(screen.getByTestId("trust-self-testing")).toHaveTextContent(/fixed regression set of known attacks, not red-team coverage/);
+  // No "strict" CSP claim while script-src allows inline scripts.
+  expect(text).not.toMatch(/strict Content-Security-Policy/i);
+});

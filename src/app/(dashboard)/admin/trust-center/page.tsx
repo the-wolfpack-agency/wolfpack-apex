@@ -32,7 +32,7 @@ const SECTIONS: TrustSection[] = [
     id: "security-posture",
     heading: "Security posture",
     summary:
-      "Enterprise-grade security is the floor: a strict Content-Security-Policy and security headers on every route, tenant isolation, a tamper-evident hash-chained audit trail, durable rate limiting, and a crypto registry with a reserved post-quantum slot. Every change is gated in CI by CodeQL dataflow analysis plus a precision security self-scan, so injection, secret leakage, and log-injection classes fail the build.",
+      "A Content-Security-Policy and security headers on every route (script-src still allows inline scripts for hydration), tenant isolation enforced in the application by a workspace predicate and a build-failing guardrail (database row-level security does not enforce it yet), a tamper-evident hash-chained audit trail verified on a schedule, durable rate limiting, and a crypto registry with a reserved post-quantum slot. The precision security self-scan is a required check on every pull request. CodeQL runs on every pull request but is not yet a required check, so a CodeQL finding does not block a merge. MFA enrollment exists but sign-in does not enforce it yet. The public posture page lists each control as in place, in progress, or not in place, checked against measured evidence.",
     evidence: { label: "Public security posture", href: "/security-posture" },
   },
   {
@@ -60,14 +60,14 @@ const SECTIONS: TrustSection[] = [
     id: "self-testing",
     heading: "What we test ourselves, before any paid audit",
     summary:
-      "The controls are proven continuously, not asserted. On every change, CI runs CodeQL, a precision security self-scan, security-governance and hygiene gates, a browser platform scan, an accessibility and UX sweep, and the end-to-end reality checks. A production-readiness board grades each surface from real repository facts. The compliance report derives each control's covered / partial / gap status from measured evidence (the audit chain, gate decisions, red-team runs, enforcement posture). The one test we cannot run on ourselves is the independent penetration test and the external certification, by design.",
+      "On every pull request, CI runs the required checks (verify, the precision security self-scan, the end-to-end reality checks, and platform verification) plus CodeQL as a non-blocking check. A production-readiness board grades each surface from repository facts, with comments ignored and SQL parsed by statement. The compliance report derives each control's covered / partial / gap status from execution evidence inside a window (enforced gate decisions, a verified audit chain, signed checkpoints, stored-secret encryption, database RLS), never from configuration alone. The scheduled gate check is a fixed regression set of known attacks, not red-team coverage. The one test we cannot run on ourselves is the independent penetration test and the external certification, by design.",
     evidence: { label: "Live compliance evidence", href: "/admin/compliance" },
   },
   {
     id: "philosophy",
     heading: "Our compliance philosophy",
     summary:
-      "We separate the controls from the stamp. The controls (access control, encryption, tenant isolation, a tamper-evident audit trail, incident detection, continuity) we build and verify on every commit, and this page, the evidence pack, and the readiness board all read that one model, so they never disagree with the code. The external audit is an independent third party vouching, with liability, that those controls are real. That independence is the point, which is why it is the one thing we do not self-issue. The aim is to make the substance so complete that the audit is a last-mile stamp on machine-generated evidence, engaged when a client requires it.",
+      "We separate the controls from the stamp. The controls (access control, encryption, tenant isolation, a tamper-evident audit trail, incident detection, continuity) we build and measure, and each status we show is computed from evidence that the control ran, so a control that is not running reads as a gap rather than as protection. The external audit is an independent third party vouching, with liability, that those controls are real. That independence is the point, which is why it is the one thing we do not self-issue. The aim is to make the substance so complete that the audit is a last-mile stamp on machine-generated evidence, engaged when a client requires it.",
   },
   {
     id: "certifications",
