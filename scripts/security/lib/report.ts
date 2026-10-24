@@ -144,22 +144,59 @@ export function parseCliOptions(argv: string[], defaultOut: string): CliOptions 
 }
 
 /**
- * Write JSON + markdown, print the markdown, append it to the GitHub job
- * summary when running in Actions, and return the exit code.
+ * True when the details of a report must not leave the machine. Actions logs,
+ * job summaries and artifacts of a PUBLIC repository are readable by anyone, so
+ * a findings table there publishes our unpatched packages, private repo names
+ * and over-privileged apps to the people looking for them. Fail closed: inside
+ * Actions, details are withheld unless the workflow states the repository is
+ * private (SECURITY_REPORT_PUBLIC=false). Local runs always get full detail.
  */
-export function emitReport(r: CheckReport, opts: CliOptions): number {
+export function isRedacted(env: Record<string, string | undefined> = process.env): boolean {
+  if (env.GITHUB_ACTIONS !== "true") return false;
+  return env.SECURITY_REPORT_PUBLIC !== "false";
+}
+
+/** Counts only: no subjects, details, sources, stats or notes. */
+export function renderRedactedMarkdown(r: CheckReport): string {
+  const lines: string[] = [`## Security check: ${r.check}`, "", `Generated ${r.generatedAt}`, ""];
+  if (r.skipped) {
+    lines.push(`**SKIPPED.** ${r.skipped}`);
+  } else {
+    const c = countBySeverity(r.findings);
+    lines.push(
+      `**Findings:** ${r.findings.length} (critical ${c.critical}, high ${c.high}, medium ${c.medium}, low ${c.low}, info ${c.info})`,
+    );
+    lines.push("");
+    lines.push(
+      `Details are withheld because this repository is public. Run \`npm run security:${r.check}\` locally for the full report.`,
+    );
+  }
+  lines.push("");
+  return lines.join("\n");
+}
+
+/**
+ * Write JSON + markdown, print the markdown, append it to the GitHub job
+ * summary when running in Actions, and return the exit code. When redacted,
+ * no report files are written (nothing for an artifact step to upload) and only
+ * the counts are printed.
+ */
+export function emitReport(r: CheckReport, opts: CliOptions, env: Record<string, string | undefined> = process.env): number {
   r.findings = sortFindings(r.findings);
-  mkdirSync(opts.outDir, { recursive: true });
-  const md = renderMarkdown(r);
-  writeFileSync(join(opts.outDir, `${r.check}.json`), JSON.stringify(r, null, 2) + "\n");
-  writeFileSync(join(opts.outDir, `${r.check}.md`), md + "\n");
+  const redacted = isRedacted(env);
+  const md = redacted ? renderRedactedMarkdown(r) : renderMarkdown(r);
+  if (!redacted) {
+    mkdirSync(opts.outDir, { recursive: true });
+    writeFileSync(join(opts.outDir, `${r.check}.json`), JSON.stringify(r, null, 2) + "\n");
+    writeFileSync(join(opts.outDir, `${r.check}.md`), md + "\n");
+  }
   process.stdout.write(md + "\n");
-  process.stdout.write(`\nReport written to ${join(opts.outDir, r.check)}.{json,md}\n`);
-  if (process.env.GITHUB_STEP_SUMMARY) {
+  if (!redacted) process.stdout.write(`\nReport written to ${join(opts.outDir, r.check)}.{json,md}\n`);
+  if (env.GITHUB_STEP_SUMMARY) {
     try {
-      appendFileSync(process.env.GITHUB_STEP_SUMMARY, md + "\n");
+      appendFileSync(env.GITHUB_STEP_SUMMARY, md + "\n");
     } catch {
-      process.stderr.write("Could not append to GITHUB_STEP_SUMMARY; the report files above are complete.\n");
+      process.stderr.write("Could not append to GITHUB_STEP_SUMMARY.\n");
     }
   }
   if (r.skipped) return 0;

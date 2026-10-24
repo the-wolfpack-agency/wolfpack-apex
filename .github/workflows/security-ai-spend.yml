@@ -63,13 +63,14 @@ jobs:
       - name: Run security:ai-spend
         if: env.HAS_AZURE == 'true'
         env:
+          SECURITY_REPORT_PUBLIC: ${{ github.event.repository.private && 'false' || 'true' }}
           AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           npm_config_yes: "true"
         run: npm run security:ai-spend -- --out security-reports
 
       - name: Keep the report
         continue-on-error: true
-        if: always() && env.HAS_AZURE == 'true'
+        if: always() && env.HAS_AZURE == 'true' && github.event.repository.private
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: security-ai-spend-${{ github.run_id }}
