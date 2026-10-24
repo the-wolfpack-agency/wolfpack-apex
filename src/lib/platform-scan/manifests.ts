@@ -141,10 +141,26 @@ export const SCAN_MANIFESTS: Record<string, ScanManifest> = {
     baseUrl: "https://wolfpack-instinct.vercel.app",
     routes: WOLFPACK_INSTINCT,
     apiEndpoints: WOLFPACK_INSTINCT_API,
+    // White-box target for the continuous engagement sweep (profile + static
+    // scan). Seed paths only; repo-tree discovery unions the rest. Without a
+    // static target the sweep records this platform as skipped (no_static_target).
+    static: {
+      owner: "the-wolfpack-agency",
+      repo: "wolfpack-apex",
+      ref: "main",
+      paths: ["src/app/login/page.tsx", "src/app/(dashboard)/layout.tsx"],
+    },
   },
   "ogiam": {
     baseUrl: "https://ogiam.com",
     routes: HOME_ONLY,
+    // The OGIAM site's source (private repo, read with the org PAT).
+    static: {
+      owner: "the-wolfpack-agency",
+      repo: "OGIAM",
+      ref: "main",
+      paths: ["src/app/page.tsx", "src/app/contact/page.tsx", "src/app/api/contact/route.ts"],
+    },
   },
   "porsche-weekend": {
     baseUrl: "https://weekendwithporsche.com",

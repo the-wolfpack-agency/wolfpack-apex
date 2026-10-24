@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 /**
  * resolveScanTarget + listScanTargets: a curated platform OR a saved client
  * connection is scannable, so any system an operator connects (username/password)
@@ -139,5 +141,32 @@ describe("Forcefield surfaces in the wolfpack-instinct manifest", () => {
     // the public signup must reject an empty body (validation before any write)
     expect(byPath["/api/forcefield/signup"]?.invalidBody).toEqual({});
     expect(byPath["/api/forcefield/signup"]?.expectRejectStatuses).toEqual([400]);
+  });
+});
+
+describe("static (repo) targets for our own properties (engagement sweep)", () => {
+  it("wolfpack-instinct reads this repo, and every seed path exists in it", () => {
+    const s = getScanManifest("wolfpack-instinct")?.static;
+    expect(s).toMatchObject({ owner: "the-wolfpack-agency", repo: "wolfpack-apex", ref: "main" });
+    for (const p of s?.paths ?? []) expect(existsSync(join(process.cwd(), p))).toBe(true);
+    expect(s?.paths.length).toBeGreaterThan(0);
+  });
+
+  it("ogiam reads the-wolfpack-agency/OGIAM", () => {
+    expect(getScanManifest("ogiam")?.static).toMatchObject({ owner: "the-wolfpack-agency", repo: "OGIAM", ref: "main" });
+    expect(getScanManifest("ogiam")?.static?.paths.length).toBeGreaterThan(0);
+  });
+
+  it("does NOT add a repo target for the client sites (that needs written client authorization)", () => {
+    expect(getScanManifest("porsche-weekend")?.static).toBeUndefined();
+    expect(getScanManifest("aidan-mulready")?.static).toBeUndefined();
+  });
+
+  it("lists both own properties as static-capable targets", async () => {
+    mockList.mockResolvedValue([]);
+    mockListStored.mockResolvedValue([]);
+    const targets = await listScanTargets("default");
+    expect(targets.find((t) => t.platform === "wolfpack-instinct")?.hasStatic).toBe(true);
+    expect(targets.find((t) => t.platform === "ogiam")?.hasStatic).toBe(true);
   });
 });
