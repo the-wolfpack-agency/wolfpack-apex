@@ -17,6 +17,21 @@ describe("Forcefield vendored core is portable", () => {
     expect(manifest.files).not.toContain("rollup.ts"); // imports @/lib/db
   });
 
+  // Every relative import of a vendored file must itself be vendored, or the
+  // copy does not compile in the site (index.ts re-exported ./campaign while
+  // campaign.ts was missing from the manifest, which broke the site type-check).
+  it("is closed under its own imports (every relative import is in the manifest)", () => {
+    const missing: string[] = [];
+    for (const file of manifest.files) {
+      const src = readFileSync(join(dir, file), "utf8");
+      for (const m of src.matchAll(/from\s+"(\.\/[^"]+)"/g)) {
+        const target = `${m[1].slice(2)}.ts`;
+        if (!manifest.files.includes(target)) missing.push(`${file} -> ${target}`);
+      }
+    }
+    expect(missing).toEqual([]);
+  });
+
   for (const file of manifest.files) {
     it(`${file} imports only relatively (no @/ host paths, no bare packages)`, () => {
       const src = readFileSync(join(dir, file), "utf8");

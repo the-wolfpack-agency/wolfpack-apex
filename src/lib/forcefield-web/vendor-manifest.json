@@ -12,6 +12,7 @@
     "enforce.ts",
     "monitor.ts",
     "index.ts",
-    "hosting.ts"
+    "hosting.ts",
+    "campaign.ts"
   ]
 }
