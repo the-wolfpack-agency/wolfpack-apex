@@ -26,6 +26,12 @@ describe("wordpress.org readme.txt", () => {
     expect(stable).toBe(version);
   });
 
+  it("has a changelog entry for the shipped Version", () => {
+    const version = plugin.match(/Version:\s*([0-9.]+)/)?.[1];
+    const changelog = readme.slice(readme.indexOf("== Changelog =="));
+    expect(changelog).toContain(`= ${version} =`);
+  });
+
   it("documents the required sections (Installation + Changelog)", () => {
     expect(readme).toMatch(/== Installation ==/);
     expect(readme).toMatch(/== Changelog ==/);

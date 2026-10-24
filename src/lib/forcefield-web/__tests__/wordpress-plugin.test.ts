@@ -34,28 +34,97 @@ describe("wordpress plugin safety invariants", () => {
   it("is watch-first: watch mode is fire-and-forget, blocking is gated on the enforce option", () => {
     expect(php).toContain("get_option('ogiam_ff_enforce', '') === 'on'");
     expect(php).toMatch(/'blocking'\s*=>\s*false/); // watch = non-blocking best-effort
-    // the 403 block path exists only after the enforce branch returns
-    const enforceIdx = php.indexOf("if (!$enforce)");
-    const blockIdx = php.indexOf("status_header(403)");
-    expect(enforceIdx).toBeGreaterThan(-1);
-    expect(blockIdx).toBeGreaterThan(enforceIdx);
+    expect(php).toMatch(/'timeout'\s*=>\s*0\.3/); // and a short timeout
+    // the block path exists only after the watch / signed-in branch returns
+    const watchIdx = php.indexOf("if (!$enforce || $authenticated)");
+    const blockCallIdx = php.indexOf("ogiam_ff_block(ogiam_ff_request_context())");
+    expect(watchIdx).toBeGreaterThan(-1);
+    expect(blockCallIdx).toBeGreaterThan(watchIdx);
   });
 
-  it("fails open on any engine error (never takes the site down)", () => {
+  it("fails open on any engine error, a non-200, or an unreadable answer", () => {
     expect(php).toMatch(/if \(is_wp_error\(\$res\)\) \{ return; \}/);
+    expect(php).toMatch(/wp_remote_retrieve_response_code\(\$res\) !== 200\) \{ return; \}/);
+    // only an explicit block verdict blocks
+    expect(php).toContain("$verdict['action'] === 'block'");
   });
 
-  it("forwards SHAPE only - never the request body or $_POST", () => {
+  it("forwards SHAPE only - never the request body, $_POST or cookies", () => {
     expect(php).not.toContain("$_POST");
+    expect(php).not.toContain("$_COOKIE");
     expect(php).not.toContain("php://input");
     expect(php).not.toContain("file_get_contents");
-    // the body sent is built only from the shape fields
+    expect(php).not.toContain("HTTP_COOKIE'");
+    expect(php).not.toContain("HTTP_AUTHORIZATION'");
     for (const key of ["'site'", "'path'", "'method'", "'userAgent'", "'country'", "'headerNames'"]) {
       expect(php).toContain(key);
     }
   });
 
-  it("never gates wp-admin", () => {
-    expect(php).toMatch(/if \(is_admin\(\)\) \{ return; \}/);
+  it("forwards the new contract fields: platform, rawUrl, ip, accept, secFetchDest, authenticated", () => {
+    expect(php).toMatch(/'platform'\s*=>\s*'wordpress'/);
+    expect(php).toMatch(/'rawUrl'\s*=>/);
+    expect(php).toMatch(/'ip'\s*=>\s*ogiam_ff_client_ip\(\)/);
+    expect(php).toMatch(/'accept'\s*=>.*HTTP_ACCEPT/);
+    expect(php).toMatch(/'secFetchDest'\s*=>.*HTTP_SEC_FETCH_DEST/);
+    expect(php).toMatch(/'authenticated'\s*=>\s*\(bool\) \$authenticated/);
+  });
+
+  it("guards on init (priority 0), so wp-login, xmlrpc, admin-ajax, REST and wp-admin are seen", () => {
+    expect(php).toMatch(/add_action\('init', 'ogiam_ff_guard', 0\);/);
+    // the old front-end-only hook and the wp-admin blind spot are gone
+    expect(php).not.toMatch(/add_action\('template_redirect'/);
+    expect(php).not.toMatch(/if \(is_admin\(\)\) \{ return; \}/);
+  });
+
+  it("never blocks a signed-in user, and attests it from WordPress's own session check", () => {
+    expect(php).toContain("$authenticated = is_user_logged_in();");
+    // signed-in requests always take the non-blocking path and return before any block
+    expect(php).toMatch(/if \(!\$enforce \|\| \$authenticated\) \{[\s\S]*?'blocking'\s*=>\s*false[\s\S]*?return;\s*\}/);
+    // never inferred from a cookie or auth header being present
+    expect(php).not.toMatch(/LOGGED_IN_COOKIE|wordpress_logged_in/);
+  });
+
+  it("stays out of the way of WP-CLI, cron, and saving its own settings", () => {
+    expect(php).toMatch(/if \(defined\('WP_CLI'\) && WP_CLI\) \{ return; \}/);
+    expect(php).toMatch(/if \(wp_doing_cron\(\)\) \{ return; \}/);
+    expect(php).toMatch(/'\/wp-admin\/options\.php'[\s\S]{0,80}current_user_can\('manage_options'\)\) \{\s*return;/);
+    // the exemptions run before any engine call
+    const firstPost = php.indexOf("wp_remote_post(");
+    expect(php.indexOf("defined('WP_CLI')")).toBeLessThan(firstPost);
+    expect(php.indexOf("wp_doing_cron()")).toBeLessThan(firstPost);
+  });
+
+  it("uses REMOTE_ADDR unless the owner chose a proxy header, and validates the IP", () => {
+    expect(php).toContain("ogiam_ff_server('REMOTE_ADDR')");
+    expect(php).toContain("FILTER_VALIDATE_IP");
+    // X-Forwarded-For only behind a chosen proxy, and then the LAST hop
+    expect(php).toMatch(/\$source === 'x-forwarded-for'[\s\S]{0,160}end\(\$hops\)/);
+    expect(php).toMatch(/'ogiam_ff_proxy_header'[\s\S]{0,120}'sanitize_callback' => 'ogiam_ff_sanitize_proxy_header'/);
+  });
+
+  it("answers a block with a context-appropriate 403 that leaks no internals", () => {
+    const block = php.slice(php.indexOf("function ogiam_ff_block("), php.indexOf("function ogiam_ff_guard("));
+    expect(block).toMatch(/wp_send_json\([\s\S]*?403\s*\)/); // REST + admin-ajax: JSON 403
+    expect(block).toContain("<methodResponse><fault>"); // XML-RPC: fault
+    expect(block).toMatch(/wp_die\([\s\S]*?'response' => 403/); // pages: HTML 403
+    // fixed text only: the engine verdict / reason is never echoed to the requester
+    expect(block).not.toContain("$verdict");
+    expect(block).not.toMatch(/reason/i);
+  });
+
+  it("sanitizes every stored setting and escapes every output on the settings page", () => {
+    for (const opt of ["ogiam_ff_site", "ogiam_ff_token", "ogiam_ff_ingest_url", "ogiam_ff_enforce", "ogiam_ff_proxy_header"]) {
+      expect(php).toMatch(new RegExp(`register_setting\\('ogiam_ff', '${opt}', array\\([^)]*'sanitize_callback'`));
+    }
+    expect(php).toContain("esc_url_raw(");
+    // no unescaped echo of an option value
+    expect(php).not.toMatch(/echo get_option\(/);
+  });
+
+  it("is plain PHP 7.4 (no PHP 8-only helpers)", () => {
+    for (const fn of ["str_starts_with(", "str_ends_with(", "str_contains(", "match ("]) {
+      expect(php).not.toContain(fn);
+    }
   });
 });
