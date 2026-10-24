@@ -46,14 +46,22 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     name: "Static Security Scan"
+    # Read-only. This job used to hold contents: write so it could commit a
+    # regenerated baseline to main on every push, which absorbed every new
+    # finding the moment it landed and kept the gate from ever going red. The
+    # baseline now changes only through a reviewed commit
+    # (scripts/security/self-scan.ts baseline, docs/security/self-scan.md).
     permissions:
-      contents: write
-      pull-requests: write
-      actions: read
+      contents: read
+    # Numbers only. These outputs feed the scan-summary job, whose summary,
+    # PR comment and issue are public in this repository.
     outputs:
-      total_findings: ${{ steps.parse.outputs.total_findings }}
-      total_critical: ${{ steps.parse.outputs.total_critical }}
-      risk_level: ${{ steps.parse.outputs.risk_level }}
+      total_findings: ${{ steps.gate.outputs.total_findings }}
+      total_critical: ${{ steps.gate.outputs.total_critical }}
+      risk_level: ${{ steps.gate.outputs.risk_level }}
+      new_findings: ${{ steps.gate.outputs.new_findings }}
+      new_critical_high: ${{ steps.gate.outputs.new_critical_high }}
+      scanner_errors: ${{ steps.gate.outputs.scanner_errors }}
     steps:
       - name: Checkout Instinct
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -104,125 +112,40 @@ jobs:
       - name: Run security scan
         if: steps.pat-check.outputs.configured == 'true'
         run: |
+          # No --json: with it the scanner prints every finding (file, line,
+          # rule, evidence) to stdout, and this repository's logs are public.
+          # Results go to the file only; console output is discarded and
+          # stderr is shown only if the scanner itself fails.
+          set +e
           python vendor/agenticqa-tool/AgenticQA/scripts/run_client_scan.py . \
-            --json \
-            --output scan-results.json
+            --output scan-results.json > /dev/null 2> scan-stderr.log
+          code=$?
+          set -e
+          if [ "$code" -ne 0 ] || [ ! -s scan-results.json ]; then
+            echo "::error::run_client_scan.py exited $code without a result file"
+            tail -n 30 scan-stderr.log
+            exit 2
+          fi
           echo "--- Scan complete ---"
 
-      - name: Parse scan results
-        id: parse
+      - name: Set up Node.js
         if: steps.pat-check.outputs.configured == 'true'
-        run: |
-          python3 << 'PYEOF'
-          import json, os
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v4.0.4
+        with:
+          node-version: '22'
 
-          with open("scan-results.json") as f:
-              data = json.load(f)
-
-          summary = data.get("summary", {})
-          scanners = data.get("scanners", {})
-
-          total_findings = summary.get("total_findings", 0)
-          total_critical = summary.get("total_critical", 0)
-          risk_level = summary.get("risk_level", "unknown")
-
-          # Check the 6 critical scanner categories
-          CRITICAL_SCANNERS = [
-              "auth_bypass", "idor", "jwt_security",
-              "rate_limit", "error_disclosure", "security_headers"
-          ]
-          critical_in_key_scanners = 0
-          for name in CRITICAL_SCANNERS:
-              scanner = scanners.get(name, {})
-              if scanner.get("status") == "ok":
-                  critical_in_key_scanners += scanner["result"].get("critical", 0)
-
-          # ── Baseline comparison: only fail on NEW findings ──────────
-          # Load baseline (committed to repo). If it doesn't exist, this
-          # is the first run, save current as baseline and pass.
-          baseline_path = ".agenticqa/scan-baseline.json"
-          baseline_hashes = set()
-          try:
-              with open(baseline_path) as bf:
-                  baseline_data = json.load(bf)
-                  baseline_hashes = set(baseline_data.get("finding_hashes", []))
-          except (FileNotFoundError, json.JSONDecodeError):
-              pass
-
-          # Line-independent identity (file|cwe|rule|normalized-snippet).
-          # Codified + unit-tested in the package so routine edits that
-          # shift line numbers don't turn an old finding into a "new" one.
-          from agenticqa.security.finding_fingerprint import fingerprint
-          current_hashes = set()
-          all_findings_list = []
-          for name in CRITICAL_SCANNERS:
-              scanner = scanners.get(name, {})
-              if scanner.get("status") == "ok":
-                  for f in scanner["result"].get("findings", []):
-                      h = fingerprint(f)
-                      current_hashes.add(h)
-                      all_findings_list.append({**f, "_hash": h})
-
-          new_findings = current_hashes - baseline_hashes
-          new_critical = sum(
-              1 for f in all_findings_list
-              if f["_hash"] in new_findings and f.get("severity") in ("critical", "high")
-          )
-
-          # Save current as baseline for next run
-          os.makedirs(os.path.dirname(baseline_path), exist_ok=True)
-          with open(baseline_path, "w") as bf:
-              json.dump({
-                  "finding_hashes": sorted(current_hashes),
-                  "total": len(current_hashes),
-                  "generated_at": __import__("datetime").datetime.utcnow().isoformat(),
-              }, bf, indent=2)
-
-          # Override: only NEW critical/high findings should fail the pipeline
-          critical_in_key_scanners = new_critical
-
-          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
-              out.write(f"total_findings={total_findings}\n")
-              out.write(f"total_critical={total_critical}\n")
-              out.write(f"risk_level={risk_level}\n")
-              out.write(f"critical_in_key_scanners={critical_in_key_scanners}\n")
-
-          # Build markdown table for PR comment
-          rows = []
-          for name in CRITICAL_SCANNERS:
-              scanner = scanners.get(name, {})
-              if scanner.get("status") == "ok":
-                  r = scanner["result"]
-                  findings = r.get("total_findings", 0)
-                  crit = r.get("critical", 0)
-                  status = "PASS" if crit == 0 else "FAIL"
-              elif scanner.get("status") == "error":
-                  findings = "err"
-                  crit = "err"
-                  status = "ERROR"
-              else:
-                  findings = "-"
-                  crit = "-"
-                  status = "SKIP"
-              display = name.replace("_", " ").title()
-              rows.append(f"| {display} | {findings} | {crit} | {status} |")
-
-          table = "| Scanner | Findings | Critical | Status |\n"
-          table += "|---------|----------|----------|--------|\n"
-          table += "\n".join(rows)
-
-          # Write table to file for the comment step
-          with open("scan-table.md", "w") as f:
-              f.write(table)
-
-          # Write full JSON details for the collapsible section
-          with open("scan-details.json", "w") as f:
-              json.dump(data, f, indent=2, default=str)
-
-          PYEOF
+      - name: Gate on the committed baseline
+        id: gate
+        if: steps.pat-check.outputs.configured == 'true'
+        env:
+          # Fail closed: details only when the repository says it is private.
+          SECURITY_REPORT_PUBLIC: ${{ github.event.repository.private && 'false' || 'true' }}
+          npm_config_yes: "true"
+        run: npx tsx scripts/security/self-scan.ts static --scan scan-results.json --baseline .agenticqa/scan-baseline.json --md scan-report.md
 
       - name: Upload scan results
-        if: steps.pat-check.outputs.configured == 'true'
+        # Private repositories only: an artifact here is downloadable by anyone.
+        if: steps.pat-check.outputs.configured == 'true' && github.event.repository.private
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         continue-on-error: true # diagnostic upload; a transient artifact-service timeout must not fail the job
         with:
@@ -230,115 +153,18 @@ jobs:
           path: scan-results.json
           retention-days: 30
 
-      - name: Post PR comment
-        # Reporting only, NOT the security gate. Marked best-effort so a comment
-        # permission/API hiccup can never skip the downstream "Fail on NEW
-        # critical findings" enforcement step (that was a fail-open defect: a
-        # cosmetic comment failure silently disabled the security gate).
-        continue-on-error: true
-        if: >-
-          steps.pat-check.outputs.configured == 'true' &&
-          github.event_name == 'pull_request'
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v7.0.1
-        with:
-          script: |
-            const fs = require('fs');
-            const table = fs.readFileSync('scan-table.md', 'utf8');
-            const details = fs.readFileSync('scan-details.json', 'utf8');
-            const totalFindings = '${{ steps.parse.outputs.total_findings }}';
-            const totalCritical = '${{ steps.parse.outputs.total_critical }}';
-            const riskLevel = '${{ steps.parse.outputs.risk_level }}';
-
-            const body = `## AgenticQA Security Scan
-
-            ${table}
-
-            **Risk level**: ${riskLevel} | **Total findings**: ${totalFindings} | **Critical**: ${totalCritical}
-
-            <details>
-            <summary>Full scan details</summary>
-
-            \`\`\`json
-            ${details}
-            \`\`\`
-
-            </details>
-
-            _Scan ran on commit ${context.sha.substring(0, 7)}_`;
-
-            // Find and update existing comment or create new one
-            const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-            });
-            const marker = '## AgenticQA Security Scan';
-            const existing = comments.find(c => c.body.startsWith(marker));
-
-            if (existing) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: existing.id,
-                body,
-              });
-            } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body,
-              });
-            }
-
-      - name: Commit updated baseline
-        # ONLY on push to main, never on pull_request runs. The baseline JSON
-        # carries a generated_at timestamp, so a PR run rewrites it even when the
-        # findings are identical; committing that to the PR branch then conflicts
-        # with main on every push (the merge-conflict churn this stops). Main's
-        # baseline is kept current by this same step on push-to-main, and PR runs
-        # compare against that committed baseline read-only, so the gate still
-        # works without any branch-side writes.
-        if: steps.pat-check.outputs.configured == 'true' && github.event_name == 'push'
-        # Best-effort: a baseline-commit failure must never fail the scan job (the
-        # gate is the separate "Fail on NEW critical findings" step below).
-        continue-on-error: true
-        env:
-          # Pass the ref through the environment rather than interpolating
-          # ${{ github.head_ref }} straight into the script. A branch name is
-          # attacker-controllable, so inlining it into the shell allows command
-          # injection (CodeQL/Scorecard: dangerous workflow). As an env var it is
-          # a plain, quoted string that the shell never parses as code.
-          TARGET_REF: ${{ github.head_ref || github.ref_name }}
-        run: |
-          [ -f .agenticqa/scan-baseline.json ] || exit 0
-          git config user.name "AgenticQA Bot"
-          git config user.email "agenticqa@wolfpack.dev"
-          # On a pull_request run, actions/checkout checks out the detached
-          # refs/pull/<n>/merge ref, so `git push` has no branch to push to and
-          # dies with exit 128 - which is why the baseline never auto-updated on
-          # PRs and every PR got stuck on stale-baseline drift. Re-anchor onto the
-          # real target branch (the PR head, or main on a push run) before
-          # committing the regenerated baseline.
-          TARGET="$TARGET_REF"
-          cp .agenticqa/scan-baseline.json /tmp/scan-baseline.json
-          git fetch origin "$TARGET" --depth=1
-          git checkout -B "$TARGET" "origin/$TARGET"
-          cp /tmp/scan-baseline.json .agenticqa/scan-baseline.json
-          git add .agenticqa/scan-baseline.json
-          git diff --cached --quiet && { echo "Baseline unchanged."; exit 0; }
-          git commit -m "chore: update security scan baseline [skip ci]"
-          git push origin "$TARGET" || echo "Push failed (non-blocking)"
-
-      - name: Fail on NEW critical findings only
+      - name: Fail on NEW critical/high findings or a silent scanner
         if: >-
           steps.pat-check.outputs.configured == 'true' &&
           (github.event_name != 'workflow_dispatch' || inputs.fail_on_critical == true) &&
-          steps.parse.outputs.critical_in_key_scanners != '0'
+          (steps.gate.outputs.new_critical_high != '0' || steps.gate.outputs.scanner_errors != '0')
+        env:
+          NEW_CRITICAL_HIGH: ${{ steps.gate.outputs.new_critical_high }}
+          SCANNER_ERRORS: ${{ steps.gate.outputs.scanner_errors }}
         run: |
-          echo "::error::NEW critical/high findings detected: ${{ steps.parse.outputs.critical_in_key_scanners }}"
-          echo "These are findings not present in the previous baseline."
-          echo "If these are false positives, the baseline will auto-update on the next green run."
+          echo "::error::$NEW_CRITICAL_HIGH new critical/high finding(s) not in .agenticqa/scan-baseline.json; $SCANNER_ERRORS key scanner(s) did not report."
+          echo "Fix them, or accept them with a reviewed baseline commit: docs/security/self-scan.md."
+          echo "The baseline no longer updates itself, so this stays red until one of those happens."
           exit 1
 
       - name: Skip notice
@@ -362,6 +188,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     name: "Pentest Validation"
+    outputs:
+      pentest_ran: ${{ steps.gate.outputs.pentest_ran }}
+      pentest_confirmed: ${{ steps.gate.outputs.pentest_confirmed }}
+      pentest_confirmed_critical_high: ${{ steps.gate.outputs.pentest_confirmed_critical_high }}
     steps:
       - name: Checkout Instinct
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -409,34 +239,39 @@ jobs:
           python -m pip install --upgrade "pip==26.2"
           pip install -e ./vendor/agenticqa-tool/AgenticQA/
 
-      - name: Download scan results
-        if: steps.pat-check.outputs.configured == 'true'
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: scan-results
-          path: ./scan-data
-        continue-on-error: true
-
       - name: Run pentest validation
-        id: pentest
         if: steps.pat-check.outputs.configured == 'true'
         run: |
-          # self_hack.py may not exist yet, run it if available,
-          # otherwise fall back to a re-scan with --fail-on-critical
-          if [ -f vendor/agenticqa-tool/AgenticQA/scripts/self_hack.py ]; then
-            python vendor/agenticqa-tool/AgenticQA/scripts/self_hack.py . \
-              --phase pentest \
-              --json \
-              --output pentest-results.json
-          else
-            echo "::warning::self_hack.py not found, running scan with --fail-on-critical as fallback"
-            python vendor/agenticqa-tool/AgenticQA/scripts/run_client_scan.py . \
-              --json \
-              --output pentest-results.json
+          # --json would print the full report, every candidate finding with
+          # its file and evidence, into this public log. File only.
+          set +e
+          python vendor/agenticqa-tool/AgenticQA/scripts/self_hack.py . \
+            --phase pentest \
+            --output pentest-results.json > /dev/null 2> pentest-stderr.log
+          code=$?
+          set -e
+          if [ "$code" -ne 0 ] || [ ! -s pentest-results.json ]; then
+            echo "::error::self_hack.py exited $code without a result file"
+            tail -n 30 pentest-stderr.log
+            exit 2
           fi
 
-      - name: Upload pentest results
+      - name: Set up Node.js
         if: steps.pat-check.outputs.configured == 'true'
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v4.0.4
+        with:
+          node-version: '22'
+
+      - name: Read the pentest result
+        id: gate
+        if: steps.pat-check.outputs.configured == 'true'
+        env:
+          npm_config_yes: "true"
+        run: npx tsx scripts/security/self-scan.ts pentest --results pentest-results.json --md pentest-report.md
+
+      - name: Upload pentest results
+        # Private repositories only: an artifact here is downloadable by anyone.
+        if: steps.pat-check.outputs.configured == 'true' && github.event.repository.private
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         continue-on-error: true # diagnostic upload; a transient artifact-service timeout must not fail the job
         with:
@@ -444,23 +279,22 @@ jobs:
           path: pentest-results.json
           retention-days: 30
 
-      - name: Check for confirmed critical vulnerabilities
-        if: steps.pat-check.outputs.configured == 'true'
+      - name: Fail on confirmed critical/high, or a pentest that did not run
+        # The previous check read summary.total_critical, a key self_hack.py
+        # does not write, so it reported 0 on every run whatever it found.
+        if: >-
+          steps.pat-check.outputs.configured == 'true' &&
+          (steps.gate.outputs.pentest_ran != 'true' || steps.gate.outputs.pentest_confirmed_critical_high != '0')
+        env:
+          RAN: ${{ steps.gate.outputs.pentest_ran }}
+          CONFIRMED: ${{ steps.gate.outputs.pentest_confirmed_critical_high }}
         run: |
-          python3 << 'PYEOF'
-          import json, sys
-
-          try:
-              with open("pentest-results.json") as f:
-                  data = json.load(f)
-              critical = data.get("summary", {}).get("total_critical", 0)
-              if critical > 0:
-                  print(f"::error::Confirmed critical vulnerabilities: {critical}")
-                  sys.exit(1)
-              print(f"Pentest validation passed, 0 confirmed critical vulnerabilities")
-          except FileNotFoundError:
-              print("::warning::No pentest results file found")
-          PYEOF
+          if [ "$RAN" != "true" ]; then
+            echo "::error::The pentest phase did not run (no phase 2 result). A pentest that did not run is not a pass."
+          else
+            echo "::error::Confirmed critical/high vulnerabilities: $CONFIRMED"
+          fi
+          exit 1
 
   # ──────────────────────────────────────────────────
   # Job 3: Dependency Audit
@@ -496,7 +330,7 @@ jobs:
           # ships to production, and Dependabot already covers every
           # dependency on the repo security page. This mirrors the prod-only
           # audit in agenticqa-full-pipeline.yml.
-          npm audit --omit=dev --json > npm-audit.json 2>&1 || true
+          npm audit --omit=dev --json > npm-audit.json 2> npm-audit-stderr.log || true
           echo "--- npm audit complete ---"
 
       - name: Parse audit results
@@ -505,33 +339,29 @@ jobs:
           python3 << 'PYEOF'
           import json, os, sys
 
+          # Fail closed: an audit that could not run (registry down, bad
+          # output) used to write 0 high / 0 critical and pass.
           try:
               with open("npm-audit.json") as f:
                   data = json.load(f)
-          except (json.JSONDecodeError, FileNotFoundError):
-              # npm audit sometimes outputs non-JSON on error
-              with open(os.environ["GITHUB_OUTPUT"], "a") as out:
-                  out.write("high_count=0\n")
-                  out.write("critical_count=0\n")
-              print("::warning::Could not parse npm audit output")
-              sys.exit(0)
+              vulns = data["metadata"]["vulnerabilities"]
+          except (json.JSONDecodeError, FileNotFoundError, KeyError, TypeError):
+              print("::error::npm audit produced no vulnerability counts; the audit did not run")
+              sys.exit(2)
 
-          vulns = data.get("metadata", {}).get("vulnerabilities", {})
-          high = vulns.get("high", 0)
-          critical = vulns.get("critical", 0)
+          high = int(vulns.get("high", 0))
+          critical = int(vulns.get("critical", 0))
 
           with open(os.environ["GITHUB_OUTPUT"], "a") as out:
               out.write(f"high_count={high}\n")
               out.write(f"critical_count={critical}\n")
 
           print(f"Dependency audit: {high} high, {critical} critical")
-
-          # Write summary for the table
-          with open("dep-summary.md", "w") as f:
-              f.write(f"**Dependency Audit**: {high} high, {critical} critical CVEs\n")
           PYEOF
 
       - name: Upload audit results
+        # Private repositories only: an artifact here is downloadable by anyone.
+        if: github.event.repository.private
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         continue-on-error: true # diagnostic upload; a transient artifact-service timeout must not fail the job
         with:
@@ -543,13 +373,19 @@ jobs:
         if: >-
           (github.event_name != 'workflow_dispatch' || inputs.fail_on_critical == true) &&
           (steps.parse.outputs.high_count != '0' || steps.parse.outputs.critical_count != '0')
+        env:
+          HIGH: ${{ steps.parse.outputs.high_count }}
+          CRITICAL: ${{ steps.parse.outputs.critical_count }}
         run: |
-          echo "::error::npm audit found ${{ steps.parse.outputs.high_count }} high and ${{ steps.parse.outputs.critical_count }} critical CVEs"
+          echo "::error::npm audit found $HIGH high and $CRITICAL critical CVEs"
           exit 1
 
   # ──────────────────────────────────────────────────
   # Job 4: Scan Summary
   # ──────────────────────────────────────────────────
+  # Built from the jobs' outputs, which are counts only. It downloads no
+  # artifacts: the result files are uploaded only from a private repository,
+  # and their contents never belong in this public summary, comment or issue.
   scan-summary:
     needs: [static-scan, pentest-validation, dependency-audit]
     if: always()
@@ -561,116 +397,36 @@ jobs:
       pull-requests: write
       issues: write
     steps:
-      - name: Checkout (for issue creation context)
+      - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      - name: Download all artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - name: Set up Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v4.0.4
         with:
-          path: ./artifacts
-        continue-on-error: true
+          node-version: '22'
 
       - name: Generate combined report
-        id: report
-        run: |
-          python3 << 'PYEOF'
-          import json, os, datetime
-
-          scan_data = {}
-          pentest_data = {}
-          audit_data = {}
-
-          # Load scan results
-          try:
-              with open("artifacts/scan-results/scan-results.json") as f:
-                  scan_data = json.load(f)
-          except (FileNotFoundError, json.JSONDecodeError):
-              pass
-
-          # Load pentest results
-          try:
-              with open("artifacts/pentest-results/pentest-results.json") as f:
-                  pentest_data = json.load(f)
-          except (FileNotFoundError, json.JSONDecodeError):
-              pass
-
-          # Load npm audit
-          try:
-              with open("artifacts/npm-audit/npm-audit.json") as f:
-                  audit_data = json.load(f)
-          except (FileNotFoundError, json.JSONDecodeError):
-              pass
-
-          # Build scanners table
-          scanners = scan_data.get("scanners", {})
-          CRITICAL_SCANNERS = [
-              "auth_bypass", "idor", "jwt_security",
-              "rate_limit", "error_disclosure", "security_headers"
-          ]
-          table_rows = []
-          for name in CRITICAL_SCANNERS:
-              scanner = scanners.get(name, {})
-              if scanner.get("status") == "ok":
-                  r = scanner["result"]
-                  findings = r.get("total_findings", 0)
-                  crit = r.get("critical", 0)
-                  status = "PASS" if crit == 0 else "FAIL"
-              else:
-                  findings = "-"
-                  crit = "-"
-                  status = "SKIP"
-              display = name.replace("_", " ").title()
-              table_rows.append(f"| {display} | {findings} | {crit} | {status} |")
-
-          # Dep audit summary
-          vulns = audit_data.get("metadata", {}).get("vulnerabilities", {})
-          dep_high = vulns.get("high", 0)
-          dep_crit = vulns.get("critical", 0)
-
-          summary = scan_data.get("summary", {})
-          total_findings = summary.get("total_findings", 0)
-          total_critical = summary.get("total_critical", 0)
-          risk_level = summary.get("risk_level", "unknown")
-
-          report = f"""## AgenticQA Security Scan
-
-          | Scanner | Findings | Critical | Status |
-          |---------|----------|----------|--------|
-          {chr(10).join(table_rows)}
-
-          **Dependency Audit**: {dep_high} high / {dep_crit} critical CVEs
-
-          **Overall**: {total_findings} findings, {total_critical} critical, risk={risk_level}
-
-          <details>
-          <summary>Full scan details</summary>
-
-          ```json
-          {json.dumps(scan_data, indent=2, default=str)[:50000]}
-          ```
-
-          </details>
-          """
-
-          # De-indent the report (it was indented for readability in the heredoc)
-          import textwrap
-          report = textwrap.dedent(report)
-
-          with open("combined-report.md", "w") as f:
-              f.write(report)
-
-          # Signal whether to create an issue
-          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
-              out.write(f"total_critical={total_critical}\n")
-              out.write(f"risk_level={risk_level}\n")
-
-          PYEOF
-
-      - name: Write step summary
-        run: cat combined-report.md >> $GITHUB_STEP_SUMMARY
+        env:
+          npm_config_yes: "true"
+          SELF_SCAN_STATIC_RESULT: ${{ needs.static-scan.result }}
+          SELF_SCAN_PENTEST_RESULT: ${{ needs.pentest-validation.result }}
+          SELF_SCAN_DEPENDENCY_RESULT: ${{ needs.dependency-audit.result }}
+          SELF_SCAN_TOTAL_FINDINGS: ${{ needs.static-scan.outputs.total_findings }}
+          SELF_SCAN_TOTAL_CRITICAL: ${{ needs.static-scan.outputs.total_critical }}
+          SELF_SCAN_RISK_LEVEL: ${{ needs.static-scan.outputs.risk_level }}
+          SELF_SCAN_NEW_FINDINGS: ${{ needs.static-scan.outputs.new_findings }}
+          SELF_SCAN_NEW_CRITICAL_HIGH: ${{ needs.static-scan.outputs.new_critical_high }}
+          SELF_SCAN_SCANNER_ERRORS: ${{ needs.static-scan.outputs.scanner_errors }}
+          SELF_SCAN_PENTEST_RAN: ${{ needs.pentest-validation.outputs.pentest_ran }}
+          SELF_SCAN_PENTEST_CONFIRMED: ${{ needs.pentest-validation.outputs.pentest_confirmed }}
+          SELF_SCAN_PENTEST_CONFIRMED_CRITICAL_HIGH: ${{ needs.pentest-validation.outputs.pentest_confirmed_critical_high }}
+          SELF_SCAN_DEP_HIGH: ${{ needs.dependency-audit.outputs.high_count }}
+          SELF_SCAN_DEP_CRITICAL: ${{ needs.dependency-audit.outputs.critical_count }}
+        run: npx tsx scripts/security/self-scan.ts combine --md combined-report.md
 
       - name: Post PR comment (combined)
         if: github.event_name == 'pull_request'
+        continue-on-error: true # reporting only; the gates are the jobs above
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v7.0.1
         with:
           script: |
@@ -699,20 +455,31 @@ jobs:
               });
             }
 
-      - name: Create issue for scheduled runs
+      - name: Create issue for a failed scheduled run
+        # Was `${steps.report.outputs.total_critical}` inside the JS template
+        # literal: `steps` is an Actions expression context, not a JavaScript
+        # variable, so every scheduled run died with "ReferenceError: steps is
+        # not defined" (2026-10-11, 2026-10-18) and no issue was ever opened.
+        # Values now arrive through env.
         if: >-
           github.event_name == 'schedule' &&
-          steps.report.outputs.total_critical != '0'
+          (needs.static-scan.result == 'failure' ||
+           needs.pentest-validation.result == 'failure' ||
+           needs.dependency-audit.result == 'failure')
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v7.0.1
+        env:
+          NEW_CRITICAL_HIGH: ${{ needs.static-scan.outputs.new_critical_high }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         with:
           script: |
             const fs = require('fs');
-            const body = fs.readFileSync('combined-report.md', 'utf8');
+            const body = fs.readFileSync('combined-report.md', 'utf8') + `\nRun: ${process.env.RUN_URL}\n`;
             const date = new Date().toISOString().split('T')[0];
+            const n = /^\d+$/.test(process.env.NEW_CRITICAL_HIGH || '') ? process.env.NEW_CRITICAL_HIGH : '?';
             await github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title: `Security Scan: ${steps.report.outputs.total_critical} critical findings (${date})`,
+              title: `Security self-scan failed: ${n} new critical/high (${date})`,
               body,
               labels: ['security', 'automated'],
             });
