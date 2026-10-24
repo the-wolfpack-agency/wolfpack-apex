@@ -103,7 +103,7 @@ const SEVERITY_RANK: Record<ProbeSeverity, number> = { low: 0, medium: 1, high: 
 export function matchProbePath(path: string): ProbeSignature | null {
   const p = (path || "").toLowerCase().split("?")[0];
   for (const sig of PROBE_SIGNATURES) {
-    const s = sig.prefix;
+    const s = sig.prefix.toLowerCase();
     if (p === s || p.startsWith(`${s}/`) || p.startsWith(`${s}.`)) return sig;
   }
   return null;
