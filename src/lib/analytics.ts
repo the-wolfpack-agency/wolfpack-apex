@@ -1057,6 +1057,17 @@ export type InstinctEventType =
   // broken sweep (stale client posture) is visible. { kind, targets, succeeded, failed }
   | "platform.sweep_completed"
   | "platform.sweep_failed"
+  // ---- Stream 4 (measure tier honest + wired) ----
+  // A sweep tick found nothing to assess (zero targets, or every target skipped),
+  // recorded with status no_targets instead of a false "completed".
+  // { kind, targets, succeeded, failed, skipped }
+  | "platform.sweep_no_targets"
+  // The Secure Agent PR-gate received a code PR it could not gate (unknown
+  // installation, unentitled tenant, no token, gate error). Fired every time, with
+  // whether an explanatory check was posted.
+  // { reason, repo, pr_number, check_posted, conclusion }
+  | "ai_code.pr_gate_skipped"
+  // ---- end Stream 4 ----
   // UX/accessibility posture grade for a target, trended over time like the
   // security posture. { platform, grade, ux, a11y, total }
   | "platform.ux_posture_scored"

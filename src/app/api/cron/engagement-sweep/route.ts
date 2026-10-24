@@ -13,7 +13,8 @@
  * Never 500s on a recoverable error. BUT a failure is no longer SILENT: the sweep
  * runs through runSweepWithHealth, which records every run in the
  * instinct_sweep_runs ledger, captures each target's outcome (a target that
- * threw is recorded as a failure, the sweep continues), derives ok/partial/failed
+ * threw is recorded as a failure, the sweep continues; a skipped target is not a
+ * success), derives ok/partial/failed/no_targets
  * status, and ALERTS the operator via the existing notifications layer on a
  * transition into an unhealthy state. The route still returns 200 so the cron
  * health monitor stays green - but a broken sweep now surfaces immediately.
