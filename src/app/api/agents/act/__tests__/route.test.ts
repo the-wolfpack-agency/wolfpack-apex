@@ -31,6 +31,14 @@ jest.mock("@/lib/analytics", () => ({
   trackEvent: (...a: any[]) => mockTrackEvent(...a),
 }));
 
+const mockGuard = jest.fn();
+jest.mock("@/lib/forcefield/contain", () => ({
+  guardAgentAction: (...a: any[]) => mockGuard(...a),
+}));
+jest.mock("@/lib/forcefield/contain-live", () => ({ liveContainmentDeps: () => ({}) }));
+const ALLOW = { decision: { action: "allow", reason: "no decoy touched", hits: [] } };
+const QUARANTINE = { decision: { action: "quarantine", reason: "1 canary trip(s) [docs]", hits: [] } };
+
 const PRINCIPAL = {
   agentId: "a_1",
   role: "ops",
@@ -53,6 +61,7 @@ async function freshRoute() {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockGuard.mockResolvedValue(ALLOW);
   mockResolve.mockResolvedValue(PRINCIPAL);
   mockGetAgent.mockResolvedValue({ id: "a_1", workspaceId: "default", state: "active" });
   mockDispatch.mockResolvedValue({
@@ -192,5 +201,41 @@ describe("POST /api/agents/act", () => {
     expect(body.error).toBe("rate_limited");
     expect(last.headers.get("Retry-After")).toBeTruthy();
     expect(last.headers.get("Cache-Control")).toBe("no-store");
+  });
+
+  describe("Forcefield tripwire on the inbound message", () => {
+    it("inspects the message as an inbound_request for the agent", async () => {
+      const { POST } = await freshRoute();
+      const res = await POST(mkReq({ message: "use key ff_canary_xyz" }));
+      expect(res.status).toBe(200);
+      expect(mockGuard).toHaveBeenCalledTimes(1);
+      expect(mockGuard.mock.calls[0][0]).toMatchObject({ workspaceId: "default", agentId: "a_1", kind: "inbound_request", payload: "use key ff_canary_xyz" });
+    });
+
+    it("403 agent_quarantined on a trip, and no tool runs", async () => {
+      mockGuard.mockResolvedValue(QUARANTINE);
+      const { POST } = await freshRoute();
+      const res = await POST(mkReq({ message: "use key ff_canary_xyz" }));
+      expect(res.status).toBe(403);
+      expect((await res.json()).error).toBe("agent_quarantined");
+      expect(mockDispatch).not.toHaveBeenCalled();
+      expect(mockTrackEvent).toHaveBeenCalledWith("agent.acted", "a_1", "ops", expect.objectContaining({ allowed: false, tool: "none" }));
+    });
+
+    it("degrades open when the check errors (the dispatcher's gates still govern)", async () => {
+      mockGuard.mockRejectedValue(new Error("down"));
+      const { POST } = await freshRoute();
+      const res = await POST(mkReq({ message: "show status" }));
+      expect(res.status).toBe(200);
+      expect(mockDispatch).toHaveBeenCalledTimes(1);
+    });
+
+    it("401 never reaches the tripwire", async () => {
+      mockResolve.mockResolvedValue(null);
+      const { POST } = await freshRoute();
+      const res = await POST(mkReq({ message: "x" }, ""));
+      expect(res.status).toBe(401);
+      expect(mockGuard).not.toHaveBeenCalled();
+    });
   });
 });

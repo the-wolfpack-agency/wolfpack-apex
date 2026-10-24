@@ -106,3 +106,34 @@ describe("guardAgentAction", () => {
     expect(out.contained).toBe(false);
   });
 });
+
+describe("guardAgentAction notifies a person on a trip", () => {
+  it("calls notifyTrip (event + audit + alert) on a trip and reports alerted", async () => {
+    const { deps } = fakeDeps();
+    const notified: TripRecord[] = [];
+    deps.notifyTrip = async (t) => { notified.push(t); };
+    const out = await guardAgentAction(MALICIOUS, deps);
+    expect(out.alerted).toBe(true);
+    expect(notified).toHaveLength(1);
+    expect(notified[0].decision.hits[0].canaryId).toBe("c-tool");
+  });
+
+  it("never notifies on a legitimate action", async () => {
+    const { deps } = fakeDeps();
+    const notify = jest.fn(async () => {});
+    deps.notifyTrip = notify;
+    const out = await guardAgentAction(LEGIT, deps);
+    expect(out.alerted).toBe(false);
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it("a failing notify never stops containment", async () => {
+    const { deps, revokedFor, recorded } = fakeDeps();
+    deps.notifyTrip = async () => { throw new Error("mail down"); };
+    const out = await guardAgentAction(MALICIOUS, deps);
+    expect(out.decision.action).toBe("quarantine");
+    expect(out.alerted).toBe(false);
+    expect(revokedFor).toHaveLength(1);
+    expect(recorded).toHaveLength(1);
+  });
+});

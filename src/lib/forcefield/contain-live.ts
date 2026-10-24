@@ -12,6 +12,8 @@
  *                        (the same revoke path a human admin uses; audited)
  *   recordTrip        -> ogiam/ledger `recordDecision` with a DENY decision, via
  *                        `buildAction` so the redactor + hashing stay DRY.
+ *   notifyTrip        -> canary-store `recordCanaryTrip` (analytics event +
+ *                        hash-chained audit entry + alert to a person).
  *
  * SECRET SAFETY: the ledger record is built from the tripwire HIT METADATA only
  * (canary ids, kinds, and where each was seeded) - never the action payload and
@@ -24,7 +26,7 @@ import { buildAction } from "@/lib/ogiam/action";
 import { POLICY_VERSION } from "@/lib/ogiam/policy";
 import type { OgiamDecision, OgiamPrincipal } from "@/lib/ogiam/types";
 import { setAgentState } from "@/lib/agents/store";
-import { listCanariesForMatching } from "./canary-store";
+import { listCanariesForMatching, recordCanaryTrip } from "./canary-store";
 import { CANARY_TRIP_RULE_ID } from "./tripwire";
 import type { ContainmentDeps, TripRecord } from "./contain";
 
@@ -88,5 +90,14 @@ export function liveContainmentDeps(): ContainmentDeps {
       await setAgentState(agentId, workspaceId, "revoked", FORCEFIELD_ACTOR);
     },
     recordTrip: (trip) => recordTripToLedger(trip),
+    // Event + audit entry + alert to a person. Hit metadata only, like the ledger.
+    notifyTrip: async (trip) => {
+      await recordCanaryTrip({
+        workspaceId: trip.workspaceId,
+        action: trip.action,
+        hits: trip.decision.hits,
+        agentId: trip.agentId,
+      });
+    },
   };
 }

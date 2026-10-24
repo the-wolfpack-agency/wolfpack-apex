@@ -36,6 +36,7 @@ import { recordSiteEvent } from "@/lib/site-analytics";
 import { entitledToBlock, getSiteBlockEntitlement } from "@/lib/forcefield-web/billing";
 import { resolveTenantByToken } from "@/lib/forcefield-web/tenants";
 import { trackEvent } from "@/lib/analytics";
+import { checkInboundForCanaries } from "@/lib/forcefield/canary-store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -211,5 +212,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     /* fail-open: never break the site on an engine error */
   }
 
-  return NextResponse.json({ action, eventType, reasonKind, wouldBlock });
+  // 4. TRIPWIRE: a decoy route, decoy credential, honey-row value or honeypot
+  //    tool name in the request (path / raw URL) is a canary trip. Recorded as
+  //    an event + audit entry and alerted (deduped per decoy + 6h window).
+  //    Cached decoy list, so no DB read per request; never throws.
+  const trip = await checkInboundForCanaries({
+    workspaceId: EDGE_WORKSPACE_ID,
+    clientLabel: `site:${site}`,
+    url: rawUrl || path,
+    site,
+  }).catch(() => null);
+
+  return NextResponse.json({ action, eventType, reasonKind, wouldBlock, ...(trip?.tripped ? { canaryTripped: true } : {}) });
 }

@@ -24,6 +24,8 @@ jest.mock("@/lib/forcefield-web/billing", () => ({
 }));
 jest.mock("@/lib/forcefield-web/tenants", () => ({ resolveTenantByToken: (...a: unknown[]) => resolveTenantByToken(...a) }));
 jest.mock("@/lib/analytics", () => ({ trackEvent: (...a: unknown[]) => trackEvent(...a) }));
+const checkInboundForCanaries = jest.fn();
+jest.mock("@/lib/forcefield/canary-store", () => ({ checkInboundForCanaries: (...a: unknown[]) => checkInboundForCanaries(...a) }));
 
 import { NextRequest } from "next/server";
 import { POST } from "../route";
@@ -40,6 +42,7 @@ beforeEach(() => {
   getSiteBlockEntitlement.mockResolvedValue(null); // default: unmanaged site -> enforce.
   resolveTenantByToken.mockResolvedValue(null); // default: a non-secret token resolves to no tenant.
   getCrawlerRanges.mockResolvedValue({});
+  checkInboundForCanaries.mockResolvedValue({ tripped: false, hits: [], severity: "none" });
   _resetRateWindow();
 });
 afterAll(() => { process.env = OLD; });
@@ -333,5 +336,37 @@ describe("live rate detection (site.agent_high_rate)", () => {
   test("a normal browsing pace never reports", async () => {
     await burst(xhr, 10);
     expect(hits()).toHaveLength(0);
+  });
+});
+
+describe("tripwire: a decoy in the inbound request is a canary trip", () => {
+  test("inspects the RAW url (query included) under the site's client label", async () => {
+    await POST(post({ ...sqlmap, path: "/api/export", rawUrl: "/api/export?key=ff_canary_abc" }));
+    expect(checkInboundForCanaries).toHaveBeenCalledTimes(1);
+    expect(checkInboundForCanaries.mock.calls[0][0]).toMatchObject({ clientLabel: "site:ogiam.com", url: "/api/export?key=ff_canary_abc", site: "ogiam.com" });
+  });
+
+  test("a trip is reported in the response (200, canaryTripped)", async () => {
+    checkInboundForCanaries.mockResolvedValue({ tripped: true, hits: [{ canaryId: "c1", kind: "token", seededIn: "x", reason: "r", surface: "url" }], severity: "critical" });
+    const res = await POST(post(sqlmap));
+    expect(res.status).toBe(200);
+    expect((await res.json()).canaryTripped).toBe(true);
+  });
+
+  test("no trip: the response carries no canaryTripped field", async () => {
+    const body = await (await POST(post(sqlmap))).json();
+    expect(body.canaryTripped).toBeUndefined();
+  });
+
+  test("a tripwire error never breaks the site (fail-open, still 200)", async () => {
+    checkInboundForCanaries.mockRejectedValue(new Error("db down"));
+    const res = await POST(post(sqlmap));
+    expect(res.status).toBe(200);
+    expect((await res.json()).action).toBe("block");
+  });
+
+  test("401 on a bad token never reaches the tripwire", async () => {
+    await POST(post(sqlmap, "wrong"));
+    expect(checkInboundForCanaries).not.toHaveBeenCalled();
   });
 });
