@@ -27,8 +27,12 @@ centrally, so new signatures go live without updating the plugin.
 
 ## Scope + verification (honest)
 
-v0.1 guards front-end page requests (the `template_redirect` hook). The REST API and
-`wp-admin` are out of scope in this version. The plugin's PHP is syntax-checked in
+v0.2 runs on `init` (priority 0), right after WordPress resolves the signed-in user, so it
+guards pages, `wp-login.php`, `xmlrpc.php`, `admin-ajax.php`, the REST API (`/wp-json/` and
+`?rest_route=`) and `wp-admin`. A signed-in user is reported but never blocked. WP-CLI, cron
+and an administrator saving settings are skipped. `/wp-admin/install.php` and
+`setup-config.php` load before any plugin, so no plugin can see them; put the Cloudflare
+connector in front for those. The plugin's PHP is syntax-checked in
 CI (`.github/workflows/php-lint.yml`, `php -l`), and its safety invariants are pinned
 by a structural test (`cloudflare`-style parity, in the apex test suite). End-to-end
 behavior on a live WordPress install is validated in that environment, not in this

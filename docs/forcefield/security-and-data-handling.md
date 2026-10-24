@@ -44,7 +44,11 @@ Collected:
 NOT collected by the engine:
 - Page content, response bodies, or rendered HTML.
 - Header VALUES (only the names), cookies, authorization headers, or tokens.
-- Form field values, query-string contents beyond the path, or request bodies.
+- Form field values or request bodies.
+- Query-string contents in the stored record. Connectors send the request target
+  (path plus query string, length-capped) so the engine can match attack payloads
+  such as SQL injection in a parameter; it is inspected in memory and discarded.
+  The event keeps only the path and the attack class name (e.g. `sqli`).
 - Visitor identity, account identifiers, or any field we would treat as PII by
   design. Coarse country is the only location signal; no precise IP is stored in
   the event record.
