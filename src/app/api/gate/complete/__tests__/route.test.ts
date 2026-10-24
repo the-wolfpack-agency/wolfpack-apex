@@ -110,6 +110,14 @@ describe("what it will spend", () => {
     );
   });
 
+  /* An outside agent's prompt may carry its users' data, so it answers to the
+     retention gate like any other personal data. */
+  it("tags the request as personal data and attributes it to the key's workspace", async () => {
+    await POST(req({ prompt: "hi" }));
+    expect(mockComplete.mock.calls[0][0].sensitivity).toBe("pii");
+    expect(mockComplete.mock.calls[0][0].metadata.workspace_id).toBeDefined();
+  });
+
   it("allows standard when asked, and defaults to cheap", async () => {
     await POST(req({ prompt: "hi", tier: "standard" }));
     expect(mockComplete.mock.calls[0][0].model_tier).toBe("standard");

@@ -109,6 +109,8 @@ export function liveJudgeComplete(): JudgeComplete {
       max_tokens: maxTokens,
       model_tier: "cheap",
       provider_pin: providerPin,
+      /* Findings quote the client's source, like the author's call. */
+      sensitivity: "confidential",
       metadata: { feature: "ai_code.judge", internal_check: true },
     });
     return res.content;

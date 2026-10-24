@@ -394,6 +394,8 @@ async function describeDocument(
         max_tokens: input.maxTokens,
         /* Describing a document is not a reasoning problem. */
         model_tier: "cheap",
+        /* A client's uploaded document. */
+        sensitivity: "pii",
         metadata: {
           feature: "brain.document_summary",
           user_id: req.uploadedBy,

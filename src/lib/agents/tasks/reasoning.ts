@@ -77,6 +77,8 @@ export async function reasonAboutInstruction(input: ReasonInput): Promise<Reason
       model_tier: "standard",
       latency_target: "real_time",
       // Reasoning is governed by the OGIAM Agent Constitution.
+      /* Task context and prior results are workspace data. */
+      sensitivity: "pii",
       apply_constitution: true,
       metadata: {
         feature: "agent_reasoning",

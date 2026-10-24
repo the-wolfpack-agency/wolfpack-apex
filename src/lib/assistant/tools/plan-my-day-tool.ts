@@ -129,6 +129,8 @@ export const planMyDayTool: ToolDef<Params, PlanData> = {
         max_tokens: 900,
         /* Splitting prose into steps is not a reasoning problem. */
         model_tier: "cheap",
+        /* The person's own description of their day. */
+        sensitivity: "pii",
         metadata: {
           feature: "assistant.plan_my_day",
           user_id: ctx.userId,

@@ -1637,6 +1637,7 @@ async function chatInner(
     userId,
     userRole,
     convId,
+    workspaceId,
   );
   /* Brain CONTEXT is still gathered and passed to the model below — a
      screenshot plus company knowledge is a better answer than either alone.
@@ -1796,6 +1797,7 @@ async function chatInner(
     attachmentBlock,
     tierOverride,
     turnDegradation,
+    workspaceId,
   );
   if (aiResult) {
     trackEvent("system.ai_call_made", userId, userRole, {
@@ -2839,6 +2841,8 @@ async function tryBrain(
   userId: string,
   userRole: string,
   conversationId: string,
+  /* The turn's workspace, so the relevance judge's spend is attributed to it. */
+  workspaceId?: string,
 ): Promise<{
   strong: BrainHitAnswer | null;
   context: BrainContext;
@@ -2906,7 +2910,8 @@ async function tryBrain(
           ],
           max_tokens: input.maxTokens,
           model_tier: "cheap",
-          metadata: { feature: "brain.retrieval_relevance", user_id: userId, user_role: userRole },
+          sensitivity: "pii",
+          metadata: { feature: "brain.retrieval_relevance", user_id: userId, user_role: userRole, ...(workspaceId ? { workspace_id: workspaceId } : {}) },
         });
         return res.content;
       });
@@ -3107,7 +3112,8 @@ async function tryBrain(
               ],
               max_tokens: input.maxTokens,
               model_tier: "cheap",
-              metadata: { feature: "brain.retrieval_relevance", user_id: userId, user_role: userRole },
+              sensitivity: "pii",
+              metadata: { feature: "brain.retrieval_relevance", user_id: userId, user_role: userRole, ...(workspaceId ? { workspace_id: workspaceId } : {}) },
             });
             return res.content;
           });
@@ -3445,6 +3451,8 @@ async function callAI(
   tierOverride?: TierDirective | null,
   /* What broke during this turn, so the answer can say so. */
   degradation?: TurnDegradation,
+  /* The turn's workspace, for spend attribution and the audit row. */
+  workspaceId?: string,
 ): Promise<{
   content: string;
   tokensUsed: number;
@@ -3664,10 +3672,15 @@ async function callAI(
       // Govern the assistant's answers with the OGIAM Agent Constitution. The
       // router prepends it to `system` at the chokepoint.
       apply_constitution: true,
+      /* The turn reads the person's mail, calendar, CRM and documents, so it
+         carries personal data and answers to the retention gate. "pii", not
+         "confidential": confidential skips the credential redaction pass. */
+      sensitivity: "pii",
       metadata: {
         feature: "assistant_chat",
         user_id: userId,
         user_role: userRole,
+        ...(workspaceId ? { workspace_id: workspaceId } : {}),
         routing_reason: tierChoice.reason,
         /* "standard" is exactly what this call site sent unconditionally
            before, so the router can price the counterfactual and savings

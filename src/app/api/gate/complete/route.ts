@@ -169,6 +169,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       ...(residency && residency.length > 0 ? { residency } : {}),
       /* The constitution applies to an outside agent for the same reason it
          applies to ours: the rules are about the answer, not about who asked. */
+      /* An outside agent's prompt is opaque to us and may carry its users' data,
+         so it is treated as personal data and answers to the retention gate. */
+      sensitivity: "pii",
       apply_constitution: true,
       metadata: {
         feature: "gate.external_agent",

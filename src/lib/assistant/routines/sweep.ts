@@ -262,6 +262,7 @@ async function proposeRepair(
         ],
         max_tokens: 200,
         model_tier: "cheap",
+        sensitivity: "pii",
         metadata: {
           feature: "assistant.routine_repair",
           user_id: ctx.userId,

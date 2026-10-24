@@ -132,6 +132,8 @@ export async function proposePlan(args: {
   goal: string;
   context?: string;
   maxTokens?: number;
+  /** The caller's workspace, for spend attribution. Omitted when unknown. */
+  workspaceId?: string;
 }): Promise<ProposedPlan> {
   const goal = args.goal.trim();
   const base: ProposedPlan = { goal, steps: [], truncated: false, model: null };
@@ -143,7 +145,7 @@ export async function proposePlan(args: {
       max_tokens: args.maxTokens ?? 1500,
       model_tier: "cheap",
       sensitivity: "confidential",
-      metadata: { feature: "ai-code-plan" },
+      metadata: { feature: "ai-code-plan", ...(args.workspaceId ? { workspace_id: args.workspaceId } : {}) },
     });
     const { steps, truncated } = parsePlanResponse(resp?.content ?? "");
     return { goal, steps, truncated, model: resp?.model_used || resp?.provider_used || null };
