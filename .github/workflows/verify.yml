@@ -156,7 +156,7 @@ jobs:
           SMOKE_TEST_PASSWORD: ${{ secrets.SMOKE_TEST_PASSWORD }}
         run: npm run verify
       - name: Upload Playwright report
-        if: always()
+        if: (always()) && github.event.repository.private
         continue-on-error: true # diagnostic upload; a transient artifact-service timeout must not fail the job
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -165,7 +165,7 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
       - name: Upload Playwright test-results
-        if: failure()
+        if: (failure()) && github.event.repository.private
         continue-on-error: true # diagnostic upload; a transient artifact-service timeout must not fail the job
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
