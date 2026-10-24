@@ -509,7 +509,9 @@ function failure(
 function safeJson(v: unknown): string {
   try {
     return JSON.stringify(v) ?? "";
-  } catch {
+  } catch (err) {
+    // The tripwire cannot scan what it cannot serialize, so say so.
+    console.warn("[tripwire] value not serializable; canary scan skipped for it", err);
     return "[unserializable]";
   }
 }
