@@ -33,6 +33,9 @@ export interface AuthorInput {
   tier?: AIModelTier;
   maxTokens?: number;
   feature?: string;
+  /** Workspace the spend is charged to. Without it the router governs the call
+   *  in the shared unattributed bucket, so callers that know it must pass it. */
+  workspaceId?: string;
 }
 
 export interface AuthorResult {
@@ -90,7 +93,7 @@ export async function authorDiff(input: AuthorInput, deps: AuthorDeps): Promise<
       model_tier: input.tier ?? "standard",
       ...(input.executorProviderPin ? { provider_pin: input.executorProviderPin } : {}),
       sensitivity: "confidential",
-      metadata: { feature },
+      metadata: { feature, ...(input.workspaceId ? { workspace_id: input.workspaceId } : {}) },
     });
     result.diff = extractDiff(resp.content);
     // Prefer the concrete model id as the author lineage anchor; fall back to
@@ -140,7 +143,7 @@ export async function authorFileChanges(input: AuthorInput, deps: AuthorDeps): P
       model_tier: input.tier ?? "standard",
       ...(input.executorProviderPin ? { provider_pin: input.executorProviderPin } : {}),
       sensitivity: "confidential",
-      metadata: { feature },
+      metadata: { feature, ...(input.workspaceId ? { workspace_id: input.workspaceId } : {}) },
     });
     result.changes = parseFileChanges(resp.content);
     result.author = resp.model_used || resp.provider_used || result.author;
@@ -191,7 +194,7 @@ export async function authorAnchorEdits(input: AuthorInput, deps: AuthorDeps): P
       model_tier: input.tier ?? "standard",
       ...(input.executorProviderPin ? { provider_pin: input.executorProviderPin } : {}),
       sensitivity: "confidential",
-      metadata: { feature },
+      metadata: { feature, ...(input.workspaceId ? { workspace_id: input.workspaceId } : {}) },
     });
     result.edits = parseAnchorEdits(resp.content);
     result.newFiles = parseFileChanges(resp.content); // brand-new files via FILE blocks

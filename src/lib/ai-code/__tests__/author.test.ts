@@ -120,3 +120,23 @@ describe("the factory classifies its egress as confidential (so the zero-retenti
     expect(captured!.sensitivity).toBe("confidential");
   });
 });
+
+describe("the factory attributes its spend to a workspace (so the budget governor can cap it)", () => {
+  it("every author entry point forwards workspaceId as metadata.workspace_id", async () => {
+    const { authorFileChanges, authorAnchorEdits } = await import("../author");
+    const seen: AICompleteRequest[] = [];
+    const deps = { complete: async (r: AICompleteRequest) => { seen.push(r); return resp("```diff\n" + SAMPLE_DIFF + "\n```"); } };
+    await authorDiff({ prompt: "x", workspaceId: "ws-1" }, deps);
+    await authorFileChanges({ prompt: "x", workspaceId: "ws-1" }, deps);
+    await authorAnchorEdits({ prompt: "x", workspaceId: "ws-1" }, deps);
+    expect(seen).toHaveLength(3);
+    for (const r of seen) expect(r.metadata?.workspace_id).toBe("ws-1");
+  });
+
+  it("omits workspace_id when the caller has none (the router then governs it as unattributed)", async () => {
+    let captured: AICompleteRequest | null = null;
+    const deps = { complete: async (r: AICompleteRequest) => { captured = r; return resp("```diff\n" + SAMPLE_DIFF + "\n```"); } };
+    await authorDiff({ prompt: "x" }, deps);
+    expect(captured!.metadata).not.toHaveProperty("workspace_id");
+  });
+});

@@ -268,7 +268,7 @@ export async function driveCiFixStep(input: DriveCiFixInput): Promise<DriveCiFix
       // gets a shot BEFORE the loop escalates to a human (dogfooding: the cheap
       // model oscillated on a trivial uniform fix; a capability gap, not a spec one).
       const authored = await authorFileChanges(
-        { prompt, feature: "ai-code-ci-fix", tier: fixAuthorTier(effectiveAttempt) },
+        { prompt, feature: "ai-code-ci-fix", tier: fixAuthorTier(effectiveAttempt), workspaceId },
         { complete: (r) => ai.complete(r) },
       );
       // Anti-hallucination guard (pure, tested): reject a fix that edits none of
