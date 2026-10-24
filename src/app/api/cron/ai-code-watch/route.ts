@@ -9,15 +9,19 @@
  *
  * Auth mirrors the other crons: `Authorization: Bearer ${CRON_SECRET}` for the
  * scheduler, capability fallback for a manual run. Returns: 200 { summary } | 401.
+ *
+ * Every PR is keyed by its CURRENT head SHA and checked against the watcher's
+ * memory (migration 293) before it is driven: a terminal or exhausted SHA is
+ * skipped, and so is a PR past its daily cap. See watch.ts.
  */
 import { NextRequest, NextResponse } from "next/server";
 import { isAuthorizedBearer } from "@/lib/auth/bearer-auth";
 import { requireCapability } from "@/lib/auth/require-capability";
-import { workspaceGithubClient, listOpenPullRequests, type GithubClient } from "@/lib/github-client";
+import { workspaceGithubClient, listOpenPullRequests, getBranchHead, type GithubClient } from "@/lib/github-client";
 import { resolveEntitlement } from "@/lib/tenancy/entitlements";
 import { driveCiFixStep } from "@/lib/ai-code/ci-fix-runner";
 import { listAllEnabledWatched, mergeWatchTargets } from "@/lib/ai-code/watched-repos";
-import { runAiCodeWatch, type WatchTarget } from "@/lib/ai-code/watch";
+import { runAiCodeWatch, dbWatchMemory, type WatchTarget } from "@/lib/ai-code/watch";
 
 function isAuthorizedCron(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET;
@@ -60,6 +64,8 @@ async function runWatch(): Promise<NextResponse> {
   const summary = await runAiCodeWatch({
     targets,
     listPRs: async (t) => listOpenPullRequests(await clientFor(t.workspaceId), t.repo),
+    resolveHead: async (t, pr) => getBranchHead(await clientFor(t.workspaceId), t.repo, pr.headRef),
+    memory: dbWatchMemory(),
     drive: async (t, pr) => {
       const { body } = await driveCiFixStep({
         repo: t.repo,
