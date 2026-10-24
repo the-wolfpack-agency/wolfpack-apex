@@ -3338,7 +3338,15 @@ export type InstinctEventType =
   | "platform.workspace_offboarded"
 
   // Public agent harness: a developer started a "point your agent at our test site" run.
-  | "harness.session_started";
+  | "harness.session_started"
+  // ---- Stream 2 (evidence-backed status): assurance.* ----
+  // assurance.report_computed { active, partial, gap, unknown, total, score } -
+  // the Forcefield assurance report was computed from windowed evidence.
+  // Records how many controls had execution evidence vs none vs unmeasurable.
+  | "assurance.report_computed"
+  // assurance.posture_parity_checked { claims, proven, in_progress, violations } -
+  // the security-posture claims were checked against their evidence keys.
+  | "assurance.posture_parity_checked";
 
 export interface InstinctEvent {
   event_type: InstinctEventType;

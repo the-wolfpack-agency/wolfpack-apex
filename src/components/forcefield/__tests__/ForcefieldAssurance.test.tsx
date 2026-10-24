@@ -87,3 +87,36 @@ it("shows no missed count when nothing is missed", async () => {
   await waitFor(() => expect(screen.getByTestId("assurance-score")).toBeInTheDocument());
   expect(screen.queryByTestId("breach-missed")).toBeNull();
 });
+
+it("renders unknown controls in neutral, with the evidence each status rests on", async () => {
+  const withEvidence = {
+    ...DATA,
+    assurance: {
+      controls: [
+        {
+          id: "enforce.inline", title: "Inline edge enforcement", status: "gap", detail: "No request was blocked.",
+          evidence: [{ key: "ff.inline_block", proof: "site_analytics_events with blocked=true on site=instinct", windowDays: 7, count: 0, lastAt: "2026-08-01T00:00:00.000Z", state: "stale" }],
+        },
+        {
+          id: "audit.hash_chain", title: "Tamper-evident audit (hash chain)", status: "unknown", detail: "Could not be measured.",
+          evidence: [{ key: "audit.chain_verified", proof: "audit.chain_verified events", windowDays: 1, count: 0, lastAt: null, state: "error", error: "relation does not exist" }],
+        },
+        {
+          id: "detect.decoys", title: "Web decoy traps", status: "active", detail: "Tripped.",
+          evidence: [{ key: "ff.trap_tripped", proof: "trap events", windowDays: 30, count: 4, lastAt: "2026-10-23T00:00:00.000Z", state: "fresh" }],
+        },
+      ],
+      activeCount: 1, partialCount: 0, gapCount: 1, unknownCount: 1, total: 3, score: 33, measuredAt: "2026-10-24T12:00:00.000Z",
+    },
+  };
+  mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => withEvidence });
+  render(<ForcefieldAssurance />);
+  fireEvent.click(screen.getByText(/Assurance & self-test/i));
+  await waitFor(() => expect(screen.getByTestId("assurance-unknown-count")).toHaveTextContent("1 unknown"));
+  expect(screen.getByTestId("assurance-control-audit.hash_chain")).toHaveAttribute("data-status", "unknown");
+  expect(screen.getByTestId("assurance-status-audit.hash_chain")).toHaveTextContent("unknown");
+  expect(screen.getByTestId("assurance-evidence-audit.hash_chain-audit.chain_verified")).toHaveTextContent(/could not be measured: relation does not exist/);
+  expect(screen.getByTestId("assurance-evidence-enforce.inline-ff.inline_block")).toHaveTextContent(/none in 7d, last 2026-08-01/);
+  expect(screen.getByTestId("assurance-evidence-detect.decoys-ff.trap_tripped")).toHaveTextContent(/4 in 30d/);
+  expect(screen.getByTestId("assurance-measured-at")).toHaveTextContent("2026-10-24 12:00 UTC");
+});
