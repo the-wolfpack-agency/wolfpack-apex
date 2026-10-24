@@ -11,10 +11,12 @@ const getDatacenterPrefixes = jest.fn();
 const getSiteBlockEntitlement = jest.fn();
 const trackEvent = jest.fn();
 const resolveTenantByToken = jest.fn();
+const getCrawlerRanges = jest.fn();
 
 jest.mock("@/lib/site-analytics", () => ({ recordSiteEvent: (...a: unknown[]) => recordSiteEvent(...a) }));
 jest.mock("@/lib/forcefield/blocked-fingerprints", () => ({ getBlockedFingerprints: (...a: unknown[]) => getBlockedFingerprints(...a) }));
 jest.mock("@/lib/forcefield/datacenter-ranges", () => ({ getDatacenterPrefixes: (...a: unknown[]) => getDatacenterPrefixes(...a) }));
+jest.mock("@/lib/forcefield/crawler-ranges", () => ({ getCrawlerRanges: (...a: unknown[]) => getCrawlerRanges(...a) }));
 // Enforce-to-paid gate: mock the central license resolver; keep the pure gate real.
 jest.mock("@/lib/forcefield-web/billing", () => ({
   getSiteBlockEntitlement: (...a: unknown[]) => getSiteBlockEntitlement(...a),
@@ -25,6 +27,8 @@ jest.mock("@/lib/analytics", () => ({ trackEvent: (...a: unknown[]) => trackEven
 
 import { NextRequest } from "next/server";
 import { POST } from "../route";
+import { _resetRateWindow } from "@/lib/forcefield/rate-window";
+import { parseCidr } from "@/lib/forcefield-web/hosting";
 
 const OLD = process.env;
 beforeEach(() => {
@@ -35,6 +39,8 @@ beforeEach(() => {
   recordSiteEvent.mockResolvedValue(undefined);
   getSiteBlockEntitlement.mockResolvedValue(null); // default: unmanaged site -> enforce.
   resolveTenantByToken.mockResolvedValue(null); // default: a non-secret token resolves to no tenant.
+  getCrawlerRanges.mockResolvedValue({});
+  _resetRateWindow();
 });
 afterAll(() => { process.env = OLD; });
 
@@ -176,4 +182,156 @@ test("a normal human page view is allowed and not flagged", async () => {
   const res = await POST(post({ site: "ogiam.com", path: "/", method: "GET", userAgent: "Mozilla/5.0 (Macintosh) Chrome/120", headerNames: ["host", "user-agent", "accept", "accept-language", "sec-fetch-dest"], country: "US", secFetchDest: "document", accept: "text/html" }));
   const body = await res.json();
   expect(body.action).toBe("allow");
+});
+
+
+const chromeView = {
+  site: "ogiam.com", path: "/", rawUrl: "/", method: "GET", country: "US", ip: "24.60.1.1",
+  userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+  headerNames: ["host", "user-agent", "accept", "accept-language", "accept-encoding", "sec-fetch-dest"],
+  accept: "text/html", secFetchDest: "document",
+};
+const rec = (i = 0) => recordSiteEvent.mock.calls[i][0];
+
+describe("400 on a body that is not a JSON object", () => {
+  test.each([["not json"], ["[1,2]"], ["null"], ["\"str\""]])("%s -> 400 allow, nothing recorded", async (raw) => {
+    const r = new NextRequest("http://localhost/api/forcefield/observe", { method: "POST", headers: { "content-type": "application/json", "x-edge-token": "secret-token" }, body: raw });
+    const res = await POST(r);
+    expect(res.status).toBe(400);
+    expect((await res.json()).action).toBe("allow");
+    expect(recordSiteEvent).not.toHaveBeenCalled();
+  });
+});
+
+describe("decide FIRST, then record: the stored row says what happened", () => {
+  test("an enforced block is recorded with blocked/action/posture/reason_kind", async () => {
+    await POST(post(sqlmap));
+    expect(rec().props).toMatchObject({ blocked: true, action: "block", posture: "enforce", reason_kind: "attack_tool" });
+  });
+
+  test("a block withheld by the free-tier gate is recorded as would_block + action report", async () => {
+    getSiteBlockEntitlement.mockResolvedValue(false);
+    await POST(post(sqlmap));
+    expect(rec().props).toMatchObject({ blocked: false, would_block: true, action: "report", reason_kind: "attack_tool" });
+  });
+
+  test("a payload in rawUrl is recorded as site.agent_payload_attack with props.attack", async () => {
+    const res = await POST(post({ ...chromeView, path: "/search", rawUrl: "/search?q=1%20UNION%20SELECT%20pw%20FROM%20users" }));
+    const body = await res.json();
+    expect(body.action).toBe("block");
+    expect(body.eventType).toBe("site.agent_payload_attack");
+    expect(rec().props).toMatchObject({ attack: "sql_injection", blocked: true, reason_kind: "payload" });
+  });
+
+  test("a blocked request whose observation would be null (blocked fp, static asset) is still recorded", async () => {
+    const quiet = { site: "ogiam.com", path: "/sw.js", method: "GET", userAgent: "Mozilla/5.0 (X11) HeadlessChrome/131", headerNames: ["host", "user-agent", "accept", "accept-language", "accept-encoding"], country: "US" };
+    // learn the fp the engine stamps for this client shape on a flagged path, then block it
+    await POST(post({ ...quiet, path: "/admin" }));
+    const fp = rec().props.fp as string;
+    recordSiteEvent.mockClear();
+    getBlockedFingerprints.mockResolvedValue([fp]);
+    const res = await POST(post(quiet));
+    expect((await res.json()).action).toBe("block");
+    expect(recordSiteEvent).toHaveBeenCalledTimes(1);
+    expect(rec()).toMatchObject({ eventType: "site.agent_flagged" });
+    expect(rec().props).toMatchObject({ blocked: true, reason_kind: "blocked_fingerprint" });
+  });
+
+  test("a real Chrome page view is recorded ONLY as site.page_viewed and allowed", async () => {
+    const res = await POST(post(chromeView));
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body).toMatchObject({ action: "allow", wouldBlock: false, eventType: "site.page_viewed" });
+    expect(recordSiteEvent).toHaveBeenCalledTimes(1);
+    expect(rec().eventType).toBe("site.page_viewed");
+  });
+});
+
+describe("edge-supplied fields: authenticated, platform, asn, asOrg", () => {
+  test("authenticated:true (boolean only) suppresses weak tells; a string 'true' does not", async () => {
+    const curl = { site: "ogiam.com", path: "/api/cron", method: "POST", userAgent: "curl/8.5.0", headerNames: ["host", "user-agent"], country: "US" };
+    await POST(post({ ...curl, authenticated: true }));
+    expect(recordSiteEvent).not.toHaveBeenCalled();
+    await POST(post({ ...curl, authenticated: "true" }));
+    expect(rec().eventType).toBe("site.agent_flagged");
+  });
+
+  test("platform wordpress: /wp-login.php is the site's own page, not recon", async () => {
+    await POST(post({ ...chromeView, path: "/wp-login.php", rawUrl: "/wp-login.php", platform: "wordpress" }));
+    expect(recordSiteEvent.mock.calls.map((c) => c[0].eventType)).not.toContain("site.agent_probed_sensitive");
+    recordSiteEvent.mockClear();
+    await POST(post({ ...chromeView, path: "/wp-login.php", rawUrl: "/wp-login.php" }));
+    expect(rec().eventType).toBe("site.agent_probed_sensitive");
+  });
+
+  test("a junk platform value is ignored", async () => {
+    await POST(post({ ...chromeView, path: "/wp-login.php", rawUrl: "/wp-login.php", platform: "wordpress; drop table" }));
+    expect(rec().eventType).toBe("site.agent_probed_sensitive");
+  });
+
+  test("asn / as_org are stamped on agent events (finite number, capped string); junk is dropped", async () => {
+    await POST(post({ ...sqlmap, asn: 13335, asOrg: "x".repeat(500) }));
+    expect(rec().props.asn).toBe(13335);
+    expect((rec().props.as_org as string).length).toBe(80);
+    recordSiteEvent.mockClear();
+    await POST(post({ ...sqlmap, asn: "13335", asOrg: 7 }));
+    expect(rec().props.asn).toBeUndefined();
+    expect(rec().props.as_org).toBeUndefined();
+  });
+
+  test("a tenant token still pins the site even with the new fields", async () => {
+    resolveTenantByToken.mockResolvedValueOnce({ id: "t1", name: "Acme", siteLabel: "acme", status: "active", sharesIntel: true, enforceEnabled: true });
+    await POST(post({ ...sqlmap, site: "victim", platform: "wordpress", authenticated: true }, "ff_tenanttoken"));
+    expect(rec().props.site).toBe("acme");
+  });
+});
+
+describe("verified crawler identity via the composed ruleset", () => {
+  const p = parseCidr("66.249.64.0/19")!;
+  beforeEach(() => getCrawlerRanges.mockResolvedValue({ Googlebot: [`${p.base >>> 0}/${p.bits}`] }));
+  const gb = { site: "ogiam.com", path: "/", method: "GET", userAgent: "Mozilla/5.0 (compatible; Googlebot/2.1)", headerNames: ["host", "user-agent"], country: "US" };
+
+  test("the observe route never waits on the vendors", async () => {
+    await POST(post(gb));
+    expect(getCrawlerRanges).toHaveBeenCalledWith({ waitMs: 0 });
+  });
+  test("a real Googlebot IP is welcomed + verified", async () => {
+    await POST(post({ ...gb, ip: "66.249.66.1" }));
+    expect(rec()).toMatchObject({ eventType: "site.agent_welcomed" });
+    expect(rec().props.agent_verification).toBe("verified");
+  });
+  test("a Googlebot UA from elsewhere is flagged as an impersonation", async () => {
+    await POST(post({ ...gb, ip: "203.0.113.9" }));
+    expect(rec()).toMatchObject({ eventType: "site.agent_flagged" });
+    expect(rec().props).toMatchObject({ impersonating: "Googlebot", agent_verification: "impersonation" });
+  });
+  test("spoofed Googlebot + SQLi is blocked (welcome-lane hole closed)", async () => {
+    const res = await POST(post({ ...gb, ip: "66.249.66.1", rawUrl: "/?id=1%20UNION%20SELECT%201" }));
+    expect((await res.json()).reasonKind).toBe("payload");
+  });
+});
+
+describe("live rate detection (site.agent_high_rate)", () => {
+  const hits = () => recordSiteEvent.mock.calls.filter((c) => c[0].eventType === "site.agent_high_rate");
+  const burst = async (body: Record<string, unknown>, n: number) => { for (let i = 0; i < n; i++) await POST(post(body)); };
+  const xhr = { ...chromeView, path: "/api/items", rawUrl: "/api/items", accept: "application/json", secFetchDest: "empty" };
+
+  test("reports ONCE when a client crosses 40 requests / 10s, report-only", async () => {
+    await burst(xhr, 45);
+    expect(hits()).toHaveLength(1);
+    expect(hits()[0][0].props).toMatchObject({ site: "ogiam.com", rate: 40, window_s: 10, client_type: "browser" });
+    expect(typeof hits()[0][0].props.sig).toBe("string");
+    expect(typeof hits()[0][0].props.fp).toBe("string");
+    expect(JSON.stringify(hits()[0][0])).not.toContain("24.60.1.1"); // IP never stored
+  });
+  test("static assets, authenticated traffic and IP-less requests are not counted", async () => {
+    await burst({ ...xhr, path: "/_next/static/a.js", rawUrl: "/_next/static/a.js" }, 45);
+    await burst({ ...xhr, authenticated: true }, 45);
+    await burst({ ...xhr, ip: undefined }, 45);
+    expect(hits()).toHaveLength(0);
+  });
+  test("a normal browsing pace never reports", async () => {
+    await burst(xhr, 10);
+    expect(hits()).toHaveLength(0);
+  });
 });
