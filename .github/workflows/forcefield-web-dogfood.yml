@@ -22,6 +22,7 @@ on:
     paths:
       - "tests/e2e/site-analytics-agent-profile.spec.ts"
       - "tests/e2e/site-analytics-defense.spec.ts"
+      - "tests/e2e/evidence-backed-status.spec.ts"
       - ".github/workflows/forcefield-web-dogfood.yml"
       - "src/app/(dashboard)/admin/site-analytics/**"
       - "src/app/api/admin/site-analytics/**"
@@ -30,6 +31,19 @@ on:
       - "src/lib/agent-operators.ts"
       - "src/lib/agent-profile.ts"
       - "src/lib/agent-behavior.ts"
+      # Evidence-backed status surfaces (assurance panel, gate regression set,
+      # security posture, trust center) and the evidence they are computed from.
+      - "src/components/forcefield/ForcefieldAssurance.tsx"
+      - "src/app/api/admin/forcefield/assurance/**"
+      - "src/lib/forcefield/assurance*.ts"
+      - "src/lib/compliance/**"
+      - "src/lib/ai-redteam/**"
+      - "src/app/(dashboard)/admin/ai-redteam/**"
+      - "src/app/api/admin/ai-redteam/**"
+      - "src/app/(dashboard)/admin/trust-center/**"
+      - "src/app/security-posture/**"
+      - "src/app/api/admin/security-posture/**"
+      - "docs/security-posture.md"
 
 permissions:
   contents: read
@@ -104,6 +118,7 @@ jobs:
           npx playwright test
           tests/e2e/site-analytics-agent-profile.spec.ts
           ${{ github.event_name != 'pull_request' && 'tests/e2e/site-analytics-defense.spec.ts' || '' }}
+          ${{ github.event_name != 'pull_request' && 'tests/e2e/evidence-backed-status.spec.ts' || '' }}
           --config=playwright.config.ts
           --reporter=github
 
@@ -180,6 +195,7 @@ jobs:
         run: >-
           npx playwright test
           tests/e2e/site-analytics-defense.spec.ts
-          --grep-invert "real sign-in, real board API"
+          tests/e2e/evidence-backed-status.spec.ts
+          --grep-invert "real sign-in"
           --config=playwright.config.ts
           --reporter=github
