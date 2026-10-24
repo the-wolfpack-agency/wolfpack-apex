@@ -40,10 +40,10 @@ describe("ai-code signals + grading", () => {
     "tests/e2e/ai-code-factory-live.spec.ts": "test('live', async () => {});",
     "src/app/api/admin/ai-code/pipeline/route.ts": "trackEvent({});\nconst ws = x.workspaceId;",
     "src/lib/ai-code/deep-scan.ts": "export function deepScan(changedLines) { return addedLines; }",
-    "src/lib/ai-code/x.db.test.ts": "db",
-    "src/app/api/admin/ai-code/y.db.test.ts": "db",
+    "src/lib/ai-code/x.db.test.ts": "const url = process.env.TEST_DATABASE_URL; it('persists', async () => {});",
+    "src/app/api/admin/ai-code/y.db.test.ts": "const url = process.env.TEST_DATABASE_URL; it('persists', async () => {});",
     "src/db/migrations/212_ai_code_reviews.sql":
-      "CREATE TABLE instinct_ai_code_reviews(workspace_id uuid);\nENABLE ROW LEVEL SECURITY;\nCREATE POLICY p ON instinct_ai_code_reviews USING (workspace_id = current_setting('app.workspace_id')::uuid);",
+      "CREATE TABLE instinct_ai_code_reviews(workspace_id uuid);\nALTER TABLE instinct_ai_code_reviews FORCE ROW LEVEL SECURITY;\nCREATE POLICY p ON instinct_ai_code_reviews USING (workspace_id = current_setting('app.workspace_id')::uuid);",
     "src/lib/db/__tests__/tenant-isolation-global.test.ts": "repo-wide predicate guardrail",
   };
 
@@ -100,7 +100,7 @@ describe("governance tools (ogiam-gate, agent-approvals)", () => {
     const repo = {
       "src/lib/ogiam/policy.ts": "export function decide(signals) { return { outcome: 'deny' }; }",
       "src/lib/ogiam/ledger.ts": "const entry_hash = sha256(prev_hash + json);",
-      "src/db/migrations/177_ogiam_immutability_triggers.sql": "CREATE TRIGGER ogiam_immutable ... BEFORE UPDATE",
+      "src/db/migrations/177_ogiam_immutability_triggers.sql": "CREATE TRIGGER ogiam_immutable BEFORE UPDATE OR DELETE ON ogiam_decisions FOR EACH ROW EXECUTE FUNCTION f();",
       "src/app/api/admin/ogiam/x/route.ts": "trackEvent('x');",
     };
     const r = reportTool(toolById("ogiam-gate")!, fakeReader(repo));
@@ -130,8 +130,8 @@ describe("isolation is graded in three honest levels", () => {
     const r = reportTool(toolById("ai-code")!, fakeReader(repo));
     expect(Object.fromEntries(r.results.map((x) => [x.id, x.status]))["isolation-db-enforced"]).toBe("partial");
   });
-  it("READY only with a real current_setting('app.workspace_id') policy", () => {
-    const repo = { ...base, "src/db/migrations/212_ai_code_reviews.sql": "CREATE TABLE instinct_ai_code_reviews(workspace_id text); CREATE POLICY p ON instinct_ai_code_reviews USING (workspace_id = current_setting('app.workspace_id'));" };
+  it("READY only with a real current_setting('app.workspace_id') policy, forced", () => {
+    const repo = { ...base, "src/db/migrations/212_ai_code_reviews.sql": "CREATE TABLE instinct_ai_code_reviews(workspace_id text); ALTER TABLE instinct_ai_code_reviews FORCE ROW LEVEL SECURITY; CREATE POLICY p ON instinct_ai_code_reviews USING (workspace_id = current_setting('app.workspace_id'));" };
     const r = reportTool(toolById("ai-code")!, fakeReader(repo));
     expect(Object.fromEntries(r.results.map((x) => [x.id, x.status]))["isolation-db-enforced"]).toBe("ready");
   });
@@ -148,8 +148,8 @@ describe("forcefield signals + grading", () => {
       ".github/workflows/e2e-reality-check.yml":
         "on:\n  pull_request:\n    branches: [main]\njobs:\n  rc:\n    steps:\n      - run: npx playwright test tests/e2e/forcefield-dashboard.spec.ts",
       "tests/e2e/forcefield-dashboard.spec.ts": "test('dash', async () => {});",
-      "src/db/__tests__/forcefield-tenants.db.test.ts": "db",
-      "src/db/__tests__/forcefield-signup-requests.db.test.ts": "db",
+      "src/db/__tests__/forcefield-tenants.db.test.ts": "const url = process.env.TEST_DATABASE_URL; it('persists', async () => {});",
+      "src/db/__tests__/forcefield-signup-requests.db.test.ts": "const url = process.env.TEST_DATABASE_URL; it('persists', async () => {});",
       "src/app/api/forcefield/signup/route.ts": "trackEvent(); recordAudit(); return json({ ok: true, status: 'received' });",
       "src/app/api/admin/forcefield/signups/route.ts": "recordAudit();",
       "src/app/api/forcefield/my-stats/route.ts": "const t = await resolveTenantByToken(x); getPublicForcefieldStats(30, undefined, tenant.id);",
@@ -158,7 +158,7 @@ describe("forcefield signals + grading", () => {
       // durable: a store-backed limiter, not an in-memory Map
       "src/lib/forcefield-web/signup.ts": "await checkRateLimit(ipHash)",
       // DB-level RLS on the tenant attribution column (defense-in-depth)
-      "src/db/migrations/290_ff_rls.sql": "CREATE POLICY p ON site_analytics_events USING (forcefield_tenant_id = current_setting('app.forcefield_tenant')::uuid);",
+      "src/db/migrations/290_ff_rls.sql": "ALTER TABLE site_analytics_events FORCE ROW LEVEL SECURITY; CREATE POLICY p ON site_analytics_events USING (forcefield_tenant_id = current_setting('app.forcefield_tenant')::uuid);",
     };
     const r = reportTool(toolById("forcefield")!, fakeReader(WORKED_UP));
     const by = Object.fromEntries(r.results.map((x) => [x.id, x.status]));
