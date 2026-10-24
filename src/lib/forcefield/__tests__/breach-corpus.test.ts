@@ -37,4 +37,10 @@ describe("famous-breach corpus", () => {
       expect(r.attack.length).toBeGreaterThan(15);
     }
   });
+
+  it("injection and credential stuffing are driven through the real detectors, not pre-labeled events", async () => {
+    const byId = Object.fromEntries((await runBreachCorpus()).results.map((r) => [r.id, r]));
+    expect(byId["injection"].detail).toMatch(/detector: sql_injection/);
+    expect(byId["credential-stuffing"].detail).toMatch(/rate window: 40 requests in 10s/);
+  });
 });

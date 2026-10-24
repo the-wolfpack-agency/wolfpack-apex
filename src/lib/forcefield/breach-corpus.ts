@@ -15,6 +15,9 @@ import { qualifiesForAutoBlock, type EdgeSignals } from "@/lib/forcefield/edge-e
 import { checkMandate, type PrincipalVerdict } from "@/lib/forcefield/principal-types";
 import { verifyPresentedDelegation, type DelegationIssuer } from "@/lib/forcefield/principal";
 import { delegationSignature } from "@/lib/ogiam/delegate";
+import { decideEnforcement } from "@/lib/forcefield-web/enforce";
+import { DEFAULT_RULESET } from "@/lib/forcefield-web/ruleset";
+import { noteRequest } from "@/lib/forcefield/rate-window";
 
 export type Coverage = "prevented" | "detected" | "out_of_scope";
 
@@ -82,18 +85,30 @@ export async function runBreachCorpus(): Promise<BreachReport> {
     add({ id: "idor-enumeration", attack: "An agent steps through sequential record IDs to reach data belonging to other users.", realWorld: "Broken Object-Level Authorization (IDOR) - the #1 OWASP API risk, behind many public API data breaches.", coverage: idor ? "detected" : "out_of_scope", control: "ID-enumeration detection flags the sequential walk for escalation.", detail: `id_enumeration insight: ${idor}` });
   }
 
-  // 4. Injection (SQLi / prompt injection payload sent in a request).
+  // 4. Injection. Driven through the REAL payload detector first: the event is
+  //    only built if decideEnforcement actually catches the request. Feeding a
+  //    pre-labeled payload event straight into the classifier (as this did
+  //    before) proved the classifier, not the detection.
   {
-    const j = classify([ev("site.agent_payload_attack", "/api/search", { attack: "sql_injection" })]);
-    const payload = j.insights.some((i) => i.kind === "payload_attack");
-    add({ id: "injection", attack: "An agent sends a live injection payload (SQLi, or a prompt-injection string aimed at an AI endpoint).", realWorld: "Injection attacks - perennial OWASP Top 10, now including prompt injection against AI agents.", coverage: payload ? "detected" : "out_of_scope", control: "Payload detection classifies it as active exploitation (exploit_attempt), not just a probe.", detail: `payload_attack insight: ${payload}, class: ${j.behaviorClass}` });
+    const rawUrl = "/api/search?q=1%27%20UNION%20SELECT%20password%20FROM%20users--";
+    const d = decideEnforcement({ path: "/api/search", rawUrl, method: "GET", userAgent: "Mozilla/5.0", headerNames: ["accept", "accept-language", "accept-encoding"] }, DEFAULT_RULESET);
+    const caught = d.block && d.reasonKind === "payload";
+    const j = caught ? classify([ev("site.agent_payload_attack", "/api/search", { attack: d.attack })]) : null;
+    const payload = !!j && j.insights.some((i) => i.kind === "payload_attack");
+    add({ id: "injection", attack: "An agent sends a live SQL injection payload in a request.", realWorld: "Injection attacks - a perennial OWASP Top 10 class, behind many database breaches.", coverage: payload ? "detected" : "out_of_scope", control: "The edge payload detector catches it (and turns it away when enforcement is on); the journey reads as active exploitation (exploit_attempt).", detail: caught ? `detector: ${d.attack}, class: ${j?.behaviorClass}` : "NOT detected by the payload engine" });
   }
 
-  // 5. Credential stuffing (bot hammering a login form, superhuman speed).
+  // 5. Credential stuffing (bot hammering a login form at machine speed). The
+  //    burst is driven through the REAL live rate window, not a pre-labeled
+  //    high-rate event.
   {
-    const j = classify([ev("site.agent_high_rate", "/login"), ev("site.agent_form_too_fast", "/login")]);
-    const bot = j.signals.includes("high_rate") || j.signals.includes("form_too_fast");
-    add({ id: "credential-stuffing", attack: "A bot replays stolen username/password pairs against a login form at machine speed.", realWorld: "Credential stuffing - the technique behind waves of account-takeover incidents at major consumer brands.", coverage: bot ? "detected" : "out_of_scope", control: "High-rate + too-fast-submit signals flag automation for challenge before it can brute-force.", detail: `automation signals: ${j.signals.join(", ") || "none"}` });
+    const cfg = { windowMs: 10_000, threshold: 40, maxKeys: 5_000 };
+    const key = `corpus-stuffing-${Math.random().toString(36).slice(2)}`;
+    let hit = null as ReturnType<typeof noteRequest>;
+    for (let i = 0; i < 60 && !hit; i++) hit = noteRequest(key, 1_700_000_000_000 + i * 100, cfg);
+    const j = hit ? classify([ev("site.agent_high_rate", "/login"), ev("site.agent_form_too_fast", "/login")]) : null;
+    const bot = !!j && (j.signals.includes("high_rate") || j.signals.includes("form_too_fast"));
+    add({ id: "credential-stuffing", attack: "A bot replays stolen username/password pairs against a login form at machine speed.", realWorld: "Credential stuffing - the technique behind waves of account-takeover incidents at major consumer brands.", coverage: bot ? "detected" : "out_of_scope", control: "The live rate window flags the burst (report-only) and the too-fast-submit signal marks automation for challenge.", detail: hit ? `rate window: ${hit.count} requests in ${hit.windowMs / 1000}s; signals: ${j?.signals.join(", ")}` : "NOT detected by the rate window" });
   }
 
   // 6. Stolen OAuth/session token replayed (captured credential reused).
