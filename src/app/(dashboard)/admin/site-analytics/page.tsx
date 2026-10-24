@@ -14,12 +14,13 @@ import { fetchWithRefresh, jsonHeaders } from "@/lib/client-auth";
 import { SiteUsagePanel } from "@/components/site-analytics/SiteUsagePanel";
 import { LearnedSignaturesPanel } from "@/components/site-analytics/LearnedSignaturesPanel";
 import { AgentIntelPanel } from "@/components/site-analytics/AgentIntelPanel";
-import { AgentJourneyTimeline } from "@/components/AgentJourneyTimeline";
+import { AgentJourneyTimeline, attackLabel, probeLabel } from "@/components/AgentJourneyTimeline";
 import { AgentActionLog } from "@/components/AgentActionLog";
 import type { JourneyStep } from "@/lib/agent-behavior";
 import { triageJourneys, type Severity } from "@/lib/agent-triage";
 import { consolidateByOperator, filterOperators, deriveOperatorInsight, deriveTrustProfile, aggregateTradecraft, clusterByTradecraft, detectCampaigns, tradecraftTrend, matchOperatorsToNetwork } from "@/lib/agent-operators-view";
 import { decideEdgeAction, type EdgeMode } from "@/lib/forcefield/edge-enforcement";
+import type { BlockReasonKind } from "@/lib/forcefield-web/enforce";
 import { ForcefieldSwitch } from "@/components/ForcefieldSwitch";
 import { ForcefieldAssurance } from "@/components/forcefield/ForcefieldAssurance";
 import { ProbeIntelPanel } from "@/components/forcefield/ProbeIntelPanel";
@@ -42,6 +43,7 @@ interface Summary {
     flagged: number;
     trapped: number;
     blocked: number;
+    wouldBlock?: number;
     hostileOperators?: number;
     hostileEvents?: number;
     topAgents: Array<{ agent: string; count: number }>;
@@ -53,6 +55,9 @@ interface Summary {
     automationFleet: number;
     aiAgents: number;
     scripts: number;
+    scanners?: number;
+    impersonators?: number;
+    verifiedAgents?: number;
     datacenterOperators?: number;
     persistedAfterBlock: number;
     escalatedAfterBlock: number;
@@ -80,6 +85,16 @@ interface Summary {
   networkReputation?: Record<string, { operatorKey: string; otherWorkspaces: number; severity: "hostile" | "elevated" | "benign"; ttps?: string[] }>;
   networkTradecraft?: Array<{ tells: string[]; workspaceCount: number; severity: "hostile" | "elevated" | "benign" }>;
   principalByOperator?: Record<string, { status: "verified" | "claimed"; principal?: string; issuer?: string; scopes: string[]; mandateExceeded: boolean; violations: string[] }>;
+  defense?: DefenseSignals;
+}
+
+/** What the edge did and saw (mirrors DefenseSignals in lib/site-analytics). */
+interface DefenseSignals {
+  enforcement: { blocked: number; wouldBlock: number; byReason: Array<{ reason: string; blocked: number; wouldBlock: number }> };
+  highRate: { bursts: number; operators: number; peakRate: number; windowSeconds: number | null; fromIngest: number };
+  identity: { verified: number; impersonation: number; unverifiable: number; signed: number; byAgent: Array<{ agent: string; verified: number; impersonation: number; unverifiable: number; signed: number }> };
+  probes: Array<{ probe: string; count: number }>;
+  networks: Array<{ asn: string; org: string | null; count: number; hostile: number }>;
 }
 
 interface AgentProfile {
@@ -693,6 +708,10 @@ export default function SiteAnalyticsPage() {
           {summary.agentIntel && (
 <AgentIntelPanel data={summary.agentIntel} />
           )}
+
+          {/* What the edge did: blocks vs withheld blocks, payload families, fast
+              agents, claimed-vs-verified identity, probe labels, source network. */}
+          <DefenseSignalsPanel defense={summary.defense} payloadIntel={summary.payloadIntel ?? []} agentIntel={summary.agentIntel} rangeDays={summary.rangeDays} />
 
           {/* Probe intelligence + payload attacks. Placed BELOW the agent-traffic
               summary - that section ties directly to the map above, so it leads;
@@ -1410,6 +1429,201 @@ function AgentProfilePanel({ profile, testKey }: { profile: AgentProfile; testKe
         </div>
         <p style={{ margin: "0.5rem 0 0", fontSize: "0.68rem", color: "var(--wp-text-muted, #9ca3af)", lineHeight: 1.45 }}>{profile.disclaimer}</p>
       </div>
+    </div>
+  );
+}
+
+// Keyed by the engine's BlockReasonKind so a new rule fails the build here
+// instead of rendering its raw id.
+const REASON_LABEL: Record<BlockReasonKind | "unspecified", string> = {
+  payload: "attack payload",
+  decoy: "decoy trip",
+  attack_tool: "named attack tool",
+  blocked_fingerprint: "operator you blocked",
+  unspecified: "other rule",
+};
+
+/**
+ * Defense signals: what the edge DID and what it SAW, in plain language. Every
+ * number is read from the enforcement-era event props; a section with no data
+ * says so instead of showing a zero that looks like a measurement. Blocked and
+ * would-have-blocked are always shown side by side, so a watch-mode site sees
+ * exactly what turning blocking on would change.
+ */
+function DefenseSignalsPanel({ defense, payloadIntel, agentIntel, rangeDays }: {
+  defense?: DefenseSignals;
+  payloadIntel: ReadonlyArray<{ attack: string; count: number }>;
+  agentIntel?: Summary["agentIntel"];
+  rangeDays: number;
+}) {
+  const box: CSSProperties = { background: "var(--wp-dark-surface, #1f1f22)", border: "1px solid var(--wp-dark-border, #333)", borderRadius: 8, padding: "1.1rem 1.2rem", display: "grid", gap: "0.9rem" };
+  const head: CSSProperties = { fontSize: "0.72rem", textTransform: "uppercase", letterSpacing: "0.03em", color: "var(--wp-text-muted, #9ca3af)" };
+  const sub: CSSProperties = { fontSize: "0.66rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--wp-text-muted, #9ca3af)", margin: 0 };
+  const muted: CSSProperties = { fontSize: "0.74rem", color: "var(--wp-text-muted, #9ca3af)", margin: 0, lineHeight: 1.45 };
+  const chip = (color: string, dashed = false): CSSProperties => ({ display: "inline-flex", alignItems: "center", gap: "0.3rem", fontSize: "0.72rem", color: "var(--wp-text, #eee)", border: `1px ${dashed ? "dashed" : "solid"} ${color}`, borderRadius: 999, padding: "0.15rem 0.55rem" });
+  const RED = "var(--wp-error, #ef4444)";
+  const AMBER = "var(--wp-warning, #f5a623)";
+  const GREEN = "var(--wp-success, #30a46c)";
+  const GOLD = "var(--wp-gold, #e8b528)";
+
+  const d = defense;
+  const enf = d?.enforcement ?? { blocked: 0, wouldBlock: 0, byReason: [] };
+  const hr = d?.highRate ?? { bursts: 0, operators: 0, peakRate: 0, windowSeconds: null, fromIngest: 0 };
+  const id = d?.identity ?? { verified: 0, impersonation: 0, unverifiable: 0, signed: 0, byAgent: [] };
+  const probes = d?.probes ?? [];
+  const networks = d?.networks ?? [];
+  const scanners = agentIntel?.scanners ?? 0;
+  const impersonators = agentIntel?.impersonators ?? 0;
+  const verifiedAgents = agentIntel?.verifiedAgents ?? 0;
+  const nothing = enf.blocked + enf.wouldBlock === 0 && payloadIntel.length === 0 && hr.bursts === 0
+    && id.verified + id.impersonation + id.unverifiable + id.signed === 0 && probes.length === 0 && networks.length === 0
+    && scanners + impersonators + verifiedAgents === 0;
+
+  return (
+    <div style={box} data-testid="ff-defense">
+      <div style={{ display: "flex", alignItems: "baseline", gap: "0.5rem", flexWrap: "wrap" }}>
+        <span style={head}>What the edge did &middot; last {rangeDays}d</span>
+        <span style={{ fontSize: "0.7rem", color: "var(--wp-text-muted, #8b90a0)" }}>blocks, fast agents, and whether agents are who they say they are</span>
+      </div>
+
+      {nothing ? (
+        <p data-testid="ff-defense-empty" style={muted}>
+          Nothing blocked or held back, no fast-agent bursts, and no identity checks in this window. This fills in as the edge reports enforcement and identity results.
+        </p>
+      ) : (
+        <>
+          {/* Enforcement: blocked vs would-have-blocked, always together. */}
+          <div data-testid="ff-defense-enforcement" style={{ display: "grid", gap: "0.45rem" }}>
+            <p style={sub}>Blocked vs would have blocked</p>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "1.4rem", alignItems: "baseline" }}>
+              <span><strong data-testid="ff-defense-blocked" style={{ fontSize: "1.4rem", color: enf.blocked > 0 ? RED : "var(--wp-text, #eee)" }}>{enf.blocked.toLocaleString()}</strong> <span style={muted}>turned away</span></span>
+              <span><strong data-testid="ff-defense-would-block" style={{ fontSize: "1.4rem", color: enf.wouldBlock > 0 ? AMBER : "var(--wp-text, #eee)" }}>{enf.wouldBlock.toLocaleString()}</strong> <span style={muted}>would have been blocked, but blocking is off or not on this plan, so they were let through and recorded</span></span>
+            </div>
+            {enf.byReason.length > 0 && (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "0.35rem" }}>
+                {enf.byReason.map((r) => (
+                  <span key={r.reason} data-testid={`ff-defense-reason-${r.reason}`} style={chip(r.blocked > 0 ? RED : AMBER, r.blocked === 0)}>
+                    {REASON_LABEL[r.reason as BlockReasonKind] ?? r.reason.replace(/_/g, " ")}
+                    {r.blocked > 0 && <span style={{ color: RED, fontWeight: 700 }}>{r.blocked} blocked</span>}
+                    {r.wouldBlock > 0 && <span style={{ color: AMBER, fontWeight: 700 }}>{r.wouldBlock} would block</span>}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Payload attacks by family. */}
+          <div data-testid="ff-defense-payloads" style={{ display: "grid", gap: "0.45rem" }}>
+            <p style={sub}>Attack payloads by family</p>
+            {payloadIntel.length === 0 ? (
+              <p data-testid="ff-defense-payloads-empty" style={muted}>No attack payloads in this window.</p>
+            ) : (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "0.35rem" }}>
+                {payloadIntel.map((p) => (
+                  <span key={p.attack} data-testid={`ff-defense-payload-${p.attack}`} style={chip(RED)}>
+                    {attackLabel(p.attack)} <span style={{ color: RED, fontWeight: 700 }}>{p.count.toLocaleString()}&times;</span>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Fast agents. */}
+          <div data-testid="ff-defense-rate" style={{ display: "grid", gap: "0.35rem" }}>
+            <p style={sub}>Fast agents</p>
+            {hr.bursts === 0 ? (
+              <p data-testid="ff-defense-rate-empty" style={muted}>No client went faster than a person can browse.</p>
+            ) : (
+              <p style={{ ...muted, color: "var(--wp-text, #eee)" }}>
+                <strong data-testid="ff-defense-bursts" style={{ color: AMBER }}>{hr.bursts.toLocaleString()}</strong> burst{hr.bursts === 1 ? "" : "s"} from{" "}
+                <strong>{hr.operators.toLocaleString()}</strong> client{hr.operators === 1 ? "" : "s"}; the fastest made{" "}
+                <strong data-testid="ff-defense-peak">{hr.peakRate.toLocaleString()} requests{hr.windowSeconds ? ` in ${hr.windowSeconds}s` : ""}</strong>.
+                {hr.fromIngest > 0 && <span style={muted}> {hr.fromIngest.toLocaleString()} counted centrally for sites that forward without the client address.</span>}
+                <span style={muted}> Recorded, never blocked on speed alone.</span>
+              </p>
+            )}
+          </div>
+
+          {/* Identity: claimed vs verified. */}
+          <div data-testid="ff-defense-identity" style={{ display: "grid", gap: "0.45rem" }}>
+            <p style={sub}>Claimed vs verified identity</p>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "0.35rem" }}>
+              <span data-testid="ff-defense-verified" style={chip(GREEN)}>verified <strong style={{ color: GREEN }}>{id.verified.toLocaleString()}</strong></span>
+              <span data-testid="ff-defense-impersonation" style={chip(RED)}>impersonating <strong style={{ color: RED }}>{id.impersonation.toLocaleString()}</strong></span>
+              <span data-testid="ff-defense-unverifiable" style={chip("var(--wp-text-muted, #9ca3af)", true)}>could not be checked <strong>{id.unverifiable.toLocaleString()}</strong></span>
+              <span data-testid="ff-defense-signed" style={chip(GOLD)}>signed agents <strong style={{ color: GOLD }}>{id.signed.toLocaleString()}</strong></span>
+              {(scanners > 0 || impersonators > 0 || verifiedAgents > 0) && (
+                <span data-testid="ff-defense-operator-mix" style={{ ...muted, alignSelf: "center" }}>
+                  by operator: {verifiedAgents} verified AI agent{verifiedAgents === 1 ? "" : "s"}, {impersonators} impersonator{impersonators === 1 ? "" : "s"}, {scanners} scanner{scanners === 1 ? "" : "s"}
+                </span>
+              )}
+            </div>
+            {id.byAgent.length === 0 ? (
+              <p data-testid="ff-defense-identity-empty" style={muted}>No agent identity was checked in this window.</p>
+            ) : (
+              <div style={{ overflowX: "auto" }}>
+                <table data-testid="ff-defense-identity-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.74rem" }}>
+                  <thead>
+                    <tr style={{ color: "var(--wp-text-muted, #9ca3af)", textAlign: "left" }}>
+                      <th style={{ padding: "0.2rem 0.5rem 0.2rem 0", fontWeight: 600 }}>Claimed to be</th>
+                      <th style={{ padding: "0.2rem 0.5rem", fontWeight: 600 }}>Verified</th>
+                      <th style={{ padding: "0.2rem 0.5rem", fontWeight: 600 }}>Impersonating</th>
+                      <th style={{ padding: "0.2rem 0.5rem", fontWeight: 600 }}>Could not check</th>
+                      <th style={{ padding: "0.2rem 0", fontWeight: 600 }}>Signed</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {id.byAgent.map((a) => (
+                      <tr key={a.agent} data-testid={`ff-defense-agent-${a.agent}`} style={{ borderTop: "1px solid var(--wp-dark-border, #262b34)", color: "var(--wp-text, #eee)" }}>
+                        <td style={{ padding: "0.25rem 0.5rem 0.25rem 0", fontFamily: "var(--wp-mono, ui-monospace, monospace)" }}>{a.agent}</td>
+                        <td style={{ padding: "0.25rem 0.5rem", color: a.verified > 0 ? GREEN : undefined }}>{a.verified}</td>
+                        <td style={{ padding: "0.25rem 0.5rem", color: a.impersonation > 0 ? RED : undefined, fontWeight: a.impersonation > 0 ? 700 : undefined }}>{a.impersonation}</td>
+                        <td style={{ padding: "0.25rem 0.5rem" }}>{a.unverifiable}</td>
+                        <td style={{ padding: "0.25rem 0" }}>{a.signed}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <p style={{ ...muted, marginTop: "0.35rem", fontSize: "0.68rem" }}>Impersonating means the request claimed that agent but came from outside its published network. Could not check means the agent publishes no ranges to check against.</p>
+              </div>
+            )}
+          </div>
+
+          {/* Probe labels the engine matched. */}
+          {probes.length > 0 && (
+            <div data-testid="ff-defense-probes" style={{ display: "grid", gap: "0.45rem" }}>
+              <p style={sub}>What agents probed for</p>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "0.35rem" }}>
+                {probes.map((p) => (
+                  <span key={p.probe} data-testid={`ff-defense-probe-${p.probe}`} style={chip(AMBER)}>
+                    <span style={{ fontFamily: p.probe.startsWith("/") ? "var(--wp-mono, ui-monospace, monospace)" : undefined }}>{probeLabel(p.probe)}</span>
+                    <span style={{ color: AMBER, fontWeight: 700 }}>{p.count.toLocaleString()}</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Source network (ASN), Cloudflare sites only. */}
+          <div data-testid="ff-defense-networks" style={{ display: "grid", gap: "0.45rem" }}>
+            <p style={sub}>Source networks</p>
+            {networks.length === 0 ? (
+              <p data-testid="ff-defense-networks-empty" style={muted}>The network (ASN) an agent came from shows here for sites behind Cloudflare.</p>
+            ) : (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "0.35rem" }}>
+                {networks.map((n) => (
+                  <span key={n.asn} data-testid={`ff-defense-asn-${n.asn}`} title={`${n.count} agent events from AS${n.asn}${n.org ? ` (${n.org})` : ""}, ${n.hostile} hostile`} style={chip(n.hostile > 0 ? RED : "var(--wp-dark-border, #333)")}>
+                    <span style={{ fontFamily: "var(--wp-mono, ui-monospace, monospace)" }}>AS{n.asn}</span>
+                    {n.org && <span style={{ color: "var(--wp-text-muted, #b8bcc4)" }}>{n.org}</span>}
+                    <strong>{n.count.toLocaleString()}</strong>
+                    {n.hostile > 0 && <span style={{ color: RED, fontWeight: 700 }}>{n.hostile} hostile</span>}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 }
