@@ -37,6 +37,10 @@ shield smarter, automatically, with nothing for you to do."
   cannot reconstruct a person or a page from it.
 - **Only PROVEN-hostile actors are shared,** the ones that tripped a trap or ran an
   attack. Normal visitors and good bots are never in the shared list.
+- **Automatic blocks are bounded.** An automatic block expires 14 days after the
+  attacker was last seen, and one automatic decision cannot fan out to more than 20
+  fingerprints without proof on each. Only a block a person made is permanent. See
+  `alerts-blocking-tripwire.md`.
 - **Participation is opt-out.** A privacy-sensitive customer can decline to
   contribute to or consume the shared list and still get full local protection. The
   default is to participate, because the network is the value.
