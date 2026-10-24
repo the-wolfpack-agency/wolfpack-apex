@@ -129,16 +129,17 @@ export async function liveOperatorDossiers(rangeDays = 30): Promise<AttributionD
 }
 
 /** Block an operator by its durable fingerprint. Idempotent (upsert). No-op
- *  without a DB. */
-export async function blockOperator(input: { workspaceId: string; operatorKey: string; reason?: string; blockedBy?: string }): Promise<void> {
+ *  without a DB. `expiresAt` is set ONLY for an automatic block; a human block
+ *  passes none and never expires (and re-blocking by hand clears an expiry). */
+export async function blockOperator(input: { workspaceId: string; operatorKey: string; reason?: string; blockedBy?: string; expiresAt?: string | null }): Promise<void> {
   if (!process.env.DATABASE_URL) return;
   try {
     await query(
-      `INSERT INTO instinct_agent_operator_blocklist (workspace_id, operator_key, reason, blocked_by)
-       VALUES ($1, $2, $3, $4)
+      `INSERT INTO instinct_agent_operator_blocklist (workspace_id, operator_key, reason, blocked_by, expires_at)
+       VALUES ($1, $2, $3, $4, $5)
        ON CONFLICT (workspace_id, operator_key)
-       DO UPDATE SET reason = EXCLUDED.reason, blocked_by = EXCLUDED.blocked_by, blocked_at = now()`,
-      [input.workspaceId, input.operatorKey, input.reason ?? null, input.blockedBy ?? null],
+       DO UPDATE SET reason = EXCLUDED.reason, blocked_by = EXCLUDED.blocked_by, blocked_at = now(), expires_at = EXCLUDED.expires_at`,
+      [input.workspaceId, input.operatorKey, input.reason ?? null, input.blockedBy ?? null, input.expiresAt ?? null],
     );
   } catch (err) {
     console.warn("[agent-operators] blockOperator failed:", (err as Error).message);
@@ -155,10 +156,12 @@ export async function unblockOperator(workspaceId: string, operatorKey: string):
   }
 }
 
-/** The set of blocked operator keys for a workspace. Fail-open (empty). */
+/** The set of blocked operator keys for a workspace. An expired automatic
+ *  block is not in it (admin blocks have no expiry). Fail-open (empty). */
 export async function listBlockedOperatorKeys(workspaceId: string): Promise<Set<string>> {
   const { rows } = await safeQuery<{ operator_key: string }>(
-    `SELECT operator_key FROM instinct_agent_operator_blocklist WHERE workspace_id = $1`,
+    `SELECT operator_key FROM instinct_agent_operator_blocklist
+      WHERE workspace_id = $1 AND (expires_at IS NULL OR expires_at > now())`,
     [workspaceId],
   );
   return new Set(rows.map((r) => r.operator_key));

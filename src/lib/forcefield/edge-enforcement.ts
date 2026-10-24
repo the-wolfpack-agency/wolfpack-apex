@@ -100,6 +100,11 @@ export function decideEdgeAction(signals: EdgeSignals, policy: { mode: EdgeMode 
 }
 
 
+/** How long an AUTOMATIC block lasts (days). Every automatic block carries an
+ *  expiry; a human (admin) block never does. One constant for every auto-block
+ *  writer (the distributed fingerprint list and the operator blocklist). */
+export const AUTO_BLOCK_TTL_DAYS = 14;
+
 /** The verdict on whether an operator qualifies for AUTOMATIC blocking. This is
  *  deliberately stricter than the edge decision: auto-block is a durable action a
  *  human would otherwise take, so it fires ONLY on high-confidence, proven-hostile

@@ -5,6 +5,7 @@ import {
   mineSignatures,
   eligibleForPromotion,
   evaluateLearnedSignatures,
+  trustBandOf,
   type OperatorDossierLite,
   type StoredSignature,
   type LearnedSignatureDeps,
@@ -85,7 +86,7 @@ describe("eligibleForPromotion", () => {
 
 describe("evaluateLearnedSignatures (orchestration)", () => {
   function harness(dossiers: OperatorDossierLite[], stored: StoredSignature[]) {
-    const calls = { shadowMatch: [] as string[], falsePositive: [] as string[], promoted: [] as string[], autoBlocked: [] as { op: string; reason: string }[] };
+    const calls = { shadowMatch: [] as string[], falsePositive: [] as string[], promoted: [] as string[], autoBlocked: [] as { op: string; reason: string }[], gate: [] as { proven: boolean; trustBand: string }[], tracked: [] as string[] };
     const deps: LearnedSignatureDeps = {
       listDossiers: async () => dossiers,
       upsertSignature: async () => {},
@@ -93,8 +94,8 @@ describe("evaluateLearnedSignatures (orchestration)", () => {
       recordShadowMatch: async (h) => { calls.shadowMatch.push(h); },
       recordFalsePositive: async (h) => { calls.falsePositive.push(h); },
       promoteSignature: async (h) => { calls.promoted.push(h); },
-      autoBlockOperator: async (op, reason) => { calls.autoBlocked.push({ op, reason }); return 2; },
-      track: () => {},
+      autoBlockOperator: async (op, reason, input) => { calls.autoBlocked.push({ op, reason }); calls.gate.push(input); return 2; },
+      track: async (event) => { await Promise.resolve(); calls.tracked.push(event); },
     };
     return { deps, calls };
   }
@@ -142,5 +143,59 @@ describe("evaluateLearnedSignatures (orchestration)", () => {
     const r = await evaluateLearnedSignatures(deps);
     expect(calls.promoted).toEqual(["sigReady"]);
     expect(r.promoted).toBe(1);
+  });
+
+  it("passes proof + trust band to the auto-block gate (elevated maps to untrusted, never hostile)", async () => {
+    const stored: StoredSignature[] = [{ sigHash: "sig1abcd", tells: sigTells, dangerous: true, prevalence: 3, status: "enforcing", shadowMatches: 2, falsePositiveHits: 0 }];
+    const { deps, calls } = harness(
+      [
+        { operatorKey: "proven", threatLevel: "hostile", proven: true, tells: [...sigTells] },
+        { operatorKey: "elev", threatLevel: "elevated", tells: [...sigTells] },
+      ],
+      stored,
+    );
+    await evaluateLearnedSignatures(deps);
+    expect(calls.gate).toEqual([{ proven: true, trustBand: "hostile" }, { proven: false, trustBand: "untrusted" }]);
+  });
+
+  it("does not count an operator the gate refused (0 rows inserted)", async () => {
+    const stored: StoredSignature[] = [{ sigHash: "sig1abcd", tells: sigTells, dangerous: true, prevalence: 3, status: "enforcing", shadowMatches: 2, falsePositiveHits: 0 }];
+    const { deps, calls } = harness([{ operatorKey: "elev", threatLevel: "elevated", tells: [...sigTells] }], stored);
+    deps.autoBlockOperator = async () => 0;
+    const r = await evaluateLearnedSignatures(deps);
+    expect(r.operatorsAutoBlocked).toBe(0);
+    expect(calls.tracked).not.toContain("forcefield.signature_autoblocked");
+  });
+
+  it("DURABLE promotion event: signature_promoted is awaited before the pass returns", async () => {
+    const stored: StoredSignature[] = [{ sigHash: "sigReady", tells: sigTells, dangerous: true, prevalence: 3, status: "shadow", shadowMatches: 2, falsePositiveHits: 0 }];
+    const { deps, calls } = harness([], stored);
+    await evaluateLearnedSignatures(deps);
+    expect(calls.tracked).toContain("forcefield.signature_promoted");
+  });
+
+  it("a promotion that changed nothing is not counted and records no event", async () => {
+    const stored: StoredSignature[] = [{ sigHash: "sigReady", tells: sigTells, dangerous: true, prevalence: 3, status: "shadow", shadowMatches: 2, falsePositiveHits: 0 }];
+    const { deps, calls } = harness([], stored);
+    deps.promoteSignature = async () => false;
+    const r = await evaluateLearnedSignatures(deps);
+    expect(r.promoted).toBe(0);
+    expect(calls.tracked).not.toContain("forcefield.signature_promoted");
+  });
+
+  it("a promotion that throws is not counted", async () => {
+    const stored: StoredSignature[] = [{ sigHash: "sigReady", tells: sigTells, dangerous: true, prevalence: 3, status: "shadow", shadowMatches: 2, falsePositiveHits: 0 }];
+    const { deps } = harness([], stored);
+    deps.promoteSignature = async () => { throw new Error("db"); };
+    expect((await evaluateLearnedSignatures(deps)).promoted).toBe(0);
+  });
+});
+
+describe("trustBandOf", () => {
+  it("maps behavior to the gate's band", () => {
+    expect(trustBandOf({ threatLevel: "hostile" })).toBe("hostile");
+    expect(trustBandOf({ threatLevel: "elevated" })).toBe("untrusted");
+    expect(trustBandOf({ threatLevel: "benign" })).toBe("caution");
+    expect(trustBandOf({ threatLevel: "hostile", welcomed: true })).toBe("trusted");
   });
 });

@@ -5,7 +5,7 @@
  * distributed block rail the honeytoken flywheel uses) for enforcement.
  */
 import { query } from "@/lib/db";
-import { trackEvent, type InstinctEventType } from "@/lib/analytics";
+import { trackEventAwait, type InstinctEventType } from "@/lib/analytics";
 import { liveOperatorDossiers } from "@/lib/agent-operators";
 import { autoBlockOperator } from "@/lib/forcefield/blocked-fingerprints";
 import type { LearnedSignatureDeps, MinedSignature, OperatorDossierLite, StoredSignature } from "@/lib/forcefield/learned-signatures";
@@ -38,6 +38,7 @@ export function liveLearnedSignatureDeps(): LearnedSignatureDeps {
         threatLevel: o.threatLevel,
         welcomed: isWelcomed(o.threatLevel, o.behaviorClasses, o.tells),
         tells: o.tells,
+        proven: o.confidence === "proven",
       }));
     },
     upsertSignature: async (sig: MinedSignature) => {
@@ -82,15 +83,16 @@ export function liveLearnedSignatureDeps(): LearnedSignatureDeps {
         [sigHash, workspaceId],
       );
     },
-    promoteSignature: async (sigHash: string) => {
-      await query(
+    promoteSignature: async (sigHash: string): Promise<boolean> => {
+      const res = await query(
         `UPDATE instinct_learned_hostile_signatures SET status = 'enforcing', promoted_at = now()
           WHERE sig_hash = $1 AND workspace_id = $2 AND status = 'shadow'`,
         [sigHash, workspaceId],
       );
+      return (res.rowCount ?? 0) > 0;
     },
-    autoBlockOperator: async (operatorKey: string, reason: string): Promise<number> => {
-      const n = await autoBlockOperator(operatorKey, reason);
+    autoBlockOperator: async (operatorKey, reason, input): Promise<number> => {
+      const n = await autoBlockOperator(operatorKey, reason, input);
       if (n > 0) {
         const prefix = reason.replace(/^learned:/, "");
         await query(
@@ -101,8 +103,7 @@ export function liveLearnedSignatureDeps(): LearnedSignatureDeps {
       }
       return n;
     },
-    track: (event: InstinctEventType, payload: Record<string, string | number | boolean>) => {
-      trackEvent(event, "system", "forcefield", payload);
-    },
+    track: (event: InstinctEventType, payload: Record<string, string | number | boolean>) =>
+      trackEventAwait(event, "system", "forcefield", payload),
   };
 }

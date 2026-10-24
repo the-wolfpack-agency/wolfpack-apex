@@ -19,7 +19,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { timingSafeEqual } from "crypto";
-import { decideEdgeAction, qualifiesForAutoBlock, type EdgeSignals, type EdgePrincipalStatus } from "@/lib/forcefield/edge-enforcement";
+import { decideEdgeAction, qualifiesForAutoBlock, AUTO_BLOCK_TTL_DAYS, type EdgeSignals, type EdgePrincipalStatus } from "@/lib/forcefield/edge-enforcement";
 import { getEdgePolicy } from "@/lib/forcefield/edge-policy";
 import { listBlockedOperatorKeys, blockOperator } from "@/lib/agent-operators";
 import { getNetworkReputation, contributeHostileOperator, type NetworkReputation } from "@/lib/forcefield/operator-reputation";
@@ -87,7 +87,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if (policy.mode === "enforce" && policy.autoBlock && !signals.blocked) {
     const q = qualifiesForAutoBlock(signals, { proven: body.proven === true });
     if (q.auto) {
-      await blockOperator({ workspaceId: EDGE_WORKSPACE_ID, operatorKey, reason: `auto: ${q.reason}`, blockedBy: "forcefield.auto" }).catch(() => {});
+      // An automatic block EXPIRES (AUTO_BLOCK_TTL_DAYS); only a human block is
+      // permanent. An expired row drops out of listBlockedOperatorKeys.
+      const expiresAt = new Date(Date.now() + AUTO_BLOCK_TTL_DAYS * 86_400_000).toISOString();
+      await blockOperator({ workspaceId: EDGE_WORKSPACE_ID, operatorKey, reason: `auto: ${q.reason}`, blockedBy: "forcefield.auto", expiresAt }).catch(() => {});
       // An auto-block is a proven-hostile decision too - contribute it to the
       // reputation network (gated + fail-safe inside the helper) so other
       // workspaces learn this operator's methods. The rule that fired IS the tell;
@@ -102,7 +105,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         action: "operator.blocked",
         resourceType: "agent_operator",
         resourceId: operatorKey,
-        afterState: { workspace_id: EDGE_WORKSPACE_ID, blocked: true, auto: true, reason: q.reason },
+        afterState: { workspace_id: EDGE_WORKSPACE_ID, blocked: true, auto: true, reason: q.reason, expires_at: expiresAt },
       }).catch(() => {});
     }
   }
