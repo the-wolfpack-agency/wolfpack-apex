@@ -38,6 +38,7 @@
     "security:public-artifacts": "npx tsx scripts/security/public-artifacts.ts",
     "security:revoke-session": "npx tsx scripts/security/revoke-session.ts",
     "pr:status": "npx tsx scripts/pr-status.ts",
+    "security:self-scan": "npx tsx scripts/security/self-scan.ts",
     "self-scan": "npx tsx scripts/self-scan-ai-surfaces.ts",
     "start": "next start",
     "test:e2e:prod": "PROD_URL=${PROD_URL:-https://wolfpack-instinct.vercel.app} playwright test tests/e2e/ --config=playwright.config.ts",
