@@ -1,5 +1,5 @@
 /**
- * /api/admin/ai-redteam/run — run the fixed gate regression set against the gate.
+ * /api/admin/ai-redteam/run: run the fixed gate regression set against the gate.
  *
  *   POST -> runs the regression set, persists the result, returns the report.
  *   GET  -> recent run history for the workspace + the suite descriptor (what the
