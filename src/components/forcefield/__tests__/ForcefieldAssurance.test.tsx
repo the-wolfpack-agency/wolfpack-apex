@@ -60,3 +60,30 @@ it("surfaces an error without crashing", async () => {
   fireEvent.click(screen.getByText(/Assurance & self-test/i));
   await waitFor(() => expect(screen.getByTestId("assurance-error")).toBeInTheDocument());
 });
+
+it("a known-attack scenario whose detector stopped firing shows MISSED, not out of scope", async () => {
+  const missed = {
+    ...DATA,
+    breaches: {
+      results: [
+        { id: "injection", attack: "An agent sends a live SQL injection payload.", realWorld: "Injection.", coverage: "missed", control: "Edge payload detector.", detail: "NOT detected by the payload engine" },
+        { id: "supply-chain", attack: "Build-pipeline compromise.", realWorld: "SolarWinds class.", coverage: "out_of_scope", control: "Out of scope.", detail: "" },
+      ],
+      prevented: 0, detected: 0, missed: 1, outOfScope: 1, total: 2,
+    },
+  };
+  mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => missed });
+  render(<ForcefieldAssurance />);
+  fireEvent.click(screen.getByText(/Assurance & self-test/i));
+  await waitFor(() => expect(screen.getByTestId("assurance-breach-injection")).toHaveTextContent(/MISSED/));
+  expect(screen.getByTestId("assurance-breach-injection")).not.toHaveTextContent(/out of scope/i);
+  expect(screen.getByTestId("breach-missed")).toHaveTextContent("1 MISSED");
+});
+
+it("shows no missed count when nothing is missed", async () => {
+  mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => DATA });
+  render(<ForcefieldAssurance />);
+  fireEvent.click(screen.getByText(/Assurance & self-test/i));
+  await waitFor(() => expect(screen.getByTestId("assurance-score")).toBeInTheDocument());
+  expect(screen.queryByTestId("breach-missed")).toBeNull();
+});

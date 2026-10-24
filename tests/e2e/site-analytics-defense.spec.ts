@@ -204,6 +204,37 @@ test.describe("Forcefield board: what the edge did", () => {
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
       expect(overflow, "no horizontal page overflow at 390px").toBeLessThanOrEqual(1);
     });
+
+    test("assurance: a known attack whose detector stopped firing reads MISSED, not out of scope", async ({ page }) => {
+      const assurance = {
+        assurance: { controls: [{ id: "verify.replay", title: "Delegation replay defense (jti)", status: "active", detail: "Accepted once." }], activeCount: 1, partialCount: 0, gapCount: 0, total: 1, score: 100 },
+        adversarial: { results: [{ id: "replay", attack: "An agent replays a captured delegation.", control: "Replay defense (jti)", defended: true, detail: "" }], defendedCount: 1, total: 1, allDefended: true },
+        breaches: {
+          results: [
+            { id: "injection", attack: "An agent sends a live SQL injection payload in a request.", realWorld: "Injection.", coverage: "missed", control: "Edge payload detector.", detail: "NOT detected by the payload engine" },
+            { id: "supply-chain", attack: "Build-pipeline compromise.", realWorld: "SolarWinds class.", coverage: "out_of_scope", control: "Out of scope.", detail: "" },
+          ],
+          prevented: 0, detected: 0, missed: 1, outOfScope: 1, total: 2,
+        },
+        lowAndSlow: { profiles: [], detected: 0, total: 0, rate: 0, evasiveRate: 0, note: "" },
+      };
+      await stubInstinctSession(page, { role: "cto" });
+      await stubBoard(page, { summary: summary(), permissions: { ...INTEL, manageOperators: true } });
+      let assuranceStatus = 0;
+      await page.route(/\/api\/admin\/forcefield\/assurance(\?|$)/, (route) => {
+        assuranceStatus = 200;
+        return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(assurance) });
+      });
+      const snapshot = collectConsoleAndNetworkFailures(page);
+      await openDefense(page);
+      await page.getByText(/Assurance & self-test/i).click();
+      await expect(page.getByTestId("assurance-breach-injection")).toContainText("MISSED");
+      await expect(page.getByTestId("assurance-breach-injection")).not.toContainText(/out of scope/i);
+      await expect(page.getByTestId("assurance-breach-supply-chain")).toContainText(/out of scope/i);
+      await expect(page.getByTestId("breach-missed")).toHaveText("1 MISSED");
+      expect(assuranceStatus, "the assurance API answered 200").toBe(200);
+      expectNoFailures(snapshot);
+    });
   });
 
   test.describe("live (real sign-in, real board API)", () => {
