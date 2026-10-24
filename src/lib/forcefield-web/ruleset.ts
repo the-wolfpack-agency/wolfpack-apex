@@ -40,6 +40,17 @@ export interface ForcefieldRuleset {
    *  coverage update ships to all client sites via one ruleset refresh, no
    *  re-vendor. Optional; a site with none falls back to its bundled seed. */
   datacenterPrefixes?: string[];
+  /** Paths NATIVE to a platform (keyed by platform id, e.g. "wordpress"): on a
+   *  site that declares that platform these are its own real paths, not recon, so
+   *  they are never reported as a sensitive probe there. Optional. */
+  platformPaths?: Record<string, string[]>;
+  /** Published IPv4 ranges ("base/bits", same compact shape as
+   *  datacenterPrefixes) per allowlisted agent id. A request whose UA claims an
+   *  agent that has ranges here is VERIFIED when its IP falls inside them and an
+   *  IMPERSONATION when it does not; an agent with no ranges is "unverifiable".
+   *  Distributed centrally so every site verifies against current lists.
+   *  Optional. */
+  verifiedAgentRanges?: Record<string, string[]>;
 }
 
 /** The bundled fallback baked into every site. Kept deliberately broad so a site
@@ -96,6 +107,17 @@ export function coerceRuleset(data: unknown): ForcefieldRuleset | null {
   // still validates and a bad field can't accidentally enable enforcement.
   const blockedFingerprints = strArr(d.blockedFingerprints) ?? [];
   const datacenterPrefixes = strArr(d.datacenterPrefixes) ?? [];
+  const strArrMap = (v: unknown): Record<string, string[]> => {
+    if (!v || typeof v !== "object" || Array.isArray(v)) return {};
+    const out: Record<string, string[]> = {};
+    for (const [k, arr] of Object.entries(v as Record<string, unknown>)) {
+      const a = strArr(arr);
+      if (a) out[k] = a;
+    }
+    return out;
+  };
+  const platformPaths = strArrMap(d.platformPaths);
+  const verifiedAgentRanges = strArrMap(d.verifiedAgentRanges);
   return {
     version: typeof d.version === "string" ? d.version : "remote",
     knownAgents: agents,
@@ -104,6 +126,8 @@ export function coerceRuleset(data: unknown): ForcefieldRuleset | null {
     toolSignatures: sigs,
     blockedFingerprints,
     datacenterPrefixes,
+    platformPaths,
+    verifiedAgentRanges,
   };
 }
 

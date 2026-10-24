@@ -40,7 +40,7 @@ export interface MonitorRequestLike {
  * Returns a promise the caller should hand to event.waitUntil so the forward
  * survives the response. Never throws; a no-op unless fully configured + enabled.
  */
-export async function forcefieldMonitor(args: { site: string; req: MonitorRequestLike }): Promise<void> {
+export async function forcefieldMonitor(args: { site: string; req: MonitorRequestLike; authenticated?: boolean; platform?: string }): Promise<void> {
   try {
     if (process.env.FORCEFIELD_WEB !== "on") return;
     const token = process.env.SITE_ANALYTICS_INGEST_TOKEN;
@@ -90,7 +90,7 @@ export async function forcefieldMonitor(args: { site: string; req: MonitorReques
  * returns null (allow), so enforcement can never itself break the site. The
  * caller (middleware) builds the 403 response and still reports the block.
  */
-export async function forcefieldGuard(args: { site: string; req: MonitorRequestLike }): Promise<EnforcementDecision | null> {
+export async function forcefieldGuard(args: { site: string; req: MonitorRequestLike; authenticated?: boolean; platform?: string }): Promise<EnforcementDecision | null> {
   try {
     if (process.env.FORCEFIELD_WEB !== "on" || process.env.FORCEFIELD_ENFORCE !== "on") return null;
     const { req } = args;

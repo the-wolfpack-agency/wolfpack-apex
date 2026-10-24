@@ -21,7 +21,9 @@ export type ForcefieldEventType =
   | "site.agent_welcomed"
   | "site.agent_flagged"
   | "site.agent_trap_tripped"
-  | "site.agent_probed_sensitive";
+  | "site.agent_probed_sensitive"
+  | "site.agent_payload_attack"
+  | "site.agent_high_rate";
 
 export interface Observation {
   type: ForcefieldEventType;
@@ -47,6 +49,17 @@ export interface ObserveInput {
   /** The client IP (from the edge). Classified to a hosting label and then
    *  DISCARDED - never stored. Optional; absent -> hosting "unknown". */
   ip?: string;
+  /** The full request target (pathname + query), so an injection payload in the
+   *  query is seen. Optional; falls back to `path`. */
+  rawUrl?: string;
+  /** SITE-ATTESTED: true only when the site itself verified a real signed-in
+   *  session or service credential for this request (never inferred from the
+   *  mere presence of a cookie/authorization header, which anyone can send).
+   *  Optional; absent = anonymous. */
+  authenticated?: boolean;
+  /** The platform the site runs on (e.g. "wordpress"), so that platform's own
+   *  paths (ruleset.platformPaths) are not reported as recon. Optional. */
+  platform?: string;
   nowMs: number;
 }
 
