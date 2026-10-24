@@ -22,7 +22,7 @@ Wolfpack Agency team members first; then client-agency users onboarded via the s
 
 ## Feature flags / posture in flight
 
-- **MFA on admin**: not shipped. Pre-release checklist item. Do not announce MFA coverage externally.
+- **MFA on admin**: enforced in code for admin-capable accounts (effective `settings.manage_team`), default ON (`MFA_ENFORCE_ADMIN=off` is the kill switch). An unenrolled admin is sent to `/mfa` to enroll; an enrolled admin answers a TOTP or recovery-code challenge once per browser per 7 days. Do not announce MFA coverage externally until enrollment is complete for every admin.
 - **ML-DSA signing**: reserved slot, throws `NotImplementedError`. Messaging: "quantum-migration-ready," not "quantum-safe today."
 - **Hybrid TLS**: asserted via `scripts/verify-tls-hybrid.sh`; CI test activates when `PROD_DOMAIN` env var is set.
 - **HSTS preload**: plan to submit domains after HSTS has been live on Vercel for >1 week.
@@ -45,6 +45,9 @@ Any missing value = production crash loop. Flag at the top of a handoff, not the
 | `NEO4J_URI` / `NEO4J_USER` / `NEO4J_PASSWORD` | Graph store. Optional, and unset in production today. Absence degrades the triple write to Postgres + Qdrant and is reported, not silent |
 | `PROD_DOMAIN` | Enables the TLS hybrid posture CI assertion |
 | `FACTORY_SERVICE_TOKEN` | OPTIONAL (>=16 chars). Lets the code factory run non-interactively (the driver presents it instead of a user login); accepted only by the ai-code pipeline + ci-fix routes, scoped to the factory workspace. Unset = service path OFF (user login required). `FACTORY_SERVICE_WORKSPACE` overrides the default workspace. |
+| `MFA_ENFORCE_ADMIN` | OPTIONAL. Admin MFA enforcement, default ON. `off` / `false` / `0` disables it (break-glass only). |
+| `MFA_EXEMPT_EMAILS` | OPTIONAL. Comma-separated emails exempt from admin MFA. For CI smoke / E2E accounts ONLY; each use emits `auth.mfa_exemption_applied`. |
+| `INSTINCT_RLS_SESSION_CONTEXT` | OPTIONAL, default off. Sets `app.workspace_id` per request for the workspace RLS policies. Turn on only as part of `docs/security/rls-cutover.md`. |
 | `AI_CODE_SEMANTIC_REUSE` | OPTIONAL (`on`/`true`/`1` to enable). Turns on the factory's semantic reuse widening: the reuse-scout embeds the prompt + repo paths via the existing Azure embedder (`getEmbeddingProvider`) to surface synonym/intent matches the curated keyword map misses. OFF by default; needs the Azure OpenAI embedding env already used by the RAG stack. Absent embedder or any failure degrades to keyword-only (zero behavior change). |
 
 ## Messaging guardrails

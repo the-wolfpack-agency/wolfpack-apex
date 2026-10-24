@@ -11,7 +11,9 @@
  * recovery codes are returned plaintext exactly once here; only their SHA-256
  * hashes are persisted.
  *
- * NON-ENFORCING: confirming MFA does not alter login/middleware/refresh.
+ * Confirming also sets the HttpOnly MFA proof cookie for this browser: the
+ * user has just proved possession of the authenticator, so an admin finishing
+ * enrollment is let straight through the admin MFA gate.
  * Security-relevant => recordAudit (hash-chained).
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -19,6 +21,8 @@ import { requireCapability } from "@/lib/auth/require-capability";
 import { trackEvent } from "@/lib/analytics";
 import { recordAudit, extractRequestMetadata } from "@/lib/audit-log";
 import { confirmMfa } from "@/lib/auth/mfa";
+import { issueMfaProof, MFA_PROOF_COOKIE, MFA_PROOF_TTL_SECONDS } from "@/lib/crypto/mfa-proof";
+import { setAuthCookie } from "@/lib/crypto/cookies";
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const auth = await requireCapability(req, "account.manage_mfa");
@@ -66,5 +70,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     recovery_codes_issued: result.recoveryCodes.length,
   });
 
-  return NextResponse.json({ ok: true, recoveryCodes: result.recoveryCodes });
+  const res = NextResponse.json({ ok: true, recoveryCodes: result.recoveryCodes });
+  if (typeof result.confirmedAtMs === "number") {
+    setAuthCookie(
+      res,
+      MFA_PROOF_COOKIE,
+      issueMfaProof({ userId: user.id, confirmedAtMs: result.confirmedAtMs }),
+      MFA_PROOF_TTL_SECONDS,
+      { sameSite: "Lax" },
+    );
+  }
+  return res;
 }

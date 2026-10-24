@@ -72,6 +72,10 @@ beforeEach(() => {
   storedRole = "sales";
   storedOverrides = { grants: [], revokes: [], expires: {} };
   process.env.DATABASE_URL = "postgres://fake";
+  // The admin MFA gate (requireCapability) has its own suite,
+  // src/lib/auth/__tests__/require-capability-mfa-gate.test.ts. Here the admin
+  // caller is taken as MFA-satisfied so these tests stay about capabilities.
+  process.env.MFA_ENFORCE_ADMIN = "off";
 
   // Only return a stored record for the target user id "u1". For the
   // caller (admin) we return null so requireCapability falls back to the

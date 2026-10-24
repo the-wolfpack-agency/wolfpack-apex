@@ -1,14 +1,26 @@
 /**
- * mfa.ts — Admin MFA (TOTP) core. OPT-IN, SELF-SERVICE, NON-ENFORCING.
+ * mfa.ts: Admin MFA (TOTP) core: enrollment, verification, status, and the
+ * ENFORCEMENT policy for admin-capable accounts.
  *
  * ──────────────────────────────────────────────────────────────────────────
- * SAFETY CONTRACT (this PR):
- *   This module implements enrollment + verification + status ONLY. It is
- *   imported by the /api/auth/mfa/* routes and the settings UI. It is NOT
- *   imported by src/middleware.ts, the login route, require-capability's gate,
- *   or the refresh flow. The ABSENCE of an MFA enrollment never blocks any
- *   existing flow. Enforcement (requiring a TOTP at login) is a deliberate
- *   later PR behind a flag, once adoption is proven — zero lockout risk now.
+ * ENFORCEMENT CONTRACT:
+ *   - Who: any caller whose EFFECTIVE capabilities include
+ *     `settings.manage_team` (CTO, CEO, EVP, VP, CCO by default, plus anyone
+ *     granted it by override). Everyone else is unaffected.
+ *   - Where: requireCapability() calls mfaRequirementFor() after the
+ *     capability check, so every capability-gated route is covered. The
+ *     /api/auth/mfa/* routes (capability `account.manage_mfa`) are always
+ *     reachable so an admin can enroll or answer a challenge.
+ *   - Grace, so nobody is locked out: an admin with NO confirmed enrollment is
+ *     sent straight to enrollment after signing in and can enroll right there.
+ *     An admin WITH a confirmed enrollment must pass a challenge (TOTP or a
+ *     single-use recovery code) once per browser per 7 days (mfa-proof.ts).
+ *   - Kill switch: MFA_ENFORCE_ADMIN=off (also "false" / "0"). Default ON.
+ *   - Exemptions: MFA_EXEMPT_EMAILS, a comma-separated list held in env by the
+ *     operator, for the CI smoke account(s) only. Each use is reported.
+ *   - Not covered: service credentials (FACTORY_SERVICE_TOKEN, CRON_SECRET)
+ *     never reach requireCapability's user path, and on-behalf delegation
+ *     tokens (actingAgentId) are exempt because an agent cannot answer a TOTP.
  * ──────────────────────────────────────────────────────────────────────────
  *
  * TOTP implementation choice: NATIVE node:crypto (HMAC-SHA1 per RFC 6238 /
@@ -39,6 +51,7 @@ import {
 import { query } from "@/lib/db";
 import { encryptSecret, decryptSecret } from "@/lib/crypto/secret-storage";
 import { DEFAULT_WORKSPACE_ID } from "@/lib/auth";
+import { verifyMfaProof } from "@/lib/crypto/mfa-proof";
 
 // ──────────────────────────────────────────────────────────────────────────
 // RFC 6238 / 4226 constants
@@ -138,9 +151,7 @@ export function totpForSecret(
  * window. Uses constant-time comparison so a near-miss code cannot be timed.
  * Returns true iff the code matches the prev, current, or next step.
  *
- * NON-ENFORCING note: this is only ever called from the /api/auth/mfa/verify
- * route during opt-in enrollment confirmation (and reserved for a later
- * enforcement PR). It does not gate any current login.
+ * Called at enrollment confirmation and at every sign-in challenge.
  */
 export function verifyTotp(
   base32Secret: string,
@@ -318,7 +329,10 @@ export async function confirmMfa(params: {
   userId: string;
   workspaceId?: string;
   code: string;
-}): Promise<{ ok: true; recoveryCodes: string[] } | { ok: false; reason: "no_enrollment" | "bad_code" }> {
+}): Promise<
+  | { ok: true; recoveryCodes: string[]; confirmedAtMs: number | null }
+  | { ok: false; reason: "no_enrollment" | "bad_code" }
+> {
   const workspaceId = params.workspaceId ?? DEFAULT_WORKSPACE_ID;
   const row = await loadRow(params.userId, workspaceId);
   if (!row) return { ok: false, reason: "no_enrollment" };
@@ -333,20 +347,23 @@ export async function confirmMfa(params: {
   const recoveryCodes = generateRecoveryCodes();
   const hashes = recoveryCodes.map(hashRecoveryCode);
 
-  await query(
+  const updated = await query<{ confirmed_at: string | Date }>(
     `UPDATE instinct_admin_mfa
         SET confirmed_at = NOW(), recovery_code_hashes = $3, updated_at = NOW()
-      WHERE user_id = $1 AND workspace_id = $2`,
+      WHERE user_id = $1 AND workspace_id = $2
+      RETURNING confirmed_at`,
     [params.userId, workspaceId, hashes],
   );
+  const confirmedAt = updated?.rows?.[0]?.confirmed_at;
 
-  return { ok: true, recoveryCodes };
+  return { ok: true, recoveryCodes, confirmedAtMs: confirmedAt ? new Date(confirmedAt).getTime() : null };
 }
 
 /**
  * Verify a code (TOTP or single-use recovery code) for a CONFIRMED enrollment.
- * Recovery codes are consumed in place (the matching hash is removed). Reserved
- * for the later enforcement PR + used by tests; not wired into any login today.
+ * Recovery codes are consumed in place (the matching hash is removed). Used by
+ * the sign-in challenge (/api/auth/mfa/challenge) and by the step-up check that
+ * guards disabling or re-enrolling a confirmed enrollment.
  */
 export async function verifyMfaCode(params: {
   userId: string;
@@ -411,4 +428,158 @@ export async function mfaStatus(params: {
     recoveryCodesRemaining: (row.recovery_code_hashes ?? []).length,
     confirmedAt: row.confirmed_at,
   };
+}
+
+
+// ──────────────────────────────────────────────────────────────────────────
+// Enforcement policy (consumed by requireCapability + the MFA routes)
+// ──────────────────────────────────────────────────────────────────────────
+
+/** The capability that marks an account as admin-capable for MFA purposes. */
+export const MFA_ADMIN_CAPABILITY = "settings.manage_team";
+
+/** Default ON. Only an explicit off/false/0 disables enforcement. */
+export function mfaEnforcementEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  const v = (env.MFA_ENFORCE_ADMIN ?? "").trim().toLowerCase();
+  return !(v === "off" || v === "false" || v === "0");
+}
+
+/** Operator-held exemption list (CI smoke accounts). Case-insensitive. */
+export function isMfaExempt(email: string | null | undefined, env: NodeJS.ProcessEnv = process.env): boolean {
+  if (!email) return false;
+  const list = (env.MFA_EXEMPT_EMAILS ?? "")
+    .split(",")
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean);
+  return list.includes(email.trim().toLowerCase());
+}
+
+/** What the caller must do before an admin-capable request is served. */
+export type MfaRequirement = null | "enroll" | "challenge" | "unavailable";
+
+export interface MfaDecision {
+  required: MfaRequirement;
+  /** True when an exemption (not the absence of admin rights) let the caller through. */
+  exempt: boolean;
+  /** True when the caller is admin-capable, so enforcement applies at all. */
+  subject: boolean;
+}
+
+/** Enrollment confirmation time in ms, or null when not confirmed / no row. */
+export async function confirmedAtFor(userId: string, workspaceId?: string): Promise<number | null> {
+  const row = await loadRow(userId, workspaceId ?? DEFAULT_WORKSPACE_ID);
+  if (!row || !row.confirmed_at) return null;
+  return new Date(row.confirmed_at).getTime();
+}
+
+/**
+ * Decide whether this caller may be served. Pure policy over (user,
+ * capabilities, proof); one indexed read for admin-capable callers only.
+ * Never throws: a failed read is "unavailable", which the caller turns into a
+ * 503 rather than silently letting an admin through.
+ */
+export async function mfaRequirementFor(params: {
+  user: { id: string; email?: string; workspaceId?: string; actingAgentId?: string };
+  capabilities: ReadonlySet<string>;
+  proofToken?: string | null;
+  nowMs?: number;
+}): Promise<MfaDecision> {
+  const none: MfaDecision = { required: null, exempt: false, subject: false };
+  if (!mfaEnforcementEnabled()) return none;
+  if (!process.env.DATABASE_URL) return none; // shadow mode: no enrollment store
+  if (params.user.actingAgentId) return none; // delegation: an agent cannot answer a TOTP
+  if (!params.capabilities.has(MFA_ADMIN_CAPABILITY)) return none;
+  if (isMfaExempt(params.user.email)) return { required: null, exempt: true, subject: true };
+
+  let confirmedAtMs: number | null;
+  try {
+    confirmedAtMs = await confirmedAtFor(params.user.id, params.user.workspaceId);
+  } catch (err) {
+    console.warn("[mfa] enforcement read failed:", (err as Error).message);
+    return { required: "unavailable", exempt: false, subject: true };
+  }
+  if (confirmedAtMs === null) return { required: "enroll", exempt: false, subject: true };
+  const ok = verifyMfaProof(params.proofToken, {
+    userId: params.user.id,
+    confirmedAtMs,
+    nowMs: params.nowMs,
+  });
+  return { required: ok ? null : "challenge", exempt: false, subject: true };
+}
+
+/**
+ * Step-up for CHANGING a confirmed enrollment (disable, re-enroll). A stolen
+ * password alone must not be able to remove or replace someone's second
+ * factor, so a confirmed enrollment can only be changed with a valid proof
+ * from this browser or a fresh code. An unconfirmed (or absent) enrollment
+ * needs neither.
+ */
+export async function canChangeEnrollment(params: {
+  userId: string;
+  workspaceId?: string;
+  proofToken?: string | null;
+  code?: string | null;
+}): Promise<{ ok: true } | { ok: false; reason: "mfa_code_required" | "bad_code" }> {
+  const confirmedAtMs = await confirmedAtFor(params.userId, params.workspaceId);
+  if (confirmedAtMs === null) return { ok: true };
+  if (verifyMfaProof(params.proofToken, { userId: params.userId, confirmedAtMs })) return { ok: true };
+  const code = (params.code ?? "").trim();
+  if (!code) return { ok: false, reason: "mfa_code_required" };
+  const v = await verifyMfaCode({ userId: params.userId, workspaceId: params.workspaceId, code });
+  return v.ok ? { ok: true } : { ok: false, reason: "bad_code" };
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Challenge failure limiter (per user, in-process)
+// ──────────────────────────────────────────────────────────────────────────
+
+export const MFA_MAX_FAILURES = 5;
+export const MFA_FAILURE_WINDOW_SECONDS = 15 * 60;
+const failures = new Map<string, { count: number; resetAt: number }>();
+
+/** True when this user has used up their failed-code budget for the window. */
+export function mfaChallengeLocked(userId: string, nowMs: number = Date.now()): boolean {
+  const f = failures.get(userId);
+  if (!f) return false;
+  if (nowMs >= f.resetAt) {
+    failures.delete(userId);
+    return false;
+  }
+  return f.count >= MFA_MAX_FAILURES;
+}
+
+export function recordMfaFailure(userId: string, nowMs: number = Date.now()): void {
+  const f = failures.get(userId);
+  if (!f || nowMs >= f.resetAt) {
+    failures.set(userId, { count: 1, resetAt: nowMs + MFA_FAILURE_WINDOW_SECONDS * 1000 });
+    return;
+  }
+  f.count++;
+}
+
+export function clearMfaFailures(userId: string): void {
+  failures.delete(userId);
+}
+
+/** Test seam. */
+export function __resetMfaFailuresForTests(): void {
+  failures.clear();
+}
+
+/** Read a cookie from a plain Request (requireCapability takes Request, not NextRequest). */
+export function readCookie(request: Request, name: string): string | null {
+  const header = request.headers.get("cookie");
+  if (!header) return null;
+  for (const part of header.split(";")) {
+    const idx = part.indexOf("=");
+    if (idx === -1) continue;
+    if (part.slice(0, idx).trim() === name) {
+      try {
+        return decodeURIComponent(part.slice(idx + 1).trim());
+      } catch {
+        return part.slice(idx + 1).trim();
+      }
+    }
+  }
+  return null;
 }
