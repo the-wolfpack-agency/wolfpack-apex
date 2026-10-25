@@ -15,6 +15,7 @@ import { getNetworkReputation, getNetworkTradecraft, type NetworkReputation, typ
 import { summarizeProbeIntel, type ProbeIntelEntry } from "@/lib/agent-probe-signatures";
 import { getFindingTriage, type TriageStatus } from "@/lib/site-finding-triage";
 import { listBlockedOperatorKeys, liveAgentIntelligence, type AgentIntelSummary } from "@/lib/agent-operators";
+import { getProvenAttacks, NOT_CONTROL_PLANE_FP, type ProvenAttacks } from "@/lib/site-analytics-proven";
 
 /** Closed event vocabulary, mirrored from the marketing site's analytics. A
  *  value outside this set is rejected at the ingest boundary. */
@@ -196,6 +197,10 @@ export interface SiteAnalyticsSummary {
      identity, the probe labels the engine matched, and the network (ASN) the
      agent traffic came from when the site runs behind Cloudflare. */
   defense: DefenseSignals;
+  /* Proven attacks per protected site (live payloads + decoy trips), blocked vs
+     report-only, with the control-plane false positive excluded. The top of the
+     board. available=false means the read failed, never "zero attacks". */
+  proven: ProvenAttacks;
 }
 
 export interface DefenseSignals {
@@ -323,7 +328,8 @@ const numProp = (k: string) => `CASE WHEN props->>'${k}' ~ '^[0-9]+(\\.[0-9]+)?$
  * empty on any DB error (safeQuery), never throws.
  */
 async function getDefenseSignals(sinceClause: string, surfaceClause: string, params: string[]): Promise<DefenseSignals> {
-  const where = `WHERE ${sinceClause}${surfaceClause}`;
+  // The control-plane false positive is not an attack; it never reaches a count.
+  const where = `WHERE ${sinceClause}${surfaceClause}${NOT_CONTROL_PLANE_FP}`;
   const [reasons, rate, identity, probes, networks] = await Promise.all([
     safeQuery<{ reason: string; blocked: string; would_block: string }>(
       `SELECT coalesce(props->>'reason_kind', 'unspecified') AS reason,
@@ -425,7 +431,11 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
   const notAssetFlag =
     ` AND NOT (event_type = 'site.agent_flagged' AND ${ap} NOT LIKE '/api/%' AND (` +
     `${ap} LIKE '/_next/%' OR ${ap} IN ('/sw.js','/manifest.json','/favicon.ico') OR ` +
-    `${ap} ~* '\\.(js|mjs|css|map|png|jpe?g|gif|svg|ico|webp|avif|woff2?|ttf|otf|eot|webmanifest)$'))`;
+    `${ap} ~* '\\.(js|mjs|css|map|png|jpe?g|gif|svg|ico|webp|avif|woff2?|ttf|otf|eot|webmanifest)$'))` +
+    // Our own edge's control-plane calls, once mis-flagged as CVE-2025-29927
+    // (fixed at the source in enforce.ts). The old rows are still in the window
+    // and must not count as attacks anywhere on the board.
+    NOT_CONTROL_PLANE_FP;
 
   const [hour, page, country, type, totals, ff, ffAgents, journeyRows, agentOriginRows, payloadRows, surfacesRows, pvExists, learnedSig, agentIntel, defense] = await Promise.all([
     safeQuery<{ hour: number; count: string }>(
@@ -538,7 +548,7 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
     safeQuery<{ attack: string; count: string }>(
       `SELECT coalesce(props->>'attack', 'unknown') AS attack, count(*) AS count
          FROM site_analytics_events
-        WHERE ${sinceClause}${surfaceClause} AND event_type = 'site.agent_payload_attack'
+        WHERE ${sinceClause}${surfaceClause}${NOT_CONTROL_PLANE_FP} AND event_type = 'site.agent_payload_attack'
         GROUP BY 1 ORDER BY count(*) DESC LIMIT 20`,
       params,
     ),
@@ -581,6 +591,8 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
     getDefenseSignals(sinceClause, surfaceClause, params),
   ]);
 
+  const surfaces = surfacesRows.rows.map((r) => r.surface).filter((x): x is string => typeof x === "string" && x.length > 0);
+  const proven = await getProvenAttacks(sinceClause, surfaceClause, params, surfaces);
   const t = totals.rows[0];
   const journeys = await attachTriage(
     buildJourneys(
@@ -637,7 +649,7 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
 
   return {
     rangeDays: days,
-    surfaces: surfacesRows.rows.map((r) => r.surface).filter((x): x is string => typeof x === "string" && x.length > 0),
+    surfaces,
     surface,
     totalPageViews: t ? Number(t.page_views) : 0,
     collectsPageViews: pvExists?.rows?.[0]?.has_pv === true,
@@ -669,6 +681,7 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
     networkTradecraft,
     verdictFeedback: { falsePositives },
     defense,
+    proven,
     principalByOperator,
     agentOrigins: agentOriginRows.rows.map((r) => ({
       country: r.country,

@@ -99,3 +99,44 @@ describe("GET /api/admin/site-analytics", () => {
       expect(body.summary[k]).toBeUndefined();
     }
   });
+
+describe("GET /api/admin/site-analytics - proven attacks block", () => {
+  const PROVEN = { available: true, generatedAt: "2026-10-24T00:00:00Z", excludedFalsePositives: 3, sites: [] };
+  const full = { rangeDays: 30, surfaces: [], totalPageViews: 0, collectsPageViews: false, totalEvents: 0, byHour: [], byPage: [], byCountry: [], byType: [], forcefield: { blocked: 2 }, agentOrigins: [], proven: PROVEN };
+
+  it("401 when unauthenticated (the gate's own response, no summary read)", async () => {
+    const unauth = new Response(JSON.stringify({ error: "unauthorized" }), { status: 401 });
+    mockRequireCapability.mockResolvedValueOnce({ ok: false, response: unauth });
+    const res = await GET(mkReq());
+    expect(res.status).toBe(401);
+    expect(mockGetSummary).not.toHaveBeenCalled();
+  });
+
+  it("200 with proven for forcefield.view holders", async () => {
+    mockGetSummary.mockResolvedValue(full);
+    mockRequireCapability.mockResolvedValueOnce({ ok: true, user: { id: "u1", role: "cto", workspaceId: "w1" }, capabilities: new Set(["analytics.view", "forcefield.view"]) });
+    const res = await GET(mkReq());
+    expect(res.status).toBe(200);
+    expect((await res.json()).summary.proven).toEqual(PROVEN);
+  });
+
+  it("strips proven for analytics.view-only viewers (same allowlist, unchanged authz)", async () => {
+    mockGetSummary.mockResolvedValue(full);
+    mockRequireCapability.mockResolvedValueOnce({ ok: true, user: { id: "u2", role: "sales", workspaceId: "w1" }, capabilities: new Set(["analytics.view"]) });
+    const res = await GET(mkReq());
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.summary.proven).toBeUndefined();
+    expect(body.summary.forcefield.blocked).toBe(2);
+  });
+
+  it("malformed input is coerced to a safe default, never a 400 or 500 (the route has no 400 path)", async () => {
+    mockGetSummary.mockResolvedValue(full);
+    mockRequireCapability.mockResolvedValueOnce({ ok: true, user: { id: "u1", role: "cto", workspaceId: "w1" }, capabilities: new Set(["analytics.view", "forcefield.view"]) });
+    const res = await GET(mkReq("?days=abc&surface=%27%3B--"));
+    expect(res.status).toBe(200);
+    const [days, , surface] = mockGetSummary.mock.calls[0];
+    expect(Number.isNaN(days)).toBe(true); // clampDays in the lib maps a non-finite value to 30
+    expect(surface).toBe("all");
+  });
+});
