@@ -13,19 +13,55 @@ const REPO_ROOT = path.resolve(__dirname, "../..");
 const WF = path.join(REPO_ROOT, ".github/workflows/e2e-reality-check.yml");
 const yaml = fs.readFileSync(WF, "utf8");
 
-/** The hard gates that must run on every PR + push. */
+/** The hard gates that must run, and pass, on every PR + push. */
 const HARD_GATES = [
   "tests/e2e/sites-preview-reality-check.spec.ts",
   "tests/e2e/dashboard-quick-actions.spec.ts",
-  "tests/e2e/ai-router-behavior.spec.ts",
-  /* A hard gate because this page shipped correct and unreadable, twice: once
-     with no stylesheet at all, then with a diagram that fenced and closed
-     early so half of it rendered as prose. Both times the unit tests were
-     green, because they read the source string. Only a browser against the
-     deployed page can tell the difference, and a check that only runs when
-     somebody remembers to run it would not have caught either. */
-  "tests/e2e/playbook-readable.spec.ts",
 ];
+
+/**
+ * REPORT-ONLY gates: run on every PR + push under continue-on-error, so their
+ * result is recorded without blocking a merge. Promote one by moving it into
+ * HARD_GATES and into the hard-gates step; this list is meant to shrink.
+ *
+ * These five were previously listed here as hard gates, and the workflow
+ * listed them in the hard-gates command, but `#` comment lines inside that
+ * folded `run: >-` command turned everything after the first comment into a
+ * shell comment. None of them had ever run in CI (found 2026-10-25). The old
+ * assertions only checked that the spec NAME appeared in the file text, which
+ * a commented-out argument satisfies. The assertions below check the parsed
+ * command each step actually executes.
+ */
+const REPORT_ONLY_GATES = [
+  "tests/e2e/deployed-url-smoke.spec.ts",
+  "tests/e2e/ai-router-behavior.spec.ts",
+  /* The playbook page shipped correct and unreadable, twice: once with no
+     stylesheet at all, then with a diagram that fenced and closed early so
+     half of it rendered as prose. Only a browser against the deployed page
+     can tell the difference. */
+  "tests/e2e/playbook-readable.spec.ts",
+  "tests/e2e/client-builds.spec.ts",
+  "tests/e2e/lms-security-course.spec.ts",
+];
+
+const { load } = require("js-yaml") as { load: (src: string) => unknown };
+interface Step {
+  name?: string;
+  run?: string;
+  "continue-on-error"?: boolean;
+  "timeout-minutes"?: number;
+  if?: string;
+}
+const steps = (
+  load(yaml) as { jobs: Record<string, { steps: Step[] }> }
+).jobs["reality-check"].steps;
+function step(name: string): Step {
+  const s = steps.find((x) => x.name === name);
+  if (!s) throw new Error(`step not found: ${name}`);
+  return s;
+}
+const HARD_STEP = "Reality-check gates (preview parity + dashboard quick-actions)";
+const REPORT_STEP = "Reality-check gates (report-only, promote when green)";
 
 /**
  * Specs deliberately not run by this workflow, each with the reason.
@@ -155,8 +191,8 @@ test("every spec the workflow references actually exists (no silently-dropped sp
   expect(missing).toEqual([]);
 });
 
-test("every hard gate is present", () => {
-  for (const g of HARD_GATES) expect(yaml).toContain(g);
+test("every hard gate and report-only gate is present", () => {
+  for (const g of [...HARD_GATES, ...REPORT_ONLY_GATES]) expect(yaml).toContain(g);
 });
 
 test("every e2e spec is either run by a workflow or listed as deliberately not", () => {
@@ -218,9 +254,34 @@ test("the Playwright browser is cached (the install only runs on a version bump)
   expect(yaml).toMatch(/cache-hit/);
 });
 
-test("the hard gates run in a single parallel invocation", () => {
-  // One playwright invocation with --workers=2 carrying both gate specs.
-  const gatesStep = yaml.slice(yaml.indexOf("Reality-check gates"));
-  expect(gatesStep).toMatch(/--workers=2/);
-  for (const g of HARD_GATES) expect(gatesStep.slice(0, gatesStep.indexOf("Reality-check soft"))).toContain(g);
+test("the hard gates run in a single parallel invocation, with every flag really passed", () => {
+  const run = step(HARD_STEP).run ?? "";
+  // A `#` in the executed command would comment out what follows it.
+  expect(run).not.toContain("#");
+  for (const g of HARD_GATES) expect(run).toContain(g);
+  expect(run).toMatch(/--config=playwright\.config\.ts/);
+  expect(run).toMatch(/--workers=2/);
+  // A hard gate is a hard gate: it must be able to fail the job.
+  expect(step(HARD_STEP)["continue-on-error"]).toBeUndefined();
+  for (const r of REPORT_ONLY_GATES) expect(run).not.toContain(r);
+});
+
+test("the report-only gates really run, on PR + push, and cannot block a merge", () => {
+  const s = step(REPORT_STEP);
+  const run = s.run ?? "";
+  expect(run).not.toContain("#");
+  for (const r of REPORT_ONLY_GATES) expect(run).toContain(r);
+  expect(run).toMatch(/--config=playwright\.config\.ts/);
+  expect(run).toMatch(/--workers=2/);
+  expect(s["continue-on-error"]).toBe(true);
+  // Bounded, so a hang cannot eat the job budget the hard gates need.
+  expect(typeof s["timeout-minutes"]).toBe("number");
+  // Same gate as the hard gates: not push-only.
+  expect(s.if).toBe("steps.cfg.outputs.configured == 'true'");
+  // A failure is surfaced on the run summary, not swallowed.
+  expect(yaml).toMatch(/steps\.report_only\.outcome == 'failure'/);
+});
+
+test("no spec is both a hard gate and report-only", () => {
+  expect(HARD_GATES.filter((g) => REPORT_ONLY_GATES.includes(g))).toEqual([]);
 });

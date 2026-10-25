@@ -9,6 +9,8 @@ name: E2E Reality Check
 #   * The Playwright browser is cached, so the ~1-2 min install only runs on a
 #     version bump.
 #   * The two HARD gates run in ONE parallel invocation on every PR + push.
+#   * Five REPORT-ONLY gates run on every PR + push under continue-on-error,
+#     until each is green and promoted into the hard-gates step.
 #   * The SOFT specs run in ONE invocation on push-to-main ONLY, so they stay off
 #     the PR critical path (they never gated a merge; they only delayed it).
 #
@@ -34,7 +36,7 @@ jobs:
     # Heavy browser job: on PRs run only when ready for review, not every draft commit.
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     env:
       CI: "true"
       PROD_URL: ${{ secrets.PROD_URL }}
@@ -114,46 +116,66 @@ jobs:
             || (echo "retrying once" && sleep 10 && timeout 150 npx playwright install-deps chromium) \
             || echo "::warning::playwright install-deps failed (apt mirror). Continuing: a genuinely missing library surfaces as a browser launch failure in the next step."
 
-      # HARD GATES — one parallel invocation; must pass on PR + push. A parity
-      # regression blocks the merge. All three specs are read-only page renders,
-      # so --workers=2 is safe and roughly halves the wall time.
+      # HARD GATES: one parallel invocation; must pass on PR + push. A parity
+      # regression blocks the merge. Both specs are read-only page renders, so
+      # --workers=2 is safe and roughly halves the wall time.
       #
-      # ai-router-behavior was added on 2026-08-20 after being found red for
-      # weeks: it stubs every response so it needs no credentials, which was
-      # written into its header as the reason it could run everywhere, and then
-      # it was never listed in a workflow. Five of its assertions had been
-      # obsoleted by #279 and nothing said so. A spec no job runs is not a test.
+      # NO `#` LINES INSIDE A FOLDED `run: >-` COMMAND. A folded scalar joins
+      # its lines with spaces, so a `#` line is not a YAML comment: it becomes
+      # a shell comment that swallows every argument after it. Until
+      # 2026-10-25 this step carried comment lines inside its command, so only
+      # the first two specs ran and --config/--workers/--reporter were all
+      # commented out. Five specs listed here had never run in CI.
+      # src/__tests__/workflow-folded-run-comments.test.ts now fails on it.
       - name: Reality-check gates (preview parity + dashboard quick-actions)
         if: steps.cfg.outputs.configured == 'true'
         run: >-
           npx playwright test
           tests/e2e/sites-preview-reality-check.spec.ts
           tests/e2e/dashboard-quick-actions.spec.ts
-          # A HARD GATE BECAUSE IT NEEDS NO CREDENTIALS AND GUARDS THE
-          # FAILURES THIS PRODUCT HAS ACTUALLY SHIPPED: an authenticated page
-          # rendering empty instead of redirecting (2026-04-16, every API call
-          # 401'd and the dashboard drew zeros), a login submit clickable
-          # before hydration, a CSP violation, a stale deploy alias. It runs in
-          # 8 seconds and cannot flake on a session it never establishes.
+          --config=playwright.config.ts --workers=2 --reporter=github
+
+      # REPORT-ONLY: the five specs that were listed above as hard gates but,
+      # because of the folded-comment bug, never ran. Their first real runs
+      # are recorded here without blocking merges. Promote each one into the
+      # hard-gates step above once it is green on main; removing a spec from
+      # this step without promoting it is not allowed (reality-check-workflow
+      # .test.ts pins the list). Why each one earns a hard gate:
+      #   deployed-url-smoke: needs no credentials and guards the failures this
+      #     product has shipped (an authed page rendering empty instead of
+      #     redirecting, a login submit clickable before hydration, a CSP
+      #     violation, a stale deploy alias).
+      #   ai-router-behavior: stubs every response, so it runs with no
+      #     credentials; five of its assertions were obsoleted by #279 unseen.
+      #   playbook-readable: the page shipped correct and unreadable twice
+      #     (no stylesheet, then a diagram that fenced early); only a browser
+      #     against the deployed page tells the difference.
+      #   client-builds: the engagement-work banner fails silently if it
+      #     renders unstyled or clipped. Needs no credentials.
+      #   lms-security-course: stubs the session and intercepts the LMS API,
+      #     driving the real deployed bundle through the learner journey.
+      # continue-on-error is the report-only mechanism, bounded by its own
+      # timeout so it cannot eat the job budget. Follow-up: promote to hard
+      # gates and drop continue-on-error once each spec is green on main.
+      - name: Reality-check gates (report-only, promote when green)
+        id: report_only
+        if: steps.cfg.outputs.configured == 'true'
+        continue-on-error: true
+        timeout-minutes: 8
+        run: >-
+          npx playwright test
           tests/e2e/deployed-url-smoke.spec.ts
           tests/e2e/ai-router-behavior.spec.ts
           tests/e2e/playbook-readable.spec.ts
-          # A HARD GATE FOR THE SAME REASON AS THE SMOKE SPEC: the marker that
-          # says a page is engagement work rather than a shipped feature is one
-          # banner, and a banner that renders unstyled or gets clipped fails
-          # silently. The page still looks fine and the sentence that stops a
-          # concept being demoed as a product is gone. Needs no credentials.
           tests/e2e/client-builds.spec.ts
-          # A HARD GATE FOR THE SAME REASON: the security build is now an
-          # interactive, progress-tracked course, and the failures this product
-          # actually ships live exactly there (an authed page that renders empty
-          # instead of gating, a button that posts the wrong body, a widget that
-          # draws nothing, a CSP blank, a sideways-scrolling body). It stubs the
-          # session AND intercepts the LMS API, so it drives the REAL deployed
-          # bundle through the full learner journey with no credentials and
-          # cannot flake on a session it never establishes.
           tests/e2e/lms-security-course.spec.ts
           --config=playwright.config.ts --workers=2 --reporter=github
+
+      # A report-only failure must still be visible on the run summary, not
+      # only inside a collapsed green step.
+      - name: Report-only gates outcome
+        if: always() && steps.report_only.outcome == 'failure'
+        run: echo "::warning::Report-only reality-check gates failed. They do not block this merge; see the step above and fix before promoting them to hard gates."
 
       # CSP img-src narrowing, its own invocation. A narrowed CSP fails
       # silently: img-src no longer allows any https host (model output must
