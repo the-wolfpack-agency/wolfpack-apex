@@ -60,6 +60,8 @@ test.describe("Agent-principal onboarding, roster reality check", () => {
     // silent blank. One of the two testids is always present.
     const roster = page.getByTestId("agents-roster");
     const empty = page.getByTestId("agents-empty");
+    // Wait for either to mount: counting at once reads the loading state as "neither" (2026-10-25).
+    await roster.or(empty).first().waitFor({ state: "attached", timeout: 15_000 }).catch(() => {});
     const rosterCount = await roster.count();
     const emptyCount = await empty.count();
     expect(
@@ -112,6 +114,8 @@ test.describe("Agent-principal onboarding, roster reality check", () => {
     // silent blank. One of the two testids is always present.
     const list = page.getByTestId("memory-list");
     const empty = page.getByTestId("memory-empty");
+    // Wait for either to mount: counting at once reads the loading state as "neither" (2026-10-25).
+    await list.or(empty).first().waitFor({ state: "attached", timeout: 15_000 }).catch(() => {});
     const listCount = await list.count();
     const emptyCount = await empty.count();
     expect(

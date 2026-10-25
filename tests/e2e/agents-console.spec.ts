@@ -106,6 +106,8 @@ test.describe("Agent fleet console reality check", () => {
 
     const roster = page.getByTestId("agents-roster-grid");
     const empty = page.getByTestId("agents-empty");
+    // Wait for either to mount: counting at once reads the loading state as "neither" (2026-10-25).
+    await roster.or(empty).first().waitFor({ state: "attached", timeout: 15_000 }).catch(() => {});
     const rosterCount = await roster.count();
     const emptyCount = await empty.count();
     expect(

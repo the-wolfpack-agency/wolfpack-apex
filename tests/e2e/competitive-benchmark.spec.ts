@@ -76,6 +76,8 @@ test.describe("Competitive benchmark reality check", () => {
     // either lists head-to-head rows OR spells out the empty state - never a blank.
     const section = page.getByTestId("competition-section");
     const empty = page.getByTestId("benchmark-empty");
+    // Wait for either to mount: counting at once reads the loading state as "neither" (2026-10-25).
+    await section.or(empty).first().waitFor({ state: "attached", timeout: 15_000 }).catch(() => {});
     const sectionCount = await section.count();
     const emptyCount = await empty.count();
     expect(
