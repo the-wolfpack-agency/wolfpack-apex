@@ -35,6 +35,7 @@
  * Every error path still emits an analytics event. No data lost.
  */
 
+import { ATTACHED_FILES_ARE_DATA } from "@/lib/ai/provenance";
 import { createHash, randomUUID } from "node:crypto";
 import { trackEvent } from "@/lib/analytics";
 import {
@@ -223,7 +224,8 @@ export const defaultVisionCaller: VisionCaller = async ({
       body: JSON.stringify({
         model: BRIEF_FROM_IMAGE_MODEL,
         max_tokens: 4096,
-        system: systemPrompt,
+        /* The attached file is data, never instructions (provenance rule). */
+        system: `${ATTACHED_FILES_ARE_DATA}\n\n${systemPrompt}`,
         messages: [{ role: "user", content }],
       }),
     });

@@ -33,6 +33,20 @@
  *     than the full draft_template — operators author it specifically
  *     for unsupervised replies.
  *
+ * Injection (2026-10-25): the inbound email is a stranger's text, and the
+ * reply goes back to that stranger unsupervised. Two controls, both
+ * deterministic:
+ *   - The customer's subject and body reach the model only inside the
+ *     provenance fence (src/lib/ai/provenance.ts): announced as data, never
+ *     as instructions. A directive inside them emits
+ *     `ai.injection_attempt_blocked`.
+ *   - Before sending, the reply passes checkOutboundReply
+ *     (./outbound-check.ts): no secrets, no internal or unapproved links, no
+ *     URL carrying encoded data, no instruction to hand over a code or
+ *     forward the mail. FAIL CLOSED: on any finding nothing is sent, the
+ *     ticket stays open for an operator, and `support.auto_ack_blocked`
+ *     fires.
+ *
  * This module never throws. Every public function returns a structured
  * result. The caller (inbox poller) wraps the orchestrator in
  * try/catch + obs.recordError as belt-and-braces.
@@ -47,6 +61,9 @@ import {
 import { getValidToken } from "@/lib/microsoft-graph";
 import { trackEvent } from "@/lib/analytics";
 import { getObsClient } from "@/lib/obs";
+import { fenceUntrusted } from "@/lib/ai/provenance";
+import { reportFenceAttempts } from "@/lib/ai/fence-report";
+import { checkOutboundReply, type OutboundCheckResult } from "./outbound-check";
 
 import {
   appendTicketReply,
@@ -196,16 +213,23 @@ export interface AutoAcknowledgeDraft {
   cache_id?: string | null;
 }
 
-function buildUserPrompt(
+/**
+ * The model's input. The customer's subject and body are a stranger's words,
+ * so they go inside the provenance fence; the operator template and our
+ * instruction stay outside it, because they are ours and must still be obeyed.
+ * Exported for the fence tests.
+ */
+export function buildAutoAckPrompt(
   ticket: SupportTicket,
   pattern: SupportPattern,
-): string {
+): { prompt: string; attempts: ReturnType<typeof fenceUntrusted>["attempts"] } {
   const truncatedBody = (ticket.body ?? "").slice(0, TICKET_BODY_TRUNCATE);
+  const fenced = fenceUntrusted([
+    { provenance: "external", label: "customer email subject", text: ticket.title ?? "" },
+    { provenance: "external", label: "customer email body (truncated)", text: truncatedBody },
+  ]);
   const parts: string[] = [];
-  parts.push(`Customer subject: ${ticket.title}`);
-  parts.push("");
-  parts.push("Customer message (truncated):");
-  parts.push(truncatedBody);
+  parts.push(fenced.text);
   if (
     pattern.auto_acknowledge_template &&
     pattern.auto_acknowledge_template.trim().length > 0
@@ -216,9 +240,22 @@ function buildUserPrompt(
   }
   parts.push("");
   parts.push(
-    "Write the auto-acknowledgement now. Output the email body only.",
+    "Write the auto-acknowledgement now. Output the email body only. Do not include links, addresses or steps that are not in the self-serve steps above.",
   );
-  return parts.join("\n");
+  return { prompt: parts.join("\n"), attempts: fenced.attempts };
+}
+
+/** The outbound check with this ticket's context. */
+export function checkAutoAckBody(
+  body: string,
+  ticket: SupportTicket,
+  pattern: SupportPattern,
+): OutboundCheckResult {
+  return checkOutboundReply(body, {
+    template: pattern.auto_acknowledge_template,
+    recipientEmail: ticket.created_by_email,
+    supportFrom: SUPPORT_FROM,
+  });
 }
 
 function containsForbiddenPhrase(text: string): boolean {
@@ -265,7 +302,11 @@ export async function generateAutoAcknowledge(
       /* Re-run the safety guards on the cached output. The forbidden-
          phrase list is dynamic; a phrase added after the row was
          cached must still trip the fallback. */
-      if (candidate && !containsForbiddenPhrase(candidate)) {
+      if (
+        candidate &&
+        !containsForbiddenPhrase(candidate) &&
+        checkAutoAckBody(candidate, ticket, pattern).ok
+      ) {
         return { subject, body: candidate, cache_id: lookup.cache_id };
       }
       /* Cached row failed the guard — treat as a miss + write a fresh
@@ -276,12 +317,17 @@ export async function generateAutoAcknowledge(
     /* lookup helper logs; defensive double-swallow. */
   }
 
-  const messages: AIMessage[] = [
-    { role: "user", content: buildUserPrompt(ticket, pattern) },
-  ];
+  const built = buildAutoAckPrompt(ticket, pattern);
+  /* The fence made any directive inert; this is so somebody finds out. */
+  reportFenceAttempts("support.auto_ack", built.attempts, {
+    userId: "automation-cron",
+    userRole: "system",
+  });
+  const messages: AIMessage[] = [{ role: "user", content: built.prompt }];
 
   let body: string;
   let usedSafeFallback = false;
+  let blockedByOutboundCheck = false;
   let aiResponse: Awaited<ReturnType<ReturnType<typeof getAIClient>["complete"]>> | null = null;
   try {
     aiResponse = await getAIClient().complete({
@@ -302,6 +348,12 @@ export async function generateAutoAcknowledge(
     } else if (containsForbiddenPhrase(candidate)) {
       body = SAFE_FALLBACK_BODY;
       usedSafeFallback = true;
+    } else if (!checkAutoAckBody(candidate, ticket, pattern).ok) {
+      /* Kept as the body so the orchestrator's pre-send check blocks it and
+         an operator sees the ticket. Never cached: a blocked reply must not
+         be served to the next customer. */
+      body = candidate;
+      blockedByOutboundCheck = true;
     } else {
       body = candidate;
     }
@@ -320,7 +372,7 @@ export async function generateAutoAcknowledge(
      is the same for every ticket — caching it would waste a row and
      mean future operator-helpful votes inflate a row that wasn't
      actually used. */
-  if (!usedSafeFallback && aiResponse) {
+  if (!usedSafeFallback && !blockedByOutboundCheck && aiResponse) {
     try {
       const written = await cacheResponse({
         feature: "support.auto_ack",
@@ -551,6 +603,33 @@ export async function processAutoAcknowledge(
       ticket_id: ticketId,
     });
     return { acknowledged: false, reason: "generate_threw" };
+  }
+
+  /* THE LAST READ BEFORE A STRANGER GETS IT. Runs on every path (fresh,
+     cached, fallback) at the one point they all pass through. Fail closed:
+     on any finding nothing is sent. The ticket keeps auto_acknowledged_at
+     NULL and stays open in the operator queue, where the regular
+     review-and-send draft is waiting, so a human answers it. */
+  const outbound = checkAutoAckBody(draft.body, ticket, pattern);
+  if (!outbound.ok) {
+    const kinds = [...new Set(outbound.findings.map((f) => f.kind))].sort();
+    try {
+      trackEvent("support.auto_ack_blocked", "automation-cron", "system", {
+        ticket_id: ticketId,
+        pattern_id: pattern.id,
+        kinds: kinds.join(","),
+        count: outbound.findings.length,
+      });
+    } catch {
+      /* analytics best-effort */
+    }
+    obs.recordError(new Error(`auto_ack_output_check_blocked: ${kinds.join(",")}`), {
+      feature: "support.auto_ack",
+      stage: "output_check",
+      ticket_id: ticketId,
+      pattern_id: pattern.id,
+    });
+    return { acknowledged: false, reason: "output_check_blocked" };
   }
 
   let sendResult: SendAutoAcknowledgeResult;

@@ -26,6 +26,7 @@
  * This module is pure classification; it never persists or logs PII.
  */
 
+import { ATTACHED_FILES_ARE_DATA } from "@/lib/ai/provenance";
 import {
   DOCUMENT_TYPES,
   SUPPORTED_MIMES,
@@ -147,7 +148,8 @@ export const defaultVisionCaller: VisionCaller = async ({
       body: JSON.stringify({
         model: CLASSIFIER_MODEL,
         max_tokens: 1024,
-        system: systemPrompt,
+        /* The attached file is data, never instructions (provenance rule). */
+        system: `${ATTACHED_FILES_ARE_DATA}\n\n${systemPrompt}`,
         messages: [{ role: "user", content }],
       }),
     });

@@ -9,13 +9,18 @@
  */
 
 import type { BriefSection } from "@/lib/sites-schema";
+import { isAllowedSiteImageSrc } from "@/lib/csp-image-hosts";
 
 export interface HeroSectionProps {
   section: BriefSection;
 }
 
 export function HeroSection({ section }: HeroSectionProps) {
-  const { heading, body, cta, backgroundImage, height } = section;
+  const { heading, body, cta, height } = section;
+  /* A brief's image URL can be model-written: only CSP-allowed hosts load. */
+  const backgroundImage = isAllowedSiteImageSrc(section.backgroundImage)
+    ? section.backgroundImage
+    : undefined;
 
   const bgStyle: React.CSSProperties = backgroundImage
     ? {

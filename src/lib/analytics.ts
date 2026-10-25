@@ -3007,6 +3007,12 @@ export type InstinctEventType =
   | "support.poll_run"
   | "support.categorized"
   | "support.auto_acknowledged"
+  // Outbound output check on the unsupervised support reply.
+  //   support.auto_ack_blocked  { ticket_id, pattern_id, kinds, count } the
+  //     auto-ack reply failed the outbound check (secret, internal URL, data
+  //     URL, instruction to the recipient). Nothing was sent; the ticket stays
+  //     open for an operator.
+  | "support.auto_ack_blocked"
   // /support/patterns management page (operator-facing).
   //
   //   support.patterns_viewed   { count, auto_ack_enabled_count }

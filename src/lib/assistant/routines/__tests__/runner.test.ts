@@ -98,7 +98,9 @@ describe("running to the end", () => {
       },
     }));
 
-    expect(prompt).toBe("summarize two threads");
+    /* The slot value is fetched content, so it arrives fenced as data. */
+    expect(prompt).toContain("summarize ");
+    expect(prompt).toContain('<untrusted source="external" label="inbox">\ntwo threads\n</untrusted>');
     expect(run.slots.summary).toBe("here is the summary");
   });
 });

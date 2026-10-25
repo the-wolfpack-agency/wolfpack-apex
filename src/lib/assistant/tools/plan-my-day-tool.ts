@@ -26,7 +26,7 @@ import { registerTool, getTools } from "./registry";
 import { canInvokeTool } from "./gate";
 import { getAIClient } from "@/lib/ai/router";
 import {
-  buildExtractionPrompt,
+  buildFencedExtractionPrompt,
   parseExtraction,
   mapDay,
   draftRoutine,
@@ -34,6 +34,7 @@ import {
 } from "@/lib/assistant/routines/day-plan";
 import { savePendingAction, REVIEWABLE_PENDING_TTL_MINUTES } from "./pending-actions";
 import type { ToolDef, ToolResult } from "./types";
+import { reportFenceAttempts } from "@/lib/ai/fence-report";
 
 const ParamSchema = z.object({
   /** Their description, in their words. */
@@ -122,10 +123,17 @@ export const planMyDayTool: ToolDef<Params, PlanData> = {
       (t) => canInvokeTool(ctx.userRole, t.capability) && t.name !== "plan_my_day",
     );
 
+    /* The description is fenced as data (see buildFencedExtractionPrompt). */
+    const extraction = buildFencedExtractionPrompt(params.description, tools);
+    reportFenceAttempts("assistant.plan_my_day", extraction.attempts, {
+      userId: ctx.userId,
+      userRole: ctx.userRole,
+    });
+
     let raw = "";
     try {
       const res = await getAIClient().complete({
-        messages: [{ role: "user", content: buildExtractionPrompt(params.description, tools) }],
+        messages: [{ role: "user", content: extraction.prompt }],
         max_tokens: 900,
         /* Splitting prose into steps is not a reasoning problem. */
         model_tier: "cheap",

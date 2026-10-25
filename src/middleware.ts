@@ -16,6 +16,7 @@ import { getObsClient } from "@/lib/obs";
 import { forcefieldMonitor, forcefieldGuard, isSyntheticMonitor, constantTimeEqual } from "@/lib/forcefield-web/monitor";
 import { CURRENT_SIGN_ALGORITHM, assertCallable } from "@/lib/crypto/algorithms";
 import { ACCESS_TOKEN_COOKIE } from "@/lib/crypto/cookies";
+import { imgSrcDirective } from "@/lib/csp-image-hosts";
 
 const IS_PROD = process.env.NODE_ENV === "production";
 
@@ -52,12 +53,16 @@ function shouldSpanRequest(pathname: string): boolean {
 // .vercel.app client-site previews). frame-ancestors 'none' is the
 // clickjacking defense — it's separate and stays locked down so
 // Instinct itself can never be iframed by a third party.
+// img-src is per route and never a bare `https:` (any-host images are a
+// zero-click exfiltration channel for model output). The host list lives in
+// src/lib/csp-image-hosts.ts so the renderers and the CSP share it.
+const IMG_SRC_PLACEHOLDER = "img-src";
 const CSP_DIRECTIVES = [
   "default-src 'self'",
   "script-src 'self' 'unsafe-inline'",
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "style-src-elem 'self' 'unsafe-inline' https://fonts.googleapis.com",
-  "img-src 'self' data: blob: https:",
+  IMG_SRC_PLACEHOLDER,
   "font-src 'self' data: https://fonts.gstatic.com",
   "connect-src 'self' https:",
   "frame-src 'self' https://*.vercel.app",
@@ -72,7 +77,12 @@ const CSP_DIRECTIVES = [
   "base-uri 'self'",
   "form-action 'self'",
   "report-uri /api/csp-report",
-].join("; ");
+];
+
+/** The enforced CSP for one route. */
+export function cspFor(pathname: string): string {
+  return CSP_DIRECTIVES.map((d) => (d === IMG_SRC_PLACEHOLDER ? imgSrcDirective(pathname) : d)).join("; ");
+}
 
 /* ---------------------------------------------------------------------------
    Forcefield "authenticated" attestation for Instinct's own traffic.
@@ -191,7 +201,7 @@ export async function middleware(req: NextRequest, event?: NextFetchEvent) {
 
   const response = NextResponse.next();
 
-  response.headers.set("Content-Security-Policy", CSP_DIRECTIVES);
+  response.headers.set("Content-Security-Policy", cspFor(req.nextUrl.pathname));
   response.headers.set("X-Content-Type-Options", "nosniff");
   // X-Frame-Options for legacy browsers; CSP frame-ancestors takes precedence in modern browsers
   response.headers.set("X-Frame-Options", "DENY");

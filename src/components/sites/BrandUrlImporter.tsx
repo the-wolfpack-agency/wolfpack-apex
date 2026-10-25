@@ -20,6 +20,7 @@
  * CLAUDE.md's "no raw authenticated fetches" rule.
  */
 
+import { isAllowedSiteImageSrc } from "@/lib/csp-image-hosts";
 import { useCallback, useMemo, useState } from "react";
 import { fetchWithRefresh, jsonHeaders } from "@/lib/client-auth";
 import type {
@@ -241,7 +242,10 @@ export default function BrandUrlImporter({
           }}
         >
           <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-            {(result.scraped.ogImage || result.scraped.faviconUrl) && (
+            {/* The thumbnail comes from whatever site was scraped. It renders
+                only when its host is one the CSP allows; any other host would
+                be refused by the browser anyway (src/lib/csp-image-hosts.ts). */}
+            {isAllowedSiteImageSrc(result.scraped.ogImage ?? result.scraped.faviconUrl) && (
               // eslint-disable-next-line @next/next/no-img-element
               <img
                 data-testid="brand-url-preview-thumb"

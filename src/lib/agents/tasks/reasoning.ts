@@ -19,6 +19,7 @@
  * as no_match exactly as before. It never throws into the run loop.
  */
 
+import { fenceForPrompt } from "@/lib/ai/fence-report";
 import { getAIClient } from "@/lib/ai";
 
 export interface ReasonInput {
@@ -59,10 +60,18 @@ export async function reasonAboutInstruction(input: ReasonInput): Promise<Reason
     const contextParts: string[] = [];
     if (input.guidance) contextParts.push(input.guidance);
     if (input.priorResults && input.priorResults.length > 0) {
-      contextParts.push(
-        "Earlier results in this task:\n" +
-          input.priorResults.map((p) => `- ${p.instruction}: ${p.result}`).join("\n"),
+      /* Earlier step results are what tools fetched (mail, web, records):
+         fenced as data so a fetched page cannot re-task the agent. */
+      const fenced = fenceForPrompt(
+        "agents.reasoning",
+        input.priorResults.map((p, i) => ({
+          provenance: "external" as const,
+          label: `earlier result ${i + 1}: ${p.instruction.slice(0, 60)}`,
+          text: p.result,
+        })),
+        { userId: input.agentId, userRole: input.role },
       );
+      contextParts.push("Earlier results in this task:\n" + fenced.text);
     }
     const userContent =
       contextParts.length > 0

@@ -5,6 +5,7 @@
  * analytics is emitted by the final deployed template, not the preview.
  */
 
+import { isAllowedSiteImageSrc } from "@/lib/csp-image-hosts";
 import type { BriefSection } from "@/lib/sites-schema";
 
 type ImageShape = { src: string; alt?: string };
@@ -28,7 +29,11 @@ export function GallerySection({ section }: GallerySectionProps) {
   const { heading, images } = section;
   const normalized = (images ?? [])
     .map(normalize)
-    .filter((i): i is ImageShape => i !== null);
+    .filter((i): i is ImageShape => i !== null)
+    /* Brief image URLs can be model-written. Only hosts the CSP allows are
+       rendered (src/lib/csp-image-hosts.ts), so an image address can never
+       become a zero-click request to an arbitrary host. */
+    .filter((i) => isAllowedSiteImageSrc(i.src));
 
   return (
     <section

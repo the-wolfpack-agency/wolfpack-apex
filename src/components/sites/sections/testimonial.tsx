@@ -21,6 +21,7 @@
  */
 
 import type { BriefSection } from "@/lib/sites-schema";
+import { isAllowedSiteImageSrc } from "@/lib/csp-image-hosts";
 
 export interface TestimonialSectionProps {
   section: BriefSection;
@@ -67,7 +68,10 @@ export function TestimonialSection({ section }: TestimonialSectionProps) {
         <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
           {valid.map((item, idx) => {
             const safePhoto =
-              typeof item.authorPhotoUrl === "string" && item.authorPhotoUrl.startsWith("https://")
+              typeof item.authorPhotoUrl === "string" &&
+              item.authorPhotoUrl.startsWith("https://") &&
+              /* Only hosts the CSP allows (src/lib/csp-image-hosts.ts). */
+              isAllowedSiteImageSrc(item.authorPhotoUrl)
                 ? item.authorPhotoUrl
                 : null;
             return (
