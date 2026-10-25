@@ -3402,7 +3402,29 @@ export type InstinctEventType =
   | "assurance.report_computed"
   // assurance.posture_parity_checked { claims, proven, in_progress, violations } -
   // the security-posture claims were checked against their evidence keys.
-  | "assurance.posture_parity_checked";
+  | "assurance.posture_parity_checked"
+
+  // STREAM 1 (Forcefield alerts, safe blocking, tripwire).
+  // forcefield.web_alert_notified { kind, fingerprint, recipient_count } - the
+  // in-app half of an alert, emitted by fanoutToTeam. The delivery OUTCOME
+  // (in-app + Graph email, delivered or failed) is forcefield.web_alert_dispatched.
+  | "forcefield.web_alert_notified"
+  // forcefield.alert_silence_detected { hostile_events, delivered_alerts, hours } -
+  // the daily silence check found hostile events in the last 24h but no alert
+  // that reached a person. Raised as an alert itself.
+  | "forcefield.alert_silence_detected"
+  // forcefield.autoblock_capped { operatorKey, reason, resolved, proven, cap } - an
+  // automatic operator block resolved to more fingerprints than the cap, so only
+  // the fingerprints that carried proof were blocked and the rest were left for
+  // a human.
+  | "forcefield.autoblock_capped"
+  // forcefield.autoblock_skipped { reason, rule, mode, auto_block } - an automatic
+  // block was refused by the edge policy or by qualifiesForAutoBlock.
+  | "forcefield.autoblock_skipped"
+  // forcefield.canary_tripped { canary_id, kind, surface, seeded_in, agent_id? } -
+  // a decoy (token, route, row or tool) was touched in an inbound request, an
+  // agent message, a tool call or a tool's output.
+  | "forcefield.canary_tripped";
 
 export interface InstinctEvent {
   event_type: InstinctEventType;

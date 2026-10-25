@@ -51,6 +51,9 @@ export interface OperatorDossierLite {
    *  match is a FALSE POSITIVE and permanently blocks the signature's promotion. */
   welcomed?: boolean;
   tells: string[];
+  /** Pinned by PROOF (a decoy trip, a live payload), not inferred from a coarse
+   *  grouping. Only a proven operator may be auto-blocked (qualifiesForAutoBlock). */
+  proven?: boolean;
 }
 
 export interface MinedSignature {
@@ -131,12 +134,29 @@ export interface LearnedSignatureDeps {
   recordShadowMatch: (sigHash: string) => Promise<void>;
   /** A signature matched a welcomed/known-good operator - a false positive. */
   recordFalsePositive: (sigHash: string) => Promise<void>;
-  /** Flip a signature shadow -> enforcing. */
-  promoteSignature: (sigHash: string) => Promise<void>;
+  /** Flip a signature shadow -> enforcing. Returns false when nothing changed
+   *  (so a failed or no-op promotion is never counted as one). */
+  promoteSignature: (sigHash: string) => Promise<boolean | void>;
   /** Auto-block a matched operator (resolve its edge fps into the distributed
-   *  block list under an auto:<reason> key). Returns fps blocked. */
-  autoBlockOperator: (operatorKey: string, reason: string) => Promise<number>;
-  track: (event: "forcefield.signature_mined" | "forcefield.signature_promoted" | "forcefield.signature_autoblocked", payload: Record<string, string | number | boolean>) => void;
+   *  block list under an auto:<reason> key). The live adapter passes the edge
+   *  policy + qualifiesForAutoBlock gate, caps the fan-out and sets an expiry.
+   *  Returns fingerprint rows NEWLY blocked. */
+  autoBlockOperator: (operatorKey: string, reason: string, input: { proven: boolean; trustBand: OperatorTrustBand }) => Promise<number>;
+  /** Analytics. Awaited, so the event is durable before a serverless response
+   *  returns (a fire-and-forget promotion event was being lost). */
+  track: (event: "forcefield.signature_mined" | "forcefield.signature_promoted" | "forcefield.signature_autoblocked", payload: Record<string, string | number | boolean>) => Promise<void> | void;
+}
+
+/** The trust band an operator's behavior maps to, for the auto-block gate.
+ *  Only "hostile" can ever qualify; "elevated" (probing, scraping) is watched,
+ *  not auto-blocked. */
+export type OperatorTrustBand = "trusted" | "caution" | "untrusted" | "hostile";
+
+export function trustBandOf(op: Pick<OperatorDossierLite, "threatLevel" | "welcomed">): OperatorTrustBand {
+  if (op.welcomed === true) return "trusted";
+  if (op.threatLevel === "hostile") return "hostile";
+  if (op.threatLevel === "elevated") return "untrusted";
+  return "caution";
 }
 
 export interface LearnedSignatureReport {
@@ -146,6 +166,14 @@ export interface LearnedSignatureReport {
   promoted: number;
   operatorsAutoBlocked: number;
   falsePositives: number;
+}
+
+async function safeTrack(deps: LearnedSignatureDeps, event: Parameters<LearnedSignatureDeps["track"]>[0], payload: Record<string, string | number | boolean>): Promise<void> {
+  try {
+    await deps.track(event, payload);
+  } catch {
+    /* analytics never breaks the learning pass */
+  }
 }
 
 /** True when a shadow signature has earned enforcement. */
@@ -180,7 +208,7 @@ export async function evaluateLearnedSignatures(deps: LearnedSignatureDeps): Pro
   for (const sig of mined) {
     await deps.upsertSignature(sig).catch(() => {});
   }
-  if (mined.length) deps.track("forcefield.signature_mined", { count: mined.length, dangerous: mined.filter((s) => s.dangerous).length });
+  if (mined.length) await safeTrack(deps, "forcefield.signature_mined", { count: mined.length, dangerous: mined.filter((s) => s.dangerous).length });
 
   // 2. Match live operators against stored signatures.
   const signatures = await deps.listSignatures().catch(() => [] as StoredSignature[]);
@@ -203,12 +231,15 @@ export async function evaluateLearnedSignatures(deps: LearnedSignatureDeps): Pro
         continue;
       }
 
-      // Hostile / elevated operator.
+      // Hostile / elevated operator. An enforcing match is only a REQUEST to
+      // block: the adapter's gate refuses an elevated or unproven operator.
       if (sig.status === "enforcing") {
-        const n = await deps.autoBlockOperator(op.operatorKey, `learned:${sig.sigHash.slice(0, 8)}`).catch(() => 0);
+        const n = await deps
+          .autoBlockOperator(op.operatorKey, `learned:${sig.sigHash.slice(0, 8)}`, { proven: op.proven === true, trustBand: trustBandOf(op) })
+          .catch(() => 0);
         if (n > 0) {
           report.operatorsAutoBlocked++;
-          deps.track("forcefield.signature_autoblocked", { sigHash: sig.sigHash, operatorKey: op.operatorKey, fps: n });
+          await safeTrack(deps, "forcefield.signature_autoblocked", { sigHash: sig.sigHash, operatorKey: op.operatorKey, fps: n });
         }
       } else {
         await deps.recordShadowMatch(sig.sigHash).catch(() => {});
@@ -221,9 +252,10 @@ export async function evaluateLearnedSignatures(deps: LearnedSignatureDeps): Pro
   const refreshed = await deps.listSignatures().catch(() => signatures);
   for (const sig of refreshed) {
     if (eligibleForPromotion(sig)) {
-      await deps.promoteSignature(sig.sigHash).catch(() => {});
+      const ok = await deps.promoteSignature(sig.sigHash).then((r) => r !== false, () => false);
+      if (!ok) continue;
       report.promoted++;
-      deps.track("forcefield.signature_promoted", { sigHash: sig.sigHash, prevalence: sig.prevalence, tells: sig.tells.join(",") });
+      await safeTrack(deps, "forcefield.signature_promoted", { sigHash: sig.sigHash, prevalence: sig.prevalence, tells: sig.tells.join(",") });
     }
   }
 

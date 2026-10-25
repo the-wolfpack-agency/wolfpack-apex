@@ -82,6 +82,17 @@ describe("auto-block: stop the proven-bad agent, spare everyone else", () => {
     expect(recordAudit).toHaveBeenCalledWith(expect.objectContaining({ action: "operator.blocked", afterState: expect.objectContaining({ auto: true }) }));
   });
 
+  it("an automatic block EXPIRES after AUTO_BLOCK_TTL_DAYS (only a human block is permanent)", async () => {
+    enforceAuto();
+    const before = Date.now();
+    await POST(req({ operatorKey: "op-bad", trustBand: "hostile", proven: true }));
+    const arg = blockOperator.mock.calls[0][0] as { expiresAt: string };
+    const ttlMs = new Date(arg.expiresAt).getTime() - before;
+    expect(ttlMs).toBeGreaterThan(13.9 * 86_400_000);
+    expect(ttlMs).toBeLessThanOrEqual(14 * 86_400_000 + 5_000);
+    expect(recordAudit).toHaveBeenCalledWith(expect.objectContaining({ afterState: expect.objectContaining({ expires_at: arg.expiresAt }) }));
+  });
+
   it("does NOT auto-block an INFERRED hostile actor (could be legitimate client traffic)", async () => {
     enforceAuto();
     const body = await (await POST(req({ operatorKey: "op-maybe", trustBand: "hostile", proven: false }))).json();

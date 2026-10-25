@@ -21,7 +21,7 @@ jest.mock("@/lib/analytics", () => ({ trackEvent: jest.fn() }));
 jest.mock("@/lib/notifications/in-app", () => ({ notify: () => Promise.resolve({ id: "n" }) }));
 
 import { z } from "zod";
-import { tryDispatchTool } from "@/lib/assistant/tools/dispatcher";
+import { tryDispatchTool, dispatchToolByName } from "@/lib/assistant/tools/dispatcher";
 import { registerTool, __resetRegistryForTests } from "@/lib/assistant/tools/registry";
 import type { ToolContext } from "@/lib/assistant/tools/types";
 
@@ -65,10 +65,39 @@ it("refuses an agent tool call that trips a decoy, after containment ran", async
 it("passes a clean action through, and guardAgentAction saw the real action", async () => {
   const res = await tryDispatchTool("show status", agentCtx);
   expect(res?.result.ok).toBe(true);
-  expect(mockGuard).toHaveBeenCalledTimes(1);
+  // Twice: the tool CALL (before it runs) and the tool OUTPUT (after it runs).
+  expect(mockGuard).toHaveBeenCalledTimes(2);
   const action = mockGuard.mock.calls[0][0] as { workspaceId: string; agentId: string; kind: string; tool: string; payload: string };
   expect(action).toMatchObject({ workspaceId: "ws-1", agentId: "agent-1", kind: "tool_call", tool: "read_status" });
   expect(action.payload).toContain("hello"); // the serialized params, where an exfil-token decoy would be caught
+  const output = mockGuard.mock.calls[1][0] as { kind: string; tool: string; output: string };
+  expect(output).toMatchObject({ kind: "tool_output", tool: "read_status" });
+  expect(output.output).toContain("read_status"); // the serialized result, where a honey-row or decoy credential would be caught
+});
+
+it("withholds a tool's OUTPUT when a decoy appears in it (the tool ran, the agent never sees the result)", async () => {
+  mockGuard.mockResolvedValueOnce(ALLOW).mockResolvedValueOnce(QUARANTINE);
+  const res = await tryDispatchTool("show status", agentCtx);
+  expect(res?.result.ok).toBe(false);
+  if (res && !res.result.ok) {
+    expect(res.result.code).toBe("capability");
+    expect(res.result.message).toMatch(/decoy reached in tool output/);
+    expect(res.result.message).not.toContain("read_status\"");
+  }
+});
+
+it("runs an agent's call to an UNREGISTERED tool name through the tripwire (a honeypot tool has no handler)", async () => {
+  mockGuard.mockResolvedValue(QUARANTINE);
+  const res = await dispatchToolByName("admin_bulk_export_abc123", { all: true }, agentCtx);
+  expect(res).toBeNull();
+  expect(mockGuard).toHaveBeenCalledTimes(1);
+  expect(mockGuard.mock.calls[0][0]).toMatchObject({ kind: "tool_call", tool: "admin_bulk_export_abc123", agentId: "agent-1" });
+});
+
+it("does not run the tripwire for a HUMAN naming an unknown tool", async () => {
+  const res = await dispatchToolByName("admin_bulk_export_abc123", {}, humanCtx);
+  expect(res).toBeNull();
+  expect(mockGuard).not.toHaveBeenCalled();
 });
 
 it("never subjects the HUMAN path to Forcefield", async () => {

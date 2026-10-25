@@ -50,8 +50,11 @@ client-controlled, so a true sev-1 block event is rare by design).
 
 - During a reported incident, the customer's fair-use allowance is not counted
   (see pricing) and enforcement can be dialed back to watch-only on request.
-- Alerting on high-confidence hostile signals (trap trips, payload attacks) is a
-  product feature, not only an SLA term.
+- Alerting on high-confidence hostile signals (trap trips, payload attacks, canary
+  trips) is a product feature, not only an SLA term. One alert per site, attack
+  class and 6-hour window; every delivery outcome is recorded, and a daily silence
+  check alerts if hostile traffic produced no delivered alert. See
+  `alerts-blocking-tripwire.md`.
 
 ## 6. Remedies `[COMMIT]`
 

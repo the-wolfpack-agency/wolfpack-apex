@@ -156,7 +156,14 @@ export async function dispatchToolByName(
   ctx: ToolContext,
 ): Promise<ToolDispatchResult | null> {
   const tool = getToolByName(name);
-  if (!tool) return null;
+  if (!tool) {
+    /* An AGENT naming a tool that does not exist may be reaching for a
+       honeypot tool (a decoy name advertised where only a hijacked agent would
+       find it). Run it through the tripwire before reporting no-such-tool, so
+       a decoy tool name trips even though no handler is registered for it. */
+    if (ctx.agentPrincipal) await tripwireCheck(ctx.agentPrincipal, { kind: "tool_call", tool: name, payload: safeJson(params) }, name);
+    return null;
+  }
 
   /* The same two principal rules the matching path enforces. A routine must not
      become the way an agent reaches a human-only tool, or a human reaches an
@@ -442,6 +449,17 @@ async function runOneTool<P, R>(
   }
   const execDurationMs = Date.now() - startedExec;
 
+  /* 4b. Forcefield on the OUTPUT (AGENT principals only). A decoy credential,
+         honey-row or decoy URL in what a tool returned means the agent reached
+         data nothing legitimate reads. Contain it and withhold the output, so
+         the decoy never reaches the agent. */
+  if (agent) {
+    const tripped = await tripwireCheck(agent, { kind: "tool_output", tool: tool.name, output: safeJson(result) }, tool.name);
+    if (tripped) {
+      return failure("capability", `Forcefield: decoy reached in tool output; agent quarantined and its scope revoked (${tripped})`);
+    }
+  }
+
   /* 5. Record the action OUTCOME (the RESULT half of the audit trail) for a
         GOVERNED AGENT principal only, linked to the decision seq. The decision
         captured the redacted INPUT; this captures the redacted RESULT, so the
@@ -483,6 +501,49 @@ function failure(
   message: string,
 ): ToolFailure {
   return { ok: false, code, message };
+}
+
+/** Serialize for the tripwire scan. An unserializable value (a cycle, a BigInt)
+ *  is reported as such rather than as an empty string, so "nothing to scan" and
+ *  "could not scan" are never spelled the same. */
+function safeJson(v: unknown): string {
+  try {
+    return JSON.stringify(v) ?? "";
+  } catch (err) {
+    // The tripwire cannot scan what it cannot serialize, so say so.
+    console.warn("[tripwire] value not serializable; canary scan skipped for it", err);
+    return "[unserializable]";
+  }
+}
+
+/**
+ * Run one agent action through the Forcefield tripwire. On a trip the agent is
+ * already contained inside guardAgentAction (scope revoked, ledger record,
+ * event + audit entry + alert); this also alerts the owner and returns the
+ * containment reason so the caller refuses. Returns null when nothing tripped.
+ * Degrades open on an unexpected error (secondary control; logged, not hidden).
+ */
+async function tripwireCheck(
+  agent: NonNullable<ToolContext["agentPrincipal"]>,
+  partial: { kind: "tool_call" | "tool_output"; tool: string; payload?: string; output?: string },
+  toolName: string,
+): Promise<string | null> {
+  try {
+    const contained = await guardAgentAction(
+      { workspaceId: agent.workspaceId, agentId: agent.agentId, ...partial },
+      liveContainmentDeps(),
+    );
+    if (contained.decision.action === "quarantine") {
+      await alertAgentBlock(agent, toolName, `Forcefield: ${contained.decision.reason}`);
+      return contained.decision.reason;
+    }
+  } catch (err) {
+    console.warn(
+      `[forcefield] containment check errored for agent ${agent.agentId} on ${toolName}; degraded open:`,
+      (err as Error)?.message ?? "unknown",
+    );
+  }
+  return null;
 }
 
 /**

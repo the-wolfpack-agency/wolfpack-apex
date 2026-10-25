@@ -52,6 +52,10 @@ export interface ContainmentDeps {
   revokeAgentScope: (workspaceId: string, agentId: string) => Promise<void>;
   /** Write the trip to the hash-chained OGIAM ledger for triage. */
   recordTrip: (trip: TripRecord) => Promise<void>;
+  /** Record the trip as an analytics event + audit-log entry and alert a person
+   *  (canary-store recordCanaryTrip). Optional so a caller without the alert
+   *  path still contains; the live adapter always supplies it. */
+  notifyTrip?: (trip: TripRecord) => Promise<void>;
 }
 
 export interface ContainmentOutcome {
@@ -62,6 +66,8 @@ export interface ContainmentOutcome {
    *  audit or revoke without the failure ever blocking containment. */
   revoked: boolean;
   recorded: boolean;
+  /** The trip event + audit entry + alert landed (false when not supplied). */
+  alerted: boolean;
 }
 
 async function settled(p: Promise<unknown>): Promise<boolean> {
@@ -88,15 +94,17 @@ export async function guardAgentAction(
   const decision = containmentFor(verdict, action);
 
   if (decision.action !== "quarantine") {
-    return { decision, contained: false, revoked: false, recorded: false };
+    return { decision, contained: false, revoked: false, recorded: false, alerted: false };
   }
 
   // Contain and audit as INDEPENDENT best-effort effects. Neither blocks the
   // other; a failure in one must not stop the other or reach the caller.
-  const [revoked, recorded] = await Promise.all([
+  const trip: TripRecord = { workspaceId: action.workspaceId, agentId: action.agentId, action, decision };
+  const [revoked, recorded, alerted] = await Promise.all([
     settled(deps.revokeAgentScope(action.workspaceId, action.agentId)),
-    settled(deps.recordTrip({ workspaceId: action.workspaceId, agentId: action.agentId, action, decision })),
+    settled(deps.recordTrip(trip)),
+    deps.notifyTrip ? settled(deps.notifyTrip(trip)) : Promise.resolve(false),
   ]);
 
-  return { decision, contained: true, revoked, recorded };
+  return { decision, contained: true, revoked, recorded, alerted };
 }

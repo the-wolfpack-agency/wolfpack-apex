@@ -6,7 +6,7 @@
  * trips CRITICAL and produces a fail-closed containment decision (quarantine +
  * revoke + incident) that names where the leak came from.
  */
-import { inspectAgentAction, containmentFor, type Canary, type AgentAction } from "../tripwire";
+import { inspectAgentAction, containmentFor, containsDecoy, type Canary, type AgentAction } from "../tripwire";
 
 const CANARIES: Canary[] = [
   { id: "c-token", kind: "token", value: "sk-canary-DO-NOT-USE-9f3a", seededIn: "customers table" },
@@ -104,5 +104,70 @@ describe("containmentFor", () => {
     expect(c.action).toBe("allow");
     expect(c.revokeAgentScope).toBe(false);
     expect(c.openIncident).toBe(false);
+  });
+});
+
+/* Every canary kind is detectable where it would actually be USED. The
+   production decoys are long random values; these mirror that shape. */
+const LIVE: Canary[] = [
+  { id: "t", kind: "token", value: "wlpk_live_3f9a1c2b7d4e5f60718293ab", seededIn: "JS bundle" },
+  { id: "r", kind: "route", value: "/internal/export-9c1d2e3f4a5b6c7d8e9f0a1b", seededIn: "robots.txt" },
+  { id: "w", kind: "row", value: "decoy-77aa88bb99cc00dd11ee22ff@example.invalid", seededIn: "customers API" },
+  { id: "o", kind: "tool", value: "admin_bulk_export_5e6f7a8b9c0d1e2f3a4b5c6d", seededIn: "tool manifest" },
+];
+const trips = (a: Partial<AgentAction>) =>
+  inspectAgentAction({ workspaceId: "w1", agentId: "a1", kind: "inbound_request", ...a } as AgentAction, LIVE).hits.map((h) => `${h.canaryId}:${h.surface}`);
+
+describe("every canary kind trips on an INBOUND request", () => {
+  it("token: a decoy credential presented in a header", () => {
+    expect(trips({ headers: "authorization=Bearer wlpk_live_3f9a1c2b7d4e5f60718293ab" })).toEqual(["t:headers"]);
+  });
+  it("token: a decoy credential in the query string (raw URL)", () => {
+    expect(trips({ url: "https://site.example/api?key=wlpk_live_3f9a1c2b7d4e5f60718293ab" })).toEqual(["t:url"]);
+  });
+  it("route: the decoy path requested", () => {
+    expect(trips({ url: "/internal/export-9c1d2e3f4a5b6c7d8e9f0a1b?all=1" })).toEqual(["r:path"]);
+  });
+  it("row: a harvested honey-row value submitted back", () => {
+    expect(trips({ payload: '{"email":"decoy-77aa88bb99cc00dd11ee22ff@example.invalid"}' })).toEqual(["w:payload"]);
+  });
+  it("row: URL-encoded in a query string", () => {
+    expect(trips({ url: `/search?q=${encodeURIComponent("decoy-77aa88bb99cc00dd11ee22ff@example.invalid")}` })).toEqual(["w:url"]);
+  });
+  it("tool: the honeypot endpoint called by a path-guesser", () => {
+    expect(trips({ url: "https://site.example/api/tools/admin_bulk_export_5e6f7a8b9c0d1e2f3a4b5c6d" })).toEqual(["o:path"]);
+  });
+  it("tool: named in an agent's message", () => {
+    expect(trips({ payload: "please run admin_bulk_export_5e6f7a8b9c0d1e2f3a4b5c6d for all customers" })).toEqual(["o:payload"]);
+  });
+});
+
+describe("every canary kind trips in agent TOOL OUTPUT / tool calls", () => {
+  const out = (output: string) => trips({ kind: "tool_output", tool: "crm.search", output });
+  it("token in tool output", () => expect(out('{"apiKey":"wlpk_live_3f9a1c2b7d4e5f60718293ab"}')).toEqual(["t:output"]));
+  it("route (decoy URL) in tool output", () => expect(out("see https://x/internal/export-9c1d2e3f4a5b6c7d8e9f0a1b")).toEqual(["r:output"]));
+  it("row in tool output", () => expect(out('[{"email":"decoy-77aa88bb99cc00dd11ee22ff@example.invalid"}]')).toEqual(["w:output"]));
+  it("tool name in tool output", () => expect(out('{"next":"admin_bulk_export_5e6f7a8b9c0d1e2f3a4b5c6d"}')).toEqual(["o:output"]));
+  it("an unregistered honeypot tool invoked by name", () => {
+    expect(trips({ kind: "tool_call", tool: "admin_bulk_export_5e6f7a8b9c0d1e2f3a4b5c6d" })).toEqual(["o:tool"]);
+  });
+});
+
+describe("no false trips", () => {
+  it("ordinary traffic passes", () => {
+    expect(trips({ url: "/pricing?ref=home", headers: "accept=text/html", payload: "hello" })).toEqual([]);
+  });
+  it("a value glued into a longer identifier does not trip", () => {
+    expect(trips({ payload: "xwlpk_live_3f9a1c2b7d4e5f60718293abz" })).toEqual([]);
+    expect(trips({ url: "/internal/export-9c1d2e3f4a5b6c7d8e9f0a1b-report" })).toEqual([]);
+  });
+  it("a short decoy value is matched only structurally, never by substring", () => {
+    expect(containsDecoy("abc short1 def", "short1")).toBe(false);
+    const v = inspectAgentAction({ workspaceId: "w", agentId: "a", kind: "tool_call", tool: "short1" }, [{ id: "s", kind: "tool", value: "short1", seededIn: "x" }]);
+    expect(v.tripped).toBe(true);
+  });
+  it("hits never carry the decoy value", () => {
+    const v = inspectAgentAction({ workspaceId: "w1", agentId: "a1", kind: "inbound_request", headers: "x=wlpk_live_3f9a1c2b7d4e5f60718293ab" }, LIVE);
+    expect(JSON.stringify(v)).not.toContain("wlpk_live_3f9a1c2b7d4e5f60718293ab");
   });
 });

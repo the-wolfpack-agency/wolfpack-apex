@@ -31,6 +31,8 @@ import { getAgent } from "@/lib/agents/store";
 // and silently no_match'd tools the human path had. See executor.ts.
 import { tryDispatchTool } from "@/lib/assistant/tools";
 import { trackEvent } from "@/lib/analytics";
+import { guardAgentAction } from "@/lib/forcefield/contain";
+import { liveContainmentDeps } from "@/lib/forcefield/contain-live";
 
 /* --------------------- Per-agent rate limiter ------------------------- */
 
@@ -126,6 +128,35 @@ export async function POST(req: NextRequest) {
       ownerUserId: principal.ownerUserId,
     },
   };
+
+  /* Forcefield tripwire on the INBOUND message. An agent presenting a decoy
+     credential, naming a honeypot tool, or asking for a decoy route or
+     honey-row got it from somewhere nothing legitimate reads. Contain it (scope
+     revoked, ledger + audit + alert inside guardAgentAction) and refuse before
+     any tool runs. Degrades open on an unexpected error: the OGIAM gate inside
+     the dispatcher still governs the action. */
+  try {
+    const contained = await guardAgentAction(
+      {
+        workspaceId: principal.workspaceId,
+        agentId: principal.agentId,
+        kind: "inbound_request",
+        url: "/api/agents/act",
+        payload: message,
+      },
+      liveContainmentDeps(),
+    );
+    if (contained.decision.action === "quarantine") {
+      trackEvent("agent.acted", principal.agentId, principal.role, {
+        agent_id: principal.agentId,
+        tool: "none",
+        allowed: false,
+      });
+      return json({ error: "agent_quarantined" }, 403);
+    }
+  } catch (err) {
+    console.warn(`[forcefield] inbound containment check errored for agent ${principal.agentId}; degraded open:`, (err as Error)?.message ?? "unknown");
+  }
 
   const result = await tryDispatchTool(message, ctx);
 
