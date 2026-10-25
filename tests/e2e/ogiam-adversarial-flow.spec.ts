@@ -149,6 +149,8 @@ test.describe("OGIAM adversarial flow, live dispatch reality check", () => {
 
     const list = page.getByTestId("ogiam-decisions-list");
     const empty = page.getByTestId("ogiam-decisions-empty");
+    // Wait for either to mount: counting at once reads the loading state as "neither" (2026-10-25).
+    await list.or(empty).first().waitFor({ state: "attached", timeout: 15_000 }).catch(() => {});
     const listCount = await list.count();
     const emptyCount = await empty.count();
     expect(

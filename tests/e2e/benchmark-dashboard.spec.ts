@@ -89,6 +89,8 @@ test.describe("Benchmark dashboard reality check", () => {
 
     const summary = page.getByTestId("benchmark-summary");
     const empty = page.getByTestId("benchmark-empty");
+    // Wait for either to mount: counting at once reads the loading state as "neither" (2026-10-25).
+    await summary.or(empty).first().waitFor({ state: "attached", timeout: 15_000 }).catch(() => {});
     const summaryCount = await summary.count();
     const emptyCount = await empty.count();
     expect(

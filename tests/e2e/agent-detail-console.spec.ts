@@ -92,6 +92,8 @@ test.describe("Agent detail command-view reality check", () => {
     // the DOM, never a silent blank.
     const identity = page.getByTestId("agent-name");
     const notFound = page.getByTestId("agent-not-found");
+    // Wait for either to mount: counting at once reads the loading state as "neither" (2026-10-25).
+    await identity.or(notFound).first().waitFor({ state: "attached", timeout: 15_000 }).catch(() => {});
     const identityCount = await identity.count();
     const notFoundCount = await notFound.count();
     expect(

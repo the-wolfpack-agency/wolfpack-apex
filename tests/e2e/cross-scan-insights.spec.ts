@@ -83,6 +83,8 @@ test.describe("Cross-scan intelligence console reality check", () => {
     // DOM, never a silent blank.
     const metrics = page.getByTestId("insights-metrics");
     const empty = page.getByTestId("insights-empty");
+    // Wait for either to mount: counting at once reads the loading state as "neither" (2026-10-25).
+    await metrics.or(empty).first().waitFor({ state: "attached", timeout: 15_000 }).catch(() => {});
     const metricsCount = await metrics.count();
     const emptyCount = await empty.count();
     expect(
