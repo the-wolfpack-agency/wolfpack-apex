@@ -100,9 +100,12 @@ test.describe("feedback screenshot data flow, real DB round-trip", () => {
     const feedbackId: string = posted.id;
 
     // 2. Independent read-back through the admin list. If the row never landed,
-    // or has_screenshot is computed wrong, this catches it.
+    // or has_screenshot is computed wrong, this catches it. includeTest=1:
+    // the inbox deliberately hides "E2E SCREENSHOT FLOW" notes from humans
+    // (src/app/api/admin/feedback/route.ts), so without it our own row is
+    // filtered out and the read-back finds nothing even though it landed.
     const listRes = await request.get(
-      `${target.baseUrl}/api/admin/feedback?status=all&limit=200`,
+      `${target.baseUrl}/api/admin/feedback?status=all&limit=200&includeTest=1`,
       { headers: { Authorization: `Bearer ${token}` } },
     );
     expect(listRes.status(), "admin feedback list reachable").toBe(200);
@@ -133,7 +136,9 @@ test.describe("feedback screenshot data flow, real DB round-trip", () => {
 
     // 4. The browser UI renders the page cleanly and shows the thumbnail.
     const snapshot = collectConsoleAndNetworkFailures(page);
-    const nav = await page.goto(`${target.baseUrl}/admin/feedback`, {
+    // Same flag on the page: it forwards includeTest=1 to the API, otherwise
+    // the inbox hides the smoke row this step is looking for.
+    const nav = await page.goto(`${target.baseUrl}/admin/feedback?includeTest=1`, {
       waitUntil: "domcontentloaded",
       timeout: 20_000,
     });

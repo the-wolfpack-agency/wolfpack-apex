@@ -68,7 +68,12 @@ test.describe("Admin MFA settings reality check", () => {
     });
 
     // The MFA SectionCard heading proves the section is wired into the page.
-    await expect(page.getByText(/Multi-factor authentication/i)).toBeVisible({ timeout: 15_000 });
+    // Role-scoped: once /api/auth/mfa/status resolves, the card body also says
+    // "Multi-factor authentication is off", so a bare getByText matched two
+    // elements and failed strict mode whenever the status fetch won the race.
+    await expect(
+      page.getByRole("heading", { name: /^Multi-factor authentication$/i }),
+    ).toBeVisible({ timeout: 15_000 });
 
     // The card renders in one of its states (loading -> disabled/confirmed).
     const card = page.getByTestId("mfa-settings-card");

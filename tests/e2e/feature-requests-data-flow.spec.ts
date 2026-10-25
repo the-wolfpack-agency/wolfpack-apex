@@ -56,10 +56,12 @@ test.describe("feature-requests data flow — real DB round-trip", () => {
       data: { title: uniqueTitle, description, priority: "low" },
     });
 
-    // 200 (or 201 — the endpoint uses 200 per the codebase) must carry a real id.
+    // The route answers 201 with the inserted row wrapped as { feature }.
+    // The row is NOT at the top level: reading `body.id` is how this spec
+    // (and the assistant form executor) missed the id on every run.
     expect([200, 201]).toContain(postRes.status());
-    const posted = await postRes.json();
-    expect(posted.id).toBeTruthy();
+    const posted = (await postRes.json()).feature;
+    expect(posted?.id, "POST /api/features returns { feature: { id } }").toBeTruthy();
     expect(typeof posted.id).toBe("string");
 
     // Independent GET by id — if the write was silently dropped, this
@@ -68,8 +70,8 @@ test.describe("feature-requests data flow — real DB round-trip", () => {
       headers: { Authorization: `Bearer ${token}` },
     });
     expect(getRes.status()).toBe(200);
-    const fetched = await getRes.json();
-    expect(fetched.id).toBe(posted.id);
+    const fetched = (await getRes.json()).feature;
+    expect(fetched?.id, "GET /api/features/:id returns { feature }").toBe(posted.id);
     expect(fetched.title).toBe(uniqueTitle);
     expect(fetched.description).toBe(description);
   });

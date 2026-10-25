@@ -500,8 +500,11 @@ async function submitFeature(
         : "Feature request submit failed.",
     );
   }
-  const featureId = typeof (data as { id?: string })?.id === "string"
-    ? (data as { id: string }).id
+  /* POST /api/features answers { feature: FeatureRequest }, like /api/tasks
+     ({ task }) and /api/goals/okrs ({ okr }). Reading a top-level `id` here
+     dropped the resource id on every successful submit. */
+  const featureId = typeof (data as { feature?: { id?: string } })?.feature?.id === "string"
+    ? (data as { feature: { id: string } }).feature.id
     : undefined;
   return success(`Submitted feature request: "${title}".`, featureId);
 }
