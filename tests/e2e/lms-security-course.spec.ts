@@ -81,6 +81,20 @@ async function stubCourseApi(page: Page) {
   return { posts };
 }
 
+/** Lessons render collapsed (a native <details>): the body, including the
+ *  "Mark complete" and "Check yourself" controls, is not shown until the
+ *  learner opens the lesson, and opening it is what records the view. Drive
+ *  the real interaction: assert the control is hidden while collapsed, open
+ *  the lesson by its summary, then assert the control is reachable. */
+async function openLesson(page: Page, lessonId: string) {
+  const lesson = page.getByTestId(`lesson-${lessonId}`);
+  await expect(lesson.getByTestId(`lesson-complete-${lessonId}`), "lesson controls start collapsed").toBeHidden();
+  await lesson.locator("summary").click();
+  await expect(lesson.locator("details")).toHaveAttribute("open", "");
+  await expect(page.getByTestId(`lesson-complete-${lessonId}`)).toBeVisible();
+  await expect(page.getByTestId(`lesson-check-${lessonId}`)).toBeVisible();
+}
+
 test.describe("LMS security course - learner journey", () => {
   test("loads the course scaffold: banner, ladder, lessons, four beats", async ({ page }) => {
     await stubInstinctSession(page);
@@ -114,12 +128,17 @@ test.describe("LMS security course - learner journey", () => {
     await page.goto(`${target.baseUrl}${PATH}`, { waitUntil: "domcontentloaded" });
     await expect(page.getByTestId("spl-course")).toBeVisible({ timeout: 20_000 });
 
-    // Complete the first lesson -> done badge + count increments.
+    // Open the first lesson, complete it -> done badge + count increments.
+    await openLesson(page, "l1");
     await page.getByTestId("lesson-complete-l1").click();
     await expect(page.getByTestId("lesson-done-l1")).toBeVisible();
     await expect(page.getByTestId("spl-progress-count")).toContainText("1 of 2");
+    await expect(page.getByTestId("lesson-complete-l1")).toBeDisabled();
+    await expect(page.getByTestId("lesson-complete-l1")).toHaveText("Completed");
+    await expect(page.getByTestId("spl-complete-badge")).toHaveCount(0);
 
-    // Complete the last lesson -> whole-course completion badge, Foundations passes.
+    // Open and complete the last lesson -> whole-course completion badge, Foundations passes.
+    await openLesson(page, "l2");
     await page.getByTestId("lesson-complete-l2").click();
     await expect(page.getByTestId("spl-complete-badge")).toBeVisible();
     await expect(page.getByTestId("spl-progress-count")).toContainText("2 of 2");
@@ -127,6 +146,9 @@ test.describe("LMS security course - learner journey", () => {
     // The client posted the right bodies.
     const completes = posts.filter((p) => p.action === "complete").map((p) => p.lessonId);
     expect(completes).toEqual(expect.arrayContaining(["l1", "l2"]));
+    // Opening each lesson recorded its view.
+    const viewed = posts.filter((p) => p.action === "view").map((p) => p.lessonId);
+    expect(viewed).toEqual(expect.arrayContaining(["l1", "l2"]));
   });
 
   test("'Check yourself' reveals the four-beat rubric and records a self-check", async ({ page }) => {
@@ -135,12 +157,14 @@ test.describe("LMS security course - learner journey", () => {
     await page.goto(`${target.baseUrl}${PATH}`, { waitUntil: "domcontentloaded" });
     await expect(page.getByTestId("spl-course")).toBeVisible({ timeout: 20_000 });
 
+    await openLesson(page, "l1");
+    await expect(page.getByTestId("lesson-selfcheck-l1")).toHaveCount(0); // rubric only after the check
     await page.getByTestId("lesson-check-l1").click();
     const rubric = page.getByTestId("lesson-selfcheck-l1");
     await expect(rubric).toBeVisible();
     await expect(rubric).toContainText(/Name the jargon/i);
     await expect(rubric).toContainText(/What it stops/i);
-    expect(posts.some((p) => p.action === "self_check" && p.lessonId === "l1")).toBe(true);
+    await expect.poll(() => posts.some((p) => p.action === "self_check" && p.lessonId === "l1")).toBe(true);
   });
 
   test("expanding a lesson records a view exactly once", async ({ page }) => {
