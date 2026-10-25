@@ -58,7 +58,7 @@ describe("threat-coverage matrix is self-checking", () => {
   });
 
   it("includes this week's threats as rows", () => {
-    for (const id of ["LLMJACKING", "NEXTJS-MIDDLEWARE-BYPASS", "PHP-CGI-INJECTION", "WP-PLUGIN-ABUSE", "FAST-AGENT", "CRAWLER-IMPERSONATION", "SECRET-FILES"]) {
+    for (const id of ["AGENT-CONFIG-FILES", "AI-TOOL-ADMIN", "LLMJACKING", "NEXTJS-MIDDLEWARE-BYPASS", "PHP-CGI-INJECTION", "WP-PLUGIN-ABUSE", "FAST-AGENT", "CRAWLER-IMPERSONATION", "SECRET-FILES"]) {
       const row = THREAT_COVERAGE.find((e) => e.id === id);
       expect(row).toBeDefined();
       expect(row!.sample).toBeTruthy();
@@ -109,5 +109,27 @@ describe("coverageSummary", () => {
     expect(s.gaps.every((g: ThreatEntry) => g.status === "gap")).toBe(true);
     // The no-guard residual is always a named gap, so the list is never empty.
     expect(s.gaps.some((g) => g.id === "LLM01-indirect-fence-coverage")).toBe(true);
+  });
+});
+
+describe("AI-tool probe rows are computed from the engine, not typed in", () => {
+  it.each(["AGENT-CONFIG-FILES", "AI-TOOL-ADMIN"])("%s earns covered by running its samples", (id) => {
+    const spec = THREAT_SPECS.find((s) => s.id === id)!;
+    expect(spec.check).toBeDefined();
+    expect(runThreatCheck(spec.check)).toBe("covered");
+    expect(THREAT_COVERAGE.find((e) => e.id === id)).toMatchObject({ status: "covered", lenses: ["probe-path"] });
+  });
+
+  it("AGENT-CONFIG-FILES flips to gap when the engine loses the signatures", () => {
+    jest.isolateModules(() => {
+      jest.doMock("@/lib/forcefield-web/ruleset", () => {
+        const actual = jest.requireActual("@/lib/forcefield-web/ruleset");
+        const ai = new Set<string>([...actual.AI_TOOL_CONFIG_PROBE_PATHS]);
+        return { ...actual, DEFAULT_RULESET: { ...actual.DEFAULT_RULESET, sensitivePaths: actual.DEFAULT_RULESET.sensitivePaths.filter((p: string) => !ai.has(p)) } };
+      });
+      const tc = require("@/lib/forcefield/threat-coverage") as typeof import("@/lib/forcefield/threat-coverage");
+      // the probe intel still names the files, so the row degrades to partial, never covered
+      expect(tc.THREAT_COVERAGE.find((e) => e.id === "AGENT-CONFIG-FILES")?.status).toBe("partial");
+    });
   });
 });

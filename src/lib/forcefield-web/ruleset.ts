@@ -51,14 +51,79 @@ export interface ForcefieldRuleset {
    *  Distributed centrally so every site verifies against current lists.
    *  Optional. */
   verifiedAgentRanges?: Record<string, string[]>;
+  /** Named probe classes (e.g. "ai_tool_config"), each a list of sensitivePaths
+   *  patterns. A probe that matched one of them carries props.probe_class, so
+   *  the board can group what a scanner was after. Labels only, never a block.
+   *  Optional; an older ruleset without it still validates. */
+  probeClasses?: Record<string, string[]>;
 }
+
+/**
+ * AI coding-assistant config and credential files (probe class
+ * "ai_tool_config"). These hold MCP server definitions and model-provider API
+ * keys, so a request for one on a web origin is key theft or recon: no site we
+ * protect serves any of them (guarded by the route-collision test). A dotfile
+ * pattern also covers its variants through observe.ts dotfileVariant
+ * ("/.mcp" -> "/.mcp.json", "/.aider" -> "/.aider.conf.yml") and every path
+ * under it ("/.cursor" -> "/.cursor/mcp.json"). Sources:
+ *   SANS ISC diary 33150, scanners requesting /.claude/mcp.json,
+ *   /.claude/settings.local.json, /.claude/.credentials.json,
+ *   /.config/claude/.credentials.json, /.cursor/mcp.json, /.vscode/mcp.json,
+ *   /.mcp/config.json: https://isc.sans.edu/diary/33150
+ *   Ryvane AI-honeypot report (2026-09-11), most-requested agent secrets incl.
+ *   .claude/.credentials.json and .aider.conf.yml:
+ *   https://ryvane.ai/journal/ai-honeypot-traffic-trends-2026
+ *   SANDWORM_MODE (Feb 2026) injects a rogue MCP server into Claude Code,
+ *   Claude Desktop, Cursor, VS Code Continue and Windsurf configs:
+ *   https://thehackernews.com/2026/02/malicious-npm-packages-harvest-crypto.html
+ * File locations from each tool's docs: Claude Desktop
+ * claude_desktop_config.json (https://modelcontextprotocol.io/quickstart/user),
+ * Gemini CLI .gemini/.env holding GEMINI_API_KEY
+ * (https://github.com/google-gemini/gemini-cli/blob/main/docs/get-started/authentication.mdx),
+ * Continue ~/.continue/config.yaml|json (https://docs.continue.dev/customize/config),
+ * Windsurf ~/.codeium/windsurf/mcp_config.json. "/.vscode" (which covers
+ * /.vscode/mcp.json) stays in the classic group above.
+ */
+export const AI_TOOL_CONFIG_PROBE_PATHS: readonly string[] = [
+  "/.claude", "/.config/claude", "/.cursor", "/.mcp", "/claude_desktop_config.json",
+  "/.gemini", "/.aider", "/.continue", "/.codeium",
+];
+
+/**
+ * Admin / code-execution endpoints of self-hosted AI platforms that are
+ * exploited in the wild (probe class "ai_tool_admin"). Only paths with a
+ * published advisory or exploitation report are listed.
+ *   Langflow CVE-2025-3248, unauthenticated exec() at /api/v1/validate/code
+ *   (CISA KEV, 2025-05-05): https://thehackernews.com/2025/05/critical-langflow-flaw-added-to-cisa.html
+ *   Langflow CVE-2026-33017, POST /api/v1/build_public_tmp/{flow_id}/flow,
+ *   exploited within 20h: https://www.sysdig.com/blog/cve-2026-33017-how-attackers-compromised-langflow-ai-pipelines-in-20-hours
+ *   LiteLLM CVE-2026-42271, MCP command injection at /mcp-rest/test/connection
+ *   and /mcp-rest/test/tools/list (CISA KEV, 2026-06-08):
+ *   https://labs.cloudsecurityalliance.org/research/csa-research-note-litellm-cve-2026-42271-ai-gateway-exploita/
+ *   MLflow CVE-2023-1177, path traversal through /ajax-api/2.0/mlflow
+ *   (https://advisories.gitlab.com/pkg/pypi/mlflow/CVE-2023-1177/, PoC
+ *   https://github.com/protectai/Snaike-MLflow)
+ *   ComfyUI botnet recon + Manager abuse, from the attacker's own script:
+ *   https://censys.com/blog/comfyui-servers-cryptomining-proxy-botnet/
+ * The Ollama API (/api/tags, /api/pull, ...) is listed with the LLMjacking
+ * group above and classed here too.
+ */
+export const AI_TOOL_ADMIN_PROBE_PATHS: readonly string[] = [
+  "/api/v1/validate/code", "/api/v1/build_public_tmp",
+  "/mcp-rest",
+  "/ajax-api/2.0/mlflow",
+  "/object_info", "/system_stats", "/customnode/install", "/manager/reboot",
+];
+
+/** Ollama's native API, already a sensitive path (LLMjacking group). */
+const OLLAMA_NATIVE_PATHS = ["/api/tags", "/api/ps", "/api/generate", "/api/chat", "/api/show", "/api/pull", "/api/embed"];
 
 /** The bundled fallback baked into every site. Kept deliberately broad so a site
  *  running on defaults alone still detects the common cases. Every entry below is
  *  DATA, so a change reaches every connected site on the next ruleset refresh
  *  (no re-vendor). Each group cites where the indicator comes from. */
 export const DEFAULT_RULESET: ForcefieldRuleset = {
-  version: "bundled-2",
+  version: "bundled-3",
   knownAgents: [
     // Only vendor-DOCUMENTED tokens. Most-specific first is not needed: every
     // token is distinct (Claude-User does not contain ClaudeBot, etc.).
@@ -133,10 +198,10 @@ export const DEFAULT_RULESET: ForcefieldRuleset = {
     "/v1/models", "/v1/chat/completions", "/v1/completions", "/v1/embeddings", "/v1/messages",
     "/api/v1/models", "/api/tags", "/api/ps", "/api/generate", "/api/chat", "/api/show",
     "/api/pull", "/api/embed", "/mcp", "/sse",
-    "/.claude", "/.config/claude", "/.cursor", "/.mcp",
-    // ComfyUI botnet recon + Manager abuse, from the attacker's own script:
-    // https://censys.com/blog/comfyui-servers-cryptomining-proxy-botnet/
-    "/object_info", "/system_stats", "/customnode/install", "/manager/reboot",
+    // AI-tool config files and AI-platform admin endpoints (probe classes
+    // ai_tool_config / ai_tool_admin, see probeClasses below).
+    ...AI_TOOL_CONFIG_PROBE_PATHS,
+    ...AI_TOOL_ADMIN_PROBE_PATHS,
   ],
   toolSignatures: [...DEFAULT_TOOL_SIGNATURES],
   blockedFingerprints: [],
@@ -151,6 +216,10 @@ export const DEFAULT_RULESET: ForcefieldRuleset = {
       "/wp-cron.php", "/wp-signup.php", "/wp-activate.php", "/wp-comments-post.php",
       "/wp-trackback.php", "/wp-links-opml.php", "/wp-mail.php", "/wp-load.php",
     ],
+  },
+  probeClasses: {
+    ai_tool_config: [...AI_TOOL_CONFIG_PROBE_PATHS],
+    ai_tool_admin: [...AI_TOOL_ADMIN_PROBE_PATHS, ...OLLAMA_NATIVE_PATHS],
   },
   // Served live by the ruleset/observe routes from the vendors' published lists
   // (src/lib/forcefield/crawler-ranges.ts). Empty in the bundle = every claimed
@@ -196,6 +265,7 @@ export function coerceRuleset(data: unknown): ForcefieldRuleset | null {
   };
   const platformPaths = strArrMap(d.platformPaths);
   const verifiedAgentRanges = strArrMap(d.verifiedAgentRanges);
+  const probeClasses = strArrMap(d.probeClasses);
   return {
     version: typeof d.version === "string" ? d.version : "remote",
     knownAgents: agents,
@@ -206,6 +276,7 @@ export function coerceRuleset(data: unknown): ForcefieldRuleset | null {
     datacenterPrefixes,
     platformPaths,
     verifiedAgentRanges,
+    probeClasses,
   };
 }
 

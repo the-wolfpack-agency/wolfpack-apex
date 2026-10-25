@@ -141,6 +141,16 @@ function matchedSensitive(
   return null;
 }
 
+/** The named probe class (ruleset.probeClasses) a matched sensitive pattern
+ *  belongs to, e.g. "ai_tool_config", or null. A label only: it never changes
+ *  whether or how the request is reported or blocked. */
+function probeClassOf(pattern: string, probeClasses: ForcefieldRuleset["probeClasses"]): string | null {
+  for (const [cls, patterns] of Object.entries(probeClasses ?? {})) {
+    if (patterns.includes(pattern)) return cls;
+  }
+  return null;
+}
+
 /** OpenAI's ChatGPT agent signs requests with Web Bot Auth (RFC 9421 HTTP
  *  Message Signatures): Signature-Agent + Signature + Signature-Input headers
  *  (https://help.openai.com/en/articles/11845367-chatgpt-agent-allowlisting).
@@ -271,8 +281,9 @@ export function observeRequest(input: ObserveInput, ruleset: ForcefieldRuleset):
   // decoy trip, and evaluated whatever the UA claims.
   const attack = detectHeaderAttack(input.headerNames, path) ?? detectPayload(input.rawUrl ?? path);
   const native = input.platform ? ruleset.platformPaths?.[input.platform] ?? [] : [];
+  const sensitive = matchedSensitive(path, ruleset.sensitivePaths, native);
   const probe =
-    matchedSensitive(path, ruleset.sensitivePaths, native) ??
+    sensitive ??
     updraftCentralProbe(userAgent, input.platform) ??
     (input.platform === "wordpress" && WP_BACKDOOR_TRIGGER.test(input.rawUrl ?? "") ? "wp_backdoor_trigger" : null) ??
     // A Server Action invocation (`next-action` header) from a NON-browser
@@ -328,6 +339,8 @@ export function observeRequest(input: ObserveInput, ruleset: ForcefieldRuleset):
 
   const props = agentProps(input, ruleset, verdict.matchedAgentId ?? (signedAgent ? "signed_agent" : undefined));
   if (probe) props.probe = probe;
+  const probeClass = sensitive ? probeClassOf(sensitive, ruleset.probeClasses) : null;
+  if (probeClass) props.probe_class = probeClass;
   if (attack) {
     props.attack = attack;
     if (PAYLOAD_CWE[attack]) props.cwe = PAYLOAD_CWE[attack];
