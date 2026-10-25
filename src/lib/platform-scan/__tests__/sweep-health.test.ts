@@ -7,6 +7,8 @@
  *   - top-level throw        -> caught, status failed, results=[], alert + run row recorded (never re-throws)
  *   - status-change dedup    -> a persistently-broken sweep alerts only on transition into unhealthy, not every tick
  *   - decideStatus           -> the pure status table
+ *   - zero targets / all skipped -> no_targets, sweep_no_targets fired (never sweep_completed), alert
+ *   - a skipped target is never a success (some assessed + some skipped -> partial)
  * All deps are injected: no real DB, no real email, no real analytics row.
  */
 import {
@@ -55,9 +57,19 @@ const actor = { id: "cron", role: "system" };
 const started = new Date("2026-06-27T11:59:00.000Z");
 
 describe("decideStatus", () => {
-  it("ok when no failures", () => {
+  it("ok only when every target was assessed", () => {
     expect(decideStatus(3, 0, false)).toBe("ok");
-    expect(decideStatus(0, 0, false)).toBe("ok"); // nothing due is not a failure
+    expect(decideStatus(3, 0, false, 0)).toBe("ok");
+  });
+  it("no_targets when nothing was assessed (zero targets, or all skipped)", () => {
+    expect(decideStatus(0, 0, false)).toBe("no_targets");
+    expect(decideStatus(0, 0, false, 4)).toBe("no_targets");
+  });
+  it("partial when some were assessed and others skipped (a skip is not a success)", () => {
+    expect(decideStatus(2, 0, false, 1)).toBe("partial");
+  });
+  it("failed when targets failed and none succeeded, even with skips", () => {
+    expect(decideStatus(0, 2, false, 3)).toBe("failed");
   });
   it("partial when some succeed and some fail", () => {
     expect(decideStatus(2, 1, false)).toBe("partial");
@@ -71,18 +83,24 @@ describe("decideStatus", () => {
 });
 
 describe("outcome classifiers", () => {
-  it("treats an error: skip as a failure and a benign skip as success", () => {
-    expect(engagementOutcome({ platform: "a", skipped: "error:boom" })).toMatchObject({
+  it("treats an error: skip as a failure and a benign skip as a skip, never a success", () => {
+    expect(engagementOutcome({ platform: "a", skipped: "error:boom" })).toEqual({
       target: "a",
       ok: false,
+      reason: "error:boom",
     });
-    expect(engagementOutcome({ platform: "b", skipped: "no_static_target" })).toMatchObject({
-      ok: true,
+    expect(engagementOutcome({ platform: "b", skipped: "no_static_target" })).toEqual({
+      target: "b",
+      ok: false,
+      skipped: true,
+      reason: "no_static_target",
     });
-    expect(engagementOutcome({ platform: "c" })).toMatchObject({ ok: true });
+    expect(engagementOutcome({ platform: "c" })).toEqual({ target: "c", ok: true });
     expect(pentestOutcome({ platform: "d", skipped: "error:x" })).toMatchObject({ ok: false });
+    expect(pentestOutcome({ platform: "d", skipped: "error:x" }).skipped).toBeUndefined();
     expect(pentestOutcome({ platform: "e", skipped: "no_active_scope" })).toMatchObject({
-      ok: true,
+      ok: false,
+      skipped: true,
     });
   });
 });
@@ -299,10 +317,7 @@ describe("runSweepWithHealth", () => {
       {
         kind: "engagement",
         actor,
-        run: async () => [
-          { platform: "a", skipped: undefined },
-          { platform: "b", skipped: "no_static_target" },
-        ],
+        run: async () => [{ platform: "a", skipped: undefined }, { platform: "c" }],
         outcome: engagementOutcome,
       },
       deps,
@@ -312,6 +327,71 @@ describe("runSweepWithHealth", () => {
     expect(out.health.status).toBe("ok");
     expect(notifies).toHaveLength(0);
     expect(inserted[0].status).toBe("ok");
+  });
+
+  it("an assessed target plus a skipped one is partial, not ok", async () => {
+    const { deps, inserted, events } = makeDeps();
+    const out = await runSweepWithHealth(
+      {
+        kind: "engagement",
+        actor,
+        run: async () => [
+          { platform: "a", skipped: undefined },
+          { platform: "b", skipped: "no_static_target" },
+        ],
+        outcome: engagementOutcome,
+      },
+      deps,
+    );
+    expect(out.health).toMatchObject({ status: "partial", targetsSucceeded: 1, targetsFailed: 0, targetsSkipped: 1 });
+    expect(inserted[0]).toMatchObject({ status: "partial", targetsSkipped: 1 });
+    expect(events.map((e) => e.event)).not.toContain("platform.sweep_completed");
+  });
+
+  it("zero targets -> no_targets run, sweep_no_targets fired, never sweep_completed", async () => {
+    const { deps, inserted, notifies, events } = makeDeps();
+    const out = await runSweepWithHealth(
+      { kind: "pentest", actor, run: async () => [], outcome: pentestOutcome },
+      deps,
+    );
+    expect(out.health.status).toBe("no_targets");
+    expect(inserted[0]).toMatchObject({ status: "no_targets", targetsTotal: 0 });
+    expect(events).toHaveLength(1);
+    expect(events[0].event).toBe("platform.sweep_no_targets");
+    expect(events[0].meta).toMatchObject({ kind: "pentest", targets: 0, status: "no_targets" });
+    expect(notifies).toHaveLength(1);
+    expect(JSON.stringify(notifies[0])).toContain("NO targets");
+  });
+
+  it("every target skipped -> no_targets with the skip reasons in the alert", async () => {
+    const { deps, notifies, events } = makeDeps();
+    const out = await runSweepWithHealth(
+      {
+        kind: "engagement",
+        actor,
+        run: async () => [
+          { platform: "wolfpack-instinct", skipped: "no_static_target" },
+          { platform: "ogiam", skipped: "no_static_target" },
+        ],
+        outcome: engagementOutcome,
+      },
+      deps,
+    );
+    expect(out.health).toMatchObject({ status: "no_targets", targetsSkipped: 2, targetsSucceeded: 0 });
+    expect(events[0].event).toBe("platform.sweep_no_targets");
+    expect(JSON.stringify(notifies[0])).toContain("ogiam (skipped: no_static_target)");
+  });
+
+  it("a persistent no_targets state alerts once, not every tick", async () => {
+    const { deps, notifies, setPrevious } = makeDeps();
+    setPrevious("no_targets");
+    const out = await runSweepWithHealth(
+      { kind: "engagement", actor, run: async () => [], outcome: engagementOutcome },
+      deps,
+    );
+    expect(out.health.status).toBe("no_targets");
+    expect(out.health.alerted).toBe(false);
+    expect(notifies).toHaveLength(0);
   });
 
   it("one target's error: result -> partial run, sweep continues, alert sent", async () => {

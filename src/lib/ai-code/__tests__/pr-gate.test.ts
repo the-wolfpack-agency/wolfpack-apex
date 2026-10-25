@@ -143,3 +143,69 @@ describe("gatePullRequestDiff with a workspace policy", () => {
     expect(v.conclusion).toBe("success"); // clean built-in gate still stands
   });
 });
+
+describe("verdict lines for the CWE-862 and known-compromised layers", () => {
+  const finding = (over: Record<string, unknown>) => ({
+    route: "package-lock.json", severity: "critical" as const, category: "security" as const, title: "t", detail: "d",
+    evidence: { package: "@subql/common", version: "5.8.3", advisory_id: "subql-common-2026-10-05", source: "https://www.stepsecurity.io/blog/subql-ecosystem-compromised", ...over },
+  });
+
+  it("a compromised-dependency block names the package, advisory id and advisory source", () => {
+    const v = assessmentToVerdict({
+      ...clean(), handoffAllowed: false, blockedBy: "compromised-dependency",
+      compromisedDependencies: { status: "checked", lockfiles: ["package-lock.json"], entriesChecked: 3, findings: [finding({})], listUpdated: "2026-10-24" },
+    });
+    expect(v.conclusion).toBe("action_required");
+    expect(v.title).toMatch(/known-compromised/i);
+    expect(v.summary).toContain("@subql/common@5.8.3");
+    expect(v.summary).toContain("[subql-common-2026-10-05]");
+    expect(v.summary).toContain("advisory: https://www.stepsecurity.io/blog/subql-ecosystem-compromised");
+  });
+
+  it("a missing list is STATED in the verdict, never presented as clear", () => {
+    const v = assessmentToVerdict({
+      ...clean(),
+      compromisedDependencies: { status: "list_missing", lockfiles: ["package-lock.json"], entriesChecked: 2, findings: [], reason: "security/known-compromised.json not found" },
+    });
+    expect(v.summary).toContain("Known-compromised packages: NOT CHECKED (security/known-compromised.json not found)");
+    expect(v.summary).toContain("2 lockfile entries unverified");
+  });
+
+  it("a clean lockfile check says how many entries were checked", () => {
+    const v = assessmentToVerdict({ ...clean(), compromisedDependencies: { status: "checked", lockfiles: ["pnpm-lock.yaml"], entriesChecked: 1, findings: [], listUpdated: "2026-10-24" } });
+    expect(v.summary).toContain("Known-compromised packages: clear (1 added or changed lockfile entry checked, list updated 2026-10-24)");
+  });
+
+  it("no lockfile in the change adds no line", () => {
+    const v = assessmentToVerdict({ ...clean(), compromisedDependencies: { status: "not_applicable", lockfiles: [], entriesChecked: 0, findings: [] } });
+    expect(v.summary).not.toContain("Known-compromised");
+  });
+
+  it("missing-auth: blocked lists the routes; unevaluated says so", () => {
+    const blocked = assessmentToVerdict({
+      ...clean(), handoffAllowed: false, blockedBy: "missing-auth",
+      missingAuth: { evaluated: true, findings: [{ route: "src/app/api/admin/x/route.ts", severity: "critical", category: "security", title: "t", detail: "d", evidence: {} }] },
+    });
+    expect(blocked.title).toMatch(/CWE-862/);
+    expect(blocked.summary).toContain("  - src/app/api/admin/x/route.ts");
+    const skipped = assessmentToVerdict({ ...clean(), missingAuth: { evaluated: false, findings: [] } });
+    expect(skipped.summary).toContain("Missing authorization (CWE-862): not evaluated");
+  });
+});
+
+describe("gatePullRequestDiff passes repo + post-images to the real gate", () => {
+  it("blocks a compromised lockfile entry on a client repo", async () => {
+    const d = [
+      "diff --git a/package-lock.json b/package-lock.json",
+      "--- a/package-lock.json",
+      "+++ b/package-lock.json",
+      "@@ -1,2 +1,2 @@",
+      '     "node_modules/@apexacc/cli": {',
+      '+      "version": "1.0.0",',
+    ].join("\n");
+    const v = await gatePullRequestDiff(d, { repoFullName: "acme/app" });
+    expect(v.conclusion).toBe("action_required");
+    expect(v.assessment.blockedBy).toBe("compromised-dependency");
+    expect(v.summary).toContain("https://www.elastic.co/security-labs/threat-command/apex-accelerator-malicious-npm-packages");
+  });
+});

@@ -33,3 +33,53 @@ App and a correctness gate. ~65%.
 "A deterministic reviewer on every AI-written PR: it blocks the dangerous classes,
 confirms with a second independent model, and never merges itself." Priced per repo
 or per seat.
+
+## Operator install steps for the agentgate-ai GitHub App
+
+Read from the code (`src/app/api/github-app/webhook/route.ts`,
+`src/lib/github-app/`, `src/lib/github-client.ts`). The live App's current
+settings were not inspected; compare them against this list.
+
+1. App settings (GitHub, the App's "General" page):
+   - Webhook URL: `https://wolfpack-instinct.vercel.app/api/github-app/webhook`
+   - Webhook secret: the same value as the env var **`GITHUB_APP_WEBHOOK_SECRET`**
+     (the route verifies `x-hub-signature-256` with it and returns 401 on a
+     mismatch or a missing signature).
+   - Setup URL (post-install redirect):
+     `https://wolfpack-instinct.vercel.app/api/admin/connectors/github-app/install-callback`
+     (links the installation to the signed-in admin's workspace).
+2. Permissions the gate uses: Pull requests: read (diff), Contents: read
+   (post-images of changed files, so modified files are deep-scanned), Checks:
+   write (the verdict), and write access for PR comments (posted through the
+   issues comments API on a block). Subscribe to the **Pull request** event.
+3. App credentials in the deployment env: `GITHUB_APP_ID` and
+   `GITHUB_APP_PRIVATE_KEY` (`readAppConfigFromEnv`). Without them no
+   installation token can be minted, and the gate falls back to the
+   `GITHUB_TOKEN_WOLFPACK_AGENCY` PAT where one applies.
+4. Which repos:
+   - Client repos: the repos the client selects at install. Nothing else is
+     needed on their side. Making "Secure Agent / gate" a required check is
+     their optional branch-protection step.
+   - Our own repo `the-wolfpack-agency/wolfpack-apex`: installing it does nothing
+     until `SELFHOST_GATE_MODE` is raised from its default `off` to `comment`
+     (neutral, non-blocking check) and later `enforce`.
+5. Entitlement: the workspace needs `secure_agent` enabled (a per-workspace row
+   in `instinct_org_entitlements`, else the env default
+   `OGIAM_FEATURE_SECURE_AGENT`, which is on unless set to `off`/`false`/`0`).
+
+What a PR shows when it was NOT gated (every case also fires
+`ai_code.pr_gate_skipped` with the reason):
+
+| Reason | Check posted | Conclusion |
+|---|---|---|
+| `unknown_installation` (installation not linked to a workspace) | yes, via an installation token minted from the payload | neutral |
+| `not_entitled` | yes, via an installation token | neutral |
+| `no_token` | no (no token exists to post with) | none |
+| `gate_error` | yes, when the failure left a usable token | failure |
+
+Gate layers on a PR: security, engineering invariant, deep static scan (new and
+modified files; a finding in a modified file counts only on a line the PR
+added), missing authorization CWE-862 (our own repo only, where the
+protected-module convention is known), and known-compromised package versions in
+`package-lock.json` / `pnpm-lock.yaml` changes (checked offline against
+`security/known-compromised.json`, advisory source cited in the verdict).

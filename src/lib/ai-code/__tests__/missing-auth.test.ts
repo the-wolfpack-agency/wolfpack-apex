@@ -3,7 +3,9 @@
  * authored with no auth control, mirroring the repo's capability-coverage net, but
  * never false-fires on a gated / public / non-route file.
  */
-import { findMissingAuth, isProtectedApiRoute, hasAuthControl } from "@/lib/ai-code/missing-auth";
+import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
+import { join } from "node:path";
+import { findMissingAuth, isProtectedApiRoute, hasAuthControl, PROTECTED_API_MODULES } from "@/lib/ai-code/missing-auth";
 
 const route = (path: string, content: string) => ({ path, content });
 
@@ -51,5 +53,69 @@ describe("findMissingAuth", () => {
       route("src/lib/util.ts", "export const x = 1;"),
       route("src/app/(dashboard)/admin/page.tsx", "export default function P(){ return null; }"),
     ])).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fixtures drawn from THIS repo's own route shapes (read from disk, not
+// paraphrased), so the rule is proven against the code it will actually gate.
+// ---------------------------------------------------------------------------
+
+function walkRoutes(dir: string, out: string[] = []): string[] {
+  if (!existsSync(dir)) return out;
+  for (const name of readdirSync(dir)) {
+    const p = join(dir, name);
+    if (statSync(p).isDirectory()) walkRoutes(p, out);
+    else if (name === "route.ts") out.push(p);
+  }
+  return out;
+}
+
+const ROOT = process.cwd();
+const real = (rel: string) => ({ path: rel, content: readFileSync(join(ROOT, rel), "utf8") });
+
+describe("true negatives: every protected route already in this repo", () => {
+  const files = PROTECTED_API_MODULES.flatMap((m) => walkRoutes(join(ROOT, "src/app/api", m))).map((abs) =>
+    real(abs.slice(ROOT.length + 1)),
+  );
+
+  it("finds the protected routes (the walk is not vacuous)", () => {
+    expect(files.length).toBeGreaterThan(100);
+  });
+
+  it("produces ZERO findings over the repo's real protected routes", () => {
+    expect(findMissingAuth(files).map((f) => f.route)).toEqual([]);
+  });
+
+  it("recognizes each real auth shape: requireCapability, getUserFromRequest, verifyToken<T>()", () => {
+    expect(hasAuthControl(real("src/app/api/admin/platform-scans/profile/route.ts").content)).toBe(true);
+    expect(hasAuthControl(real("src/app/api/admin/audit-log/route.ts").content)).toBe(true);
+    expect(hasAuthControl(real("src/app/api/tasks/route.ts").content)).toBe(true);
+    expect(hasAuthControl(real("src/app/api/admin/connectors/oauth/[provider]/callback/route.ts").content)).toBe(true);
+  });
+});
+
+describe("true positives: the same real routes with their auth call removed", () => {
+  const strip = (rel: string, call: RegExp) => {
+    const r = real(rel);
+    const content = r.content.replace(call, "null as never; //");
+    expect(content).not.toBe(r.content); // the fixture really removed something
+    return { path: rel, content };
+  };
+
+  it("the admin profile route without requireCapability is held", () => {
+    const f = strip("src/app/api/admin/platform-scans/profile/route.ts", /await requireCapability\([^)]*\)/g);
+    expect(findMissingAuth([f])).toHaveLength(1);
+  });
+
+  it("the audit-log route without getUserFromRequest is held", () => {
+    const f = strip("src/app/api/admin/audit-log/route.ts", /getUserFromRequest\([^)]*\)\)/g);
+    // the import line still names it, but not as a call
+    expect(findMissingAuth([f])).toHaveLength(1);
+  });
+
+  it("the tasks route without getUserFromRequest is held", () => {
+    const f = strip("src/app/api/tasks/route.ts", /getUserFromRequest\([^)]*\)\)/g);
+    expect(findMissingAuth([f])).toHaveLength(1);
   });
 });

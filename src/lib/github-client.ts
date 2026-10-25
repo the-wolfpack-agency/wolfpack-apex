@@ -16,7 +16,7 @@
  * /api/sites/* must be checked before any function here is called.
  */
 
-import { resolveGithubToken } from "@/lib/github-app";
+import { resolveGithubToken, mintInstallationToken, type ResolveDeps } from "@/lib/github-app";
 
 export interface GithubClient {
   token: string;
@@ -773,4 +773,61 @@ export async function createPrComment(
   body: string,
 ): Promise<void> {
   await gh(client, "POST", `/repos/${repoFullName}/issues/${prNumber}/comments`, { body });
+}
+
+/**
+ * A GitHub client authenticated as the App's installation named by a webhook
+ * payload, minted directly from the installation id (no workspace lookup). The
+ * PR-gate uses it to post an explanatory check on a delivery it cannot gate (an
+ * installation not linked to a workspace, an unentitled tenant), because the
+ * App is installed on that repo even when no workspace claims it. Never throws:
+ * any failure (App not configured, bad key, GitHub non-2xx) returns token "".
+ * The token is never logged.
+ */
+export async function installationGithubClient(
+  installationId: string,
+  deps: Pick<ResolveDeps, "fetchImpl" | "appConfig" | "now"> = {},
+): Promise<GithubClient> {
+  const doFetch = deps.fetchImpl ?? globalThis.fetch;
+  if (!/^\d+$/.test(installationId)) return { token: "", fetch: doFetch };
+  // Reuse the one installation-token exchange (JWT signing, caching, never
+  // throws). The cache key is namespaced so it can never collide with a
+  // workspace id, and the "installation lookup" is the id from the payload.
+  const token = await mintInstallationToken(`installation:${installationId}`, {
+    ...deps,
+    loadInstallation: async () => ({
+      workspaceId: "",
+      installationId,
+      accountLogin: null,
+      linkedAt: "",
+      linkedBy: "",
+    }),
+  }).catch(() => null);
+  return { token: token ?? "", fetch: doFetch };
+}
+
+/**
+ * Fetch the post-image (content at `ref`) of each path, for the PR-gate's deep
+ * scan of MODIFIED files. Bounded (maxFiles, maxBytes per file) and best-effort:
+ * a file that 404s, is too large, or fails to fetch is skipped, never thrown.
+ */
+export async function fetchPostImages(
+  client: GithubClient,
+  repoFullName: string,
+  paths: readonly string[],
+  ref: string,
+  opts: { maxFiles?: number; maxBytes?: number } = {},
+): Promise<{ path: string; content: string }[]> {
+  const maxFiles = opts.maxFiles ?? 60;
+  const maxBytes = opts.maxBytes ?? 512 * 1024;
+  const out: { path: string; content: string }[] = [];
+  for (const path of paths.slice(0, maxFiles)) {
+    try {
+      const content = await fetchFileContent(client, repoFullName, path, ref);
+      if (content != null && content.length <= maxBytes) out.push({ path, content });
+    } catch {
+      // best-effort: an unreadable post-image is scanned as diff-only
+    }
+  }
+  return out;
 }

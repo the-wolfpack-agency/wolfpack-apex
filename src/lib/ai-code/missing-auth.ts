@@ -20,8 +20,13 @@ export const PROTECTED_API_MODULES: readonly string[] = [
   "admin", "hr", "finance", "clients", "meetings", "docs", "journal", "tasks", "knowledge", "tools",
 ];
 
-/** Any recognized server-side authorization entrypoint. One present => the route gates. */
-const AUTH_CONTROL = /\b(?:requireCapability|requireEntitlement|requireSession|factoryServiceAuth|isAuthorizedBearer|requireAgentAuth)\s*\(/;
+/** Any recognized server-side authorization entrypoint. One present => the route gates.
+ *  Drawn from this repo's own protected routes: requireCapability is the norm;
+ *  getUserFromRequest (session JWT + an in-route role check) gates the audit-log,
+ *  insights and tasks routes listed in CAPABILITY_ALLOWLIST; verifyToken (HMAC
+ *  signed OAuth state) gates the connector OAuth callback; the webhook verifiers
+ *  gate signed server-to-server deliveries. Any one present => not CWE-862. */
+const AUTH_CONTROL = /\b(?:requireCapability|requireEntitlement|requireSession|factoryServiceAuth|isAuthorizedBearer|requireAgentAuth|getUserFromRequest|verifyToken|verifyWebhookSignature|verifyWebhookClientState)\s*(?:<[^<>()]*>)?\s*\(/;
 /** An explicit, auditable opt-out for a deliberately public route. */
 const PUBLIC_MARKER = /\/\/\s*PUBLIC\b/;
 

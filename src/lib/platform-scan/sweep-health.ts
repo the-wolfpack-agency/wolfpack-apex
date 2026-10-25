@@ -16,7 +16,7 @@
  *       - the durable health ledger, no data lost about sweep health;
  *   (b) captures PER-TARGET outcome so one failing target never silently vanishes
  *       (its reason is recorded in the run's `details`);
- *   (c) derives status: ok / partial / failed;
+ *   (c) derives status: ok / partial / failed / no_targets;
  *   (d) on partial-or-failed, alerts the operator via the EXISTING notifications
  *       layer (notify(), the same mechanism recordScan uses for critical findings
  *       - we do NOT build a new notifier) and fires platform.sweep_failed; on a
@@ -45,6 +45,14 @@
  *     human-facing email/notification is deduped. notify(dedup:true) is a second
  *     safety net against same-tick duplicates.
  *
+ * HONESTY (migration 294). A tick with ZERO targets, or one where every target
+ * was skipped (no static target, no active scope, unknown platform), assessed
+ * nothing. It used to be recorded `ok` and fire platform.sweep_completed, so a
+ * sweep that had never assessed anything looked identical to a healthy one. It
+ * is now `no_targets` and fires platform.sweep_no_targets. A skipped target is
+ * never counted as a success: a tick where some targets succeeded and others were
+ * skipped is `partial`, because the skipped ones' posture did not refresh.
+ *
  * Every external dependency is injectable so tests never touch a real DB, send a
  * real email, or write a real analytics row.
  */
@@ -55,12 +63,16 @@ import { notify } from "@/lib/notifications/in-app";
 import { trackEvent, type InstinctEventType } from "@/lib/analytics";
 
 export type SweepKind = "engagement" | "pentest" | "ux";
-export type SweepStatus = "ok" | "partial" | "failed";
+export type SweepStatus = "ok" | "partial" | "failed" | "no_targets";
 
-/** Outcome of one target within a sweep. `reason` is set only on failure. */
+/** Outcome of one target within a sweep. `ok` is true only when the target was
+ *  actually assessed. A target that was not assessed for a non-error reason has
+ *  `skipped: true` (and `ok: false`); an errored target has neither. `reason`
+ *  carries the skip / error reason. */
 export interface TargetOutcome {
   target: string;
   ok: boolean;
+  skipped?: boolean;
   reason?: string;
 }
 
@@ -79,6 +91,8 @@ export interface SweepRunRecord {
   targetsTotal: number;
   targetsSucceeded: number;
   targetsFailed: number;
+  /** Targets not assessed for a non-error reason. Stored in details JSONB. */
+  targetsSkipped: number;
   status: SweepStatus;
   error: string | null;
   outcomes: TargetOutcome[];
@@ -124,6 +138,7 @@ async function realInsertRun(row: SweepRunRecord): Promise<void> {
         targets_total: row.targetsTotal,
         targets_succeeded: row.targetsSucceeded,
         targets_failed: row.targetsFailed,
+        targets_skipped: row.targetsSkipped,
       }),
     ],
   );
@@ -156,26 +171,29 @@ export const defaultSweepHealthDeps: SweepHealthDeps = {
 
 /**
  * Decide the run status from the per-target tally.
- *   failed  -> attempted targets > 0 and ALL failed, OR a top-level throw
- *              (succeeded === 0 && failed === 0 && hadError) means nothing ran.
- *   partial -> at least one failed AND at least one succeeded.
- *   ok      -> no failures.
- * A run with zero targets and no error is `ok` (nothing was due; not a failure).
+ *   failed     -> a top-level throw, OR targets failed and none succeeded.
+ *   partial    -> some failed or were skipped, and at least one succeeded.
+ *   no_targets -> nothing was assessed: zero targets, or every target skipped.
+ *   ok         -> every target was assessed successfully.
+ * A skipped target is never a success.
  */
 export function decideStatus(
   succeeded: number,
   failed: number,
   hadTopLevelError: boolean,
+  skipped = 0,
 ): SweepStatus {
   if (hadTopLevelError) return "failed";
-  if (failed === 0) return "ok";
-  if (succeeded === 0) return "failed";
-  return "partial";
+  if (failed > 0 && succeeded === 0) return "failed";
+  if (failed > 0 || (skipped > 0 && succeeded > 0)) return "partial";
+  if (succeeded === 0) return "no_targets";
+  return "ok";
 }
 
 const QUERIED_EVENT_BY_STATUS: Record<Exclude<SweepStatus, "ok">, InstinctEventType> = {
   partial: "platform.sweep_failed",
   failed: "platform.sweep_failed",
+  no_targets: "platform.sweep_no_targets",
 };
 
 // ---------------------------------------------------------------------------
@@ -197,6 +215,7 @@ export interface RecordSweepResult {
   targetsTotal: number;
   targetsSucceeded: number;
   targetsFailed: number;
+  targetsSkipped: number;
   alerted: boolean;
 }
 
@@ -211,9 +230,10 @@ export async function recordSweepRun(
   deps: SweepHealthDeps = defaultSweepHealthDeps,
 ): Promise<RecordSweepResult> {
   const succeeded = input.outcomes.filter((o) => o.ok).length;
-  const failed = input.outcomes.filter((o) => !o.ok).length;
+  const skipped = input.outcomes.filter((o) => !o.ok && o.skipped).length;
+  const failed = input.outcomes.filter((o) => !o.ok && !o.skipped).length;
   const hadError = Boolean(input.topLevelError);
-  const status = decideStatus(succeeded, failed, hadError);
+  const status = decideStatus(succeeded, failed, hadError, skipped);
 
   const runId = deps.newId();
   const finishedAt = deps.now().toISOString();
@@ -227,6 +247,7 @@ export async function recordSweepRun(
     targetsTotal: total,
     targetsSucceeded: succeeded,
     targetsFailed: failed,
+    targetsSkipped: skipped,
     status,
     error: input.topLevelError ?? null,
     outcomes: input.outcomes,
@@ -248,6 +269,7 @@ export async function recordSweepRun(
         targets: total,
         succeeded,
         failed,
+        skipped,
       });
     } else {
       deps.trackEvent(QUERIED_EVENT_BY_STATUS[status], input.actor.id, input.actor.role, {
@@ -255,6 +277,7 @@ export async function recordSweepRun(
         targets: total,
         succeeded,
         failed,
+        skipped,
         status,
       });
     }
@@ -286,6 +309,7 @@ export async function recordSweepRun(
     targetsTotal: total,
     targetsSucceeded: succeeded,
     targetsFailed: failed,
+    targetsSkipped: skipped,
     alerted,
   };
 }
@@ -298,17 +322,23 @@ async function sendSweepAlert(
 ): Promise<boolean> {
   const failedTargets = record.outcomes
     .filter((o) => !o.ok)
-    .map((o) => o.target)
+    .map((o) => (o.skipped ? `${o.target} (skipped: ${o.reason ?? "unknown"})` : o.target))
     .slice(0, 5);
   // Label derives from the kind so a new kind (e.g. "ux") reads correctly
   // without a hardcoded 2-way branch that would mislabel it.
   const label = `${record.kind} sweep`;
   const body =
-    record.status === "failed"
+    record.status === "no_targets"
+      ? record.targetsTotal === 0
+        ? `The continuous ${label} has NO targets: nothing was assessed this run, so no client posture is being kept fresh. Configure targets (see docs/security/platform-scan-targets.md).`
+        : `The continuous ${label} assessed NOTHING: all ${record.targetsSkipped} target(s) were skipped${
+            failedTargets.length > 0 ? ` (${failedTargets.join(", ")})` : ""
+          }. Their posture is stale - fix the skip reasons.`
+      : record.status === "failed"
       ? record.error
         ? `The continuous ${label} FAILED to run: ${record.error}. The client's security posture is going stale - investigate now.`
         : `The continuous ${label} FAILED: all ${record.targetsFailed} target(s) errored. The client's security posture is going stale - investigate now.`
-      : `The continuous ${label} ran PARTIALLY: ${record.targetsFailed} of ${record.targetsTotal} target(s) failed${
+      : `The continuous ${label} ran PARTIALLY: ${record.targetsFailed} failed and ${record.targetsSkipped} skipped of ${record.targetsTotal} target(s)${
           failedTargets.length > 0 ? ` (${failedTargets.join(", ")})` : ""
         }. Those targets' posture is stale - investigate.`;
 
@@ -317,7 +347,9 @@ async function sendSweepAlert(
       userId: actor.id,
       category: "security",
       priority: "high",
-      title: `Continuous ${label} ${record.status === "failed" ? "failed" : "ran partially"}`,
+      title: `Continuous ${label} ${
+        record.status === "failed" ? "failed" : record.status === "no_targets" ? "assessed nothing" : "ran partially"
+      }`,
       body,
       actionUrl: "/admin/platform-scans",
       actionLabel: "Review sweep health",
@@ -329,6 +361,7 @@ async function sendSweepAlert(
         status: record.status,
         targets_total: record.targetsTotal,
         targets_failed: record.targetsFailed,
+        targets_skipped: record.targetsSkipped,
         failed_targets: failedTargets.join(", "),
       },
       // sourceId is kind:status (not the run id) so dedup collapses repeated
@@ -403,26 +436,27 @@ export async function runSweepWithHealth<R>(
 }
 
 /**
- * Classify an engagement per-target result. The orchestrator encodes a target
- * that threw as `skipped: "error:<msg>"`; a legitimate non-failure skip (no
- * static target) is NOT a failure. Anything else assessed is a success.
+ * Classify a per-target result. The orchestrators encode a target that threw as
+ * `skipped: "error:<msg>"` (a failure); any other `skipped` reason (no static
+ * target, no active scope, unknown platform) means the target was NOT assessed,
+ * which is a skip, not a success. Only a result with no `skipped` is a success.
  */
-export function engagementOutcome(r: {
-  platform: string;
-  skipped?: string;
-}): TargetOutcome {
+function classifyOutcome(r: { platform: string; skipped?: string }): TargetOutcome {
   if (r.skipped && r.skipped.startsWith("error:")) {
     return { target: r.platform, ok: false, reason: r.skipped };
   }
-  return { target: r.platform, ok: true, reason: r.skipped };
+  if (r.skipped) return { target: r.platform, ok: false, skipped: true, reason: r.skipped };
+  return { target: r.platform, ok: true };
 }
 
-/** Classify a pentest per-target result. Same error-encoding contract. */
+/** Classify an engagement per-target result (see classifyOutcome). */
+export function engagementOutcome(r: { platform: string; skipped?: string }): TargetOutcome {
+  return classifyOutcome(r);
+}
+
+/** Classify a pentest per-target result. Same encoding contract. */
 export function pentestOutcome(r: { platform: string; skipped?: string }): TargetOutcome {
-  if (r.skipped && r.skipped.startsWith("error:")) {
-    return { target: r.platform, ok: false, reason: r.skipped };
-  }
-  return { target: r.platform, ok: true, reason: r.skipped };
+  return classifyOutcome(r);
 }
 
 /** Direct ledger reader for the health page / tests. */
@@ -447,7 +481,7 @@ export async function listRecentSweepRuns(
     targets_failed: number;
     status: SweepStatus;
     error: string | null;
-    details: { outcomes?: TargetOutcome[] } | null;
+    details: { outcomes?: TargetOutcome[]; targets_skipped?: number } | null;
   }>(
     `SELECT id, kind, started_at, finished_at, targets_total, targets_succeeded,
             targets_failed, status, error, details
@@ -470,6 +504,7 @@ export async function listRecentSweepRuns(
     targetsTotal: Number(r.targets_total) || 0,
     targetsSucceeded: Number(r.targets_succeeded) || 0,
     targetsFailed: Number(r.targets_failed) || 0,
+    targetsSkipped: Number(r.details?.targets_skipped) || 0,
     status: r.status,
     error: r.error,
     outcomes: r.details?.outcomes ?? [],

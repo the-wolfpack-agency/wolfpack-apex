@@ -18,6 +18,8 @@ process.env.GITHUB_APP_WEBHOOK_SECRET = SECRET;
 const mockGetWorkspace = jest.fn();
 const mockResolveEntitlement = jest.fn();
 const mockClient = jest.fn();
+const mockInstallClient = jest.fn();
+const mockPostImages = jest.fn();
 const mockFetchDiff = jest.fn();
 const mockCreateCheck = jest.fn();
 const mockCreateComment = jest.fn();
@@ -30,6 +32,8 @@ jest.mock("@/lib/github-app/storage", () => ({ getWorkspaceByInstallation: (...a
 jest.mock("@/lib/tenancy/entitlements", () => ({ resolveEntitlement: (...a: unknown[]) => mockResolveEntitlement(...a) }));
 jest.mock("@/lib/github-client", () => ({
   workspaceGithubClient: (...a: unknown[]) => mockClient(...a),
+  installationGithubClient: (...a: unknown[]) => mockInstallClient(...a),
+  fetchPostImages: (...a: unknown[]) => mockPostImages(...a),
   fetchPullRequestDiff: (...a: unknown[]) => mockFetchDiff(...a),
   createCheckRun: (...a: unknown[]) => mockCreateCheck(...a),
   createPrComment: (...a: unknown[]) => mockCreateComment(...a),
@@ -73,6 +77,8 @@ beforeEach(() => {
   mockGetWorkspace.mockResolvedValue({ workspaceId: "w1", installationId: "77", linkedBy: "u1", accountLogin: "acme", linkedAt: "" });
   mockResolveEntitlement.mockResolvedValue(true);
   mockClient.mockResolvedValue({ token: "t", fetch: jest.fn() });
+  mockInstallClient.mockResolvedValue({ token: "inst-t", fetch: jest.fn() });
+  mockPostImages.mockResolvedValue([{ path: "x", content: "ok\n" }]);
   mockFetchDiff.mockResolvedValue("diff --git a/x b/x\n@@ -0,0 +1 @@\n+ok");
   mockGate.mockResolvedValue({ assessment: { blockedBy: null }, conclusion: "success", title: "Passed", summary: "s" });
   mockCreateCheck.mockResolvedValue({ id: 1 });
@@ -101,20 +107,94 @@ it("acknowledges a non-code PR action (e.g. labeled) without gating", async () =
   expect(mockFetchDiff).not.toHaveBeenCalled();
 });
 
-it("acknowledges an unknown installation without a GitHub call", async () => {
-  mockGetWorkspace.mockResolvedValue(null);
-  const res = await POST(post(prPayload()));
-  expect(res.status).toBe(200);
-  expect((await res.json()).ignored).toBe("unknown_installation");
-  expect(mockClient).not.toHaveBeenCalled();
+const skipEvent = () => mockTrack.mock.calls.find((c) => c[0] === "ai_code.pr_gate_skipped");
+
+it("rejects an unsigned delivery (no signature header) with 401", async () => {
+  const body = JSON.stringify(prPayload());
+  const req = new NextRequest("http://localhost/api/github-app/webhook", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-github-event": "pull_request" },
+    body,
+  });
+  const res = await POST(req);
+  expect(res.status).toBe(401);
+  expect(mockGetWorkspace).not.toHaveBeenCalled();
+  expect(mockCreateCheck).not.toHaveBeenCalled();
 });
 
-it("acknowledges an unentitled tenant without gating", async () => {
-  mockResolveEntitlement.mockResolvedValue(false);
-  const res = await POST(post(prPayload()));
-  expect(res.status).toBe(200);
-  expect((await res.json()).ignored).toBe("not_entitled");
-  expect(mockFetchDiff).not.toHaveBeenCalled();
+describe("un-gated PRs are never silent", () => {
+  it("unknown_installation: 200, posts a NEUTRAL check via the installation token, records the event", async () => {
+    mockGetWorkspace.mockResolvedValue(null);
+    const res = await POST(post(prPayload()));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ignored: "unknown_installation", check_posted: true });
+    expect(mockInstallClient).toHaveBeenCalledWith("77");
+    expect(mockClient).not.toHaveBeenCalled();
+    expect(mockFetchDiff).not.toHaveBeenCalled();
+    expect(mockCreateCheck).toHaveBeenCalledWith(
+      expect.objectContaining({ token: "inst-t" }),
+      "acme/app",
+      expect.objectContaining({ headSha: "abc123", name: "Secure Agent / gate", conclusion: "neutral", title: expect.stringContaining("not linked") }),
+    );
+    expect(skipEvent()?.[3]).toMatchObject({ reason: "unknown_installation", repo: "acme/app", pr_number: "5", check_posted: true, conclusion: "neutral" });
+  });
+
+  it("unknown_installation with no App token: 200, no check, the event still records check_posted=false", async () => {
+    mockGetWorkspace.mockResolvedValue(null);
+    mockInstallClient.mockResolvedValue({ token: "", fetch: jest.fn() });
+    const res = await POST(post(prPayload()));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ignored: "unknown_installation", check_posted: false });
+    expect(mockCreateCheck).not.toHaveBeenCalled();
+    expect(skipEvent()?.[3]).toMatchObject({ reason: "unknown_installation", check_posted: false, conclusion: "none" });
+  });
+
+  it("not_entitled: 200, NEUTRAL check with the reason, event recorded, never gates", async () => {
+    mockResolveEntitlement.mockResolvedValue(false);
+    const res = await POST(post(prPayload()));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ignored: "not_entitled", check_posted: true });
+    expect(mockFetchDiff).not.toHaveBeenCalled();
+    expect(mockGate).not.toHaveBeenCalled();
+    expect(mockCreateCheck).toHaveBeenCalledWith(expect.anything(), "acme/app", expect.objectContaining({ conclusion: "neutral", title: expect.stringContaining("not enabled") }));
+    expect(skipEvent()?.[3]).toMatchObject({ reason: "not_entitled", workspace_id: "w1", check_posted: true });
+    expect(skipEvent()?.[1]).toBe("u1");
+  });
+
+  it("no_token: 200, no check is possible, the event + ledger outcome are recorded", async () => {
+    mockClient.mockResolvedValue({ token: "", fetch: jest.fn() });
+    const res = await POST(post(prPayload()));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ignored: "no_token", check_posted: false });
+    expect(mockCreateCheck).not.toHaveBeenCalled();
+    expect(mockRecordOutcome).toHaveBeenCalledWith(expect.objectContaining({ ok: false, code: "no_token" }));
+    expect(skipEvent()?.[3]).toMatchObject({ reason: "no_token", check_posted: false });
+  });
+
+  it("gate_error: 200, a FAILURE check says the PR is not verified, event recorded", async () => {
+    mockGate.mockRejectedValue(new Error("deep scan exploded"));
+    const res = await POST(post(prPayload()));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: false, error: "gate_error", check_posted: true });
+    expect(mockCreateCheck).toHaveBeenCalledWith(expect.anything(), "acme/app", expect.objectContaining({ conclusion: "failure", title: expect.stringContaining("internal error") }));
+    expect(skipEvent()?.[3]).toMatchObject({ reason: "gate_error", check_posted: true, conclusion: "failure" });
+  });
+
+  it("gate_error where posting the check also fails: still 200 and the event records check_posted=false", async () => {
+    mockGate.mockRejectedValue(new Error("boom"));
+    mockCreateCheck.mockRejectedValue(new Error("checks:write missing"));
+    const res = await POST(post(prPayload()));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ error: "gate_error", check_posted: false });
+    expect(skipEvent()?.[3]).toMatchObject({ reason: "gate_error", check_posted: false });
+  });
+});
+
+it("passes post-images of the changed files and the repo to the gate (modified files are deep-scanned)", async () => {
+  mockFetchDiff.mockResolvedValue("diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1 +1 @@\n-x\n+y\n");
+  await POST(post(prPayload()));
+  expect(mockPostImages).toHaveBeenCalledWith(expect.anything(), "acme/app", ["src/a.ts"], "abc123");
+  expect(mockGate).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ workspaceId: "w1", repoFullName: "acme/app", changedFiles: [{ path: "x", content: "ok\n" }] }));
 });
 
 it("gates a code PR: posts a success check, tracks the event, records the outcome", async () => {
