@@ -1,9 +1,11 @@
 "use client";
 
 /**
- * MfaSettingsCard — self-service, OPT-IN multi-factor auth (TOTP) management.
+ * MfaSettingsCard: self-service multi-factor auth (TOTP) management.
  *
- * Mounted in /settings inside a <SectionCard title="Multi-factor authentication">.
+ * Mounted in /settings inside a <SectionCard title="Multi-factor authentication">,
+ * and on /mfa (mode="required") where an admin who has not enrolled yet is sent
+ * after signing in.
  * Drives the four /api/auth/mfa/* routes via fetchWithRefresh (never raw fetch,
  * per the no-raw-api-fetch guardrail). States:
  *   - loading       — fetching status on mount
@@ -12,8 +14,12 @@
  *   - recovery      — codes shown ONCE after a successful verify
  *   - confirmed     — active: shows remaining recovery codes + "Disable"
  *
- * NON-ENFORCING: nothing here changes the login flow; a user who never enables
- * MFA is unaffected.
+ * Admin-capable accounts are REQUIRED to enroll (the server's admin MFA gate,
+ * src/lib/auth/mfa.ts); for everyone else it stays optional. The copy follows
+ * the server's `enforced` flag, never a guess from the role.
+ *
+ * Disabling or replacing a confirmed enrollment needs a current code (or a
+ * recent challenge on this browser), so the confirmed view asks for one.
  */
 
 import { useCallback, useEffect, useState } from "react";
@@ -24,6 +30,15 @@ interface StatusResponse {
   confirmed: boolean;
   recoveryCodesRemaining: number;
   confirmedAt: string | null;
+  enforced?: boolean;
+  required?: null | "enroll" | "challenge" | "unavailable";
+}
+
+interface MfaSettingsCardProps {
+  /** "required": rendered on /mfa for an admin who must enroll before continuing. */
+  mode?: "settings" | "required";
+  /** Called when the user finishes enrollment (after saving recovery codes). */
+  onComplete?: () => void;
 }
 
 type View = "loading" | "disabled" | "enrolling" | "recovery" | "confirmed";
@@ -37,12 +52,13 @@ const inputStyle = {
   fontSize: "16px",
 } as const;
 
-export default function MfaSettingsCard() {
+export default function MfaSettingsCard({ mode = "settings", onComplete }: MfaSettingsCardProps = {}) {
   const [view, setView] = useState<View>("loading");
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [secret, setSecret] = useState<string | null>(null);
   const [otpauth, setOtpauth] = useState<string | null>(null);
   const [code, setCode] = useState("");
+  const [disableCode, setDisableCode] = useState("");
   const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -122,12 +138,23 @@ export default function MfaSettingsCard() {
     setError(null);
     setBusy(true);
     try {
-      const res = await fetchWithRefresh("/api/auth/mfa/disable", { method: "POST", headers: jsonHeaders() });
+      const res = await fetchWithRefresh("/api/auth/mfa/disable", {
+        method: "POST",
+        headers: jsonHeaders(),
+        body: JSON.stringify(disableCode.trim() ? { code: disableCode.trim() } : {}),
+      });
       const body = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
       if (!res.ok || !body.ok) {
-        setError(body.error || `Could not disable MFA (HTTP ${res.status})`);
+        setError(
+          body.error === "mfa_code_required"
+            ? "Enter a current code from your authenticator (or a recovery code) to turn MFA off."
+            : body.error === "bad_code"
+              ? "That code didn't match."
+              : body.error || `Could not disable MFA (HTTP ${res.status})`,
+        );
         return;
       }
+      setDisableCode("");
       setRecoveryCodes([]);
       setSecret(null);
       setOtpauth(null);
@@ -141,9 +168,12 @@ export default function MfaSettingsCard() {
 
   return (
     <div className="space-y-3" data-testid="mfa-settings-card">
-      <p className="text-xs" style={dimText}>
+      <p className="text-xs" style={dimText} data-testid="mfa-intro">
         Add a one-time code from an authenticator app (Google Authenticator, 1Password, Authy) as a
-        second factor on your account. Optional — your login works the same with or without it.
+        second factor on your account.{" "}
+        {mode === "required" || status?.enforced
+          ? "Required for your account because it has admin access."
+          : "Optional for your account."}
       </p>
 
       {error && (
@@ -234,7 +264,7 @@ export default function MfaSettingsCard() {
           </ul>
           <button
             type="button"
-            onClick={() => void loadStatus()}
+            onClick={() => (onComplete ? onComplete() : void loadStatus())}
             data-testid="mfa-recovery-done-btn"
             className="mt-3 px-3 py-2 rounded text-sm"
             style={{ background: "var(--wp-dark-surface2)", border: "1px solid var(--wp-dark-border)", color: "var(--wp-text)" }}
@@ -250,12 +280,24 @@ export default function MfaSettingsCard() {
             Multi-factor authentication is <strong>on</strong> for your account.
             {status ? ` ${status.recoveryCodesRemaining} recovery code${status.recoveryCodesRemaining === 1 ? "" : "s"} remaining.` : ""}
           </p>
+          <label className="block text-xs mt-2 mb-1" style={mutedText}>
+            Current code (needed to turn MFA off)
+          </label>
+          <input
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            value={disableCode}
+            onChange={(e) => setDisableCode(e.target.value)}
+            data-testid="mfa-disable-code-input"
+            className="w-40 px-3 py-2 rounded tracking-widest"
+            style={inputStyle}
+          />
           <button
             type="button"
             onClick={disable}
             disabled={busy}
             data-testid="mfa-disable-btn"
-            className="mt-2 px-3 py-2 rounded text-sm"
+            className="mt-2 ml-2 px-3 py-2 rounded text-sm"
             style={{ background: "transparent", border: "1px solid var(--wp-dark-border)", color: "var(--wp-danger, #f87171)", opacity: busy ? 0.6 : 1 }}
           >
             {busy ? "Disabling…" : "Disable MFA"}

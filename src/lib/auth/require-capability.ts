@@ -34,6 +34,13 @@ import {
   type CapabilityOverrides,
 } from "./capability-overrides";
 import { capabilitiesForRole } from "./role-capabilities";
+import { mfaRequirementFor, readCookie } from "./mfa";
+import { MFA_PROOF_COOKIE } from "@/lib/crypto/mfa-proof";
+import { bindRequestWorkspace } from "@/lib/db/request-workspace";
+
+/** Exemption uses are reported at most once per user per hour per process. */
+const exemptionReported = new Map<string, number>();
+const EXEMPTION_REPORT_MS = 60 * 60 * 1000;
 
 export type RequireCapabilityResult =
   | { ok: true; user: TeamMember; capabilities: Set<Capability> }
@@ -156,5 +163,63 @@ export async function requireCapability(
     };
   }
 
+  /* RLS SESSION CONTEXT. Bind the caller's VERIFIED workspace (from the JWT,
+     never from request input) for the rest of this request, so query() can set
+     app.workspace_id once INSTINCT_RLS_SESSION_CONTEXT is on. A no-op while
+     the flag is off. Bound before the MFA gate because that gate reads
+     instinct_admin_mfa, which carries a workspace policy (migration 296). */
+  bindRequestWorkspace(user.workspaceId);
+
+  /* ADMIN MFA GATE. Admin-capable callers (effective `settings.manage_team`)
+     must hold a confirmed enrollment and a valid MFA proof for this browser.
+     The MFA routes themselves (`account.manage_mfa`) are always reachable so
+     an admin can enroll or answer the challenge; see src/lib/auth/mfa.ts for
+     the whole contract. Runs AFTER the capability check so a plain 403 for a
+     missing capability is unchanged. */
+  if (capability !== "account.manage_mfa") {
+    const decision = await mfaRequirementFor({
+      user,
+      capabilities,
+      proofToken: readCookie(request, MFA_PROOF_COOKIE) ?? (await proofFromCookieJar()),
+    });
+    if (decision.exempt) {
+      const last = exemptionReported.get(user.id) ?? 0;
+      if (Date.now() - last > EXEMPTION_REPORT_MS) {
+        exemptionReported.set(user.id, Date.now());
+        trackEvent("auth.mfa_exemption_applied", user.id, user.role, { capability, route });
+      }
+    }
+    if (decision.required === "unavailable") {
+      return {
+        ok: false,
+        response: NextResponse.json({ error: "mfa_check_unavailable", capability }, { status: 503 }),
+      };
+    }
+    if (decision.required) {
+      trackEvent("auth.mfa_enforcement_blocked", user.id, user.role, {
+        reason: decision.required,
+        capability,
+        route,
+      });
+      return {
+        ok: false,
+        response: NextResponse.json(
+          { error: "mfa_required", mfa: decision.required, capability },
+          { status: 403 },
+        ),
+      };
+    }
+  }
+
   return { ok: true, user, capabilities };
+}
+
+/** Cookie-jar fallback for the proof (route handlers given a bare Request). */
+async function proofFromCookieJar(): Promise<string | null> {
+  try {
+    const jar = await cookies();
+    return jar.get(MFA_PROOF_COOKIE)?.value ?? null;
+  } catch {
+    return null;
+  }
 }

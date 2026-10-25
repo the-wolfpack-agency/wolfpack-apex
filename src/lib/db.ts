@@ -10,6 +10,11 @@ import { Pool, type PoolClient, type PoolConfig, type QueryResult } from "pg";
 import { normalizeDatabaseUrlSsl } from "@/lib/db-url";
 import { connectionStringFor, dbMode, TenantResolutionError } from "@/lib/db/tenant";
 import { getTenantPool } from "@/lib/db/pools";
+import {
+  rlsSessionContextEnabled,
+  bindRequestWorkspace,
+  boundRequestWorkspace,
+} from "@/lib/db/request-workspace";
 
 export { normalizeDatabaseUrlSsl };
 
@@ -170,8 +175,109 @@ export async function query<T extends Record<string, unknown> = Record<string, u
   // Outside (the default everywhere today), use the pool exactly as before.
   const scope = scopeStore.getStore();
   if (scope) return scope.client.query<T>(text, params); // in a tx: never retry
+  // RLS cutover (flag OFF by default): a request whose workspace was bound by
+  // requireCapability runs each statement with app.workspace_id set, so the
+  // workspace policies (migrations 296/297) filter it once the app connects as
+  // a NOBYPASSRLS role. See docs/security/rls-cutover.md.
+  const bound = rlsSessionContextEnabled() ? boundRequestWorkspace() : undefined;
+  if (bound) return withConnectRetry(() => queryWithRlsContext<T>(bound, text, params));
   return withConnectRetry(() => activePool().query<T>(text, params));
 }
+
+// ---------------------------------------------------------------------------
+// Per-request RLS session context (the one-env-change cutover).
+//
+// INSTINCT_RLS_SESSION_CONTEXT=on makes every query() of an authenticated
+// request run inside a one-statement transaction that first sets the
+// transaction-local GUC app.workspace_id to the caller's VERIFIED workspace
+// (requireCapability binds it from the JWT; never from request input). With the
+// flag off (the default) nothing here runs and query() is byte-for-byte the
+// old pool path. While the app still connects as the table owner (BYPASSRLS)
+// the setting is harmless; it only starts filtering after the role switch in
+// docs/security/rls-cutover.md.
+// ---------------------------------------------------------------------------
+
+export { rlsSessionContextEnabled, bindRequestWorkspace, boundRequestWorkspace };
+
+async function queryWithRlsContext<T extends Record<string, unknown>>(
+  workspaceId: string,
+  text: string,
+  params?: unknown[],
+): Promise<QueryResult<T>> {
+  const client: PoolClient = await activePool().connect();
+  let began = false;
+  try {
+    await client.query("BEGIN");
+    began = true;
+    try {
+      await client.query("SELECT set_config('app.workspace_id', $1, true)", [workspaceId]);
+    } catch (err) {
+      // Refuse rather than run the statement without its tenant context.
+      reportRlsContextFailure(err);
+      throw err;
+    }
+    const out = await client.query<T>(text, params);
+    await client.query("COMMIT");
+    return out;
+  } catch (err) {
+    if (began) {
+      try {
+        await client.query("ROLLBACK");
+      } catch (rbErr) {
+        console.warn("[db] ROLLBACK failed:", (rbErr as Error).message);
+      }
+    }
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+function reportRlsContextFailure(err: unknown): void {
+  // Lazy import: analytics imports this module, so a static import would cycle.
+  void import("@/lib/analytics")
+    .then((m) => m.trackEvent("security.rls_context_failed", "system", "system", { error: (err as Error)?.message ?? "unknown" }))
+    .catch(() => undefined);
+}
+
+/**
+ * Run `fn` as SYSTEM work that legitimately spans workspaces (crons, sweeps):
+ * sets the transaction-local GUC app.rls_system = 'on', which the workspace
+ * policies accept. Same client pinning, nesting and shadow-mode contract as
+ * withWorkspaceScope. Must never be reachable with request-controlled input
+ * deciding whether it is used; it is for code paths that have no caller
+ * workspace at all.
+ */
+export async function withSystemScope<R>(fn: () => Promise<R>): Promise<R> {
+  const existing = scopeStore.getStore();
+  if (existing) {
+    if (existing.workspaceId !== SYSTEM_SCOPE) {
+      throw new Error(`withSystemScope nesting mismatch: already scoped to '${existing.workspaceId}'`);
+    }
+    return fn();
+  }
+  if (!hasDatabase()) return fn();
+  const client: PoolClient = await activePool().connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SELECT set_config('app.rls_system', 'on', true)");
+    const out = await scopeStore.run({ workspaceId: SYSTEM_SCOPE, client }, fn);
+    await client.query("COMMIT");
+    return out;
+  } catch (err) {
+    try {
+      await client.query("ROLLBACK");
+    } catch (rbErr) {
+      console.warn("[db] ROLLBACK failed:", (rbErr as Error).message);
+    }
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/** Sentinel scope id for withSystemScope; not a valid workspace slug. */
+const SYSTEM_SCOPE = "\u0000system";
 
 /** True for a failure to ACQUIRE a pooled connection (the query never reached
  *  the server, so retrying is safe even for writes). Neon scales to zero, so a

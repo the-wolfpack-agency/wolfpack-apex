@@ -96,3 +96,54 @@ describe("<MfaSettingsCard />", () => {
     );
   });
 });
+
+describe("<MfaSettingsCard /> under admin enforcement", () => {
+  const off = { enrolled: false, confirmed: false, recoveryCodesRemaining: 0, confirmedAt: null };
+
+  it("says MFA is required when the server reports it enforced", async () => {
+    mockFetchWithRefresh.mockResolvedValueOnce(mkRes({ ...off, enforced: true, required: "enroll" }));
+    render(<MfaSettingsCard />);
+    expect(await screen.findByTestId("mfa-disabled")).toBeInTheDocument();
+    expect(screen.getByTestId("mfa-intro")).toHaveTextContent(/Required for your account/);
+  });
+
+  it("says MFA is optional for an account the gate does not cover", async () => {
+    mockFetchWithRefresh.mockResolvedValueOnce(mkRes({ ...off, enforced: false, required: null }));
+    render(<MfaSettingsCard />);
+    expect(await screen.findByTestId("mfa-disabled")).toBeInTheDocument();
+    expect(screen.getByTestId("mfa-intro")).toHaveTextContent(/Optional for your account/);
+  });
+
+  it("in required mode, finishing enrollment hands control back via onComplete", async () => {
+    const onComplete = jest.fn();
+    mockFetchWithRefresh
+      .mockResolvedValueOnce(mkRes(off))
+      .mockResolvedValueOnce(mkRes({ secret: "JBSWY3DPEHPK3PXP", otpauthUrl: "otpauth://totp/x?secret=JBSWY3DPEHPK3PXP" }))
+      .mockResolvedValueOnce(mkRes({ ok: true, recoveryCodes: ["aaaaa-11111"] }));
+    render(<MfaSettingsCard mode="required" onComplete={onComplete} />);
+    expect(screen.getByTestId("mfa-intro")).toHaveTextContent(/Required/);
+    fireEvent.click(await screen.findByTestId("mfa-enable-btn"));
+    fireEvent.change(await screen.findByTestId("mfa-code-input"), { target: { value: "123456" } });
+    fireEvent.click(screen.getByTestId("mfa-confirm-btn"));
+    fireEvent.click(await screen.findByTestId("mfa-recovery-done-btn"));
+    expect(onComplete).toHaveBeenCalledTimes(1);
+  });
+
+  it("disabling a confirmed enrollment sends the current code and explains a refusal", async () => {
+    mockFetchWithRefresh
+      .mockResolvedValueOnce(mkRes({ enrolled: true, confirmed: true, recoveryCodesRemaining: 9, confirmedAt: "2026-01-01T00:00:00Z" }))
+      .mockResolvedValueOnce(mkRes({ ok: false, error: "mfa_code_required" }, false, 403));
+    render(<MfaSettingsCard />);
+    fireEvent.click(await screen.findByTestId("mfa-disable-btn"));
+    expect(await screen.findByTestId("mfa-error")).toHaveTextContent(/Enter a current code/);
+    const [, init] = mockFetchWithRefresh.mock.calls[1] as [string, { body: string }];
+    expect(JSON.parse(init.body)).toEqual({});
+
+    mockFetchWithRefresh.mockResolvedValueOnce(mkRes({ ok: false, error: "bad_code" }, false, 403));
+    fireEvent.change(screen.getByTestId("mfa-disable-code-input"), { target: { value: "000000" } });
+    fireEvent.click(screen.getByTestId("mfa-disable-btn"));
+    expect(await screen.findByText(/didn't match/)).toBeInTheDocument();
+    const [, init2] = mockFetchWithRefresh.mock.calls[2] as [string, { body: string }];
+    expect(JSON.parse(init2.body)).toEqual({ code: "000000" });
+  });
+});

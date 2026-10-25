@@ -15,6 +15,7 @@ import { getSecretOrThrow } from "@/lib/secrets";
 import { normalizeGraphDateTime as sharedNormalizeGraphDateTime } from "@/lib/calendar/timezone";
 import { getObsClient } from "@/lib/obs";
 import { sanitizeForLog } from "@/lib/log-sanitize";
+import { sealGraphToken, openGraphToken, type OpenedToken } from "@/lib/crypto/graph-token-storage";
 
 // TODO: when Azure Key Vault is provisioned, more secrets will move
 // behind getSecretOrThrow (MS_TENANT_ID, MS_REDIRECT_URI, INSTINCT_JWT_SECRET).
@@ -753,6 +754,24 @@ export async function storeTokens(
    * and the library repair both stopped and neither said why. */
   if (!process.env.DATABASE_URL) return false;
 
+  /* SEALED AT REST. Both tokens are encrypted with the same AES-256-GCM helper
+     (secret-storage.ts, same key) that already protects connector credentials.
+     A seal failure refuses the write rather than storing plaintext: the caller
+     gets false and microsoft.token_store_failed fires, which is the honest
+     outcome. A plaintext row is the bug this replaced. */
+  let sealedAccess: string;
+  let sealedRefresh: string;
+  try {
+    sealedAccess = sealGraphToken(tokens.access_token);
+    sealedRefresh = sealGraphToken(tokens.refresh_token);
+  } catch {
+    trackEvent("microsoft.token_store_failed", userId, "system", {
+      user_email: userEmail || tokens.user_email,
+      code: "seal_failed",
+    });
+    return false;
+  }
+
   try {
     await query(
       `INSERT INTO instinct_ms_tokens (user_email, display_name, access_token, refresh_token, expires_at, connected_by)
@@ -764,7 +783,7 @@ export async function storeTokens(
          refresh_token = EXCLUDED.refresh_token,
          expires_at = EXCLUDED.expires_at,
          updated_at = NOW()`,
-      [userEmail || tokens.user_email, displayName || tokens.display_name || null, tokens.access_token, tokens.refresh_token, tokens.expires_at, userId],
+      [userEmail || tokens.user_email, displayName || tokens.display_name || null, sealedAccess, sealedRefresh, tokens.expires_at, userId],
     );
     return true;
   } catch (err) {
@@ -817,17 +836,45 @@ export async function getValidToken(
   if (rows.length === 0) return null;
 
   const row = rows[0];
+
+  /* OPEN BOTH TOKENS. Rows written before tokens were sealed are raw plaintext
+     and must keep working on deploy day, so the reader accepts both formats and
+     says which it found. A sealed value that fails to authenticate (tampered,
+     or the key changed) is NOT used and NOT treated as plaintext: the
+     connection reads as unavailable and the failure is reported. The row is
+     left in place, because a key misconfiguration must not destroy every
+     user's connection. */
+  const openedAccess = openGraphToken(row.access_token);
+  const openedRefresh = openGraphToken(row.refresh_token);
+  if (!openedAccess.ok || !openedRefresh.ok) {
+    trackEvent("security.graph_token_decrypt_failed", userId, "system", {
+      user_email: row.user_email,
+      field: !openedAccess.ok ? "access_token" : "refresh_token",
+    });
+    return null;
+  }
+  const accessToken = openedAccess.value ?? "";
+  const refreshToken = openedRefresh.value ?? "";
+  const legacy = isLegacy(openedAccess) || isLegacy(openedRefresh);
+
   const expiresAt = new Date(row.expires_at).getTime();
   const bufferMs = 5 * 60 * 1000; // refresh 5 min before expiry
 
   if (Date.now() < expiresAt - bufferMs) {
-    return { accessToken: row.access_token, userEmail: row.user_email };
+    /* LAZY BACKFILL. A legacy plaintext row is re-sealed the first time it is
+       read, so every live connection is encrypted without a migration that
+       would need the application key. Best effort: a failed backfill never
+       fails the read, and the next read tries again. */
+    if (legacy) {
+      await backfillSealedRow(row, accessToken, refreshToken, userId);
+    }
+    return { accessToken, userEmail: row.user_email };
   }
 
   // Token expired or expiring soon — refresh
   let refreshed: Awaited<ReturnType<typeof refreshAccessToken>> = null;
   try {
-    refreshed = await refreshAccessToken(row.refresh_token);
+    refreshed = await refreshAccessToken(refreshToken);
   } catch (err) {
     if (err instanceof MsGrantRevokedError) {
       /* Microsoft permanently revoked this grant (e.g. a password reset or an
@@ -886,6 +933,14 @@ export async function getValidToken(
    * Harmless when the caller passed a user id, because that is what
    * row.connected_by already holds. */
   const stored = await storeTokens(refreshed, row.connected_by ?? userId, row.user_email);
+  /* A legacy row replaced by this sealed write is now migrated. Recorded once,
+     here, because the next read finds a sealed row and takes neither path. */
+  if (stored && legacy) {
+    trackEvent("security.graph_token_encrypted", userId, "system", {
+      user_email: row.user_email,
+      source: "refresh_write",
+    });
+  }
 
   /* ONLY SAY REFRESHED WHEN IT WAS ALSO KEPT.
    *
@@ -899,6 +954,44 @@ export async function getValidToken(
   });
 
   return { accessToken: refreshed.access_token, userEmail: row.user_email };
+}
+
+function isLegacy(t: OpenedToken): boolean {
+  return t.ok && t.format === "legacy_plaintext";
+}
+
+/**
+ * Re-seal a legacy plaintext row in place.
+ *
+ * Conditional on the stored values still being the plaintext just read, so a
+ * concurrent refresh that already wrote newer sealed tokens is never clobbered
+ * with older ones. Emits security.graph_token_encrypted only when a row was
+ * actually rewritten, which makes the event once-per-row by construction.
+ */
+async function backfillSealedRow(
+  row: { access_token: string; refresh_token: string; user_email: string; connected_by: string },
+  accessToken: string,
+  refreshToken: string,
+  userId: string,
+): Promise<void> {
+  try {
+    const sealedAccess = sealGraphToken(accessToken);
+    const sealedRefresh = sealGraphToken(refreshToken);
+    const res = await query(
+      `UPDATE instinct_ms_tokens
+          SET access_token = $1, refresh_token = $2, updated_at = NOW()
+        WHERE connected_by = $3 AND access_token = $4 AND refresh_token = $5`,
+      [sealedAccess, sealedRefresh, row.connected_by, row.access_token, row.refresh_token],
+    );
+    if ((res.rowCount ?? 0) > 0) {
+      trackEvent("security.graph_token_encrypted", userId, "system", {
+        user_email: row.user_email,
+        source: "lazy_read",
+      });
+    }
+  } catch (err) {
+    console.error("[microsoft-graph] token backfill failed:", sanitizeForLog((err as Error).message));
+  }
 }
 
 /**

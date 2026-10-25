@@ -25,6 +25,7 @@ import { useEmailArrivalPoll } from "@/lib/hooks/useEmailArrivalPoll";
 import { NAV_ITEMS, PINNED_NAV_HREFS, defaultHiddenForRole, canSeeNavItem, activeNavHref } from "@/lib/dashboard-nav";
 import { BOOT_SPLASH_TESTID, BOOT_SPLASH_TEXT } from "@/lib/ui/boot-splash";
 import { APP_SHELL_BAR_HEIGHT } from "@/lib/ui/app-shell";
+import { mfaRedirectFor, type MfaRequired } from "@/lib/auth/mfa-client";
 
 interface User {
   id: string;
@@ -114,6 +115,25 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
         router.push(`/login${next}`);
         return;
       }
+      /* ADMIN MFA GATE. An admin-capable account that has not enrolled, or
+         has not answered this browser's challenge, is refused by every
+         capability-gated API (src/lib/auth/mfa.ts). Rendering a page first
+         would draw a dashboard of 403s, so send them to /mfa before anything
+         mounts. Fail-open on a network error: the server still enforces. */
+      try {
+        const mfaRes = await fetchWithRefresh("/api/auth/mfa/status");
+        if (mfaRes.ok) {
+          const mfa = (await mfaRes.json()) as { required?: MfaRequired };
+          const target = mfaRedirectFor(mfa.required, pathname);
+          if (target) {
+            if (!cancelled) router.replace(target);
+            return;
+          }
+        }
+      } catch {
+        /* fall through: the server-side gate is authoritative */
+      }
+      if (cancelled) return;
       setUser(parsed);
     })();
     return () => {
