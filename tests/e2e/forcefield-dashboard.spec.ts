@@ -37,10 +37,28 @@ function mockMyStats(page: import("@playwright/test").Page, status: number, body
   });
 }
 
+/** The setup card the page loads alongside the stats (#1173), same shape as the jest test's SETUP. */
+const SETUP = {
+  ok: true,
+  tenant: STATS.tenant,
+  quickstart: {
+    cloudflareEnv: { FORCEFIELD_SITE: "e2e-client", SITE_ANALYTICS_INGEST_TOKEN: "ff_e2e_token", FORCEFIELD_ENFORCE: "off" },
+    nextEnv: { FORCEFIELD_SITE: "e2e-client", SITE_ANALYTICS_INGEST_TOKEN: "ff_e2e_token" },
+    nextSnippet: 'export { default as middleware } from "@ogiam/forcefield/next";',
+  },
+  connection: { connected: true, lastEventAt: "2026-10-07T00:00:00Z" },
+};
+function mockMySetup(page: import("@playwright/test").Page) {
+  return page.route(/\/api\/forcefield\/my-setup/, async (route: Route) => {
+    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(SETUP) });
+  });
+}
+
 test.describe("Forcefield client dashboard", () => {
   test("connects with a token and renders the client's scoped numbers", async ({ page }) => {
     const getFailures = collectConsoleAndNetworkFailures(page);
     await mockMyStats(page, 200, STATS);
+    await mockMySetup(page);
 
     await page.goto(`${target.baseUrl}${PATH}`, { waitUntil: "domcontentloaded", timeout: 20_000 });
 

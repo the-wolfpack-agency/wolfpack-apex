@@ -63,6 +63,12 @@ test.describe("Code factory reality check", () => {
 
   test("a prompt runs the factory and renders the executor + gate verdict cleanly", async ({ page }) => {
     await stubInstinctSession(page, { role: "cto" });
+    // The stubbed session's token is fake, so the real API rightly 401s every panel read. Answer the
+    // reads with an empty body (each panel treats {} as nothing yet); later routes win, so the
+    // pipeline stub below still handles the run.
+    await page.route("**/api/admin/ai-code/**", (r) =>
+      r.request().method() === "GET" ? r.fulfill({ status: 200, contentType: "application/json", body: "{}" }) : r.fallback(),
+    );
     // Stub the pipeline so no paid model runs; the contract is covered elsewhere.
     await page.route("**/api/admin/ai-code/pipeline", async (route) => {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(PIPELINE_RESPONSE) });
@@ -99,6 +105,7 @@ test.describe("Code factory reality check", () => {
     await expect(page.getByTestId("handoff-status")).toContainText(/handoff captured/i);
 
     // The human-in-the-loop step: approve opens the real PR and the link appears.
+    await page.getByTestId("approve-consent").check(); // the approve button is disabled until consent (#896)
     await page.getByTestId("approve-open-pr").click();
     await expect(page.getByTestId("pr-link"), "the opened PR link is shown").toHaveAttribute("href", /github\.com\/.*\/pull\/\d+/, { timeout: 10_000 });
 
@@ -110,6 +117,12 @@ test.describe("Code factory reality check", () => {
 
   test("the negative path: a change the security gate allows but an invariant blocks is WITHHELD from handoff", async ({ page }) => {
     await stubInstinctSession(page, { role: "cto" });
+    // The stubbed session's token is fake, so the real API rightly 401s every panel read. Answer the
+    // reads with an empty body (each panel treats {} as nothing yet); later routes win, so the
+    // pipeline stub below still handles the run.
+    await page.route("**/api/admin/ai-code/**", (r) =>
+      r.request().method() === "GET" ? r.fulfill({ status: 200, contentType: "application/json", body: "{}" }) : r.fallback(),
+    );
     await page.route("**/api/admin/ai-code/pipeline", async (route) => {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(WITHHELD_RESPONSE) });
     });

@@ -33,7 +33,8 @@ test.describe("AI Red-Team assurance reality check", () => {
     });
     expect(nav?.status(), "/admin/ai-redteam loads (not 401/blank)").toBe(200);
 
-    await expect(page.getByText("AI Red-Team", { exact: false }).first()).toBeVisible({ timeout: 15_000 });
+    // The header reads "Gate Regression Set" by default since #1226; the root is the stable anchor.
+    await expect(page.getByTestId("ai-redteam-root")).toBeVisible({ timeout: 15_000 });
 
     const summary = page.getByTestId("ai-redteam-summary");
     const empty = page.getByTestId("ai-redteam-empty");

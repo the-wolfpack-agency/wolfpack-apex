@@ -67,8 +67,10 @@ test.describe("the assistant, driven the way a client drives it", () => {
       await page.locator('[data-testid="assistant-send-btn"]').click();
 
       /* The first assistant message must render real content, not a blank
-         bubble and not a stuck spinner. */
-      const answer = page.locator('[data-testid="assistant-msg-content-0"]');
+         bubble and not a stuck spinner. Question and reply share the testid
+         prefix (helpers/assistant.ts), so index 0 is the question we typed and
+         the reply is index 1. */
+      const answer = page.locator('[data-testid="assistant-msg-content-1"]');
       await answer.waitFor({ state: "visible", timeout: 45_000 });
       await expect
         .poll(async () => (await answer.innerText().catch(() => "")).trim().length, {
@@ -76,6 +78,7 @@ test.describe("the assistant, driven the way a client drives it", () => {
           message: "assistant answer never rendered non-empty content",
         })
         .toBeGreaterThan(20);
+      await page.waitForTimeout(2_000); // let the streamed reply finish before reading it
 
       const answerText = (await answer.innerText()).trim();
 
@@ -90,7 +93,7 @@ test.describe("the assistant, driven the way a client drives it", () => {
       /* Any source the answer cites must be a real, clickable anchor — the
          clean source cards we shipped — not bare URL text. When the answer
          cites nothing (an honest "closest things I hold"), that's valid too. */
-      const anchorCount = await page.locator('[data-testid="assistant-msg-content-0"] a[href]').count();
+      const anchorCount = await page.locator('[data-testid="assistant-msg-content-1"] a[href]').count();
       const citesSomething = /source|closest|i hold|\bhttp/i.test(answerText);
       if (citesSomething) {
         expect(
