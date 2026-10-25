@@ -116,8 +116,17 @@ function parseCompactPrefixes(list: readonly string[]): DatacenterPrefix[] {
   if (cached) return cached;
   const parsed: DatacenterPrefix[] = [];
   for (const s of list) {
+    if (typeof s !== "string") continue;
     const slash = s.indexOf("/");
     if (slash < 0) continue;
+    // A dotted CIDR ("20.15.240.64/28", the shape the vendors publish) is read
+    // too: before, Number("20.15.240.64") was NaN, the entry was dropped, and a
+    // hand-written or vendor-shaped list silently left every claim unverifiable.
+    if (s.slice(0, slash).includes(".")) {
+      const p = parseCidr(s);
+      if (p) parsed.push(p);
+      continue;
+    }
     const base = Number(s.slice(0, slash));
     const bits = Number(s.slice(slash + 1));
     if (Number.isFinite(base) && Number.isInteger(bits) && bits >= 0 && bits <= 32) parsed.push({ base: base >>> 0, bits });

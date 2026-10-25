@@ -14,6 +14,7 @@ jest.mock("@/lib/client-auth", () => ({
 }));
 
 import ForcefieldPage from "../page";
+import { coverageSummary } from "@/lib/forcefield/threat-coverage";
 
 function resp(status: number, body: unknown): Response {
   return { ok: status >= 200 && status < 300, status, json: async () => body } as unknown as Response;
@@ -163,9 +164,9 @@ test("threat coverage panel: shows the honest headline, gaps, and per-threat sta
   // The gaps callout still names an honest frontier - the "not caught off guard" part.
   // Indirect injection is no longer listed: a build guard now fails CI on any unfenced
   // model call site, so that row reads partial (the fence still relies on the model).
-  const gaps = screen.getByTestId("coverage-gaps");
-  expect(gaps).toHaveTextContent(/gaps? to close/i);
-  expect(gaps).not.toHaveTextContent(/indirect injection/i);
+  // The callout (or its explicit empty state) follows the computed matrix; see the
+  // computed-count test below.
+  expect(screen.queryByTestId("coverage-gaps")?.textContent ?? "").not.toMatch(/indirect injection/i);
   expect(screen.getByTestId("coverage-row-LLM01-indirect-fence-coverage")).toHaveTextContent(/partial/i);
   // A covered injection CWE reads "covered"; a code-level CWE reads out-of-scope.
   expect(screen.getByTestId("coverage-row-CWE-89")).toHaveTextContent(/covered/i);
@@ -175,4 +176,28 @@ test("threat coverage panel: shows the honest headline, gaps, and per-threat sta
   expect(screen.getByTestId("coverage-row-CWE-1427")).toHaveTextContent(/covered/i); // prompt injection now live
   // Indirect prompt injection reads partial now (provenance fence deployed), not covered.
   expect(screen.getByTestId("coverage-row-LLM01-indirect")).toHaveTextContent(/partial/i);
+});
+
+test("threat coverage panel: the gap count is the computed one, and the closed gaps read covered", async () => {
+  render(<ForcefieldPage />);
+  await waitFor(() => expect(screen.getByTestId("threat-coverage")).toBeInTheDocument());
+  const { gaps } = coverageSummary();
+  if (gaps.length > 0) {
+    const callout = screen.getByTestId("coverage-gaps");
+    // Count and grammar follow the engine-computed matrix, never a typed number.
+    expect(callout).toHaveTextContent(`${gaps.length} ${gaps.length === 1 ? "gap" : "gaps"} to close`);
+    for (const g of gaps) expect(callout).toHaveTextContent(g.id);
+    expect(screen.queryByTestId("coverage-no-gaps")).not.toBeInTheDocument();
+  } else {
+    // Zero gaps reads as an explicit statement, never a silently missing callout.
+    expect(screen.queryByTestId("coverage-gaps")).not.toBeInTheDocument();
+    expect(screen.getByTestId("coverage-no-gaps")).toHaveTextContent(/no open gaps/i);
+  }
+  // The three engine rules closed these: covered in the table, absent from the callout.
+  for (const id of ["SECRET-FILES", "WP-PLUGIN-ABUSE", "CRAWLER-IMPERSONATION"]) {
+    expect(screen.getByTestId(`coverage-row-${id}`)).toHaveTextContent(/covered/i);
+    expect(gaps.some((g) => g.id === id)).toBe(false);
+    const callout = screen.queryByTestId("coverage-gaps");
+    if (callout) expect(callout).not.toHaveTextContent(id);
+  }
 });

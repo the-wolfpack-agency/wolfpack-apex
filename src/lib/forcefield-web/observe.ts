@@ -141,6 +141,69 @@ function matchedSensitive(
   return null;
 }
 
+/** Committed TEMPLATES of a .env file (no secrets in them), skipped below a
+ *  subdirectory so a code-browsing or docs route that shows one is not recon. */
+const DOTENV_TEMPLATE_SEGMENT = /^\.env\.(?:example|sample|template|dist)$/;
+
+/** A .env file BELOW the root ("/api/.env", "/app/backend/.env.production",
+ *  "/x/.env/..."): scanners sweep every framework subdirectory, not just "/.env",
+ *  and a sensitivePaths pattern only anchors at the root. Fires on a path
+ *  SEGMENT that is exactly ".env", ".env~" or ".env.<suffix>", so "/environment",
+ *  "/api/.envoy", "/assets/env.js" and "/blog/what-is-a-.env-file" are NOT it.
+ *  Template copies (.env.example etc.) are skipped at depth. The root-level
+ *  variants stay with sensitivePaths + dotfileVariant. Report-only. */
+function nestedDotenvProbe(path: string): string | null {
+  const segs = path.toLowerCase().split("/");
+  for (let i = 1; i < segs.length; i++) {
+    const s = segs[i];
+    if (s === ".env" || s === ".env~" || (s.startsWith(".env.") && s.length > 5 && !DOTENV_TEMPLATE_SEGMENT.test(s))) {
+      return "nested_dotenv";
+    }
+  }
+  return null;
+}
+
+/**
+ * Anonymous calls to WordPress PLUGIN endpoints with a published missing-auth
+ * flaw. On a site that declares platform "wordpress", core paths such as
+ * /wp-admin/admin-ajax.php and /wp-json are its own (platformPaths), so the path
+ * alone is never the reason: only the named plugin action/route is, and only
+ * when WordPress did NOT attest a signed-in user (the plugin forwards
+ * is_user_logged_in()). Both endpoints exist for a logged-in editor, so an
+ * anonymous call has no legitimate caller. Report-only, like every probe.
+ *   UpdraftCentral AJAX handler, missing authorization (UpdraftPlus 1.22.14 to
+ *   1.23.2): https://www.wordfence.com/threat-intel/vulnerabilities/wordpress-plugins/updraftplus/updraft-plus-12214-to-1232-privilege-escalation-via-updraft-central-ajax-handler
+ *   Rank Math rankmath/v1/updateMeta without a permission_callback,
+ *   CVE-2020-11514 (CVSS 9.8): https://nvd.nist.gov/vuln/detail/CVE-2020-11514
+ */
+function wpPluginAbuseProbe(path: string, rawUrl: string | undefined, authenticated: boolean): string | null {
+  if (authenticated) return null;
+  const lower = path.toLowerCase();
+  const raw = rawUrl ?? path;
+  const q = raw.indexOf("?");
+  let params: URLSearchParams | null = null;
+  try {
+    params = q === -1 ? null : new URLSearchParams(raw.slice(q + 1));
+  } catch {
+    params = null;
+  }
+  // admin-ajax.php at the root or under a subdirectory install ("/blog/wp-admin/...").
+  if (lower === "/wp-admin/admin-ajax.php" || lower.endsWith("/wp-admin/admin-ajax.php")) {
+    const action = (params?.get("action") ?? "").toLowerCase();
+    if (action.startsWith("updraft_central")) return "wp_plugin_updraftcentral_ajax";
+  }
+  // The REST route, by pretty permalink (/wp-json/<route>) or the plain
+  // ?rest_route=<route> form. WordPress matches REST routes case-insensitively.
+  const at = lower.indexOf("/wp-json/");
+  let route = at === -1 ? (params?.get("rest_route") ?? "").toLowerCase() : lower.slice(at + "/wp-json".length);
+  // trim trailing slashes without a regex (/\/+$/ is polynomial on a long run of '/': CodeQL js/polynomial-redos)
+  let end = route.length;
+  while (end > 0 && route.charCodeAt(end - 1) === 47) end--;
+  route = route.slice(0, end);
+  if (route === "/rankmath/v1/updatemeta") return "wp_plugin_rankmath_updatemeta";
+  return null;
+}
+
 /** The named probe class (ruleset.probeClasses) a matched sensitive pattern
  *  belongs to, e.g. "ai_tool_config", or null. A label only: it never changes
  *  whether or how the request is reported or blocked. */
@@ -284,6 +347,8 @@ export function observeRequest(input: ObserveInput, ruleset: ForcefieldRuleset):
   const sensitive = matchedSensitive(path, ruleset.sensitivePaths, native);
   const probe =
     sensitive ??
+    nestedDotenvProbe(path) ??
+    wpPluginAbuseProbe(path, input.rawUrl, authenticated) ??
     updraftCentralProbe(userAgent, input.platform) ??
     (input.platform === "wordpress" && WP_BACKDOOR_TRIGGER.test(input.rawUrl ?? "") ? "wp_backdoor_trigger" : null) ??
     // A Server Action invocation (`next-action` header) from a NON-browser

@@ -209,10 +209,19 @@ const SPEC_ROWS: readonly ThreatSpec[] = [
   { id: "LLM07", name: "Insecure tool / plugin design", family: "agent-llm", lenses: ["tool-composition"], note: "Unauthorized-access / credential-abuse tool intents from the toolset.", sample: "tools: auth_attempt + credential_list", check: () => (analyzeToolComposition(["auth_attempt", "credential_list"]).maliciousCombinations.some((c) => c.intent === "credential_stuffing") ? "covered" : null) },
   { id: "LLM08", name: "Excessive agency", family: "agent-llm", lenses: ["tool-composition"], note: "Malicious tool combinations (data theft, intrusion) from the equipped tools.", sample: "tools: inject_payload + auth_attempt", check: () => (analyzeToolComposition(["inject_payload", "auth_attempt"]).maliciousCombinations.some((c) => c.intent === "intrusion_attempt") ? "covered" : null) },
   { id: "CWE-290", name: "Authentication bypass by spoofing (impersonation)", family: "agent-llm", lenses: ["agent-behavior"], note: "A claimed good-bot identity that behaves hostilely is flagged as impersonation.", sample: "claims ClaudeBot, then probes /.env", check: () => (journey([ev("site.agent_welcomed", "/", { agent: "ClaudeBot" }), ev("site.agent_probed_sensitive", "/.env")]).insights.some((i) => i.kind === "impersonation") ? "covered" : null) },
-  { id: "CRAWLER-IMPERSONATION", name: "Crawler impersonation (claimed agent from the wrong network)", family: "agent-llm", lenses: ["web-classifier"], note: "A request whose User-Agent claims a known crawler but whose source is outside that crawler's published ranges, caught on the request itself (before it does anything hostile).", sample: "GPTBot UA from 203.0.113.9", check: () => {
-    const ruleset: ForcefieldRuleset = { ...DEFAULT_RULESET, verifiedAgentRanges: { GPTBot: ["20.15.240.64/28"] } };
-    const o = observeRequest(req("/", { userAgent: "Mozilla/5.0 (compatible; GPTBot/1.2; +https://openai.com/gptbot)", ip: "203.0.113.9", headerNames: [] }), ruleset);
-    return o && (o.props.impersonating === "GPTBot" || o.props.agent_verification === "impersonation") ? "covered" : null;
+  { id: "CRAWLER-IMPERSONATION", name: "Crawler impersonation (claimed agent from the wrong network)", family: "agent-llm", lenses: ["web-classifier"], note: "A request whose User-Agent claims a known crawler but whose source is outside that crawler's published ranges, caught on the request itself (before it does anything hostile).", sample: "GPTBot UA from 203.0.113.9 (and a real GPTBot from 20.15.240.70 stays welcomed)", check: () => {
+    const ua = "Mozilla/5.0 (compatible; GPTBot/1.2; +https://openai.com/gptbot)";
+    // Both range shapes: the vendor's dotted CIDR and the compact "base/bits" the
+    // live ruleset serves (20.15.240.64/28 = 336588864/28).
+    return weakest([["20.15.240.64/28"], ["336588864/28"]].map((list): CheckLevel => {
+      const ruleset: ForcefieldRuleset = { ...DEFAULT_RULESET, verifiedAgentRanges: { GPTBot: list } };
+      const fake = observeRequest(req("/", { userAgent: ua, ip: "203.0.113.9", headerNames: [] }), ruleset);
+      const real = observeRequest(req("/", { userAgent: ua, ip: "20.15.240.70", headerNames: [] }), ruleset);
+      const caught = fake?.type === "site.agent_flagged" && fake.props.impersonating === "GPTBot";
+      // Precision: a real crawler from its published range is never the suspect.
+      const realOk = real?.type === "site.agent_welcomed" && real.props.agent_verification === "verified";
+      return caught && realOk ? "covered" : null;
+    }));
   } },
   { id: "CWE-693", name: "Protection mechanism failure (evasion)", family: "agent-llm", lenses: ["agent-behavior"], note: "Read robots.txt, then violated it on purpose (deliberate_violation).", sample: "robots.txt, then the disallowed decoy", check: () => (journey([ev("site.agent_read_robots", "/robots.txt"), ev("site.agent_trap_tripped", "/_ff/records")]).insights.some((i) => i.kind === "deliberate_violation") ? "covered" : null) },
   { id: "FAST-AGENT", name: "Fast autonomous agents (request rate)", family: "agent-llm", lenses: ["agent-behavior"], note: "An autonomous agent making requests far faster than a person crosses the live rate window and is reported once per burst (report-only, never a block on rate alone).", sample: "60 requests in 3 seconds", check: () => (rateFires() ? "covered" : null) },

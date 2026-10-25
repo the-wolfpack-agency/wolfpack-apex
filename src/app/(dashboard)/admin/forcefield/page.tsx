@@ -274,10 +274,15 @@ export default function ForcefieldPage() {
                 </span>
               </div>
 
+              {sum.gaps.length === 0 && (
+                <span data-testid="coverage-no-gaps" style={{ fontSize: "0.78rem", color: "var(--wp-text-muted, #929cad)" }}>
+                  No open gaps: every agent-observable threat below is detected. Rows marked partial name what is still missing.
+                </span>
+              )}
               {sum.gaps.length > 0 && (
                 <div data-testid="coverage-gaps" style={{ display: "grid", gap: "0.3rem", padding: "0.5rem 0.7rem", borderRadius: 6, border: "1px solid var(--wp-error, #e5484d)" }}>
-                  <span style={{ fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em", color: "var(--wp-error, #e5484d)" }}>
-                    {sum.gaps.length} gaps to close (not caught off guard)
+                  <span data-testid="coverage-gaps-count" style={{ fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em", color: "var(--wp-error, #e5484d)" }}>
+                    {sum.gaps.length} {sum.gaps.length === 1 ? "gap" : "gaps"} to close (not caught off guard)
                   </span>
                   {sum.gaps.map((g) => (
                     <span key={g.id} style={{ fontSize: "0.78rem", color: "var(--wp-text, #e6e9ef)" }}>
