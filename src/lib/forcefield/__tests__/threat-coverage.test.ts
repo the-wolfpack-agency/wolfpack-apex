@@ -24,7 +24,6 @@ describe("threat-coverage matrix is self-checking", () => {
         expect(sp.check).toBeUndefined(); // code-level rows claim nothing
         continue;
       }
-      if (sp.id === "LLM01-indirect-fence-coverage") continue; // honest gap: no guard exists to run
       expect(typeof sp.check).toBe("function");
       expect(sp.sample && sp.sample.length > 0).toBe(true);
     }
@@ -107,8 +106,10 @@ describe("coverageSummary", () => {
     expect(s.observableTotal).toBe(s.total - s.notAgentObservable);
     expect(s.observableDetected).toBe(s.covered + s.partial);
     expect(s.gaps.every((g: ThreatEntry) => g.status === "gap")).toBe(true);
-    // The no-guard residual is always a named gap, so the list is never empty.
-    expect(s.gaps.some((g) => g.id === "LLM01-indirect-fence-coverage")).toBe(true);
+    // The fence-coverage row is backed by a real build guard now; it must stay honest (partial, not covered).
+    const fenceRow = THREAT_COVERAGE.find((e: ThreatEntry) => e.id === "LLM01-indirect-fence-coverage");
+    expect(fenceRow?.status).toBe("partial");
+    expect(require("fs").existsSync(require("path").resolve(__dirname, "../../../__tests__/model-call-fence-coverage.test.ts"))).toBe(true);
   });
 });
 

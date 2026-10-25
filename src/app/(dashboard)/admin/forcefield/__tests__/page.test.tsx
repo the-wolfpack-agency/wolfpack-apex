@@ -161,12 +161,12 @@ test("threat coverage panel: shows the honest headline, gaps, and per-threat sta
   // Honest headline: detected / observable (excludes code-level CWEs).
   expect(screen.getByTestId("coverage-headline")).toHaveTextContent(/\d+ \/ \d+ agent-observable threats detected/i);
   // The gaps callout still names an honest frontier - the "not caught off guard" part.
-  // Indirect prompt injection is now structurally mitigated by the provenance fence
-  // (partial), so the named gap moved to the enforcement residual: no build-time guard
-  // that EVERY retrieval path is fenced.
+  // Indirect injection is no longer listed: a build guard now fails CI on any unfenced
+  // model call site, so that row reads partial (the fence still relies on the model).
   const gaps = screen.getByTestId("coverage-gaps");
-  expect(gaps).toHaveTextContent(/indirect injection/i);
   expect(gaps).toHaveTextContent(/gaps? to close/i);
+  expect(gaps).not.toHaveTextContent(/indirect injection/i);
+  expect(screen.getByTestId("coverage-row-LLM01-indirect-fence-coverage")).toHaveTextContent(/partial/i);
   // A covered injection CWE reads "covered"; a code-level CWE reads out-of-scope.
   expect(screen.getByTestId("coverage-row-CWE-89")).toHaveTextContent(/covered/i);
   expect(screen.getByTestId("coverage-row-CWE-352")).toHaveTextContent(/not agent observable/i);
