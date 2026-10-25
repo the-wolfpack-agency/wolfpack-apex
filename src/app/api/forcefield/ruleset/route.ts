@@ -14,6 +14,9 @@
  * "on") the blockedFingerprints an admin has blocked from the board, so every
  * site turns those operators away pre-emptively. Flag-gated + fail-safe: any
  * error, or the flag off, serves an EMPTY block list rather than a wrong one.
+ * An AUTOMATIC block on a generic fingerprint (default curl, a library, a
+ * headless browser) is never served; only an admin may block those tool-wide
+ * (see forcefield/autoblock-scope.ts).
  *
  * Responses: 200 { ruleset }.
  */

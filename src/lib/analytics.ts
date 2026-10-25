@@ -3448,6 +3448,12 @@ export type InstinctEventType =
   // forcefield.autoblock_skipped { reason, rule, mode, auto_block } - an automatic
   // block was refused by the edge policy or by qualifiesForAutoBlock.
   | "forcefield.autoblock_skipped"
+  // forcefield.autoblock_withheld_generic { reason, operatorKey, withheld, fps, why }
+  // - an automatic block passed every gate, but its fingerprint is GENERIC (a
+  // default client shape shared by unrelated users: curl, a library, a headless
+  // browser, or a header shape seen with several tools or countries), so it was
+  // NOT distributed tool-wide. Recorded report-only with an admin-review alert.
+  | "forcefield.autoblock_withheld_generic"
   // forcefield.canary_tripped { canary_id, kind, surface, seeded_in, agent_id? } -
   // a decoy (token, route, row or tool) was touched in an inbound request, an
   // agent message, a tool call or a tool's output.
