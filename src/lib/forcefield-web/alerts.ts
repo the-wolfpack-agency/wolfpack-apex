@@ -49,7 +49,9 @@ export const SILENCE_LOOKBACK_HOURS = 24;
 /** A failed delivery is retried on later scans until this many attempts. */
 export const MAX_ATTEMPTS = 5;
 
-export type ForcefieldWebAlertKind = "honeytoken_trip" | "payload_attack" | "canary_trip" | "alert_silence";
+/** autoblock_withheld: an automatic block on a GENERIC fingerprint was recorded
+ *  report-only and needs an admin review (see forcefield/autoblock-scope.ts). */
+export type ForcefieldWebAlertKind = "honeytoken_trip" | "payload_attack" | "canary_trip" | "alert_silence" | "autoblock_withheld";
 
 export interface HostileSignal {
   kind: "honeytoken_trip" | "payload_attack";

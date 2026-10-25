@@ -24,6 +24,13 @@
  *      key that resolves to more than AUTO_BLOCK_MAX_FINGERPRINTS fingerprints
  *      blocks only the fingerprints that themselves carried proof (a trap trip,
  *      a payload attack, a honeypot field), and records forcefield.autoblock_capped.
+ *   4. They are never TOOL-WIDE on a GENERIC fingerprint (autoblock-scope.ts). A
+ *      fingerprint is header shape + tool with no network part, so an automatic
+ *      block on default curl / python-requests / a headless browser would turn
+ *      away every user of that tool on every site. Such a block is withheld:
+ *      recorded as forcefield.autoblock_withheld_generic plus an alert asking an
+ *      admin to review, and an existing generic automatic row is no longer
+ *      distributed by getBlockedFingerprints. An ADMIN block stays tool-wide.
  *
  * Fail-safe: every function degrades to a no-op / empty result on a DB error, so
  * a resolution failure can neither block a legitimate admin action nor, more
@@ -36,6 +43,8 @@ import { buildAgentProfile } from "@/lib/agent-profile";
 import { listBlockedOperatorKeys } from "@/lib/agent-operators";
 import { getEdgePolicy, type EdgePolicy } from "@/lib/forcefield/edge-policy";
 import { qualifiesForAutoBlock, AUTO_BLOCK_TTL_DAYS, type EdgeSignals } from "@/lib/forcefield/edge-enforcement";
+import { classifyAutoBlockScope, isStaticallyGeneric, splitFingerprint, staticFingerprintScope, type FingerprintScope, type HeaderShapeSpread } from "@/lib/forcefield/autoblock-scope";
+import type { ForcefieldAlert, DeliveryOutcome } from "@/lib/forcefield-web/alerts";
 
 const LOOKBACK_DAYS = 30;
 const MAX_EVENTS = 5000;
@@ -279,6 +288,104 @@ export async function gateAutoBlock(input: AutoBlockGateInput, deps: { getPolicy
   return { allowed, why, policy };
 }
 
+/* ------------------------------- auto scope -------------------------------- */
+
+/** Injected I/O for the scope check, so it is testable with no DB. */
+export interface AutoBlockScopeDeps {
+  /** How widely a header shape is shared recently. null = could not read. */
+  loadSpread?: (shape: string) => Promise<HeaderShapeSpread | null>;
+  /** Raise the admin-review alert. Never expected to throw. */
+  alert?: (alert: ForcefieldAlert) => Promise<DeliveryOutcome | null>;
+}
+
+/** Distinct kinds + countries seen with one header shape in the lookback.
+ *  Read-only; uses idx_sae_fp_created (prefix range on props->>'fp'). null on
+ *  any error, which the scope rule treats as generic (fail toward not blocking). */
+export async function loadHeaderShapeSpread(shape: string): Promise<HeaderShapeSpread | null> {
+  if (!/^[0-9a-f]{1,16}$/.test(shape)) return null;
+  try {
+    const res = await query<{ kinds: string; countries: string }>(
+      `SELECT count(DISTINCT split_part(props->>'fp', ':', 2)) AS kinds,
+              count(DISTINCT country) AS countries
+         FROM site_analytics_events
+        WHERE created_at > now() - ($1 || ' days')::interval
+          AND props->>'fp' LIKE $2`,
+      [String(LOOKBACK_DAYS), `${shape}:%`],
+    );
+    const r = res.rows[0];
+    if (!r) return null;
+    return { kinds: Number(r.kinds), countries: Number(r.countries) };
+  } catch {
+    return null;
+  }
+}
+
+async function liveAlert(alert: ForcefieldAlert): Promise<DeliveryOutcome | null> {
+  // Lazy: keeps the mail/notification graph out of the per-request ruleset path.
+  const { dispatchForcefieldAlert, liveForcefieldAlertDeps } = await import("@/lib/forcefield-web/alerts");
+  return dispatchForcefieldAlert(alert, liveForcefieldAlertDeps());
+}
+
+/** Scope verdict for one fingerprint at write time: the static rule first, the
+ *  header-shape data only for the kind that needs it. */
+export async function resolveAutoBlockScope(fp: string, deps: AutoBlockScopeDeps = {}): Promise<FingerprintScope> {
+  if (staticFingerprintScope(fp)) return classifyAutoBlockScope(fp, null);
+  const spread = await (deps.loadSpread ?? loadHeaderShapeSpread)(splitFingerprint(fp).shape).catch(() => null);
+  return classifyAutoBlockScope(fp, spread);
+}
+
+/** Record a withheld generic auto-block: one durable event and one alert per
+ *  (reason, operator) in a 6-hour window. Never throws. */
+async function recordWithheldGeneric(
+  withheld: { fp: string; scope: FingerprintScope }[],
+  ctx: { reason: string; operatorKey?: string },
+  deps: AutoBlockScopeDeps,
+): Promise<void> {
+  if (withheld.length === 0) return;
+  const sample = withheld.slice(0, 5).map((w) => w.fp).join(",");
+  const whys = Array.from(new Set(withheld.map((w) => w.scope.why))).join(",");
+  await trackEventAwait("forcefield.autoblock_withheld_generic", "system", "forcefield", {
+    reason: ctx.reason,
+    operatorKey: ctx.operatorKey ?? "",
+    withheld: withheld.length,
+    fps: sample,
+    why: whys,
+  }).catch(() => {});
+  try {
+    const { windowStartOf, incidentKey } = await import("@/lib/forcefield-web/alerts");
+    const windowStart = windowStartOf(new Date());
+    const subject = ctx.operatorKey ? `operator ${ctx.operatorKey}` : `fingerprint ${withheld[0].fp}`;
+    await (deps.alert ?? liveAlert)({
+      kind: "autoblock_withheld",
+      dedupeKey: incidentKey("autoblock_withheld", "", `${ctx.reason}|${ctx.operatorKey ?? withheld[0].fp}`, windowStart),
+      title: `Forcefield: automatic block withheld for a shared client fingerprint (${ctx.reason})`,
+      body:
+        `A proven-hostile signal (${ctx.reason}) asked Forcefield to block ${subject}, but ${withheld.length} of its fingerprint(s) (${sample}) ` +
+        `are generic (${whys}): many unrelated clients send the same header shape with the same tool, so a fingerprint-wide block would turn all of them away on every site. ` +
+        `The block was recorded report-only. Decoy, payload and attack-tool rules still block this client's hostile requests. ` +
+        `Review the operator on the Forcefield board and block it explicitly if a tool-wide block is warranted.`,
+      windowStart,
+      attackClass: "autoblock_withheld",
+      metadata: { reason: ctx.reason, withheld: withheld.length, why: whys },
+    });
+  } catch {
+    /* the event above is the durable record; an alert failure is retried by nothing here */
+  }
+}
+
+/** Split planned automatic rows into fingerprint-wide (distinctive) and withheld
+ *  (generic). */
+async function partitionByScope<T extends { fp: string }>(rows: readonly T[], deps: AutoBlockScopeDeps): Promise<{ keep: T[]; withheld: { fp: string; scope: FingerprintScope }[] }> {
+  const keep: T[] = [];
+  const withheld: { fp: string; scope: FingerprintScope }[] = [];
+  for (const r of rows) {
+    const scope = await resolveAutoBlockScope(r.fp, deps);
+    if (scope.verdict === "distinctive") keep.push(r);
+    else withheld.push({ fp: r.fp, scope });
+  }
+  return { keep, withheld };
+}
+
 /* --------------------------------- writes --------------------------------- */
 
 /** Capture + persist a blocked operator's fingerprints (an ADMIN block: no
@@ -335,12 +442,17 @@ async function writeAutoRows(workspaceId: string, opKey: string, rows: { fp: str
  *  (proven, hostile), is written under a reserved "auto:<reason>" key, and
  *  expires AUTO_BLOCK_TTL_DAYS after this sighting. Returns rows inserted.
  *  Fail-safe + idempotent; never throws. */
-export async function autoBlockFingerprint(fp: string, reason: string): Promise<number> {
+export async function autoBlockFingerprint(fp: string, reason: string, deps: AutoBlockScopeDeps = {}): Promise<number> {
   if (!process.env.DATABASE_URL || !fp) return 0;
   const workspaceId = process.env.FORCEFIELD_EDGE_WORKSPACE_ID || "default";
   try {
     const gate = await gateAutoBlock({ workspaceId, proven: true, trustBand: "hostile", reason: `auto:${reason}` });
     if (!gate.allowed) return 0;
+    // A generic fingerprint (default curl, a library, a headless browser) is
+    // shared by unrelated users: never block it tool-wide automatically.
+    const { keep, withheld } = await partitionByScope([{ fp }], deps);
+    await recordWithheldGeneric(withheld, { reason: `auto:${reason}` }, deps);
+    if (keep.length === 0) return 0;
     const expiresAt = new Date(Date.now() + AUTO_BLOCK_TTL_DAYS * 86_400_000).toISOString();
     const { inserted } = await writeAutoRows(workspaceId, `auto:${reason}`, [{ fp, expiresAt }]);
     if (inserted > 0) trackEvent("forcefield.fingerprint_autoblocked", "system", "forcefield", { fp, reason, expires_at: expiresAt });
@@ -363,7 +475,7 @@ export interface AutoBlockOperatorInput {
  *  header. Used by the learned-signature loop when a live operator matches an
  *  ENFORCING signature. Fail-safe + idempotent; returns the number of
  *  fingerprint rows NEWLY inserted (0 on a re-run that added nothing). */
-export async function autoBlockOperator(operatorKey: string, reason: string, input: AutoBlockOperatorInput = { proven: false, trustBand: "caution" }): Promise<number> {
+export async function autoBlockOperator(operatorKey: string, reason: string, input: AutoBlockOperatorInput = { proven: false, trustBand: "caution" }, deps: AutoBlockScopeDeps = {}): Promise<number> {
   if (!process.env.DATABASE_URL || !operatorKey) return 0;
   const workspaceId = process.env.FORCEFIELD_EDGE_WORKSPACE_ID || "default";
   const opKey = `auto:${reason}`;
@@ -383,7 +495,11 @@ export async function autoBlockOperator(operatorKey: string, reason: string, inp
       });
     }
     if (plan.rows.length === 0) return 0;
-    const { inserted } = await writeAutoRows(workspaceId, opKey, plan.rows);
+    // Cap + expiry first (above), then scope: generic fingerprints are withheld.
+    const { keep, withheld } = await partitionByScope(plan.rows, deps);
+    await recordWithheldGeneric(withheld, { reason: opKey, operatorKey }, deps);
+    if (keep.length === 0) return 0;
+    const { inserted } = await writeAutoRows(workspaceId, opKey, keep);
     if (inserted > 0) trackEvent("forcefield.fingerprint_autoblocked", "system", "forcefield", { operatorKey, reason, count: inserted, capped: plan.capped });
     return inserted;
   } catch (err) {
@@ -397,7 +513,11 @@ export async function autoBlockOperator(operatorKey: string, reason: string, inp
 /** The distinct fingerprints to distribute for a workspace. A row enforces only
  *  while it is unexpired; an admin row only while its operator is still blocked;
  *  an automatic row only while the edge policy still allows auto-blocking (so
- *  turning auto_block off withdraws every automatic block at once). Empty on any
+ *  turning auto_block off withdraws every automatic block at once) AND only when
+ *  its fingerprint is not statically generic (autoblock-scope.ts): a stored
+ *  automatic row on default curl / a library / a headless browser is kept in the
+ *  table (it still expires on schedule) but is never served. An admin row on the
+ *  same fingerprint is still served: a human chose tool-wide. Empty on any
  *  error (fail-safe: the ruleset falls back to no fingerprint enforcement rather
  *  than a wrong block). */
 export async function getBlockedFingerprints(workspaceId: string, now = new Date()): Promise<string[]> {
@@ -418,7 +538,9 @@ export async function getBlockedFingerprints(workspaceId: string, now = new Date
     const out = new Set<string>();
     for (const r of res.rows) {
       if (!isBlockActive(r.expires_at, now)) continue;
-      if (r.operator_key.startsWith("auto:") ? autoEnforces : blocked.has(r.operator_key)) out.add(r.fp);
+      const isAuto = r.operator_key.startsWith("auto:");
+      if (isAuto && isStaticallyGeneric(r.fp)) continue;
+      if (isAuto ? autoEnforces : blocked.has(r.operator_key)) out.add(r.fp);
     }
     return [...out];
   } catch {

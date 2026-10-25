@@ -21,6 +21,12 @@ const mockTrackAwait = jest.fn(async () => {});
 jest.mock("@/lib/db", () => ({ query: (...a: unknown[]) => mockQuery(...a) }));
 jest.mock("@/lib/agent-operators", () => ({ listBlockedOperatorKeys: (...a: unknown[]) => mockListBlocked(...a) }));
 jest.mock("@/lib/forcefield/edge-policy", () => ({ getEdgePolicy: (...a: unknown[]) => mockPolicy(...a) }));
+const mockDispatch = jest.fn(async () => null);
+jest.mock("@/lib/forcefield-web/alerts", () => ({
+  ...jest.requireActual("@/lib/forcefield-web/alerts"),
+  dispatchForcefieldAlert: (...a: unknown[]) => mockDispatch(...(a as [])),
+  liveForcefieldAlertDeps: () => ({}),
+}));
 jest.mock("@/lib/analytics", () => ({
   trackEvent: (...a: unknown[]) => mockTrack(...a),
   trackEventAwait: (...a: unknown[]) => mockTrackAwait(...(a as [])),
@@ -66,11 +72,11 @@ describe("getBlockedFingerprints", () => {
     mockListBlocked.mockResolvedValue(new Set());
     mockQuery.mockResolvedValue({
       rows: [
-        { fp: "live", operator_key: "auto:honeytoken", expires_at: daysAgo(-3) },
-        { fp: "dead", operator_key: "auto:honeytoken", expires_at: daysAgo(1) },
+        { fp: "aaaa0001:sqlmap", operator_key: "auto:honeytoken", expires_at: daysAgo(-3) },
+        { fp: "aaaa0002:sqlmap", operator_key: "auto:honeytoken", expires_at: daysAgo(1) },
       ],
     });
-    expect(await getBlockedFingerprints("default", NOW)).toEqual(["live"]);
+    expect(await getBlockedFingerprints("default", NOW)).toEqual(["aaaa0001:sqlmap"]);
   });
 
   it("ADMIN BLOCKS PERSIST: an admin row with no expiry enforces however old it is", async () => {
@@ -84,7 +90,7 @@ describe("getBlockedFingerprints", () => {
     mockPolicy.mockResolvedValue({ mode: "enforce", autoBlock: false });
     mockQuery.mockResolvedValue({
       rows: [
-        { fp: "auto1", operator_key: "auto:honeytoken", expires_at: daysAgo(-3) },
+        { fp: "aaaa0003:sqlmap", operator_key: "auto:honeytoken", expires_at: daysAgo(-3) },
         { fp: "adm", operator_key: "op_admin", expires_at: null },
       ],
     });
@@ -173,7 +179,7 @@ describe("gateAutoBlock (edge policy + qualifiesForAutoBlock)", () => {
 function eventRows(n: number, provenCount: number) {
   return Array.from({ length: n }, (_, i) => ({
     event_type: i < provenCount ? "site.agent_trap_tripped" : "site.agent_flagged",
-    path: "/x", created_at: new Date().toISOString(), sig: `sig${i}`, nonce: null, fp: `fp${i}`,
+    path: "/x", created_at: new Date().toISOString(), sig: `sig${i}`, nonce: null, fp: `fp${i}:sqlmap`,
     agent: null, attack: null, tool: null, client_type: "script",
   }));
 }
@@ -228,14 +234,14 @@ describe("autoBlockOperator", () => {
     expect(n).toBe(2);
     expect(mockTrackAwait).toHaveBeenCalledWith("forcefield.autoblock_capped", "system", "forcefield", expect.objectContaining({ resolved: AUTO_BLOCK_MAX_FINGERPRINTS + 10, proven: 2, cap: AUTO_BLOCK_MAX_FINGERPRINTS }));
     const fpsWritten = mockQuery.mock.calls[1][1][2];
-    expect(fpsWritten.sort()).toEqual(["fp0", "fp1"]);
+    expect(fpsWritten.sort()).toEqual(["fp0:sqlmap", "fp1:sqlmap"]);
   });
 });
 
 describe("autoBlockFingerprint (honeytoken)", () => {
   it("writes with an expiry and returns rows inserted", async () => {
     mockQuery.mockResolvedValueOnce({ rows: [{ inserted: true }] });
-    expect(await autoBlockFingerprint("fpX", "honeytoken")).toBe(1);
+    expect(await autoBlockFingerprint("ab12cd34:sqlmap", "honeytoken")).toBe(1);
     const [sql, params] = mockQuery.mock.calls[0];
     expect(sql).toMatch(/expires_at/);
     expect(params[1]).toBe("auto:honeytoken");
@@ -244,7 +250,7 @@ describe("autoBlockFingerprint (honeytoken)", () => {
 
   it("is refused by the edge policy when auto-block is off", async () => {
     mockPolicy.mockResolvedValueOnce({ mode: "monitor", autoBlock: false });
-    expect(await autoBlockFingerprint("fpX", "honeytoken")).toBe(0);
+    expect(await autoBlockFingerprint("ab12cd34:sqlmap", "honeytoken")).toBe(0);
     expect(mockQuery).not.toHaveBeenCalled();
   });
 });
