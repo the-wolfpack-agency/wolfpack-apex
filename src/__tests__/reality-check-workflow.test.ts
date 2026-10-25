@@ -26,6 +26,8 @@ const HARD_GATES = [
      can tell the difference. */
   "tests/e2e/playbook-readable.spec.ts",
   "tests/e2e/client-builds.spec.ts",
+  // Promoted 2026-10-25 after #1241 fixed the spec: 6/6 on main (CI run 40228607337).
+  "tests/e2e/lms-security-course.spec.ts",
 ];
 
 /**
@@ -41,10 +43,7 @@ const HARD_GATES = [
  * a commented-out argument satisfies. The assertions below check the parsed
  * command each step actually executes.
  */
-const REPORT_ONLY_GATES = [
-  // Two lesson-1 controls never became visible on its first real run; promote once fixed.
-  "tests/e2e/lms-security-course.spec.ts",
-];
+const REPORT_ONLY_GATES: string[] = [];
 
 const { load } = require("js-yaml") as { load: (src: string) => unknown };
 interface Step {
@@ -268,7 +267,13 @@ test("the hard gates run in a single parallel invocation, with every flag really
   for (const r of REPORT_ONLY_GATES) expect(run).not.toContain(r);
 });
 
-test("the report-only gates really run, on PR + push, and cannot block a merge", () => {
+test("with no report-only gates there is no report-only step (an empty playwright command runs every spec)", () => {
+  if (REPORT_ONLY_GATES.length) return;
+  expect(steps.find((x) => x.name === REPORT_STEP)).toBeUndefined();
+  expect(yaml).not.toMatch(/steps\.report_only\.outcome/);
+});
+
+(REPORT_ONLY_GATES.length ? test : test.skip)("the report-only gates really run, on PR + push, and cannot block a merge", () => {
   const s = step(REPORT_STEP);
   const run = s.run ?? "";
   expect(run).not.toContain("#");
