@@ -160,6 +160,18 @@ export async function stubInstinctSession(
       body: JSON.stringify({ token: "test-token-not-validated", user }),
     });
   });
+  // 3. The dashboard layout asks /api/auth/mfa/status on every mount. The stub
+  //    token is not a real JWT, so the real route answers 401 and every spec that
+  //    collects network failures went red. Answer as production does with MFA
+  //    enforcement off. A spec that tests MFA registers its own route after this
+  //    one, and Playwright gives the later route priority.
+  await page.route("**/api/auth/mfa/status", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ enrolled: false, enforced: false, required: null }),
+    });
+  });
 }
 
 export interface ConsoleFailure {

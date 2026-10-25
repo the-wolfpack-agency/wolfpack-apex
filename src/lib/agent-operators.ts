@@ -10,6 +10,7 @@
  * rather than throwing.
  */
 import { query, safeQuery } from "@/lib/db";
+import { NOT_CONTROL_PLANE_FP } from "@/lib/site-analytics-proven";
 import { operatorKeyFor, buildDossiers, buildDossier, type Sighting, type AttributionDossier } from "@/lib/agent-dossier";
 import { buildJourneys, type AgentJourney, type CorrelationKind } from "@/lib/agent-behavior";
 import { liveSightingFor } from "@/lib/agent-profile";
@@ -235,7 +236,7 @@ export async function liveAgentIntelligence(rangeDays = 7): Promise<AgentIntelSu
          FROM site_analytics_events
         WHERE created_at > now() - ($1 || ' days')::interval
           AND event_type LIKE 'site.agent_%'
-          AND props->>'fp' IS NOT NULL
+          AND props->>'fp' IS NOT NULL${NOT_CONTROL_PLANE_FP}
         ORDER BY created_at ASC
         LIMIT 20000`,
       [String(days)],

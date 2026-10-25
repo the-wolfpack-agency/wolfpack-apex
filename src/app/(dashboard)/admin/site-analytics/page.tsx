@@ -25,6 +25,8 @@ import { ForcefieldSwitch } from "@/components/ForcefieldSwitch";
 import { ForcefieldAssurance } from "@/components/forcefield/ForcefieldAssurance";
 import { ProbeIntelPanel } from "@/components/forcefield/ProbeIntelPanel";
 import { PayloadIntelPanel } from "@/components/forcefield/PayloadIntelPanel";
+import { ProvenAttacksPanel } from "@/components/site-analytics/ProvenAttacksPanel";
+import type { ProvenAttacks } from "@/lib/site-analytics-proven";
 
 interface Summary {
   verdictFeedback?: { falsePositives: number };
@@ -86,6 +88,8 @@ interface Summary {
   networkTradecraft?: Array<{ tells: string[]; workspaceCount: number; severity: "hostile" | "elevated" | "benign" }>;
   principalByOperator?: Record<string, { status: "verified" | "claimed"; principal?: string; issuer?: string; scopes: string[]; mandateExceeded: boolean; violations: string[] }>;
   defense?: DefenseSignals;
+  /** Per-site proven attacks (forcefield.view only; stripped for everyone else). */
+  proven?: ProvenAttacks;
 }
 
 /** What the edge did and saw (mirrors DefenseSignals in lib/site-analytics). */
@@ -166,6 +170,9 @@ export default function SiteAnalyticsPage() {
   const [surface, setSurface] = useState<string>("all");
   const [summary, setSummary] = useState<Summary | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
+  // When the last successful load happened and for which scope, so a failed
+  // refresh shows the previous board marked stale instead of blanking it.
+  const [loadedAt, setLoadedAt] = useState<{ at: string; days: number; surface: string } | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [sevFilter, setSevFilter] = useState<Severity | "all">("all");
   const [provenOnly, setProvenOnly] = useState(false);
@@ -320,6 +327,7 @@ export default function SiteAnalyticsPage() {
       }
       const body = (await res.json()) as { summary: Summary; permissions?: { triage: boolean; manageOperators: boolean; viewIntel: boolean } };
       setSummary(body.summary);
+      setLoadedAt({ at: new Date().toISOString(), days: range, surface: surf });
       if (body.permissions) setPermissions(body.permissions);
       // The reputation-network opt-in lives behind a manage capability; a 403 just
       // means this viewer can't toggle it, which is fine - leave it null.
@@ -625,12 +633,18 @@ export default function SiteAnalyticsPage() {
         </div>
       )}
       {state === "error" && (
-        <div data-testid="site-analytics-error" style={{ ...card, color: "var(--wp-error, #ef4444)" }}>
-          Could not load site analytics right now.
+        <div data-testid="site-analytics-error" role="alert" style={{ ...card, color: "var(--wp-error, #ef4444)" }}>
+          {summary && loadedAt ? (
+            <span data-testid="site-analytics-stale">
+              Could not refresh site analytics. Showing the data loaded at {new Date(loadedAt.at).toLocaleTimeString()} ({loadedAt.days}d, {loadedAt.surface === "all" ? "all sites" : loadedAt.surface}); it may be stale.
+            </span>
+          ) : (
+            "Could not load site analytics right now."
+          )}
         </div>
       )}
 
-      {state === "ready" && summary && (
+      {(state === "ready" || state === "error") && summary && (
         <>
           {/* Forcefield hero: the prominent auto-block on/off. The count is how many
               operators in view the edge would block or challenge if protection were on. */}
@@ -669,6 +683,23 @@ export default function SiteAnalyticsPage() {
           })()}
 
           {permissions.manageOperators && <ForcefieldAssurance />}
+
+          {/* Proven attacks first: blocked payloads and decoy trips per protected
+              site. Everything below (flagged / welcomed automation, page views,
+              journeys, intel drill-downs) is context, not the headline. */}
+          <ProvenAttacksPanel
+            proven={summary.proven}
+            viewIntel={permissions.viewIntel}
+            rangeDays={summary.rangeDays}
+            blockedTotal={summary.forcefield.blocked}
+          />
+
+          <div data-testid="secondary-signals-heading" style={{ display: "grid", gap: "0.2rem", marginTop: "0.4rem" }}>
+            <span style={{ ...label, fontWeight: 700 }}>Traffic and detection detail</span>
+            <span style={{ fontSize: "0.72rem", color: "var(--wp-text-muted, #8b90a0)", lineHeight: 1.45 }}>
+              Page views, welcomed agents and flagged automation are weak, unconfirmed signals, not attacks. They are kept here for anyone digging in.
+            </span>
+          </div>
 
           {/* Audience split: site usage vs agent-defense intel. The Forcefield tab
               exists only for forcefield.view holders; the data is gated server-side too. */}

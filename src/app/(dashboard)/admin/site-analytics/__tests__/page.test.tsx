@@ -949,3 +949,56 @@ test("low-data honesty: a banner shows on thin volume and is absent on healthy v
   await waitFor(() => expect(screen.getByTestId("site-analytics-page")).toBeInTheDocument());
   expect(screen.queryByTestId("low-data-banner")).toBeNull();
 });
+
+describe("proven attacks lead the board", () => {
+  const PROVEN = {
+    available: true,
+    generatedAt: "2026-10-24T12:00:00Z",
+    excludedFalsePositives: 7828,
+    sites: [
+      { site: "ogiam.com", lastReportAt: new Date().toISOString(), excludedFalsePositives: 0,
+        blocked: { events: 76, fingerprints: 12, withoutFingerprint: 0, lastSeen: new Date().toISOString(), byClass: [{ attack: "path_traversal", eventType: "site.agent_payload_attack", count: 76, fingerprints: 12, withoutFingerprint: 0, lastSeen: new Date().toISOString() }] },
+        reportOnly: { events: 0, fingerprints: null, withoutFingerprint: 0, lastSeen: null, byClass: [] } },
+      { site: "instinct", lastReportAt: new Date().toISOString(), excludedFalsePositives: 7828,
+        blocked: { events: 0, fingerprints: null, withoutFingerprint: 0, lastSeen: null, byClass: [] },
+        reportOnly: { events: 0, fingerprints: null, withoutFingerprint: 0, lastSeen: null, byClass: [] } },
+    ],
+  };
+
+  test("the proven panel renders above the noise (tabs, flagged, page views)", async () => {
+    mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: { ...SUMMARY, proven: PROVEN }, permissions: PERMS }) });
+    render(<SiteAnalyticsPage />);
+    const proven = await screen.findByTestId("proven-attacks");
+    const tabs = screen.getByTestId("console-tabs");
+    expect(proven.compareDocumentPosition(tabs) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(proven.compareDocumentPosition(screen.getByTestId("ff-flagged")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByTestId("proven-ogiam.com-blocked-path_traversal")).toHaveTextContent("76");
+    // the false-positive site shows zero proven + the exclusion, not 7,828 attacks
+    expect(screen.getByTestId("proven-site-instinct-empty")).toBeInTheDocument();
+    expect(screen.getByTestId("proven-site-instinct-excluded")).toHaveTextContent("7,828");
+    // noise is still there for anyone who looks
+    expect(screen.getByTestId("secondary-signals-heading")).toBeInTheDocument();
+    expect(screen.getByTestId("ff-flagged")).toHaveTextContent("9");
+  });
+
+  test("a viewer without forcefield.view gets the gated proven card, not a blank", async () => {
+    mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: SUMMARY, permissions: { triage: false, manageOperators: false, viewIntel: false } }) });
+    render(<SiteAnalyticsPage />);
+    expect(await screen.findByTestId("proven-attacks-gated")).toHaveTextContent("4 requests blocked");
+  });
+
+  test("a failed refresh keeps the last board, marked stale", async () => {
+    let fail = false;
+    mockFetchWithRefresh.mockImplementation((url: string) => {
+      if (String(url).startsWith("/api/admin/site-analytics?") && fail) return Promise.resolve({ ok: false, json: async () => ({}) });
+      return Promise.resolve({ ok: true, json: async () => ({ summary: { ...SUMMARY, proven: PROVEN }, permissions: PERMS }) });
+    });
+    render(<SiteAnalyticsPage />);
+    await screen.findByTestId("proven-attacks");
+    fail = true;
+    fireEvent.click(screen.getByText("7d"));
+    expect(await screen.findByTestId("site-analytics-stale")).toHaveTextContent(/Could not refresh.*30d, all sites.*may be stale/);
+    expect(screen.getByTestId("site-analytics-error")).toBeInTheDocument();
+    expect(screen.getByTestId("proven-ogiam.com-blocked-path_traversal")).toBeInTheDocument();
+  });
+});
