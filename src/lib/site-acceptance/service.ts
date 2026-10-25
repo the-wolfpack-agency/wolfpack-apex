@@ -8,6 +8,7 @@
  * that must never be needed to prove the rules are right.
  */
 import { trackEvent } from "@/lib/analytics";
+import { runWithRequestWorkspace } from "@/lib/db/request-workspace";
 import { assertScannableUrl } from "@/lib/platform-scan/ssrf-guard";
 import { runSpecDiff } from "@/lib/spec-diff/run";
 import { createSpecDiffBrowser } from "@/lib/spec-diff/browser";
@@ -194,7 +195,10 @@ export async function drainAcceptanceQueue(
     if (!run) break;
     out.claimed++;
     out.runIds.push(run.id);
-    const status = await executeAcceptanceRun(run, depsFor);
+    // Claimed under system scope (the shared queue); executed under the run's
+    // own workspace, so its reads and writes reach that workspace only.
+    const ws = ((run as { workspace_id?: string }).workspace_id as string) ?? "default";
+    const status = await runWithRequestWorkspace(ws, () => executeAcceptanceRun(run, depsFor));
     out[status]++;
   }
   return out;

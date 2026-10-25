@@ -12,6 +12,7 @@
  * abandoning the pass.
  */
 import { nextRun, type Cadence, type Schedule } from "./schedule";
+import { withSystemScope } from "@/lib/db/request-workspace";
 
 export interface ScheduleRow {
   id: string;
@@ -126,14 +127,18 @@ export async function dueSchedules(now: Date, limit = 50): Promise<ScheduleRow[]
   if (!process.env.DATABASE_URL) return [];
   try {
     const { query } = await import("@/lib/db");
-    const { rows } = await query<Record<string, unknown>>(
-      `SELECT id, workspace_id, user_id, command, cadence, hour, weekday, time_zone,
-              next_run_at, failures
-         FROM assistant_routine_schedules
-        WHERE active AND next_run_at <= $1
-        ORDER BY next_run_at
-        LIMIT $2`,
-      [now, limit],
+    // Cross-workspace on purpose: the sweep's work list is every workspace's due
+    // schedules. Each row is then run under its own workspace (sweep.ts).
+    const { rows } = await withSystemScope(() =>
+      query<Record<string, unknown>>(
+        `SELECT id, workspace_id, user_id, command, cadence, hour, weekday, time_zone,
+                next_run_at, failures
+           FROM assistant_routine_schedules
+          WHERE active AND next_run_at <= $1
+          ORDER BY next_run_at
+          LIMIT $2`,
+        [now, limit],
+      ),
     );
     return rows.map(toRow);
   } catch {

@@ -9,7 +9,11 @@
  *   - a binding made inside an awaited helper (as requireCapability does) is
  *     visible to the caller afterwards, and concurrent requests never see each
  *     other's workspace;
- *   - withSystemScope sets app.rls_system and refuses to nest in a workspace.
+ *   - withSystemScope sets app.rls_system per statement under the flag, is
+ *     invisible with the flag off, narrows to an inner workspace binding, and
+ *     refuses to nest with a pinned withWorkspaceScope;
+ *   - withTransaction sets the same context query() would (flag on), and with
+ *     the flag off issues exactly BEGIN, the writes, COMMIT.
  *
  * pg is mocked (same harness as db-workspace-scope.test.ts).
  */
@@ -31,7 +35,7 @@ jest.mock("pg", () => {
 jest.mock("@/lib/analytics", () => ({ trackEvent: jest.fn() }));
 
 import "./helpers/next-request-als";
-import { pool, query, withSystemScope, withWorkspaceScope } from "@/lib/db";
+import { pool, query, withSystemScope, withTransaction, withWorkspaceScope } from "@/lib/db";
 import {
   bindRequestWorkspace,
   boundRequestWorkspace,
@@ -151,11 +155,63 @@ describe("flag ON", () => {
 });
 
 describe("withSystemScope", () => {
-  it("sets app.rls_system for the scope and commits", async () => {
+  it("flag OFF: a marker nothing reads; the statement goes to the pool unchanged", async () => {
     const res = await withSystemScope(() => query("SELECT 3"));
-    expect(res.rows[0].via).toBe("client");
-    expect(statements()).toEqual(["BEGIN", "SELECT set_config('app.rls_system', 'on', true)", "SELECT 3", "COMMIT"]);
-    expect(mockRelease).toHaveBeenCalledTimes(1);
+    expect(res.rows[0].via).toBe("pool");
+    expect(mockConnect).not.toHaveBeenCalled();
+    expect(poolQuery).toHaveBeenCalledWith("SELECT 3", undefined);
+  });
+
+  describe("flag ON", () => {
+    beforeEach(() => {
+      process.env.INSTINCT_RLS_SESSION_CONTEXT = "on";
+    });
+
+    it("sets app.rls_system in a one-statement transaction per query", async () => {
+      const res = await withSystemScope(async () => {
+        await query("SELECT 3");
+        return query("SELECT 4");
+      });
+      expect(res.rows[0].via).toBe("client");
+      expect(statements()).toEqual([
+        "BEGIN", "SELECT set_config('app.rls_system', 'on', true)", "SELECT 3", "COMMIT",
+        "BEGIN", "SELECT set_config('app.rls_system', 'on', true)", "SELECT 4", "COMMIT",
+      ]);
+      expect(mockRelease).toHaveBeenCalledTimes(2);
+    });
+
+    it("one failed statement does not poison the next (no long transaction)", async () => {
+      mockClientQuery.mockImplementation(async (sql: string) => {
+        if (sql === "SELECT bad") throw new Error("boom");
+        return { rows: [{ via: "client" }] };
+      });
+      const out = await withSystemScope(async () => {
+        await query("SELECT bad").catch(() => undefined);
+        return query("SELECT good");
+      });
+      expect(out.rows[0].via).toBe("client");
+      expect(statements()).toContain("SELECT good");
+    });
+
+    it("wins over the request binding, and an inner workspace binding narrows it", async () => {
+      await runWithRequestWorkspace("ws-A", () => withSystemScope(() => query("SELECT sys")));
+      await withSystemScope(() => runWithRequestWorkspace("ws-B", () => query("SELECT ws")));
+      const s = statements();
+      expect(s.slice(0, 4)).toEqual(["BEGIN", "SELECT set_config('app.rls_system', 'on', true)", "SELECT sys", "COMMIT"]);
+      expect(s.slice(4)).toEqual(["BEGIN", "SELECT set_config('app.workspace_id', $1, true)", "SELECT ws", "COMMIT"]);
+      expect(mockClientQuery.mock.calls[5][1]).toEqual(["ws-B"]);
+      expect(boundRequestWorkspace()).toBeUndefined();
+    });
+
+    it("refuses the statement when the system setting cannot be set", async () => {
+      mockClientQuery.mockImplementation(async (sql: string) => {
+        if (sql.includes("rls_system")) throw new Error("denied");
+        return { rows: [] };
+      });
+      await expect(withSystemScope(() => query("SELECT secret"))).rejects.toThrow("denied");
+      expect(statements()).not.toContain("SELECT secret");
+      expect(statements()).toContain("ROLLBACK");
+    });
   });
 
   it("refuses to nest inside a workspace scope (and vice versa)", async () => {
@@ -167,5 +223,78 @@ describe("withSystemScope", () => {
     delete process.env.DATABASE_URL;
     await expect(withSystemScope(async () => "ok")).resolves.toBe("ok");
     expect(mockConnect).not.toHaveBeenCalled();
+  });
+});
+
+describe("runWithRequestWorkspace", () => {
+  it("an empty workspace binds nothing", async () => {
+    expect(runWithRequestWorkspace("", () => boundRequestWorkspace())).toBeUndefined();
+  });
+
+  it("refuses to re-scope a pinned withWorkspaceScope to another workspace", async () => {
+    await expect(withWorkspaceScope("ws-A", async () => runWithRequestWorkspace("ws-B", () => 1))).rejects.toThrow(/nesting mismatch/);
+    await expect(withWorkspaceScope("ws-A", async () => runWithRequestWorkspace("ws-A", () => 1))).resolves.toBe(1);
+  });
+});
+
+describe("withTransaction RLS context", () => {
+  const write = (sql: string) => withTransaction((tx) => tx.write(sql));
+
+  it("flag OFF: exactly BEGIN, the write, COMMIT, even when bound or under system scope", async () => {
+    await write("INSERT 1");
+    await runWithRequestWorkspace("ws-A", () => write("INSERT 2"));
+    await withSystemScope(() => write("INSERT 3"));
+    expect(statements()).toEqual([
+      "BEGIN", "INSERT 1", "COMMIT",
+      "BEGIN", "INSERT 2", "COMMIT",
+      "BEGIN", "INSERT 3", "COMMIT",
+    ]);
+  });
+
+  describe("flag ON", () => {
+    beforeEach(() => {
+      process.env.INSTINCT_RLS_SESSION_CONTEXT = "on";
+    });
+
+    it("sets app.workspace_id for a bound workspace, before any write", async () => {
+      await runWithRequestWorkspace("ws-A", () =>
+        withTransaction(async (tx) => {
+          await tx.write("INSERT a");
+          await tx.write("INSERT b");
+        }),
+      );
+      expect(statements()).toEqual(["BEGIN", "SELECT set_config('app.workspace_id', $1, true)", "INSERT a", "INSERT b", "COMMIT"]);
+      expect(mockClientQuery.mock.calls[1][1]).toEqual(["ws-A"]);
+    });
+
+    it("sets app.rls_system under withSystemScope", async () => {
+      await withSystemScope(() => write("INSERT s"));
+      expect(statements()).toEqual(["BEGIN", "SELECT set_config('app.rls_system', 'on', true)", "INSERT s", "COMMIT"]);
+    });
+
+    it("with no context it runs as before (unbound, like query())", async () => {
+      await write("INSERT n");
+      expect(statements()).toEqual(["BEGIN", "INSERT n", "COMMIT"]);
+    });
+
+    it("refuses the writes when the setting fails, rolls back, releases", async () => {
+      mockClientQuery.mockImplementation(async (sql: string) => {
+        if (sql.includes("set_config")) throw new Error("denied");
+        return { rows: [] };
+      });
+      await expect(runWithRequestWorkspace("ws-A", () => write("INSERT x"))).rejects.toThrow("denied");
+      expect(statements()).not.toContain("INSERT x");
+      expect(statements()).toContain("ROLLBACK");
+      expect(mockRelease).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("inside an explicit withWorkspaceScope the transaction inherits that workspace", async () => {
+    await withWorkspaceScope("ws-P", () => write("INSERT p"));
+    const s = statements();
+    // scope: BEGIN, set_config; tx (own client): BEGIN, set_config, INSERT, COMMIT; scope COMMIT
+    expect(s.filter((x) => x === "SELECT set_config('app.workspace_id', $1, true)")).toHaveLength(2);
+    expect(s.indexOf("INSERT p")).toBeGreaterThan(s.lastIndexOf("SELECT set_config('app.workspace_id', $1, true)"));
+    expect(mockClientQuery.mock.calls.filter((c) => String(c[0]).includes("set_config")).map((c) => c[1])).toEqual([["ws-P"], ["ws-P"]]);
   });
 });

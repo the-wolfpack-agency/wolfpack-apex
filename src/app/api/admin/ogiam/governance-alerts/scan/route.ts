@@ -24,6 +24,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { isAuthorizedBearer } from "@/lib/auth/bearer-auth";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { scanAndDispatch } from "@/lib/ogiam/governance-alerts";
+import { runWithRequestWorkspace } from "@/lib/db/request-workspace";
 
 function isAuthorizedCron(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET;
@@ -36,7 +37,8 @@ async function run(
   actorId: string,
   actorRole: string,
 ): Promise<NextResponse> {
-  const result = await scanAndDispatch({ workspaceId, actorId, actorRole });
+  // One workspace per scan: its context, not system scope.
+  const result = await runWithRequestWorkspace(workspaceId, () => scanAndDispatch({ workspaceId, actorId, actorRole }));
   return NextResponse.json({
     ok: true,
     detected: result.detected,

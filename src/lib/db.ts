@@ -14,6 +14,12 @@ import {
   rlsSessionContextEnabled,
   bindRequestWorkspace,
   boundRequestWorkspace,
+  boundRlsContext,
+  inSystemScope,
+  runPinnedWorkspace,
+  runWithRequestWorkspace,
+  withSystemScope,
+  type RlsContext,
 } from "@/lib/db/request-workspace";
 
 export { normalizeDatabaseUrlSsl };
@@ -176,11 +182,13 @@ export async function query<T extends Record<string, unknown> = Record<string, u
   const scope = scopeStore.getStore();
   if (scope) return scope.client.query<T>(text, params); // in a tx: never retry
   // RLS cutover (flag OFF by default): a request whose workspace was bound by
-  // requireCapability runs each statement with app.workspace_id set, so the
-  // workspace policies (migrations 296/297) filter it once the app connects as
-  // a NOBYPASSRLS role. See docs/security/rls-cutover.md.
-  const bound = rlsSessionContextEnabled() ? boundRequestWorkspace() : undefined;
-  if (bound) return withConnectRetry(() => queryWithRlsContext<T>(bound, text, params));
+  // requireCapability (or a job inside runWithRequestWorkspace) runs each
+  // statement with app.workspace_id set; a job inside withSystemScope runs it
+  // with app.rls_system = 'on'. The workspace policies (migrations 296/297)
+  // filter on those once the app connects as a NOBYPASSRLS role. See
+  // docs/security/rls-cutover.md.
+  const ctx = rlsSessionContextEnabled() ? boundRlsContext() : undefined;
+  if (ctx) return withConnectRetry(() => queryWithRlsContext<T>(ctx, text, params));
   return withConnectRetry(() => activePool().query<T>(text, params));
 }
 
@@ -197,10 +205,32 @@ export async function query<T extends Record<string, unknown> = Record<string, u
 // docs/security/rls-cutover.md.
 // ---------------------------------------------------------------------------
 
-export { rlsSessionContextEnabled, bindRequestWorkspace, boundRequestWorkspace };
+export {
+  rlsSessionContextEnabled,
+  bindRequestWorkspace,
+  boundRequestWorkspace,
+  runWithRequestWorkspace,
+  withSystemScope,
+};
+
+/** Set the transaction-local RLS setting for ctx on an open transaction.
+ *  Refuses (reports, then re-throws) rather than let the caller run its
+ *  statements without the context it asked for. */
+async function applyRlsContext(client: PoolClient, ctx: RlsContext): Promise<void> {
+  try {
+    if (ctx.kind === "system") {
+      await client.query("SELECT set_config('app.rls_system', 'on', true)");
+    } else {
+      await client.query("SELECT set_config('app.workspace_id', $1, true)", [ctx.workspaceId]);
+    }
+  } catch (err) {
+    reportRlsContextFailure(err);
+    throw err;
+  }
+}
 
 async function queryWithRlsContext<T extends Record<string, unknown>>(
-  workspaceId: string,
+  ctx: RlsContext,
   text: string,
   params?: unknown[],
 ): Promise<QueryResult<T>> {
@@ -209,13 +239,7 @@ async function queryWithRlsContext<T extends Record<string, unknown>>(
   try {
     await client.query("BEGIN");
     began = true;
-    try {
-      await client.query("SELECT set_config('app.workspace_id', $1, true)", [workspaceId]);
-    } catch (err) {
-      // Refuse rather than run the statement without its tenant context.
-      reportRlsContextFailure(err);
-      throw err;
-    }
+    await applyRlsContext(client, ctx);
     const out = await client.query<T>(text, params);
     await client.query("COMMIT");
     return out;
@@ -240,44 +264,9 @@ function reportRlsContextFailure(err: unknown): void {
     .catch(() => undefined);
 }
 
-/**
- * Run `fn` as SYSTEM work that legitimately spans workspaces (crons, sweeps):
- * sets the transaction-local GUC app.rls_system = 'on', which the workspace
- * policies accept. Same client pinning, nesting and shadow-mode contract as
- * withWorkspaceScope. Must never be reachable with request-controlled input
- * deciding whether it is used; it is for code paths that have no caller
- * workspace at all.
- */
-export async function withSystemScope<R>(fn: () => Promise<R>): Promise<R> {
-  const existing = scopeStore.getStore();
-  if (existing) {
-    if (existing.workspaceId !== SYSTEM_SCOPE) {
-      throw new Error(`withSystemScope nesting mismatch: already scoped to '${existing.workspaceId}'`);
-    }
-    return fn();
-  }
-  if (!hasDatabase()) return fn();
-  const client: PoolClient = await activePool().connect();
-  try {
-    await client.query("BEGIN");
-    await client.query("SELECT set_config('app.rls_system', 'on', true)");
-    const out = await scopeStore.run({ workspaceId: SYSTEM_SCOPE, client }, fn);
-    await client.query("COMMIT");
-    return out;
-  } catch (err) {
-    try {
-      await client.query("ROLLBACK");
-    } catch (rbErr) {
-      console.warn("[db] ROLLBACK failed:", (rbErr as Error).message);
-    }
-    throw err;
-  } finally {
-    client.release();
-  }
-}
-
-/** Sentinel scope id for withSystemScope; not a valid workspace slug. */
-const SYSTEM_SCOPE = "\u0000system";
+// withSystemScope lives in request-workspace.ts (re-exported above) so the
+// stores that wrap their cross-workspace reads in it do not import the pool,
+// and the many test files that mock "@/lib/db" keep working unchanged.
 
 /** True for a failure to ACQUIRE a pooled connection (the query never reached
  *  the server, so retrying is safe even for writes). Neon scales to zero, so a
@@ -476,8 +465,20 @@ export async function withTransaction<R>(
       return { rows: result.rows as T[] };
     },
   };
+  // The same RLS context query() would use, so an atomic multi-write block is
+  // filtered exactly like the single statements around it: an explicit
+  // withWorkspaceScope always (it is an unflagged opt-in), otherwise the
+  // request/job context only while INSTINCT_RLS_SESSION_CONTEXT is on. Flag
+  // off and no explicit scope: BEGIN, the writes, COMMIT, as before.
+  const scope = scopeStore.getStore();
+  const ctx: RlsContext | undefined = scope
+    ? { kind: "workspace", workspaceId: scope.workspaceId }
+    : rlsSessionContextEnabled()
+      ? boundRlsContext()
+      : undefined;
   try {
     await client.query("BEGIN");
+    if (ctx) await applyRlsContext(client, ctx);
     const out = await fn(tx);
     await client.query("COMMIT");
     return out;
@@ -511,10 +512,8 @@ export async function withTransaction<R>(
  *   - The client is ALWAYS released; COMMIT on success, ROLLBACK + re-throw on
  *     failure (mirrors withTransaction).
  *
- * NOTE: withTransaction() opens its OWN connection and is NOT yet scope-aware, so
- * a multi-write atomic block does not inherit the GUC. Until that is unified,
- * keep FORCE-RLS tables off the withTransaction path (they use writeQuery, which
- * IS scope-aware). Tracked in docs/tenant-isolation.md.
+ * withTransaction() opens its own connection; inside this scope it sets the
+ * same app.workspace_id on it, so an atomic block inherits the scope.
  */
 export async function withWorkspaceScope<R>(
   workspaceId: string,
@@ -522,6 +521,9 @@ export async function withWorkspaceScope<R>(
 ): Promise<R> {
   if (!workspaceId) {
     throw new Error("withWorkspaceScope requires a non-empty workspaceId");
+  }
+  if (inSystemScope()) {
+    throw new Error(`withWorkspaceScope nesting mismatch: already scoped to system, refused re-scope to '${workspaceId}'`);
   }
   const existing = scopeStore.getStore();
   if (existing) {
@@ -544,7 +546,7 @@ export async function withWorkspaceScope<R>(
     // `SET LOCAL` (SET LOCAL cannot bind a parameter). Transaction-scoped, reset
     // automatically on COMMIT/ROLLBACK + client release.
     await client.query("SELECT set_config('app.workspace_id', $1, true)", [workspaceId]);
-    const out = await scopeStore.run({ workspaceId, client }, fn);
+    const out = await runPinnedWorkspace(workspaceId, () => scopeStore.run({ workspaceId, client }, fn));
     await client.query("COMMIT");
     return out;
   } catch (err) {

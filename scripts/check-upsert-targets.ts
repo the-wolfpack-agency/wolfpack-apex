@@ -43,6 +43,7 @@ import "./load-env";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { Client } from "pg";
+import { migrationDatabaseUrl } from "./migration-database-url.cjs";
 
 /**
  * Its own connection, rather than @/lib/db.
@@ -58,7 +59,7 @@ import { Client } from "pg";
  * anything else does.
  */
 async function withClient<T>(fn: (c: Client) => Promise<T>): Promise<T> {
-  const url = process.env.DATABASE_URL!;
+  const url = migrationDatabaseUrl() as string;
   const local = /@(localhost|127\.0\.0\.1)\b/.test(url);
   const client = new Client({
     connectionString: url,
@@ -308,7 +309,7 @@ async function main(): Promise<void> {
    * missing, because there its absence means the check verified nothing while
    * reporting green. Same script, and the difference is deliberate: here the
    * absence is expected, there it is the failure. */
-  if (!process.env.DATABASE_URL) {
+  if (!migrationDatabaseUrl()) {
     console.log("[upsert] DATABASE_URL not set — nothing to check against (shadow mode).");
     process.exit(0);
   }

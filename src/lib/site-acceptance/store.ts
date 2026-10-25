@@ -7,6 +7,7 @@
  * tenant's contract judge another tenant's build.
  */
 import { query } from "@/lib/db";
+import { withSystemScope } from "@/lib/db/request-workspace";
 import { parseCriteria, criteriaCompleteness, type AcceptanceCriteria } from "./criteria";
 import type { AcceptanceVerdict } from "./evaluate";
 
@@ -96,9 +97,13 @@ export async function saveAcceptanceCriteria(
  * project whose criteria were saved by such a user still lines up.
  */
 export async function resolveAcceptanceWorkspace(projectId: string): Promise<string> {
-  const res = await query<{ workspace_id: string }>(
-    `SELECT workspace_id FROM instinct_site_acceptance WHERE project_id = $1`,
-    [projectId],
+  // System scope: this is how the workspace is FOUND (the deploy webhook has no
+  // session), so no workspace context can exist yet. Returns only the id.
+  const res = await withSystemScope(() =>
+    query<{ workspace_id: string }>(
+      `SELECT workspace_id FROM instinct_site_acceptance WHERE project_id = $1`,
+      [projectId],
+    ),
   );
   return res.rows[0]?.workspace_id ?? "default";
 }
@@ -138,7 +143,9 @@ export async function enqueueAcceptanceRun(
  * stuck row is indistinguishable from a check nobody ever performed.
  */
 export async function claimNextAcceptanceRun(staleAfterMinutes = 15): Promise<StoredAcceptanceRun | null> {
-  const res = await query<StoredAcceptanceRun & { workspace_id: string }>(
+  // System scope: the queue is shared across workspaces and the claim must see
+  // all of it. The claimed run is then executed under its own workspace.
+  const res = await withSystemScope(() => query<StoredAcceptanceRun & { workspace_id: string }>(
     `UPDATE instinct_site_acceptance_runs
         SET status = 'running', started_at = NOW(), attempts = attempts + 1
       WHERE id = (
@@ -153,7 +160,7 @@ export async function claimNextAcceptanceRun(staleAfterMinutes = 15): Promise<St
                verdict, spec_diff_run_id::text AS spec_diff_run_id, attempts, last_error,
                duration_ms, created_at, started_at, finished_at`,
     [String(Math.max(1, staleAfterMinutes))],
-  );
+  ));
   return res.rows[0] ?? null;
 }
 

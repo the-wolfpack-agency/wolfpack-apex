@@ -140,9 +140,11 @@ For each table group:
    step is why the flip is NOT done blind: swapping policies before the call
    sites are wrapped + verified would deny live traffic.
 
-`withTransaction()` opens its own connection and is not yet scope-aware, so keep
-FORCE-RLS tables on the `writeQuery` path (which IS scope-aware) until the two are
-unified.
+`withTransaction()` opens its own connection and sets the same RLS context on it
+that `query()` would: the `withWorkspaceScope` workspace always, and the request,
+job or system context while `INSTINCT_RLS_SESSION_CONTEXT` is on. An atomic
+multi-write block is filtered like the statements around it
+(`src/db/__tests__/rls-cutover-prereqs.db.test.ts`).
 
 ### Step 3 - keep the guardrails
 

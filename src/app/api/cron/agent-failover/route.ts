@@ -32,6 +32,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { isAuthorizedBearer } from "@/lib/auth/bearer-auth";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { runFailoverSweep } from "@/lib/agents/failover/store";
+import { withSystemScope } from "@/lib/db/request-workspace";
 
 /**
  * Cron secret check. Mirrors src/app/api/cron/agent-drift/route.ts so all our
@@ -47,7 +48,9 @@ function isAuthorizedCron(req: NextRequest): boolean {
 
 async function runSweep(): Promise<NextResponse> {
   try {
-    const result = await runFailoverSweep();
+    // System scope: with no workspace argument the failover reclaims stalled
+    // tasks and reassigns unhealthy agents across the whole fleet.
+    const result = await withSystemScope(() => runFailoverSweep());
     return NextResponse.json({ ok: true, result });
   } catch (err) {
     // Never 500 on a recoverable condition: return a zeroed sweep so the cron

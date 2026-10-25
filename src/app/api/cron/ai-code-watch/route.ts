@@ -22,6 +22,7 @@ import { resolveEntitlement } from "@/lib/tenancy/entitlements";
 import { driveCiFixStep } from "@/lib/ai-code/ci-fix-runner";
 import { listAllEnabledWatched, mergeWatchTargets } from "@/lib/ai-code/watched-repos";
 import { runAiCodeWatch, dbWatchMemory, type WatchTarget } from "@/lib/ai-code/watch";
+import { runWithRequestWorkspace } from "@/lib/db/request-workspace";
 
 function isAuthorizedCron(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET;
@@ -61,12 +62,16 @@ async function runWatch(): Promise<NextResponse> {
     return c;
   };
 
+  // The work list is cross-workspace (listAllEnabledWatched); everything done
+  // for a target runs under that target's workspace.
+  const inTarget = <R>(t: WatchTarget, fn: () => Promise<R>): Promise<R> =>
+    runWithRequestWorkspace(t.workspaceId || "default", fn);
   const summary = await runAiCodeWatch({
     targets,
-    listPRs: async (t) => listOpenPullRequests(await clientFor(t.workspaceId), t.repo),
-    resolveHead: async (t, pr) => getBranchHead(await clientFor(t.workspaceId), t.repo, pr.headRef),
+    listPRs: (t) => inTarget(t, async () => listOpenPullRequests(await clientFor(t.workspaceId), t.repo)),
+    resolveHead: (t, pr) => inTarget(t, async () => getBranchHead(await clientFor(t.workspaceId), t.repo, pr.headRef)),
     memory: dbWatchMemory(),
-    drive: async (t, pr) => {
+    drive: (t, pr) => inTarget(t, async () => {
       const { body } = await driveCiFixStep({
         repo: t.repo,
         ref: pr.headRef,
@@ -80,7 +85,7 @@ async function runWatch(): Promise<NextResponse> {
       });
       const decision = (body.decision ?? {}) as { action?: string };
       return { action: decision.action, terminal: body.terminal as boolean | undefined };
-    },
+    }),
   });
   return NextResponse.json({ summary });
 }

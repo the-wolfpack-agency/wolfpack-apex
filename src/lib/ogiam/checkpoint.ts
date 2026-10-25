@@ -14,6 +14,7 @@
 
 import { createHash } from "crypto";
 import { query, safeQuery } from "@/lib/db";
+import { runWithRequestWorkspace, withSystemScope } from "@/lib/db/request-workspace";
 import { trackEvent } from "@/lib/analytics";
 import { OGIAM_GENESIS_HASH } from "./ledger";
 import { checkpointPayload, getSigner, type OgiamSigner } from "./signing";
@@ -129,12 +130,15 @@ function mapCheckpoint(r: Record<string, unknown>): OgiamCheckpoint {
 
 /** Workspaces with at least one decision beyond their latest checkpoint. */
 export async function workspacesNeedingCheckpoint(): Promise<string[]> {
-  const res = await safeQuery<{ workspace_id: string }>(
-    `SELECT d.workspace_id
-       FROM (SELECT workspace_id, MAX(seq) AS max_seq FROM ogiam_decisions GROUP BY workspace_id) d
-       LEFT JOIN (SELECT workspace_id, MAX(through_seq) AS max_cp FROM ogiam_checkpoints GROUP BY workspace_id) c
-         ON c.workspace_id = d.workspace_id
-      WHERE c.max_cp IS NULL OR d.max_seq > c.max_cp`,
+  // Cross-workspace on purpose: which workspaces the sweep has to visit.
+  const res = await withSystemScope(() =>
+    safeQuery<{ workspace_id: string }>(
+      `SELECT d.workspace_id
+         FROM (SELECT workspace_id, MAX(seq) AS max_seq FROM ogiam_decisions GROUP BY workspace_id) d
+         LEFT JOIN (SELECT workspace_id, MAX(through_seq) AS max_cp FROM ogiam_checkpoints GROUP BY workspace_id) c
+           ON c.workspace_id = d.workspace_id
+        WHERE c.max_cp IS NULL OR d.max_seq > c.max_cp`,
+    ),
   );
   return res.rows.map((r) => r.workspace_id);
 }
@@ -221,7 +225,7 @@ export async function runCheckpointSweep(
   let written = 0;
   for (const ws of workspaces) {
     try {
-      const cp = await createCheckpoint(ws, signer);
+      const cp = await runWithRequestWorkspace(ws, () => createCheckpoint(ws, signer));
       if (cp) written += 1;
     } catch (err) {
       console.warn(`[ogiam] checkpoint failed for ${ws}:`, (err as Error).message);

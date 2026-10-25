@@ -16,6 +16,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { isAuthorizedBearer } from "@/lib/auth/bearer-auth";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { listAllEnabledWatched } from "@/lib/ai-code/watched-repos";
+import { runWithRequestWorkspace } from "@/lib/db/request-workspace";
 import { indexReuseCorpus, defaultReuseIndexDeps } from "@/lib/ai-code/factory-reuse-index";
 import { indexFailureMemory, defaultFailureIndexDeps } from "@/lib/ai-code/factory-failure-index";
 
@@ -50,12 +51,16 @@ async function run(): Promise<NextResponse> {
   for (const t of targets) {
     let indexed = 0;
     let failures = 0;
-    try {
-      ({ indexed } = await indexReuseCorpus({ workspaceId: t.workspaceId, repo: t.repo, limit: PER_REPO_LIMIT, deps }));
-    } catch { /* never let one repo abort the sweep */ }
-    try {
-      if (failureDeps) ({ indexed: failures } = await indexFailureMemory({ workspaceId: t.workspaceId, repo: t.repo, limit: PER_REPO_LIMIT, deps: failureDeps }));
-    } catch { /* same */ }
+    // The work list is cross-workspace (listAllEnabledWatched); each repo is
+    // indexed under its own workspace.
+    await runWithRequestWorkspace(t.workspaceId, async () => {
+      try {
+        ({ indexed } = await indexReuseCorpus({ workspaceId: t.workspaceId, repo: t.repo, limit: PER_REPO_LIMIT, deps }));
+      } catch { /* never let one repo abort the sweep */ }
+      try {
+        if (failureDeps) ({ indexed: failures } = await indexFailureMemory({ workspaceId: t.workspaceId, repo: t.repo, limit: PER_REPO_LIMIT, deps: failureDeps }));
+      } catch { /* same */ }
+    });
     total += indexed;
     failuresTotal += failures;
     if (indexed > 0 || failures > 0) detail.push({ workspaceId: t.workspaceId, repo: t.repo, indexed, failures });

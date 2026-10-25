@@ -23,6 +23,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { isAuthorizedBearer } from "@/lib/auth/bearer-auth";
 import { runDueEngagements } from "@/lib/platform-scan/engage/orchestrator";
 import { trackEvent } from "@/lib/analytics";
+import { runWithRequestWorkspace } from "@/lib/db/request-workspace";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { runSweepWithHealth, engagementOutcome } from "@/lib/platform-scan/sweep-health";
 
@@ -39,7 +40,8 @@ async function runSweep(actorId: string, actorRole: string): Promise<NextRespons
   const { results, health } = await runSweepWithHealth({
     kind: "engagement",
     actor: { id: actorId, role: actorRole },
-    run: () => runDueEngagements("default"),
+    // The sweep covers the default workspace only: its context, not system scope.
+    run: () => runWithRequestWorkspace("default", () => runDueEngagements("default")),
     outcome: engagementOutcome,
   });
 

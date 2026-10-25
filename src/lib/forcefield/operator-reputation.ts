@@ -14,6 +14,7 @@
  * rather than throwing.
  */
 import { query, safeQuery, hasDatabase } from "@/lib/db";
+import { withSystemScope } from "@/lib/db/request-workspace";
 import type { Severity } from "@/lib/agent-triage";
 
 export interface ReputationOptIn {
@@ -105,7 +106,10 @@ export async function getNetworkReputation(
   // Cross-workspace by design: aggregate reports from workspaces OTHER than the
   // caller. Selects workspace_id (the count) but is intentionally not workspace-
   // scoped - this is the network signal.
-  const { rows } = await safeQuery<{ operator_key: string; other_workspaces: string; hostile_reporters: string; sev_rank: number; ttps: string[] | null }>(
+  // System scope for THIS statement only: it reads other workspaces' reports by
+  // design and returns aggregates (counts, severity, tags), never a workspace.
+  // The opt-in check above stays under the caller's own workspace.
+  const { rows } = await withSystemScope(() => safeQuery<{ operator_key: string; other_workspaces: string; hostile_reporters: string; sev_rank: number; ttps: string[] | null }>(
     // ttps: the union of every tradecraft signal (behavior classes + tells) this
     // actor showed across ALL reporting workspaces. LEFT JOIN LATERAL unnest so an
     // actor with empty arrays still counts toward other_workspaces; array_agg
@@ -120,7 +124,7 @@ export async function getNetworkReputation(
       WHERE r.operator_key = ANY($1) AND r.workspace_id <> $2
       GROUP BY r.operator_key`,
     [operatorKeys as string[], callerWorkspaceId],
-  );
+  ));
   const out: Record<string, NetworkReputation> = {};
   for (const r of rows) {
     const n = Number(r.other_workspaces);
@@ -164,7 +168,8 @@ export async function getNetworkTradecraft(
   const limit = Math.max(1, Math.min(opts.limit ?? 200, 1000));
   // Bind the corroboration floor and the row cap as parameters (never string-
   // interpolated) so this stays clear of the no-SQL-injection ratchet.
-  const { rows } = await safeQuery<{ workspaces: string; sev_rank: number; tells: string[] | null }>(
+  // System scope for this aggregate only (see getNetworkReputation).
+  const { rows } = await withSystemScope(() => safeQuery<{ workspaces: string; sev_rank: number; tells: string[] | null }>(
     `SELECT count(DISTINCT r.workspace_id) AS workspaces,
             max(CASE r.severity WHEN 'hostile' THEN 3 WHEN 'elevated' THEN 2 ELSE 1 END) AS sev_rank,
             array_remove(array_agg(DISTINCT sig.tag), NULL) AS tells
@@ -176,7 +181,7 @@ export async function getNetworkTradecraft(
       ORDER BY workspaces DESC
       LIMIT $3`,
     [callerWorkspaceId, HOSTILE_CORROBORATION_MIN, limit],
-  );
+  ));
   const actors: NetworkTradecraftActor[] = [];
   for (const r of rows) {
     const tells = (Array.isArray(r.tells) ? r.tells.filter((t): t is string => typeof t === "string" && t.length > 0) : []);
