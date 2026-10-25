@@ -267,6 +267,24 @@ describe("edge-supplied fields: authenticated, platform, asn, asOrg", () => {
     expect(rec().eventType).toBe("site.agent_probed_sensitive");
   });
 
+  test("platform wordpress: an anonymous Rank Math updateMeta call is recorded as plugin abuse and allowed (report-only)", async () => {
+    const rawUrl = "/wp-json/rankmath/v1/updateMeta";
+    const res = await POST(post({ ...chromeView, path: rawUrl, rawUrl, platform: "wordpress", authenticated: false }));
+    expect(res.status).toBe(200);
+    expect((await res.json()).action).toBe("allow");
+    expect(rec().eventType).toBe("site.agent_probed_sensitive");
+    expect(rec().props.probe).toBe("wp_plugin_rankmath_updatemeta");
+    // The same call from a WordPress-attested signed-in editor is not a probe.
+    recordSiteEvent.mockClear();
+    await POST(post({ ...chromeView, path: rawUrl, rawUrl, platform: "wordpress", authenticated: true }));
+    expect(recordSiteEvent.mock.calls.map((c) => c[0].eventType)).not.toContain("site.agent_probed_sensitive");
+  });
+
+  test("platform wordpress: core admin-ajax with another action is not a probe", async () => {
+    await POST(post({ ...chromeView, path: "/wp-admin/admin-ajax.php", rawUrl: "/wp-admin/admin-ajax.php?action=heartbeat", platform: "wordpress" }));
+    expect(recordSiteEvent.mock.calls.map((c) => c[0].eventType)).not.toContain("site.agent_probed_sensitive");
+  });
+
   test("a junk platform value is ignored", async () => {
     await POST(post({ ...chromeView, path: "/wp-login.php", rawUrl: "/wp-login.php", platform: "wordpress; drop table" }));
     expect(rec().eventType).toBe("site.agent_probed_sensitive");
