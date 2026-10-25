@@ -26,7 +26,9 @@ export type ProbeCategory =
   // Added for broader, precision-first CWE coverage:
   | "source-exposure" // VCS / source-tree leaks (CWE-527 / CWE-200)
   | "path-traversal" // absolute-path / traversal file reads (CWE-22)
-  | "rce"; // remote code execution surfaces (CWE-94 / CWE-78 / CWE-502)
+  | "rce" // remote code execution surfaces (CWE-94 / CWE-78 / CWE-502)
+  | "ai-tool-config" // AI coding-assistant config / credential files (MCP servers, model API keys)
+  | "ai-tool-admin"; // exploited admin / code-exec endpoints of self-hosted AI platforms
 
 export interface ProbeSignature {
   /** Path prefix that identifies the probe (matched case-insensitively, as an
@@ -47,6 +49,25 @@ export const PROBE_SIGNATURES: readonly ProbeSignature[] = [
   { prefix: "/.git", label: "Git repository exposure (source + secrets)", cwe: "CWE-200", severity: "critical", category: "secrets-exposure" },
   { prefix: "/.aws", label: "AWS credentials directory probe", cwe: "CWE-200", severity: "critical", category: "secrets-exposure" },
   { prefix: "/.ssh", label: "SSH key directory probe", cwe: "CWE-200", severity: "critical", category: "secrets-exposure" },
+  // AI coding-assistant config / credential files (CWE-522). The same patterns
+  // the edge flags (forcefield-web/ruleset.ts AI_TOOL_CONFIG_PROBE_PATHS, where
+  // the sources are cited), named here so the board says what was sought.
+  { prefix: "/.claude", label: "Claude Code config / credentials probe (MCP servers, API key)", cwe: "CWE-522", severity: "critical", category: "ai-tool-config" },
+  { prefix: "/.config/claude", label: "Claude Code config / credentials probe (MCP servers, API key)", cwe: "CWE-522", severity: "critical", category: "ai-tool-config" },
+  { prefix: "/claude_desktop_config.json", label: "Claude Desktop MCP config probe", cwe: "CWE-522", severity: "high", category: "ai-tool-config" },
+  { prefix: "/.cursor", label: "Cursor MCP config probe", cwe: "CWE-522", severity: "high", category: "ai-tool-config" },
+  { prefix: "/.vscode/mcp.json", label: "VS Code MCP config probe", cwe: "CWE-522", severity: "high", category: "ai-tool-config" },
+  { prefix: "/.mcp", label: "MCP server config probe", cwe: "CWE-522", severity: "high", category: "ai-tool-config" },
+  { prefix: "/.gemini", label: "Gemini CLI config / API key probe", cwe: "CWE-522", severity: "critical", category: "ai-tool-config" },
+  { prefix: "/.aider", label: "Aider config / API key probe", cwe: "CWE-522", severity: "high", category: "ai-tool-config" },
+  { prefix: "/.continue", label: "Continue assistant config probe", cwe: "CWE-522", severity: "high", category: "ai-tool-config" },
+  { prefix: "/.codeium", label: "Windsurf (Codeium) MCP config probe", cwe: "CWE-522", severity: "high", category: "ai-tool-config" },
+  // Self-hosted AI platform admin / code-exec endpoints (sources in ruleset.ts
+  // AI_TOOL_ADMIN_PROBE_PATHS).
+  { prefix: "/api/v1/validate/code", label: "Langflow code-validation RCE probe (CVE-2025-3248)", cwe: "CWE-94", severity: "critical", category: "ai-tool-admin" },
+  { prefix: "/api/v1/build_public_tmp", label: "Langflow public flow build RCE probe (CVE-2026-33017)", cwe: "CWE-94", severity: "critical", category: "ai-tool-admin" },
+  { prefix: "/mcp-rest", label: "LiteLLM MCP test endpoint command injection probe (CVE-2026-42271)", cwe: "CWE-78", severity: "critical", category: "ai-tool-admin" },
+  { prefix: "/ajax-api/2.0/mlflow", label: "MLflow API probe (CVE-2023-1177 path traversal)", cwe: "CWE-22", severity: "high", category: "ai-tool-admin" },
   // Credential files (CWE-522: insufficiently protected credentials).
   { prefix: "/.npmrc", label: "npm credentials file probe", cwe: "CWE-522", severity: "high", category: "secrets-exposure" },
   { prefix: "/.netrc", label: "netrc credentials file probe", cwe: "CWE-522", severity: "high", category: "secrets-exposure" },
