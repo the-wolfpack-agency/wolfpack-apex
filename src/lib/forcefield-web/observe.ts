@@ -196,7 +196,10 @@ function wpPluginAbuseProbe(path: string, rawUrl: string | undefined, authentica
   // ?rest_route=<route> form. WordPress matches REST routes case-insensitively.
   const at = lower.indexOf("/wp-json/");
   let route = at === -1 ? (params?.get("rest_route") ?? "").toLowerCase() : lower.slice(at + "/wp-json".length);
-  route = route.replace(/\/+$/, "");
+  // trim trailing slashes without a regex (/\/+$/ is polynomial on a long run of '/': CodeQL js/polynomial-redos)
+  let end = route.length;
+  while (end > 0 && route.charCodeAt(end - 1) === 47) end--;
+  route = route.slice(0, end);
   if (route === "/rankmath/v1/updatemeta") return "wp_plugin_rankmath_updatemeta";
   return null;
 }

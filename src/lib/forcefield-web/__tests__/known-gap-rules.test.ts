@@ -69,6 +69,7 @@ describe("WP-PLUGIN-ABUSE: anonymous calls to plugin endpoints with a missing-au
     ["/blog/wp-admin/admin-ajax.php?foo=1&action=UPDRAFT_CENTRAL", "wp_plugin_updraftcentral_ajax"],
     ["/wp-json/rankmath/v1/updateMeta", "wp_plugin_rankmath_updatemeta"],
     ["/wp-json/rankmath/v1/updatemeta/", "wp_plugin_rankmath_updatemeta"],
+    ["/wp-json/rankmath/v1/updatemeta///", "wp_plugin_rankmath_updatemeta"],
     ["/blog/wp-json/rankmath/v1/updateMeta", "wp_plugin_rankmath_updatemeta"],
     ["/?rest_route=/rankmath/v1/updateMeta", "wp_plugin_rankmath_updatemeta"],
     ["/index.php?rest_route=%2Frankmath%2Fv1%2FupdateMeta", "wp_plugin_rankmath_updatemeta"],
@@ -77,6 +78,12 @@ describe("WP-PLUGIN-ABUSE: anonymous calls to plugin endpoints with a missing-au
     expect(o.type).toBe("site.agent_probed_sensitive");
     // The plugin rule is the reason, not the core path.
     expect(o.props.probe).toBe(label);
+  });
+
+  it("a long run of slashes in the route is classified in linear time (no regex backtracking)", () => {
+    const t = Date.now();
+    expect(obs("/wp-json/" + "/".repeat(200_000) + "x", wp)?.props?.probe ?? null).not.toBe("wp_plugin_rankmath_updatemeta");
+    expect(Date.now() - t).toBeLessThan(1000);
   });
 
   it.each([
