@@ -158,6 +158,13 @@ describe("payload records (site.agent_payload_attack)", () => {
     expect(o.type).toBe("site.agent_payload_attack");
     expect(o.props.attack).toBe("nextjs_middleware_bypass");
   });
+  it("x-middleware-subrequest on a control-plane endpoint is not recorded as an attack", () => {
+    const sub = [...base.headerNames, "x-middleware-subrequest"];
+    const o = observeRequest({ ...base, path: "/api/site-analytics/ingest", userAgent: "x", headerNames: sub }, R);
+    expect(o?.props.attack).toBeUndefined();
+    // Same request off the control plane is still the attack (the test is not vacuous).
+    expect(observeRequest({ ...base, path: "/admin", userAgent: "x", headerNames: sub }, R)!.props.attack).toBe("nextjs_middleware_bypass");
+  });
   it("PHP-CGI injection is recorded as php_cgi_injection", () => {
     expect(observeRequest({ ...base, path: "/index.php", rawUrl: "/index.php?%ADd+allow_url_include%3d1+-d+auto_prepend_file%3dphp://input", userAgent: "x" }, R)!.props.attack).toBe("php_cgi_injection");
   });

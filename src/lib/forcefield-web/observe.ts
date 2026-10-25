@@ -254,7 +254,7 @@ export function observeRequest(input: ObserveInput, ruleset: ForcefieldRuleset):
   // Proof carried by the request itself: a header attack (CVE-2025-29927) or an
   // injection payload in the full target (query included). Ranked right after a
   // decoy trip, and evaluated whatever the UA claims.
-  const attack = detectHeaderAttack(input.headerNames) ?? detectPayload(input.rawUrl ?? path);
+  const attack = detectHeaderAttack(input.headerNames, path) ?? detectPayload(input.rawUrl ?? path);
   const native = input.platform ? ruleset.platformPaths?.[input.platform] ?? [] : [];
   const probe =
     matchedSensitive(path, ruleset.sensitivePaths, native) ??

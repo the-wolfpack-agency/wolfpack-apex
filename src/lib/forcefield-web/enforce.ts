@@ -256,6 +256,20 @@ export const PAYLOAD_CWE: Readonly<Record<string, string>> = {
 export const PAYLOAD_FAMILIES: readonly string[] = PAYLOAD_SIGNATURES.map((p) => p.attack);
 
 /**
+ * The control-plane endpoints every Forcefield edge calls FROM its own Next.js
+ * middleware (see tenant-quickstart.ts). Next sets `x-middleware-subrequest` on
+ * fetches made from middleware, so these arrive carrying it legitimately: about
+ * 6,700 a day were reported as CVE-2025-29927 attempts against the core itself.
+ * None of these routes relies on middleware for auth (each checks the tenant
+ * token in its handler), so the header buys an attacker nothing here.
+ */
+export const FORCEFIELD_CONTROL_PLANE_PATHS: ReadonlySet<string> = new Set([
+  "/api/site-analytics/ingest",
+  "/api/forcefield/ruleset",
+  "/api/forcefield/observe",
+]);
+
+/**
  * Header-borne attacks, detected from header NAMES alone (values are never read
  * or stored, so this stays non-PII and works with what every adapter forwards).
  *
@@ -266,7 +280,8 @@ export const PAYLOAD_FAMILIES: readonly string[] = PAYLOAD_SIGNATURES.map((p) =>
  * exploitation attempt. The vendor's own mitigation is to drop every external
  * request that carries it: https://github.com/advisories/GHSA-f82v-jwr5-mffw
  */
-export function detectHeaderAttack(headerNames: readonly string[]): string | null {
+export function detectHeaderAttack(headerNames: readonly string[], path?: string): string | null {
+  if (path !== undefined && FORCEFIELD_CONTROL_PLANE_PATHS.has(path)) return null;
   for (const h of headerNames) {
     if ((h ?? "").toLowerCase() === "x-middleware-subrequest") return "nextjs_middleware_bypass";
   }
@@ -323,7 +338,7 @@ export function decideEnforcement(
     //    payload. Checked BEFORE the welcome lane: a User-Agent is a free-text
     //    claim, so letting "Googlebot" in the UA exempt a request from payload
     //    checks meant any attacker could send SQLi unchallenged by spoofing it.
-    const headerAttack = detectHeaderAttack(input.headerNames);
+    const headerAttack = detectHeaderAttack(input.headerNames, input.path);
     if (headerAttack) {
       return { block: true, reasonKind: "payload", reason: `header attack: ${headerAttack}`, attack: headerAttack };
     }
