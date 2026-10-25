@@ -25,8 +25,7 @@
 
 import { test, expect, type Page, type Request } from "@playwright/test";
 import { resolveSmokeTarget, signInIfPossible } from "./helpers/smoke-helpers";
-import * as path from "node:path";
-import * as fs from "node:fs";
+import { pickFilesThroughDropzone } from "./helpers/dropzone";
 
 const target = resolveSmokeTarget();
 
@@ -88,18 +87,16 @@ test.describe("sites — wireframe upload flow (non-technical)", () => {
     expect(await signInIfPossible(page, target)).toBe(true);
     await page.goto(`${target.baseUrl}/sites/new`, { waitUntil: "networkidle" });
 
-    // Simulate a bogus upload — build a File with a rejected MIME.
-    const input = page.locator('input[type="file"]').first();
-    const tmp = path.join("/tmp", `e2e-bogus-${Date.now()}.xyz`);
-    fs.writeFileSync(tmp, "not an image");
-
-    await input.setInputFiles({
+    // Simulate a bogus upload: build a File with a rejected MIME. The
+    // multi-frame uploader on /sites/new rejects it client-side, before any
+    // request, in its own inline error (multi-frame-error).
+    await pickFilesThroughDropzone(page, "wireframe-dropzone", {
       name: "weird.exe",
       mimeType: "application/x-msdownload",
       buffer: Buffer.from("MZ\x90\x00"),
     });
 
-    const banner = page.getByTestId("wireframe-error-banner");
+    const banner = page.getByTestId("multi-frame-error");
     await expect(banner).toBeVisible({ timeout: 10_000 });
     const text = await banner.innerText();
     expect(text).toMatch(/PNG|JPG|WEBP|PDF/i);
@@ -117,11 +114,13 @@ test.describe("sites — wireframe upload flow (non-technical)", () => {
         req.url().includes("/api/sites/parse-brief") && req.method() === "POST",
     );
 
-    await page.locator('input[type="file"]').first().setInputFiles({
+    await pickFilesThroughDropzone(page, "wireframe-dropzone", {
       name: "wireframe.png",
       mimeType: "image/png",
       buffer: TINY_RED_PNG,
     });
+    // /sites/new collects frames first; parsing starts on Analyze.
+    await page.getByTestId("multi-frame-submit").click();
 
     // Loading state visible while vision runs
     await expect(page.getByTestId("wireframe-loading-indicator")).toBeVisible();
@@ -165,11 +164,12 @@ test.describe("sites — wireframe upload flow (non-technical)", () => {
       return route.continue();
     });
 
-    await page.locator('input[type="file"]').first().setInputFiles({
+    await pickFilesThroughDropzone(page, "wireframe-dropzone", {
       name: "x.png",
       mimeType: "image/png",
       buffer: TINY_RED_PNG,
     });
+    await page.getByTestId("multi-frame-submit").click();
 
     const banner = page.getByTestId("wireframe-error-banner");
     await expect(banner).toBeVisible({ timeout: 10_000 });

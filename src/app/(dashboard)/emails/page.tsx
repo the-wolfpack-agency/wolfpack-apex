@@ -84,6 +84,18 @@ export const INBOX_WIDTH_KEY = "instinct_emails_inbox_px";
 export const INBOX_WIDTH_MIN = 280;
 export const INBOX_WIDTH_MAX = 720;
 export const INBOX_WIDTH_DEFAULT = 340;
+/**
+ * Layout floors, separate from the drag clamp above. The inbox column and
+ * the nav rail used to be fixed-width (flexShrink 0) while the right pane had
+ * minWidth 0, so whenever the two fixed columns filled the row the right pane
+ * was squeezed to 0px: at 640px wide after a resize, and at desktop widths
+ * with a large saved inbox width. The inbox now gives up width first, down to
+ * INBOX_LAYOUT_FLOOR, so the right pane keeps RIGHT_PANE_MIN_WIDTH.
+ */
+export const INBOX_LAYOUT_FLOOR = 220;
+export const RIGHT_PANE_MIN_WIDTH = 240;
+/** Below this the nav rail defaults to collapsed (matches isNarrow). */
+export const NAV_RAIL_EXPAND_MIN_VIEWPORT = 1100;
 
 export function clampInboxWidth(px: number): number {
   if (!Number.isFinite(px)) return INBOX_WIDTH_DEFAULT;
@@ -192,11 +204,19 @@ export default function EmailsPage() {
   const [isMobile, setIsMobile] = useState<boolean>(() =>
     typeof window !== "undefined" ? window.innerWidth < 640 : false,
   );
+  // Set once the user toggles the nav rail themselves; from then on a
+  // resize never overrides their choice for the rest of the session.
+  const navUserToggledRef = useRef(false);
   useEffect(() => {
     if (typeof window === "undefined") return;
     function onResize() {
-      setIsNarrow(window.innerWidth < 1100);
+      setIsNarrow(window.innerWidth < NAV_RAIL_EXPAND_MIN_VIEWPORT);
       setIsMobile(window.innerWidth < 640);
+      // Follow the viewport: a 240px rail that stays expanded after the
+      // window shrinks leaves no room for the right pane.
+      if (!navUserToggledRef.current) {
+        setNavExpanded(window.innerWidth >= NAV_RAIL_EXPAND_MIN_VIEWPORT);
+      }
     }
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
@@ -215,12 +235,11 @@ export default function EmailsPage() {
   }, []);
 
   // Nav rail. Default expanded on desktop, collapsed on narrow.
+  // The resize handler above keeps it in step with the viewport until
+  // the user toggles it explicitly.
   const [navExpanded, setNavExpanded] = useState<boolean>(() =>
-    typeof window !== "undefined" ? window.innerWidth >= 1100 : true,
+    typeof window !== "undefined" ? window.innerWidth >= NAV_RAIL_EXPAND_MIN_VIEWPORT : true,
   );
-  // Reflect viewport changes onto nav rail default — but never override
-  // an explicit user toggle within a session (we'd need a ref to track
-  // that; simple version: keep current state on resize).
 
   // Recipient context drawer — open by default on wide, closed on
   // narrow/mobile.
@@ -1060,6 +1079,7 @@ export default function EmailsPage() {
   // -------------------------------------------------------------------------
 
   function toggleNavRail() {
+    navUserToggledRef.current = true;
     setNavExpanded((v) => {
       const next = !v;
       emitInsight({
@@ -1910,8 +1930,11 @@ function inboxColStyle(
 ): React.CSSProperties {
   return {
     width: isMobile ? "100%" : widthPx,
-    minWidth: isMobile ? 0 : INBOX_WIDTH_MIN,
-    flexShrink: 0,
+    /* widthPx is the preferred width. When the row is short of space the
+       column shrinks (down to INBOX_LAYOUT_FLOOR) before the right pane
+       does, so the right pane is never squeezed to nothing. */
+    minWidth: isMobile ? 0 : INBOX_LAYOUT_FLOOR,
+    flexShrink: isMobile ? 0 : 1,
     display: "flex",
     flexDirection: "column",
     minHeight: 0,
@@ -1949,7 +1972,7 @@ const resizeHandleGripStyle: React.CSSProperties = {
 function rightColStyle(isMobile: boolean): React.CSSProperties {
   return {
     flex: 1,
-    minWidth: 0,
+    minWidth: isMobile ? 0 : RIGHT_PANE_MIN_WIDTH,
     display: "flex",
     flexDirection: "column",
     minHeight: 0,

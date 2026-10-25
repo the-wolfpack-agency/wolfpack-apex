@@ -56,7 +56,11 @@ function attachPageErrorTrap(page: import("@playwright/test").Page): {
     if (msg.type() !== "error") return;
     const text = msg.text();
     if (PAGE_ERROR_ALLOWLIST.some((rx) => rx.test(text))) return;
-    errors.push(`console.error: ${text}`);
+    // Chromium's "Failed to load resource: ... status of 401 ()" carries no
+    // URL in its text; the URL is only on the message location. Without it
+    // the failure could not say WHICH request failed, and stayed undiagnosed.
+    const where = msg.location()?.url;
+    errors.push(where ? `console.error: ${text} [${where}]` : `console.error: ${text}`);
   });
   return { errors };
 }

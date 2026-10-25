@@ -19,6 +19,7 @@
 
 import { test, expect, type Page, type Request } from "@playwright/test";
 import { resolveSmokeTarget, signInIfPossible } from "./helpers/smoke-helpers";
+import { pickFilesThroughDropzone } from "./helpers/dropzone";
 
 const target = resolveSmokeTarget();
 
@@ -74,8 +75,7 @@ const MULTI_FRAME_RESPONSE = {
 };
 
 async function dropTwoFrames(page: Page): Promise<void> {
-  const input = page.locator('input[type="file"]').first();
-  await input.setInputFiles([
+  await pickFilesThroughDropzone(page, "wireframe-dropzone", [
     { name: "page-1.png", mimeType: "image/png", buffer: TINY_RED_PNG },
     { name: "page-2.png", mimeType: "image/png", buffer: TINY_RED_PNG },
   ]);
@@ -115,8 +115,7 @@ test.describe("sites — multi-frame wireframe upload", () => {
     await expect(page.getByTestId("multi-frame-thumb-1")).toHaveCount(0);
 
     // Re-drop and submit — capture the request to prove files[] shape.
-    const input = page.locator('input[type="file"]').first();
-    await input.setInputFiles([
+    await pickFilesThroughDropzone(page, "wireframe-dropzone", [
       { name: "page-1.png", mimeType: "image/png", buffer: TINY_RED_PNG },
     ]);
     // Now we have 2 frames again (the leftover + one new).

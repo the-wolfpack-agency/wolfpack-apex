@@ -28,7 +28,10 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import EmailsPage from "@/app/(dashboard)/emails/page";
+import EmailsPage, {
+  INBOX_LAYOUT_FLOOR,
+  RIGHT_PANE_MIN_WIDTH,
+} from "@/app/(dashboard)/emails/page";
 
 interface MockResponse {
   ok?: boolean;
@@ -1191,6 +1194,52 @@ describe("EmailsPage — responsive layout", () => {
     await waitFor(() => screen.getByTestId("emails-page"));
     const page = screen.getByTestId("emails-page");
     expect(page.style.paddingBottom).not.toBe("6rem");
+  });
+
+  /* Regression: shrinking a window from desktop to 640px left the nav rail
+     expanded at 240px and the inbox fixed at 340px with flexShrink 0, and the
+     right pane (minWidth 0) was squeezed to a 0px-wide, invisible column. A real
+     browser measured right-pane width 0 at 640px and 38px at 700px. jsdom has
+     no layout engine, so these tests pin the three properties that make the
+     browser layout work; the E2E viewport sweep in
+     tests/e2e/emails-inbox-flow.spec.ts measures the real geometry. */
+  it("collapses the nav rail when the window shrinks below the narrow breakpoint", async () => {
+    setViewport(1280);
+    render(<EmailsPage />);
+    await flushPromises();
+    expect(screen.getByTestId("email-nav-rail").getAttribute("data-expanded")).toBe("true");
+    act(() => setViewport(640));
+    expect(screen.getByTestId("email-nav-rail").getAttribute("data-expanded")).toBe("false");
+    act(() => setViewport(1280));
+    expect(screen.getByTestId("email-nav-rail").getAttribute("data-expanded")).toBe("true");
+  });
+
+  it("never overrides a nav rail toggle the user made, on later resizes", async () => {
+    setViewport(1280);
+    render(<EmailsPage />);
+    await flushPromises();
+    fireEvent.click(screen.getByTestId("nav-rail-toggle"));
+    expect(screen.getByTestId("email-nav-rail").getAttribute("data-expanded")).toBe("false");
+    act(() => setViewport(1600));
+    expect(screen.getByTestId("email-nav-rail").getAttribute("data-expanded")).toBe("false");
+  });
+
+  it("the inbox column gives up width before the right pane does", async () => {
+    setViewport(800);
+    render(<EmailsPage />);
+    await flushPromises();
+    const inbox = screen.getByTestId("inbox-column");
+    const right = screen.getByTestId("right-pane");
+    expect(inbox.style.flexShrink).toBe("1");
+    expect(inbox.style.minWidth).toBe(`${INBOX_LAYOUT_FLOOR}px`);
+    expect(right.style.minWidth).toBe(`${RIGHT_PANE_MIN_WIDTH}px`);
+  });
+
+  it("on mobile the single visible pane keeps the full-width rules", async () => {
+    setViewport(400);
+    render(<EmailsPage />);
+    await flushPromises();
+    expect(screen.getByTestId("inbox-column").style.minWidth).toBe("0");
   });
 
   it("action buttons never wrap their label text", async () => {
