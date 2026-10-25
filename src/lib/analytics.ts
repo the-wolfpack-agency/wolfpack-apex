@@ -1752,6 +1752,22 @@ export type InstinctEventType =
   /* A sealed Graph token failed to authenticate on read (tampered, or the key
      changed). The connection reads as unavailable. Metadata: { user_email, field }. */
   | "security.graph_token_decrypt_failed"
+  /* At-rest keyring (src/lib/crypto/secret-storage.ts). Each is emitted ONCE
+     per process and never carries key material, plaintext or ciphertext.
+     secret_key_primary_active { primary_kid, previous_count, invalid_previous }:
+       INSTINCT_SECRET_KEY is set and new values are encrypted with it. The
+       rotation script compares its own key id against this.
+     secret_key_degraded { reason, legacy_kid }: production has no valid
+       INSTINCT_SECRET_KEY, so new values still use the legacy derived key.
+     secret_old_key_decrypt { key_class: "legacy" | "previous", kid, primary_kid }:
+       a value was opened with a non-primary key. Rotation is done when this
+       stops appearing and scripts/rotate-secret-key.ts reports zero. */
+  | "security.secret_key_primary_active"
+  | "security.secret_key_degraded"
+  | "security.secret_old_key_decrypt"
+  /* scripts/rotate-secret-key.ts --apply re-encrypted values under the primary
+     key. Metadata: { table, column, rotated, primary_kid }. Counts only. */
+  | "security.secret_values_rotated"
   /* Setting the per-request RLS session context (app.workspace_id) failed, so
      the query was refused rather than run without it. Metadata: { error }. */
   | "security.rls_context_failed"
