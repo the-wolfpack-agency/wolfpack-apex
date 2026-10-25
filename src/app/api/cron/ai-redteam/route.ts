@@ -16,6 +16,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { isAuthorizedBearer } from "@/lib/auth/bearer-auth";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { executeRedTeam } from "@/lib/ai-redteam/execute";
+import { runWithRequestWorkspace } from "@/lib/db/request-workspace";
 
 function isAuthorizedCron(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET;
@@ -24,13 +25,14 @@ function isAuthorizedCron(req: NextRequest): boolean {
 }
 
 async function run(workspaceId: string, actorId: string, actorRole: string): Promise<NextResponse> {
-  const { report, id } = await executeRedTeam({
+  // One workspace per run: its context, not system scope.
+  const { report, id } = await runWithRequestWorkspace(workspaceId, () => executeRedTeam({
     workspaceId,
     actorId,
     actorRole,
     source: "cron",
     nowIso: new Date().toISOString(),
-  });
+  }));
   if (report.vulns.length > 0) {
     // A gate regression is a security event the team must see immediately.
     console.warn(`[ai-redteam] REGRESSION: ${report.vulns.length} attack(s) got through`, report.vulns.map((v) => v.attackId));

@@ -7,8 +7,9 @@ How the workspace RLS policies from migrations 296 and 297 go from written to en
 | Piece | State | Where |
 |---|---|---|
 | Workspace policies on 78 tenant-scoped tables | Shipped. Not enforced | `src/db/migrations/296_rls_workspace_policies.sql`, `297_rls_workspace_policies_remaining.sql` |
-| Per-request `app.workspace_id` | Shipped behind `INSTINCT_RLS_SESSION_CONTEXT`. Default off | `src/lib/db/request-workspace.ts`, `query()` in `src/lib/db.ts`, bound in `requireCapability` |
-| System escape for cross-workspace work | Shipped: `withSystemScope()` sets `app.rls_system = 'on'` | `src/lib/db.ts` |
+| Per-request `app.workspace_id` | Shipped behind `INSTINCT_RLS_SESSION_CONTEXT`. Default off | `src/lib/db/request-workspace.ts`, `query()` and `withTransaction()` in `src/lib/db.ts`, bound in `requireCapability` |
+| Job contexts for crons and sweeps | Shipped: `withSystemScope()` (`app.rls_system = 'on'`) and `runWithRequestWorkspace()`, guarded by a test | `src/lib/db/request-workspace.ts` |
+| Owner connection for migrations | Shipped: `MIGRATION_DATABASE_URL`, falls back to `DATABASE_URL` | `scripts/migration-database-url.cjs` |
 | A role the policies actually apply to | **Not created.** The app connects as `neondb_owner`, which has BYPASSRLS | Operator step 2 |
 
 Each policy admits a row only when `workspace_id = current_setting('app.workspace_id', true)`, or when the transaction set `app.rls_system = 'on'`. If neither setting is present, the role sees zero rows. No table is `FORCE`d.
@@ -38,11 +39,24 @@ These need their own design (for example a `SECURITY DEFINER` lookup function fo
 
 ## Prerequisites before any environment change
 
-All of these are code changes. Each needs its own PR and green CI.
+All three are code changes and are done. Each is covered by tests that run in CI.
 
-1. **Migrations must keep the owner connection.** `scripts/migrate.mjs`, `check:upserts` and `engineering:seed` all read `DATABASE_URL`. If `DATABASE_URL` becomes the app role, the next deploy fails, because a non-owner cannot `ALTER TABLE`. Make them prefer a `MIGRATION_DATABASE_URL` (the owner) when it is set, and set that variable before step 3.
-2. **Wrap system call sites in `withSystemScope()`.** The tenant-isolation scanner lists every cross-workspace query on a covered table as `system-cross-workspace`. Run `npx tsx scripts/scan-tenant-isolation.ts` to get the list. On 2026-10-24 it was: `lib/assistant/routines/schedule-store.ts`, `lib/agents/drift/store.ts`, `lib/agents/evals/store.ts`, `lib/ai-code/watched-repos.ts`, `lib/forcefield/operator-reputation.ts`, `lib/site-acceptance/store.ts`, `lib/ogiam/checkpoint.ts`. A missed site does not leak data. It fails closed, returning zero rows, which in practice means a cron that quietly stops working. That is why step 4 checks crons as well as pages.
-3. **`withTransaction()` is not workspace-aware yet** (see `docs/tenant-isolation.md`). Atomic multi-write blocks on covered tables must run inside `withWorkspaceScope()`, or `withTransaction()` must learn to set the setting.
+1. **Done: migrations keep the owner connection.** `scripts/migrate.mjs`, `check:upserts` (`scripts/check-upsert-targets.ts`) and `engineering:seed` (`scripts/seed-engineering-wiki.ts`) connect through `scripts/migration-database-url.cjs`: `MIGRATION_DATABASE_URL` when it is set, otherwise `DATABASE_URL`. Unset, nothing changes. `vercel-build` runs the same three scripts, so it needs no change of its own. The scheduled upsert check passes `MIGRATION_DATABASE_URL` through when the secret exists. The DB contract workflow runs `migrate` with a `DATABASE_URL` that points at a database that does not exist and a working `MIGRATION_DATABASE_URL`, so a regression fails CI. Tests: `src/lib/db/__tests__/migration-database-url.test.ts`.
+2. **Done: cron and sweep call sites have a context.** `withSystemScope()` and `runWithRequestWorkspace()` (`src/lib/db/request-workspace.ts`, re-exported from `src/lib/db.ts`) mark the RLS context. While the flag is on, each statement inside them runs in its own short transaction with `app.rls_system = 'on'` or `app.workspace_id` set. While the flag is off they change nothing the database can see. The innermost context wins.
+   - The seven sites the tenant-isolation scanner lists wrap only their cross-workspace statement in `withSystemScope()`. Each one was checked, and each genuinely spans workspaces: the due-schedule list (`schedule-store.ts`), the active-agent lists for drift and model evals, the watched-repo list, the two Forcefield network-reputation aggregates (which return counts only), the site-acceptance project lookup and queue claim, and the list of workspaces with unsigned decisions (`checkpoint.ts`).
+   - The work each sweep then does for one workspace runs under `runWithRequestWorkspace()` for that workspace, not under system scope.
+   - Crons that work a single workspace (`ai-redteam`, `engagement-sweep`, `pentest-sweep`, `ai-code-merge-poll`, `forcefield-learn`, the governance-alert scan) run under that workspace. `integration-health` probes each workspace under its own context. `agent-failover` runs under system scope because, called with no workspace, it reassigns work across the whole fleet. The site deploy webhook writes its queue row under the workspace it resolved.
+   - **Guard:** `src/lib/db/__tests__/rls-cron-context.test.ts` walks the import graph of every scheduled route (`src/app/api/cron/*` and every cron in `vercel.json`). A route that can reach a covered table must be listed with the file that sets its context and a reason, and the test checks that file really sets it. Every scanner `system-cross-workspace` site on a covered table must call `withSystemScope()`. A new cron, or a cron that starts touching a covered table, fails until it has a context.
+3. **Done: `withTransaction()` sets the context.** It sets the same `app.workspace_id` (or `app.rls_system`) on its own connection that `query()` would. With the flag off and no explicit `withWorkspaceScope`, it still issues only `BEGIN`, the writes, and `COMMIT`.
+
+Evidence on a real Postgres, as a non-owner role without BYPASSRLS: `src/db/__tests__/rls-cutover-prereqs.db.test.ts`. With the flag on, a wrapped cron work list sees every workspace while the same statement unwrapped sees none, a sweep's write lands only in its own workspace, a request sees only its own workspace (also right after a nested system read), and `withTransaction` sees only its context, refuses a row for another workspace, and rolls the whole block back. With the flag off, no setting reaches the database, and as the owner the wrapped stores read exactly what unwrapped queries read.
+
+### Known gaps outside crons
+
+These are request paths with no session. Under the app role they fail closed: they degrade, and they do not leak.
+
+- `POST /api/forcefield/edge/decide` reads the edge workspace's reputation opt-in (`instinct_reputation_optin`) with no context, so network reputation reads as empty until it is given the edge workspace's context.
+- The phase 2 tables listed above.
 
 ## Operator steps
 
@@ -76,8 +90,8 @@ The audit log's append-only trigger still applies to this role. Do not grant `TR
 
 ### 3. Preview environment (Vercel, Preview scope only)
 
-1. Set `MIGRATION_DATABASE_URL` to the current owner connection string (prerequisite 1).
-2. Set `DATABASE_URL` to the `instinct_app` connection string for the Neon preview branch.
+1. Set `MIGRATION_DATABASE_URL` to the owner (`neondb_owner`) connection string for the Neon preview branch. Redeploy once and confirm the build log still shows `[migrate] done` and `[upsert]` passing. Nothing else has changed yet.
+2. Set `DATABASE_URL` to the `instinct_app` connection string for the same branch.
 3. Set `INSTINCT_RLS_SESSION_CONTEXT=on`.
 4. Redeploy the preview.
 
@@ -89,12 +103,12 @@ Every item must pass.
 - Run the E2E reality-check specs against the preview (`PROD_URL=<preview url>`).
 - **Cross-tenant check.** With two workspaces seeded on the branch, a user in workspace A sees none of workspace B's rows on the pages above.
 - **The binding works on the deployed runtime.** `requireCapability` binds the workspace on Next.js's per-request store (`request-workspace.ts`). If that ever fails to reach `query()`, every covered page reads empty. That is a fail-closed outcome, and this step is where it would show.
-- **Crons.** Trigger `routine-schedules`, `ms-sync` and `tenant-isolation-scan` with the cron secret. Each returns 200 and does real work (rows processed > 0 where there is data).
+- **Crons.** Trigger each cron listed in `src/lib/db/__tests__/rls-cron-context.test.ts` (at least `routine-schedules`, `agent-drift`, `ogiam-checkpoint`, `site-acceptance`, `ai-code-watch` and `integration-health`), plus `ms-sync` and `tenant-isolation-scan`, with the cron secret. Each returns 200 and does real work (rows processed > 0 where there is data). Zero rows where there should be some means a missed context, not an empty system.
 - `security.rls_context_failed` count is 0 in `instinct_events`.
 
 ### 5. Production
 
-Repeat step 2 on the production branch, then step 3 in the Production scope with the production values. **Keep the old owner `DATABASE_URL` value saved** until production is verified with the step 4 checklist on `https://wolfpack-instinct.vercel.app`. Only then remove any remaining use of the owner credential from the app's runtime variables. `MIGRATION_DATABASE_URL` stays.
+Repeat step 2 on the production branch, then step 3 in the Production scope with the production values, setting `MIGRATION_DATABASE_URL` and redeploying before changing `DATABASE_URL`. **Keep the old owner `DATABASE_URL` value saved** until production is verified with the step 4 checklist on `https://wolfpack-instinct.vercel.app`. Only then remove any remaining use of the owner credential from the app's runtime variables. `MIGRATION_DATABASE_URL` stays.
 
 ### Rollback
 
@@ -105,4 +119,7 @@ The migrations themselves never need rolling back to undo a cutover. If they mus
 ## Tests
 
 - `src/db/__tests__/rls-workspace-policies.db.test.ts` runs against a real Postgres in the DB contract workflow. It covers non-owner isolation, cross-tenant reads returning 0, fail-closed with no context, WITH CHECK, the system escape, the owner being unaffected, idempotency, reversibility, and the real `query()` path under the flag.
-- `src/lib/__tests__/db-rls-session-context.test.ts` covers the flag, the per-request binding (including no leakage across concurrent requests), the refusal when the setting fails, and `withSystemScope`.
+- `src/lib/__tests__/db-rls-session-context.test.ts` covers the flag, the per-request binding (including no leakage across concurrent requests), the refusal when the setting fails, `withSystemScope`, `runWithRequestWorkspace` and the `withTransaction` context.
+- `src/db/__tests__/rls-cutover-prereqs.db.test.ts` runs the prerequisites against a real Postgres as a non-owner role, with the flag on and off.
+- `src/lib/db/__tests__/rls-cron-context.test.ts` is the cron and sweep guard.
+- `src/lib/db/__tests__/migration-database-url.test.ts` covers the migration connection.

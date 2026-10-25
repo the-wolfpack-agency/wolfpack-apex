@@ -10,6 +10,7 @@
  */
 
 import { safeQuery, writeQuery } from "@/lib/db";
+import { runWithRequestWorkspace, withSystemScope } from "@/lib/db/request-workspace";
 import { trackEvent } from "@/lib/analytics";
 import { getAgent, setAgentState } from "@/lib/agents/store";
 import { notify } from "@/lib/notifications/in-app";
@@ -215,17 +216,22 @@ export async function listDriftEvents(
 
 /** Check every active agent that has a baseline (the cron sweep). */
 export async function runDriftSweep(): Promise<{ checked: number; paused: number }> {
-  const res = await safeQuery<{ agent_id: string; workspace_id: string }>(
-    `SELECT a.id AS agent_id, a.workspace_id
-       FROM instinct_agents a
-       JOIN instinct_agent_baselines b ON b.agent_id = a.id
-      WHERE a.state = 'active'`,
+  // Cross-workspace on purpose (the fleet's work list); each check then runs
+  // under the agent's own workspace.
+  const res = await withSystemScope(() =>
+    safeQuery<{ agent_id: string; workspace_id: string }>(
+      `SELECT a.id AS agent_id, a.workspace_id
+         FROM instinct_agents a
+         JOIN instinct_agent_baselines b ON b.agent_id = a.id
+        WHERE a.state = 'active'`,
+    ),
   );
   let checked = 0;
   let paused = 0;
   for (const row of res.rows) {
     try {
-      const out = await runDriftCheck(String(row.agent_id), String(row.workspace_id));
+      const ws = String(row.workspace_id);
+      const out = await runWithRequestWorkspace(ws, () => runDriftCheck(String(row.agent_id), ws));
       checked += 1;
       if (out.action === "paused") paused += 1;
     } catch (err) {

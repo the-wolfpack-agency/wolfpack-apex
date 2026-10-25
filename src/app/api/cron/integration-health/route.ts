@@ -26,6 +26,7 @@ import { runAssistantSelfCheck } from "@/lib/health/assistant-selfcheck";
 import { recordSearchLatency } from "@/lib/health/search-latency-check";
 import { recordProviderReadiness } from "@/lib/health/model-provider-check";
 import { trackEvent } from "@/lib/analytics";
+import { runWithRequestWorkspace } from "@/lib/db/request-workspace";
 
 function isAuthorizedCron(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET;
@@ -43,7 +44,8 @@ async function runSweep(actorId: string, actorRole: string): Promise<NextRespons
        one that was false all day on 2026-08-28 while every probe would have
        read green. Runs after the probes so a Graph outage shows up as an
        integration failure rather than as six mysterious behavior failures. */
-    const selfCheck = await runAssistantSelfCheck().catch(() => null);
+    // These three probe the default workspace (their own default argument).
+    const selfCheck = await runWithRequestWorkspace("default", () => runAssistantSelfCheck()).catch(() => null);
 
     /* EVERY INTEGRATION JOINS THE FAN-OUT, AND THE SLOWEST ONE IS THE SEARCH.
        Connecting a client's systems is the product, so each new source widens
@@ -51,7 +53,7 @@ async function runSweep(actorId: string, actorRole: string): Promise<NextRespons
        slow provider holding the rest up; this notices that it happened, which
        is the half that was missing when one provider made the whole product
        feel broken for weeks without anybody attributing it. */
-    const latency = await recordSearchLatency().catch(() => null);
+    const latency = await runWithRequestWorkspace("default", () => recordSearchLatency()).catch(() => null);
 
     /* WHICH MODELS WE CAN ACTUALLY REACH.
        The product is sold on routing to the cheapest model that can answer,
@@ -61,7 +63,7 @@ async function runSweep(actorId: string, actorRole: string): Promise<NextRespons
        never been able to run, and nothing reported it: the router correctly
        fell through to the provider that worked, which looks identical to a
        product that only supports one vendor. */
-    const modelProviders = await recordProviderReadiness().catch(() => null);
+    const modelProviders = await runWithRequestWorkspace("default", () => recordProviderReadiness()).catch(() => null);
     trackEvent("integration.health_sweep", actorId, actorRole, {
       workspaces: result.workspaces,
       probes: result.probes,

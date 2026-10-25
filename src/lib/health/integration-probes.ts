@@ -19,6 +19,7 @@
 
 import { createHash } from "node:crypto";
 import { safeQuery } from "@/lib/db";
+import { runWithRequestWorkspace } from "@/lib/db/request-workspace";
 import { trackEvent } from "@/lib/analytics";
 import { getConnectionStatus as getMsStatus, graphFetch, getValidToken } from "@/lib/microsoft-graph";
 import { getConnectionStatus as getQboStatus } from "@/lib/quickbooks";
@@ -750,30 +751,35 @@ export async function sweepAllWorkspaces(): Promise<{ workspaces: number; probes
   let probes = 0;
   const drifted: string[] = [];
   for (const r of rows) {
-    /* Resolved per workspace rather than passed in, so the nightly cron probes
-       Microsoft as a real connected account instead of failing its own guard. */
-    const userId = await resolveMicrosoftProbeUser(r.workspace_id);
-    const res = await sweepWorkspace(r.workspace_id, userId ? { userId } : {});
-    probes += res.probes;
-    drifted.push(...res.drifted);
+    /* Each workspace is probed under its own RLS context. The work list above
+       reads instinct_connector_credentials, which has no workspace policy yet
+       (docs/security/rls-cutover.md, phase 2), so it needs no system scope. */
+    await runWithRequestWorkspace(r.workspace_id, async () => {
+      /* Resolved per workspace rather than passed in, so the nightly cron probes
+         Microsoft as a real connected account instead of failing its own guard. */
+      const userId = await resolveMicrosoftProbeUser(r.workspace_id);
+      const res = await sweepWorkspace(r.workspace_id, userId ? { userId } : {});
+      probes += res.probes;
+      drifted.push(...res.drifted);
 
-    /* THE SURFACES NOBODY USES, EXERCISED NIGHTLY.
-     *
-     * Eighteen Microsoft surfaces are built and twelve had ever run, because
-     * six sit behind features nobody on this team happens to use daily. No
-     * event was ever written, and a surface with no events is
-     * indistinguishable from a broken one.
-     *
-     * Reads only, through the real modules, so each writes the same analytics
-     * a genuine use would. Running here rather than from somebody's laptop is
-     * not incidental: refreshing a Microsoft token needs the client secret,
-     * which exists in this deployment and not on a developer machine, so this
-     * is the only place the claim can honestly be earned. */
-    if (userId) {
-      const { exerciseUnprovenSurfaces } = await import("@/lib/health/unproven-surfaces");
-      const exercised = await exerciseUnprovenSurfaces(r.workspace_id, userId).catch(() => []);
-      probes += exercised.length;
-    }
+      /* THE SURFACES NOBODY USES, EXERCISED NIGHTLY.
+       *
+       * Eighteen Microsoft surfaces are built and twelve had ever run, because
+       * six sit behind features nobody on this team happens to use daily. No
+       * event was ever written, and a surface with no events is
+       * indistinguishable from a broken one.
+       *
+       * Reads only, through the real modules, so each writes the same analytics
+       * a genuine use would. Running here rather than from somebody's laptop is
+       * not incidental: refreshing a Microsoft token needs the client secret,
+       * which exists in this deployment and not on a developer machine, so this
+       * is the only place the claim can honestly be earned. */
+      if (userId) {
+        const { exerciseUnprovenSurfaces } = await import("@/lib/health/unproven-surfaces");
+        const exercised = await exerciseUnprovenSurfaces(r.workspace_id, userId).catch(() => []);
+        probes += exercised.length;
+      }
+    });
   }
   return { workspaces: rows.length, probes, drifted };
 }

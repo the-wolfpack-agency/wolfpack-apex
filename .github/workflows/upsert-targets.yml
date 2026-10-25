@@ -45,6 +45,9 @@ jobs:
       - name: Check every upsert has a unique index to conflict on
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          # Same connection vercel-build uses for schema work. Unset (an absent
+          # secret expands to "") falls back to DATABASE_URL.
+          MIGRATION_DATABASE_URL: ${{ secrets.MIGRATION_DATABASE_URL }}
         run: |
           if [ -z "${DATABASE_URL:-}" ]; then
             echo "::error::DATABASE_URL is not set for Actions, so this check cannot read the live schema and would exit green having verified nothing. Add it as a repository secret."

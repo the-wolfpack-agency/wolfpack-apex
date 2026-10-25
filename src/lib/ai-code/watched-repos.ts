@@ -8,6 +8,7 @@
  * "watch nothing", never crashes). Writes use query so the API surfaces failures.
  */
 import { query, safeQuery } from "@/lib/db";
+import { withSystemScope } from "@/lib/db/request-workspace";
 
 const REPO_RE = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
 
@@ -38,11 +39,15 @@ export async function listWatchedRepos(workspaceId: string): Promise<WatchedRepo
  *  Never throws (safeQuery): a read failure yields [], so the watcher does nothing
  *  rather than crashing the cron. */
 export async function listAllEnabledWatched(): Promise<Array<{ workspaceId: string; repo: string }>> {
-  const { rows } = await safeQuery<{ workspace_id: string; repo: string }>(
-    `SELECT workspace_id, repo
-       FROM instinct_ai_code_watched_repos
-      WHERE enabled = TRUE
-      ORDER BY workspace_id, repo`,
+  // Cross-workspace on purpose: the cron's work list. Callers run each target
+  // under its own workspace.
+  const { rows } = await withSystemScope(() =>
+    safeQuery<{ workspace_id: string; repo: string }>(
+      `SELECT workspace_id, repo
+         FROM instinct_ai_code_watched_repos
+        WHERE enabled = TRUE
+        ORDER BY workspace_id, repo`,
+    ),
   );
   return rows.map((r) => ({ workspaceId: r.workspace_id, repo: r.repo }));
 }

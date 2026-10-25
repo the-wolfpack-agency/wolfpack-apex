@@ -21,6 +21,7 @@ import { recordDeployResult, getDeployProjectId } from "@/lib/sites";
 import { trackEvent } from "@/lib/analytics";
 import { sanitizeForLog } from "@/lib/log-sanitize";
 import { enqueueAcceptanceRun, resolveAcceptanceWorkspace } from "@/lib/site-acceptance/store";
+import { runWithRequestWorkspace } from "@/lib/db/request-workspace";
 
 export async function POST(req: NextRequest) {
   const expected = process.env.WOLFPACK_SITES_WEBHOOK_SECRET;
@@ -74,7 +75,13 @@ export async function POST(req: NextRequest) {
         const projectId = await getDeployProjectId(body.deployId);
         if (projectId) {
           const workspaceId = await resolveAcceptanceWorkspace(projectId);
-          await enqueueAcceptanceRun(workspaceId, projectId, body.deployId, body.previewUrl ?? null);
+          // No session on a deploy webhook: write the queue row under the
+          // workspace just resolved, so RLS admits it once enforced.
+          const deployId = body.deployId;
+          const previewUrl = body.previewUrl ?? null;
+          await runWithRequestWorkspace(workspaceId, () =>
+            enqueueAcceptanceRun(workspaceId, projectId, deployId, previewUrl),
+          );
           acceptanceQueued = true;
           trackEvent("site.acceptance_queued", "system", "system", {
             project_id: projectId,

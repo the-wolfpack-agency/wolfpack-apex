@@ -9,6 +9,8 @@
 
 /* FIRST. Imports hoist, so anything below already read process.env. */
 import "./load-env";
+// Before @/lib/engineering pulls in the pool: seed as the owner connection.
+import "./use-migration-database-url";
 import { upsertPage } from "@/lib/engineering";
 
 interface Seed {

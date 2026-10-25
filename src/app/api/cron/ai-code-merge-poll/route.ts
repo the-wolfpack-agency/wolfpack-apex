@@ -18,6 +18,7 @@ import { query } from "@/lib/db";
 import { trackEvent } from "@/lib/analytics";
 import { workspaceGithubClient, getPullRequest, fetchPullRequestDiff } from "@/lib/github-client";
 import { resolveWorkspace } from "@/lib/auth/workspace";
+import { runWithRequestWorkspace } from "@/lib/db/request-workspace";
 import { pollMergeOutcomes, type OpenedPr, type PrState } from "@/lib/ai-code/merge-poll";
 import { reinforceFromOutcome } from "@/lib/ai-code/factory-reinforce";
 import { markExemplarMerged } from "@/lib/ai-code/factory-exemplar-store";
@@ -105,5 +106,6 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const auth = await requireCapability(req, "settings.manage_team");
     if (!auth.ok) return auth.response;
   }
-  return run();
+  // One workspace, the factory's (see run()): its context, not system scope.
+  return runWithRequestWorkspace(resolveWorkspace(null), run);
 }

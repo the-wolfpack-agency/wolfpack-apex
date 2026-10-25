@@ -7,7 +7,11 @@
  * Idempotent: tracks applied migrations in _migrations table and skips
  * anything already applied. Atomic: each migration runs inside a tx.
  *
- * If DATABASE_URL is unset, this script no-ops with a warning so local
+ * Connects as MIGRATION_DATABASE_URL when set (the table owner, kept after the
+ * RLS cutover moves DATABASE_URL to a non-owner app role), else DATABASE_URL.
+ * See scripts/migration-database-url.cjs.
+ *
+ * If neither is set, this script no-ops with a warning so local
  * builds and shadow-mode dev environments don't break.
  */
 
@@ -15,6 +19,9 @@ import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
+import migrationUrl from "./migration-database-url.cjs";
+
+const { migrationDatabaseUrl } = migrationUrl;
 
 const { Pool } = pg;
 const __filename = fileURLToPath(import.meta.url);
@@ -22,7 +29,8 @@ const ROOT = dirname(dirname(__filename));
 const DIR = join(ROOT, "src", "db", "migrations");
 
 async function main() {
-  if (!process.env.DATABASE_URL) {
+  const url = migrationDatabaseUrl();
+  if (!url) {
     console.warn("[migrate] DATABASE_URL not set — skipping (shadow mode).");
     return;
   }
@@ -30,10 +38,10 @@ async function main() {
     console.log("[migrate] no migrations dir, nothing to do");
     return;
   }
-  const ssl = process.env.DATABASE_URL.includes("neon")
+  const ssl = url.includes("neon")
     ? { rejectUnauthorized: false }
     : undefined;
-  const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl });
+  const pool = new Pool({ connectionString: url, ssl });
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS _migrations (

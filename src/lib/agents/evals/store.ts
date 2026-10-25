@@ -25,6 +25,7 @@
  */
 
 import { safeQuery, writeQuery } from "@/lib/db";
+import { runWithRequestWorkspace, withSystemScope } from "@/lib/db/request-workspace";
 import { trackEvent } from "@/lib/analytics";
 import { getAgent } from "@/lib/agents/store";
 import { notify } from "@/lib/notifications/in-app";
@@ -254,19 +255,21 @@ export async function runModelEvalSweep(): Promise<{
   checked: number;
   regressed: number;
 }> {
-  const res = await safeQuery<{ agent_id: string; workspace_id: string }>(
-    `SELECT id AS agent_id, workspace_id
-       FROM instinct_agents
-      WHERE state = 'active'`,
+  // Cross-workspace on purpose (the fleet's work list); each check then runs
+  // under the agent's own workspace.
+  const res = await withSystemScope(() =>
+    safeQuery<{ agent_id: string; workspace_id: string }>(
+      `SELECT id AS agent_id, workspace_id
+         FROM instinct_agents
+        WHERE state = 'active'`,
+    ),
   );
   let checked = 0;
   let regressed = 0;
   for (const row of res.rows) {
     try {
-      const out = await runModelEvalCheck(
-        String(row.agent_id),
-        String(row.workspace_id),
-      );
+      const ws = String(row.workspace_id);
+      const out = await runWithRequestWorkspace(ws, () => runModelEvalCheck(String(row.agent_id), ws));
       checked += 1;
       if (out.verdict === "regressed") regressed += 1;
     } catch (err) {

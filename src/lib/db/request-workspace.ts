@@ -24,7 +24,13 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { workUnitAsyncStorage } from "next/dist/server/app-render/work-unit-async-storage.external";
 
-const store = new AsyncLocalStorage<{ workspaceId: string }>();
+/** The RLS context a statement runs under. `pinned` marks withWorkspaceScope
+ *  (db.ts), which owns a transaction and must not be re-scoped from inside. */
+export type RlsContext =
+  | { kind: "workspace"; workspaceId: string; pinned?: boolean }
+  | { kind: "system" };
+
+const store = new AsyncLocalStorage<RlsContext>();
 const byRequest = new WeakMap<object, string>();
 
 /** The current Next.js request's work-unit store, or undefined outside one. */
@@ -49,15 +55,66 @@ export function bindRequestWorkspace(workspaceId: string | null | undefined): vo
   if (key) byRequest.set(key, workspaceId);
 }
 
-/** The workspace bound for this request, if any. */
-export function boundRequestWorkspace(): string | undefined {
-  const explicit = store.getStore()?.workspaceId;
+/** The innermost explicit context, else the workspace bound to this request. */
+export function boundRlsContext(): RlsContext | undefined {
+  const explicit = store.getStore();
   if (explicit) return explicit;
   const key = currentRequestKey();
-  return key ? byRequest.get(key) : undefined;
+  const ws = key ? byRequest.get(key) : undefined;
+  return ws ? { kind: "workspace", workspaceId: ws } : undefined;
 }
 
-/** Run fn with a workspace bound (tests, and callers that already own a context). */
+/** The workspace bound for this request, if any (undefined under system scope). */
+export function boundRequestWorkspace(): string | undefined {
+  const ctx = boundRlsContext();
+  return ctx?.kind === "workspace" ? ctx.workspaceId : undefined;
+}
+
+/**
+ * Run fn with a workspace bound: per-workspace job work (a sweep's loop body),
+ * tests, and callers that already own a verified workspace id. An empty id binds
+ * nothing and runs fn as it is. Refuses to re-scope a pinned withWorkspaceScope.
+ */
 export function runWithRequestWorkspace<R>(workspaceId: string, fn: () => R): R {
-  return store.run({ workspaceId }, fn);
+  if (!workspaceId) return fn();
+  const cur = store.getStore();
+  if (cur?.kind === "workspace" && cur.pinned && cur.workspaceId !== workspaceId) {
+    throw new Error(`runWithRequestWorkspace nesting mismatch: already scoped to '${cur.workspaceId}', refused re-scope to '${workspaceId}'`);
+  }
+  return store.run({ kind: "workspace", workspaceId }, fn);
+}
+
+/**
+ * Run fn as SYSTEM work that legitimately spans workspaces (a cron's work list,
+ * a queue claim, a deliberate cross-workspace aggregate). Under the flag every
+ * query() and withTransaction() inside runs with app.rls_system = 'on', which
+ * the workspace policies admit. Each statement still runs in its own short
+ * transaction, exactly like a request-bound one, so a long sweep never holds a
+ * connection or a transaction open and one failed statement cannot poison the
+ * rest. Flag off: a marker nothing reads.
+ *
+ * Code decides when this is used, never request input. Wrap the enumerating
+ * statement, not the whole job: per-workspace work belongs in
+ * runWithRequestWorkspace.
+ */
+export function withSystemScope<R>(fn: () => Promise<R>): Promise<R> {
+  const cur = store.getStore();
+  if (cur?.kind === "workspace" && cur.pinned) {
+    return Promise.reject(new Error(`withSystemScope nesting mismatch: already scoped to '${cur.workspaceId}'`));
+  }
+  return store.run({ kind: "system" }, fn);
+}
+
+/** True inside withSystemScope (and not narrowed back to a workspace). */
+export function inSystemScope(): boolean {
+  return store.getStore()?.kind === "system";
+}
+
+/** db.ts withWorkspaceScope only: mark the pinned scope so nothing re-scopes it. */
+export function runPinnedWorkspace<R>(workspaceId: string, fn: () => R): R {
+  const cur = store.getStore();
+  if (cur?.kind === "system") {
+    throw new Error(`withWorkspaceScope nesting mismatch: already scoped to system, refused re-scope to '${workspaceId}'`);
+  }
+  return store.run({ kind: "workspace", workspaceId, pinned: true }, fn);
 }

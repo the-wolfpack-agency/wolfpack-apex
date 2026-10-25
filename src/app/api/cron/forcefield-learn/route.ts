@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { isAuthorizedBearer } from "@/lib/auth/bearer-auth";
 import { evaluateLearnedSignatures } from "@/lib/forcefield/learned-signatures";
 import { liveLearnedSignatureDeps } from "@/lib/forcefield/learned-signatures-live";
+import { runWithRequestWorkspace } from "@/lib/db/request-workspace";
 
 /**
  * Learned hostile-tradecraft signature pass (Vercel cron, see vercel.json).
@@ -19,7 +20,12 @@ export async function GET(req: Request) {
     if (!isAuthorizedBearer(auth, secret)) return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
   }
   try {
-    const result = await evaluateLearnedSignatures(liveLearnedSignatureDeps());
+    // The pass works the edge workspace only (the same id the deps use): its
+    // context, not system scope. The cross-workspace reputation reads inside
+    // carry their own withSystemScope.
+    const result = await runWithRequestWorkspace(process.env.FORCEFIELD_EDGE_WORKSPACE_ID || "default", () =>
+      evaluateLearnedSignatures(liveLearnedSignatureDeps()),
+    );
     return NextResponse.json({ ok: true, ...result });
   } catch {
     return NextResponse.json({ ok: true, mined: 0, shadow: 0, enforcing: 0, promoted: 0, operatorsAutoBlocked: 0, falsePositives: 0 });

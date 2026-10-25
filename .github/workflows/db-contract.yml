@@ -110,8 +110,13 @@ jobs:
       - name: Running them again changes nothing
         # A migration that is not idempotent breaks the next deploy rather than
         # this one, which is the worst time to find out.
+        #
+        # Also proves MIGRATION_DATABASE_URL wins (RLS cutover prerequisite 1):
+        # DATABASE_URL here points at a database that does not exist, so this
+        # step only passes if migrate connects through the migration URL.
         env:
-          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/fresh_install
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/no_such_database
+          MIGRATION_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/fresh_install
         run: |
           set -euo pipefail
           npm run migrate 2>&1 | tee replay.log

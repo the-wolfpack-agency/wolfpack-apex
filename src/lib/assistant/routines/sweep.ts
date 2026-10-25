@@ -39,6 +39,7 @@ import {
   type StepProblem,
 } from "./heal";
 import type { Routine, ToolStep } from "./types";
+import { runWithRequestWorkspace } from "@/lib/db/request-workspace";
 
 export interface SweepResult {
   due: number;
@@ -61,15 +62,19 @@ export async function sweepDueRoutines(now: Date = new Date()): Promise<SweepRes
 
   for (const row of rows) {
     try {
-      const outcome = await runOne(row, now);
-      if (outcome === "waiting") result.waiting += 1;
-      if (outcome !== "failed") result.ran += 1;
-      else result.failed += 1;
-      const { deactivated } = await recordRun(row, outcome === "failed" ? "failed" : "ok", now);
-      if (deactivated) {
-        result.deactivated += 1;
-        await tellThemItStopped(row);
-      }
+      /* Each row runs under ITS workspace, never system scope: the routine
+         reads that person's data, and nothing else is in reach of it. */
+      await runWithRequestWorkspace(row.workspaceId, async () => {
+        const outcome = await runOne(row, now);
+        if (outcome === "waiting") result.waiting += 1;
+        if (outcome !== "failed") result.ran += 1;
+        else result.failed += 1;
+        const { deactivated } = await recordRun(row, outcome === "failed" ? "failed" : "ok", now);
+        if (deactivated) {
+          result.deactivated += 1;
+          await tellThemItStopped(row);
+        }
+      });
     } catch {
       /* Already counted as failed by runOne where it could be; this catch is
          the backstop that keeps one row from ending the pass. */
