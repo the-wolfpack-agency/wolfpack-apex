@@ -30,6 +30,7 @@ import {
   recordRealityCheckRun,
 } from "./helpers/smoke-helpers";
 import { ensureFixture } from "./fixtures/generate-fixtures";
+import { pickFilesThroughDropzone } from "./helpers/dropzone";
 
 const target = resolveSmokeTarget();
 const SPEC_NAME = "sites-designer-journey";
@@ -91,8 +92,9 @@ test.describe("sites — designer journey reality check", () => {
         "wireframe-journey.png",
         "PARTNER",
       );
-      const input = page.locator('input[type="file"]').first();
-      await input.setInputFiles(fixturePath);
+      // The detail page's brief dropzone (chat tab, the default) parses on
+      // pick; it has no file input in the DOM (see helpers/dropzone.ts).
+      await pickFilesThroughDropzone(page, "wireframe-dropzone", fixturePath);
 
       const reviewOrError = await Promise.race([
         page

@@ -27,6 +27,7 @@ import {
   recordRealityCheckRun,
 } from "./helpers/smoke-helpers";
 import { ensureFixture } from "./fixtures/generate-fixtures";
+import { pickFilesThroughDropzone } from "./helpers/dropzone";
 
 const target = resolveSmokeTarget();
 const SPEC_NAME = "sites-upload-reality-check";
@@ -71,9 +72,11 @@ test.describe("sites — wireframe upload reality check", () => {
       );
       expect(fs.existsSync(fixturePath), "fixture must exist").toBe(true);
 
-      // Drop the fixture via the dropzone's hidden file input.
-      const input = page.locator('input[type="file"]').first();
-      await input.setInputFiles(fixturePath);
+      // Pick the fixture through the dropzone (it has no file input in the
+      // DOM; see helpers/dropzone.ts), then press Analyze: /sites/new
+      // collects frames first and only parses on submit.
+      await pickFilesThroughDropzone(page, "wireframe-dropzone", fixturePath);
+      await page.getByTestId("multi-frame-submit").click();
 
       // Either the review card shows (happy) or the error banner fires
       // (503 / 413 / 415). We tolerate the "not configured" skip case.
@@ -151,27 +154,23 @@ test.describe("sites — wireframe upload reality check", () => {
       expect(await signInIfPossible(page, target)).toBe(true);
       await page.goto(`${target.baseUrl}/sites/new`, { waitUntil: "networkidle" });
 
-      // Feature-gate: if the file input doesn't accept `multiple`, the
-      // multi-frame extractor isn't wired yet (it's one of the parallel
-      // streams still in flight at spec-authoring time). Skip cleanly.
-      const input = page.locator('input[type="file"]').first();
-      const acceptsMultiple = await input.evaluate(
-        (el) => (el as HTMLInputElement).multiple === true,
-      );
-      if (!acceptsMultiple) {
-        result = "skip";
-        note = "input[type=file] is not multiple — multi-frame feature not landed yet";
-        test.skip(
-          true,
-          "Multi-file uploader not wired yet — skipping until multi-frame extractor lands",
-        );
-        return;
-      }
-
+      // The multi-frame uploader has landed (MultiFrameUploader on
+      // /sites/new). Feature-gate on the real file chooser: if it ever
+      // stops accepting several files, skip with that reason.
       const home = ensureFixture("wireframe-acme-home.png", "ACME");
       const partner = ensureFixture("wireframe-acme-partner.png", "PARTNER");
-
-      await input.setInputFiles([home, partner]);
+      const { multiple } = await pickFilesThroughDropzone(page, "wireframe-dropzone", [
+        home,
+        partner,
+      ]);
+      if (!multiple) {
+        result = "skip";
+        note = "wireframe file chooser is single-file: multi-frame upload not available";
+        test.skip(true, note);
+        return;
+      }
+      await expect(page.getByTestId("multi-frame-thumb-1")).toBeVisible();
+      await page.getByTestId("multi-frame-submit").click();
 
       // Wait for review OR error banner like the single-file case.
       const review = page.getByTestId("wireframe-extract-review");
