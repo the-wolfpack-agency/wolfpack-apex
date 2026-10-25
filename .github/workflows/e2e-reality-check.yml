@@ -128,7 +128,8 @@ jobs:
       # commented out. Five specs listed here had never run in CI.
       # src/__tests__/workflow-folded-run-comments.test.ts now fails on it.
       # Promoted 2026-10-25 from report-only after their first real run passed:
-      # deployed-url-smoke, ai-router-behavior, playbook-readable, client-builds.
+      # deployed-url-smoke, ai-router-behavior, playbook-readable, client-builds;
+      # lms-security-course after its spec fix (#1241), 6/6 on main (run 40228607337).
       - name: Reality-check gates (hard)
         if: steps.cfg.outputs.configured == 'true'
         run: >-
@@ -139,45 +140,14 @@ jobs:
           tests/e2e/ai-router-behavior.spec.ts
           tests/e2e/playbook-readable.spec.ts
           tests/e2e/client-builds.spec.ts
-          --config=playwright.config.ts --workers=2 --reporter=github
-
-      # REPORT-ONLY: the five specs that were listed above as hard gates but,
-      # because of the folded-comment bug, never ran. Their first real runs
-      # are recorded here without blocking merges. Promote each one into the
-      # hard-gates step above once it is green on main; removing a spec from
-      # this step without promoting it is not allowed (reality-check-workflow
-      # .test.ts pins the list). Why each one earns a hard gate:
-      #   deployed-url-smoke: needs no credentials and guards the failures this
-      #     product has shipped (an authed page rendering empty instead of
-      #     redirecting, a login submit clickable before hydration, a CSP
-      #     violation, a stale deploy alias).
-      #   ai-router-behavior: stubs every response, so it runs with no
-      #     credentials; five of its assertions were obsoleted by #279 unseen.
-      #   playbook-readable: the page shipped correct and unreadable twice
-      #     (no stylesheet, then a diagram that fenced early); only a browser
-      #     against the deployed page tells the difference.
-      #   client-builds: the engagement-work banner fails silently if it
-      #     renders unstyled or clipped. Needs no credentials.
-      #   lms-security-course: stubs the session and intercepts the LMS API,
-      #     driving the real deployed bundle through the learner journey.
-      # continue-on-error is the report-only mechanism, bounded by its own
-      # timeout so it cannot eat the job budget. Follow-up: promote to hard
-      # gates and drop continue-on-error once each spec is green on main.
-      - name: Reality-check gates (report-only, promote when green)
-        id: report_only
-        if: steps.cfg.outputs.configured == 'true'
-        continue-on-error: true
-        timeout-minutes: 8
-        run: >-
-          npx playwright test
           tests/e2e/lms-security-course.spec.ts
           --config=playwright.config.ts --workers=2 --reporter=github
 
-      # A report-only failure must still be visible on the run summary, not
-      # only inside a collapsed green step.
-      - name: Report-only gates outcome
-        if: always() && steps.report_only.outcome == 'failure'
-        run: echo "::warning::Report-only reality-check gates failed. They do not block this merge; see the step above and fix before promoting them to hard gates."
+      # REPORT-ONLY gates: none today (all five woken specs promoted 2026-10-25).
+      # To stage a new spec, add a "Reality-check gates (report-only, promote when
+      # green)" step with id report_only, continue-on-error and a timeout, plus a
+      # warning step that fires when that step fails, and list it in
+      # REPORT_ONLY_GATES (reality-check-workflow.test.ts pins both).
 
       # CSP img-src narrowing, its own invocation. A narrowed CSP fails
       # silently: img-src no longer allows any https host (model output must
