@@ -345,3 +345,31 @@ describe("withEnforcement - the stored row says what happened", () => {
     expect(clientKeys(input, R).fp).toBe(obs!.props.fp);
   });
 });
+
+describe("synthetic attestation stamp", () => {
+  const hc = "Mozilla/5.0 HeadlessChrome/131.0.0.0";
+  it("a synthetic request's hostile event carries synthetic + authenticated, after the attack class", () => {
+    const o = observeRequest({ ...base, path: "/q", rawUrl: "/q?x=<script>", userAgent: hc, authenticated: true, synthetic: true }, R)!;
+    expect(o.type).toBe("site.agent_payload_attack");
+    expect(o.props.synthetic).toBe(true);
+    expect(o.props.authenticated).toBe(true);
+    const keys = Object.keys(o.props);
+    expect(keys.indexOf("synthetic")).toBeGreaterThan(keys.indexOf("attack"));
+  });
+  it("authenticated alone (a signed-in user) is NOT synthetic", () => {
+    const o = observeRequest({ ...base, path: "/_ff/records", userAgent: hc, authenticated: true }, R)!;
+    expect(o.props.authenticated).toBe(true);
+    expect(o.props.synthetic).toBeUndefined();
+  });
+  it("the block-record path (no base observation) still stamps synthetic", () => {
+    const input = { ...base, path: "/plain", userAgent: "Mozilla/5.0 (Macintosh) Chrome/131", authenticated: true, synthetic: true };
+    const o = withEnforcement(null, input, R, { wouldBlock: true, blocked: true, reasonKind: "blocked_fingerprint" })!;
+    expect(o.props.synthetic).toBe(true);
+    expect(o.props.authenticated).toBe(true);
+  });
+  it("an anonymous request is never stamped, whatever its UA claims", () => {
+    const o = observeRequest({ ...base, path: "/_ff/records", userAgent: "wolfpack-verify/1.0" }, R)!;
+    expect(o.props.synthetic).toBeUndefined();
+    expect(o.props.authenticated).toBeUndefined();
+  });
+});

@@ -162,3 +162,28 @@ describe("ingest live rate for vendored sites", () => {
     expect(mockRecordSiteEvent.mock.calls.length).toBe((DEFAULT_RATE.threshold + 1) * 2);
   });
 });
+
+describe("attestation marks survive the 12-key props cap", () => {
+  // A synthetic monitor's event carries authenticated/synthetic LAST (after the
+  // attack class), so the cap would otherwise drop the mark that keeps our own
+  // probes out of the Forcefield alert scan.
+  const wide = (extra: Record<string, unknown>) => {
+    const p: Record<string, unknown> = {};
+    for (let i = 0; i < 14; i++) p[`k${i}`] = `v${i}`;
+    return { ...p, ...extra };
+  };
+
+  it("keeps synthetic:true and authenticated:true beyond key 12", async () => {
+    const res = await POST(mkReq({ type: "site.agent_payload_attack", path: "/", props: wide({ authenticated: true, synthetic: true }) }, "shared-secret"));
+    expect(res.status).toBe(200);
+    const props = mockRecordSiteEvent.mock.calls[0][0].props;
+    expect(props.synthetic).toBe(true);
+    expect(props.authenticated).toBe(true);
+    expect(props.k13).toBeUndefined(); // the cap itself still holds
+  });
+
+  it("carries only a literal boolean true (a string 'true' is not a mark)", async () => {
+    await POST(mkReq({ type: "site.agent_payload_attack", path: "/", props: wide({ synthetic: "true" }) }, "shared-secret"));
+    expect(mockRecordSiteEvent.mock.calls[0][0].props.synthetic).toBeUndefined();
+  });
+});

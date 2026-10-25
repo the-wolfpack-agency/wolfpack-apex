@@ -9,7 +9,8 @@ const mockTrackAwait = jest.fn();
 jest.mock("@/lib/notifications/team-fanout", () => ({ fanoutToTeam: (...a: unknown[]) => mockFanout(...a) }));
 jest.mock("@/lib/mail/send-via-graph", () => ({ sendViaGraph: (...a: unknown[]) => mockSendViaGraph(...a) }));
 jest.mock("@/lib/analytics", () => ({ trackEventAwait: (...a: unknown[]) => mockTrackAwait(...a), trackEvent: jest.fn() }));
-jest.mock("@/lib/db", () => ({ query: jest.fn(), safeQuery: jest.fn(async () => ({ rows: [] })) }));
+const mockSafeQuery = jest.fn<Promise<{ rows: unknown[] }>, unknown[]>(async () => ({ rows: [] }));
+jest.mock("@/lib/db", () => ({ query: jest.fn(), safeQuery: (...a: unknown[]) => mockSafeQuery(...a) }));
 
 import {
   scanForcefieldWebAlerts,
@@ -19,6 +20,9 @@ import {
   incidentKey,
   windowStartOf,
   isSilenceCheckHour,
+  fingerprintPhrase,
+  liveForcefieldAlertDeps,
+  EXCLUDE_SYNTHETIC_SQL,
   MAX_ATTEMPTS,
   type ForcefieldAlert,
   type ForcefieldAlertDeps,
@@ -216,5 +220,75 @@ describe("deliverForcefieldAlert (in-app + Graph email)", () => {
     mockSendViaGraph.mockRejectedValue(new Error("network"));
     const o = await deliverForcefieldAlert(ALERT);
     expect(o.status).toBe("failed");
+  });
+});
+
+describe("alert wording: fingerprints", () => {
+  it("says 'fingerprint not recorded' when no event in the group carried one", async () => {
+    const m = memoryDeps([sig({ kind: "honeytoken_trip", attackClass: "honeytoken_trip", count: 2, fpCount: 0, samplePath: "/_ff/records" })]);
+    await scanForcefieldWebAlerts(m.deps);
+    const body = m.sent[0].body;
+    expect(body).toContain("2 honeytoken trips on ogiam.com");
+    expect(body).toContain("Fingerprint not recorded.");
+    expect(body).not.toMatch(/0 distinct fingerprint/);
+    expect(body).toContain("Example path: /_ff/records.");
+  });
+
+  it("gives the distinct count when fingerprints were recorded, singular and plural", async () => {
+    const one = memoryDeps([sig({ count: 1, fpCount: 1 })]);
+    await scanForcefieldWebAlerts(one.deps);
+    expect(one.sent[0].body).toContain("1 payload attack on ogiam.com");
+    expect(one.sent[0].body).toContain("1 distinct fingerprint.");
+    const many = memoryDeps([sig({ count: 5, fpCount: 3 })]);
+    await scanForcefieldWebAlerts(many.deps);
+    expect(many.sent[0].body).toContain("5 payload attacks on ogiam.com");
+    expect(many.sent[0].body).toContain("3 distinct fingerprints.");
+  });
+
+  it("fingerprintPhrase treats 0, negative and NaN as not recorded", () => {
+    expect(fingerprintPhrase(0)).toBe("Fingerprint not recorded");
+    expect(fingerprintPhrase(-1)).toBe("Fingerprint not recorded");
+    expect(fingerprintPhrase(Number.NaN)).toBe("Fingerprint not recorded");
+    expect(fingerprintPhrase(2)).toBe("2 distinct fingerprints");
+  });
+
+  it("the new wording is still HTML-escaped in the email", async () => {
+    mockFanout.mockResolvedValue({ recipientCount: 1, skipped: 0 });
+    mockSendViaGraph.mockResolvedValue({ delivered: true, reason: "ok" });
+    const m = memoryDeps([sig({ samplePath: "/<script>x</script>", fpCount: 0 })]);
+    m.deps.deliver = deliverForcefieldAlert;
+    await scanForcefieldWebAlerts(m.deps);
+    const mail = mockSendViaGraph.mock.calls[0][0];
+    expect(mail.html).not.toContain("<script>");
+    expect(mail.html).toContain("&lt;script&gt;");
+    expect(mail.html).toContain("Fingerprint not recorded");
+  });
+});
+
+describe("our own synthetic probes never raise an alert", () => {
+  const sqlOf = (i: number) => String(mockSafeQuery.mock.calls[i][0]);
+
+  it("the hostile-signal scan excludes events stamped props.synthetic", async () => {
+    await liveForcefieldAlertDeps().listHostileSignals(24);
+    const sql = sqlOf(0);
+    expect(sql).toContain(EXCLUDE_SYNTHETIC_SQL);
+    expect(EXCLUDE_SYNTHETIC_SQL).toMatch(/props->>'synthetic'/);
+    // Fingerprints: empty strings are not a recorded fingerprint.
+    expect(sql).toContain("count(DISTINCT NULLIF(props->>'fp', ''))");
+  });
+
+  it("the silence check's hostile count excludes them too (no false silence alert)", async () => {
+    await liveForcefieldAlertDeps().countHostileEvents(24);
+    expect(sqlOf(0)).toContain(EXCLUDE_SYNTHETIC_SQL);
+  });
+
+  it("the exemption keys on the token-attested mark only, never the user agent", async () => {
+    await liveForcefieldAlertDeps().listHostileSignals(24);
+    await liveForcefieldAlertDeps().countHostileEvents(24);
+    for (const i of [0, 1]) {
+      expect(sqlOf(i)).not.toMatch(/user.?agent|wolfpack-verify|props->>'ua'/i);
+      // A signed-in (authenticated but not synthetic) attacker still alerts.
+      expect(sqlOf(i)).not.toMatch(/props->>'authenticated'/);
+    }
   });
 });

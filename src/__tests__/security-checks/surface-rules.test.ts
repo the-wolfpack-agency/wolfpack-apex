@@ -12,6 +12,10 @@ import {
   middlewareBypassFinding,
   secretPathFinding,
   toHeaderMap,
+  syntheticAttestation,
+  probeHeaders,
+  attestationFor,
+  SYNTHETIC_HEADER,
   type SiteConfig,
 } from "../../../scripts/security/lib/surface";
 
@@ -175,5 +179,61 @@ describe("surface-sites.json post-deploy fields", () => {
     }
     expect(by.instinct.loginPath).toBe("/login");
     expect(by.instinct.versionPath).toBe("/api/version");
+  });
+});
+
+describe("synthetic attestation for our own probes", () => {
+  const TOKEN = "t".repeat(40);
+  const UA = "wolfpack-security-surface/1.0 (+read-only probe)";
+
+  it("sends x-forcefield-synthetic with the token when FORCEFIELD_SYNTHETIC_TOKEN is set", () => {
+    const a = syntheticAttestation({ FORCEFIELD_SYNTHETIC_TOKEN: TOKEN });
+    expect(a.warning).toBeNull();
+    const h = probeHeaders(UA, a, { "x-middleware-subrequest": "middleware" });
+    expect(h[SYNTHETIC_HEADER]).toBe(TOKEN);
+    expect(h["user-agent"]).toBe(UA);
+    expect(h["x-middleware-subrequest"]).toBe("middleware");
+    expect(SYNTHETIC_HEADER).toBe("x-forcefield-synthetic"); // the engine's header name
+  });
+
+  it("a per-probe header can never override the attestation", () => {
+    const a = syntheticAttestation({ FORCEFIELD_SYNTHETIC_TOKEN: TOKEN });
+    expect(probeHeaders(UA, a, { [SYNTHETIC_HEADER]: "other" })[SYNTHETIC_HEADER]).toBe(TOKEN);
+  });
+
+  it("warns LOUDLY and sends nothing when the token is unset", () => {
+    const a = syntheticAttestation({});
+    expect(a.headers).toEqual({});
+    expect(a.warning).toMatch(/NOT set/);
+    expect(a.warning).toMatch(/WILL raise Forcefield alert emails/);
+    expect(probeHeaders(UA, a)[SYNTHETIC_HEADER]).toBeUndefined();
+  });
+
+  it("treats a token shorter than 32 chars as OFF, like the engine, and warns", () => {
+    const a = syntheticAttestation({ FORCEFIELD_SYNTHETIC_TOKEN: "short" });
+    expect(a.headers).toEqual({});
+    expect(a.warning).toMatch(/shorter than 32/);
+  });
+
+  it("the warning never contains the token", () => {
+    const a = syntheticAttestation({ FORCEFIELD_SYNTHETIC_TOKEN: "abc123" });
+    expect(a.warning).not.toContain("abc123");
+  });
+
+  it("sends the token only to hosts we own", () => {
+    const a = syntheticAttestation({ FORCEFIELD_SYNTHETIC_TOKEN: TOKEN });
+    const owned = new Set(["ogiam.com", "wolfpack-instinct.vercel.app"]);
+    expect(attestationFor("https://ogiam.com/?q=x", owned, a).headers[SYNTHETIC_HEADER]).toBe(TOKEN);
+    expect(attestationFor("https://evil.example/", owned, a).headers).toEqual({});
+    expect(attestationFor("not a url", owned, a).headers).toEqual({});
+  });
+
+  it("the runner wires the attestation into every probe and prints the warning", () => {
+    const src = readFileSync(join(__dirname, "..", "..", "..", "scripts", "security", "surface.ts"), "utf8");
+    expect(src).toContain("syntheticAttestation(process.env)");
+    expect(src).toMatch(/headers: probeHeaders\(UA, attestationFor\(url, ATTEST_HOSTS, SYNTHETIC\), init\.headers\)/);
+    expect(src).toMatch(/process\.stderr\.write\(`\\n!!! WARNING: \$\{SYNTHETIC\.warning\}/);
+    // Exactly one fetch call site, so no probe can bypass the attestation.
+    expect(src.match(/await fetch\(/g)).toHaveLength(1);
   });
 });

@@ -60,6 +60,11 @@ export interface ObserveInput {
    *  mere presence of a cookie/authorization header, which anyone can send).
    *  Optional; absent = anonymous. */
   authenticated?: boolean;
+  /** VERIFIED synthetic monitor: the request presented x-forcefield-synthetic
+   *  equal to FORCEFIELD_SYNTHETIC_TOKEN (isSyntheticMonitor). Set only by a
+   *  caller that ran that check; never derived from the user agent. Stamped as
+   *  props.synthetic so our own probes do not page anyone. Optional. */
+  synthetic?: boolean;
   /** The platform the site runs on (e.g. "wordpress"), so that platform's own
    *  paths (ruleset.platformPaths) are not reported as recon. Optional. */
   platform?: string;
@@ -234,6 +239,16 @@ function agentProps(
   return props;
 }
 
+/** Stamp the site attestation LAST (after attack / cwe, so a size-capped ingest
+ *  keeps the attack class; the ingest carries these two marks explicitly). Called
+ *  by observeRequest AND the block-record path in withEnforcement, so a hostile
+ *  event from our own attested traffic carries the mark however it was recorded.
+ *  The alert scan excludes props.synthetic events. */
+function stampAttestation(props: Record<string, string | number | boolean>, input: ObserveInput): void {
+  if (input.authenticated === true || input.synthetic === true) props.authenticated = true;
+  if (input.synthetic === true) props.synthetic = true;
+}
+
 /**
  * Inspect one request against the current ruleset. Most-severe first: a decoy
  * trip, then a payload / header attack, then a sensitive-path probe, then a
@@ -320,7 +335,7 @@ export function observeRequest(input: ObserveInput, ruleset: ForcefieldRuleset):
   if (verification) props.agent_verification = verification;
   if (verification === "impersonation" && verdict.matchedAgentId) props.impersonating = verdict.matchedAgentId;
   if (signedAgent) props.signed_agent = true;
-  if (authenticated) props.authenticated = true;
+  stampAttestation(props, input);
   return { type, path, props };
 }
 
@@ -373,5 +388,6 @@ export function withEnforcement(
     props.would_block = true;
     props.action = "report";
   }
+  stampAttestation(props, input);
   return { ...base, props };
 }

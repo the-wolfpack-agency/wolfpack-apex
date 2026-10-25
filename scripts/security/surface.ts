@@ -19,6 +19,14 @@
  * and an x-middleware-subrequest header does not turn a refused request into a
  * served one (CVE-2025-29927). Rules: scripts/security/lib/surface.ts.
  *
+ * Synthetic attestation: when FORCEFIELD_SYNTHETIC_TOKEN is set (>= 32 chars),
+ * every probe sends it as x-forcefield-synthetic, so a Forcefield site holding
+ * the same token records the probes as our own monitor and raises no alert.
+ * Unset or short prints a loud WARNING (stderr + report notes): the probes will
+ * then page the security owner like a real attack. The user agent never exempts
+ * anything. The token is never printed, and is sent only to the configured
+ * sites (an ad-hoc --url gets it only with --attest-synthetic).
+ *
  * GET, HEAD and OPTIONS only. No form posts, no logins, nothing that changes
  * state on the target. The image-proxy probe asks the target to fetch one
  * public Google logo, which is exactly the behavior being tested.
@@ -38,6 +46,9 @@ import {
   imageProxyFinding,
   middlewareBypassFinding,
   secretPathFinding,
+  attestationFor,
+  syntheticAttestation,
+  probeHeaders,
   toHeaderMap,
   type ProbeResponse,
   type SiteConfig,
@@ -55,6 +66,12 @@ const CONFIG = resolve(argValue("--config") ?? "scripts/security/surface-sites.j
 const EXTERNAL_IMAGE = "https://www.google.com/images/branding/googlelogo/2x/googlelogo_color_92x30dp.png";
 const TIMEOUT_MS = 20_000;
 const UA = "wolfpack-security-surface/1.0 (+read-only probe)";
+// Every probe presents the synthetic-monitor header when FORCEFIELD_SYNTHETIC_TOKEN
+// is set, so the injection/decoy probes do not page anyone. The UA above exempts
+// nothing (spoofable); only the token does. Missing token = loud warning.
+const SYNTHETIC = syntheticAttestation(process.env);
+/** Hosts the token may be sent to (filled from the selected sites in main()). */
+const ATTEST_HOSTS = new Set<string>();
 
 async function probe(url: string, init: { method?: "GET" | "HEAD" | "OPTIONS"; headers?: Record<string, string>; follow?: boolean } = {}) {
   const ctl = new AbortController();
@@ -63,7 +80,7 @@ async function probe(url: string, init: { method?: "GET" | "HEAD" | "OPTIONS"; h
     const res = await fetch(url, {
       method: init.method ?? "GET",
       redirect: init.follow ? "follow" : "manual",
-      headers: { "user-agent": UA, ...(init.headers ?? {}) },
+      headers: probeHeaders(UA, attestationFor(url, ATTEST_HOSTS, SYNTHETIC), init.headers),
       signal: ctl.signal,
     });
     const ct = res.headers.get("content-type") ?? "";
@@ -148,6 +165,27 @@ async function main(): Promise<number> {
   if (EXPECT_SHA && sites.length > 1) {
     process.stderr.write("--expect-sha names one deployment's commit: pick one site with --site <name> or --url.\n");
     return 2;
+  }
+  // The token goes only to our configured sites; an ad-hoc --url gets it only
+  // with --attest-synthetic (the operator vouching the host is ours).
+  for (const s of sites) {
+    if (argValue("--url") && !argv.includes("--attest-synthetic")) continue;
+    try {
+      ATTEST_HOSTS.add(new URL(s.url).host.toLowerCase());
+    } catch {
+      /* an unparsable URL is reported as unreachable below */
+    }
+  }
+  if (argValue("--url") && !argv.includes("--attest-synthetic") && !SYNTHETIC.warning) {
+    report.notes.push("--url without --attest-synthetic: the synthetic header was NOT sent to this ad-hoc host, so its Forcefield (if any) will alert on the injection probe.");
+  }
+  if (SYNTHETIC.warning) {
+    process.stderr.write(`\n!!! WARNING: ${SYNTHETIC.warning}\n\n`);
+    report.notes.push(`WARNING: ${SYNTHETIC.warning}`);
+    report.stats.synthetic_attested = "no";
+  } else {
+    report.notes.push("Probes presented the x-forcefield-synthetic header (FORCEFIELD_SYNTHETIC_TOKEN is set), so a target that holds the same token records them as our synthetic monitor and raises no alert.");
+    report.stats.synthetic_attested = "yes";
   }
   let probes = 0;
   for (const site of sites) {
