@@ -201,6 +201,21 @@ describe("new payload rules", () => {
     expect(d).toMatchObject({ block: true, reasonKind: "payload", attack: "nextjs_middleware_bypass" });
   });
 
+  it("x-middleware-subrequest on the Forcefield control plane is our own edges, not an attack", () => {
+    // Next sets the header on fetches made FROM middleware; every edge calls these
+    // from its middleware. Seen ~6,700/day in production as false CVE-2025-29927 hits.
+    const sub = [...base.headerNames, "x-middleware-subrequest"];
+    for (const path of ["/api/site-analytics/ingest", "/api/forcefield/ruleset", "/api/forcefield/observe"]) {
+      expect(detectHeaderAttack(sub, path)).toBeNull();
+      expect(decideEnforcement({ ...base, path, headerNames: sub }, R).block).toBe(false);
+    }
+    // Everywhere else, and on lookalike paths, it is still the attack.
+    for (const path of ["/admin", "/api/forcefield/ruleset/x", "/api/site-analytics/ingest2", "/API/forcefield/ruleset"]) {
+      expect(detectHeaderAttack(sub, path)).toBe("nextjs_middleware_bypass");
+    }
+    expect(detectHeaderAttack(sub)).toBe("nextjs_middleware_bypass");
+  });
+
   it("CVE-2024-4577 / CVE-2012-1823: PHP-CGI argument injection, soft-hyphen and plain forms", () => {
     // Verbatim watchTowr PoC query string.
     expect(detectPayload("/index.php?%ADd+allow_url_include%3d1+-d+auto_prepend_file%3dphp://input")).toBe("php_cgi_injection");
