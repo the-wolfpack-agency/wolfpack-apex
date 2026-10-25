@@ -17,6 +17,15 @@ const yaml = fs.readFileSync(WF, "utf8");
 const HARD_GATES = [
   "tests/e2e/sites-preview-reality-check.spec.ts",
   "tests/e2e/dashboard-quick-actions.spec.ts",
+  // Promoted 2026-10-25: green on their first real run (CI run 40225842145).
+  "tests/e2e/deployed-url-smoke.spec.ts",
+  "tests/e2e/ai-router-behavior.spec.ts",
+  /* The playbook page shipped correct and unreadable, twice: once with no
+     stylesheet at all, then with a diagram that fenced and closed early so
+     half of it rendered as prose. Only a browser against the deployed page
+     can tell the difference. */
+  "tests/e2e/playbook-readable.spec.ts",
+  "tests/e2e/client-builds.spec.ts",
 ];
 
 /**
@@ -33,14 +42,7 @@ const HARD_GATES = [
  * command each step actually executes.
  */
 const REPORT_ONLY_GATES = [
-  "tests/e2e/deployed-url-smoke.spec.ts",
-  "tests/e2e/ai-router-behavior.spec.ts",
-  /* The playbook page shipped correct and unreadable, twice: once with no
-     stylesheet at all, then with a diagram that fenced and closed early so
-     half of it rendered as prose. Only a browser against the deployed page
-     can tell the difference. */
-  "tests/e2e/playbook-readable.spec.ts",
-  "tests/e2e/client-builds.spec.ts",
+  // Two lesson-1 controls never became visible on its first real run; promote once fixed.
   "tests/e2e/lms-security-course.spec.ts",
 ];
 
@@ -60,7 +62,7 @@ function step(name: string): Step {
   if (!s) throw new Error(`step not found: ${name}`);
   return s;
 }
-const HARD_STEP = "Reality-check gates (preview parity + dashboard quick-actions)";
+const HARD_STEP = "Reality-check gates (hard)";
 const REPORT_STEP = "Reality-check gates (report-only, promote when green)";
 
 /**

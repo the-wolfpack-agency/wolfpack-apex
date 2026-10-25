@@ -127,12 +127,18 @@ jobs:
       # the first two specs ran and --config/--workers/--reporter were all
       # commented out. Five specs listed here had never run in CI.
       # src/__tests__/workflow-folded-run-comments.test.ts now fails on it.
-      - name: Reality-check gates (preview parity + dashboard quick-actions)
+      # Promoted 2026-10-25 from report-only after their first real run passed:
+      # deployed-url-smoke, ai-router-behavior, playbook-readable, client-builds.
+      - name: Reality-check gates (hard)
         if: steps.cfg.outputs.configured == 'true'
         run: >-
           npx playwright test
           tests/e2e/sites-preview-reality-check.spec.ts
           tests/e2e/dashboard-quick-actions.spec.ts
+          tests/e2e/deployed-url-smoke.spec.ts
+          tests/e2e/ai-router-behavior.spec.ts
+          tests/e2e/playbook-readable.spec.ts
+          tests/e2e/client-builds.spec.ts
           --config=playwright.config.ts --workers=2 --reporter=github
 
       # REPORT-ONLY: the five specs that were listed above as hard gates but,
@@ -164,10 +170,6 @@ jobs:
         timeout-minutes: 8
         run: >-
           npx playwright test
-          tests/e2e/deployed-url-smoke.spec.ts
-          tests/e2e/ai-router-behavior.spec.ts
-          tests/e2e/playbook-readable.spec.ts
-          tests/e2e/client-builds.spec.ts
           tests/e2e/lms-security-course.spec.ts
           --config=playwright.config.ts --workers=2 --reporter=github
 
