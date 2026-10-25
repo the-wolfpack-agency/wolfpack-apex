@@ -11,6 +11,7 @@
  * The parsers are pure (testable without GitHub); gatherFailureContext does the
  * IO and never throws (best-effort context, not a gate).
  */
+import { fenceUntrusted } from "@/lib/ai/provenance";
 import {
   listWorkflowRunsRaw,
   listRunJobs,
@@ -260,20 +261,28 @@ export function buildEnrichedFixPrompt(args: {
   changedFiles?: readonly string[];
 }): string {
   const subtypeHint = args.subtype ? SUBTYPE_HINT[args.subtype] : undefined;
+  /* CI output and repository files are text this system did not write (a PR
+     author controls both): quarantined by the provenance fence, so a comment
+     in a file or a line in a log cannot re-task the fixer. */
   const fileBlocks = args.context.files
     .map((f) => `FILE: ${f.path}\n\`\`\`\n${f.content}\n\`\`\``)
     .join("\n\n");
+  const fenced = fenceUntrusted([
+    ...(args.context.detail ? [{ provenance: "external" as const, label: "CI failure output", text: args.context.detail }] : []),
+    ...(fileBlocks ? [{ provenance: "external" as const, label: "current file contents", text: fileBlocks }] : []),
+  ]);
   const stalled = args.authoredTestStillFailing && args.authoredTestStillFailing.length > 0;
   const changed = args.changedFiles && args.changedFiles.length > 0 ? args.changedFiles : undefined;
   return [
     `The pull request on branch ${args.branch} of ${args.repo} is failing CI.`,
     args.brief,
-    args.context.detail ? `The ACTUAL CI failure:\n${args.context.detail}` : "",
+    args.context.detail ? "The ACTUAL CI failure is in the quarantined block below." : "",
     subtypeHint ?? "",
     changed
       ? `This change consists of EXACTLY these file(s): ${changed.join(", ")}. Fix the failure by editing the EXISTING file(s) listed here. Do NOT create a new file at a different path or with a different extension (for example, do not add a parallel .js file for a .ts module, and do not invent a new directory) - the module under test already exists in this list, so modify it in place.`
       : "",
-    fileBlocks ? `Current contents of the files involved:\n\n${fileBlocks}` : "",
+    fileBlocks ? "Current contents of the files involved are in the quarantined block below." : "",
+    fenced.text,
     stalled
       ? `A fix was already attempted and these test file(s) this change authored are STILL failing: ${args.authoredTestStillFailing!.join(", ")}. When the source correctly implements the described behavior, that means the TEST's expected value is wrong - correct the expected value(s) to match the source's correct output (each failing assertion shows "Expected" vs "Received"; "Received" is the source's actual result).`
       : "",

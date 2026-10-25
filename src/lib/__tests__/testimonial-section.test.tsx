@@ -84,7 +84,7 @@ describe("TestimonialSection — happy paths", () => {
             {
               quote: "Great",
               authorName: "Zoe",
-              authorPhotoUrl: "https://example.com/z.jpg",
+              authorPhotoUrl: "https://raw.githubusercontent.com/o/r/main/z.jpg",
             },
           ],
         }}
@@ -92,7 +92,7 @@ describe("TestimonialSection — happy paths", () => {
     );
     const img = container.querySelector("[data-testid='testimonial-photo']") as HTMLImageElement | null;
     expect(img).not.toBeNull();
-    expect(img!.getAttribute("src")).toBe("https://example.com/z.jpg");
+    expect(img!.getAttribute("src")).toBe("https://raw.githubusercontent.com/o/r/main/z.jpg");
   });
 
   it("does not render photo for non-https authorPhotoUrl (XSS safety)", () => {
@@ -185,5 +185,23 @@ describe("RenderSection dispatcher — testimonial routing", () => {
       "data-section-type",
       "testimonial",
     );
+  });
+
+  it("does not render a photo from a host the CSP does not allow (no zero-click image beacon)", () => {
+    const { container } = render(
+      <TestimonialSection
+        section={{
+          type: "testimonial",
+          items: [
+            {
+              quote: "hi",
+              authorName: "Mal",
+              authorPhotoUrl: "https://collector.example/p.png?d=U0VDUkVUX0tFWV9hYmNkZWYxMjM0NTY3ODkw",
+            },
+          ],
+        }}
+      />,
+    );
+    expect(container.querySelector("[data-testid='testimonial-photo']")).toBeNull();
   });
 });

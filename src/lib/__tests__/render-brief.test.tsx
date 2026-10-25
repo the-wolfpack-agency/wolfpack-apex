@@ -75,6 +75,16 @@ describe("HeroSection", () => {
     expect(screen.getByTestId("hero-section")).toBeInTheDocument();
   });
 
+  it("drops a backgroundImage on a host the CSP does not allow", () => {
+    const { container } = render(
+      <HeroSection
+        section={{ type: "hero", heading: "H", backgroundImage: "https://collector.example/bg.jpg?d=U0VDUkVUX0tFWV9hYmNkZWYxMjM0NTY3ODkw" }}
+      />,
+    );
+    const section = container.querySelector("section") as HTMLElement;
+    expect(section.style.backgroundImage).toBe("");
+  });
+
   it("applies backgroundImage as inline style without dangerouslySetInnerHTML", () => {
     const { container } = render(
       <HeroSection
@@ -167,6 +177,25 @@ describe("GallerySection", () => {
   it("renders empty state when images is missing", () => {
     expect(() => render(<GallerySection section={{ type: "gallery" }} />)).not.toThrow();
     expect(screen.getByTestId("gallery-empty")).toBeInTheDocument();
+  });
+
+  it("never renders an image from a host the CSP does not allow", () => {
+    render(
+      <GallerySection
+        section={{
+          type: "gallery",
+          images: [
+            "https://collector.example/x.png?d=U0VDUkVUX0tFWV9hYmNkZWYxMjM0NTY3ODkw",
+            "https://raw.githubusercontent.com/o/r/main/public/generated/a.jpg",
+            "/ok.jpg",
+          ],
+        }}
+      />,
+    );
+    const srcs = screen
+      .getAllByTestId("gallery-item")
+      .flatMap((i) => Array.from(i.querySelectorAll("img")).map((img) => img.getAttribute("src")));
+    expect(srcs).toEqual(["https://raw.githubusercontent.com/o/r/main/public/generated/a.jpg", "/ok.jpg"]);
   });
 
   it("skips empty string entries without throwing", () => {

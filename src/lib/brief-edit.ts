@@ -22,6 +22,7 @@
  * apply, guardrail check, and validation are all pure TypeScript.
  */
 
+import { fenceUntrusted } from "@/lib/ai/provenance";
 import { randomUUID, createHash } from "node:crypto";
 import { safeQuery } from "@/lib/db";
 import { trackEvent } from "@/lib/analytics";
@@ -522,7 +523,13 @@ export async function generateBriefEdit(
   });
 
   const t0 = Date.now();
-  const userText = `CURRENT_BRIEF:\n${JSON.stringify(currentBrief)}\n\nINSTRUCTION:\n${instruction}`;
+  /* The current brief is stored content, often built from an uploaded
+     document, a scraped brand site or an image: fenced as data. Only the
+     person's INSTRUCTION is an instruction. */
+  const fencedBrief = fenceUntrusted([
+    { provenance: "retrieved", label: "CURRENT_BRIEF", text: JSON.stringify(currentBrief) },
+  ]).text;
+  const userText = `CURRENT_BRIEF:\n${fencedBrief}\n\nINSTRUCTION:\n${instruction}`;
 
   let aiResult: AICallResult | null;
   try {

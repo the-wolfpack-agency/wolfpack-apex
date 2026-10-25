@@ -41,7 +41,8 @@ import type {
   ToolStep,
   ModelStep,
 } from "./types";
-import { interpolate, MissingSlotError } from "./slots";
+import { interpolate, interpolateFenced, MissingSlotError } from "./slots";
+import type { FenceResult } from "@/lib/ai/provenance";
 
 /** Everything the runner cannot do for itself. */
 export interface RunnerDeps {
@@ -53,7 +54,7 @@ export interface RunnerDeps {
   ) => Promise<{ ok: boolean; answer?: string; data?: unknown; error?: string } | null>;
   /** Ask the model. Goes through the router at the call site, so a routine
    *  inherits redaction, residency, the budget and the content policy. */
-  askModel: (prompt: string) => Promise<string>;
+  askModel: (prompt: string, meta?: { attempts: FenceResult["attempts"] }) => Promise<string>;
   /** Milliseconds. Injected so the timing split can be asserted. */
   now: () => number;
 }
@@ -368,8 +369,13 @@ async function runStep(
          raw "Meeting ID: AAMkAG..." in the slot became one in a client-facing
          brief. A tool step below keeps full fidelity, because the next tool
          needs those ids. */
-      const prompt = interpolate(step.prompt, slots, { forReader: true });
-      const answer = await deps.askModel(prompt);
+      /* And FENCED: slot values are what tools fetched (mail, calendar, CRM,
+         web), so each is quarantined as data inside the prompt. The answer
+         only ever lands in a slot; a later tool step runs only because the
+         routine named it, through the dispatcher's own gates, so text inside
+         a slot cannot add a send or a tool call to the chain. */
+      const fenced = interpolateFenced(step.prompt, slots);
+      const answer = await deps.askModel(fenced.text, { attempts: fenced.attempts });
       if (step.slot) slots[step.slot] = answer;
       return { ...base, answer };
     }

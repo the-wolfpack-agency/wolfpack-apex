@@ -25,6 +25,7 @@
  * fresh tokens and writes a new row.
  */
 
+import { fenceUntrusted } from "@/lib/ai/provenance";
 import { createHash } from "node:crypto";
 
 import { getAIClient } from "@/lib/ai";
@@ -191,16 +192,17 @@ export function buildUserPrompt(
   ticket: GenerateDraftInput["ticket"],
   patterns: ReadonlyArray<SupportPattern>,
 ): string {
+  /* The ticket title, body and pasted diagnostic are other people's text:
+     fenced as data. The matched templates below are ours and stay outside. */
+  const fenced = fenceUntrusted([
+    { provenance: "external", label: "ticket title", text: ticket.title ?? "" },
+    { provenance: "external", label: "ticket body", text: ticket.body ?? "" },
+    ...(ticket.diagnostic_text
+      ? [{ provenance: "external" as const, label: "diagnostic text pasted by the operator", text: ticket.diagnostic_text }]
+      : []),
+  ]);
   const parts: string[] = [];
-  parts.push(`Ticket title: ${ticket.title}`);
-  parts.push("");
-  parts.push("Ticket body:");
-  parts.push(ticket.body);
-  if (ticket.diagnostic_text) {
-    parts.push("");
-    parts.push("Diagnostic text pasted by the operator:");
-    parts.push(ticket.diagnostic_text);
-  }
+  parts.push(fenced.text);
   if (ticket.created_by_email) {
     parts.push("");
     parts.push(`Operator who filed the ticket: ${ticket.created_by_email}`);

@@ -15,6 +15,7 @@
  * parses still emit `site.brief_parse_failed` with the error.
  */
 
+import { fenceUntrusted } from "@/lib/ai/provenance";
 import { trackEvent } from "@/lib/analytics";
 import { validateBrief, BriefValidationError, type SiteBrief } from "@/lib/sites";
 import { htmlToText } from "@/lib/html-sanitize";
@@ -199,7 +200,10 @@ export async function aiParse(
   ai: AICaller = defaultAICaller,
 ): Promise<{ brief: SiteBrief; tokensUsed: number } | null> {
   const cleaned = stripHtml(rawInput).slice(0, 24000);
-  const userText = `client_slug: "${clientSlug}"\n\nDocument:\n${cleaned}`;
+  /* The document is an uploaded file: fenced as data, so text inside it
+     cannot re-task the parser. The output is still validated by validateBrief. */
+  const fencedDoc = fenceUntrusted([{ provenance: "attachment", label: "uploaded document", text: cleaned }]).text;
+  const userText = `client_slug: "${clientSlug}"\n\nDocument:\n${fencedDoc}`;
   const result = await ai(SYSTEM_PROMPT, userText);
   if (!result) return null;
   // Strip any accidental code fences

@@ -33,6 +33,7 @@
  * cache as soon as the team votes.
  */
 
+import { fenceUntrusted } from "@/lib/ai/provenance";
 import { query, writeQuery } from "@/lib/db";
 import { embedBatch, isEmbeddingConfigured } from "@/lib/brain/embedder";
 import { getAIClient } from "@/lib/ai";
@@ -334,8 +335,10 @@ async function callLLM(
      prompt. When contextBlock is empty (resolver failed, or user has no
      M365 token, or no hits), the prompt is unchanged. */
   const baseSystem = pickSystemPrompt(surface);
+  /* The grounding block is SharePoint / Project content: other people's
+     documents, quarantined as data so a page cannot re-task the answerer. */
   const system = contextBlock
-    ? `${contextBlock}\n${baseSystem}`
+    ? `${fenceUntrusted([{ provenance: "retrieved", label: "SharePoint and Project grounding", text: contextBlock }]).text}\n${baseSystem}`
     : baseSystem;
   const result = await client.complete({
     messages: [{ role: "user", content: question }],

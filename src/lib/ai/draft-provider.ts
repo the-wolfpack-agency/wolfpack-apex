@@ -15,6 +15,8 @@
  * downstream learning store should NEVER drop these events.
  */
 
+import { fenceUntrusted } from "./provenance";
+
 export type DraftSurface = "chat" | "channel" | "email";
 
 export interface DraftRequestContext {
@@ -77,10 +79,17 @@ function userPromptFor(ctx: DraftRequestContext): string {
   if (ctx.selfName) lines.push(`You are: ${ctx.selfName}.`);
   if (ctx.threadContext && ctx.threadContext.length > 0) {
     const recent = ctx.threadContext.slice(-MAX_THREAD_TURNS);
-    lines.push("Recent thread (oldest → newest):");
-    for (const t of recent) {
-      lines.push(`  ${t.from}: ${t.text.slice(0, 800)}`);
-    }
+    /* The thread is other people's messages: fenced as data, so a received
+       email cannot tell the drafter what to write. */
+    const fenced = fenceUntrusted(
+      recent.map((t, i) => ({
+        provenance: "external" as const,
+        label: `message ${i + 1} from ${t.from}`,
+        text: t.text.slice(0, 800),
+      })),
+    );
+    lines.push("Recent thread (oldest → newest), quarantined below:");
+    lines.push(fenced.text);
   }
   if (ctx.draftSoFar && ctx.draftSoFar.trim()) {
     lines.push(

@@ -17,6 +17,7 @@
  * after the first reads it for ~10% of base price.
  */
 
+import { fenceForPrompt } from "@/lib/ai/fence-report";
 import { callAnthropic } from "./anthropic";
 import {
   ANALYZER_MODEL,
@@ -181,7 +182,15 @@ export function buildUserPrompt(input: AnalyzerInput): string {
     parts.push("", "[ATTACHMENTS]", attachmentsText);
   }
 
-  return parts.join("\n");
+  /* The email or transcript is somebody else's text (and its attachments
+     somebody else's files): fenced as data, so a line in a forwarded thread
+     cannot re-task the extractor. The JSON schema lives in SYSTEM_PROMPT,
+     which is ours. */
+  return fenceForPrompt(
+    "automations.meeting_insights",
+    [{ provenance: "external", label: "meeting message", text: parts.join("\n") }],
+    { userId: "automation-cron", userRole: "system" },
+  ).text;
 }
 
 function truncate(s: string, max: number): string {

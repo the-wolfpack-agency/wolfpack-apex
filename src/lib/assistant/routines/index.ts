@@ -15,6 +15,8 @@
  * through the existing gates, never a way around them.
  */
 import { getAIClient } from "@/lib/ai/router";
+import { DATA_ONLY_PREAMBLE } from "@/lib/ai/provenance";
+import { reportFenceAttempts } from "@/lib/ai/fence-report";
 import { dispatchToolByName } from "@/lib/assistant/tools/dispatcher";
 import type { ToolContext } from "@/lib/assistant/tools/types";
 import { advance, resume, startRun, type RunnerDeps } from "./runner";
@@ -74,12 +76,25 @@ const MAX_PROMPT_CHARS = 24_000;
  * model holding a pile of data and no question. Losing some of the middle of
  * the data is survivable; losing the ask is not.
  */
-function boundPrompt(prompt: string): string {
+export function boundPrompt(prompt: string): string {
   if (prompt.length <= MAX_PROMPT_CHARS) return prompt;
-  const kept = prompt.slice(prompt.length - MAX_PROMPT_CHARS);
+  let kept = prompt.slice(prompt.length - MAX_PROMPT_CHARS);
+  /* THE FENCE MUST SURVIVE THE TRIM. The head is what gets cut, and the head
+     is where the data-only preamble and, possibly, a block's opening tag
+     live. Without them the tail would be fetched text with nothing saying it
+     is data, which is exactly the injection the fence exists to stop. */
+  const fenced = prompt.includes(DATA_ONLY_PREAMBLE);
+  if (fenced) {
+    const open = kept.indexOf("<untrusted ");
+    const close = kept.indexOf("</untrusted>");
+    if (close !== -1 && (open === -1 || close < open)) {
+      kept = `<untrusted source="external" label="trimmed">\n${kept}`;
+    }
+  }
   return [
     `[this chain gathered more than fits in one prompt: ${prompt.length} characters were trimmed to ${MAX_PROMPT_CHARS}, so what follows is partial and any count in it is a floor rather than a total]`,
     "",
+    ...(fenced ? [DATA_ONLY_PREAMBLE, ""] : []),
     kept,
   ].join("\n");
 }
@@ -94,7 +109,10 @@ export function liveDeps(ctx: ToolContext): RunnerDeps {
         ? { ok: true, answer: res.result.answer, data: res.result.data }
         : { ok: false, error: res.result.message };
     },
-    askModel: async (prompt) => {
+    askModel: async (prompt, meta) => {
+      /* The runner fenced the slot values; this reports a directive found in
+         one. Counts only, never the text. */
+      if (meta) reportFenceAttempts("assistant.routine", meta.attempts, { userId: ctx.userId, userRole: ctx.userRole });
       const res = await getAIClient().complete({
         messages: [{ role: "user", content: boundPrompt(prompt) }],
         /* A HARD CEILING ON THE WAIT. This was 700, and the model wrote to it:
