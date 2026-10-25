@@ -109,6 +109,8 @@ export function liveDeps(ctx: ToolContext): RunnerDeps {
            every routine is how a feature that saves people time becomes a line
            item somebody cancels. */
         model_tier: "cheap",
+        /* Steps summarize what the person's tools returned: mail, calendar, CRM. */
+        sensitivity: "pii",
         metadata: {
           feature: "assistant.routine",
           user_id: ctx.userId,

@@ -40,7 +40,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if (!goal) return NextResponse.json({ error: "goal is required" }, { status: 400 });
 
   const client = getAIClient();
-  const plan = await proposePlan({ complete: (r) => client.complete(r), goal, context });
+  const plan = await proposePlan({ complete: (r) => client.complete(r), goal, context, workspaceId: auth.user.workspaceId ?? undefined });
 
   trackEvent("ai_code.plan_proposed", auth.user.id, auth.user.role, {
     workspace_id: auth.user.workspaceId,

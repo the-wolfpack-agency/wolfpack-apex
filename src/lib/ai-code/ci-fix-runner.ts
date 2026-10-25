@@ -25,6 +25,7 @@ import { assessChange } from "@/lib/ai-code/assess";
 import { authorFileChanges } from "@/lib/ai-code/author";
 import { getAIClient } from "@/lib/ai";
 import { trackEvent } from "@/lib/analytics";
+import { protectedPathVerdict } from "@/lib/ai-code/protected-paths";
 
 const MAX_ATTEMPTS_CEILING = 5;
 
@@ -280,6 +281,19 @@ export async function driveCiFixStep(input: DriveCiFixInput): Promise<DriveCiFix
     // is committed. A fix carrying a secret / injection / critical finding is never
     // pushed to the PR branch; the step escalates to a human.
     gate: async (changes) => {
+      /* Protected paths first, before any scan: a fix that edits a test, a
+         workflow or the gate itself is refused outright and escalates to a
+         human. See PROTECTED_FIX_PATHS in protected-paths.ts for why. */
+      const refused = protectedPathVerdict(changes);
+      if (refused) {
+        trackEvent("ai.code_fix_protected_path_refused", actor.userId, actor.role, {
+          workspace_id: workspaceId ?? "unknown",
+          repo,
+          ref,
+          paths: refused.paths.slice(0, 20).join(","),
+        });
+        return { cleared: false, blockedBy: refused.blockedBy };
+      }
       const a = await assessChange(filesToDiff(changes));
       return { cleared: a.handoffAllowed, blockedBy: a.blockedBy };
     },

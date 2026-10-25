@@ -55,6 +55,8 @@ function clientAgent(workspaceId: string, userId: string, role: string): GateAge
           messages: [{ role: "user", content: req.prompt }],
           max_tokens: 4096,
           model_tier: "cheap",
+          /* The client's gate input is their data, already scrubbed by runGate. */
+          sensitivity: "pii",
           metadata: { feature: req.feature, workspace_id: workspaceId, user_id: userId, user_role: role },
         })
         .then((r) => ({ content: r.content, model_used: r.model_used })),

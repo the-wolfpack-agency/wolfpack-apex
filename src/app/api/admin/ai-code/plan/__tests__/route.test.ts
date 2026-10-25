@@ -75,3 +75,10 @@ it("accepts the factory service token in place of a user login", async () => {
   expect(res.status).toBe(200);
   expect(mockRequireCapability).not.toHaveBeenCalled();
 });
+
+it("attributes the plan's completion to the caller's workspace, as confidential source", async () => {
+  await POST(post({ goal: "add rate limiting" }));
+  const sent = mockComplete.mock.calls[0][0];
+  expect(sent.metadata).toMatchObject({ feature: "ai-code-plan", workspace_id: "w1" });
+  expect(sent.sensitivity).toBe("confidential");
+});

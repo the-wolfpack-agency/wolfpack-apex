@@ -223,6 +223,8 @@ export function liveRepairComplete(): RepairComplete {
       max_tokens: maxTokens,
       model_tier: tier,
       provider_pin: providerPin,
+      /* The client's source, like the author's call. */
+      sensitivity: "confidential",
       metadata: { feature: "ai_code.repair", internal_check: true },
     });
     return res.content;

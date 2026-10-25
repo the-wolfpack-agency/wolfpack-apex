@@ -12,7 +12,14 @@
  * that way, because "send it anyway" is the tempting fix every time somebody
  * hits it in staging.
  */
-import { mayServe, requiresZeroRetention, zeroRetentionProviders } from "@/lib/ai/retention";
+import {
+  mayServe,
+  requiresZeroRetention,
+  zeroRetentionProviders,
+  retentionMode,
+  DEFAULT_RETENTION_MODE,
+  PROVIDER_RETENTION_TERMS,
+} from "@/lib/ai/retention";
 
 const trusted = (...names: string[]) => new Set(names);
 
@@ -96,5 +103,45 @@ describe("confidential source code is restricted (the factory's egress)", () => 
   });
   test("an untrusted provider may NOT serve confidential egress", () => {
     expect(mayServe({ sensitivity: "confidential", provider: "openai", trusted: trusted("azure-openai") })).toEqual({ allowed: false, reason: "provider_not_trusted" });
+  });
+});
+
+describe("the mode the router acts in (AI_RETENTION_MODE)", () => {
+  test("unset is the measured default, observe, because no configured provider qualifies yet", () => {
+    expect(DEFAULT_RETENTION_MODE).toBe("observe");
+    expect(retentionMode({})).toBe("observe");
+  });
+  test("enforce and observe are read case-insensitively", () => {
+    expect(retentionMode({ AI_RETENTION_MODE: " ENFORCE " })).toBe("enforce");
+    expect(retentionMode({ AI_RETENTION_MODE: "Observe" })).toBe("observe");
+  });
+  test("an unrecognized value enforces: a typo is never permission", () => {
+    expect(retentionMode({ AI_RETENTION_MODE: "off" })).toBe("enforce");
+  });
+});
+
+describe("extending and narrowing the qualifying list", () => {
+  test("'azure' is accepted for azure-openai, and a +name extends", () => {
+    expect([...zeroRetentionProviders({ AI_ZERO_RETENTION_PROVIDERS: "azure,+anthropic" })].sort()).toEqual(["anthropic", "azure-openai"]);
+  });
+  test("a -name narrows", () => {
+    expect([...zeroRetentionProviders({ AI_ZERO_RETENTION_PROVIDERS: "azure-openai,anthropic,-anthropic" })]).toEqual(["azure-openai"]);
+  });
+  test("the alias also matches at serve time", () => {
+    expect(mayServe({ sensitivity: "pii", provider: "azure-openai", trusted: zeroRetentionProviders({ AI_ZERO_RETENTION_PROVIDERS: "azure" }) }).allowed).toBe(true);
+  });
+});
+
+describe("vendor terms are documented, not asserted", () => {
+  test("every configured provider has a condition and cites the vendor's own pages", () => {
+    for (const name of ["azure-openai", "foundry", "anthropic"]) {
+      const t = PROVIDER_RETENTION_TERMS[name];
+      expect(t.condition.length).toBeGreaterThan(20);
+      expect(t.sources.length).toBeGreaterThan(0);
+      for (const s of t.sources) expect(s).toMatch(/^https:\/\//);
+    }
+  });
+  test("none qualifies by default: each needs an approval we must attest", () => {
+    expect(Object.values(PROVIDER_RETENTION_TERMS).some((t) => t.qualifiesByDefault)).toBe(false);
   });
 });

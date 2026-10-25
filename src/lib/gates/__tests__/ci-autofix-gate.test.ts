@@ -146,3 +146,18 @@ it("require_human: model produced no usable changes", async () => {
   expect(r.reason).toMatch(/no usable fix/i);
   expect(mockCommit).not.toHaveBeenCalled();
 });
+
+it("require_human: a fix that edits a test or a workflow is NEVER committed (protected paths)", async () => {
+  mockCi.mockResolvedValue(red(["agenticqa-full-pipeline"]));
+  mockParse.mockReturnValue([
+    { path: "src/x.ts", content: "export const x = 1;" },
+    { path: "src/__tests__/x.test.ts", content: "it.skip('x', () => {});" },
+    { path: ".github/workflows/ci.yml", content: "on: []" },
+  ]);
+  const r = await runGate(ciAutofixGate, input, ctx());
+  expect(r.verdict).toBe("require_human");
+  expect(r.reason).toMatch(/protected paths/i);
+  expect(r.audit?.ruleId ?? r.findings[0]?.id).toBeDefined();
+  expect(mockAssess).not.toHaveBeenCalled();
+  expect(mockCommit).not.toHaveBeenCalled();
+});

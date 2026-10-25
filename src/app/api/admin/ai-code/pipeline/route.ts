@@ -125,6 +125,8 @@ async function resolveChange(args: {
   tier?: AIModelTier;
   /** For anchor mode: fetch the live content of the files being edited (apply needs it). */
   fetchFiles?: (paths: string[]) => Promise<Record<string, string>>;
+  /** The caller's workspace, so the author's spend is attributed to it. */
+  workspaceId?: string;
 }): Promise<{ diff: string; author: string; executor: ExecutorEvidence | null; changes: FileChange[] | null; anchorFailures?: AnchorFailure[] }> {
   if (args.mode === "anchor") {
     // Large-file edit mode: author emits exact SEARCH/REPLACE blocks, we fetch the
@@ -132,7 +134,7 @@ async function resolveChange(args: {
     // edit). The applied result is full-file content -> same gate + CI path.
     const client = getAIClient();
     const authored = await authorAnchorEdits(
-      { prompt: args.prompt, executorProviderPin: args.executorProviderPin, feature: "ai-code-pipeline-author-anchor", tier: args.tier },
+      { prompt: args.prompt, executorProviderPin: args.executorProviderPin, feature: "ai-code-pipeline-author-anchor", tier: args.tier, workspaceId: args.workspaceId },
       { complete: (r) => client.complete(r) },
     );
     const paths = Array.from(new Set(authored.edits.map((e) => e.path)));
@@ -146,7 +148,7 @@ async function resolveChange(args: {
   if (args.mode === "files") {
     const client = getAIClient();
     const authored = await authorFileChanges(
-      { prompt: args.prompt, executorProviderPin: args.executorProviderPin, feature: "ai-code-pipeline-author-files", tier: args.tier },
+      { prompt: args.prompt, executorProviderPin: args.executorProviderPin, feature: "ai-code-pipeline-author-files", tier: args.tier, workspaceId: args.workspaceId },
       { complete: (r) => client.complete(r) },
     );
     const ev: ExecutorEvidence = { author: authored.author, provider: authored.provider, costUsd: authored.costUsd, latencyMs: authored.latencyMs, inputTokens: authored.inputTokens ?? null, outputTokens: authored.outputTokens ?? null, error: authored.error };
@@ -155,7 +157,7 @@ async function resolveChange(args: {
   if (args.diff.trim()) return { diff: args.diff, author: args.authorModel, executor: null, changes: null };
   const client = getAIClient();
   const executor = await authorDiff(
-    { prompt: args.prompt, executorProviderPin: args.executorProviderPin, feature: "ai-code-pipeline-author", tier: args.tier },
+    { prompt: args.prompt, executorProviderPin: args.executorProviderPin, feature: "ai-code-pipeline-author", tier: args.tier, workspaceId: args.workspaceId },
     { complete: (r) => client.complete(r) },
   );
   const ev: ExecutorEvidence = { author: executor.author, provider: executor.provider, costUsd: executor.costUsd, latencyMs: executor.latencyMs, inputTokens: executor.inputTokens ?? null, outputTokens: executor.outputTokens ?? null, error: executor.error };
@@ -582,7 +584,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const authorMode = pickAuthorMode(mode, extractMentionedPaths(prompt), repoTree, modePinned);
 
   const resolved = await resolveChangeWithFallback(
-    { mode: authorMode, diff, prompt: authorPrompt, authorModel, executorProviderPin, tier: authorTier, fetchFiles: fetchFilesForAnchor },
+    { mode: authorMode, diff, prompt: authorPrompt, authorModel, executorProviderPin, tier: authorTier, fetchFiles: fetchFilesForAnchor, workspaceId },
     installedRoots,
     (files) => autoCorrectImports(files, repoTree, aliasMap, (ff) => checkLocalImports(ff, localImportCtx)),
   );
@@ -632,7 +634,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       initialAuthor: effectiveAuthor,
       reauthor: (feedback) =>
         authorFileChanges(
-          { prompt: `${prompt}\n\nThe previous attempt was rejected. ${feedback}`, executorProviderPin: indep, feature: "ai-code-pipeline-repair-files" },
+          { prompt: `${prompt}\n\nThe previous attempt was rejected. ${feedback}`, executorProviderPin: indep, feature: "ai-code-pipeline-repair-files", workspaceId },
           { complete: (r) => client.complete(r) },
         ),
       maxAttempts: 2,

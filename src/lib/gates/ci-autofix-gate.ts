@@ -28,6 +28,7 @@ import { gatherFailureContext, buildEnrichedFixPrompt, extractFailingTestFiles }
 import { classifyCiFailure } from "@/lib/ai-code/ci-failure-classify";
 import { assessChange } from "@/lib/ai-code/assess";
 import { commitFileChanges, filesToDiff, parseFileChanges } from "@/lib/ai-code/file-changes";
+import { protectedPathVerdict } from "@/lib/ai-code/protected-paths";
 import { recordGateDecision } from "./audit";
 import type { GateDefinition, GateResult, GateContext } from "./types";
 
@@ -143,6 +144,17 @@ export const ciAutofixGate: GateDefinition<CiAutofixInput, CiAutofixOutput> = {
       return result("require_human", "The model produced no usable fix for the failing checks; handing to a human.", ctx, {
         checksRun: authorChecks, dataSeen: "the PR's CI status + failing files, sent to your model", modelInvoked,
         output: { failedChecks: ci.failedChecks }, ruleId: "GATE-ci-autofix-empty",
+      });
+    }
+
+    // Protected paths first: a fix that edits tests, workflows, gate or build
+    // config makes CI green by changing what CI checks. Never committed.
+    const refused = protectedPathVerdict(changes);
+    if (refused) {
+      return result("require_human", `The proposed fix edits protected paths (${refused.paths.slice(0, 5).join(", ")}); it was NOT committed. A human should make this change.`, ctx, {
+        checksRun: [...authorChecks, "protected-paths"], dataSeen: "the PR's CI status + failing files, sent to your model", modelInvoked,
+        findings: [{ id: "protected_path", severity: "critical", detail: refused.blockedBy }],
+        output: { failedChecks: ci.failedChecks }, ruleId: "GATE-ci-autofix-protected-path",
       });
     }
 

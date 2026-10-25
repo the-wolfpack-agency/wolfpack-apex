@@ -7,8 +7,16 @@ const mockListPRs = jest.fn();
 const mockDrive = jest.fn();
 const mockListAll = jest.fn();
 const mockEntitle = jest.fn();
+const mockHead = jest.fn();
+/* One in-process memory per test, standing in for migration 293. */
+let mockMemory: unknown;
 jest.mock("@/lib/auth/require-capability", () => ({ requireCapability: (...a: unknown[]) => mockRequireCapability(...a) }));
-jest.mock("@/lib/github-client", () => ({ workspaceGithubClient: (...a: unknown[]) => mockClient(...a), listOpenPullRequests: (...a: unknown[]) => mockListPRs(...a) }));
+jest.mock("@/lib/github-client", () => ({ workspaceGithubClient: (...a: unknown[]) => mockClient(...a), listOpenPullRequests: (...a: unknown[]) => mockListPRs(...a), getBranchHead: (...a: unknown[]) => mockHead(...a) }));
+jest.mock("@/lib/ai-code/watch", () => {
+  const actual = jest.requireActual("@/lib/ai-code/watch");
+  return { ...actual, dbWatchMemory: () => mockMemory };
+});
+jest.mock("@/lib/analytics", () => ({ trackEvent: jest.fn() }));
 jest.mock("@/lib/tenancy/entitlements", () => ({ resolveEntitlement: (...a: unknown[]) => mockEntitle(...a) }));
 jest.mock("@/lib/ai-code/ci-fix-runner", () => ({ driveCiFixStep: (...a: unknown[]) => mockDrive(...a) }));
 jest.mock("@/lib/ai-code/watched-repos", () => ({
@@ -28,6 +36,8 @@ beforeEach(() => {
   mockListAll.mockResolvedValue([]);
   mockEntitle.mockResolvedValue(true);
   mockListPRs.mockResolvedValue([]);
+  mockHead.mockResolvedValue("sha-1");
+  mockMemory = jest.requireActual("@/lib/ai-code/watch").inMemoryWatchMemory();
 });
 
 it("runs on the correct cron bearer secret", async () => {
@@ -63,4 +73,39 @@ it("skips a workspace lacking the secure_agent entitlement", async () => {
   const body = await res.json();
   expect(body.summary.driven).toEqual([]);
   expect(mockListPRs).not.toHaveBeenCalled();
+});
+
+it("never re-drives a terminal PR at an unchanged head SHA (the 10-08 loop)", async () => {
+  mockListAll.mockResolvedValue([{ workspaceId: "w1", repo: "o/r" }]);
+  /* Only the enrolled repo has a PR; the self-watch target has none. */
+  mockListPRs.mockImplementation(async (_c: unknown, repo: string) => (repo === "o/r" ? [{ number: 5, headRef: "factory/feat", baseRef: "main" }] : []));
+  mockDrive.mockResolvedValue({ body: { decision: { action: "escalate" }, terminal: true } });
+  const first = await (await GET(req("Bearer s3cret"))).json();
+  expect(first.summary.driven).toHaveLength(1);
+  const second = await GET(req("Bearer s3cret"));
+  expect(second.status).toBe(200);
+  const body = await second.json();
+  expect(body.summary.driven).toEqual([]);
+  expect(body.summary.skipped).toEqual([{ workspaceId: "w1", repo: "o/r", pr: 5, reason: "terminal_unchanged" }]);
+  expect(mockDrive).toHaveBeenCalledTimes(1);
+});
+
+it("a new push earns one more drive", async () => {
+  mockListAll.mockResolvedValue([{ workspaceId: "w1", repo: "o/r" }]);
+  /* Only the enrolled repo has a PR; the self-watch target has none. */
+  mockListPRs.mockImplementation(async (_c: unknown, repo: string) => (repo === "o/r" ? [{ number: 5, headRef: "factory/feat", baseRef: "main" }] : []));
+  mockDrive.mockResolvedValue({ body: { decision: { action: "escalate" }, terminal: true } });
+  await GET(req("Bearer s3cret"));
+  mockHead.mockResolvedValue("sha-2");
+  await GET(req("Bearer s3cret"));
+  expect(mockDrive).toHaveBeenCalledTimes(2);
+});
+
+it("an unresolvable head is skipped, not driven", async () => {
+  mockListAll.mockResolvedValue([{ workspaceId: "w1", repo: "o/r" }]);
+  mockListPRs.mockResolvedValue([{ number: 5, headRef: "factory/feat", baseRef: "main" }]);
+  mockHead.mockRejectedValue(new Error("404"));
+  const body = await (await GET(req("Bearer s3cret"))).json();
+  expect(body.summary.skipped[0]).toMatchObject({ pr: 5, reason: "head_unknown" });
+  expect(mockDrive).not.toHaveBeenCalled();
 });

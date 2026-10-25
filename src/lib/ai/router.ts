@@ -36,6 +36,8 @@ import { reviewAndImprove } from "./improve";
 import {
   applyPolicy,
   policyFor,
+  rulesForFeature,
+  contentPolicyAudience,
   isWithheld,
   type PolicyVerdict,
 } from "./policy";
@@ -71,8 +73,11 @@ import {
 import { recordRouterCall } from "./audit-record-writer";
 import {
   mayServe,
+  requiresZeroRetention,
+  retentionMode,
   zeroRetentionProviders,
   RetentionPolicyError,
+  type RetentionMode,
 } from "./retention";
 import {
   mayProcessHere,
@@ -267,6 +272,71 @@ function pickFallback(
     return registry.azure;
   }
   return null;
+}
+
+/**
+ * A provider, other than the one about to be called, that may serve a
+ * restricted request: under a zero-retention agreement, configured, and able
+ * to serve the tier. Null when there is none, which on 2026-10-24 is always.
+ *
+ * Only providers that are actually reachable are considered: a trusted name
+ * whose key is unset is not a way out, it is a second failure.
+ */
+function qualifyingAlternative(
+  registry: ProviderRegistry,
+  req: AICompleteRequest,
+  trusted: ReadonlySet<string>,
+  exclude: string,
+): AIProvider | null {
+  const candidates: AIProvider[] = [
+    ...(isAzureConfigured() ? [registry.azure] : []),
+    ...(isAnthropicConfigured() ? [registry.anthropic] : []),
+    ...registry.compatible,
+  ];
+  return (
+    candidates.find(
+      (p) => p.name !== exclude && mayServe({ sensitivity: req.sensitivity, provider: p.name, trusted }).allowed && p.supportsTier(req.model_tier),
+    ) ?? null
+  );
+}
+
+/**
+ * May the fallback provider take over THIS request?
+ *
+ * pickFallback chooses on availability alone, which is right for an ordinary
+ * request and wrong for one that declared where its data may go. Before
+ * 2026-10-24 failover re-checked neither retention nor residency, so a
+ * primary outage was a way for restricted data to reach a provider the gates
+ * had never approved. The same rules that judged the primary now judge the
+ * fallback, and a refused fallback means the router retries the primary
+ * instead (the branch that already exists for "no other provider").
+ *
+ * Retention follows the mode: under observe a non-qualifying fallback is used
+ * and recorded, exactly as the primary would have been. Residency has no
+ * observe state, so a declared requirement is never relaxed by an outage.
+ */
+export function fallbackVerdict(input: {
+  fallback: string;
+  sensitivity: AICompleteRequest["sensitivity"];
+  residency: AICompleteRequest["residency"];
+  trusted: ReadonlySet<string>;
+  mode: RetentionMode;
+  env?: Record<string, string | undefined>;
+}):
+  | { allowed: true; unenforced: boolean }
+  | { allowed: false; gate: "retention" | "residency"; reason: string } {
+  let unenforced = false;
+  const retention = mayServe({ sensitivity: input.sensitivity, provider: input.fallback, trusted: input.trusted });
+  if (!retention.allowed) {
+    if (input.mode === "enforce") return { allowed: false, gate: "retention", reason: retention.reason };
+    unenforced = true;
+  }
+  if (input.residency && input.residency.length > 0) {
+    const servedIn = regionOfModel({ modelId: input.fallback, provider: input.fallback }, input.env ?? process.env);
+    const residency = mayProcessHere({ required: input.residency, servedIn });
+    if (!residency.allowed) return { allowed: false, gate: "residency", reason: residency.reason };
+  }
+  return { allowed: true, unenforced };
 }
 
 /**
@@ -757,74 +827,92 @@ class RouterClient implements AIClient {
     // Constitution to the system prompt here, so every constitution-governed
     // surface (assistant + OGIAM agents) inherits the same rules regardless of
     // which model version answers. No-op for the other call sites.
-    const cReq0 = applyConstitutionToRequest(governed);
+    // (Applied as cReq0 below, beside the retention gate that may re-pin it.)
 
     /* SENSITIVE DATA MAY ONLY GO WHERE WE HAVE AN AGREEMENT.
      *
-     * The request already declares its sensitivity; until now that only
-     * decided how hard to redact. It now also decides WHO may answer: a
-     * request carrying personal or health data may only be served by a
-     * provider under a zero-retention agreement (AI_ZERO_RETENTION_PROVIDERS).
+     * A request carrying confidential, personal or health data may only be
+     * served by a provider that qualifies as zero-retention (retention.ts,
+     * PROVIDER_RETENTION_TERMS, extended or narrowed by
+     * AI_ZERO_RETENTION_PROVIDERS). Judged here, on the provider that is
+     * actually about to be called, before a single byte leaves.
      *
-     * Checked here, after the provider is resolved and before a single byte
-     * leaves, and it FAILS CLOSED. Everywhere else in this router degrading
-     * gracefully is the right instinct; here it would mean sending a medical
-     * record to a provider that keeps prompts because somebody had not
-     * finished the configuration. */
+     * When the primary does not qualify, a qualifying configured provider
+     * takes the call if there is one. When there is none, AI_RETENTION_MODE
+     * decides: enforce refuses with a typed 422, observe sends it and records
+     * ai.retention_unenforced with the mode and the reason, once per call, so
+     * "we do not enforce this yet" is a number somebody can read rather than a
+     * sentence in a comment. Observe is the measured default; see retention.ts
+     * for the measurement and what blocks enforce. */
+    const mode = retentionMode();
     const trustedProviders = zeroRetentionProviders();
+    let cReq0 = applyConstitutionToRequest(governed);
+    const firstChoice = primaryProviderName(this.registry, cReq0);
     const retention = mayServe({
       sensitivity: cReq0.sensitivity,
-      provider: primaryProviderName(this.registry, cReq0),
+      provider: firstChoice,
       trusted: trustedProviders,
     });
 
-    /* ENFORCEMENT IS OPT-IN, AND THAT IS NOT A WEAKENING.
-     *
-     * The rule in retention.ts says an unconfigured estate trusts nobody, which
-     * is correct. Enforcing that the moment this deploys would refuse every
-     * live request carrying personal or health data, on an estate where nobody
-     * has yet been asked which providers are under an agreement. That is not a
-     * control, it is an outage with a principled explanation.
-     *
-     * So the gate turns on when somebody names the trusted providers. Until
-     * then every restricted request is recorded as UNPROTECTED, once per call,
-     * because the honest state of the world is "we do not yet enforce this"
-     * and it should be visible rather than assumed. */
-    if (retention.reason === "none_configured") {
-      trackEvent(
-        "ai.retention_unenforced",
-        cReq0.metadata?.user_id ?? "system",
-        cReq0.metadata?.user_role ?? "system",
-        {
-          feature: cReq0.metadata?.feature ?? "unknown",
-          workspace_id: cReq0.metadata?.workspace_id ?? "default",
-          sensitivity: String(cReq0.sensitivity),
-          provider: primaryProviderName(this.registry, cReq0),
-        },
-      );
-    } else if (!retention.allowed) {
-      trackEvent(
-        "ai.request_blocked_retention",
-        cReq0.metadata?.user_id ?? "system",
-        cReq0.metadata?.user_role ?? "system",
-        {
-          feature: cReq0.metadata?.feature ?? "unknown",
-          workspace_id: cReq0.metadata?.workspace_id ?? "default",
-          sensitivity: String(cReq0.sensitivity),
-          reason: retention.reason,
-        },
-      );
-      /* Reaching here means providers ARE named and this one is not among
-         them, which is the only refusal case: the unconfigured estate took the
-         branch above. */
-      throw new RetentionPolicyError(
-        "This request carries sensitive data and the available provider is not under a zero-retention agreement.",
-        {
-          sensitivity: String(cReq0.sensitivity),
-          provider: primaryProviderName(this.registry, cReq0),
-          reason: retention.reason,
-        },
-      );
+    if (!retention.allowed) {
+      const alternative = qualifyingAlternative(this.registry, cReq0, trustedProviders, firstChoice);
+      if (alternative) {
+        /* Pinned rather than re-selected: pickPrimary honours a pin before any
+           other rule, so the provider judged here is the one that answers. */
+        cReq0 = { ...cReq0, provider_pin: alternative.name };
+        trackEvent(
+          "ai.retention_rerouted",
+          cReq0.metadata?.user_id ?? "system",
+          cReq0.metadata?.user_role ?? "system",
+          {
+            feature: cReq0.metadata?.feature ?? "unknown",
+            workspace_id: cReq0.metadata?.workspace_id ?? "default",
+            sensitivity: String(cReq0.sensitivity),
+            from_provider: firstChoice,
+            to_provider: alternative.name,
+            mode,
+          },
+        );
+      } else if (mode === "observe") {
+        trackEvent(
+          "ai.retention_unenforced",
+          cReq0.metadata?.user_id ?? "system",
+          cReq0.metadata?.user_role ?? "system",
+          {
+            feature: cReq0.metadata?.feature ?? "unknown",
+            workspace_id: cReq0.metadata?.workspace_id ?? "default",
+            sensitivity: String(cReq0.sensitivity),
+            provider: firstChoice,
+            reason: retention.reason,
+            mode,
+            stage: "primary",
+            /* What enforce would have done with this exact call. */
+            would_block: true,
+          },
+        );
+      } else {
+        trackEvent(
+          "ai.request_blocked_retention",
+          cReq0.metadata?.user_id ?? "system",
+          cReq0.metadata?.user_role ?? "system",
+          {
+            feature: cReq0.metadata?.feature ?? "unknown",
+            workspace_id: cReq0.metadata?.workspace_id ?? "default",
+            sensitivity: String(cReq0.sensitivity),
+            provider: firstChoice,
+            reason: retention.reason,
+            mode,
+          },
+        );
+        throw new RetentionPolicyError(
+          "This request carries sensitive data and no available provider is under a zero-retention agreement.",
+          {
+            sensitivity: String(cReq0.sensitivity),
+            provider: firstChoice,
+            reason: retention.reason,
+          },
+        );
+      }
     }
 
     /* Credential / financial-identifier gate, at the last point before the
@@ -1016,7 +1104,51 @@ class RouterClient implements AIClient {
         }
       }
 
-      const fallback = pickFallback(primary, this.registry, cReq);
+      let fallback = pickFallback(primary, this.registry, cReq);
+      /* The fallback answers to the same gates as the primary. See
+         fallbackVerdict for why this was a hole. */
+      if (fallback && (requiresZeroRetention(cReq.sensitivity) || (cReq.residency?.length ?? 0) > 0)) {
+        const verdict = fallbackVerdict({
+          fallback: fallback.name,
+          sensitivity: cReq.sensitivity,
+          residency: cReq.residency,
+          trusted: trustedProviders,
+          mode,
+        });
+        if (!verdict.allowed) {
+          trackEvent(
+            "ai.failover_refused",
+            cReq.metadata?.user_id ?? "system",
+            cReq.metadata?.user_role ?? "system",
+            {
+              feature: cReq.metadata?.feature ?? "unknown",
+              workspace_id: cReq.metadata?.workspace_id ?? "default",
+              primary: primary.name,
+              fallback: fallback.name,
+              gate: verdict.gate,
+              reason: verdict.reason,
+              mode,
+            },
+          );
+          fallback = null;
+        } else if (verdict.unenforced) {
+          trackEvent(
+            "ai.retention_unenforced",
+            cReq.metadata?.user_id ?? "system",
+            cReq.metadata?.user_role ?? "system",
+            {
+              feature: cReq.metadata?.feature ?? "unknown",
+              workspace_id: cReq.metadata?.workspace_id ?? "default",
+              sensitivity: String(cReq.sensitivity),
+              provider: fallback.name,
+              reason: "provider_not_trusted",
+              mode,
+              stage: "fallback",
+              would_block: true,
+            },
+          );
+        }
+      }
       if (fallback && isRetryableError(err)) {
         console.warn(
           `[ai/router] primary ${primary.name} failed (${(err as Error).message}); falling back to ${fallback.name}`,
@@ -1277,12 +1409,20 @@ class RouterClient implements AIClient {
     /* The judge's verdict ABOUT an answer is not an answer. Skipping it here,
        rather than inside the try, keeps "we chose not to gate this" separate
        from "the gate failed and we degraded". */
-    if (!cReq.metadata?.internal_check) {
-      try {
-        const rules = policyFor(
-          wsPolicy?.content_policy_profile ??
-            process.env.AI_CONTENT_POLICY_PROFILE,
+    /* Customer-facing rules apply to customer-facing features only. Generated
+       code, and machine-read verdicts, are not a sentence a customer reads:
+       the customer-chat rule price_guarantee matched the word "guarantee" in
+       code and withheld 7,346 CI fixes in October 2026. Code has its own gate
+       (src/lib/ai-code/assess.ts). See policy.ts contentPolicyAudience. */
+    const policyRules = cReq.metadata?.internal_check
+      ? []
+      : rulesForFeature(
+          cReq.metadata?.feature,
+          policyFor(wsPolicy?.content_policy_profile ?? process.env.AI_CONTENT_POLICY_PROFILE),
         );
+    if (policyRules.length > 0) {
+      try {
+        const rules = policyRules;
         const verdict = applyPolicy(response.content, "response", rules);
         if (verdict.action !== "allow") {
           policyVerdict = verdict;
@@ -1300,6 +1440,7 @@ class RouterClient implements AIClient {
                 wsPolicy?.content_policy_profile ??
                 process.env.AI_CONTENT_POLICY_PROFILE ??
                 "baseline",
+              audience: contentPolicyAudience(cReq.metadata?.feature),
               /* Rule ids only. The panel explains a refusal from the RULE, never
                by replaying what the model said: a store of blocked sentences
                is a store of exactly the text we decided nobody should read. */
@@ -1554,6 +1695,11 @@ class RouterClient implements AIClient {
               verify: false,
               improve: false,
               ...(reviewer ? { provider_pin: reviewer.provider } : {}),
+              /* The reviewer reads the question and the answer, so it carries
+                 the same data and answers to the same retention and residency
+                 gates. Without these the review was a way around both. */
+              ...(cReq.sensitivity ? { sensitivity: cReq.sensitivity } : {}),
+              ...(cReq.residency ? { residency: cReq.residency } : {}),
               metadata: { ...cReq.metadata, feature: `${cReq.metadata?.feature ?? "unknown"}.review` },
             } as AICompleteRequest);
             return r.content;

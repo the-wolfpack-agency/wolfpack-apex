@@ -400,9 +400,11 @@ test("empty detail on a CODE check (unit/lint) is NOT mis-escalated as infra: au
   mockFetchAttribution.mockResolvedValue({ introduced: ["unit (3/4)", "lint-types"], preexisting: [], indeterminate: [], fixed: [], baselineKnown: true, baselineHealthy: false, clean: false, reason: "introduced" });
   mockCountFixCommits.mockResolvedValue(1); // past the flake pre-filter
   mockGather.mockResolvedValue({ detail: "", files: [] }); // extractor missed the code error
-  mockListChangedFiles.mockResolvedValue(["src/__tests__/no-direct-auth-cookie.test.ts"]);
+  /* A product file: since 2026-10-24 a fix that edits a test is refused as a
+     protected path (see the next test), so this one anchors on product code. */
+  mockListChangedFiles.mockResolvedValue(["src/lib/auth/session-cookie.ts"]);
   mockListRuns.mockResolvedValue([]);
-  mockAuthorFiles.mockResolvedValue({ changes: [{ path: "src/__tests__/no-direct-auth-cookie.test.ts", content: "// real test" }], author: "model-b", error: null });
+  mockAuthorFiles.mockResolvedValue({ changes: [{ path: "src/lib/auth/session-cookie.ts", content: "export const x = 1;" }], author: "model-b", error: null });
   const body = await (await POST(post({ repo: "o/r", ref: "b", branch: "factory/b-abc", base: "main", attempt: 0, maxAttempts: 3 }))).json();
   expect(body.decision.action).toBe("author_fix"); // NOT escalate_human
   expect(body.unfixableNoDetail).toBeUndefined();
@@ -439,3 +441,23 @@ test("real code failure whose log names only the TEST file: authors, anchored to
   expect(body.terminal).toBe(false);
 });
 
+
+test("a fix that edits a TEST is refused as a protected path, never committed", async () => {
+  /* Same red CI as above, but the model's fix rewrites the failing test. Making
+     CI green by changing what CI checks is the move the deny list exists to stop. */
+  const codeRed = { total: 3, passed: 1, failed: 2, pending: 0, complete: true, ciComplete: false, failedChecks: ["unit (3/4)", "lint-types"], failedDetails: [{ name: "unit (3/4)", summary: "" }] };
+  mockFetchCiStatus.mockResolvedValue(codeRed);
+  mockFetchAttribution.mockResolvedValue({ introduced: ["unit (3/4)", "lint-types"], preexisting: [], indeterminate: [], fixed: [], baselineKnown: true, baselineHealthy: false, clean: false, reason: "introduced" });
+  mockCountFixCommits.mockResolvedValue(1);
+  mockGather.mockResolvedValue({ detail: "", files: [] });
+  mockListChangedFiles.mockResolvedValue(["src/__tests__/no-direct-auth-cookie.test.ts"]);
+  mockListRuns.mockResolvedValue([]);
+  mockAuthorFiles.mockResolvedValue({ changes: [{ path: "src/__tests__/no-direct-auth-cookie.test.ts", content: "it.skip('x', () => {});" }], author: "model-b", error: null });
+  const res = await POST(post({ repo: "o/r", ref: "b", branch: "factory/b-abc", base: "main", attempt: 0, maxAttempts: 3 }));
+  expect(res.status).toBe(200);
+  const body = await res.json();
+  expect(body.decision.action).not.toBe("author_fix");
+  expect(JSON.stringify(body)).toMatch(/protected_path/);
+  expect(mockCommit).not.toHaveBeenCalled();
+  expect(mockAssessChange).not.toHaveBeenCalled();
+});
