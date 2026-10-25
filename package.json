@@ -37,6 +37,7 @@
     "security:surface": "npx tsx scripts/security/surface.ts",
     "security:public-artifacts": "npx tsx scripts/security/public-artifacts.ts",
     "security:revoke-session": "npx tsx scripts/security/revoke-session.ts",
+    "security:rotate-secret-key": "npx tsx scripts/rotate-secret-key.ts",
     "pr:status": "npx tsx scripts/pr-status.ts",
     "security:self-scan": "npx tsx scripts/security/self-scan.ts",
     "self-scan": "npx tsx scripts/self-scan-ai-surfaces.ts",

@@ -35,6 +35,7 @@ Any missing value = production crash loop. Flag at the top of a handoff, not the
 |---|---|
 | `DATABASE_URL` | Neon Postgres connection string |
 | `INSTINCT_JWT_SECRET` | ≥32 chars. Code throws in prod without it. |
+| `INSTINCT_SECRET_KEY` | 32 random bytes (hex or base64). Primary at-rest encryption key. Unset = legacy derived key and a `security.secret_key_degraded` signal. `INSTINCT_SECRET_KEY_PREVIOUS` (optional, comma-separated) is decrypt-only. Procedure: `docs/security/at-rest-key-rotation.md` |
 | `NEXTAUTH_SECRET` | Where next-auth is used (check current auth stack — Instinct uses a custom JWT, but any next-auth surface still needs this) |
 | `RESEND_API_KEY` | Plus sender domain configured in Resend |
 | `GITHUB_TOKEN_WOLFPACK_AGENCY` | For Sites module |
