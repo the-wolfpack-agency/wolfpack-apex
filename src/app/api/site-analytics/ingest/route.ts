@@ -141,6 +141,13 @@ export async function POST(req: NextRequest) {
       if (typeof v === "string") props[k] = v.slice(0, 120);
       else if (typeof v === "number" || typeof v === "boolean") props[k] = v;
     }
+    // The engine's attestation marks are stamped LAST on an event, so the
+    // 12-key cap above could drop them. Carry them explicitly (boolean true
+    // only): props.synthetic is what keeps our own verified probes out of the
+    // Forcefield alert scan (src/lib/forcefield-web/alerts.ts).
+    const raw = b.props as Record<string, unknown>;
+    if (raw.authenticated === true) props.authenticated = true;
+    if (raw.synthetic === true) props.synthetic = true;
   }
 
   // Know the Principal: if the agent presented a signed delegation credential,

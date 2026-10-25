@@ -58,7 +58,8 @@ export interface HostileSignal {
   attackClass: string;
   /** ISO start of the 6-hour window the events fell in. */
   windowStart: string;
-  /** Distinct fingerprints seen in the window (most events carry none). */
+  /** Distinct NON-EMPTY fingerprints in the window. 0 means no event in the
+   *  group recorded one (trap events often carry none), never "zero operators". */
   fpCount: number;
   samplePath: string;
   count: number;
@@ -118,14 +119,30 @@ export function incidentKey(kind: string, site: string, attackClass: string, win
   return hashKey([kind, site, attackClass, windowStart]);
 }
 
+/** "1 payload attack", "3 payload attacks". */
+function countPhrase(n: number, noun: string): string {
+  return `${n} ${noun}${n === 1 ? "" : "s"}`;
+}
+
+/**
+ * The fingerprint line of an alert. Trap trips and many payload events carry no
+ * fingerprint at all, so a count of 0 means "none recorded", not "zero distinct
+ * operators": say that plainly instead of printing a misleading 0.
+ */
+export function fingerprintPhrase(fpCount: number): string {
+  if (!Number.isFinite(fpCount) || fpCount <= 0) return "Fingerprint not recorded";
+  return `${fpCount} distinct fingerprint${fpCount === 1 ? "" : "s"}`;
+}
+
 function alertFromSignal(s: HostileSignal): ForcefieldAlert {
   const site = s.site || "site";
   const title = s.kind === "honeytoken_trip"
     ? `Forcefield: honeytoken tripped on ${site}`
     : `Forcefield: ${s.attackClass.replace(/_/g, " ")} attack on ${site}`;
   const body =
-    `${s.count} ${s.kind.replace("_", " ")} event(s) on ${site} (${s.attackClass}) in the 6-hour window from ${s.windowStart}, ` +
-    `${s.fpCount} distinct fingerprint(s), e.g. ${s.samplePath}. This is a high-confidence hostile signal.`;
+    `${countPhrase(s.count, s.kind === "honeytoken_trip" ? "honeytoken trip" : "payload attack")} on ${site} (${s.attackClass}) ` +
+    `in the 6-hour window starting ${s.windowStart}. ${fingerprintPhrase(s.fpCount)}. Example path: ${s.samplePath || "not recorded"}. ` +
+    `This is a high-confidence hostile signal.`;
   return {
     kind: s.kind,
     dedupeKey: incidentKey(s.kind, s.site, s.attackClass, s.windowStart),
@@ -242,6 +259,18 @@ export function isSilenceCheckHour(now: Date): boolean {
 
 const HOSTILE_EVENT_TYPES = ["site.agent_trap_tripped", "site.agent_payload_attack"];
 
+/**
+ * Our own verification traffic never pages anyone. An event is excluded ONLY when
+ * the engine stamped props.synthetic = true, which observe.ts does only when the
+ * request presented the x-forcefield-synthetic header matching
+ * FORCEFIELD_SYNTHETIC_TOKEN (isSyntheticMonitor, constant-time). A user agent
+ * string never exempts anything: it is spoofable, so a probe that only CLAIMS to
+ * be ours (e.g. UA wolfpack-verify/1.0) still alerts. The events stay on the
+ * board; only the page is suppressed. Applied to the scan AND the silence check,
+ * so synthetic-only traffic cannot raise a false "no alert delivered" either.
+ */
+export const EXCLUDE_SYNTHETIC_SQL = `COALESCE(props->>'synthetic', '') <> 'true'`;
+
 function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
@@ -340,12 +369,13 @@ export function liveForcefieldAlertDeps(): ForcefieldAlertDeps {
                 COALESCE(props->>'site', '') AS site,
                 COALESCE(NULLIF(props->>'attack', ''), event_type) AS attack,
                 to_timestamp(floor(extract(epoch FROM created_at) / ($2::int * 3600)) * ($2::int * 3600)) AS window_start,
-                count(DISTINCT props->>'fp') AS fps,
+                count(DISTINCT NULLIF(props->>'fp', '')) AS fps,
                 min(path) AS sample,
                 count(*) AS count
            FROM site_analytics_events
           WHERE event_type = ANY($3::text[])
             AND created_at > now() - ($1 || ' hours')::interval
+            AND ${EXCLUDE_SYNTHETIC_SQL}
           GROUP BY 1, 2, 3, 4`,
         [String(sinceHours), ALERT_WINDOW_HOURS, HOSTILE_EVENT_TYPES],
       );
@@ -369,7 +399,8 @@ export function liveForcefieldAlertDeps(): ForcefieldAlertDeps {
       const { rows } = await safeQuery<{ n: string }>(
         `SELECT count(*) AS n FROM site_analytics_events
           WHERE event_type = ANY($2::text[])
-            AND created_at > now() - ($1 || ' hours')::interval`,
+            AND created_at > now() - ($1 || ' hours')::interval
+            AND ${EXCLUDE_SYNTHETIC_SQL}`,
         [String(sinceHours), HOSTILE_EVENT_TYPES],
       );
       return Number(rows[0]?.n ?? 0);

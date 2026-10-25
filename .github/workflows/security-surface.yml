@@ -21,7 +21,10 @@ name: Security - deployed surface
 # landing and login pages answer 200 and Forcefield still blocks the
 # prompt-injection probe on sites marked enforcesForcefield.
 #
-# Needs no secrets.
+# Optional secret FORCEFIELD_SYNTHETIC_TOKEN (same value the sites hold): the
+# probes then present x-forcefield-synthetic and raise no Forcefield alert. It
+# is sent only to the configured sites, never to an ad-hoc url. Without it the
+# run still works and prints a loud WARNING that the probes will alert.
 
 on:
   schedule:
@@ -116,6 +119,9 @@ jobs:
           FAIL_ON: ${{ inputs.fail_on || 'medium' }}
           POST_DEPLOY: ${{ inputs.post_deploy && 'true' || 'false' }}
           EXPECT_SHA: ${{ inputs.expect_sha || '' }}
+          # Attests the probes as our synthetic monitor so they raise no
+          # Forcefield alert. Unset = the probe prints a loud WARNING.
+          FORCEFIELD_SYNTHETIC_TOKEN: ${{ secrets.FORCEFIELD_SYNTHETIC_TOKEN }}
           npm_config_yes: "true"
         run: |
           args=(--out security-reports --fail-on "$FAIL_ON")

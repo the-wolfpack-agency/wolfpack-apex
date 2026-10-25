@@ -110,6 +110,10 @@ function observeInputFor(args: ForcefieldArgs): ObserveInput {
   // observeRequest/decideEnforcement and discarded; never stored. First hop of
   // x-forwarded-for is the client.
   const ip = (req.headers.get("x-forwarded-for") ?? req.headers.get("x-real-ip") ?? "").split(",")[0].trim();
+  // Our own monitor PROVED itself with the shared token (never the UA). It is
+  // authenticated (no weak-tell noise, never fingerprint-blocked) AND stamped
+  // synthetic, so its events stay on the board but never raise an alert.
+  const synthetic = isSyntheticMonitor(req.headers);
   return {
     site: args.site,
     path: req.nextUrl.pathname,
@@ -121,7 +125,8 @@ function observeInputFor(args: ForcefieldArgs): ObserveInput {
     accept: req.headers.get("accept") ?? "",
     secFetchDest: req.headers.get("sec-fetch-dest") ?? "",
     ip: ip || undefined,
-    authenticated: args.authenticated === true || isSyntheticMonitor(req.headers),
+    authenticated: args.authenticated === true || synthetic,
+    synthetic,
     platform: args.platform,
     nowMs: Date.now(),
   };

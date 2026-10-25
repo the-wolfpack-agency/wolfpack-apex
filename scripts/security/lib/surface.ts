@@ -226,3 +226,59 @@ export function versionFinding(site: string, expectSha: string, versionPath: str
     source: versionPath,
   };
 }
+
+// Synthetic-monitor attestation for our own probes.
+//
+// Forcefield marks a request as OUR verified monitor only when it presents the
+// x-forcefield-synthetic header equal to FORCEFIELD_SYNTHETIC_TOKEN (>= 32
+// chars; src/lib/forcefield-web/monitor.ts isSyntheticMonitor). Its events stay
+// on the board but never raise an alert. The probe's user agent is NOT an
+// exemption and never will be: anyone can send any UA.
+export const SYNTHETIC_HEADER = "x-forcefield-synthetic";
+export const SYNTHETIC_TOKEN_MIN_LENGTH = 32;
+
+export interface SyntheticAttestation {
+  /** Extra request headers for every probe (empty when the token is unusable). */
+  headers: Record<string, string>;
+  /** Loud operator-facing warning when the probe will NOT be attested, else null. */
+  warning: string | null;
+}
+
+/** Build the probe's synthetic attestation from the environment. Never logs or
+ *  returns the token anywhere except the header value. */
+export function syntheticAttestation(env: Record<string, string | undefined>): SyntheticAttestation {
+  const token = (env.FORCEFIELD_SYNTHETIC_TOKEN ?? "").trim();
+  if (!token) {
+    return {
+      headers: {},
+      warning:
+        "FORCEFIELD_SYNTHETIC_TOKEN is NOT set: these probes are NOT attested as our synthetic monitor, so every injection/decoy probe they send will be recorded as a real attack and WILL raise Forcefield alert emails. Set it to the same value the target sites use.",
+    };
+  }
+  if (token.length < SYNTHETIC_TOKEN_MIN_LENGTH) {
+    return {
+      headers: {},
+      warning: `FORCEFIELD_SYNTHETIC_TOKEN is shorter than ${SYNTHETIC_TOKEN_MIN_LENGTH} characters, which Forcefield treats as OFF: the header was NOT sent and these probes WILL raise Forcefield alert emails.`,
+    };
+  }
+  return { headers: { [SYNTHETIC_HEADER]: token }, warning: null };
+}
+
+/** The headers one probe sends: the probe UA, the synthetic attestation, then any
+ *  per-probe headers (which never override the attestation). */
+export function probeHeaders(ua: string, attestation: SyntheticAttestation, extra: Record<string, string> = {}): Record<string, string> {
+  return { "user-agent": ua, ...extra, ...attestation.headers };
+}
+
+/** The token is a credential: it goes ONLY to hosts we own (the configured
+ *  sites, or an ad-hoc --url the operator explicitly vouched for with
+ *  --attest-synthetic). Any other host gets no header. */
+export function attestationFor(url: string, allowedHosts: ReadonlySet<string>, attestation: SyntheticAttestation): SyntheticAttestation {
+  let host = "";
+  try {
+    host = new URL(url).host.toLowerCase();
+  } catch {
+    return { headers: {}, warning: attestation.warning };
+  }
+  return allowedHosts.has(host) ? attestation : { headers: {}, warning: attestation.warning };
+}
