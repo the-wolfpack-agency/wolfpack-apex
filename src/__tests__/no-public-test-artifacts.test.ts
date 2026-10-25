@@ -14,7 +14,9 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const WF_DIR = join(__dirname, "../../.github/workflows");
-const SENSITIVE = /playwright-report|(?<!pen)test-results|test-failures|screenshots|playwright-output\.log|\/tmp\/tool-results/;
+// scan-results / pentest-results / npm-audit: the security self-scan's raw
+// findings (file, line, rule, evidence) and our unpatched packages.
+const SENSITIVE = /playwright-report|(?<!pen)test-results|test-failures|screenshots|playwright-output\.log|\/tmp\/tool-results|scan-results|pentest-results|npm-audit/;
 const GATE = "github.event.repository.private";
 
 function uploadSteps(src: string): string[] {
