@@ -62,7 +62,7 @@ function step(name: string): Step {
   if (!s) throw new Error(`step not found: ${name}`);
   return s;
 }
-const HARD_STEP = "Reality-check gates (preview parity + dashboard quick-actions)";
+const HARD_STEP = "Reality-check gates (hard)";
 const REPORT_STEP = "Reality-check gates (report-only, promote when green)";
 
 /**
