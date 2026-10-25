@@ -273,7 +273,10 @@ describe("create_okr", () => {
 
 describe("create_feature", () => {
   test("forwards to /api/features with optional fields", async () => {
-    (global.fetch as jest.Mock).mockResolvedValueOnce(jsonResponse(200, { id: "feat-2" }));
+    // The real route answers 201 { feature: { ... } } (src/app/api/features/route.ts).
+    (global.fetch as jest.Mock).mockResolvedValueOnce(
+      jsonResponse(201, { feature: { id: "feat-2", title: "Dark mode" } }),
+    );
     const res = await executeFormAction(
       "create_feature",
       {

@@ -70,6 +70,14 @@ describe("GET /api/admin/feedback/[id]/screenshot", () => {
     expect(mockQuery.mock.calls[0][1]).toEqual(["fb-other-ws", "default"]);
   });
 
+  test("an empty-string workspaceId reads the same workspace the POST wrote (default)", async () => {
+    mockRequireCap.mockResolvedValue({ ok: true, user: { ...CTO, workspaceId: "" } });
+    mockQuery.mockResolvedValueOnce({ rows: [] });
+    const { GET } = await import("@/app/api/admin/feedback/[id]/screenshot/route");
+    await GET(mkReq(), mkParams("fb-1"));
+    expect(mockQuery.mock.calls[0][1]).toEqual(["fb-1", "default"]);
+  });
+
   test("404 no_screenshot when the row exists but has no image", async () => {
     mockRequireCap.mockResolvedValue({ ok: true, user: CTO });
     mockQuery.mockResolvedValueOnce({ rows: [{ id: "fb-1" }] });

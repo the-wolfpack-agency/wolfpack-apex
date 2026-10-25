@@ -86,7 +86,17 @@ export default function FeedbackPage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetchWithRefresh(`/api/admin/feedback?limit=200&status=${filter}`);
+      /* The API hides automated E2E smoke-test notes from the human inbox and
+         keeps them behind ?includeTest=1 for debugging the smoke suite. The
+         page forwards that same flag from its own URL so the suite (and a
+         person debugging it) can see its rows in the real UI; without the
+         flag the inbox is unchanged. */
+      const includeTest =
+        typeof window !== "undefined" &&
+        new URLSearchParams(window.location.search).get("includeTest") === "1";
+      const res = await fetchWithRefresh(
+        `/api/admin/feedback?limit=200&status=${filter}${includeTest ? "&includeTest=1" : ""}`,
+      );
       if (!res.ok) {
         if (res.status === 403) setError("You don't have permission to view team feedback.");
         else setError(`Could not load feedback (HTTP ${res.status}).`);

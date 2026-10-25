@@ -23,6 +23,28 @@ import { resolveSmokeTarget, signInIfPossible } from "./helpers/smoke-helpers";
 
 const target = resolveSmokeTarget();
 
+/* Distinct, unrelated words so two runs' questions are far apart both as
+   word sets and as embeddings. */
+const WORDS = [
+  "anchor", "basil", "cobalt", "dune", "ember", "fjord", "glacier", "harbor",
+  "iris", "juniper", "kelp", "lantern", "meadow", "nectar", "orchid", "pebble",
+  "quartz", "raven", "saffron", "tundra", "umber", "violet", "walnut", "yarrow",
+  "zephyr", "almond", "bramble", "cedar", "delta", "falcon", "garnet", "heron",
+  "indigo", "jasper", "kestrel", "lichen", "maple", "nimbus", "otter", "prairie",
+  "acorn", "bison", "canyon", "dahlia", "egret", "fennel", "gecko", "hazel",
+  "ibis", "jackal", "koala", "lotus", "marlin", "nutmeg", "oyster", "puffin",
+  "quince", "reef", "sorrel", "thistle", "urchin", "vanilla", "willow", "yucca",
+  "zinnia", "aspen", "birch", "clover", "daisy", "elm", "fig", "ginger",
+];
+function uniqueWords(n: number): string {
+  const pool = [...WORDS];
+  const out: string[] = [];
+  for (let i = 0; i < n && pool.length > 0; i++) {
+    out.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0]);
+  }
+  return out.join(" ");
+}
+
 test.describe("/knowledge semantic Q&A cache", () => {
   test.beforeEach(async ({ page }) => {
     if (!target.email || !target.password) {
@@ -47,10 +69,17 @@ test.describe("/knowledge semantic Q&A cache", () => {
     /* Open the Ask panel. */
     await page.getByRole("button", { name: /ask a question/i }).click();
 
-    /* Use a question that almost certainly is not seeded so we hit
-       the LLM path on first ask. The cache is keyed on normalized
-       question + surface, so the second ask must collide. */
-    const uniqueQuestion = `qa-cache-e2e how do I rotate my JWT refresh token in instinct ${Date.now()}`;
+    /* The first ask must MISS, so the question has to be unique by the
+       cache's own similarity measure, not just by string. A trailing
+       Date.now() is not enough: the cache serves near matches (cosine
+       >= 0.86, or word-overlap Jaccard >= 0.75 without an embedding key),
+       and two runs of "qa-cache-e2e how do I rotate my JWT refresh token
+       in instinct <ts>" share 6 of 8 tokens = Jaccard 0.75, so every run
+       after the first was served the previous run's cached answer. Most
+       of the words are drawn fresh per run so no two runs overlap enough
+       to clear either threshold. The second ask reuses the exact string,
+       so it still collides on the exact-match fast path. */
+    const uniqueQuestion = `qa-cache-e2e ${uniqueWords(6)} ${Date.now().toString(36)}`;
 
     /* First ask — capture the response so we can assert was_cache_hit
        directly, not just "the badge is there". */

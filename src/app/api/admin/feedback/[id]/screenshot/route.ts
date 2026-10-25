@@ -31,7 +31,10 @@ export async function GET(
   const { id } = await params;
   if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
 
-  const workspaceId = auth.user.workspaceId ?? "default";
+  // `||`, not `??`: POST /api/feedback stores `user.workspaceId || "default"`,
+  // so an empty-string workspace must resolve to the same value on read or
+  // the caller's own row 404s here.
+  const workspaceId = auth.user.workspaceId || "default";
 
   // Confirm the feedback row exists AND belongs to the caller's workspace
   // before serving its image. A cross-tenant id returns 404, same as a
