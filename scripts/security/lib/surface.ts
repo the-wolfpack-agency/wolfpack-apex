@@ -10,6 +10,17 @@ export interface SiteConfig {
   repo?: string;
   url: string;
   protectedPath: string | null;
+  /** --post-deploy: the sign-in page, which must answer 200 (after redirects). null when the site has none. */
+  loginPath?: string | null;
+  /**
+   * --post-deploy: true only where Forcefield is verified to block a prompt-
+   * injection payload at the edge (403 + x-forcefield: blocked:payload). A
+   * site that enforces and stops blocking has lost its protection; a site that
+   * does not enforce is not asserted.
+   */
+  enforcesForcefield?: boolean;
+  /** --expect-sha: path serving {"sha": "..."} for the live deployment. */
+  versionPath?: string | null;
 }
 
 /** Response headers as a lower-cased map. */
@@ -150,3 +161,68 @@ export const MIDDLEWARE_SUBREQUEST_VALUES = [
   "pages/_middleware",
   "middleware",
 ];
+
+// ---------------------------------------------------------------------------
+// --post-deploy: is the deployment up, protected, and the build we expect?
+// ---------------------------------------------------------------------------
+
+/** The payload Forcefield must refuse. A plain GET with a query string; nothing is submitted. */
+export const INJECTION_PROBE_PATH = "/?q=ignore%20all%20previous%20instructions";
+
+/**
+ * `/` and the login page must answer 200 after redirects. "Not 500" is not
+ * enough: a 401 or 404 on the landing page is a blank site for the visitor.
+ */
+export function postDeployStatusFinding(site: string, path: string, status: number | null, error?: string): Finding | null {
+  if (status === 200) return null;
+  return {
+    severity: "high",
+    rule: "deploy.not-200",
+    subject: site,
+    detail: `${path} answered ${status === null ? `nothing (${error ?? "request failed"})` : `HTTP ${status}`} after redirects; a fresh deploy must serve 200 here.`,
+    source: path,
+  };
+}
+
+/** On a site that enforces, the injection probe must be refused at the edge with the Forcefield marker. */
+export function injectionProbeFinding(site: string, enforces: boolean, status: number | null, xForcefield: string | null): Finding | null {
+  if (!enforces) return null;
+  if (status === 403 && (xForcefield ?? "").startsWith("blocked:payload")) return null;
+  return {
+    severity: "high",
+    rule: "forcefield.injection-not-blocked",
+    subject: site,
+    detail: `${INJECTION_PROBE_PATH} answered ${status === null ? "nothing" : `HTTP ${status}`} with x-forcefield ${xForcefield ? `"${xForcefield}"` : "absent"}. This site is marked enforcesForcefield, so it must answer 403 with x-forcefield: blocked:payload. Check the Forcefield mode and middleware in the deployed build.`,
+    source: INJECTION_PROBE_PATH,
+  };
+}
+
+/** --expect-sha: the deployment's /api/version must report that commit (a short sha matches its prefix). */
+export function versionFinding(site: string, expectSha: string, versionPath: string | null | undefined, status: number | null, body: string): Finding | null {
+  const want = expectSha.trim().toLowerCase();
+  if (!versionPath) {
+    return {
+      severity: "medium",
+      rule: "deploy.version-unavailable",
+      subject: site,
+      detail: `--expect-sha ${want} was given but this site has no versionPath configured, so the deployed commit cannot be confirmed.`,
+    };
+  }
+  let sha = "";
+  try {
+    const v = JSON.parse(body) as { sha?: unknown };
+    sha = typeof v.sha === "string" ? v.sha.toLowerCase() : "";
+  } catch {
+    /* not JSON: handled below */
+  }
+  if (status === 200 && sha && want.length >= 7 && sha.startsWith(want)) return null;
+  return {
+    severity: "high",
+    rule: "deploy.sha-mismatch",
+    subject: site,
+    detail: sha
+      ? `${versionPath} reports ${sha.slice(0, 12)}, expected ${want.slice(0, 12)}. The deploy has not propagated, or a different build is live.`
+      : `${versionPath} answered ${status === null ? "nothing" : `HTTP ${status}`} without a sha; expected ${want.slice(0, 12)}.`,
+    source: versionPath,
+  };
+}

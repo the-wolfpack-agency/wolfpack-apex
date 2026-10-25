@@ -2007,6 +2007,10 @@ export type InstinctEventType =
   | "system.token_verify_failed"
   | "system.refresh_token_rotated"
   | "system.refresh_token_reuse_detected"
+  // security.session_family_revoked { family_id, user_id, rows_revoked, mode, reason }
+  //   - an operator ended a refresh-token family by hand (incident response:
+  //     a leaked session cookie). Written by scripts/security/revoke-session.ts.
+  | "security.session_family_revoked"
   | "system.csp_violation_reported"
   | "system.security_posture_viewed"
   | "system.tls_hybrid_verified"

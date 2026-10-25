@@ -1,8 +1,12 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  INJECTION_PROBE_PATH,
   MIDDLEWARE_SUBREQUEST_VALUES,
   headerFindings,
+  injectionProbeFinding,
+  postDeployStatusFinding,
+  versionFinding,
   imageProxyFinding,
   isRefused,
   middlewareBypassFinding,
@@ -120,5 +124,56 @@ describe("scripts/security/surface-sites.json", () => {
       expect(s.url).toMatch(/^https:\/\/[^/]+$/);
       if (s.protectedPath !== null) expect(s.protectedPath).toMatch(/^\//);
     }
+  });
+});
+
+describe("--post-deploy rules", () => {
+  it("requires 200 on / and the login page; a 401, 404 or 500 is a blank site", () => {
+    expect(postDeployStatusFinding("s", "/", 200)).toBeNull();
+    for (const status of [401, 404, 500, 307]) {
+      expect(postDeployStatusFinding("s", "/login", status)).toMatchObject({ severity: "high", rule: "deploy.not-200" });
+    }
+    expect(postDeployStatusFinding("s", "/login", null, "timed out")?.detail).toContain("timed out");
+  });
+
+  it("on an enforcing site, the injection probe must be 403 with x-forcefield: blocked:payload", () => {
+    expect(INJECTION_PROBE_PATH).toBe("/?q=ignore%20all%20previous%20instructions");
+    expect(injectionProbeFinding("instinct", true, 403, "blocked:payload")).toBeNull();
+    expect(injectionProbeFinding("instinct", true, 200, null)).toMatchObject({ severity: "high", rule: "forcefield.injection-not-blocked" });
+    expect(injectionProbeFinding("instinct", true, 403, null)?.rule).toBe("forcefield.injection-not-blocked"); // a 403 from something else
+    expect(injectionProbeFinding("instinct", true, 403, "monitor")?.rule).toBe("forcefield.injection-not-blocked");
+  });
+
+  it("does not assert the injection probe on a site that does not enforce", () => {
+    expect(injectionProbeFinding("fdos", false, 307, null)).toBeNull();
+  });
+
+  it("--expect-sha matches a full or short sha from /api/version", () => {
+    const body = JSON.stringify({ sha: "27e388a25b7c5e44042a554eccf4abf45da6ee57", ref: "main" });
+    expect(versionFinding("instinct", "27e388a25b7c5e44042a554eccf4abf45da6ee57", "/api/version", 200, body)).toBeNull();
+    expect(versionFinding("instinct", "27E388A", "/api/version", 200, body)).toBeNull();
+    expect(versionFinding("instinct", "deadbeef", "/api/version", 200, body)).toMatchObject({ severity: "high", rule: "deploy.sha-mismatch" });
+    expect(versionFinding("instinct", "27e38", "/api/version", 200, body)?.rule).toBe("deploy.sha-mismatch"); // too short to trust
+    expect(versionFinding("instinct", "27e388a", "/api/version", 404, "<html>")?.detail).toContain("HTTP 404");
+    expect(versionFinding("ogiam", "27e388a", null, null, "")?.rule).toBe("deploy.version-unavailable");
+  });
+});
+
+describe("surface-sites.json post-deploy fields", () => {
+  const cfg = JSON.parse(readFileSync(join(__dirname, "..", "..", "..", "scripts", "security", "surface-sites.json"), "utf8")) as { sites: SiteConfig[] };
+  const by = Object.fromEntries(cfg.sites.map((s) => [s.name, s]));
+
+  it("marks Forcefield enforcement only where it was verified (instinct, ogiam on 2026-10-24)", () => {
+    expect(cfg.sites.filter((s) => s.enforcesForcefield === true).map((s) => s.name).sort()).toEqual(["instinct", "ogiam"]);
+    for (const s of cfg.sites) expect(typeof s.enforcesForcefield).toBe("boolean");
+  });
+
+  it("declares a login path (or null) and a version path only where /api/version exists", () => {
+    for (const s of cfg.sites) {
+      expect(s.loginPath === null || /^\//.test(String(s.loginPath))).toBe(true);
+      expect(s.versionPath === null || /^\//.test(String(s.versionPath))).toBe(true);
+    }
+    expect(by.instinct.loginPath).toBe("/login");
+    expect(by.instinct.versionPath).toBe("/api/version");
   });
 });

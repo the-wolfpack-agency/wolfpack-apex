@@ -14,6 +14,7 @@ How each automated check is set up and run is in [scheduled-checks.md](scheduled
 | Entra app audit (monthly) | [security-entra-audit](https://github.com/the-wolfpack-agency/wolfpack-apex/actions/workflows/security-entra-audit.yml) run on the 1st | no unused app with a live credential; every sensitive permission is one we decided on; nothing expiring unplanned | See steps 2 and 3. |
 | AI spend (daily) | the month's runs of [security-ai-spend](https://github.com/the-wolfpack-agency/wolfpack-apex/actions/workflows/security-ai-spend.yml) | no spike or unexplained new AI resource | A spike nobody can explain: rotate that resource's keys the same day (new key in use first, then revoke the old). |
 | Deployed surface (weekly and after each deploy) | [security-surface](https://github.com/the-wolfpack-agency/wolfpack-apex/actions/workflows/security-surface.yml) | no medium or higher on any site | Fix in the site's repository; re-run the workflow against that URL to confirm. |
+| Public artifacts (daily and after E2E runs) | [security-public-artifacts](https://github.com/the-wolfpack-agency/wolfpack-apex/actions/workflows/security-public-artifacts.yml) | zero findings | A session cookie, bearer token or password URL in a public artifact is an incident: follow [incident-runbook.md](incident-runbook.md) (delete, dry run, apply, verify). |
 
 A run that says **SKIPPED** is not a pass. Configure the missing secret it names.
 
@@ -65,3 +66,5 @@ Malware in a lockfile, a known-compromised release, a workflow change outside a 
 2. Rotate every credential the affected machine, runner or app could read. New credential in use first, then revoke the old.
 3. Rebuild from a clean state rather than cleaning in place.
 4. Write down what happened and add the rule or list entry that would have caught it sooner.
+
+A leaked Instinct session (cookie or bearer token in an artifact, log or screenshot) has its own steps: [incident-runbook.md](incident-runbook.md).

@@ -16,6 +16,11 @@ name: Security - deployed surface
 #         url: https://www.weekendwithporsche.com
 #         protected_path: /admin
 #
+# After a deploy, pass post_deploy: true (and site: <name>, expect_sha:
+# ${{ github.sha }} where the site serves /api/version) to also assert the
+# landing and login pages answer 200 and Forcefield still blocks the
+# prompt-injection probe on sites marked enforcesForcefield.
+#
 # Needs no secrets.
 
 on:
@@ -41,6 +46,15 @@ on:
         description: "Lowest severity that fails the run (critical, high, medium, low)"
         required: false
         default: "medium"
+      post_deploy:
+        description: "Also assert / and the login page are 200 and Forcefield blocks the injection probe where it enforces"
+        type: boolean
+        required: false
+        default: false
+      expect_sha:
+        description: "With one site: the commit /api/version must report"
+        required: false
+        default: ""
   workflow_call:
     inputs:
       site:
@@ -63,6 +77,16 @@ on:
         type: string
         required: false
         default: "medium"
+      post_deploy:
+        description: "Also assert / and the login page are 200 and Forcefield blocks the injection probe where it enforces"
+        type: boolean
+        required: false
+        default: false
+      expect_sha:
+        description: "With one site: the commit /api/version must report (e.g. github.sha)"
+        type: string
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -90,9 +114,13 @@ jobs:
           URL: ${{ inputs.url || '' }}
           PROTECTED_PATH: ${{ inputs.protected_path || '' }}
           FAIL_ON: ${{ inputs.fail_on || 'medium' }}
+          POST_DEPLOY: ${{ inputs.post_deploy && 'true' || 'false' }}
+          EXPECT_SHA: ${{ inputs.expect_sha || '' }}
           npm_config_yes: "true"
         run: |
           args=(--out security-reports --fail-on "$FAIL_ON")
+          if [ "$POST_DEPLOY" = "true" ]; then args+=(--post-deploy); fi
+          if [ -n "$EXPECT_SHA" ]; then args+=(--expect-sha "$EXPECT_SHA"); fi
           if [ -n "$URL" ]; then
             args+=(--url "$URL")
             if [ -n "$PROTECTED_PATH" ]; then args+=(--protected-path "$PROTECTED_PATH"); fi

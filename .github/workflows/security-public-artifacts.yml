@@ -1,0 +1,103 @@
+name: Security - public artifacts
+
+# Credential scan of every unexpired Actions artifact in every PUBLIC
+# repository of the the-wolfpack-agency organization. Anyone signed in to
+# GitHub can download those artifacts. On 2026-10-20 a Playwright trace here
+# carried a live CTO session cookie; this is the check that finds the next one.
+#
+# Downloads each artifact (50 MB cap), unzips it including nested trace zips,
+# and searches for credential SHAPES (JWTs, instinct session cookies, bearer
+# headers, GitHub and sk- keys, AWS key ids, Slack webhooks, Postgres URLs with
+# a password). Records the pattern name and file, never the value.
+#
+# Read-only: it never deletes an artifact. Logic and rules:
+# scripts/security/public-artifacts.ts and lib/public-artifacts.ts. Response:
+# docs/security/incident-runbook.md.
+#
+# Runs daily, on demand, and after each E2E workflow in this repository
+# finishes, since those are the runs that record traces of live sessions.
+#
+# DARK UNTIL CONFIGURED. github.token can only see this repository, so the scan
+# needs SECURITY_AUDIT_GH_TOKEN (read-only, Actions: read on all org
+# repositories). Setup: docs/security/scheduled-checks.md. Without it the job
+# writes SKIPPED to the run summary and exits green.
+#
+# This repository is public, so the run log and summary carry counts only
+# (scripts/security/lib/report.ts isRedacted). Run it locally for detail.
+
+on:
+  schedule:
+    - cron: "43 11 * * *" # daily 11:43 UTC
+  workflow_run:
+    workflows:
+      - "E2E Reality Check"
+      - "Agent Onboarding E2E (Live Target)"
+      - "E2E: Agent Approvals (live UI)"
+      - "E2E: Code Factory full journey (live UI)"
+      - "E2E: Code Factory (live UI)"
+      - "E2E: Forcefield Web (live UI)"
+      - "E2E: OGIAM Gate (live UI)"
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      fail_on:
+        description: "Lowest severity that fails the run (critical, high, medium, low)"
+        required: false
+        default: "medium"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-public-artifacts
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    # ~3 public repositories, a few thousand artifacts listed, most small.
+    timeout-minutes: 45
+    env:
+      HAS_TOKEN: ${{ secrets.SECURITY_AUDIT_GH_TOKEN != '' }}
+    steps:
+      - name: Skip until SECURITY_AUDIT_GH_TOKEN is configured
+        if: env.HAS_TOKEN != 'true'
+        run: |
+          {
+            echo "## Security check: public-artifacts"
+            echo ""
+            echo "**SKIPPED.** Add the repository secret SECURITY_AUDIT_GH_TOKEN (read-only: Actions, Contents, Metadata on all org repositories). Steps: docs/security/scheduled-checks.md"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::warning::security:public-artifacts skipped: SECURITY_AUDIT_GH_TOKEN is not configured. Public artifacts are NOT being scanned."
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        if: env.HAS_TOKEN == 'true'
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v4.0.4
+        if: env.HAS_TOKEN == 'true'
+        with:
+          node-version: 20
+
+      - name: Run security:public-artifacts
+        if: env.HAS_TOKEN == 'true'
+        env:
+          SECURITY_REPORT_PUBLIC: ${{ github.event.repository.private && 'false' || 'true' }}
+          GH_TOKEN: ${{ secrets.SECURITY_AUDIT_GH_TOKEN }}
+          FAIL_ON: ${{ inputs.fail_on || 'medium' }}
+          EVENT: ${{ github.event_name }}
+          npm_config_yes: "true"
+        run: |
+          args=(--out security-reports --fail-on "$FAIL_ON")
+          # After an E2E run only the newest artifacts can be new; the daily run covers everything.
+          if [ "$EVENT" = "workflow_run" ]; then args+=(--days 1); fi
+          npm run security:public-artifacts -- "${args[@]}"
+
+      - name: Keep the report
+        continue-on-error: true
+        if: always() && env.HAS_TOKEN == 'true' && github.event.repository.private
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: security-public-artifacts-${{ github.run_id }}
+          path: security-reports/
+          retention-days: 90
+          if-no-files-found: ignore

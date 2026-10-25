@@ -1,6 +1,6 @@
 # Scheduled security checks
 
-Four checks that used to be done by hand now run on a schedule and on demand. Each one is a script you can run on your own machine, writes a JSON file and a readable markdown file, and exits non-zero when it finds something. All four only read: nothing here opens issues, changes settings, or writes to any site.
+Checks that used to be done by hand now run on a schedule and on demand. Each one is a script you can run on your own machine, writes a JSON file and a readable markdown file, and exits non-zero when it finds something. All of them only read: nothing here opens issues, changes settings, or writes to any site.
 
 | Check | Command | Schedule | Workflow | Needs |
 | --- | --- | --- | --- | --- |
@@ -8,6 +8,7 @@ Four checks that used to be done by hand now run on a schedule and on demand. Ea
 | Entra app audit | `npm run security:entra-audit` | monthly (1st) | `security-entra-audit.yml` | `AZURE_CLIENT_ID`, `AZURE_TENANT_ID` |
 | AI spend tripwire | `npm run security:ai-spend` | daily | `security-ai-spend.yml` | same Azure identity, plus Cost Management Reader |
 | Deployed surface | `npm run security:surface` | weekly, every release, after deploys | `security-surface.yml` | nothing |
+| Public artifacts | `npm run security:public-artifacts` | daily, after each E2E workflow | `security-public-artifacts.yml` | `SECURITY_AUDIT_GH_TOKEN` (plus Actions: read) |
 
 A workflow whose credentials are not configured yet does not fail. It writes **SKIPPED** at the top of the run summary with the name of the secret to add, and exits green. Skipped is not the same as passed; the summary says which.
 
@@ -31,6 +32,10 @@ Two limits are printed in every report:
 
 **Deployed surface**: for each site in `scripts/security/surface-sites.json`, the security headers (CSP, HSTS, `X-Content-Type-Options`, frame protection, `Referrer-Policy`), no version banner in `X-Powered-By` or `Server`, `/.env` and `/.git/config` not served, `/_next/image` refusing to fetch an outside URL, and a protected path that stays refused when the request carries `x-middleware-subrequest` (the Next.js middleware bypass, CVE-2025-29927).
 
+**Deployed surface, `--post-deploy`**: also asserts that `/` and the site's `loginPath` answer 200 after redirects, and, on sites marked `enforcesForcefield` in `surface-sites.json` (instinct and ogiam, verified with curl on 2026-10-24), that `/?q=ignore%20all%20previous%20instructions` is refused with 403 and `x-forcefield: blocked:payload`. `--expect-sha <sha>` with one site checks that its `versionPath` (`/api/version`) reports that commit.
+
+**Public artifacts** (every PUBLIC repository in the organization): every unexpired Actions artifact is downloaded (50 MB cap, `--max-mb` to raise it; larger ones are listed as not scanned), unzipped with the nested Playwright `trace.zip` files, and searched for credential shapes: JWTs, `instinct_access_token` / `instinct_refresh_token` cookies (header and storage-state forms), `Authorization: Bearer`, `ghp_` and `github_pat_` tokens, `sk-` keys, AWS key ids, Slack webhooks, and Postgres URLs with a password. Session cookies, bearer tokens and password URLs are critical; the rest are high. Findings give the repository, artifact, id, date, file and pattern name, never the value, plus the delete command and run page. It never deletes. Response steps: [incident-runbook.md](incident-runbook.md). The token needs **Actions: Read-only** in addition to the permissions in step 1 below.
+
 ## Running locally
 
 ```bash
@@ -43,6 +48,9 @@ npm run security:ai-spend
 npm run security:surface
 npm run security:surface -- --site instinct,fdos
 npm run security:surface -- --url https://preview.example.com --protected-path /admin
+npm run security:surface -- --post-deploy --site instinct --expect-sha "$(git rev-parse origin/main)"
+npm run security:public-artifacts
+npm run security:public-artifacts -- --repo wolfpack-apex
 ```
 
 Every command takes `--out <dir>` (default `scripts/security/out/`, which git ignores) and `--fail-on <critical|high|medium|low>` (default `medium`). Exit code 0 means clean or skipped, 1 means findings at or above `--fail-on`, 2 means the check could not run.
@@ -56,7 +64,7 @@ Every command takes `--out <dir>` (default `scripts/security/out/`, which git ig
 1. Open https://github.com/settings/personal-access-tokens/new
 2. Token name `security-audit-readonly`. Resource owner: **the-wolfpack-agency**. Expiration: 1 year (put the renewal date in the calendar).
 3. Repository access: **All repositories**.
-4. Repository permissions, all **Read-only**: Contents, Metadata, Pull requests, Dependabot alerts.
+4. Repository permissions, all **Read-only**: Actions, Contents, Metadata, Pull requests, Dependabot alerts.
 5. Generate. If the organization requires approval for fine-grained tokens, approve it at https://github.com/organizations/the-wolfpack-agency/settings/personal-access-token-requests
 6. Store it (paste when prompted):
 
