@@ -149,6 +149,12 @@ export interface PlatformScanResult {
    * always populates it.
    */
   coverage?: ScanCoverage;
+  /**
+   * The per-route responses the HTTP crawl already collected (status + headers,
+   * no bodies). In-memory only, never persisted: lets a later pass over the SAME
+   * responses (edge-device exposure) run without sending another request.
+   */
+  observed?: { route: string; obs: RouteObservation }[];
 }
 
 /** A single route's observed response, the pure input to classification. */

@@ -43,10 +43,26 @@ export interface EdgeDeviceMatch {
   matchedMarkers: string[];
 }
 
+/** Options for a classification. */
+export interface EdgeClassifyOptions {
+  /**
+   * Whether the observed route counts as a marker. Default true (a response
+   * observed AT an appliance path). The active scan pass sets it FALSE: it asks
+   * for the appliance paths itself, so the path proves nothing about the host
+   * and only the response body / vendor headers may decide. That is what keeps
+   * a catch-all site that answers 200 for every path from reading as a VPN.
+   */
+  routeIsEvidence?: boolean;
+}
+
+/** The evidence.exposure_kind every edge-device finding carries, so the
+ *  Forcefield Exposure panel can read exactly these rows from the shared store. */
+export const EDGE_EXPOSURE_KIND = "edge_device";
+
 /** Build the lower-cased searchable blob from body excerpt + observed route. The
  *  title is matched separately (corroboration only), never as a strong marker. */
-function searchableBlob(res: EdgeHttpResponse): string {
-  return `${res.route ?? ""}\n${res.bodyExcerpt ?? ""}`.toLowerCase();
+function searchableBlob(res: EdgeHttpResponse, routeIsEvidence: boolean): string {
+  return `${routeIsEvidence ? res.route ?? "" : ""}\n${res.bodyExcerpt ?? ""}`.toLowerCase();
 }
 
 /** Lower-cased header lookup; tolerant of callers that did not pre-lower keys. */
@@ -67,8 +83,8 @@ function headerValue(headers: Record<string, string> | undefined, name: string):
  * fired - it can never, on its own, produce a match. The first fingerprint that
  * matches wins (markers are mutually exclusive by construction).
  */
-export function classifyEdgeDevice(res: EdgeHttpResponse): EdgeDeviceMatch | null {
-  const blob = searchableBlob(res);
+export function classifyEdgeDevice(res: EdgeHttpResponse, opts: EdgeClassifyOptions = {}): EdgeDeviceMatch | null {
+  const blob = searchableBlob(res, opts.routeIsEvidence !== false);
   const title = (res.title ?? "").toLowerCase();
 
   for (const fp of EDGE_DEVICE_FINGERPRINTS) {
@@ -116,8 +132,8 @@ function severityFor(kev: KevEntry[]): ScanFinding["severity"] {
  * NOT emit a bare "we saw a VPN portal" finding - the value is the KEV mapping,
  * and a no-KEV match would be noise).
  */
-export function classifyEdgeExposure(res: EdgeHttpResponse): ScanFinding[] {
-  const match = classifyEdgeDevice(res);
+export function classifyEdgeExposure(res: EdgeHttpResponse, opts: EdgeClassifyOptions = {}): ScanFinding[] {
+  const match = classifyEdgeDevice(res, opts);
   if (!match) return [];
 
   const kev = kevForProduct(match.product);
@@ -138,9 +154,11 @@ export function classifyEdgeExposure(res: EdgeHttpResponse): ScanFinding[] {
         `${kev.length} entr${kev.length === 1 ? "y" : "ies"} on the CISA Known Exploited ` +
         `Vulnerabilities catalog (snapshot ${KEV_SNAPSHOT_DATE}): ${cveIds.join(", ")}. ` +
         `Confirm the appliance firmware is patched past each CVE and that management/portal ` +
-        `access is restricted.` +
+        `access is restricted. This is outside-in exposure monitoring: it reports what the ` +
+        `portal shows the internet and does not protect the appliance.` +
         (ransomware ? " At least one of these CVEs is linked to known ransomware campaigns." : ""),
       evidence: {
+        exposure_kind: EDGE_EXPOSURE_KIND,
         product: match.product,
         vendor: match.vendor,
         matched_markers: match.matchedMarkers.join(", "),

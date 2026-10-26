@@ -21,6 +21,7 @@ import { getInstinctUser, fetchWithRefresh, jsonHeaders } from "@/lib/client-aut
 import { GlassPanel, MetricTile, StatusPill, SectionHeader } from "@/components/console";
 import { assessDeceptionCoverage } from "@/lib/forcefield/deception-coverage";
 import { THREAT_COVERAGE, coverageSummary, type CoverageStatus } from "@/lib/forcefield/threat-coverage";
+import { ExposurePanel } from "@/components/forcefield/ExposurePanel";
 
 type CanaryKind = "token" | "route" | "row" | "tool";
 
@@ -316,6 +317,8 @@ export default function ForcefieldPage() {
           </GlassPanel>
         );
       })()}
+
+      <ExposurePanel />
 
       <GlassPanel style={{ marginBottom: "1.25rem" }}>
         <h3 style={{ margin: "0 0 0.75rem", fontSize: "1rem", color: "var(--wp-text, #e6e9ef)" }}>Seed a decoy</h3>

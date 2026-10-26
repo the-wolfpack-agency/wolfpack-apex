@@ -285,6 +285,28 @@ export async function listFindings(
   return rows.map(toFinding);
 }
 
+/** Open / acknowledged edge-device exposure findings (evidence.exposure_kind =
+ *  'edge_device', set by edge-exposure/classify.ts) for the workspace, worst
+ *  severity first. Backs the Forcefield Exposure panel. Workspace-scoped; no DB
+ *  degrades to [] (safeQuery). */
+export async function listEdgeExposureFindings(workspaceId: string, limit = 100): Promise<ScanFindingRow[]> {
+  const cap = Math.min(Math.max(limit, 1), 200);
+  const { rows } = await safeQuery<DbRow>(
+    `SELECT id, scan_id, platform, route, severity, category, title, detail, evidence, status, created_at
+       FROM instinct_platform_scan_findings
+      WHERE workspace_id = $1
+        AND status <> 'resolved'
+        AND evidence->>'exposure_kind' = 'edge_device'
+      ORDER BY CASE severity
+                 WHEN 'critical' THEN 0 WHEN 'high' THEN 1
+                 WHEN 'medium' THEN 2 ELSE 3 END,
+               created_at DESC
+      LIMIT $2`,
+    [workspaceId, cap],
+  );
+  return rows.map(toFinding);
+}
+
 export interface FindingsSummary {
   total: number;
   bySeverity: Record<ScanSeverity, number>;

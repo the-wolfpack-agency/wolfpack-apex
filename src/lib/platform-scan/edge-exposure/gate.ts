@@ -59,6 +59,70 @@ export interface EdgeExposureDeps {
   audit?: typeof recordAudit;
 }
 
+/** The actor + target the floor is evaluated for. */
+export interface EdgeExposureFloorInput {
+  workspaceId: string;
+  platform: string;
+  actor: { userId: string; role: string };
+}
+
+/** Write one best-effort audit entry for an edge-exposure decision. Never throws. */
+export async function recordEdgeExposureAudit(
+  audit: typeof recordAudit,
+  input: EdgeExposureFloorInput,
+  outcome: "detected" | "blocked" | "clean",
+  extra: Record<string, unknown>,
+): Promise<void> {
+  try {
+    await audit({
+      actor: { user_id: input.actor.userId, role: input.actor.role },
+      action: `platform.edge_exposure.${outcome}`,
+      resourceType: "edge_exposure",
+      resourceId: input.platform,
+      afterState: { platform: input.platform, outcome, ...extra },
+    });
+  } catch {
+    /* Audit is best-effort: the decision is already returned + tracked. */
+  }
+}
+
+/**
+ * The fail-closed floor on its own: OFF by default, then the ownership floor.
+ * Returns null when the classifier may run, or the refusal reason after tracking
+ * + auditing it. Shared by the single-response gate below and the scan pass
+ * (pass.ts), so the two can never drift apart.
+ */
+export async function checkEdgeExposureFloor(
+  input: EdgeExposureFloorInput,
+  deps: EdgeExposureDeps = {},
+): Promise<string | null> {
+  const enabled = deps.enabled ?? isEdgeExposureEnabled;
+  const curated = deps.curated ?? isCuratedTarget;
+  const verified = deps.verified ?? isTargetVerified;
+  const track = deps.track ?? trackEvent;
+  const audit = deps.audit ?? recordAudit;
+
+  let reason: string | null = null;
+  // 1. OFF by default: the setting must be explicitly enabled.
+  if (!enabled()) reason = "disabled";
+  // 2. Ownership floor: curated/internal is exempt; any other target must be
+  //    proven client-owned (fail-closed) before the classifier may run. A
+  //    verification lookup that throws is a refusal, never a pass.
+  else if (!curated(input.platform)) {
+    let owned = false;
+    try {
+      owned = await verified(input.workspaceId, input.platform);
+    } catch {
+      owned = false;
+    }
+    if (!owned) reason = "unverified_target";
+  }
+  if (reason === null) return null;
+  track("platform.edge_exposure_blocked", input.actor.userId, input.actor.role, { platform: input.platform, reason });
+  await recordEdgeExposureAudit(audit, input, "blocked", { reason });
+  return reason;
+}
+
 /**
  * Gate + run the edge-device exposure classifier for one already-collected
  * response. Returns { ran: false, reason } when refused by a floor, or
@@ -69,45 +133,15 @@ export async function runEdgeDeviceExposure(
   input: EdgeExposureInput,
   deps: EdgeExposureDeps = {},
 ): Promise<EdgeExposureResult> {
-  const enabled = deps.enabled ?? isEdgeExposureEnabled;
-  const curated = deps.curated ?? isCuratedTarget;
-  const verified = deps.verified ?? isTargetVerified;
   const track = deps.track ?? trackEvent;
   const audit = deps.audit ?? recordAudit;
 
-  const { workspaceId, platform, response, actor } = input;
+  const { platform, response, actor } = input;
+  const recordDecisionAudit = (outcome: "detected" | "blocked" | "clean", extra: Record<string, unknown>) =>
+    recordEdgeExposureAudit(audit, input, outcome, extra);
 
-  const recordDecisionAudit = async (
-    outcome: "detected" | "blocked" | "clean",
-    extra: Record<string, unknown>,
-  ): Promise<void> => {
-    try {
-      await audit({
-        actor: { user_id: actor.userId, role: actor.role },
-        action: `platform.edge_exposure.${outcome}`,
-        resourceType: "edge_exposure",
-        resourceId: platform,
-        afterState: { platform, outcome, ...extra },
-      });
-    } catch {
-      /* Audit is best-effort: the decision is already returned + tracked. */
-    }
-  };
-
-  const block = async (reason: string): Promise<EdgeExposureResult> => {
-    track("platform.edge_exposure_blocked", actor.userId, actor.role, { platform, reason });
-    await recordDecisionAudit("blocked", { reason });
-    return { ran: false, reason };
-  };
-
-  // 1. OFF by default: the setting must be explicitly enabled.
-  if (!enabled()) return block("disabled");
-
-  // 2. Ownership floor: curated/internal is exempt; any other target must be
-  //    proven client-owned (fail-closed) before the classifier may run.
-  if (!curated(platform) && !(await verified(workspaceId, platform))) {
-    return block("unverified_target");
-  }
+  const refused = await checkEdgeExposureFloor(input, deps);
+  if (refused !== null) return { ran: false, reason: refused };
 
   // Passed every floor: run the pure, offline classifier.
   const findings = classifyEdgeExposure(response);

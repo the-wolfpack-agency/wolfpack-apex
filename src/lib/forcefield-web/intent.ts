@@ -38,6 +38,7 @@ export type IntentSignalId =
   | "recon_foreign_product" // a path of a product the site does not run
   | "recon_foreign_runtime" // a server-side extension (.php/.jsp/...) the site's runtime never serves
   | "sensitive_probe" // an existing sensitive-path probe (.env, .git, ...)
+  | "kev_exploit_path" // the exploit shape of a CISA known-exploited CVE (kev-rules.ts)
   | "decoy_proximity" // poking around the decoy namespace without taking the decoy
   | "payload_shaped" // a parameter shaped like payload preparation (id=1', "><, ${)
   | "rapid_enumeration" // a non-browser client sweeping many distinct paths fast
@@ -59,6 +60,7 @@ export const INTENT_WEIGHTS: Readonly<Record<IntentSignalId, number>> = {
   recon_foreign_product: 3,
   recon_foreign_runtime: 3,
   sensitive_probe: 2,
+  kev_exploit_path: 3,
   decoy_proximity: 3,
   payload_shaped: 2,
   rapid_enumeration: 2,
@@ -305,7 +307,13 @@ export function intentSignalsFor(
   if (req.authenticated === true || req.welcomed === true) return [];
   const out: IntentSignal[] = [];
   const recon = reconSignal(req.path, profile, ruleset);
-  if (recon) out.push(recon);
+  // A known-exploited CVE's exploit request (observe.ts labels it kev_<rule>) is
+  // intent whatever the stack: on a WordPress site the vulnerable plugin path is
+  // "native", which is exactly where the exploit matters. It replaces the recon
+  // signal for the same request (one signal per request, never double counted).
+  // Intent only: it can reach watch / tarpit, never block without proof.
+  if (req.probe && req.probe.startsWith("kev_")) out.push({ id: "kev_exploit_path", detail: req.probe });
+  else if (recon) out.push(recon);
   else if (req.probe) {
     // A probe pattern under a product the site RUNS is its own path (a
     // WordPress site's /wp-admin), whatever the observation called it.
@@ -496,6 +504,7 @@ const REASON_TEXT: Record<IntentSignalId, string> = {
   recon_foreign_product: "asked for a product this site does not run",
   recon_foreign_runtime: "asked for server-side files this site's runtime never serves",
   sensitive_probe: "probed sensitive paths",
+  kev_exploit_path: "sent the exploit request for a known-exploited CVE",
   decoy_proximity: "searched around a decoy",
   payload_shaped: "sent payload-shaped parameters",
   rapid_enumeration: "swept many paths in under a minute",

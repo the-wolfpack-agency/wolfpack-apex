@@ -22,6 +22,8 @@
     "router:exercise": "npx tsx scripts/router-exercise.ts",
     "dogfood": "npx tsx scripts/dogfood.ts",
     "scan:tenant-isolation": "npx tsx scripts/scan-tenant-isolation.ts",
+    "kev:refresh": "npx tsx scripts/kev-refresh.ts",
+    "kev:check": "npx tsx scripts/kev-refresh.ts --check",
     "check:merge-orphans": "npx tsx scripts/check-merge-orphans.ts",
     "scan:silent-catches": "npx tsx scripts/scan-silent-catches.ts",
     "walkthrough": "npx tsx scripts/walkthrough.ts",

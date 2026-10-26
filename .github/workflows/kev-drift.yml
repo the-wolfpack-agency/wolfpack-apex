@@ -1,0 +1,36 @@
+name: Forcefield · KEV snapshot drift
+
+# The bundled CISA Known Exploited Vulnerabilities snapshot
+# (src/lib/forcefield/kev/catalog.generated.ts) is checked in so the runtime
+# never fetches the catalog. This job compares it with the live public feed
+# once a week and fails when a TRACKED entry changed or left the catalog.
+# Fix: `npm run kev:refresh`, review the diff, commit.
+#
+# READ-ONLY, no secrets. Output is CVE ids the code already names (public
+# catalog ids), never targets or findings.
+
+on:
+  schedule:
+    - cron: "40 6 * * 1" # Mondays, after CISA's weekday updates
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kev-drift
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v4.0.4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Compare the KEV snapshot with the live CISA feed
+        run: npm run kev:check

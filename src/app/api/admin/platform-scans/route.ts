@@ -17,6 +17,7 @@ import { resolveScanTarget, isCuratedTarget, type ScanManifest } from "@/lib/pla
 import { isTargetVerified } from "@/lib/platform-scan/authorization";
 import { assertScannableUrl, SsrfBlockedError } from "@/lib/platform-scan/ssrf-guard";
 import type { PlatformScanResult } from "@/lib/platform-scan/types";
+import { runEdgeExposureOverCrawl } from "@/lib/platform-scan/edge-exposure/scan-hook";
 
 /**
  * Establish an authenticated session for a platform that needs login, returning
@@ -252,7 +253,23 @@ export async function POST(req: NextRequest) {
       headers: auth?.headers,
       authenticated: !!auth,
     });
+
+    // Edge-device exposure over the responses this crawl ALREADY collected (no
+    // extra requests). OFF by default and ownership-gated inside the hook, which
+    // re-checks the same floor as above (defense in depth). Findings join the
+    // scan's own so recordScan persists, tracks and Brain-ingests them.
+    const edge = await runEdgeExposureOverCrawl({
+      workspaceId,
+      platform,
+      actor: { userId: user.id, role: user.role },
+      responses: result.observed ?? [],
+    });
+    if (edge.ran && edge.findings.length > 0) {
+      result = { ...result, findings: [...result.findings, ...edge.findings] };
+    }
   }
+  // Responses are in-memory evidence only; never persisted or returned.
+  delete result.observed;
 
   const { scanId, findingCount, criticalCount, autoResolvedCount } = await recordScan({
     workspaceId,
