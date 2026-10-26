@@ -11,6 +11,9 @@
  * IP (the DNS-pointing vector), before any fetch is issued.
  */
 import { lookup } from "node:dns/promises";
+
+/** Upper bound on one DNS lookup in the guard. */
+export const DNS_TIMEOUT_MS = 3000;
 import net from "node:net";
 
 export class SsrfBlockedError extends Error {
@@ -100,7 +103,12 @@ export async function assertScannableUrl(raw: string): Promise<void> {
     throw new SsrfBlockedError(`blocked private IP literal: ${host}`);
   }
   try {
-    const results = await lookup(host, { all: true });
+    // A resolver that never answers must not hang a scan (or a test): give up after
+    // DNS_TIMEOUT_MS, which is treated like any other transient resolver failure.
+    const results = await Promise.race([
+      lookup(host, { all: true }),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("dns_timeout")), DNS_TIMEOUT_MS).unref?.()),
+    ]);
     for (const r of results) {
       if (isPrivateIp(r.address)) {
         throw new SsrfBlockedError(`host ${host} resolves to a private IP (${r.address})`);

@@ -24,6 +24,9 @@
 // --- Boundary mocks ---------------------------------------------------------
 
 // 1. Capability gate: always admin, ws-1.
+// No real DNS in this test: the SSRF guard resolves the target host, and a slow CI
+// resolver made this suite time out (2026-10-26). A public address passes the guard.
+jest.mock("node:dns/promises", () => ({ lookup: jest.fn(async () => [{ address: "93.184.216.34", family: 4 }]) }));
 jest.mock("@/lib/auth/require-capability", () => ({
   requireCapability: jest.fn(async () => ({
     ok: true,
