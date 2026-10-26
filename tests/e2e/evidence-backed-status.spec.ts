@@ -279,7 +279,9 @@ test.describe("public security posture page", () => {
       expect(body, `evidence key ${key} is on the page`).toContain(key);
     }
     expect(body).toMatch(/Multi-factor authentication enforced for administrators Not in place/);
-    expect(body).toMatch(/Microsoft Graph and QuickBooks OAuth tokens encrypted by the application In progress/);
+    expect(body).toMatch(/Microsoft Graph and QuickBooks OAuth tokens encrypted by the application In place/);
+    expect(body).toMatch(/Integration credentials and MFA seeds encrypted by the application under a dedicated key In place/);
+    expect(body).not.toMatch(/not yet encrypted by the application|stored without application-level encryption/);
     expect(body).not.toMatch(/OAuth refresh tokens, multi-factor seeds and compliance evidence, are encrypted/);
     expectNoFailures(snapshot);
   });

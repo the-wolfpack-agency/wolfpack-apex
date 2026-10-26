@@ -5,7 +5,9 @@
  *
  * Each fact is read from the live database or the running process, never from a
  * doc or a config flag alone:
- *   - stored OAuth tokens and connector credentials: how many are NOT ciphertext
+ *   - stored OAuth tokens, connector credentials and MFA seeds: how many are NOT
+ *     ciphertext, and how many are not sealed under the deployment's dedicated
+ *     primary key (plaintext, legacy-key or previous-key values all count)
  *   - row-level security: are policies real (not USING(true)), forced, and does
  *     the connecting role bypass them
  *   - gate decisions in a window: how many were ENFORCED blocks / escalations
@@ -15,6 +17,7 @@
  *
  * A failed read yields null (unknown), never a passing default.
  */
+import { parseSecretKeyMaterial, secretKeyId } from "@/lib/crypto/secret-storage";
 import { runEvidenceProbe, type EvidenceExecutor, type EvidenceProbe } from "./evidence-window";
 
 export type KekSource = "dedicated" | "derived-from-jwt" | "dev-literal";
@@ -23,6 +26,10 @@ export interface StoredSecretCount {
   total: number;
   /** Rows whose secret column is present but not a v1.* ciphertext token. */
   plaintext: number;
+  /** Rows with a secret present that is not sealed under the primary key
+   *  (INSTINCT_SECRET_KEY): plaintext, legacy-key and previous-key values all
+   *  count. With no valid primary key every row with a secret counts. */
+  offPrimaryKey: number;
 }
 
 export interface RlsPosture {
@@ -54,6 +61,8 @@ export interface GateWindow {
 export interface PlatformEvidence {
   oauthTokens: StoredSecretCount | null;
   connectorCredentials: StoredSecretCount | null;
+  /** instinct_admin_mfa.encrypted_secret (TOTP seeds) for the workspace. */
+  mfaSeeds: StoredSecretCount | null;
   rls: RlsPosture | null;
   gate: GateWindow | null;
   signedCheckpoints: EvidenceProbe;
@@ -77,6 +86,25 @@ export function kekSource(env: Record<string, string | undefined> = process.env)
     }
   }
   return env.INSTINCT_JWT_SECRET ? "derived-from-jwt" : "dev-literal";
+}
+
+/** LIKE pattern matching a value sealed under the primary key in `env`
+ *  ("v1.<kid>.%", secret-storage.ts token format). With no valid primary key it
+ *  is "", which no present value matches, so every present value counts as off
+ *  the primary key: the check fails closed. The key id names the key without
+ *  revealing it. */
+export function primaryKeyPattern(env: Record<string, string | undefined> = process.env): string {
+  const key = parseSecretKeyMaterial(env.INSTINCT_SECRET_KEY);
+  return key ? `v1.${secretKeyId(key)}.%` : "";
+}
+
+/** count(*) FILTER clauses for a table's secret columns: plaintext and
+ *  off-primary-key rows. $pattern is the bind placeholder for primaryKeyPattern. */
+function secretCountSql(columns: string[], pattern: string): string {
+  const present = (c: string) => `${c} IS NOT NULL AND ${c} <> ''`;
+  const plain = columns.map((c) => `(${present(c)} AND ${c} NOT LIKE 'v1.%')`).join(" OR ");
+  const off = columns.map((c) => `(${present(c)} AND ${c} NOT LIKE ${pattern})`).join(" OR ");
+  return `count(*) AS total, count(*) FILTER (WHERE ${plain}) AS plaintext, count(*) FILTER (WHERE ${off}) AS off_primary`;
 }
 
 const n = (v: unknown): number => {
@@ -114,42 +142,43 @@ export async function collectPlatformEvidence(
   );
 
   if (!exec) {
-    return { oauthTokens: null, connectorCredentials: null, rls: null, gate: null, signedCheckpoints, kekSource: kekSource(env) };
+    return { oauthTokens: null, connectorCredentials: null, mfaSeeds: null, rls: null, gate: null, signedCheckpoints, kekSource: kekSource(env) };
   }
 
-  const [oauthTokens, connectorCredentials, rls, gate] = await Promise.all([
+  const pattern = primaryKeyPattern(env);
+  const counted = (row: Record<string, unknown> | undefined): StoredSecretCount => ({
+    total: n(row?.total),
+    plaintext: n(row?.plaintext),
+    offPrimaryKey: n(row?.off_primary),
+  });
+
+  const [oauthTokens, connectorCredentials, mfaSeeds, rls, gate] = await Promise.all([
     attempt(async (): Promise<StoredSecretCount> => {
       // Microsoft Graph and QuickBooks tokens are deployment-wide stores (no
       // workspace column); only counts are read, never a token value.
-      const ms = await exec(
-        `SELECT count(*) AS total,
-                count(*) FILTER (WHERE (access_token IS NOT NULL AND access_token <> '' AND access_token NOT LIKE 'v1.%')
-                                    OR (refresh_token IS NOT NULL AND refresh_token <> '' AND refresh_token NOT LIKE 'v1.%')) AS plaintext
-           FROM instinct_ms_tokens`,
-        [],
-      );
-      const qbo = await exec(
-        `SELECT count(*) AS total,
-                count(*) FILTER (WHERE (access_token IS NOT NULL AND access_token <> '' AND access_token NOT LIKE 'v1.%')
-                                    OR (refresh_token IS NOT NULL AND refresh_token <> '' AND refresh_token NOT LIKE 'v1.%')) AS plaintext
-           FROM instinct_qbo_tokens`,
-        [],
-      );
-      return {
-        total: n(ms.rows[0]?.total) + n(qbo.rows[0]?.total),
-        plaintext: n(ms.rows[0]?.plaintext) + n(qbo.rows[0]?.plaintext),
-      };
+      const ms = await exec(`SELECT ${secretCountSql(["access_token", "refresh_token"], "$1")} FROM instinct_ms_tokens`, [pattern]);
+      const qbo = await exec(`SELECT ${secretCountSql(["access_token", "refresh_token"], "$1")} FROM instinct_qbo_tokens`, [pattern]);
+      const a = counted(ms.rows[0]);
+      const b = counted(qbo.rows[0]);
+      return { total: a.total + b.total, plaintext: a.plaintext + b.plaintext, offPrimaryKey: a.offPrimaryKey + b.offPrimaryKey };
     }),
     attempt(async (): Promise<StoredSecretCount> => {
       const r = await exec(
-        `SELECT count(*) AS total,
-                count(*) FILTER (WHERE (auth_header_enc IS NOT NULL AND auth_header_enc <> '' AND auth_header_enc NOT LIKE 'v1.%')
-                                    OR (refresh_token_enc IS NOT NULL AND refresh_token_enc <> '' AND refresh_token_enc NOT LIKE 'v1.%')) AS plaintext
+        `SELECT ${secretCountSql(["auth_header_enc", "refresh_token_enc"], "$2")}
            FROM instinct_connector_credentials
           WHERE workspace_id = $1`,
-        [workspaceId],
+        [workspaceId, pattern],
       );
-      return { total: n(r.rows[0]?.total), plaintext: n(r.rows[0]?.plaintext) };
+      return counted(r.rows[0]);
+    }),
+    attempt(async (): Promise<StoredSecretCount> => {
+      const r = await exec(
+        `SELECT ${secretCountSql(["encrypted_secret"], "$2")}
+           FROM instinct_admin_mfa
+          WHERE workspace_id = $1`,
+        [workspaceId, pattern],
+      );
+      return counted(r.rows[0]);
     }),
     attempt(async (): Promise<RlsPosture> => {
       const r = await exec(
@@ -203,7 +232,7 @@ export async function collectPlatformEvidence(
     }),
   ]);
 
-  return { oauthTokens, connectorCredentials, rls, gate, signedCheckpoints, kekSource: kekSource(env) };
+  return { oauthTokens, connectorCredentials, mfaSeeds, rls, gate, signedCheckpoints, kekSource: kekSource(env) };
 }
 
 /** Database-level tenant isolation is real only when policies key on something

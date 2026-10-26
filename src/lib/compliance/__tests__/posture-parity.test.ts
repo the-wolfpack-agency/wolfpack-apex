@@ -4,8 +4,9 @@
  *
  *  1. The page's Control status table and the claim registry agree, row for row.
  *  2. For every "In place" claim, a fixture with gap evidence FAILS the check.
- *  3. Against the state measured read-only in production on 2026-10-24, the
- *     page as written has zero violations.
+ *  3. Against the state measured read-only in production on 2026-10-26, the
+ *     page as written has zero violations; the 2026-10-24 state (before the
+ *     at-rest work landed) would violate the two secrets rows now In place.
  *  4. The audit's known false claims are not on the page.
  */
 import { readFileSync } from "fs";
@@ -27,8 +28,9 @@ const probe = (state: EvidenceProbe["state"]): EvidenceProbe => ({
 });
 
 const HEALTHY_PLATFORM: PlatformEvidence = {
-  oauthTokens: { total: 6, plaintext: 0 },
-  connectorCredentials: { total: 4, plaintext: 0 },
+  oauthTokens: { total: 6, plaintext: 0, offPrimaryKey: 0 },
+  connectorCredentials: { total: 4, plaintext: 0, offPrimaryKey: 0 },
+  mfaSeeds: { total: 1, plaintext: 0, offPrimaryKey: 0 },
   rls: { tables: 248, rlsEnabled: 248, forced: 248, policies: 248, nonTrivialPolicies: 248, roleBypassesRls: false, ownedByRole: 0 },
   gate: { windowDays: 30, decisions: 100, enforced: 50, enforcedBlocks: 5, enforcedEscalations: 2, wouldBlock: 5 },
   signedCheckpoints: probe("fresh"),
@@ -49,10 +51,11 @@ const HEALTHY: PostureFacts = {
  *  generalized): plaintext OAuth tokens, connector ciphertext under a non-
  *  dedicated key, permissive unforced RLS with a bypassing owner role, no signed
  *  checkpoint, a fresh passing chain verification, PROD_DOMAIN unset. */
-const MEASURED: PostureFacts = {
+const MEASURED_2026_10_24: PostureFacts = {
   platform: {
-    oauthTokens: { total: 5, plaintext: 5 },
-    connectorCredentials: { total: 3, plaintext: 0 },
+    oauthTokens: { total: 5, plaintext: 5, offPrimaryKey: 5 },
+    connectorCredentials: { total: 3, plaintext: 0, offPrimaryKey: 3 },
+    mfaSeeds: { total: 1, plaintext: 0, offPrimaryKey: 1 },
     rls: { tables: 200, rlsEnabled: 30, forced: 0, policies: 30, nonTrivialPolicies: 0, roleBypassesRls: true, ownedByRole: 200 },
     gate: { windowDays: 30, decisions: 1000, enforced: 20, enforcedBlocks: 0, enforcedEscalations: 0, wouldBlock: 10 },
     signedCheckpoints: probe("none"),
@@ -64,6 +67,22 @@ const MEASURED: PostureFacts = {
   accessTokenTtlSeconds: 900,
   mfaEnforced: ATTESTED.mfaEnforced,
   codeqlRequired: ATTESTED.codeqlRequired,
+};
+
+/** Measured read-only against production on 2026-10-26, after the dedicated
+ *  primary key was set and every stored secret re-encrypted under it (#1227,
+ *  #1253): 6 Graph token rows, all sealed under the primary key; 0 QuickBooks
+ *  rows; 4 connector credentials and 1 MFA seed, all under the primary key;
+ *  RLS, checkpoints, TLS-in-CI unchanged. */
+const MEASURED: PostureFacts = {
+  ...MEASURED_2026_10_24,
+  platform: {
+    ...MEASURED_2026_10_24.platform!,
+    oauthTokens: { total: 6, plaintext: 0, offPrimaryKey: 0 },
+    connectorCredentials: { total: 4, plaintext: 0, offPrimaryKey: 0 },
+    mfaSeeds: { total: 1, plaintext: 0, offPrimaryKey: 0 },
+    kekSource: "dedicated",
+  },
 };
 
 describe("the page and the claim registry agree", () => {
@@ -100,6 +119,8 @@ describe("parity: an In place claim with gap evidence fails", () => {
     "isolation.app_predicate": { isolationGuardrail: false },
     "auth.short_access_tokens": { accessTokenTtlSeconds: 8 * 3600 },
     "audit.hash_chain": { chain: probe("stale") },
+    "secrets.oauth_tokens_encrypted": { platform: { ...HEALTHY_PLATFORM, oauthTokens: { total: 6, plaintext: 1, offPrimaryKey: 1 } } },
+    "secrets.app_encrypted": { platform: { ...HEALTHY_PLATFORM, connectorCredentials: { total: 4, plaintext: 0, offPrimaryKey: 1 } } },
   };
 
   it("every In place claim has a gap fixture here", () => {
@@ -119,14 +140,34 @@ describe("parity: an In place claim with gap evidence fails", () => {
   });
 
   it("flipping a Not in place claim to In place while its evidence is gap is caught", () => {
-    const lying = POSTURE_CLAIMS.map((c) => (c.key === "isolation.db_rls" || c.key === "secrets.oauth_tokens_encrypted" ? { ...c, docStatus: "in_place" as const } : c));
+    const lying = POSTURE_CLAIMS.map((c) => (c.key === "isolation.db_rls" || c.key === "auth.mfa_enforced" ? { ...c, docStatus: "in_place" as const } : c));
     const r = checkPostureParity(MEASURED, lying);
-    expect(r.results.filter((x) => x.violation).map((x) => x.key).sort()).toEqual(["isolation.db_rls", "secrets.oauth_tokens_encrypted"]);
+    expect(r.results.filter((x) => x.violation).map((x) => x.key).sort()).toEqual(["auth.mfa_enforced", "isolation.db_rls"]);
+  });
+
+  it("the 2026-10-24 state (plaintext OAuth tokens, key derived from the JWT secret) violates both secrets rows as now written", () => {
+    const r = checkPostureParity(MEASURED_2026_10_24);
+    expect(r.results.filter((x) => x.violation).map((x) => x.key).sort()).toEqual(["secrets.app_encrypted", "secrets.oauth_tokens_encrypted"]);
   });
 
   it("a non-dedicated key is not encryption under a dedicated key", () => {
     const facts = { ...HEALTHY, platform: { ...HEALTHY_PLATFORM, kekSource: "dev-literal" as const } };
     expect(checkPostureParity(facts).results.find((x) => x.key === "secrets.app_encrypted")!.evidence).toBe("gap");
+  });
+
+  it.each([
+    ["a connector credential still under the legacy or a previous key", { connectorCredentials: { total: 4, plaintext: 0, offPrimaryKey: 1 } }],
+    ["a plaintext connector credential", { connectorCredentials: { total: 4, plaintext: 1, offPrimaryKey: 1 } }],
+    ["an MFA seed still under the legacy or a previous key", { mfaSeeds: { total: 1, plaintext: 0, offPrimaryKey: 1 } }],
+    ["a plaintext MFA seed", { mfaSeeds: { total: 1, plaintext: 1, offPrimaryKey: 1 } }],
+  ])("a dedicated key is not enough: %s is a gap", (_label, over) => {
+    const facts = { ...HEALTHY, platform: { ...HEALTHY_PLATFORM, ...over } };
+    expect(checkPostureParity(facts).results.find((x) => x.key === "secrets.app_encrypted")!.evidence).toBe("gap");
+  });
+
+  it("MFA seeds not measured: the dedicated-key claim is unknown, never proven", () => {
+    const facts = { ...HEALTHY, platform: { ...HEALTHY_PLATFORM, mfaSeeds: null } };
+    expect(checkPostureParity(facts).results.find((x) => x.key === "secrets.app_encrypted")!.evidence).toBe("unknown");
   });
 
   it("unmeasured facts are unknown, never proven", () => {
@@ -147,9 +188,15 @@ describe("the page as written against the measured production state", () => {
   it("has zero violations", () => {
     expect(r.results.filter((x) => x.violation)).toEqual([]);
   });
+  it("both secrets claims are In place and proven by the measured state", () => {
+    const by = Object.fromEntries(r.results.map((x) => [x.key, x]));
+    for (const k of ["secrets.oauth_tokens_encrypted", "secrets.app_encrypted"]) {
+      expect(by[k].docStatus).toBe("in_place");
+      expect(by[k].evidence).toBe("proven");
+    }
+  });
   it("the known-false claims are recorded as not done", () => {
     const by = Object.fromEntries(r.results.map((x) => [x.key, x]));
-    expect(by["secrets.oauth_tokens_encrypted"].docStatus).toBe("in_progress");
     expect(by["isolation.db_rls"].docStatus).toBe("not_in_place");
     expect(by["auth.mfa_enforced"].docStatus).toBe("not_in_place");
     expect(by["ci.codeql_required"].docStatus).toBe("not_in_place");
