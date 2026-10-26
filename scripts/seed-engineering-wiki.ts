@@ -498,7 +498,7 @@ We build for enterprise trust from day one.
 ## Security posture
 - **Least-privilege** access, enforced by a capability model; agents act with short-lived, scope-limited tokens.
 - **Secrets** live in environment configuration, never in code.
-- **Row-level data isolation** between tenants.
+- **Row-level data isolation** policies are written for the workspace tables and switch on with the RLS cutover (docs/security/rls-cutover.md). Until then, queries are scoped to their workspace in application code, and \`npm run scan:tenant-isolation\` checks for unscoped queries (run on demand, not yet a CI gate).
 - **Crypto-agile** and quantum-migration-ready signing.
 - A public security-posture page documents the current stance.`,
   },
