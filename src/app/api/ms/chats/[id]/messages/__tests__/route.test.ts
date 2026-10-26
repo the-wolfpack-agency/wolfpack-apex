@@ -151,14 +151,38 @@ describe("POST /api/ms/chats/[id]/messages", () => {
     expect(res.status).toBe(400);
   });
 
-  it("200 {messages:[], connected:false} when user has no MS token", async () => {
+  it("409 {connected:false} when user has no MS token: the send did not happen, so never a 200", async () => {
     mockGetUser.mockReturnValue(CALLER);
     mockGetValidToken.mockResolvedValue(null);
     const { POST } = await import("@/app/api/ms/chats/[id]/messages/route");
     const res = await POST(mkReq("/api/ms/chats/c1/messages", { content: "hi" }), ctx("c1"));
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(409);
     const body = await res.json();
-    expect(body.connected).toBe(false);
+    expect(body).toEqual({
+      connected: false,
+      provider: "microsoft",
+      error: "microsoft_not_connected",
+      notice: expect.stringMatching(/not connected/i),
+    });
+    // No send, no audit row for a message that was never sent.
+    expect(mockSendChatMessage).not.toHaveBeenCalled();
+    expect(mockRecordAudit).not.toHaveBeenCalled();
+    expect(mockTrack).toHaveBeenCalledWith(
+      "integration.not_connected_served",
+      "u1",
+      "dev",
+      { provider: "microsoft", method: "POST", surface: "ms/chats/messages" },
+    );
+  });
+
+  it("401 without a session is the only 401, even when MS is also not connected", async () => {
+    mockGetUser.mockReturnValue(null);
+    mockGetValidToken.mockResolvedValue(null);
+    const { POST } = await import("@/app/api/ms/chats/[id]/messages/route");
+    const res = await POST(mkReq("/api/ms/chats/c1/messages", { content: "hi" }, ""), ctx("c1"));
+    expect(res.status).toBe(401);
+    expect((await res.json()).connected).toBeUndefined();
+    expect(mockGetValidToken).not.toHaveBeenCalled();
   });
 
   it("200 {scope_missing:true} when chat meta returns scope_missing (NOT 500)", async () => {

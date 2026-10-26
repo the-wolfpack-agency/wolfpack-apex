@@ -1227,6 +1227,62 @@ describe("MessagesPage — inline compose", () => {
     ).toBeDefined();
   });
 
+  test("409 not connected: removes optimistic, restores draft, shows connect hint, never shows as sent", async () => {
+    wireApiRouter((url, init) => {
+      if (url === "/api/ms/chats") return ok({ chats: SAMPLE_CHATS });
+      if (url === "/api/ms/chats/chat-1" && (!init || init.method === "GET"))
+        return ok({ messages: [] });
+      if (url === "/api/ms/chats/chat-1/messages" && init?.method === "POST") {
+        return ok({ connected: false, provider: "microsoft", error: "microsoft_not_connected", notice: "Microsoft 365 is not connected." }, 409);
+      }
+      return ok({});
+    });
+    await selectChat1AndWaitForComposer();
+    fireEvent.change(screen.getByTestId("messages-compose-input"), {
+      target: { value: "not sent" },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("messages-compose-send"));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("messages-compose-not-connected-hint")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("messages-compose-connect-cta")).toHaveAttribute("href", "/settings");
+    expect((screen.getByTestId("messages-compose-input") as HTMLTextAreaElement).value).toBe("not sent");
+    expect(document.querySelector('[data-testid^="message-optimistic-"]')).toBeNull();
+    expect(screen.queryByTestId("messages-toast")).toBeNull();
+    const bodies = analyticsBodies();
+    expect(
+      bodies.find((b) => b.event === "messages.compose_failed" && b.metadata.reason === "not_connected"),
+    ).toBeDefined();
+    expect(bodies.find((b) => b.event === "messages.compose_sent")).toBeUndefined();
+  });
+
+  test("legacy 200 { connected: false } from an older deploy is still not treated as sent", async () => {
+    wireApiRouter((url, init) => {
+      if (url === "/api/ms/chats") return ok({ chats: SAMPLE_CHATS });
+      if (url === "/api/ms/chats/chat-1" && (!init || init.method === "GET"))
+        return ok({ messages: [] });
+      if (url === "/api/ms/chats/chat-1/messages" && init?.method === "POST") {
+        return ok({ messages: [], connected: false });
+      }
+      return ok({});
+    });
+    await selectChat1AndWaitForComposer();
+    fireEvent.change(screen.getByTestId("messages-compose-input"), {
+      target: { value: "still not sent" },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("messages-compose-send"));
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("messages-compose-not-connected-hint")).toBeInTheDocument();
+    });
+    expect(document.querySelector('[data-testid^="message-optimistic-"]')).toBeNull();
+    expect(analyticsBodies().find((b) => b.event === "messages.compose_sent")).toBeUndefined();
+  });
+
   test("write_disabled response shows inline write-disabled hint + removes optimistic", async () => {
     wireApiRouter((url, init) => {
       if (url === "/api/ms/chats") return ok({ chats: SAMPLE_CHATS });
@@ -2073,6 +2129,57 @@ describe("MessagesPage — collapsible sections + Teams & channels", () => {
     expect(
       document.querySelector('[data-testid^="channel-message-optimistic"]'),
     ).toBeNull();
+  });
+
+  test("channel composer: 409 not connected shows connect error + rolls back optimistic", async () => {
+    wireApiRouter((url, init) => {
+      if (url === "/api/ms/chats") return ok({ chats: SAMPLE_CHATS });
+      if (url === "/api/ms/teams")
+        return ok({ teams: [{ id: "team-wolf", displayName: "Wolfpack Internal" }] });
+      if (url === "/api/ms/teams/team-wolf/channels")
+        return ok({ channels: [{ id: "ch-eng", displayName: "Engineering" }] });
+      if (url === "/api/ms/teams/team-wolf/channels/ch-eng/messages" && (!init || init.method === "GET"))
+        return ok({ messages: [] });
+      if (
+        url === "/api/ms/teams/team-wolf/channels/ch-eng/messages" &&
+        init?.method === "POST"
+      )
+        return ok({ connected: false, provider: "microsoft", error: "microsoft_not_connected", notice: "Microsoft 365 is not connected." }, 409);
+      return ok({});
+    });
+    await renderMessagesOpen();
+    await waitFor(() => screen.getByTestId("team-row-team-wolf"));
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("team-toggle-team-wolf"));
+    });
+    await waitFor(() => screen.getByTestId("channel-row-ch-eng"));
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("channel-row-ch-eng"));
+    });
+    await waitFor(() => screen.getByTestId("channel-compose-input"));
+    fireEvent.change(screen.getByTestId("channel-compose-input"), {
+      target: { value: "unsent" },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("channel-compose-send"));
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("channel-compose-error").textContent).toMatch(
+        /isn't connected, so nothing was sent/,
+      );
+    });
+    expect(
+      document.querySelector('[data-testid^="channel-message-optimistic"]'),
+    ).toBeNull();
+    const fired = mockFetchWithRefresh.mock.calls
+      .filter((c) => c[0] === "/api/analytics")
+      .map((c) => JSON.parse(c[1]?.body ?? "{}"));
+    expect(
+      fired.find(
+        (x) => x.event === "messages.channel_compose_failed" && x.metadata.reason === "not_connected",
+      ),
+    ).toBeDefined();
   });
 
   test("AI draft button: requests, fills textarea with suggestion, fires acceptance analytics on send", async () => {

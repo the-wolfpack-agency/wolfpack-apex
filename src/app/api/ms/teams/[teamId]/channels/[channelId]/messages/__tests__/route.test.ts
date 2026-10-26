@@ -16,6 +16,11 @@ jest.mock("@/lib/microsoft-graph", () => ({
 
 const mockListChannelMessages = jest.fn();
 const mockSendChannelMessage = jest.fn();
+const mockTrack = jest.fn();
+jest.mock("@/lib/analytics", () => ({
+  trackEvent: (...a: any[]) => mockTrack(...a),
+}));
+
 jest.mock("@/lib/ms-graph-teams", () => ({
   listJoinedTeams: jest.fn(),
   listTeamChannels: jest.fn(),
@@ -112,6 +117,30 @@ describe("POST /api/ms/teams/[teamId]/channels/[channelId]/messages", () => {
       params: Promise.resolve({ teamId: "t", channelId: "c" }),
     });
     expect(res.status).toBe(401);
+  });
+
+  it("409 {connected:false} when MS not connected: the post did not happen, so never a 200", async () => {
+    mockGetUser.mockReturnValue({ id: "u1", role: "dev" });
+    mockGetValidToken.mockResolvedValue(null);
+    const { POST } = await import(
+      "@/app/api/ms/teams/[teamId]/channels/[channelId]/messages/route"
+    );
+    const res = await POST(postReq({ content: "hi" }), {
+      params: Promise.resolve({ teamId: "t", channelId: "c" }),
+    });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({
+      connected: false,
+      provider: "microsoft",
+      error: "microsoft_not_connected",
+    });
+    expect(mockSendChannelMessage).not.toHaveBeenCalled();
+    expect(mockTrack).toHaveBeenCalledWith(
+      "integration.not_connected_served",
+      "u1",
+      "dev",
+      { provider: "microsoft", method: "POST", surface: "ms/teams/channel-messages" },
+    );
   });
 
   it("400 when content missing or empty", async () => {

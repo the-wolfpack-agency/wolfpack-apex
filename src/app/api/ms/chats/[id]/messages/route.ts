@@ -8,7 +8,8 @@
  * Responses:
  *   200 { message: ChatMessage }                          — success
  *   200 { scope_missing: true }                           — Graph 401/403
- *   200 { messages: [], connected: false } (no MS token)  — user hasn't linked MS
+ *   409 { connected: false, provider, error, notice }     (Microsoft not linked;
+ *                                                          the send did not happen)
  *   400 { error: "Missing content" | "Content too long" } — body validation
  *   401 { error: "Unauthorized" }                         — no Instinct JWT
  *   403 { write_disabled: true }                          — env flag off
@@ -24,6 +25,7 @@ import { getChat, sendChatMessage } from "@/lib/ms-graph-chats";
 import { isTeamsWriteEnabled } from "@/lib/instinct-flags";
 import { recordAudit, extractRequestMetadata } from "@/lib/audit-log";
 import { trackEvent } from "@/lib/analytics";
+import { providerNotConnected } from "@/lib/integrations/not-connected";
 
 // Graph's documented max chatMessage body is 28 KB of markup. We cap
 // server-side at the same limit (character-count proxy — not a precise
@@ -122,7 +124,8 @@ export async function POST(
 
     const token = await getValidToken(user.id);
     if (!token) {
-      return NextResponse.json({ messages: [], connected: false });
+      // An action: 409, never a 200 that reads as a send that happened.
+      return providerNotConnected(req, user, "microsoft", { surface: "ms/chats/messages" });
     }
 
     // Step 1 — membership gate (reuse the same pattern as GET).

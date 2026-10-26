@@ -7,7 +7,9 @@ name: Verify
 # logic in YAML.
 #
 # Why the fan-out:
-#   - lint-types: tsc + eslint, no jest, no playwright install (fast, cheap).
+#   - lint-types: tsc + eslint + the static structural checks verify.sh runs
+#     in its lint group (workflow timeouts, action pins, commit hygiene,
+#     tenant isolation), no jest, no playwright install (fast, cheap).
 #   - unit: the ~13k-test jest suite split into 4 shards (matrix), each with
 #     --workerIdleMemoryLimit=512MB + --maxWorkers=50%. The memory limit
 #     recycles bloated workers so GC stalls stop blowing the 5s default

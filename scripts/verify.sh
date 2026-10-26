@@ -14,7 +14,9 @@
 #                           `npm run verify` is byte-for-byte unchanged. CI fans
 #                           the work across parallel jobs by setting this:
 #                             typecheck  -> tsc
-#                             lint       -> eslint
+#                             lint       -> eslint + structural checks
+#                                           (ci-timeouts, action-pins,
+#                                           commit-hygiene, tenant-isolation)
 #                             unit       -> jest (the heavy stage; shardable)
 #                             e2e        -> qr-download + next-build + e2e-smoke
 #                           Comma-combine freely, e.g. "typecheck,lint".
@@ -134,6 +136,7 @@ if [ "${VERIFY_DRY_RUN:-0}" = "1" ]; then
   echo "  stages-filter: ${VERIFY_STAGES:-all}"
   echo "  ordered-stages:"
   stage_enabled lint      && echo "    - lint"
+  stage_enabled lint      && echo "    - tenant-isolation (npm run scan:tenant-isolation)"
   stage_enabled typecheck && echo "    - typecheck"
   stage_enabled unit      && echo "    - unit-tests (${JEST_CMD[*]})"
   if [ "${VERIFY_SKIP_E2E:-0}" != "1" ]; then
@@ -176,6 +179,13 @@ stage_enabled lint      && run_stage "action-pins" npm run ci:check-action-pins
 # trailer, no private email. Decidable and cheap; --strict fails the push here
 # instead of a reviewer catching it later (or not).
 stage_enabled lint      && run_stage "commit-hygiene" npm run check:commit-hygiene -- --strict
+# Repo-wide tenant isolation: every SQL literal on a workspace-scoped table
+# either filters by workspace_id or is a documented benign class. Exit 1 on any
+# "unclassified" offender, which is a cross-tenant read or write. Static, no DB,
+# about a second. The jest guardrail (tenant-isolation-global.test.ts) asserts
+# the same core; this stage names the leak in the gate summary, not inside a
+# 13k-test shard log.
+stage_enabled lint      && run_stage "tenant-isolation" npm run scan:tenant-isolation
 stage_enabled typecheck && run_stage "typecheck"  npx tsc --noEmit
 stage_enabled unit      && run_stage "unit-tests" run_unit_tests
 
