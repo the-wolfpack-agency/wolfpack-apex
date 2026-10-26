@@ -8,11 +8,11 @@ Secrets stored in Postgres (connector credentials, Microsoft Graph tokens, Quick
 |---|---|---|
 | primary | `INSTINCT_SECRET_KEY` (32 bytes, hex or base64) | every new encryption, and decryption |
 | previous | `INSTINCT_SECRET_KEY_PREVIOUS` (comma-separated) | decryption only |
-| legacy | the original derivation from `INSTINCT_JWT_SECRET` (or its built-in fallback) | decryption only, once a primary is set |
+| legacy | the original derivation from `INSTINCT_JWT_SECRET` (or its built-in fallback) | used only while no primary is set. Once one is, the app never opens a legacy value; only the backfill script does, to move it under the primary |
 
 - Values encrypted under the primary carry its key id: `v1.k<16 hex>.<iv>.<tag>.<ct>`. Older values (`v1.<iv>.<tag>.<ct>`) still parse and decrypt. The key id is a hash of the key and does not reveal it.
 - With no valid `INSTINCT_SECRET_KEY`, the app behaves exactly as before and, in production, logs a `DEGRADED` line and records `security.secret_key_degraded` once per process.
-- With a primary set, the app records `security.secret_key_primary_active { primary_kid }` once per process, and `security.secret_old_key_decrypt { key_class }` once per process the first time it opens a legacy or previous-key value.
+- With a primary set, the app records `security.secret_key_primary_active { primary_kid }` once per process, and `security.secret_old_key_decrypt { key_class }` once per process the first time it opens a previous-key value (or, in the backfill script, a legacy one).
 - The backfill, `npm run security:rotate-secret-key`, counts values per table and column by key (dry run, the default) and with `--apply` re-encrypts legacy and previous-key values under the primary.
 
 ## Operator steps
@@ -112,7 +112,7 @@ Output is counts only: `rows`, `already_hashed`, `to_hash`, `hashed`, `failed`. 
 
 ## After the count is zero
 
-The legacy fallback stays in `secret-storage.ts` until a follow-up change removes it. That change is safe only after step 6 reads zero on every database that shares this code (production, and any Preview database), and after a period with no `security.secret_old_key_decrypt` events. Removing it earlier would make any remaining legacy value unreadable.
+Once a primary is set, the app does not open legacy values at all: a legacy value it meets reads as unavailable, and the dry run counts it as `unreadable`. Only `scripts/rotate-secret-key.ts` opts back in (`allowLegacyKeyForRotation`), so a deployment that started without a primary still rotates with steps 5 and 6. A guard test fails if any other code calls it. Production was checked before this change: `legacy=0`, and no `security.secret_old_key_decrypt` event after the rotation run.
 
 ## Rotating the primary later
 

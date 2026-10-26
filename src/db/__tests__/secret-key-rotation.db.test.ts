@@ -21,6 +21,7 @@ import {
   secretKeyId,
   __resetSecretKeyCacheForTests,
   setSecretKeySignalSink,
+  allowLegacyKeyForRotation,
 } from "@/lib/crypto/secret-storage";
 import { ROTATION_TARGETS, proveAppKey, rotateSecrets, surveySecrets, totals } from "@/lib/crypto/secret-key-rotation";
 
@@ -48,6 +49,7 @@ describeIfDb("at-rest key rotation backfill", () => {
 
   beforeAll(async () => {
     setSecretKeySignalSink(() => {});
+    allowLegacyKeyForRotation(); // as scripts/rotate-secret-key.ts does
     db = new Client({ connectionString: requireLocalTestDatabase(URL) });
     await db.connect();
     for (const t of ROTATION_TARGETS) await db.query(`DROP TABLE IF EXISTS ${t.table} CASCADE`);
@@ -175,11 +177,13 @@ describeIfDb("at-rest key rotation backfill", () => {
     const mk = (await db.query(`SELECT encrypted_key FROM instinct_workspace_model_keys`)).rows[0].encrypted_key;
     expect(decryptSecretWithInfo(mk)).toMatchObject({ ok: true, value: "sk-previous", keyClass: "primary" });
 
-    /* With only the primary in the ring (legacy fallback removed later), all rotated values open. */
+    /* As the app sees it (no legacy key in the ring), all rotated values open. */
+    allowLegacyKeyForRotation(false);
     setKeys({ INSTINCT_SECRET_KEY: KEY_PRIMARY, INSTINCT_JWT_SECRET: "a-different-jwt-secret-so-legacy-is-useless" });
     expect(decryptSecret((await db.query(`SELECT encrypted_secret FROM instinct_admin_mfa`)).rows[0].encrypted_secret)).toBe("JBSWY3DPEHPK3PXP");
     expect(decryptSecret((await db.query(`SELECT secret FROM instinct_delegation_issuers`)).rows[0].secret)).toBe("shared-issuer-secret");
     expect(decryptSecret((await db.query(`SELECT db_url_encrypted FROM instinct_tenant_registry`)).rows[0].db_url_encrypted)).toBe("postgres://u:p@h/db");
+    allowLegacyKeyForRotation();
   });
 
   it("a re-run is a no-op", async () => {
