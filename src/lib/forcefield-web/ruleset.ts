@@ -16,6 +16,7 @@
  */
 import { DEFAULT_TOOL_SIGNATURES, type ToolSignature } from "./fingerprint";
 import type { KnownAgent } from "./classify";
+import { coerceCarryover, type CarryoverEntry } from "./intent";
 
 export interface ForcefieldRuleset {
   /** Version marker so a site can log which ruleset it is running. */
@@ -56,6 +57,19 @@ export interface ForcefieldRuleset {
    *  the board can group what a scanner was after. Labels only, never a block.
    *  Optional; an older ruleset without it still validates. */
   probeClasses?: Record<string, string[]>;
+  /** INTENT scoring (intent.ts): product id -> path patterns, merged over the
+   *  bundled catalog, so a newly targeted product reaches every site centrally.
+   *  Optional. */
+  productPaths?: Record<string, string[]>;
+  /** INTENT scoring: runtime id -> server-side file extensions. Optional. */
+  runtimeExtensions?: Record<string, string[]>;
+  /** INTENT scoring: declared stack token -> runtimes + products. Optional. */
+  stackComponents?: Record<string, { runtimes: string[]; products: string[] }>;
+  /** INTENT carryover: fingerprints proven hostile on a Forcefield site, each
+   *  with its own expiry. DISTINCTIVE fingerprints only (the server applies
+   *  autoblock-scope before serving). Consumed as tarpit, never as a block.
+   *  Optional. */
+  intentCarryover?: CarryoverEntry[];
 }
 
 /**
@@ -266,6 +280,18 @@ export function coerceRuleset(data: unknown): ForcefieldRuleset | null {
   const platformPaths = strArrMap(d.platformPaths);
   const verifiedAgentRanges = strArrMap(d.verifiedAgentRanges);
   const probeClasses = strArrMap(d.probeClasses);
+  const productPaths = strArrMap(d.productPaths);
+  const runtimeExtensions = strArrMap(d.runtimeExtensions);
+  const stackComponents: Record<string, { runtimes: string[]; products: string[] }> = {};
+  if (d.stackComponents && typeof d.stackComponents === "object" && !Array.isArray(d.stackComponents)) {
+    for (const [k, v] of Object.entries(d.stackComponents as Record<string, unknown>)) {
+      const o = v as Record<string, unknown> | null;
+      const r = o ? strArr(o.runtimes) : null;
+      const pr = o ? strArr(o.products) : null;
+      if (r && pr) stackComponents[k] = { runtimes: r, products: pr };
+    }
+  }
+  const intentCarryover = coerceCarryover(d.intentCarryover);
   return {
     version: typeof d.version === "string" ? d.version : "remote",
     knownAgents: agents,
@@ -277,6 +303,10 @@ export function coerceRuleset(data: unknown): ForcefieldRuleset | null {
     platformPaths,
     verifiedAgentRanges,
     probeClasses,
+    productPaths,
+    runtimeExtensions,
+    stackComponents,
+    intentCarryover,
   };
 }
 

@@ -23,7 +23,7 @@ import type {
 
 /** Bump on any rule or tiering change so decisions stay reproducible against a
  *  known policy. Date plus a same-day revision counter. */
-export const POLICY_VERSION = "ogiam-2026-06-24.1";
+export const POLICY_VERSION = "ogiam-2026-10-26.1";
 
 /** Injection score at or above which a mutation is escalated. Advisory PIP. */
 export const INJECTION_ESCALATE_THRESHOLD = 0.8;
@@ -106,6 +106,17 @@ export const POLICY_RULES: readonly PolicyRule[] = [
     test: (a) =>
       a.signals.secretDetected
         ? { reason: "a secret or credential was detected in the action parameters", intendedOutcome: "deny" }
+        : null,
+  },
+  {
+    id: "R-INTENT-MISMATCH-ESCALATE",
+    rationale: "An agent reaching outside its declared task scope (a write in a read-only task, a credential target, an unrequested outbound send) shows hostile or confused intent; hold it for the owner.",
+    test: (a) =>
+      a.signals.intentMismatch && a.signals.intentMismatch.length > 0
+        ? {
+            reason: `the action does not match the declared task scope (${a.signals.intentMismatch.join(", ")}); held for the owner`,
+            intendedOutcome: "escalate",
+          }
         : null,
   },
   {

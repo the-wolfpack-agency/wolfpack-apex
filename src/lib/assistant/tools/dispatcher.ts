@@ -274,7 +274,19 @@ async function runOneTool<P, R>(
       workflowId: ctx.workflowId,
       params: parsed.data,
       mode,
+      declaredScope: agent?.declaredScope ?? null,
     });
+    if (agent && decision.ruleId === "R-INTENT-MISMATCH-ESCALATE") {
+      trackEvent("ogiam.intent_mismatch_held", agent.agentId, agent.role, {
+        agent_id: agent.agentId,
+        workspace_id: agent.workspaceId,
+        tool: tool.name,
+        capability: tool.capability,
+        enforced: decision.enforced,
+        reasons: (decision.reason.match(/\(([^)]*)\)/)?.[1] ?? "").slice(0, 120),
+        ...(ctx.workflowId ? { workflow_id: ctx.workflowId } : {}),
+      });
+    }
     if (agent && decision.unauditable) {
       // Fail closed: the action could not be written to the tamper-evident
       // ledger, so it must not run. The ledger is unavailable, so this block can

@@ -1495,6 +1495,7 @@ const REASON_LABEL: Record<BlockReasonKind | "unspecified", string> = {
   decoy: "decoy trip",
   attack_tool: "named attack tool",
   blocked_fingerprint: "operator you blocked",
+  intent: "proven session, follow-on request",
   unspecified: "other rule",
 };
 

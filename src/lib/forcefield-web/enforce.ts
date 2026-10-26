@@ -33,7 +33,9 @@ import { classifyClient, operatorFingerprint } from "./fingerprint";
 import { verifyAgentByRanges } from "./hosting";
 import type { ForcefieldRuleset } from "./ruleset";
 
-export type BlockReasonKind = "decoy" | "attack_tool" | "payload" | "blocked_fingerprint";
+/** "intent" is never returned by decideEnforcement: it is the sticky block the
+ *  intent step-up applies to a PROVEN session's follow-on requests (intent.ts). */
+export type BlockReasonKind = "decoy" | "attack_tool" | "payload" | "blocked_fingerprint" | "intent";
 
 export interface EnforcementDecision {
   /** True only when the request is proven-hostile and should be turned away. */

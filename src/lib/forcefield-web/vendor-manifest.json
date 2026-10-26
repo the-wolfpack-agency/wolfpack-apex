@@ -13,6 +13,7 @@
     "monitor.ts",
     "index.ts",
     "hosting.ts",
-    "campaign.ts"
+    "campaign.ts",
+    "intent.ts"
   ]
 }

@@ -37,6 +37,8 @@ import { entitledToBlock, getSiteBlockEntitlement } from "@/lib/forcefield-web/b
 import { resolveTenantByToken } from "@/lib/forcefield-web/tenants";
 import { trackEvent } from "@/lib/analytics";
 import { checkInboundForCanaries } from "@/lib/forcefield/canary-store";
+import { evaluateRequestIntent, intentLedger } from "@/lib/forcefield-web/monitor";
+import { getIntentCarryover } from "@/lib/forcefield/intent-carryover";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -107,6 +109,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // Stamped as-is for the board; never used to block.
   const asn = typeof b.asn === "number" && Number.isInteger(b.asn) && b.asn >= 0 && b.asn <= 4_294_967_295 ? (b.asn as number) : undefined;
   const asOrg = typeof b.asOrg === "string" && b.asOrg.trim() ? (b.asOrg as string).trim().slice(0, 80) : undefined;
+  // Declared stack for intent scoring (short ids only), else the tenant's platform.
+  const stack = Array.isArray(b.stack)
+    ? (b.stack as unknown[]).filter((x): x is string => typeof x === "string" && /^[a-z0-9_-]{1,32}$/.test(x)).slice(0, 8)
+    : undefined;
 
   // The central ruleset: distributed blocklist (dark unless enabled) + the full
   // datacenter prefix set + the crawler ranges for verified-agent identity.
@@ -125,7 +131,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // Per-request path: never waits on the vendors (a cold instance answers
   // "unverifiable" while one background refresh warms the cache).
   const verifiedAgentRanges = await getCrawlerRanges({ waitMs: 0 }).catch(() => ({}));
-  const ruleset = { ...DEFAULT_RULESET, blockedFingerprints, datacenterPrefixes, verifiedAgentRanges };
+  const intentCarryover = consumesSharedIntel ? await getIntentCarryover().catch(() => []) : [];
+  const ruleset = { ...DEFAULT_RULESET, blockedFingerprints, datacenterPrefixes, verifiedAgentRanges, intentCarryover };
 
   let action: "allow" | "block" = "allow";
   let eventType: string | null = null;
@@ -134,6 +141,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // site is entitled to enforce, but stays true even when the paid gate withholds
   // the block - so the free tier can show "we would have blocked this".
   let wouldBlock = false;
+  let tarpitMs = 0;
   try {
     const nowMs = Date.now();
     const input: ObserveInput = {
@@ -147,6 +155,26 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       ruleset,
       { blockedFingerprints },
     );
+    // INTENT: score this request into its session (deterministic, intent.ts).
+    // Applied only with FORCEFIELD_INTENT_ENFORCE=on and, for a managed tenant,
+    // its console enforce toggle; otherwise recorded with applied:false.
+    const intentPosture = process.env.FORCEFIELD_INTENT_ENFORCE === "on" && (!tenant || tenant.enforceEnabled === true) ? "enforce" : "watch";
+    const intent = evaluateRequestIntent(input, ruleset, {
+      ledger: intentLedger(),
+      obs: observeRequest(input, ruleset),
+      enforcement: decision,
+      posture: intentPosture,
+      stack: stack ?? (tenant?.platform ? [tenant.platform] : undefined),
+    });
+    if (!decision.block && intent?.decision.applied && intent.decision.action === "block") {
+      decision.block = true;
+      decision.reasonKind = "intent";
+      decision.reason = intent.decision.summary;
+    } else if (!decision.block && intent?.decision.applied && intent.decision.action === "tarpit") {
+      // Slowing a request is enforcement too: same license gate as a block.
+      const licensed = await getSiteBlockEntitlement(site).catch(() => null);
+      if (entitledToBlock(licensed)) tarpitMs = intent.decision.delayMs;
+    }
     if (decision.block) {
       wouldBlock = true;
       reasonKind = decision.reasonKind ?? null;
@@ -189,6 +217,20 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       if (asOrg && obs.type !== "site.page_viewed") props.as_org = asOrg;
       await recordSiteEvent({ eventType: obs.type, path: obs.path, country: country || null, props }).catch(() => {});
     }
+    // The intent step-up, recorded AFTER the request's own event.
+    if (intent?.report) {
+      await recordSiteEvent({ eventType: "site.intent_scored", path, country: country || null, props: intent.props }).catch(() => {});
+      void trackEvent("forcefield.intent_decided", `site:${site}`, "forcefield", {
+        site,
+        action: intent.decision.action,
+        applied: intent.decision.applied,
+        score: intent.decision.score,
+        reasons: intent.decision.reasons.join(","),
+        details: intent.decision.details.join(","),
+        scope: intent.decision.keyScope,
+        summary: intent.decision.summary,
+      });
+    }
 
     // 3. LIVE RATE: a client making requests faster than a person can (an
     //    autonomous agent, a path sweep) reports once per 10s window. Static page
@@ -223,5 +265,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     site,
   }).catch(() => null);
 
-  return NextResponse.json({ action, eventType, reasonKind, wouldBlock, ...(trip?.tripped ? { canaryTripped: true } : {}) });
+  // "tarpit" is understood by shims that read delayMs; an older shim treats any
+  // action other than "block" as allow, so it is backward compatible.
+  const finalAction = action === "allow" && tarpitMs > 0 ? "tarpit" : action;
+  return NextResponse.json({
+    action: finalAction,
+    eventType,
+    reasonKind,
+    wouldBlock,
+    ...(finalAction === "tarpit" ? { delayMs: tarpitMs } : {}),
+    ...(trip?.tripped ? { canaryTripped: true } : {}),
+  });
 }

@@ -26,7 +26,9 @@ export type ForcefieldEventType =
   | "site.agent_trap_tripped"
   | "site.agent_probed_sensitive"
   | "site.agent_payload_attack"
-  | "site.agent_high_rate";
+  | "site.agent_high_rate"
+  /** An intent step-up (watch / tarpit / block) with its reasons (intent.ts). */
+  | "site.intent_scored";
 
 export interface Observation {
   type: ForcefieldEventType;
