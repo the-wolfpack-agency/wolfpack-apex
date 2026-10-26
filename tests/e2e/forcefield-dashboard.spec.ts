@@ -54,11 +54,19 @@ function mockMySetup(page: import("@playwright/test").Page) {
   });
 }
 
+/** The alert-address panel the dashboard loads once connected (self-serve onboarding). */
+function mockAlertEmail(page: import("@playwright/test").Page) {
+  return page.route(/\/api\/forcefield\/alert-email$/, async (route: Route) => {
+    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, notify: { email: "e2e@thewolfpack.agency", status: "confirmed", confirmedAt: "2026-10-26T00:00:00Z", restricted: true } }) });
+  });
+}
+
 test.describe("Forcefield client dashboard", () => {
   test("connects with a token and renders the client's scoped numbers", async ({ page }) => {
     const getFailures = collectConsoleAndNetworkFailures(page);
     await mockMyStats(page, 200, STATS);
     await mockMySetup(page);
+    await mockAlertEmail(page);
 
     await page.goto(`${target.baseUrl}${PATH}`, { waitUntil: "domcontentloaded", timeout: 20_000 });
 
@@ -74,6 +82,7 @@ test.describe("Forcefield client dashboard", () => {
     await expect(page.getByTestId("ff-m-detected")).toContainText("1,234");
     await expect(page.getByTestId("ff-m-hostile")).toContainText("357");
     await expect(page.getByTestId("ff-attack-sql_injection")).toContainText("SQL injection");
+    await expect(page.getByTestId("ff-alert-status")).toContainText("Alerts on");
 
     expect(getFailures(), "no CSP violations or JS errors").toEqual([]);
   });

@@ -34,6 +34,7 @@
  * cron route.
  */
 import { createHash } from "node:crypto";
+import { isRecipientAllowed } from "@/lib/forcefield-web/recipient-allowlist";
 import { safeQuery, query } from "@/lib/db";
 import { fanoutToTeam, type TeamFanoutInput } from "@/lib/notifications/team-fanout";
 import { sendViaGraph } from "@/lib/mail/send-via-graph";
@@ -75,7 +76,10 @@ export function alertRecipientEmails(): string[] {
   return (process.env.FORCEFIELD_ALERT_RECIPIENT_EMAIL || "homyk@thewolfpack.agency")
     .split(",")
     .map((e) => e.trim())
-    .filter(Boolean);
+    .filter(Boolean)
+    // Build-phase rule: even the operator list can only reach the recipient
+    // allowlist (FORCEFIELD_RECIPIENT_DOMAINS, recipient-allowlist.ts).
+    .filter((e) => isRecipientAllowed(e));
 }
 
 /** One incident = one site + one source burst inside this many hours. */

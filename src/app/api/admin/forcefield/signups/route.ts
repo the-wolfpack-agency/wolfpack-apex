@@ -29,8 +29,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const auth = await requireCapability(req, "settings.manage_team");
   if (!auth.ok) return auth.response;
   const statusParam = req.nextUrl.searchParams.get("status");
-  const status = (["pending", "approved", "rejected"] as const).includes(statusParam as SignupRequest["status"])
-    ? (statusParam as SignupRequest["status"])
+  const status = (["pending", "approved", "rejected", "concierge"] as const).includes(statusParam as SignupRequest["status"] | "concierge")
+    ? (statusParam as SignupRequest["status"] | "concierge")
     : "pending";
   return NextResponse.json({ requests: await listSignupRequests(status) });
 }

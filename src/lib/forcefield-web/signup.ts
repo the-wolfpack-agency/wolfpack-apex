@@ -34,6 +34,12 @@ export interface SignupRequest {
   status: "pending" | "approved" | "rejected";
   tenantId: string | null;
   createdAt: string;
+  /** 'request' = operator-reviewed queue; 'self_serve' = ownership-gated flow. */
+  kind?: "request" | "self_serve";
+  ownershipVerifiedAt?: string | null;
+  /** "We'll do it for you" connect request (self-serve). */
+  conciergeRequestedAt?: string | null;
+  conciergeNote?: string | null;
 }
 
 export type SignupSubmitReason = "ok" | "duplicate" | "invalid" | "honeypot" | "rate_limited" | "error";
@@ -148,13 +154,22 @@ export async function createSignupRequest(
 function rowToRequest(r: {
   id: string; name: string; email: string; site_url: string; note: string | null;
   status: string; tenant_id: string | null; created_at: string;
+  kind?: string | null; ownership_verified_at?: string | null; concierge_requested_at?: string | null; concierge_note?: string | null;
 }): SignupRequest {
   return {
     id: r.id, name: r.name, email: r.email, siteUrl: r.site_url, note: r.note,
     status: (r.status as SignupRequest["status"]) ?? "pending",
     tenantId: r.tenant_id, createdAt: r.created_at,
+    kind: r.kind === "self_serve" ? "self_serve" : "request",
+    ownershipVerifiedAt: r.ownership_verified_at ?? null,
+    conciergeRequestedAt: r.concierge_requested_at ?? null,
+    conciergeNote: r.concierge_note ?? null,
   };
 }
+
+const LIST_COLUMNS = `id, name, email, site_url, note, status, tenant_id, created_at::text AS created_at,
+       kind, ownership_verified_at::text AS ownership_verified_at,
+       concierge_requested_at::text AS concierge_requested_at, concierge_note`;
 
 /** Fetch one request by id, or null. Never throws. */
 export async function getSignupRequest(id: string, q: SignupQuery = liveQuery): Promise<SignupRequest | null> {
@@ -170,17 +185,23 @@ export async function getSignupRequest(id: string, q: SignupQuery = liveQuery): 
   }
 }
 
-/** List requests, newest first, optionally filtered by status. Never throws. */
-export async function listSignupRequests(status?: SignupRequest["status"], q: SignupQuery = liveQuery): Promise<SignupRequest[]> {
+/** List requests, newest first, optionally filtered by status, or "concierge"
+ *  for the self-serve sites that asked us to connect them. Never throws. */
+export async function listSignupRequests(status?: SignupRequest["status"] | "concierge", q: SignupQuery = liveQuery): Promise<SignupRequest[]> {
   try {
-    const rows = status
+    const rows = status === "concierge"
       ? await q<Parameters<typeof rowToRequest>[0]>(
-          `SELECT id, name, email, site_url, note, status, tenant_id, created_at::text AS created_at
+          `SELECT ${LIST_COLUMNS}
+           FROM forcefield_signup_requests WHERE concierge_requested_at IS NOT NULL ORDER BY concierge_requested_at DESC LIMIT 500`,
+        )
+      : status
+      ? await q<Parameters<typeof rowToRequest>[0]>(
+          `SELECT ${LIST_COLUMNS}
            FROM forcefield_signup_requests WHERE status = $1 ORDER BY created_at DESC LIMIT 500`,
           [status],
         )
       : await q<Parameters<typeof rowToRequest>[0]>(
-          `SELECT id, name, email, site_url, note, status, tenant_id, created_at::text AS created_at
+          `SELECT ${LIST_COLUMNS}
            FROM forcefield_signup_requests ORDER BY created_at DESC LIMIT 500`,
         );
     return rows.map(rowToRequest);

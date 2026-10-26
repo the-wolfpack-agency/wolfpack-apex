@@ -105,6 +105,9 @@ const WOLFPACK_INSTINCT: ScanRouteSpec[] = [
   { path: "/forcefield/signup", journey: "Forcefield signup (request access)", auth: "public" },
   { path: "/forcefield/dashboard", journey: "Forcefield client dashboard", auth: "public" },
   { path: "/forcefield/status", journey: "Forcefield status page", auth: "public" },
+  { path: "/forcefield/setup", journey: "Forcefield self-serve setup (ownership, connect, confirm)", auth: "public" },
+  { path: "/forcefield/confirm", journey: "Forcefield alert email confirmation", auth: "public" },
+  { path: "/forcefield/unsubscribe", journey: "Forcefield alert email unsubscribe", auth: "public" },
 ];
 // Instinct gates access client-side (the dashboard shell returns 200 to an
 // unauthenticated HTTP GET and redirects in the browser), so the meaningful
@@ -118,10 +121,13 @@ const WOLFPACK_INSTINCT_API: ApiEndpointSpec[] = [
   { path: "/api/forcefield/status", method: "GET", journey: "Forcefield control-plane status", requiresAuth: false },
   { path: "/api/forcefield/my-stats", method: "GET", journey: "Forcefield tenant stats (token-scoped)", requiresAuth: true },
   { path: "/api/forcefield/my-setup", method: "GET", journey: "Forcefield tenant setup (token-scoped)", requiresAuth: true },
+  { path: "/api/forcefield/alert-email", method: "GET", journey: "Forcefield tenant alert email (token-scoped)", requiresAuth: true },
+  { path: "/api/forcefield/onboarding", method: "GET", journey: "Forcefield onboarding state (setup-key scoped)", requiresAuth: true },
   { path: "/api/admin/forcefield/tenants", method: "GET", journey: "Forcefield tenant registry", requiresAuth: true },
   { path: "/api/admin/forcefield/signups", method: "GET", journey: "Forcefield signup review", requiresAuth: true },
   // The public signup must reject an empty/invalid body BEFORE any write.
   { path: "/api/forcefield/signup", method: "POST", journey: "Forcefield signup intake", requiresAuth: false, invalidBody: {}, expectRejectStatuses: [400] },
+  { path: "/api/forcefield/onboarding", method: "POST", journey: "Forcefield self-serve onboarding intake", requiresAuth: false, invalidBody: {}, expectRejectStatuses: [400] },
   // The Stripe webhook is unauthenticated (signature-gated); an unsigned body must be rejected.
   { path: "/api/forcefield/stripe-webhook", method: "POST", journey: "Forcefield Stripe webhook", requiresAuth: false, invalidBody: {}, expectRejectStatuses: [400, 501] },
 ];

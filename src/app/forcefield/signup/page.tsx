@@ -1,22 +1,30 @@
 "use client";
 
 /**
- * Public Forcefield signup - /forcefield/signup
+ * Forcefield self-serve start - /forcefield/signup (step 1 of the onboarding).
  *
- * A prospect requests access. This is PUBLIC (no account): the form POSTs to the
- * public, gated /api/forcefield/signup, which enqueues a PENDING request for an
- * operator to review. No token is issued here - the success state tells the
- * prospect we will be in touch. A honeypot field + server-side rate limiting
- * guard the endpoint.
+ * A person enters the website to protect and the email that should receive its
+ * alerts. The form POSTs to the public /api/forcefield/onboarding:
+ *   - 201 (self-serve): the browser keeps the one-time setup key and continues
+ *     to /forcefield/setup (prove ownership, connect, confirm the address).
+ *   - 202 (request): during the build phase an address outside the Wolfpack
+ *     recipient allowlist is filed for review instead; we show "request
+ *     received" and nothing is emailed.
+ * A honeypot field + server-side rate limiting guard the endpoint.
  *
  * Raw fetch is correct (no session/JWT pre-account); the file is in the
  * no-raw-api-fetch guardrail exceptions, same as /share, /s, and the dashboard.
  */
-import { useCallback, useState } from "react";
-
+import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { SETUP_KEY_STORAGE, writeStored } from "@/lib/forcefield-web/onboarding-client";
 const HONEYPOT_FIELD = "_hp_company";
 
 export default function ForcefieldSignupPage() {
+  const router = useRouter();
+  // Submit stays disabled until hydration, so a fast click never posts a native form.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [siteUrl, setSiteUrl] = useState("");
@@ -30,7 +38,7 @@ export default function ForcefieldSignupPage() {
       if (status === "sending") return;
       setStatus("sending");
       try {
-        const res = await fetch("/api/forcefield/signup", {
+        const res = await fetch("/api/forcefield/onboarding", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ name, email, siteUrl, note, [HONEYPOT_FIELD]: hp }),
@@ -38,12 +46,18 @@ export default function ForcefieldSignupPage() {
         if (res.status === 429) { setStatus("rate_limited"); return; }
         if (res.status === 400) { setStatus("invalid"); return; }
         if (!res.ok) { setStatus("error"); return; }
+        const body = (await res.json().catch(() => ({}))) as { mode?: string; setupKey?: string };
+        if (res.status === 201 && body.mode === "self_serve" && body.setupKey) {
+          writeStored(SETUP_KEY_STORAGE, body.setupKey);
+          router.push("/forcefield/setup");
+          return;
+        }
         setStatus("done");
       } catch {
         setStatus("error");
       }
     },
-    [name, email, siteUrl, note, hp, status],
+    [name, email, siteUrl, note, hp, status, router],
   );
 
   return (
@@ -58,7 +72,7 @@ export default function ForcefieldSignupPage() {
           <div>
             <h1 className="text-2xl font-medium tracking-[-0.01em]">Protect your site with Forcefield</h1>
             <p className="text-sm" style={{ color: "var(--wp-muted, #9aa0a6)" }}>
-              Tell us where to point the shield. We will set you up and send your access.
+              Add your site and the email that should get its alerts. Setup takes a few minutes.
             </p>
           </div>
         </header>
@@ -71,28 +85,29 @@ export default function ForcefieldSignupPage() {
           >
             <h2 className="text-lg font-medium" style={{ color: "var(--wp-gold, #e8b528)" }}>Request received</h2>
             <p className="mt-2 text-sm" style={{ color: "var(--wp-muted, #9aa0a6)" }}>
-              Thanks. We will review your site and email your access details and a short setup guide. No
-              code changes are needed to start, Forcefield begins in watch-only mode.
+              Thanks. Self-serve setup is open to a limited group right now, so we will review your site
+              and be in touch. Forcefield begins in watch-only mode and never blocks a visitor until you
+              turn blocking on.
             </p>
           </div>
         ) : (
           <form onSubmit={submit} data-testid="ff-signup-form" className="flex flex-col gap-4">
-            <Field label="Your name">
-              <input
-                data-testid="ff-s-name" value={name} onChange={(e) => setName(e.target.value)} required
-                className="w-full rounded-md border px-3 py-2 text-sm" style={inputStyle}
-              />
-            </Field>
-            <Field label="Work email">
-              <input
-                data-testid="ff-s-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required
-                className="w-full rounded-md border px-3 py-2 text-sm" style={inputStyle}
-              />
-            </Field>
             <Field label="Website to protect">
               <input
                 data-testid="ff-s-site" value={siteUrl} onChange={(e) => setSiteUrl(e.target.value)}
-                placeholder="yourcompany.com" required
+                placeholder="yourcompany.com" required autoComplete="url" inputMode="url"
+                className="w-full rounded-md border px-3 py-2 text-sm" style={inputStyle}
+              />
+            </Field>
+            <Field label="Email for alerts">
+              <input
+                data-testid="ff-s-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="email"
+                className="w-full rounded-md border px-3 py-2 text-sm" style={inputStyle}
+              />
+            </Field>
+            <Field label="Your name or company (optional)">
+              <input
+                data-testid="ff-s-name" value={name} onChange={(e) => setName(e.target.value)} autoComplete="organization"
                 className="w-full rounded-md border px-3 py-2 text-sm" style={inputStyle}
               />
             </Field>
@@ -112,7 +127,7 @@ export default function ForcefieldSignupPage() {
 
             {status === "invalid" && (
               <p data-testid="ff-signup-error" className="text-sm" style={{ color: "#f87171" }}>
-                Please enter your name, a valid work email, and the website you want protected.
+                Please enter the website you want protected and a valid email for its alerts.
               </p>
             )}
             {status === "rate_limited" && (
@@ -127,14 +142,14 @@ export default function ForcefieldSignupPage() {
             )}
 
             <button
-              data-testid="ff-s-submit" type="submit" disabled={status === "sending"}
+              data-testid="ff-s-submit" type="submit" disabled={!mounted || status === "sending"}
               className="mt-1 rounded-md px-5 py-2.5 text-sm font-medium disabled:opacity-50"
               style={{ background: "var(--wp-gold, #e8b528)", color: "#0b0d11" }}
             >
-              {status === "sending" ? "Sending..." : "Request access"}
+              {status === "sending" ? "Starting..." : "Start protecting my site"}
             </button>
             <p className="text-xs" style={{ color: "var(--wp-muted, #9aa0a6)" }}>
-              We review each request before issuing access. We never share your details.
+              Next you will prove you own the site with one DNS record or file, then connect it. We never share your details.
             </p>
           </form>
         )}

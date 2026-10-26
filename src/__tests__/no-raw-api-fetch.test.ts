@@ -38,6 +38,16 @@ const EXCEPTIONS = [
                              //   the credential; there is no apex session or JWT,
                              //   so no refresh flow applies. Same posture as the
                              //   /share and /s token pages above.
+  "src/app/forcefield/setup",       // public Forcefield onboarding steps 2-4 - the
+                             //   one-time setup key (x-forcefield-setup) and then the
+                             //   tenant ingest token are the credentials; no apex
+                             //   session or JWT, so no refresh flow applies.
+  "src/app/forcefield/confirm",     // public email-link pages: the signed token in
+  "src/app/forcefield/unsubscribe", //   the link is the credential (POSTed on click).
+  "src/components/forcefield/TokenActionPage", // shared body of the two pages above.
+  "src/components/forcefield/AlertEmailPanel", // dashboard alert-address panel; the
+                             //   tenant ingest token (x-forcefield-token) is the
+                             //   credential, same as the dashboard itself.
   "src/app/accept-invite",   // pre-auth: invitee has no session yet
   "src/app/forgot-password", // pre-auth: no session by definition
   "src/app/reset-password",  // pre-auth: token-in-URL flow, no session
