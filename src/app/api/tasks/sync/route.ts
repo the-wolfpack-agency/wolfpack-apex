@@ -7,6 +7,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { providerNotConnected } from "@/lib/integrations/not-connected";
 import { getUserFromRequest } from "@/lib/auth";
 import { trackEvent } from "@/lib/analytics";
 import { syncAllForUser, GraphTasksError } from "@/lib/integrations/microsoft-tasks";
@@ -48,7 +49,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(result);
   } catch (err) {
     if (err instanceof GraphTasksError) {
-      if (err.status === 401) return NextResponse.json({ error: "Microsoft not connected" }, { status: 401 });
+      if (err.status === 401) return providerNotConnected(req, user, "microsoft", { surface: "tasks/sync" });
       return NextResponse.json({ error: err.message }, { status: err.status >= 500 ? 502 : err.status });
     }
     return NextResponse.json({ error: "Internal error" }, { status: 500 });

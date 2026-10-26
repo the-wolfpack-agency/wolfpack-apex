@@ -110,6 +110,24 @@ describe("<EmailReader />", () => {
     expect(screen.getByTestId("email-reader-settings-cta")).toHaveAttribute("href", "/settings");
   });
 
+  test("200 { message: null, connected: false } → Connect Microsoft CTA (the notice string is not taken as a message)", async () => {
+    mockFetchWithRefresh.mockResolvedValueOnce(
+      ok({
+        message: null,
+        connected: false,
+        provider: "microsoft",
+        error: "microsoft_not_connected",
+        notice: "Microsoft 365 is not connected.",
+      }),
+    );
+    render(<EmailReader id="x" onClose={() => {}} />);
+    await waitFor(() => {
+      expect(screen.getByTestId("email-reader-error")).toHaveAttribute("data-code", "not_connected");
+    });
+    expect(screen.getByTestId("email-reader-settings-cta")).toHaveAttribute("href", "/settings");
+    expect(mockEmit).not.toHaveBeenCalledWith(expect.objectContaining({ action: "message_viewed" }));
+  });
+
   test("unauthorized (401, no microsoft_not_connected hint) → unauthorized error state", async () => {
     mockFetchWithRefresh.mockResolvedValueOnce(ok({ error: "unauthorized" }, 401));
     render(<EmailReader id="x" onClose={() => {}} />);

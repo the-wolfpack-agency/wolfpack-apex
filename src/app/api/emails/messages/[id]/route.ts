@@ -16,6 +16,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { providerNotConnected, type NotConnectedUser } from "@/lib/integrations/not-connected";
 import { getUserFromRequest } from "@/lib/auth";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { trackEvent } from "@/lib/analytics";
@@ -28,7 +29,11 @@ import { _isRateLimited as inboxLimited } from "../../inbox/route";
 
 type AnyResult = Awaited<ReturnType<typeof setMessageReadState>>;
 
-function mapErrorToResponse(result: Extract<AnyResult, { ok: false }>) {
+function mapErrorToResponse(
+  result: Extract<AnyResult, { ok: false }>,
+  req: { method?: string },
+  user: NotConnectedUser,
+) {
   switch (result.code) {
     case "invalid_input":
       return NextResponse.json(
@@ -36,7 +41,7 @@ function mapErrorToResponse(result: Extract<AnyResult, { ok: false }>) {
         { status: 400 },
       );
     case "not_connected":
-      return NextResponse.json({ error: "microsoft_not_connected" }, { status: 401 });
+      return providerNotConnected(req, user, "microsoft", { surface: "emails/messages" });
     case "scope_missing":
       return NextResponse.json(
         { error: "forbidden", code: "scope_missing", scope: result.scope ?? "Mail.ReadWrite" },
@@ -106,13 +111,13 @@ export async function PATCH(
 
   if (obj.archive === true) {
     const result = await archiveMessage(user.id, id);
-    if (!result.ok) return mapErrorToResponse(result);
+    if (!result.ok) return mapErrorToResponse(result, req, user);
     return NextResponse.json({ id: result.value.id, archived: true }, { status: 200 });
   }
 
   if (typeof obj.isRead === "boolean") {
     const result = await setMessageReadState(user.id, id, obj.isRead);
-    if (!result.ok) return mapErrorToResponse(result);
+    if (!result.ok) return mapErrorToResponse(result, req, user);
     return NextResponse.json({ id: result.value.id, isRead: result.value.isRead }, { status: 200 });
   }
 
@@ -156,6 +161,6 @@ export async function DELETE(
   }
 
   const result = await deleteMessage(user.id, id);
-  if (!result.ok) return mapErrorToResponse(result);
+  if (!result.ok) return mapErrorToResponse(result, req, user);
   return NextResponse.json({ id: result.value.id, deleted: true }, { status: 200 });
 }

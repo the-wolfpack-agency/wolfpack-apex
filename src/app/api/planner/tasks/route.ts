@@ -6,6 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { providerNotConnected } from "@/lib/integrations/not-connected";
 import { getUserFromRequest } from "@/lib/auth";
 import { trackEvent } from "@/lib/analytics";
 import { createTask } from "@/lib/integrations/microsoft-planner";
@@ -48,8 +49,10 @@ export async function POST(req: NextRequest) {
   });
 
   if (!result.ok) {
+    if (result.code === "not_connected") {
+      return providerNotConnected(req, user, "microsoft", { surface: "planner/tasks" });
+    }
     const status =
-      result.code === "not_connected" ? 401 :
       result.code === "scope_missing" ? 403 :
       result.code === "not_found" ? 404 :
       result.code === "invalid_input" ? 400 :

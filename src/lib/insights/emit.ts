@@ -87,12 +87,16 @@ export function emitInsight(e: InsightEvent): void {
       const f = (globalThis as { fetch?: typeof fetch }).fetch;
       if (typeof f !== "function") return;
       const token = getClientToken();
+      /* /api/analytics attributes the event to the caller and 401s without a
+         token. No token means no user to attribute it to, so drop it here
+         rather than send a request that can only fail. */
+      if (!token) return;
       void f("/api/analytics", {
         method: "POST",
         credentials: "include",
         headers: {
           "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           event: eventNameFor(e),

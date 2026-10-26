@@ -8,6 +8,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { providerNotConnected } from "@/lib/integrations/not-connected";
 import { getUserFromRequest } from "@/lib/auth";
 import { getTask, updateTask } from "@/lib/integrations/microsoft-planner";
 import { recordAudit } from "@/lib/audit-log";
@@ -59,8 +60,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }, body.etag);
 
   if (!result.ok) {
+    if (result.code === "not_connected") {
+      return providerNotConnected(req, user, "microsoft", { surface: "planner/tasks/[id]" });
+    }
     const status =
-      result.code === "not_connected" ? 401 :
       result.code === "scope_missing" ? 403 :
       result.code === "not_found" ? 404 :
       result.code === "etag_conflict" ? 409 :

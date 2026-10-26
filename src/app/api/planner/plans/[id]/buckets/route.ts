@@ -4,6 +4,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { providerNotConnected } from "@/lib/integrations/not-connected";
 import { getUserFromRequest } from "@/lib/auth";
 import { listBuckets } from "@/lib/integrations/microsoft-planner";
 import { trackEvent } from "@/lib/analytics";
@@ -15,8 +16,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const { id } = await params;
   const result = await listBuckets(user.id, id);
   if (!result.ok) {
+    if (result.code === "not_connected") {
+      return providerNotConnected(req, user, "microsoft", { surface: "planner/plans/buckets", empty: { buckets: [] } });
+    }
     const status =
-      result.code === "not_connected" ? 401 :
       result.code === "scope_missing" ? 403 :
       result.code === "not_found" ? 404 :
       result.code === "rate_limited" ? 429 :

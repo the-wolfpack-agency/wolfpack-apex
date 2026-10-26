@@ -20,7 +20,7 @@
  * Disable with NEXT_PUBLIC_INSTINCT_BADGE_OPTIMIZE=false for instant
  * rollback to the previous one-call-per-component behavior.
  */
-import { fetchWithRefresh } from "@/lib/client-auth";
+import { fetchWithRefresh, sendTelemetry } from "@/lib/client-auth";
 
 const DEFAULT_COALESCE_MS = 1500;
 const ANALYTICS_FLUSH_INTERVAL_MS = 60_000;
@@ -46,34 +46,22 @@ function maybeFlushAnalytics(): void {
   const now = Date.now();
   if (now - lastFlushAt < ANALYTICS_FLUSH_INTERVAL_MS) return;
   if (counters.requestsServed === 0) return;
-  const payload = {
-    event: "system.badge_poll_optimized",
-    metadata: {
-      requests_served: counters.requestsServed,
-      network_calls: counters.networkCalls,
-      requests_saved:
-        counters.requestsServed - counters.networkCalls,
-      window_ms: now - lastFlushAt,
-    },
+  const metadata = {
+    requests_served: counters.requestsServed,
+    network_calls: counters.networkCalls,
+    requests_saved: counters.requestsServed - counters.networkCalls,
+    window_ms: now - lastFlushAt,
   };
+  /* sendTelemetry, not fetchWithRefresh: an analytics POST is side-effecting
+     and must not be coalesced or recurse through this module. It carries the
+     Bearer token. The raw fetch it replaced sent none, so this flush 401'd on
+     the first badge poll of every page load and the counter never landed.
+     With no token it drops the event and keeps the counters for the next
+     window instead of discarding them. */
+  if (!sendTelemetry("system.badge_poll_optimized", metadata)) return;
   lastFlushAt = now;
   counters.requestsServed = 0;
   counters.networkCalls = 0;
-  // Fire-and-forget. Never block the badge fetch on analytics.
-  // We use raw fetch (not coalesced) on purpose — analytics POSTs
-  // shouldn't be coalesced (they're side-effecting + non-GET) and
-  // shouldn't recurse through this module.
-  try {
-    fetch("/api/analytics", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-      credentials: "include",
-      keepalive: true,
-    }).catch(() => undefined);
-  } catch {
-    /* ignore — never let analytics break a badge */
-  }
 }
 
 function isOptimizeEnabled(): boolean {
@@ -176,4 +164,7 @@ function safeClone(res: Response): Response {
  */
 export function __resetCoalescedFetchForTests(): void {
   inflight.clear();
+  counters.requestsServed = 0;
+  counters.networkCalls = 0;
+  lastFlushAt = 0;
 }

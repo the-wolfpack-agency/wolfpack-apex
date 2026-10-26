@@ -198,6 +198,7 @@ jobs:
           tests/e2e/governance-sample.spec.ts
           tests/e2e/search-autofocus.spec.ts
           tests/e2e/emails-inbox-flow.spec.ts
+          tests/e2e/provider-not-connected.spec.ts
           tests/e2e/messages-bugs.spec.ts
           tests/e2e/knowledge-qa-cache.spec.ts
           tests/e2e/admin-mfa.spec.ts

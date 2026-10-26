@@ -210,9 +210,49 @@ function jwtSecondsUntilExpiry(token: string): number | null {
 const EXP_SKEW_SECONDS = 30;
 
 /**
- * Primary authenticated fetch. Use this instead of raw fetch() for any
- * call that hits an endpoint requiring auth.
+ * Fire-and-forget analytics beacon to POST /api/analytics.
+ *
+ * /api/analytics attributes every event to the caller, so it requires the
+ * Bearer token and answers 401 without one. Two beacons used to send no
+ * Authorization header at all (the badge-poll counter flush in
+ * coalesced-fetch.ts and the role-mismatch report below), so every one of
+ * them 401'd: the event was lost and the 401 showed as a console error on
+ * every dashboard page.
+ *
+ * Contract:
+ *   - Attaches `Authorization: Bearer <token>` from localStorage.
+ *   - No token (signed out, or before the session hydrates): the event is
+ *     dropped client-side. Nothing user-attributed can be recorded without a
+ *     user, and sending it anyway only produces a 401.
+ *   - Raw fetch, never fetchWithRefresh: a beacon must not rotate the refresh
+ *     token, retry, or redirect, and calling fetchWithRefresh from inside it
+ *     would recurse.
+ *   - Never throws, never rejects.
+ *
+ * Returns true when a request was sent.
  */
+export function sendTelemetry(
+  event: string,
+  metadata: Record<string, string | number | boolean | null> = {},
+  opts: { keepalive?: boolean } = {},
+): boolean {
+  if (typeof window === "undefined") return false;
+  const token = getInstinctToken();
+  if (!token) return false;
+  try {
+    void fetch("/api/analytics", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      credentials: "include",
+      keepalive: opts.keepalive ?? true,
+      body: JSON.stringify({ event, metadata }),
+    }).catch(() => undefined);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Record that somebody acted on a control their role could not use.
  *
@@ -229,24 +269,18 @@ async function reportRoleMismatch(
     if (!shouldReportMismatch(url, method)) return;
 
     const user = getInstinctUser<{ role?: string }>();
-    /* Raw fetch, not fetchWithRefresh: this IS inside fetchWithRefresh, and
-       recursing through it would re-enter the 403 branch on its own failure. */
-    await fetch("/api/analytics", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify({
-        event: "ui.role_mismatch_click",
-        metadata: {
-          control: controlKey(url),
-          method,
-          /* Where they were standing, which is what tells us which page to
-             take the control off. */
-          surface: typeof window !== "undefined" ? window.location.pathname : "unknown",
-          role: user?.role ?? "unknown",
-        },
-      }),
-    });
+    /* sendTelemetry, not fetchWithRefresh: this IS inside fetchWithRefresh, and
+       recursing through it would re-enter the 403 branch on its own failure.
+       It carries the Bearer token; the raw fetch it replaced did not, so every
+       role-mismatch report used to 401 and be lost. */
+    sendTelemetry("ui.role_mismatch_click", {
+      control: controlKey(url),
+      method,
+      /* Where they were standing, which is what tells us which page to
+         take the control off. */
+      surface: typeof window !== "undefined" ? window.location.pathname : "unknown",
+      role: user?.role ?? "unknown",
+    }, { keepalive: false });
   } catch {
     /* Swallowed on purpose. See above. */
   }

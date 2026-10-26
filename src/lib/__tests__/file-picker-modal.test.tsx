@@ -120,3 +120,19 @@ describe("<FilePickerModal />", () => {
     });
   });
 });
+
+describe("<FilePickerModal /> with no Microsoft connection", () => {
+  test("a 200 { items: [], connected: false } shows the connect message, not an empty folder", async () => {
+    mockFetch({
+      "GET /api/files": {
+        status: 200,
+        json: { items: [], nextCursor: null, connected: false, provider: "microsoft", error: "microsoft_not_connected", notice: "x" },
+      },
+    });
+    const FilePickerModal = (await import("@/components/files/FilePickerModal")).default;
+    render(<FilePickerModal open={true} onClose={() => {}} onPick={() => {}} />);
+    await waitFor(() => {
+      expect(screen.getByRole("alert").textContent).toMatch(/Microsoft 365 isn't connected/);
+    });
+  });
+});

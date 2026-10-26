@@ -209,6 +209,74 @@ describe("InboxPanel", () => {
     expect(screen.getByText(/Open Settings/i)).toBeInTheDocument();
   });
 
+  it("renders the connect-Microsoft state from a 200 { connected: false } (the current contract)", async () => {
+    mockFetchWithRefresh.mockReset();
+    mockFetchWithRefresh.mockImplementation(() =>
+      Promise.resolve(
+        ok({
+          messages: [],
+          nextSkip: null,
+          unreadCount: 0,
+          folder: "inbox",
+          connected: false,
+          provider: "microsoft",
+          error: "microsoft_not_connected",
+          notice: "Microsoft 365 is not connected.",
+        }),
+      ),
+    );
+    render(
+      <InboxPanel activeId={null} onOpen={jest.fn()} onCompose={jest.fn()} userId="u1" userRole="ceo" />,
+    );
+    await flush();
+    await waitFor(() => {
+      expect(screen.getByTestId("inbox-error").getAttribute("data-code")).toBe("not_connected");
+    });
+    // Not a blank widget and not an empty inbox: the connect prompt.
+    expect(screen.getByText(/Connect Microsoft 365 to see your inbox/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Open Settings/i })).toHaveAttribute("href", "/settings");
+    expect(screen.queryByTestId("inbox-loading")).toBeNull();
+    // No "inbox opened" insight for an inbox that never loaded.
+    expect(mockEmitInsight).not.toHaveBeenCalledWith(expect.objectContaining({ action: "inbox_opened" }));
+  });
+
+  it("a real 401 (expired session) shows the sign-in prompt, not the connect prompt", async () => {
+    mockFetchWithRefresh.mockReset();
+    mockFetchWithRefresh.mockImplementation(() => Promise.resolve(ok({ error: "unauthorized" }, 401)));
+    render(
+      <InboxPanel activeId={null} onOpen={jest.fn()} onCompose={jest.fn()} userId="u1" userRole="ceo" />,
+    );
+    await flush();
+    await waitFor(() => {
+      expect(screen.getByTestId("inbox-error").getAttribute("data-code")).toBe("unauthorized");
+    });
+    expect(screen.getByRole("link", { name: /Sign in/i })).toHaveAttribute("href", "/login?next=/emails");
+    expect(screen.queryByText(/Connect Microsoft 365/i)).toBeNull();
+  });
+
+  it("a row delete answered 409 { connected: false } shows the not-connected message", async () => {
+    mockFetchWithRefresh.mockReset();
+    mockFetchWithRefresh.mockImplementation((url: string, init?: RequestInit) => {
+      if (init?.method === "DELETE") {
+        return Promise.resolve(
+          ok({ connected: false, provider: "microsoft", error: "microsoft_not_connected", notice: "x" }, 409),
+        );
+      }
+      return Promise.resolve(ok(SAMPLE_INBOX));
+    });
+    render(
+      <InboxPanel activeId={null} onOpen={jest.fn()} onCompose={jest.fn()} userId="u1" userRole="ceo" />,
+    );
+    await flush();
+    await waitFor(() => expect(screen.getByText("Onboarding deck")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("inbox-row-delete-m1"));
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("inbox-row-confirm-yes-m1"));
+    });
+    await flush();
+    await waitFor(() => expect(screen.getByText(/isn't connected/i)).toBeInTheDocument());
+  });
+
   it("renders scope_missing error with the scope name", async () => {
     mockFetchWithRefresh.mockReset();
     mockFetchWithRefresh.mockImplementation(() =>

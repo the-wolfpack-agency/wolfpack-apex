@@ -167,11 +167,12 @@ describe("POST /api/teams/sync", () => {
     expect(data.code).toBe("scope_missing");
   });
 
-  it("401 when MS not connected", async () => {
+  it("409 { connected: false } when MS not connected (401 is only the session)", async () => {
     mockGetUser.mockReturnValue({ id: "u", role: "cto" });
     mockSyncAllForUser.mockRejectedValue(new FakeTeamsChatError(401, "no token"));
     const res = await syncPOST(mkReq({ method: "POST", auth: "Bearer x" }));
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ connected: false, error: "microsoft_not_connected" });
   });
 
   it("502 on graph 5xx", async () => {

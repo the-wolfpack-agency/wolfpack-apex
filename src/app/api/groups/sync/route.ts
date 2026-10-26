@@ -4,6 +4,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { providerNotConnected } from "@/lib/integrations/not-connected";
 import { getUserFromRequest } from "@/lib/auth";
 import { trackEvent } from "@/lib/analytics";
 import { syncGroups } from "@/lib/integrations/microsoft-groups";
@@ -40,8 +41,10 @@ export async function POST(req: NextRequest) {
 
   const result = await syncGroups(user.id);
   if (!result.ok) {
+    if (result.code === "not_connected") {
+      return providerNotConnected(req, user, "microsoft", { surface: "groups/sync" });
+    }
     const status =
-      result.code === "not_connected" ? 401 :
       result.code === "scope_missing" ? 403 :
       result.code === "rate_limited" ? 429 :
       result.status ?? 502;

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { getInstinctToken, authHeaders } from "@/lib/client-auth";
+import { getInstinctToken, authHeaders, sendTelemetry } from "@/lib/client-auth";
 import MeetingPreBriefPanel from "@/components/MeetingPreBriefPanel";
 
 // ---------------------------------------------------------------------------
@@ -369,22 +369,11 @@ export default function MorningBriefing() {
                 const isExternal = !!item.link && /^https?:\/\//i.test(item.link);
                 const handleClick = () => {
                   if (!item.link) return;
-                  void fetch("/api/analytics", {
-                    method: "POST",
-                    headers: {
-                      ...authHeaders(),
-                      "Content-Type": "application/json",
-                    },
-                    body: JSON.stringify({
-                      event: "dashboard.action_item_clicked",
-                      metadata: {
-                        priority: item.priority,
-                        source: item.source ?? "unknown",
-                        is_external: isExternal,
-                      },
-                    }),
-                    keepalive: true,
-                  }).catch(() => undefined);
+                  sendTelemetry("dashboard.action_item_clicked", {
+                    priority: item.priority,
+                    source: item.source ?? "unknown",
+                    is_external: isExternal,
+                  });
                 };
                 const cardInner = (
                   <>

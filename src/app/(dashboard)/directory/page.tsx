@@ -9,6 +9,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { authHeaders, jsonHeaders, fetchWithRefresh } from "@/lib/client-auth";
+import { isProviderNotConnected } from "@/lib/integrations/connection-state";
 import UserCard, { type DirectoryUserView } from "@/components/directory/UserCard";
 
 interface ListResponse {
@@ -71,6 +72,10 @@ export default function DirectoryPage() {
       }
       if (res.status === 403) {
         setError("Missing scope — reconnect Microsoft with User.Read.All");
+        return;
+      }
+      if (!res.ok && isProviderNotConnected(await res.clone().json().catch(() => null))) {
+        setError("Microsoft 365 isn't connected. Connect it in Settings, Integrations.");
         return;
       }
       if (!res.ok) {

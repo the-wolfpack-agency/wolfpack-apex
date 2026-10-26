@@ -23,12 +23,13 @@
  */
 
 import { NextResponse } from "next/server";
-import type { FormKind, FormSubmitResult } from "@/lib/assistant/forms/types";
+import type { FormKind, FormSubmitFailure, FormSubmitResult } from "@/lib/assistant/forms/types";
 import {
   buildRestConnectorForWorkspace,
   pickConfiguredConnector,
 } from "@/lib/assistant/connectors";
 import { internalFetch } from "@/lib/http/internal-fetch";
+import { isProviderNotConnected, NOT_CONNECTED_ACTION_STATUS } from "@/lib/integrations/connection-state";
 
 export type { FormKind } from "@/lib/assistant/forms/types";
 
@@ -54,7 +55,7 @@ export interface ExecuteContext {
 }
 
 export function failure(
-  code: "validation" | "auth" | "scope" | "rate_limit" | "internal",
+  code: FormSubmitFailure["code"],
   message: string,
   fieldErrors?: Record<string, string>,
 ): NextResponse {
@@ -62,6 +63,7 @@ export function failure(
   if (fieldErrors) body.fieldErrors = fieldErrors;
   const status =
     code === "auth" ? 401 :
+    code === "not_connected" ? NOT_CONNECTED_ACTION_STATUS :
     code === "scope" ? 403 :
     code === "rate_limit" ? 429 :
     code === "validation" ? 400 :
@@ -191,7 +193,8 @@ async function submitEmail(
     subject,
     bodyText,
   });
-  if (status === 401) return failure("auth", "Microsoft account not connected.");
+  if (isProviderNotConnected(data)) return failure("not_connected", "Microsoft account not connected.");
+  if (status === 401) return failure("auth", "Your session has expired. Sign in again.");
   if (status === 403) return failure("scope", "Email send permission not granted.");
   if (status === 429) return failure("rate_limit", "Too many emails, try again shortly.");
   if (status >= 400) {
@@ -246,8 +249,10 @@ async function submitMessage(
     } catch (err) {
       return failure("internal", `Failed to look up recipient: ${(err as Error).message}`);
     }
+    /* 401 means only "the Instinct session is invalid". A missing Microsoft
+       connection arrives as connected:false (src/lib/integrations/connection-state.ts). */
     if (listRes.status === 401) {
-      return failure("auth", "Microsoft account not connected.");
+      return failure("auth", "Your session has expired. Sign in again.");
     }
     if (listRes.status === 403) {
       return failure("scope", "Teams chat list permission not granted.");
@@ -266,6 +271,9 @@ async function submitMessage(
         members?: Array<{ displayName?: string; email?: string }>;
       }>;
     };
+    if (isProviderNotConnected(body)) {
+      return failure("not_connected", "Microsoft account not connected.");
+    }
     const wanted = recipient.toLowerCase();
     const match = (body.chats ?? []).find((c) => {
       const inTopic = (c.topic ?? "").toLowerCase().includes(wanted);
@@ -292,7 +300,8 @@ async function submitMessage(
     `/api/ms/chats/${encodeURIComponent(chatId)}/messages`,
     { content: messageBody, contentType: "text" },
   );
-  if (status === 401) return failure("auth", "Microsoft account not connected.");
+  if (isProviderNotConnected(data)) return failure("not_connected", "Microsoft account not connected.");
+  if (status === 401) return failure("auth", "Your session has expired. Sign in again.");
   if (status === 403) return failure("scope", "Teams message permission not granted.");
   if (status === 429) return failure("rate_limit", "Too many messages, try again shortly.");
   if (status === 404) {
@@ -346,7 +355,8 @@ async function submitCalendarEvent(
     ...(attendees && attendees.length > 0 ? { attendees } : {}),
     ...(bodyText ? { bodyText } : {}),
   });
-  if (status === 401) return failure("auth", "Microsoft account not connected.");
+  if (isProviderNotConnected(data)) return failure("not_connected", "Microsoft account not connected.");
+  if (status === 401) return failure("auth", "Your session has expired. Sign in again.");
   if (status === 403) return failure("scope", "Calendar permission not granted.");
   if (status === 429) return failure("rate_limit", "Too many requests, try again shortly.");
   if (status >= 400) {
@@ -394,7 +404,8 @@ async function submitTask(
     ...(dueAt ? { dueAt } : {}),
     ...(importance ? { importance } : {}),
   });
-  if (status === 401) return failure("auth", "Microsoft account not connected.");
+  if (isProviderNotConnected(data)) return failure("not_connected", "Microsoft account not connected.");
+  if (status === 401) return failure("auth", "Your session has expired. Sign in again.");
   if (status === 429) return failure("rate_limit", "Too many requests, try again shortly.");
   if (status >= 400) {
     const detail = (data as { error?: string; detail?: string })?.detail

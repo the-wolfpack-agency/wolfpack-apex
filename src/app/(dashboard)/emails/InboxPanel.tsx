@@ -25,6 +25,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { fetchWithRefresh, jsonHeaders } from "@/lib/client-auth";
 import { emitInsight } from "@/lib/insights/emit";
+import { isProviderNotConnected } from "@/lib/integrations/connection-state";
 
 export type InboxFolder = "inbox" | "drafts" | "sent" | "archived";
 
@@ -149,7 +150,7 @@ function rowDeleteErrorFromResponse(
         "Reconnect Microsoft 365 in Settings.",
     };
   }
-  if (status === 401 || body?.error === "microsoft_not_connected") {
+  if (isProviderNotConnected(body)) {
     return {
       kind: "error",
       reason: "not_connected",
@@ -305,6 +306,12 @@ export default function InboxPanel({
           headers: jsonHeaders(),
         });
         const body = await res.json().catch(() => ({}));
+        /* No Microsoft connection is a normal 200 { connected: false }, never a
+           401: a 401 is only an expired Instinct session. */
+        if (isProviderNotConnected(body)) {
+          setState({ kind: "error", code: "not_connected" });
+          return;
+        }
         if (res.status === 200 && Array.isArray(body?.messages)) {
           const rows = body.messages as InboxRow[];
           setState({
@@ -345,10 +352,7 @@ export default function InboxPanel({
           return;
         }
         if (res.status === 401) {
-          setState({
-            kind: "error",
-            code: body?.error === "microsoft_not_connected" ? "not_connected" : "unauthorized",
-          });
+          setState({ kind: "error", code: "unauthorized" });
           return;
         }
         if (res.status === 403 && body?.code === "scope_missing") {
@@ -549,10 +553,15 @@ export default function InboxPanel({
           </p>
         ) : state.kind === "error" ? (
           <div style={emptyStateStyle} data-testid="inbox-error" data-code={state.code}>
-            {state.code === "not_connected" || state.code === "unauthorized" ? (
+            {state.code === "not_connected" ? (
               <>
                 <p>Connect Microsoft 365 to see your {FOLDER_LABEL[folder].toLowerCase()}.</p>
                 <a href="/settings" style={ctaLinkStyle}>Open Settings</a>
+              </>
+            ) : state.code === "unauthorized" ? (
+              <>
+                <p>Your session has expired. Sign in again to see your {FOLDER_LABEL[folder].toLowerCase()}.</p>
+                <a href="/login?next=/emails" style={ctaLinkStyle}>Sign in</a>
               </>
             ) : state.code === "scope_missing" ? (
               <>

@@ -109,10 +109,11 @@ describe("POST /api/mail/send", () => {
     );
   });
 
-  it("401 on microsoft_not_connected", async () => {
+  it("409 { connected: false } on microsoft_not_connected (401 is only the session)", async () => {
     mockSendMail.mockResolvedValueOnce({ ok: false, code: "not_connected" });
     const res = await sendPOST(mkReq({ auth: "Bearer x", body: { to: ["a@b.com"], subject: "x", bodyText: "y" } }));
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ connected: false, error: "microsoft_not_connected" });
   });
 });
 

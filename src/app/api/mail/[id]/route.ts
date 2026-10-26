@@ -20,7 +20,7 @@
  *
  * Error shape:
  *   401 { error: "unauthorized" }                — no/invalid session
- *   401 { error: "microsoft_not_connected" }    — no MS token
+ *   200 { message: null, connected: false, error: "microsoft_not_connected" }    (no MS token)
  *   403 { error: "forbidden", code: "scope_missing", scope: "Mail.Read" }
  *   404 { error: "not_found" }                   — Graph rejected the id
  *   429 { error: "rate_limited", retryAfter }
@@ -28,6 +28,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { providerNotConnected } from "@/lib/integrations/not-connected";
 import { getUserFromRequest } from "@/lib/auth";
 import { getMessage } from "@/lib/integrations/microsoft-mail";
 
@@ -53,10 +54,7 @@ export async function GET(
   if (!result.ok) {
     switch (result.code) {
       case "not_connected":
-        return NextResponse.json(
-          { error: "microsoft_not_connected" },
-          { status: 401 },
-        );
+        return providerNotConnected(req, user, "microsoft", { surface: "mail/[id]", empty: { message: null } });
       case "scope_missing":
         return NextResponse.json(
           { error: "forbidden", code: "scope_missing", scope: result.scope ?? "Mail.Read" },
@@ -73,7 +71,7 @@ export async function GET(
         }
         return NextResponse.json(
           { error: "graph_error", message: result.message ?? "graph_error" },
-          { status: result.status && result.status >= 400 ? result.status : 502 },
+          { status: result.status && result.status >= 400 && result.status !== 401 ? result.status : 502 },
         );
       case "invalid_input":
         return NextResponse.json(

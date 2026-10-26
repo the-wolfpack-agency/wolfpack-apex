@@ -54,8 +54,10 @@ const EXCEPTIONS = [
  * because the "401 → blank page" failure mode this guard exists for does
  * not apply to them:
  *   - /api/analytics is a fire-and-forget observability beacon (often
- *     keepalive); a 401 is silently ignored and never blanks the UI, and
- *     fetchWithRefresh's retry/redirect semantics are wrong for a beacon.
+ *     keepalive); fetchWithRefresh's retry/redirect semantics are wrong for a
+ *     beacon. It still requires the Bearer token (a tokenless beacon 401s and
+ *     the event is lost), so client beacons go through sendTelemetry() in
+ *     client-auth.ts; src/__tests__/analytics-beacon-auth.test.ts enforces it.
  *   - /api/auth/whoami is the session BOOTSTRAP (re-mints the JWT via the
  *     refresh cookie). Routing it through fetchWithRefresh would be
  *     circular — it's the very call that establishes the token.

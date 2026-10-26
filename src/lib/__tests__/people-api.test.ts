@@ -45,11 +45,12 @@ describe("GET /api/people/suggest", () => {
     expect(data.suggestions).toHaveLength(1);
   });
 
-  it("401 when Microsoft not connected", async () => {
+  it("200 { connected: false, suggestions: [] } when Microsoft not connected (401 is only the session)", async () => {
     mockGetUserPpl.mockReturnValue({ id: "u", role: "cto" });
     mockSuggest.mockRejectedValue(new FakeGraphPeopleErr(401, "noop"));
     const res = await peopleGET(mkReq("http://test/api/people/suggest?q=x", "Bearer x"));
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ connected: false, suggestions: [], error: "microsoft_not_connected" });
   });
 
   it("caps top at 50", async () => {

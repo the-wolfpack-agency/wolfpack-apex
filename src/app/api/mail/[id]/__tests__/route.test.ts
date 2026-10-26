@@ -5,7 +5,7 @@
  * Locks every code path the /emails?id=<id> deep-link can hit:
  *   - 200 happy path returns the normalized message.
  *   - 401 unauth (no auth header).
- *   - 401 microsoft_not_connected when the lib reports no token.
+ *   - 200 { connected: false } when the lib reports no token (never 401).
  *   - 403 scope_missing (Mail.Read absent on the user's token).
  *   - 404 not_found (Graph rejected the id).
  *   - 429 rate_limited surfaces Retry-After.
@@ -82,16 +82,20 @@ describe("GET /api/mail/[id]", () => {
     expect(mockGetMessage).toHaveBeenCalledWith("u1", "AAMkAD-message-1");
   });
 
-  it("returns 401 microsoft_not_connected when the lib reports no token", async () => {
+  it("returns 200 { connected: false } (not 401) when the lib reports no token", async () => {
     mockGetMessage.mockResolvedValueOnce({
       ok: false,
       code: "not_connected",
       message: "microsoft_not_connected",
     });
     const res = await GET(makeReq("x"), { params: Promise.resolve({ id: "x" }) });
-    expect(res.status).toBe(401);
+    // 401 is reserved for an invalid Instinct session; fetchWithRefresh would
+    // rotate the refresh token and retry on it.
+    expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.error).toBe("microsoft_not_connected");
+    expect(body.connected).toBe(false);
+    expect(body.message).toBeNull();
   });
 
   it("returns 403 scope_missing with the Mail.Read scope name", async () => {

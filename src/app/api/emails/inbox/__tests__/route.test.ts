@@ -5,7 +5,7 @@
  * Locks every code path the /emails inbox surface relies on:
  *   - 200 happy path with messages.
  *   - 401 unauth (no auth header) before lib is touched.
- *   - 401 microsoft_not_connected when the lib reports no token.
+ *   - 200 { connected: false } when the lib reports no token (never 401).
  *   - 403 scope_missing.
  *   - 429 rate_limited surfaces Retry-After.
  *   - 502 graph_error never returns 500.
@@ -133,16 +133,20 @@ describe("GET /api/emails/inbox", () => {
     expect(body.folder).toBe("inbox");
   });
 
-  it("returns 401 microsoft_not_connected when the lib reports no token", async () => {
+  it("returns 200 { connected: false } (not 401) when the lib reports no token", async () => {
     mockListFolderMessages.mockResolvedValueOnce({
       ok: false,
       code: "not_connected",
       message: "microsoft_not_connected",
     });
     const res = await GET(makeReq());
-    expect(res.status).toBe(401);
+    // 401 is reserved for an invalid Instinct session; fetchWithRefresh would
+    // rotate the refresh token and retry on it.
+    expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.error).toBe("microsoft_not_connected");
+    expect(body.connected).toBe(false);
+    expect(body.messages).toEqual([]);
   });
 
   it("returns 403 forbidden + scope_missing", async () => {

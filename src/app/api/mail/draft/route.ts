@@ -9,7 +9,8 @@
  * Responses:
  *   201 { id, webLink? }                                  — draft created
  *   400 { error:"invalid_input", detail }                 — bad body / missing to/subject/body
- *   401 { error:"unauthorized" | "microsoft_not_connected" }
+ *   401 { error:"unauthorized" }  (Instinct session only)
+ *   409 { connected:false, error:"microsoft_not_connected" }
  *   403 { error:"forbidden", code:"scope_missing", scope:"Mail.ReadWrite" }
  *   429 { error:"rate_limited", retryAfter }
  *   502 { error:"graph_error" } / 500 { error:"internal" }
@@ -20,6 +21,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { providerNotConnected } from "@/lib/integrations/not-connected";
 import { getUserFromRequest } from "@/lib/auth";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { trackEvent } from "@/lib/analytics";
@@ -118,7 +120,7 @@ export async function POST(req: NextRequest) {
           { status: 429, headers: { "Retry-After": String(result.retryAfter ?? 60) } },
         );
       case "not_connected":
-        return NextResponse.json({ error: "microsoft_not_connected" }, { status: 401 });
+        return providerNotConnected(req, user, "microsoft", { surface: "mail/draft" });
       case "graph_error":
         return NextResponse.json(
           { error: "graph_error", status: result.status, detail: result.message },

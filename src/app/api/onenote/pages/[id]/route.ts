@@ -3,6 +3,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { providerNotConnected } from "@/lib/integrations/not-connected";
 import { getUserFromRequest } from "@/lib/auth";
 import { trackEvent } from "@/lib/analytics";
 import {
@@ -35,7 +36,7 @@ export async function GET(
         http_status: err.status,
       });
       if (err.status === 401) {
-        return NextResponse.json({ error: "Microsoft not connected" }, { status: 401 });
+        return providerNotConnected(req, user, "microsoft", { surface: "onenote/pages/[id]", empty: { html: "" } });
       }
       return NextResponse.json(
         { error: err.message },
