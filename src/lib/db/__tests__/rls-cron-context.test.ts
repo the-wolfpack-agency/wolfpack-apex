@@ -94,6 +94,10 @@ const CRON_CONTEXT: Record<string, CronContext> = {
     workspace: [CRON("forcefield-learn")],
     reason: "Works the Forcefield edge workspace only (FORCEFIELD_EDGE_WORKSPACE_ID).",
   },
+  [CRON("forcefield-alerts")]: {
+    workspace: ["src/lib/forcefield-web/alerts.ts"],
+    reason: "Reads the automatic-block decision for an incident from the Forcefield edge workspace only (FORCEFIELD_EDGE_WORKSPACE_ID), the one autoBlockFingerprint writes.",
+  },
   [CRON("integration-health")]: {
     workspace: [CRON("integration-health"), "src/lib/health/integration-probes.ts"],
     reason: "Per-workspace probes; the work list reads instinct_connector_credentials, which has no policy yet. Self-checks run in default.",

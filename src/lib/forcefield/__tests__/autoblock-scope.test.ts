@@ -110,19 +110,21 @@ describe("scope rule (pure)", () => {
 });
 
 describe("write path: autoBlockFingerprint (honeytoken)", () => {
-  it("a generic curl fingerprint is WITHHELD: no row, a durable event, and an admin-review alert", async () => {
+  it("a generic curl fingerprint is WITHHELD: no row and a durable event, but NO alert of its own", async () => {
     const alert = jest.fn(async () => null);
     expect(await autoBlockFingerprint(CURL_FP, "honeytoken", { alert })).toBe(0);
     expect(insertCalls()).toHaveLength(0);
     expect(withheldEvents()).toHaveLength(1);
     expect(withheldEvents()[0]).toEqual(["forcefield.autoblock_withheld_generic", "system", "forcefield", expect.objectContaining({ reason: "auto:honeytoken", withheld: 1, fps: CURL_FP, why: "common_client_kind" })]);
-    expect(alert).toHaveBeenCalledWith(expect.objectContaining({ kind: "autoblock_withheld", body: expect.stringMatching(/report-only/) }));
+    // One email per incident: the trap trip is already an incident, and its
+    // email reads this durable event back (alerts.ts lookupBlockDecision).
+    expect(alert).not.toHaveBeenCalled();
     expect(mockTrack).not.toHaveBeenCalledWith("forcefield.fingerprint_autoblocked", expect.anything(), expect.anything(), expect.anything());
   });
 
-  it("the default alert goes through the shared Forcefield alert dispatch", async () => {
+  it("the default path dispatches nothing either (no second email for one trap trip)", async () => {
     await autoBlockFingerprint(CURL_FP, "honeytoken");
-    expect(mockDispatch).toHaveBeenCalledWith(expect.objectContaining({ kind: "autoblock_withheld" }), expect.anything());
+    expect(mockDispatch).not.toHaveBeenCalled();
   });
 
   it("a distinctive attack-tool fingerprint STILL auto-blocks fingerprint-wide, with an expiry", async () => {

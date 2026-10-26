@@ -20,6 +20,30 @@ Source: `src/lib/forcefield-web/alerts.ts`, run by the `forcefield-alerts` cron
 - **Delivery.** In-app through `fanoutToTeam` and email through Microsoft Graph
   (`sendViaGraph`), to the security owner only (`FORCEFIELD_ALERT_RECIPIENT_EMAIL`,
   comma-separated to widen). Never Resend.
+- **Reading an alert email.** One email per incident, from one shared template
+  (`src/lib/forcefield-web/alert-email.ts`). It leads with the severity and a
+  plain headline ("A hostile agent took a decoy on ogiam.com and was
+  contained"), then the response: *Contained* (sent into the decoy maze),
+  *Blocked* (turned away at the edge), *Recorded only* (the site is in watch
+  mode) or *Partly stopped*, and either "No action needed" or the one
+  recommended action. The details table gives the exact first and last event
+  times in UTC and US Eastern (the 6-hour window is shown only as context), the
+  request count, the paths, the source (country, network type, client type,
+  identified agent), the signal and its confidence, and the fingerprint and
+  session signature. "Open this incident on the board" lands on
+  `/admin/site-analytics?tab=forcefield&view=operator&find=<session signature>`.
+- **Signals.** A *decoy* is a link or record hidden from people and never
+  offered to them, so only an automated agent can reach it. A *honeytoken* is a
+  planted value with no legitimate use. A *payload attack* is a request that
+  carried a live attack payload (SQL injection, XSS and similar). All three are
+  high-confidence hostile signals.
+- **The automatic-block decision rides the same email.** When a trap trip asks
+  for an automatic block, the decision (applied, or not applied because the
+  fingerprint is shared by legitimate visitors) is recorded and shown in the
+  incident email. It is never a second email.
+- **Recipients.** Wolfpack only (`FORCEFIELD_ALERT_RECIPIENT_EMAIL`). During the
+  build phase no client or tenant receives Forcefield alerts; a client-facing
+  version of the template exists for previews only.
 - **The outcome is recorded.** Each alert row keeps `delivery_status`
   (`delivered` or `failed`), `delivery_detail` (the reason, such as
   `email:no_mail_from`), `attempts` and `dispatched_at` (migration 291). Every

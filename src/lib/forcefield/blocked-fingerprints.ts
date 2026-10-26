@@ -334,11 +334,15 @@ export async function resolveAutoBlockScope(fp: string, deps: AutoBlockScopeDeps
   return classifyAutoBlockScope(fp, spread);
 }
 
-/** Record a withheld generic auto-block: one durable event and one alert per
- *  (reason, operator) in a 6-hour window. Never throws. */
+/** Record a withheld generic auto-block: one durable event, and (for an
+ *  operator block) one review alert per (reason, operator) in a 6-hour window.
+ *  A trap-trip block (alert: false) raises NO alert of its own: the trip is
+ *  already an incident, and the incident email reads this durable event back
+ *  and folds the decision in (one email per incident, see
+ *  forcefield-web/alerts.ts lookupBlockDecision). Never throws. */
 async function recordWithheldGeneric(
   withheld: { fp: string; scope: FingerprintScope }[],
-  ctx: { reason: string; operatorKey?: string },
+  ctx: { reason: string; operatorKey?: string; alert?: boolean },
   deps: AutoBlockScopeDeps,
 ): Promise<void> {
   if (withheld.length === 0) return;
@@ -351,6 +355,7 @@ async function recordWithheldGeneric(
     fps: sample,
     why: whys,
   }).catch(() => {});
+  if (ctx.alert === false) return;
   try {
     const { windowStartOf, incidentKey } = await import("@/lib/forcefield-web/alerts");
     const windowStart = windowStartOf(new Date());
@@ -451,7 +456,8 @@ export async function autoBlockFingerprint(fp: string, reason: string, deps: Aut
     // A generic fingerprint (default curl, a library, a headless browser) is
     // shared by unrelated users: never block it tool-wide automatically.
     const { keep, withheld } = await partitionByScope([{ fp }], deps);
-    await recordWithheldGeneric(withheld, { reason: `auto:${reason}` }, deps);
+    // No separate alert: the trap trip's incident email carries this decision.
+    await recordWithheldGeneric(withheld, { reason: `auto:${reason}`, alert: false }, deps);
     if (keep.length === 0) return 0;
     const expiresAt = new Date(Date.now() + AUTO_BLOCK_TTL_DAYS * 86_400_000).toISOString();
     const { inserted } = await writeAutoRows(workspaceId, `auto:${reason}`, [{ fp, expiresAt }]);

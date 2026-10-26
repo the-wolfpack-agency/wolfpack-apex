@@ -28,6 +28,18 @@ import { safeQuery, query } from "@/lib/db";
 import { fanoutToTeam, type TeamFanoutInput } from "@/lib/notifications/team-fanout";
 import { sendViaGraph } from "@/lib/mail/send-via-graph";
 import { trackEventAwait } from "@/lib/analytics";
+import { instinctPublicBaseUrl } from "@/lib/mail/public-base-url";
+import { boardHref } from "@/lib/forcefield-web/board-link";
+import { isStaticallyGeneric } from "@/lib/forcefield/autoblock-scope";
+import { getEdgePolicy, type EdgePolicy } from "@/lib/forcefield/edge-policy";
+import { runWithRequestWorkspace } from "@/lib/db/request-workspace";
+import {
+  renderForcefieldAlertEmail,
+  alertSubject,
+  alertSummary,
+  type BlockDecision,
+  type IncidentDetail,
+} from "@/lib/forcefield-web/alert-email";
 
 /**
  * Forcefield is still in testing and most of the team does not know it exists,
@@ -65,6 +77,9 @@ export interface HostileSignal {
   fpCount: number;
   samplePath: string;
   count: number;
+  /** The incident's facts (exact times, paths, source, outcomes). Present on
+   *  every live signal; absent only on hand-built test signals. */
+  detail?: Omit<IncidentDetail, "blockDecision">;
 }
 
 /** A fully formed alert, from any source (scan, silence check, canary trip). */
@@ -78,6 +93,8 @@ export interface ForcefieldAlert {
   attackClass?: string;
   windowStart?: string;
   metadata?: Record<string, string | number | boolean>;
+  /** Structured incident facts for the email template (scan alerts). */
+  incident?: IncidentDetail;
 }
 
 export interface DeliveryOutcome {
@@ -104,6 +121,10 @@ export interface ForcefieldAlertDeps {
   countHostileEvents: (sinceHours: number) => Promise<number>;
   /** Alerts that reached a person in the lookback, silence alerts excluded. */
   countDeliveredAlerts: (sinceHours: number) => Promise<number>;
+  /** Optional: add facts only worth reading once the alert is claimed (the
+   *  automatic-block decision), so a duplicate costs no extra query. Never
+   *  expected to throw; a failure sends the alert unenriched. */
+  enrich?: (alert: ForcefieldAlert) => Promise<ForcefieldAlert>;
 }
 
 function hashKey(parts: readonly string[]): string {
@@ -136,25 +157,28 @@ export function fingerprintPhrase(fpCount: number): string {
   return `${fpCount} distinct fingerprint${fpCount === 1 ? "" : "s"}`;
 }
 
-function alertFromSignal(s: HostileSignal): ForcefieldAlert {
+export function alertFromSignal(s: HostileSignal): ForcefieldAlert {
   const site = s.site || "site";
-  const title = s.kind === "honeytoken_trip"
-    ? `Forcefield: honeytoken tripped on ${site}`
-    : `Forcefield: ${s.attackClass.replace(/_/g, " ")} attack on ${site}`;
-  const body =
-    `${countPhrase(s.count, s.kind === "honeytoken_trip" ? "honeytoken trip" : "payload attack")} on ${site} (${s.attackClass}) ` +
-    `in the 6-hour window starting ${s.windowStart}. ${fingerprintPhrase(s.fpCount)}. Example path: ${s.samplePath || "not recorded"}. ` +
+  const legacyBody =
+    `${countPhrase(s.count, s.kind === "honeytoken_trip" ? "honeytoken trip" : "payload attack")} on ${site} (${s.attackClass}). ` +
+    `${fingerprintPhrase(s.fpCount)}. Example path: ${s.samplePath || "not recorded"}. ` +
     `This is a high-confidence hostile signal.`;
-  return {
+  const alert: ForcefieldAlert = {
     kind: s.kind,
     dedupeKey: incidentKey(s.kind, s.site, s.attackClass, s.windowStart),
-    title,
-    body,
+    title: "",
+    body: legacyBody,
     site: s.site,
     attackClass: s.attackClass,
     windowStart: s.windowStart,
     metadata: { count: s.count, fp_count: s.fpCount },
+    ...(s.detail ? { incident: { ...s.detail } } : {}),
   };
+  // Outcome-first subject ("[Forcefield] ogiam.com: hostile agent contained
+  // (decoy)"); the plain summary rides the in-app notice and the alert row.
+  alert.title = alertSubject(alert);
+  if (alert.incident) alert.body = alertSummary(alert);
+  return alert;
 }
 
 /**
@@ -162,7 +186,7 @@ function alertFromSignal(s: HostileSignal): ForcefieldAlert {
  * (scan, silence check, canary trip) uses. Returns the outcome, or null when the
  * dedupe slot was already taken (a duplicate inside its window). Never throws.
  */
-export async function dispatchForcefieldAlert(alert: ForcefieldAlert, deps: Pick<ForcefieldAlertDeps, "claimAlert" | "deliver" | "recordOutcome" | "track">): Promise<DeliveryOutcome | null> {
+export async function dispatchForcefieldAlert(alert: ForcefieldAlert, deps: Pick<ForcefieldAlertDeps, "claimAlert" | "deliver" | "recordOutcome" | "track" | "enrich">): Promise<DeliveryOutcome | null> {
   let claimed = false;
   try {
     claimed = await deps.claimAlert(alert);
@@ -170,6 +194,14 @@ export async function dispatchForcefieldAlert(alert: ForcefieldAlert, deps: Pick
     claimed = false;
   }
   if (!claimed) return null;
+
+  if (deps.enrich) {
+    try {
+      alert = await deps.enrich(alert);
+    } catch {
+      /* send unenriched rather than not at all */
+    }
+  }
 
   let outcome: DeliveryOutcome;
   try {
@@ -273,19 +305,33 @@ const HOSTILE_EVENT_TYPES = ["site.agent_trap_tripped", "site.agent_payload_atta
  */
 export const EXCLUDE_SYNTHETIC_SQL = `COALESCE(props->>'synthetic', '') <> 'true'`;
 
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+/** The alert row id (same derivation as the dedupe store), shown in the email
+ *  footer so a reader can find the row. */
+export function alertRowId(alert: Pick<ForcefieldAlert, "kind" | "dedupeKey">): string {
+  return hashKey([alert.kind, alert.dedupeKey]);
 }
 
-/** In-app (fanoutToTeam) + email (Graph) to the security owner. Never throws. */
+/**
+ * In-app (fanoutToTeam) + email (Graph) to the Wolfpack security owner list
+ * (alertRecipientEmails) ONLY. Build phase: no client or tenant ever receives a
+ * Forcefield alert, and this is the only delivery path (guarded by
+ * alert-delivery-guardrail.test.ts). One email per incident, rendered by the
+ * shared operator template. Never throws.
+ */
 export async function deliverForcefieldAlert(alert: ForcefieldAlert): Promise<DeliveryOutcome> {
   const recipients = alertRecipientEmails();
+  const email = renderForcefieldAlertEmail(alert, {
+    audience: "operator",
+    baseUrl: instinctPublicBaseUrl(),
+    recipients,
+    alertId: alertRowId(alert),
+  });
   const fanoutInput: TeamFanoutInput = {
     actor: { id: "system", role: "system", name: "Forcefield" },
-    title: alert.title,
+    title: email.subject.replace(/^\[Forcefield\]\s*/, "Forcefield: "),
     body: alert.body,
-    actionUrl: "/admin/forcefield-web",
-    actionLabel: "Open Forcefield",
+    actionUrl: email.links[0]?.href.replace(instinctPublicBaseUrl(), "") || boardHref({ tab: "forcefield" }),
+    actionLabel: "Open on the board",
     category: "security",
     recipientEmails: recipients,
     source: "forcefield-web",
@@ -305,11 +351,10 @@ export async function deliverForcefieldAlert(alert: ForcefieldAlert): Promise<De
 
   let emailAttempted = 0;
   let emailDelivered = 0;
-  const html = `<p>${escapeHtml(alert.body)}</p><p>Open Forcefield in Wolfpack Instinct: /admin/forcefield-web</p>`;
   for (const to of recipients) {
     emailAttempted++;
     try {
-      const res = await sendViaGraph({ to, subject: alert.title, text: alert.body, html, fromName: "Forcefield" });
+      const res = await sendViaGraph({ to, subject: email.subject, text: email.text, html: email.html, fromName: "OGIAM Forcefield" });
       if (res.delivered) emailDelivered++;
       else details.push(`email:${res.reason}`);
     } catch (err) {
@@ -361,19 +406,148 @@ export function liveAlertStore(): Pick<ForcefieldAlertDeps, "claimAlert" | "reco
   };
 }
 
+/** Most distinct values of one attribute the alert carries (the rest are counted). */
+export const DETAIL_LIST_CAP = 5;
+
+type SignalRow = {
+  kind: string; site: string; attack: string; window_start: string; fps: string; sample: string | null; count: string;
+  first_at: string; last_at: string;
+  paths: string[] | null; path_count: string;
+  countries: string[] | null; hosting: string[] | null; client_types: string[] | null; agents: string[] | null; networks: string[] | null;
+  fp_list: string[] | null; sigs: string[] | null; sig_count: string;
+  n_blocked: string; n_contained: string; n_recorded: string;
+  postures: string[] | null; reason_kinds: string[] | null;
+};
+
+/** Map one grouped row to a signal with its full incident detail. Exported for tests. */
+export function signalFromRow(r: SignalRow): HostileSignal {
+  const kind = r.kind === "site.agent_trap_tripped" ? "honeytoken_trip" : "payload_attack";
+  const arr = (a: string[] | null) => (a ?? []).filter((v) => typeof v === "string" && v !== "");
+  const capped = (a: string[] | null) => arr(a).slice(0, DETAIL_LIST_CAP);
+  const fpAll = arr(r.fp_list);
+  const sigAll = arr(r.sigs);
+  const windowStart = new Date(r.window_start).toISOString();
+  return {
+    kind,
+    site: r.site,
+    attackClass: r.attack === r.kind ? kind : r.attack,
+    windowStart,
+    fpCount: Number(r.fps),
+    samplePath: r.sample ?? "",
+    count: Number(r.count),
+    detail: {
+      firstAt: new Date(r.first_at).toISOString(),
+      lastAt: new Date(r.last_at).toISOString(),
+      count: Number(r.count),
+      windowStart,
+      windowHours: ALERT_WINDOW_HOURS,
+      paths: capped(r.paths),
+      pathCount: Number(r.path_count),
+      countries: capped(r.countries),
+      hosting: capped(r.hosting),
+      clientTypes: capped(r.client_types),
+      agents: capped(r.agents),
+      networks: capped(r.networks),
+      fingerprints: fpAll.slice(0, DETAIL_LIST_CAP),
+      fingerprintCount: Number(r.fps),
+      signatures: sigAll.slice(0, DETAIL_LIST_CAP),
+      signatureCount: Number(r.sig_count),
+      outcomes: { blocked: Number(r.n_blocked), contained: Number(r.n_contained), recorded: Number(r.n_recorded) },
+      postures: capped(r.postures),
+      reasonKinds: capped(r.reason_kinds),
+    },
+  };
+}
+
+/**
+ * The automatic-block decision for an incident's fingerprints, read back from
+ * what the ingest path RECORDED (never recomputed): an active automatic row in
+ * instinct_agent_blocked_fingerprints means blocked; a
+ * forcefield.autoblock_withheld_generic event naming the fingerprint since the
+ * window start means withheld. Otherwise none. Null on a read error.
+ *
+ * "blocked" is claimed only for a row the ruleset actually SERVES: a stored
+ * automatic row on a statically generic fingerprint is never distributed, and
+ * no automatic row is while the edge policy is off enforce + auto_block (same
+ * rules as getBlockedFingerprints), so neither is reported as a block.
+ */
+export async function lookupBlockDecision(
+  fps: readonly string[],
+  sinceIso: string,
+  getPolicy: (workspaceId: string) => Promise<EdgePolicy> = getEdgePolicy,
+): Promise<BlockDecision | null> {
+  const list = fps.filter(Boolean).slice(0, DETAIL_LIST_CAP);
+  if (list.length === 0) return null;
+  // Automatic blocks live in the Forcefield edge workspace (the same one
+  // autoBlockFingerprint writes and getBlockedFingerprints serves).
+  const workspaceId = process.env.FORCEFIELD_EDGE_WORKSPACE_ID || "default";
+  try {
+    const blocked = await runWithRequestWorkspace(workspaceId, () => safeQuery<{ fp: string; expires_at: string | null }>(
+      `SELECT fp, max(expires_at)::text AS expires_at FROM instinct_agent_blocked_fingerprints
+        WHERE workspace_id = $2 AND fp = ANY($1::text[]) AND operator_key LIKE 'auto:%'
+          AND (expires_at IS NULL OR expires_at > now())
+        GROUP BY fp`,
+      [list, workspaceId],
+    ));
+    const served = blocked.rows.filter((r) => !isStaticallyGeneric(r.fp));
+    if (served.length > 0) {
+      const policy = await getPolicy(workspaceId).catch(() => null);
+      if (policy && policy.mode === "enforce" && policy.autoBlock) {
+        const exp = served.map((r) => r.expires_at).filter((x): x is string => !!x).sort().pop();
+        return { state: "blocked", fingerprints: served.map((r) => r.fp), ...(exp ? { expiresAt: new Date(exp).toISOString() } : {}) };
+      }
+    }
+    const withheld = await safeQuery<{ fps: string | null; why: string | null }>(
+      `SELECT metadata->>'fps' AS fps, metadata->>'why' AS why FROM instinct_events
+        WHERE event_type = 'forcefield.autoblock_withheld_generic'
+          AND timestamp >= $1::timestamptz
+        ORDER BY timestamp DESC
+        LIMIT 50`,
+      [sinceIso],
+    );
+    for (const r of withheld.rows) {
+      const named = (r.fps ?? "").split(",").map((f) => f.trim());
+      const hit = list.filter((f) => named.includes(f));
+      if (hit.length > 0) return { state: "withheld", fingerprints: hit, ...(r.why ? { why: r.why } : {}) };
+    }
+    return { state: "none", fingerprints: list };
+  } catch {
+    return null;
+  }
+}
+
 export function liveForcefieldAlertDeps(): ForcefieldAlertDeps {
   return {
     listHostileSignals: async (sinceHours) => {
       // Group by incident: kind + site + attack class + 6-hour window, so the
-      // dedupe key is per incident and window (see the file header).
-      const { rows } = await safeQuery<{ kind: string; site: string; attack: string; window_start: string; fps: string; sample: string | null; count: string }>(
+      // dedupe key is per incident and window (see the file header). Each group
+      // carries its exact first/last times, distinct paths, source and the
+      // per-request outcome so the email states facts, not the window.
+      const { rows } = await safeQuery<SignalRow>(
         `SELECT event_type AS kind,
                 COALESCE(props->>'site', '') AS site,
                 COALESCE(NULLIF(props->>'attack', ''), event_type) AS attack,
                 to_timestamp(floor(extract(epoch FROM created_at) / ($2::int * 3600)) * ($2::int * 3600)) AS window_start,
                 count(DISTINCT NULLIF(props->>'fp', '')) AS fps,
                 min(path) AS sample,
-                count(*) AS count
+                count(*) AS count,
+                min(created_at) AS first_at,
+                max(created_at) AS last_at,
+                (array_agg(DISTINCT path) FILTER (WHERE path IS NOT NULL AND path <> ''))[1:${DETAIL_LIST_CAP}] AS paths,
+                count(DISTINCT NULLIF(path, '')) AS path_count,
+                array_agg(DISTINCT country) FILTER (WHERE country IS NOT NULL AND country <> '') AS countries,
+                array_agg(DISTINCT props->>'hosting') FILTER (WHERE COALESCE(props->>'hosting', '') <> '') AS hosting,
+                array_agg(DISTINCT props->>'client_type') FILTER (WHERE COALESCE(props->>'client_type', '') <> '') AS client_types,
+                array_agg(DISTINCT props->>'agent') FILTER (WHERE COALESCE(props->>'agent', '') <> '') AS agents,
+                array_agg(DISTINCT COALESCE(NULLIF(props->>'org', ''), NULLIF(props->>'asn', ''))) FILTER (WHERE COALESCE(props->>'org', props->>'asn', '') <> '') AS networks,
+                (array_agg(DISTINCT props->>'fp') FILTER (WHERE COALESCE(props->>'fp', '') <> ''))[1:${DETAIL_LIST_CAP}] AS fp_list,
+                (array_agg(DISTINCT props->>'sig') FILTER (WHERE COALESCE(props->>'sig', '') <> ''))[1:${DETAIL_LIST_CAP}] AS sigs,
+                count(DISTINCT NULLIF(props->>'sig', '')) AS sig_count,
+                count(*) FILTER (WHERE props->>'blocked' = 'true') AS n_blocked,
+                count(*) FILTER (WHERE COALESCE(props->>'blocked', '') <> 'true' AND (props->>'tarpit' = 'true' OR props->>'action' = 'tarpit')) AS n_contained,
+                count(*) FILTER (WHERE COALESCE(props->>'blocked', '') <> 'true' AND COALESCE(props->>'tarpit', '') <> 'true' AND COALESCE(props->>'action', '') <> 'tarpit') AS n_recorded,
+                array_agg(DISTINCT props->>'posture') FILTER (WHERE COALESCE(props->>'posture', '') <> '') AS postures,
+                array_agg(DISTINCT props->>'reason_kind') FILTER (WHERE COALESCE(props->>'reason_kind', '') <> '') AS reason_kinds
            FROM site_analytics_events
           WHERE event_type = ANY($3::text[])
             AND created_at > now() - ($1 || ' hours')::interval
@@ -381,18 +555,16 @@ export function liveForcefieldAlertDeps(): ForcefieldAlertDeps {
           GROUP BY 1, 2, 3, 4`,
         [String(sinceHours), ALERT_WINDOW_HOURS, HOSTILE_EVENT_TYPES],
       );
-      return rows.map((r) => {
-        const kind = r.kind === "site.agent_trap_tripped" ? "honeytoken_trip" : "payload_attack";
-        return {
-          kind,
-          site: r.site,
-          attackClass: r.attack === r.kind ? kind : r.attack,
-          windowStart: new Date(r.window_start).toISOString(),
-          fpCount: Number(r.fps),
-          samplePath: r.sample ?? "",
-          count: Number(r.count),
-        } satisfies HostileSignal;
-      });
+      return rows.map(signalFromRow);
+    },
+    // One email per incident: the automatic-block decision the ingest path
+    // recorded for a trap trip is folded INTO the incident email (the ingest
+    // path no longer sends its own notice for it).
+    enrich: async (alert) => {
+      const i = alert.incident;
+      if (alert.kind !== "honeytoken_trip" || !i || i.fingerprints.length === 0) return alert;
+      const decision = await lookupBlockDecision(i.fingerprints, i.windowStart);
+      return decision ? { ...alert, incident: { ...i, blockDecision: decision } } : alert;
     },
     ...liveAlertStore(),
     deliver: deliverForcefieldAlert,

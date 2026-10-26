@@ -357,6 +357,15 @@ describe("filterOperators", () => {
     const r = filterOperators(groups, "/wp-admin");
     expect(r.map((g) => g.operatorKey)).toEqual(["op_wp"]);
   });
+  it("finds an operator by an exact session signature (the alert email deep link)", () => {
+    const sigGroups = consolidateByOperator([
+      j({ operatorKey: "op_sig", path: ["/_ff/records"], key: "2f4a2b10" }),
+      j({ operatorKey: "op_near", path: ["/_ff/records"], key: "2f4a2b1" }),
+    ]);
+    expect(filterOperators(sigGroups, "2f4a2b10").map((g) => g.operatorKey)).toEqual(["op_sig"]);
+    // exact, not a substring: a prefix of a signature finds nothing by signature
+    expect(filterOperators(sigGroups, "2f4a2b").length).toBe(0);
+  });
   it("finds an operator by its key, case-insensitive", () => {
     expect(filterOperators(groups, "OP_OTHER").map((g) => g.operatorKey)).toEqual(["op_other"]);
   });

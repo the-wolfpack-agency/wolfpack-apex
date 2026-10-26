@@ -47,7 +47,17 @@ export default function ForcefieldDocsPage() {
     setLoading(false);
   }, []);
 
-  useEffect(() => { if (ready) void open(active); }, [ready]); // eslint-disable-line react-hooks/exhaustive-deps
+  // ?doc=<key> opens that doc (e.g. the alert email's "What this alert means"
+  // link). The API whitelists keys, so an unknown key just shows "unavailable".
+  useEffect(() => {
+    if (!ready) return;
+    let initial = active;
+    try {
+      const k = new URLSearchParams(window.location.search).get("doc");
+      if (k && /^[a-z0-9_-]{1,40}$/.test(k)) initial = k;
+    } catch { /* default doc */ }
+    void open(initial);
+  }, [ready]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!ready) return null;
 
