@@ -19,6 +19,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getUserFromRequest } from "@/lib/auth";
 import { getValidToken } from "@/lib/microsoft-graph";
 import { listChannelMessages, sendChannelMessage } from "@/lib/ms-graph-teams";
+import { providerNotConnected } from "@/lib/integrations/not-connected";
 
 export async function GET(
   req: NextRequest,
@@ -72,7 +73,8 @@ export async function GET(
  *
  * Sends a text message to the channel. Body: { content: string }.
  * Mirrors the chat compose route: surfaces scope_missing + graph_error
- * explicitly so the UI can render the right hint.
+ * explicitly so the UI can render the right hint. Microsoft not linked is
+ * 409 { connected: false } via providerNotConnected(): the post did not happen.
  */
 export async function POST(
   req: NextRequest,
@@ -108,7 +110,8 @@ export async function POST(
   try {
     const token = await getValidToken(user.id);
     if (!token) {
-      return NextResponse.json({ message: null, connected: false });
+      // An action: 409, never a 200 that reads as a post that happened.
+      return providerNotConnected(req, user, "microsoft", { surface: "ms/teams/channel-messages" });
     }
     const result = await sendChannelMessage(
       token.accessToken,

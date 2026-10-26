@@ -1,5 +1,6 @@
 /**
- * Guard: a route never answers 401 for a PROVIDER-connection reason.
+ * Guard: a route never answers 401 for a PROVIDER-connection reason, and an
+ * action never answers 200 { connected: false } (see the second describe).
  *
  * 401 means only "your Instinct session is invalid". fetchWithRefresh
  * (src/lib/client-auth.ts) treats every 401 as an expired session: it rotates
@@ -94,6 +95,139 @@ describe("no route answers 401 for a provider-connection reason", () => {
     expect(
       findings.map((x) => `${x.file}:${x.line}  ${x.text}`),
     ).toEqual([]);
+  });
+});
+
+/* ------------------------------------------------------------------------- */
+/* Second half of the rule: an ACTION never answers 200 { connected: false }.  */
+/* A 200 to a send / create / update that did not happen reads as success to  */
+/* every consumer that checks res.ok (the Teams composer kept the message in   */
+/* the thread as sent). Actions answer 409 via providerNotConnected().         */
+/* ------------------------------------------------------------------------- */
+
+const HANDLER = /^export\s+(?:async\s+function\s+|const\s+)(GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS)\b/;
+const ACTION_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+const NOT_CONNECTED_BODY = /(?<![\w$])connected:\s*false\b|notConnectedBody\(/;
+const ACTION_STATUS = /status:\s*(?:409|NOT_CONNECTED_ACTION_STATUS)\b/;
+
+/** A POST that is a read in all but verb (the payload is too large for a
+ *  query string). Its "not connected" answer is a read's: 200 and empty. */
+export const READ_VIA_POST: Record<string, string> = {
+  "src/app/api/ms/presence/route.ts POST":
+    "batch presence lookup; POST only to carry the user id list",
+};
+
+export interface ActionNotConnected200Finding {
+  file: string;
+  method: string;
+  line: number;
+  text: string;
+}
+
+export function findActionNotConnected200s(
+  file: string,
+  source: string,
+): ActionNotConnected200Finding[] {
+  const lines = source.split("\n");
+  const findings: ActionNotConnected200Finding[] = [];
+  let method: string | null = null;
+  lines.forEach((l, i) => {
+    const h = HANDLER.exec(l);
+    if (h) method = h[1];
+    if (!method || !ACTION_METHODS.has(method)) return;
+    if (COMMENT.test(l) || !NOT_CONNECTED_BODY.test(l)) return;
+    if (READ_VIA_POST[`${file} ${method}`]) return;
+    // The call this body belongs to: this line through the end of the statement.
+    let call = l;
+    for (let j = i + 1; j < lines.length && j <= i + 6 && !/;\s*$/.test(call); j++) {
+      call += "\n" + lines[j];
+    }
+    if (!ACTION_STATUS.test(call)) {
+      findings.push({ file, method, line: i + 1, text: l.trim() });
+    }
+  });
+  return findings;
+}
+
+describe("no action answers 200 { connected: false }", () => {
+  it("scans every route handler's POST / PUT / PATCH / DELETE", () => {
+    const routes = walk(path.join(ROOT, "src/app/api")).filter((f) => f.endsWith("route.ts"));
+    expect(routes.length).toBeGreaterThan(100);
+    const findings = routes.flatMap((f) =>
+      findActionNotConnected200s(path.relative(ROOT, f), fs.readFileSync(f, "utf8")),
+    );
+    expect(
+      findings.map((x) => `${x.file}:${x.line} ${x.method}  ${x.text}`),
+    ).toEqual([]);
+  });
+
+  it("every READ_VIA_POST exemption still names a real POST handler", () => {
+    for (const key of Object.keys(READ_VIA_POST)) {
+      const [file, method] = key.split(" ");
+      const src = fs.readFileSync(path.join(ROOT, file), "utf8");
+      expect(src).toMatch(new RegExp(`export\\s+(?:async\\s+function\\s+|const\\s+)${method}\\b`));
+    }
+  });
+});
+
+describe("findActionNotConnected200s (the detector itself)", () => {
+  const flagged = (src: string, file = "x.ts") => findActionNotConnected200s(file, src).length;
+
+  it("flags the Teams send form: POST answering 200 { messages: [], connected: false }", () => {
+    expect(
+      flagged(`
+export async function POST(req: NextRequest) {
+  const token = await getValidToken(user.id);
+  if (!token) {
+    return NextResponse.json({ messages: [], connected: false });
+  }
+}`),
+    ).toBe(1);
+  });
+
+  it("flags an explicit 200 and a helper body without a status", () => {
+    expect(
+      flagged(`
+export const PATCH = async (req: Request) => {
+  return NextResponse.json({ connected: false }, { status: 200 });
+};`),
+    ).toBe(1);
+    expect(
+      flagged(`
+export async function DELETE(req: Request) {
+  return NextResponse.json(
+    notConnectedBody("microsoft"),
+  );
+}`),
+    ).toBe(1);
+  });
+
+  it("does not flag a read, an action's 409, or providerNotConnected()", () => {
+    expect(
+      flagged(`
+export async function GET(req: NextRequest) {
+  if (!token) return NextResponse.json({ chats: [], connected: false });
+}
+export async function POST(req: NextRequest) {
+  if (!token) return providerNotConnected(req, user, "microsoft");
+  if (legacy) {
+    return NextResponse.json(
+      { connected: false, error: "microsoft_not_connected" },
+      { status: 409 },
+    );
+  }
+  const row = { m365_connected: false };
+}`),
+    ).toBe(0);
+  });
+
+  it("honours a READ_VIA_POST exemption only for its own file", () => {
+    const src = `
+export async function POST(req: NextRequest) {
+  if (!token) return NextResponse.json({ presences: [], connected: false });
+}`;
+    expect(flagged(src, "src/app/api/ms/presence/route.ts")).toBe(0);
+    expect(flagged(src, "src/app/api/other/route.ts")).toBe(1);
   });
 });
 

@@ -87,6 +87,15 @@ describe("scripts/verify.sh VERIFY_DRY_RUN plan", () => {
     expect(res.stdout).not.toMatch(/- e2e-smoke/);
   });
 
+  it("the lint group (the lint-types CI job) carries the tenant-isolation scan", () => {
+    const envs: Array<Record<string, string>> = [{}, { VERIFY_STAGES: "typecheck,lint" }, { VERIFY_STAGES: "lint" }];
+    for (const env of envs) {
+      expect(plan(env).stdout).toMatch(/- tenant-isolation \(npm run scan:tenant-isolation\)/);
+    }
+    expect(plan({ VERIFY_STAGES: "unit" }).stdout).not.toMatch(/tenant-isolation/);
+    expect(plan({ VERIFY_STAGES: "e2e" }).stdout).not.toMatch(/tenant-isolation/);
+  });
+
   it("JEST_SHARD=2/4 surfaces --shard=2/4 in the unit command", () => {
     const res = plan({ VERIFY_STAGES: "unit", JEST_SHARD: "2/4" });
     expect(res.stdout).toMatch(/jest-shard:\s+2\/4/);

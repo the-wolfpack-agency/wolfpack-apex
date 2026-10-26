@@ -14,7 +14,11 @@
  *      connection the body says connected:false and the inbox renders the
  *      connect prompt (never a blank widget, never a redirect to /login).
  *   4. No console errors.
- * Scenarios: desktop + mobile viewport, a reload, and three Graph-backed pages.
+ *   5. An ACTION never answers 200 { connected: false }: POST
+ *      /api/ms/chats/[id]/messages answers 409 when Microsoft is not connected
+ *      (a 200 read as "sent"), and without a session it is 401.
+ * Scenarios: desktop + mobile viewport, a reload, three Graph-backed pages,
+ * the Teams send action with and without a session.
  */
 import { test, expect, type Page } from "@playwright/test";
 import { resolveSmokeTarget, signInIfPossible } from "./helpers/smoke-helpers";
@@ -107,5 +111,54 @@ test.describe("provider not connected never reads as a signed-out session", () =
     expect(seen.unauthorized, "401s while signed in").toEqual([]);
     expect(seen.refreshes, "refresh-token rotations").toEqual([]);
     expect(seen.consoleErrors, "console errors").toEqual([]);
+  });
+});
+
+/* The send targets a chat id that does not exist, so even for an account WITH
+   a Microsoft connection nothing is posted: the route answers 404 (or 403 when
+   inline send is disabled). Only "not connected" may produce connected:false,
+   and then only as a 409. */
+test.describe("Teams send: not connected is a 409, never a 200", () => {
+  const CHAT = "e2e-nonexistent-chat";
+
+  test("signed in: POST /api/ms/chats/[id]/messages is never 200 connected:false and never 401", async ({
+    page,
+  }) => {
+    if (!target.email || !target.password) {
+      test.skip(true, "SMOKE_TEST_EMAIL / SMOKE_TEST_PASSWORD not set; skipping");
+      return;
+    }
+    expect(await signInIfPossible(page, target)).toBe(true);
+    await settle(page);
+    const token = await page.evaluate(
+      () => localStorage.getItem("instinct_token") ?? localStorage.getItem("apex_token") ?? "",
+    );
+    expect(token.length).toBeGreaterThan(0);
+    const res = await page.request.post(
+      `${target.baseUrl}/api/ms/chats/${CHAT}/messages`,
+      {
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        data: { content: "e2e probe, never delivered", contentType: "text" },
+      },
+    );
+    const body = (await res.json().catch(() => ({}))) as { connected?: boolean; error?: string };
+    expect(res.status(), "a signed-in send is never a 401").not.toBe(401);
+    expect(res.status(), "a send that did not happen is never a 200").not.toBe(200);
+    if (body.connected === false) {
+      expect(res.status()).toBe(409);
+      expect(body.error).toBe("microsoft_not_connected");
+    }
+  });
+
+  test("no session: POST /api/ms/chats/[id]/messages is 401 without a connected field", async ({
+    request,
+  }) => {
+    const res = await request.post(`${target.baseUrl}/api/ms/chats/${CHAT}/messages`, {
+      headers: { "Content-Type": "application/json" },
+      data: { content: "e2e probe, never delivered" },
+    });
+    expect(res.status()).toBe(401);
+    const body = (await res.json().catch(() => ({}))) as { connected?: boolean };
+    expect(body.connected).toBeUndefined();
   });
 });

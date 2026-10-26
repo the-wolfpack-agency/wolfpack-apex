@@ -43,6 +43,7 @@ import {
 import Link from "next/link";
 import { htmlToText } from "@/lib/html-sanitize";
 import { fetchWithRefresh, getInstinctUser } from "@/lib/client-auth";
+import { isProviderNotConnected } from "@/lib/integrations/connection-state";
 import { emitInsight } from "@/lib/insights/emit";
 import { useAdaptivePoll } from "@/lib/hooks/useAdaptivePoll";
 import PresenceDot from "@/components/PresenceDot";
@@ -597,7 +598,7 @@ function fireAnalytics(
   }).catch(() => undefined);
 }
 
-type ComposeHint = "scope_missing" | "write_disabled" | null;
+type ComposeHint = "scope_missing" | "write_disabled" | "not_connected" | null;
 
 export default function MessagesPage() {
   const [chats, setChats] = useState<ChatSummary[] | null>(null);
@@ -1173,7 +1174,7 @@ export default function MessagesPage() {
   // the pane can surface scope_missing / graph_error inline.
   type ChannelSendResult =
     | { ok: true }
-    | { ok: false; reason: "scope_missing" | "error" | "network"; message?: string };
+    | { ok: false; reason: "scope_missing" | "not_connected" | "error" | "network"; message?: string };
   async function sendChannelCompose(
     teamId: string,
     channelId: string,
@@ -1215,6 +1216,17 @@ export default function MessagesPage() {
           reason: "scope_missing",
         });
         return { ok: false, reason: "scope_missing" };
+      }
+      if (isProviderNotConnected(data)) {
+        setChannelMessages((prev) =>
+          (prev ?? []).filter((m) => m.id !== optimisticId),
+        );
+        fireAnalytics("messages.channel_compose_failed", {
+          team_id: teamId,
+          channel_id: channelId,
+          reason: "not_connected",
+        });
+        return { ok: false, reason: "not_connected" };
       }
       if (data.graph_error) {
         setChannelMessages((prev) =>
@@ -1784,6 +1796,18 @@ export default function MessagesPage() {
         fireAnalytics("messages.compose_failed", {
           chat_id: chatId,
           reason: "scope_missing",
+        });
+        return;
+      }
+      // Microsoft not connected: the route answers 409 { connected: false }.
+      // The message was not sent, so it never stays in the thread as sent.
+      if (isProviderNotConnected(data)) {
+        setMessages((prev) => (prev ?? []).filter((m) => m.id !== optimisticId));
+        setComposeHint("not_connected");
+        setDraft(trimmed);
+        fireAnalytics("messages.compose_failed", {
+          chat_id: chatId,
+          reason: "not_connected",
         });
         return;
       }
@@ -3119,6 +3143,30 @@ export default function MessagesPage() {
                   </div>
                 ) : null}
 
+                {composeHint === "not_connected" ? (
+                  <div
+                    data-testid="messages-compose-not-connected-hint"
+                    role="alert"
+                    style={{
+                      fontSize: 12,
+                      color: "var(--wp-text-muted, #9ca3af)",
+                      padding: "6px 8px",
+                      borderRadius: 6,
+                      background: "var(--wp-dark-surface, #1a1a1a)",
+                      border: "1px solid var(--wp-dark-border, #333)",
+                    }}
+                  >
+                    Microsoft isn&apos;t connected, so nothing was sent.{" "}
+                    <Link
+                      href="/settings"
+                      data-testid="messages-compose-connect-cta"
+                      style={{ color: "var(--wp-gold, #eab308)" }}
+                    >
+                      Connect it in Settings
+                    </Link>
+                  </div>
+                ) : null}
+
                 {composeHint === "write_disabled" ? (
                   <div
                     data-testid="messages-compose-write-disabled-hint"
@@ -3225,7 +3273,7 @@ function ChannelThreadPane(props: {
     text: string,
   ) => Promise<
     | { ok: true }
-    | { ok: false; reason: "scope_missing" | "error" | "network"; message?: string }
+    | { ok: false; reason: "scope_missing" | "not_connected" | "error" | "network"; message?: string }
   >;
   onBack: () => void;
 }) {
@@ -3292,6 +3340,10 @@ function ChannelThreadPane(props: {
       if (result.reason === "scope_missing") {
         setSendError(
           "Send permission missing. Disconnect + reconnect MS in Settings to grant ChannelMessage.Send.",
+        );
+      } else if (result.reason === "not_connected") {
+        setSendError(
+          "Microsoft isn't connected, so nothing was sent. Connect it in Settings, Integrations.",
         );
       } else if (result.reason === "network") {
         setSendError("Network error. Try again.");

@@ -64,6 +64,7 @@ describe("scripts/verify.sh", () => {
     expect(res.stdout).toMatch(/\[PASS\] lint/);
     expect(res.stdout).toMatch(/\[PASS\] typecheck/);
     expect(res.stdout).toMatch(/\[PASS\] unit-tests/);
+    expect(res.stdout).toMatch(/\[PASS\] tenant-isolation/);
     expect(res.stdout).toMatch(/\[SKIP\] e2e-smoke/);
     expect(res.status).toBe(0);
   }, 30_000);
@@ -74,6 +75,21 @@ describe("scripts/verify.sh", () => {
 
     const res = runVerify(stubDir);
     expect(res.stdout).toMatch(/\[FAIL\] lint/);
+    expect(res.status).not.toBe(0);
+  }, 30_000);
+
+  it("a tenant-isolation leak fails the gate and names the stage", () => {
+    // Fail only `npm run scan:tenant-isolation`; every other stage passes.
+    shim(
+      stubDir,
+      "npm",
+      ['if [[ "${2:-}" == "scan:tenant-isolation" ]]; then', "  exit 1", "fi", "exit 0"].join("\n"),
+    );
+    shim(stubDir, "npx", "exit 0");
+
+    const res = runVerify(stubDir);
+    expect(res.stdout).toMatch(/\[FAIL\] tenant-isolation/);
+    expect(res.stdout).toMatch(/\[PASS\] lint/);
     expect(res.status).not.toBe(0);
   }, 30_000);
 

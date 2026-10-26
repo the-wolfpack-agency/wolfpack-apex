@@ -485,7 +485,8 @@ describe("unrouted + fetch-failure error paths", () => {
 });
 
 /* Provider not connected is NOT a session failure. Upstream routes answer it
-   409 { connected: false } (or 200 { connected: false } for /api/ms/chats);
+   409 { connected: false } for an action (or 200 { connected: false } for a
+   read such as GET /api/ms/chats);
    only a missing/invalid Instinct session is a 401. The executor must keep the
    two apart so the form shows "connect Microsoft" rather than "sign in". */
 describe("provider not connected vs expired session", () => {
@@ -520,6 +521,20 @@ describe("provider not connected vs expired session", () => {
     );
     expect(res.status).toBe(409);
     expect((await res.json()).code).toBe("not_connected");
+  });
+
+  test("create_message: the send route's 409 { connected: false } is not_connected, never 'Sent'", async () => {
+    (global.fetch as jest.Mock).mockResolvedValueOnce(jsonResponse(409, NOT_CONNECTED));
+    const res = await executeFormAction(
+      "create_message",
+      { chatId: "chat-1", body: "Hello" },
+      { origin: ORIGIN, authHeader: AUTH },
+    );
+    expect(lastFetch().url).toBe(`${ORIGIN}/api/ms/chats/chat-1/messages`);
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body).toMatchObject({ ok: false, code: "not_connected" });
+    expect(body.message).not.toMatch(/^Sent/);
   });
 
   test("upstream 401 is the Instinct session, and says so", async () => {
