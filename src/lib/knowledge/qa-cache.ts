@@ -234,7 +234,8 @@ async function bumpHit(qaId: string): Promise<void> {
       `UPDATE knowledge_qa_entries
           SET lookup_count = lookup_count + 1,
               last_used_at = NOW()
-        WHERE id = $1`,
+        WHERE id = $1
+    RETURNING id`,
       [qaId],
       { expectRows: 1 },
     );
@@ -296,7 +297,8 @@ export async function recordFeedback(qaId: string, helpful: boolean): Promise<vo
   await writeQuery(
     `UPDATE knowledge_qa_entries
         SET ${col} = ${col} + 1
-      WHERE id = $1`,
+      WHERE id = $1
+  RETURNING id`,
     [qaId],
     { expectRows: 1 },
   );

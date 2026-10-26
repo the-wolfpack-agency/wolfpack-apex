@@ -346,7 +346,11 @@ export class WriteQueryError extends Error {
  *   - THROWS WriteQueryError when DATABASE_URL is unset (shadow mode is
  *     not a valid state for writes).
  *   - THROWS WriteQueryError on any pg error — no silent swallow.
- *   - OPTIONALLY asserts the number of rows returned/affected. Pass
+ *   - OPTIONALLY asserts the number of rows RETURNED (result.rows, not
+ *     rowCount). An UPDATE or DELETE without a RETURNING clause returns no
+ *     rows, so `expectRows: 1` on one always throws; add `RETURNING id`.
+ *     src/__tests__/write-query-expect-rows-returning.test.ts enforces it.
+ *     Pass
  *     `expectRows: 1` for an INSERT ... RETURNING that MUST produce
  *     exactly one row. If the count mismatches (e.g. the write was
  *     silently discarded by an auto-updatable view, an RLS policy, a

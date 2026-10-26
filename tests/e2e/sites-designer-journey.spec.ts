@@ -146,7 +146,34 @@ test.describe("sites — designer journey reality check", () => {
       await page.getByTestId("edit-prompt-input").fill(
         `Change the hero heading on the homepage to exactly "${probe}".`,
       );
+      const editRespPromise = page.waitForResponse(
+        (r) => r.url().includes(`/api/sites/${id}/brief-edit`) && r.request().method() === "POST",
+        { timeout: 45_000 },
+      );
       await page.getByTestId("edit-send-btn").click();
+
+      // The edit loop needs the AI editor. When it is not configured the
+      // route answers 503 ai_not_configured and the page says so; Publish
+      // then stays "No changes to publish" forever, which is how run
+      // 40245271617 spent 45s waiting on it. Read the response instead of
+      // waiting on a button that cannot change: skip with the server's own
+      // reason when the editor is off, fail with it on any other error.
+      const editResp = await editRespPromise;
+      if (!editResp.ok()) {
+        const body = (await editResp.json().catch(() => ({}))) as {
+          error?: string;
+          reason?: string;
+        };
+        if (editResp.status() === 503 && body.reason === "ai_not_configured") {
+          result = "skip";
+          note = `AI brief editor not configured: ${(body.error ?? "").slice(0, 160)}`;
+          test.skip(true, note);
+          return;
+        }
+        throw new Error(
+          `brief-edit returned HTTP ${editResp.status()} (${body.reason ?? "no reason"}): ${body.error ?? ""}`,
+        );
+      }
 
       // Publish enables once a patch applies — this is the non-negotiable
       // edge: no patch, no preview refresh, no journey.
@@ -215,8 +242,11 @@ test.describe("sites — designer journey reality check", () => {
         `Deployed URL did not include probe "${probe}". The edit saved and the deploy finished, but the deployed content didn't update. Deployed body started: "${deployedBody.slice(0, 240)}"`,
       ).toBe(true);
     } catch (err) {
-      result = "fail";
-      note = (err as Error).message?.slice(0, 240);
+      // test.skip() throws to stop the test; that is a skip, not a failure.
+      if (result !== "skip") {
+        result = "fail";
+        note = (err as Error).message?.slice(0, 240);
+      }
       throw err;
     } finally {
       await recordRealityCheckRun(
