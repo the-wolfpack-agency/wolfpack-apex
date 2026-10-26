@@ -64,8 +64,8 @@ const UNAUDITED_GENERATORS: readonly string[] = [
  * each records the evidence rather than a verdict.
  */
 const AUDITED: Readonly<Record<string, string>> = {
-  "lib/forcefield-web/alerts.ts":
-    "SAFE, verified by reading it: the alert email's only interpolated value is alert.body, which carries attacker-influenced request detail, and it passes through escapeHtml() (& < > \" ' all escaped) before it is placed. The rest of the template is a fixed string.",
+  "lib/forcefield-web/alert-email.ts":
+    "SAFE, verified by reading it and by test (forcefield-web/__tests__/alert-email.test.ts, 'HTML escaping of every field'): the alert email interpolates attacker-influenced request detail (site label, paths, country, network, client type, agent name, fingerprint, signature) plus recipients and ids, and every one passes through escapeHtml() (& < > \" ' all escaped) before it is placed, attribute values included. Hrefs are an env-configured base plus a fixed path, with the only request-derived part (the board finder) URL-encoded by URLSearchParams and then escaped. Colors, fonts and layout are fixed constants. The test feeds a markup-and-quote payload through every field and asserts no raw tag or quote survives. (Replaces the alerts.ts entry: that file now delegates all markup to this template.)",
   "lib/harness/sandbox.ts":
     "SAFE, verified by reading it: every interpolated value is server-authored. The page title/intro/links/form-action all come from the static SANDBOX_PAGES constant and the fixed HONEYPOT_FIELD; the only value derived from a request is the sandbox base, built as `${origin}/harness/${id}`. That id is a server-generated session token, is validated to ^hs_[A-Za-z0-9_-]{8,64}$ at the route before the renderer runs, and every interpolated value (including the base) is additionally HTML-escaped via esc() (XML-escaped via xmlEsc() in the sitemap). No model output and no free request text ever reaches the template; a breakout is closed twice (format-validate + escape).",
   "lib/ai/provenance.ts":

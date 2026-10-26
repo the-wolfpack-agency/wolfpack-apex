@@ -15,6 +15,7 @@
  * this is called — losing the email must not roll that back.
  */
 import { sendViaGraph, isGraphMailConfigured } from "@/lib/mail/send-via-graph";
+import { instinctPublicBaseUrl } from "@/lib/mail/public-base-url";
 
 export interface InviteEmailArgs {
   to: string;
@@ -43,10 +44,7 @@ export interface InviteEmailResult {
 const DEFAULT_FROM = "Wolfpack Instinct <invites@wolfpack.agency>";
 
 function publicBase(): string {
-  return (
-    process.env.INSTINCT_PUBLIC_URL?.replace(/\/$/, "") ??
-    "https://wolfpack-instinct.vercel.app"
-  );
+  return instinctPublicBaseUrl();
 }
 
 export function buildAcceptUrl(token: string): string {

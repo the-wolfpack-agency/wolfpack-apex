@@ -22,6 +22,9 @@ import {
   isSilenceCheckHour,
   fingerprintPhrase,
   liveForcefieldAlertDeps,
+  signalFromRow,
+  lookupBlockDecision,
+  alertRowId,
   EXCLUDE_SYNTHETIC_SQL,
   MAX_ATTEMPTS,
   type ForcefieldAlert,
@@ -69,7 +72,7 @@ describe("dedupe per incident and window", () => {
     const m = memoryDeps([sig()]);
     const r = await scanForcefieldWebAlerts(m.deps);
     expect(r).toEqual({ detected: 1, dispatched: 1, delivered: 1, failed: 0 });
-    expect(m.sent[0].title).toMatch(/sql injection attack on ogiam\.com/);
+    expect(m.sent[0].title).toBe("[Forcefield] ogiam.com: SQL injection detected (3 attempts)");
     const ev = m.tracked.find((t) => t.event === "forcefield.web_alert_dispatched")!;
     expect(ev.payload.outcome).toBe("delivered");
     expect(ev.payload.site).toBe("ogiam.com");
@@ -290,5 +293,114 @@ describe("our own synthetic probes never raise an alert", () => {
       // A signed-in (authenticated but not synthetic) attacker still alerts.
       expect(sqlOf(i)).not.toMatch(/props->>'authenticated'/);
     }
+  });
+});
+
+/* ------------------------- the incident email path ------------------------- */
+
+/** A grouped row exactly as the incident SQL returns it (synthetic ids). */
+const ROW = {
+  kind: "site.agent_trap_tripped", site: "ogiam.com", attack: "site.agent_trap_tripped",
+  window_start: new Date("2026-10-26T06:00:00.000Z"), fps: "1", sample: "/_ff/records", count: "1",
+  first_at: new Date("2026-10-26T10:05:37.367Z"), last_at: new Date("2026-10-26T10:05:37.367Z"),
+  paths: ["/_ff/records"], path_count: "1", countries: ["IS"], hosting: ["residential"], client_types: ["browser"],
+  agents: ["unidentified"], networks: null, fp_list: ["aaaa1111:browser"], sigs: ["bbbb2222"], sig_count: "1",
+  n_blocked: "0", n_contained: "1", n_recorded: "0", postures: ["enforce"], reason_kinds: ["decoy"],
+} as unknown as Parameters<typeof signalFromRow>[0];
+
+describe("incident detail from the grouped row", () => {
+  it("maps exact times, counts, outcomes and source; nulls become empty lists", () => {
+    const s = signalFromRow(ROW);
+    expect(s.kind).toBe("honeytoken_trip");
+    expect(s.attackClass).toBe("honeytoken_trip");
+    expect(s.detail).toMatchObject({
+      firstAt: "2026-10-26T10:05:37.367Z", lastAt: "2026-10-26T10:05:37.367Z", count: 1, windowStart: "2026-10-26T06:00:00.000Z",
+      paths: ["/_ff/records"], pathCount: 1, countries: ["IS"], networks: [], fingerprints: ["aaaa1111:browser"], signatures: ["bbbb2222"],
+      outcomes: { blocked: 0, contained: 1, recorded: 0 }, postures: ["enforce"], reasonKinds: ["decoy"],
+    });
+  });
+
+  it("the scan SQL selects exact first/last times and per-request outcomes", async () => {
+    await liveForcefieldAlertDeps().listHostileSignals(24);
+    const sql = String(mockSafeQuery.mock.calls[0][0]);
+    expect(sql).toContain("min(created_at) AS first_at");
+    expect(sql).toContain("max(created_at) AS last_at");
+    expect(sql).toMatch(/props->>'blocked' = 'true'\) AS n_blocked/);
+    expect(sql).toMatch(/AS n_contained/);
+    expect(sql).toMatch(/AS n_recorded/);
+    expect(sql).toContain(EXCLUDE_SYNTHETIC_SQL);
+  });
+});
+
+describe("lookupBlockDecision (reads what was recorded)", () => {
+  const ENF = async () => ({ mode: "enforce" as const, autoBlock: true });
+  it("blocked when a served automatic row exists and the policy enforces", async () => {
+    mockSafeQuery.mockResolvedValueOnce({ rows: [{ fp: "aaaa1111:sqlmap", expires_at: "2026-11-09 10:05:37+00" }] });
+    expect(await lookupBlockDecision(["aaaa1111:sqlmap"], "2026-10-26T06:00:00Z", ENF)).toEqual({ state: "blocked", fingerprints: ["aaaa1111:sqlmap"], expiresAt: "2026-11-09T10:05:37.000Z" });
+  });
+
+  it("a stored automatic row on a GENERIC fingerprint is not served, so it is never reported as blocked", async () => {
+    mockSafeQuery
+      .mockResolvedValueOnce({ rows: [{ fp: "1c168f78:curl", expires_at: "2026-11-08 00:00:00+00" }] })
+      .mockResolvedValueOnce({ rows: [] });
+    expect((await lookupBlockDecision(["1c168f78:curl"], "2026-10-26T06:00:00Z", ENF))?.state).toBe("none");
+  });
+
+  it("not blocked while the edge policy is off enforce + auto_block", async () => {
+    mockSafeQuery.mockResolvedValueOnce({ rows: [{ fp: "aaaa1111:sqlmap", expires_at: null }] }).mockResolvedValueOnce({ rows: [] });
+    expect((await lookupBlockDecision(["aaaa1111:sqlmap"], "2026-10-26T06:00:00Z", async () => ({ mode: "monitor", autoBlock: false })))?.state).toBe("none");
+  });
+
+  it("withheld when the durable withheld event names the fingerprint", async () => {
+    mockSafeQuery.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [{ fps: "zzzz:curl,aaaa1111:browser", why: "common_client_kind" }] });
+    expect(await lookupBlockDecision(["aaaa1111:browser"], "2026-10-26T06:00:00Z", ENF)).toEqual({ state: "withheld", fingerprints: ["aaaa1111:browser"], why: "common_client_kind" });
+    expect(mockSafeQuery.mock.calls[1][1]).toEqual(["2026-10-26T06:00:00Z"]);
+  });
+
+  it("null on a read error and for no fingerprints", async () => {
+    mockSafeQuery.mockRejectedValueOnce(new Error("db"));
+    expect(await lookupBlockDecision(["aaaa1111:browser"], "2026-10-26T06:00:00Z", ENF)).toBeNull();
+    expect(await lookupBlockDecision([], "2026-10-26T06:00:00Z", ENF)).toBeNull();
+  });
+});
+
+describe("one email per incident", () => {
+  it("a trap trip whose automatic block was withheld produces ONE email carrying the decision", async () => {
+    mockFanout.mockResolvedValue({ recipientCount: 1, skipped: 0 });
+    mockSendViaGraph.mockResolvedValue({ delivered: true, reason: "ok" });
+    const m = memoryDeps([signalFromRow(ROW)]);
+    m.deps.deliver = deliverForcefieldAlert;
+    m.deps.enrich = async (a) => ({ ...a, incident: { ...a.incident!, blockDecision: { state: "withheld", fingerprints: ["aaaa1111:browser"], why: "common_client_kind" } } });
+    await scanForcefieldWebAlerts(m.deps);
+    await scanForcefieldWebAlerts(m.deps); // a re-scan in the same window adds nothing
+    expect(mockSendViaGraph).toHaveBeenCalledTimes(1);
+    const mail = mockSendViaGraph.mock.calls[0][0];
+    expect(mail.subject).toBe("[Forcefield] ogiam.com: hostile agent contained (decoy)");
+    expect(mail.text).toContain("Automatic block not applied");
+    expect(mail.text).toContain("When: 2026-10-26 10:05:37 UTC");
+    expect(mail.html).toContain("https://wolfpack-instinct.vercel.app/admin/site-analytics?tab=forcefield&amp;view=operator&amp;find=bbbb2222");
+    expect(mail.html).not.toMatch(/href="\//); // never a relative link
+  });
+
+  it("enrich runs only after a successful claim, and a throwing enrich still sends", async () => {
+    const enrich = jest.fn(async () => { throw new Error("db"); });
+    const m = memoryDeps([signalFromRow(ROW)]);
+    m.deps.enrich = enrich;
+    await scanForcefieldWebAlerts(m.deps);
+    await scanForcefieldWebAlerts(m.deps);
+    expect(enrich).toHaveBeenCalledTimes(1);
+    expect(m.sent).toHaveLength(1);
+  });
+
+  it("the live enrich reads the decision only for a trap trip with a fingerprint", async () => {
+    const enrich = liveForcefieldAlertDeps().enrich!;
+    const payload = signalFromRow({ ...ROW, kind: "site.agent_payload_attack", attack: "sql_injection" } as typeof ROW);
+    const { alertFromSignal } = await import("../alerts");
+    await enrich(alertFromSignal(payload));
+    expect(mockSafeQuery).not.toHaveBeenCalled();
+  });
+
+  it("the footer alert id is the dedupe-store row id", () => {
+    expect(alertRowId({ kind: "honeytoken_trip", dedupeKey: "k" })).toMatch(/^[0-9a-f]{24}$/);
   });
 });

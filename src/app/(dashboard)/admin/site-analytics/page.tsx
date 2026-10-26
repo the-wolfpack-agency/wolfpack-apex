@@ -27,6 +27,7 @@ import { ProbeIntelPanel } from "@/components/forcefield/ProbeIntelPanel";
 import { PayloadIntelPanel } from "@/components/forcefield/PayloadIntelPanel";
 import { ProvenAttacksPanel } from "@/components/site-analytics/ProvenAttacksPanel";
 import type { ProvenAttacks } from "@/lib/site-analytics-proven";
+import { parseBoardDeepLink } from "@/lib/forcefield-web/board-link";
 
 interface Summary {
   verdictFeedback?: { falsePositives: number };
@@ -195,6 +196,18 @@ export default function SiteAnalyticsPage() {
   const [edgeAutoBlock, setEdgeAutoBlock] = useState(false);
   const [highlightOp, setHighlightOp] = useState<string | null>(null);
 
+  // Deep link (e.g. from a Forcefield alert email): ?tab=forcefield&view=operator
+  // &find=<session signature | path>&days=7 lands on that incident. Read once on
+  // mount; unknown values are ignored by parseBoardDeepLink.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const link = parseBoardDeepLink(window.location.search);
+    if (link.days) setDays(link.days);
+    if (link.tab) setActiveTab(link.tab);
+    if (link.view) setJourneyView(link.view);
+    if (link.find) setOperatorFilter(link.find);
+  }, []);
+
   const toggleProfile = useCallback((key: string) => {
     setExpanded((prev) => {
       const next = new Set(prev);
@@ -329,6 +342,9 @@ export default function SiteAnalyticsPage() {
       setSummary(body.summary);
       setLoadedAt({ at: new Date().toISOString(), days: range, surface: surf });
       if (body.permissions) setPermissions(body.permissions);
+      // A deep link may ask for the Agent defense tab; a viewer without intel
+      // access falls back to Site usage instead of a blank board.
+      if (body.permissions && !body.permissions.viewIntel) setActiveTab("usage");
       // The reputation-network opt-in lives behind a manage capability; a 403 just
       // means this viewer can't toggle it, which is fine - leave it null.
       void fetchWithRefresh("/api/admin/forcefield/reputation-optin")
@@ -844,7 +860,7 @@ export default function SiteAnalyticsPage() {
                       type="text"
                       value={operatorFilter}
                       onChange={(e) => setOperatorFilter(e.target.value)}
-                      placeholder="Find an operator by target path (e.g. /wp-admin) or key…"
+                      placeholder="Find an operator by target path (e.g. /wp-admin), key or session signature…"
                       data-testid="operator-filter"
                       style={{ flex: "1 1 260px", padding: "0.5rem 0.7rem", borderRadius: 8, border: "1px solid var(--wp-dark-border, #333)", background: "var(--wp-dark-surface, #14161b)", color: "var(--wp-text, #eee)", fontSize: "0.82rem" }}
                     />
@@ -925,7 +941,7 @@ export default function SiteAnalyticsPage() {
                     </div>
                   )}
                   {shown.length === 0 && (
-                    <p data-testid="operator-filter-empty" style={{ fontSize: "0.82rem", color: "var(--wp-text-muted, #9ca3af)" }}>No operator matches &ldquo;{operatorFilter}&rdquo;. It is searched by target path and operator key, not by the raw fingerprint.</p>
+                    <p data-testid="operator-filter-empty" style={{ fontSize: "0.82rem", color: "var(--wp-text-muted, #9ca3af)" }}>No operator matches &ldquo;{operatorFilter}&rdquo;. It is searched by target path, operator key and session signature, not by the raw fingerprint.</p>
                   )}
                   {shown.map((g) => (
                     <div key={g.operatorKey} data-testid={`operator-${g.operatorKey}`} data-focused={highlightOp === g.operatorKey ? "true" : undefined} style={{ border: `1px solid ${highlightOp === g.operatorKey ? "var(--wp-gold, #e8b528)" : sevColor(g.severity)}`, borderRadius: 8, padding: "0.8rem 0.9rem", display: "grid", gap: "0.5rem", scrollMarginTop: "6rem", boxShadow: highlightOp === g.operatorKey ? "0 0 0 2px var(--wp-gold, #e8b528), 0 0 18px rgba(232,181,40,0.35)" : "none", transition: "box-shadow 220ms ease, border-color 220ms ease" }}>

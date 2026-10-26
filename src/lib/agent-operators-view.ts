@@ -257,7 +257,10 @@ export function filterOperators<T extends OperatorViewJourney>(
       g.operatorKey.toLowerCase().includes(q) ||
       g.paths.some((path) => path.toLowerCase().includes(q)) ||
       g.attacks.some((a) => a.toLowerCase().includes(q)) ||
-      g.behaviorClasses.some((b) => b.toLowerCase().includes(q)),
+      g.behaviorClasses.some((b) => b.toLowerCase().includes(q)) ||
+      // A session signature (the journey's correlation key) matches EXACTLY, so
+      // an alert's deep link lands on the one operator that carried it.
+      g.journeys.some((j) => j.key.toLowerCase() === q),
   );
 }
 

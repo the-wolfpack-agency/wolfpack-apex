@@ -217,7 +217,10 @@ export async function POST(req: NextRequest) {
   // Flywheel: a honeytoken trip is the highest-confidence hostile signal, so
   // auto-block that client fingerprint. The central ruleset then turns it away on
   // its next hit across every connected site (enforced when FORCEFIELD_ENFORCE=on).
-  if (b.type === "site.agent_trap_tripped" && typeof props.fp === "string" && props.fp) {
+  // Our own synthetic probes (props.synthetic, stamped by the engine only for a
+  // request that presented the synthetic token) never write a block or a block
+  // decision, the same exemption the alert scan applies.
+  if (b.type === "site.agent_trap_tripped" && props.synthetic !== true && typeof props.fp === "string" && props.fp) {
     await autoBlockFingerprint(props.fp, "honeytoken").catch(() => {});
   }
 

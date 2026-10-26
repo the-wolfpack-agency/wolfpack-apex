@@ -46,3 +46,21 @@ it("switches docs on a nav click", async () => {
   await waitFor(() => expect(screen.getByTestId("ff-docs-body")).toHaveTextContent("flat per site"));
   expect(String(mockFetch.mock.calls[1][0])).toContain("doc=pricing");
 });
+
+it("?doc=<key> opens that doc (the alert email's 'What this alert means' link)", async () => {
+  window.history.replaceState({}, "", "/admin/forcefield/docs?doc=alerts");
+  mockFetch.mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true, docs: DOCS, html: "<h1>Alerts</h1><p>one email per incident</p>" }) } as unknown as Response);
+  render(<ForcefieldDocsPage />);
+  await waitFor(() => expect(screen.getByTestId("ff-docs-body")).toHaveTextContent("one email per incident"));
+  expect(String(mockFetch.mock.calls[0][0])).toContain("doc=alerts");
+  window.history.replaceState({}, "", "/");
+});
+
+it("a malformed ?doc= falls back to the default doc", async () => {
+  window.history.replaceState({}, "", "/admin/forcefield/docs?doc=../../etc");
+  mockFetch.mockResolvedValueOnce(doc("readme", "<h1>Overview</h1>"));
+  render(<ForcefieldDocsPage />);
+  await waitFor(() => expect(screen.getByTestId("ff-docs-body")).toHaveTextContent("Overview"));
+  expect(String(mockFetch.mock.calls[0][0])).toContain("doc=readme");
+  window.history.replaceState({}, "", "/");
+});

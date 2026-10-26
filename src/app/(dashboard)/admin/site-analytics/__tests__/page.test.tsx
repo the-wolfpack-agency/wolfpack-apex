@@ -1002,3 +1002,35 @@ describe("proven attacks lead the board", () => {
     expect(screen.getByTestId("proven-ogiam.com-blocked-path_traversal")).toBeInTheDocument();
   });
 });
+
+describe("deep link from a Forcefield alert email", () => {
+  afterEach(() => window.history.replaceState({}, "", "/"));
+
+  test("?tab=forcefield&view=operator&find=<session signature> lands on that operator", async () => {
+    window.history.replaceState({}, "", "/admin/site-analytics?tab=forcefield&view=operator&find=fp1");
+    mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: SUMMARY, permissions: PERMS }) });
+    render(<SiteAnalyticsPage />);
+    await waitFor(() => expect(screen.getByTestId("tab-forcefield")).toHaveAttribute("aria-selected", "true"));
+    expect(screen.getByTestId("tab-panel-forcefield")).not.toHaveAttribute("hidden");
+    expect(screen.getByTestId("operator-filter")).toHaveValue("fp1");
+    expect(screen.getByTestId("operator-op_abc12345")).toBeInTheDocument();
+    expect(screen.getByTestId("operator-filter-count")).toHaveTextContent("1 of 1");
+  });
+
+  test("a viewer without intel access falls back to Site usage, never a blank board", async () => {
+    window.history.replaceState({}, "", "/admin/site-analytics?tab=forcefield&find=fp1");
+    mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: SUMMARY, permissions: { triage: false, manageOperators: false, viewIntel: false } }) });
+    render(<SiteAnalyticsPage />);
+    await waitFor(() => expect(screen.getByTestId("tab-usage")).toHaveAttribute("aria-selected", "true"));
+    expect(screen.getByTestId("tab-panel-usage")).not.toHaveAttribute("hidden");
+    expect(screen.queryByTestId("tab-panel-forcefield")).toBeNull();
+  });
+
+  test("unknown params are ignored (default board)", async () => {
+    window.history.replaceState({}, "", "/admin/site-analytics?tab=admin&days=5");
+    mockFetchWithRefresh.mockResolvedValue({ ok: true, json: async () => ({ summary: SUMMARY, permissions: PERMS }) });
+    render(<SiteAnalyticsPage />);
+    await waitFor(() => expect(screen.getByTestId("tab-usage")).toHaveAttribute("aria-selected", "true"));
+    expect(String(mockFetchWithRefresh.mock.calls[0][0])).toContain("days=30");
+  });
+});

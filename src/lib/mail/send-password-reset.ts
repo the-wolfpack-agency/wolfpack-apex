@@ -7,6 +7,7 @@
  * invite flow).
  */
 import { sendViaGraph, isGraphMailConfigured } from "@/lib/mail/send-via-graph";
+import { instinctPublicBaseUrl } from "@/lib/mail/public-base-url";
 
 export interface ResetEmailArgs {
   to: string;
@@ -32,10 +33,7 @@ export interface ResetEmailResult {
 const DEFAULT_FROM = "Wolfpack Instinct <invites@wolfpack.agency>";
 
 function publicBase(): string {
-  return (
-    process.env.INSTINCT_PUBLIC_URL?.replace(/\/$/, "") ??
-    "https://wolfpack-instinct.vercel.app"
-  );
+  return instinctPublicBaseUrl();
 }
 
 export function buildResetUrl(token: string): string {
