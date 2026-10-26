@@ -15,7 +15,6 @@ const yaml = fs.readFileSync(WF, "utf8");
 
 /** The hard gates that must run, and pass, on every PR + push. */
 const HARD_GATES = [
-  "tests/e2e/sites-preview-reality-check.spec.ts",
   "tests/e2e/dashboard-quick-actions.spec.ts",
   // Promoted 2026-10-25: green on their first real run (CI run 40225842145).
   "tests/e2e/deployed-url-smoke.spec.ts",

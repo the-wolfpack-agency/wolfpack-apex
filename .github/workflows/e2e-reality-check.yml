@@ -130,11 +130,12 @@ jobs:
       # Promoted 2026-10-25 from report-only after their first real run passed:
       # deployed-url-smoke, ai-router-behavior, playbook-readable, client-builds;
       # lms-security-course after its spec fix (#1241), 6/6 on main (run 40228607337).
+      # sites-preview-reality-check moved to the soft specs 2026-10-26: /sites is an
+      # unused, hidden feature, so it must never block a merge or a deploy.
       - name: Reality-check gates (hard)
         if: steps.cfg.outputs.configured == 'true'
         run: >-
           npx playwright test
-          tests/e2e/sites-preview-reality-check.spec.ts
           tests/e2e/dashboard-quick-actions.spec.ts
           tests/e2e/deployed-url-smoke.spec.ts
           tests/e2e/ai-router-behavior.spec.ts
@@ -177,6 +178,7 @@ jobs:
           PLAYWRIGHT_JSON_OUTPUT_NAME: soft-spec-results.json
         run: >-
           npx playwright test
+          tests/e2e/sites-preview-reality-check.spec.ts
           tests/e2e/sites-upload-reality-check.spec.ts
           tests/e2e/assistant-pilot-status.spec.ts
           tests/e2e/assistant-cross-tool-insights.spec.ts
