@@ -22,7 +22,7 @@ Wolfpack Agency team members first; then client-agency users onboarded via the s
 
 ## Feature flags / posture in flight
 
-- **MFA on admin**: enforced in code for admin-capable accounts (effective `settings.manage_team`), default ON (`MFA_ENFORCE_ADMIN=off` is the kill switch). An unenrolled admin is sent to `/mfa` to enroll; an enrolled admin answers a TOTP or recovery-code challenge once per browser per 7 days. Do not announce MFA coverage externally until enrollment is complete for every admin.
+- **MFA on admin**: built for admin-capable accounts (effective `settings.manage_team`). The code default is ON, but a deployment can turn it off with `MFA_ENFORCE_ADMIN=off`, and the Wolfpack Instinct deployment runs with it off today (test environments skip MFA; every client deployment ships with it on). The public `/security-posture` page states the live value; check it rather than assuming enforcement. An unenrolled admin is sent to `/mfa` to enroll; an enrolled admin answers a TOTP or recovery-code challenge once per browser per 7 days. Do not announce MFA coverage externally until enrollment is complete for every admin.
 - **ML-DSA signing**: reserved slot, throws `NotImplementedError`. Messaging: "quantum-migration-ready," not "quantum-safe today."
 - **Hybrid TLS**: asserted via `scripts/verify-tls-hybrid.sh`; CI test activates when `PROD_DOMAIN` env var is set.
 - **HSTS preload**: plan to submit domains after HSTS has been live on Vercel for >1 week.

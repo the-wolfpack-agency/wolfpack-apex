@@ -38,7 +38,7 @@ import {
   totals,
   type ColumnCounts,
 } from "../src/lib/crypto/secret-key-rotation";
-import { secretKeyringStatus, setSecretKeySignalSink } from "../src/lib/crypto/secret-storage";
+import { allowLegacyKeyForBackfill, secretKeyringStatus, setSecretKeySignalSink } from "../src/lib/crypto/secret-storage";
 import { trackEventAwait } from "../src/lib/analytics";
 import { recordAuditNonFatal } from "../src/lib/audit-log";
 
@@ -71,6 +71,9 @@ async function main(): Promise<number> {
      security.secret_key_primary_active, or proveAppKey would accept the
      operator's own report as proof that the deployment holds the key. */
   setSecretKeySignalSink(() => {});
+  /* The app no longer opens legacy values once a primary is set; this
+     backfill must, to move them under the primary. */
+  allowLegacyKeyForBackfill();
 
   const key = checkRotationKey(process.env);
   if (!key.ok) {

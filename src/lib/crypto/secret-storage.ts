@@ -10,11 +10,12 @@
  *   previous  INSTINCT_SECRET_KEY_PREVIOUS (comma-separated, same encoding).
  *             Decrypt only. Lets a primary be rotated without a flag day.
  *   legacy    The original derivation: sha256("secret-storage:v1:" +
- *             (INSTINCT_JWT_SECRET ?? "instinct-dev-only")). Decrypt only once
- *             a primary is set. Kept byte-for-byte so every value written
- *             before the keyring existed stays readable. It is removed in a
- *             later change once scripts/rotate-secret-key.ts reports zero
- *             legacy values (docs/security/at-rest-key-rotation.md).
+ *             (INSTINCT_JWT_SECRET ?? "instinct-dev-only")). Once a primary is
+ *             set, the app never opens a value with it: the key derives from a
+ *             string in this public repo. Only the operator backfills opt in
+ *             (allowLegacyKeyForBackfill) so a deployment that began without a
+ *             primary can still move its legacy values under one
+ *             (docs/security/at-rest-key-rotation.md).
  *
  *   When no valid primary is configured, encryption falls back to the legacy
  *   key exactly as before, so nothing breaks before the env var is set. In
@@ -174,6 +175,15 @@ function signalOnce(key: string, signal: SecretKeySignal): void {
 }
 
 let _cachedKeyring: Keyring | null = null;
+/* Off in the app. Only the operator backfill scripts turn it on
+   (rotate-secret-key, seal-at-rest-secrets, encrypt-graph-tokens). */
+let _legacyForRotation = false;
+
+/** Let this process open legacy values while a primary is set. For the
+ *  operator backfill scripts only: the app must never call this. */
+export function allowLegacyKeyForBackfill(on = true): void {
+  _legacyForRotation = on;
+}
 
 function keyring(): Keyring {
   if (_cachedKeyring) return _cachedKeyring;
@@ -305,7 +315,9 @@ export function decryptSecretWithInfo(token: string): DecryptedSecret {
     } catch {
       return { ok: false };
     }
-    const all: KeyEntry[] = [...(r.primary ? [r.primary] : []), ...r.previous, r.legacy];
+    /* With a primary set, the legacy key is out of the ring (rotation aside). */
+    const legacyReadable = !r.primary || _legacyForRotation;
+    const all: KeyEntry[] = [...(r.primary ? [r.primary] : []), ...r.previous, ...(legacyReadable ? [r.legacy] : [])];
     /* A token that names its key is tried with that key first; GCM's tag is
        the real check, so a stale or forged id costs one extra attempt, never
        a wrong answer. */

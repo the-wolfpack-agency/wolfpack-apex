@@ -1,9 +1,11 @@
 /**
- * secret-storage keyring: encrypt with the primary only; decrypt primary,
- * previous and legacy; key ids in the token without breaking old v1 tokens;
+ * secret-storage keyring: encrypt with the primary only; decrypt primary and
+ * previous (legacy only without a primary, or for the rotation backfill); key ids in the token without breaking old v1 tokens;
  * once-per-process signals; no plaintext in errors or logs.
  */
+import { execSync } from "node:child_process";
 import { createCipheriv, createHash, randomBytes } from "node:crypto";
+import { join } from "node:path";
 
 const trackEvent = jest.fn();
 jest.mock("@/lib/analytics", () => ({ trackEvent: (...a: unknown[]) => trackEvent(...a) }));
@@ -19,6 +21,7 @@ import {
   PrimaryKeyUnavailableError,
   __resetSecretKeyCacheForTests,
   setSecretKeySignalSink,
+  allowLegacyKeyForBackfill,
   type SecretKeySignal,
 } from "@/lib/crypto/secret-storage";
 import { checkRotationKey, classifyValue } from "@/lib/crypto/secret-key-rotation";
@@ -38,6 +41,15 @@ function setEnv(vars: Record<string, string | undefined>): void {
 }
 
 /** A token exactly as the pre-keyring code wrote it (3 segments, no key id). */
+function asRotation(fn: () => void): void {
+  allowLegacyKeyForBackfill();
+  try {
+    fn();
+  } finally {
+    allowLegacyKeyForBackfill(false);
+  }
+}
+
 function oldV1Token(plaintext: string, jwtSecret: string | undefined): string {
   const key = createHash("sha256").update("secret-storage:v1").update(":").update(jwtSecret ?? "instinct-dev-only").digest();
   const iv = randomBytes(12);
@@ -104,7 +116,7 @@ describe("encrypt", () => {
 });
 
 describe("decrypt", () => {
-  test("primary, previous and legacy all open", () => {
+  test("primary and previous open; legacy does not once a primary is set", () => {
     setEnv({ INSTINCT_SECRET_KEY: KEY_B });
     const underB = encryptSecret("from-b");
     setEnv({ INSTINCT_SECRET_KEY: KEY_A, INSTINCT_SECRET_KEY_PREVIOUS: `${KEY_C_B64}, ${KEY_B}` });
@@ -113,18 +125,35 @@ describe("decrypt", () => {
 
     expect(decryptSecretWithInfo(underA)).toMatchObject({ ok: true, value: "from-a", keyClass: "primary" });
     expect(decryptSecretWithInfo(underB)).toMatchObject({ ok: true, value: "from-b", keyClass: "previous" });
-    expect(decryptSecretWithInfo(legacy)).toMatchObject({ ok: true, value: "from-legacy", keyClass: "legacy" });
+    expect(decryptSecretWithInfo(legacy)).toEqual({ ok: false });
+    expect(classifyValue(legacy)).toBe("unreadable");
     expect(secretKeyringStatus().previousKids).toHaveLength(2);
   });
 
-  test("old v1 tokens from the pre-keyring code still decrypt (JWT-derived and dev literal)", () => {
+  test("old v1 tokens open without a primary; with one, only for the rotation backfill", () => {
     const jwt = "jwt-secret-at-least-32-characters-long";
     setEnv({ INSTINCT_JWT_SECRET: jwt });
     expect(decryptSecret(oldV1Token(SECRET, jwt))).toBe(SECRET);
     setEnv({ INSTINCT_SECRET_KEY: KEY_A, INSTINCT_JWT_SECRET: jwt });
-    expect(decryptSecret(oldV1Token(SECRET, jwt))).toBe(SECRET);
-    setEnv({ INSTINCT_SECRET_KEY: KEY_A });
-    expect(decryptSecret(oldV1Token(SECRET, undefined))).toBe(SECRET);
+    expect(decryptSecret(oldV1Token(SECRET, jwt))).toBeNull();
+    asRotation(() => {
+      expect(decryptSecretWithInfo(oldV1Token(SECRET, jwt))).toMatchObject({ ok: true, value: SECRET, keyClass: "legacy" });
+      setEnv({ INSTINCT_SECRET_KEY: KEY_A });
+      expect(decryptSecret(oldV1Token(SECRET, undefined))).toBe(SECRET);
+    });
+  });
+
+  test("only the operator backfill scripts turn the legacy key back on", () => {
+    const callers = execSync("git grep -l allowLegacyKeyForBackfill -- src scripts", { cwd: join(__dirname, "../../../.."), encoding: "utf8" })
+      .split("\n")
+      .filter(Boolean)
+      .filter((f) => !f.includes("__tests__/"));
+    expect(callers.sort()).toEqual([
+      "scripts/encrypt-graph-tokens.ts",
+      "scripts/rotate-secret-key.ts",
+      "scripts/seal-at-rest-secrets.ts",
+      "src/lib/crypto/secret-storage.ts",
+    ]);
   });
 
   test("a value from a key that is no longer in the ring reads as unavailable", () => {
@@ -160,10 +189,12 @@ describe("decrypt", () => {
 });
 
 describe("signals", () => {
-  test("legacy decrypt is signalled once per process, not per call", () => {
+  test("legacy decrypt (rotation only) is signalled once per process, not per call", () => {
     setEnv({ INSTINCT_SECRET_KEY: KEY_A });
     const legacy = oldV1Token(SECRET, undefined);
-    for (let i = 0; i < 5; i++) expect(decryptSecret(legacy)).toBe(SECRET);
+    asRotation(() => {
+      for (let i = 0; i < 5; i++) expect(decryptSecret(legacy)).toBe(SECRET);
+    });
     const old = signals.filter((s) => s.event === "security.secret_old_key_decrypt");
     expect(old).toHaveLength(1);
     expect(old[0].metadata).toMatchObject({ key_class: "legacy", primary_kid: secretKeyId(Buffer.from(KEY_A, "hex")) });
@@ -175,7 +206,7 @@ describe("signals", () => {
     setEnv({ INSTINCT_SECRET_KEY: KEY_A, INSTINCT_SECRET_KEY_PREVIOUS: KEY_B });
     decryptSecret(underB);
     decryptSecret(underB);
-    decryptSecret(oldV1Token(SECRET, undefined));
+    asRotation(() => decryptSecret(oldV1Token(SECRET, undefined)));
     const old = signals.filter((s) => s.event === "security.secret_old_key_decrypt").map((s) => s.metadata.key_class);
     expect(old).toEqual(["previous", "legacy"]);
   });
@@ -215,7 +246,7 @@ describe("signals", () => {
     env.NODE_ENV = "development";
     try {
       setEnv({ INSTINCT_SECRET_KEY: KEY_A });
-      decryptSecret(oldV1Token(SECRET, undefined));
+      asRotation(() => decryptSecret(oldV1Token(SECRET, undefined)));
       const names = trackEvent.mock.calls.map((c) => c[0]);
       expect(names).toEqual(["security.secret_key_primary_active", "security.secret_old_key_decrypt"]);
       trackEvent.mockImplementationOnce(() => {

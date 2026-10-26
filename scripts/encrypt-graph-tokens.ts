@@ -29,13 +29,14 @@ import "./load-env";
 import { Client } from "pg";
 import { checkKey, planBackfill, type StoredTokenRow } from "../src/lib/crypto/graph-token-backfill";
 import { checkRotationKey, proveAppKey } from "../src/lib/crypto/secret-key-rotation";
-import { setSecretKeySignalSink } from "../src/lib/crypto/secret-storage";
+import { allowLegacyKeyForBackfill, setSecretKeySignalSink } from "../src/lib/crypto/secret-storage";
 
 async function main(): Promise<void> {
   const apply = process.argv.includes("--apply");
   /* This process is not the app: its keyring must never report itself as the
      deployment, or proveAppKey would accept the shell's own report. */
   setSecretKeySignalSink(() => {});
+  allowLegacyKeyForBackfill(); // the app no longer opens legacy values once a primary is set; this backfill must
   const url = process.env.DATABASE_URL;
   if (!url) {
     console.error("DATABASE_URL is not set.");

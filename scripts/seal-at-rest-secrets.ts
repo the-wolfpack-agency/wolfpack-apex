@@ -24,7 +24,7 @@
 import "./load-env";
 import { Client } from "pg";
 import { SEAL_TARGETS, sealAtRest, type SealTargetName } from "../src/lib/crypto/at-rest-seal-backfill";
-import { setSecretKeySignalSink } from "../src/lib/crypto/secret-storage";
+import { allowLegacyKeyForBackfill, setSecretKeySignalSink } from "../src/lib/crypto/secret-storage";
 import { recordAuditNonFatal } from "../src/lib/audit-log";
 
 async function main(): Promise<number> {
@@ -39,6 +39,7 @@ async function main(): Promise<number> {
   /* This process is not the app: its keyring must never report itself as the
      deployment (proveAppKey reads that report). */
   setSecretKeySignalSink(() => {});
+  allowLegacyKeyForBackfill(); // the app no longer opens legacy values once a primary is set; this backfill must
 
   const url = process.env.DATABASE_URL;
   if (!url) {
