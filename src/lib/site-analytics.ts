@@ -16,6 +16,7 @@ import { summarizeProbeIntel, type ProbeIntelEntry } from "@/lib/agent-probe-sig
 import { getFindingTriage, type TriageStatus } from "@/lib/site-finding-triage";
 import { listBlockedOperatorKeys, liveAgentIntelligence, type AgentIntelSummary } from "@/lib/agent-operators";
 import { getProvenAttacks, NOT_CONTROL_PLANE_FP, type ProvenAttacks } from "@/lib/site-analytics-proven";
+import { annotateKevProps } from "@/lib/forcefield/kev";
 
 /** Closed event vocabulary, mirrored from the marketing site's analytics. A
  *  value outside this set is rejected at the ingest boundary. */
@@ -83,6 +84,11 @@ export interface RecordSiteEventInput {
  *  so analytics can never break the ingest request. */
 export async function recordSiteEvent(input: RecordSiteEventInput): Promise<void> {
   if (!process.env.DATABASE_URL) return;
+  // CVE / KEV enrichment at the single write chokepoint: every writer (the
+  // central observe route, the vendored-site ingest, the rate events) gets the
+  // same deterministic annotation, and a client-sent cve/kev prop is replaced by
+  // the server's own lookup. See src/lib/forcefield/kev/index.ts.
+  const props = annotateKevProps(input.eventType, input.props);
   try {
     await query(
       `INSERT INTO site_analytics_events (event_type, path, country, referrer_host, props, forcefield_tenant_id)
@@ -92,7 +98,7 @@ export async function recordSiteEvent(input: RecordSiteEventInput): Promise<void
         input.path ?? null,
         input.country ?? null,
         input.referrerHost ?? null,
-        JSON.stringify(input.props ?? {}),
+        JSON.stringify(props),
         input.tenantId ?? null,
       ],
     );

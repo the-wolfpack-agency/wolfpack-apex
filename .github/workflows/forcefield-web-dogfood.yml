@@ -25,6 +25,10 @@ on:
       - "tests/e2e/site-analytics-proven.spec.ts"
       - "tests/e2e/evidence-backed-status.spec.ts"
       - "tests/e2e/forcefield-threat-coverage.spec.ts"
+      - "tests/e2e/forcefield-exposure.spec.ts"
+      - "src/app/(dashboard)/admin/forcefield/page.tsx"
+      - "src/app/api/admin/forcefield/exposure/**"
+      - "src/components/forcefield/ExposurePanel.tsx"
       - ".github/workflows/forcefield-web-dogfood.yml"
       - "src/app/(dashboard)/admin/site-analytics/**"
       - "src/app/api/admin/site-analytics/**"
@@ -133,6 +137,7 @@ jobs:
           ${{ github.event_name != 'pull_request' && 'tests/e2e/site-analytics-proven.spec.ts' || '' }}
           ${{ github.event_name != 'pull_request' && 'tests/e2e/evidence-backed-status.spec.ts' || '' }}
           ${{ github.event_name != 'pull_request' && 'tests/e2e/forcefield-threat-coverage.spec.ts' || '' }}
+          ${{ github.event_name != 'pull_request' && 'tests/e2e/forcefield-exposure.spec.ts' || '' }}
           --config=playwright.config.ts
           --reporter=github
 
@@ -212,6 +217,7 @@ jobs:
           tests/e2e/site-analytics-proven.spec.ts
           tests/e2e/evidence-backed-status.spec.ts
           tests/e2e/forcefield-threat-coverage.spec.ts
+          tests/e2e/forcefield-exposure.spec.ts
           --grep-invert "real sign-in"
           --config=playwright.config.ts
           --reporter=github

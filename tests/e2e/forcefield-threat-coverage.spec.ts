@@ -27,6 +27,7 @@ function expectNoFailures(snapshot: () => { kind: string; detail: string }[]): v
 async function stubForcefieldApis(page: Page): Promise<void> {
   await page.route(/\/api\/admin\/forcefield\/canaries(\?|$)/, (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ canaries: [] }) }));
   await page.route(/\/api\/admin\/forcefield\/trips(\?|$)/, (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ trips: [] }) }));
+  await page.route(/\/api\/admin\/forcefield\/exposure(\?|$)/, (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ enabled: false, kev: { catalogVersion: "2026.10.23", dateReleased: "2026-10-23T00:00:00Z" }, scope: "", findings: [] }) }));
 }
 
 async function open(page: Page): Promise<void> {

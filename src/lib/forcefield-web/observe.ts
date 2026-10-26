@@ -18,6 +18,7 @@ import { classifyClient, headerSignature, operatorFingerprint, type ClientFinger
 import { classifyHosting, datacenterPrefixesFrom, verifyAgentByRanges, type AgentVerification } from "./hosting";
 import { detectHeaderAttack, detectPayload, PAYLOAD_CWE } from "./enforce";
 import type { ForcefieldRuleset } from "./ruleset";
+import { kevProbe } from "./kev-rules";
 
 export type ForcefieldEventType =
   | "site.page_viewed"
@@ -347,7 +348,11 @@ export function observeRequest(input: ObserveInput, ruleset: ForcefieldRuleset):
   const attack = detectHeaderAttack(input.headerNames, path) ?? detectPayload(input.rawUrl ?? path);
   const native = input.platform ? ruleset.platformPaths?.[input.platform] ?? [] : [];
   const sensitive = matchedSensitive(path, ruleset.sensitivePaths, native);
+  // A request shaped like a known-exploited CVE's exploit (kev-rules.ts) is the
+  // most specific label, so it wins over a generic sensitive-path match.
+  const kev = kevProbe(path, input.rawUrl, authenticated);
   const probe =
+    kev?.id ??
     sensitive ??
     nestedDotenvProbe(path) ??
     wpPluginAbuseProbe(path, input.rawUrl, authenticated) ??

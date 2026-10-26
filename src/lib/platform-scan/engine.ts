@@ -379,5 +379,6 @@ export async function scanPlatform(input: PlatformScanInput): Promise<PlatformSc
     // these routes that are no longer detected (matches ScanFinding.route = spec.path).
     scannedRoutes: input.routes.map((s) => s.path),
     coverage,
+    observed: perRoute.map((r) => ({ route: r.spec.path, obs: r.obs })),
   };
 }

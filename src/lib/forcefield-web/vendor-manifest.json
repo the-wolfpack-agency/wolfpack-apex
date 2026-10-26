@@ -14,6 +14,7 @@
     "index.ts",
     "hosting.ts",
     "campaign.ts",
-    "intent.ts"
+    "intent.ts",
+    "kev-rules.ts"
   ]
 }

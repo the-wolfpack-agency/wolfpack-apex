@@ -134,3 +134,15 @@ describe("classifyEdgeExposure - KEV mapping into ScanFinding", () => {
     }
   });
 });
+
+describe("classify options + panel tag", () => {
+  it("routeIsEvidence:false ignores the route and needs a body/header marker", () => {
+    expect(classifyEdgeDevice(res({ route: "/remote/login" }), { routeIsEvidence: false })).toBeNull();
+    expect(classifyEdgeDevice(res({ route: "/remote/login", bodyExcerpt: "fgt_lang" }), { routeIsEvidence: false })?.product).toBe("fortinet_fortios_sslvpn");
+  });
+  it("every finding carries exposure_kind edge_device and the outside-in scope line", () => {
+    const f = classifyEdgeExposure(res({ route: "/global-protect/login.esp" }))[0];
+    expect(f.evidence.exposure_kind).toBe("edge_device");
+    expect(f.detail).toMatch(/outside-in exposure monitoring/);
+  });
+});
