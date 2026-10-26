@@ -26,15 +26,22 @@ const CHECKS: Check[] = [
   { name: "status serves", method: "GET", path: "/api/forcefield/status", expect: [200] },
   { name: "signup page serves", method: "GET", path: "/forcefield/signup", expect: [200] },
   { name: "dashboard page serves", method: "GET", path: "/forcefield/dashboard", expect: [200] },
+  { name: "setup page serves", method: "GET", path: "/forcefield/setup", expect: [200] },
+  { name: "confirm page serves", method: "GET", path: "/forcefield/confirm", expect: [200] },
+  { name: "unsubscribe page serves", method: "GET", path: "/forcefield/unsubscribe", expect: [200] },
   // Token-gated endpoints must refuse an unauthenticated / bogus-token caller and leak no body.
   { name: "my-stats refuses no token", method: "GET", path: "/api/forcefield/my-stats", expect: [401], noLeak: true },
   { name: "my-setup refuses no token", method: "GET", path: "/api/forcefield/my-setup", expect: [401], noLeak: true },
+  { name: "alert-email refuses no token", method: "GET", path: "/api/forcefield/alert-email", expect: [401], noLeak: true },
+  { name: "onboarding state refuses no setup key", method: "GET", path: "/api/forcefield/onboarding", expect: [401], noLeak: true },
   // Capability-gated admin endpoints must refuse an unauthenticated caller.
   { name: "admin tenants gated", method: "GET", path: "/api/admin/forcefield/tenants", expect: [401, 403] },
   { name: "admin signups gated", method: "GET", path: "/api/admin/forcefield/signups", expect: [401, 403] },
   { name: "admin docs gated", method: "GET", path: "/api/admin/forcefield/docs", expect: [401, 403] },
   // Public signup must reject an empty body before any write.
   { name: "signup rejects empty body", method: "POST", path: "/api/forcefield/signup", expect: [400], body: "{}" },
+  { name: "onboarding rejects empty body", method: "POST", path: "/api/forcefield/onboarding", expect: [400], body: "{}" },
+  { name: "confirm rejects a missing token", method: "POST", path: "/api/forcefield/alert-email/confirm", expect: [400], body: "{}" },
 ];
 
 /** The fields a refused response must never contain (would indicate a data leak). */

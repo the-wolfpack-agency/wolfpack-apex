@@ -816,6 +816,34 @@ export type InstinctEventType =
   | "forcefield.signature_mined"
   | "forcefield.signature_promoted"
   | "forcefield.signature_autoblocked"
+  // Self-serve onboarding (src/lib/forcefield-web/onboarding.ts):
+  // onboarding_started { requestId, email_domain } - a site + allowlisted alert
+  //   address entered; a setup key was issued.
+  // onboarding_ownership_verified { requestId, tenantId, method,
+  //   confirm_email_delivered } - ownership proven; tenant provisioned.
+  // onboarding_ownership_failed { requestId, reasons } - a proof click that did
+  //   not verify (coarse per-method reasons, never the token).
+  // onboarding_concierge_requested { requestId } - "we'll do it for you".
+  | "forcefield.onboarding_started"
+  | "forcefield.onboarding_ownership_verified"
+  | "forcefield.onboarding_ownership_failed"
+  | "forcefield.onboarding_concierge_requested"
+  // Tenant alert address (src/lib/forcefield-web/tenant-notify.ts):
+  // alert_email_set { tenantId, delivered } / _confirmed { tenantId, site } /
+  // _removed { tenantId } / _unsubscribed { tenantId }.
+  | "forcefield.alert_email_set"
+  | "forcefield.alert_email_confirmed"
+  | "forcefield.alert_email_removed"
+  | "forcefield.alert_email_unsubscribed"
+  // Tenant mail (src/lib/forcefield-web/tenant-mail.ts): tenant_mail_sent
+  //   { purpose, tenant_id, delivered, reason }; tenant_mail_blocked { purpose,
+  //   tenant_id, recipient_domain } - the recipient allowlist refused the address.
+  // tenant_first_evidence_sent { tenant_id, site } / tenant_digest_sent
+  //   { tenant_id, site, hostile, agents } (src/lib/forcefield-web/tenant-alerts.ts).
+  | "forcefield.tenant_mail_sent"
+  | "forcefield.tenant_mail_blocked"
+  | "forcefield.tenant_first_evidence_sent"
+  | "forcefield.tenant_digest_sent"
   // assistant.insecure_output_flagged { kinds, count } - the live model-output
   // lens (LLM02): the assistant's free-text answer carried active/executable
   // content (script/iframe/js-uri/event-handler/data-html) outside code fences.

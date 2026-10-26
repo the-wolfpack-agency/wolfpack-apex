@@ -21,6 +21,7 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import { GlassPanel, MetricTile, SectionHeader, ConsoleGrid, StatusPill } from "@/components/console";
+import { AlertEmailPanel } from "@/components/forcefield/AlertEmailPanel";
 
 const TOKEN_KEY = "ff_dashboard_token";
 
@@ -213,6 +214,9 @@ export default function ForcefieldDashboardPage() {
                 {status === "loading" ? "Connecting..." : "Connect"}
               </button>
             </form>
+            <p className="mt-3 text-xs" style={{ color: "var(--wp-muted, #9aa0a6)" }}>
+              New to Forcefield? <a data-testid="ff-start-link" href="/forcefield/signup" style={{ color: "var(--wp-gold, #e8b528)" }}>Add your site</a>.
+            </p>
             {status === "unauthorized" && (
               <p data-testid="ff-error" className="mt-3 text-sm" style={{ color: "#f87171" }}>
                 That token was not recognized. Check that you pasted the full token from your
@@ -325,6 +329,12 @@ export default function ForcefieldDashboardPage() {
                     </>
                   )}
                 </GlassPanel>
+              </div>
+            )}
+
+            {token && (
+              <div className="mb-6">
+                <AlertEmailPanel token={token} site={data?.tenant?.siteLabel ?? "your site"} />
               </div>
             )}
 

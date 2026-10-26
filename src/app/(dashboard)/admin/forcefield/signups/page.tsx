@@ -15,7 +15,7 @@ import { useRouter } from "next/navigation";
 import { getInstinctUser, fetchWithRefresh, jsonHeaders } from "@/lib/client-auth";
 import { GlassPanel, SectionHeader } from "@/components/console";
 
-interface Request { id: string; name: string; email: string; siteUrl: string; note: string | null; status: string; createdAt: string }
+interface Request { id: string; name: string; email: string; siteUrl: string; note: string | null; status: string; createdAt: string; kind?: string; ownershipVerifiedAt?: string | null; conciergeRequestedAt?: string | null; conciergeNote?: string | null }
 interface Tenant { id: string; name: string; siteLabel: string; status: string; createdAt: string }
 interface Quickstart { token: string; cloudflareEnv: Record<string, string>; nextEnv: Record<string, string>; nextSnippet: string }
 interface Approved { tenant: Tenant; token: string; quickstart: Quickstart }
@@ -35,6 +35,7 @@ export default function ForcefieldSignupsPage() {
   const router = useRouter();
   const [ready, setReady] = useState(false);
   const [requests, setRequests] = useState<Request[]>([]);
+  const [concierge, setConcierge] = useState<Request[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [approved, setApproved] = useState<Approved | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -50,6 +51,11 @@ export default function ForcefieldSignupsPage() {
       const res = await fetchWithRefresh("/api/admin/forcefield/signups?status=pending");
       if (res.ok) setRequests((await res.json()).requests ?? []);
     } catch { /* leave the list as-is on a transient error */ }
+    try {
+      // Self-serve sites that asked us to connect them ("we'll do it for you").
+      const res = await fetchWithRefresh("/api/admin/forcefield/signups?status=concierge");
+      if (res.ok) setConcierge((await res.json()).requests ?? []);
+    } catch { /* optional panel */ }
   }, []);
   useEffect(() => { if (ready) void load(); }, [ready, load]);
 
@@ -129,7 +135,13 @@ export default function ForcefieldSignupsPage() {
               {requests.map((r) => (
                 <tr key={r.id} data-testid={`s-row-${r.id}`} style={{ borderTop: "1px solid var(--wp-border)", color: "var(--wp-text)", verticalAlign: "top" }}>
                   <td style={{ padding: ".5rem" }}>
-                    {r.name}{r.note ? <div style={{ color: "var(--wp-text-dim)", fontSize: ".78rem", marginTop: 2 }}>{r.note}</div> : null}
+                    {r.name}
+                    {r.kind === "self_serve" ? (
+                      <span data-testid={`s-kind-${r.id}`} style={{ marginLeft: 6, fontSize: ".7rem", color: "var(--wp-gold)", border: "1px solid var(--wp-border)", borderRadius: 999, padding: "0 6px" }}>
+                        Self-serve: awaiting ownership proof
+                      </span>
+                    ) : null}
+                    {r.note ? <div style={{ color: "var(--wp-text-dim)", fontSize: ".78rem", marginTop: 2 }}>{r.note}</div> : null}
                     {summaries[r.id]?.loading ? (
                       <div data-testid={`s-summary-${r.id}`} style={{ color: "var(--wp-text-dim)", fontSize: ".78rem", marginTop: 4, fontStyle: "italic" }}>Summarizing…</div>
                     ) : summaries[r.id]?.text ? (
@@ -158,6 +170,23 @@ export default function ForcefieldSignupsPage() {
               ))}
             </tbody>
           </table>
+        )}
+      </GlassPanel>
+
+      <GlassPanel style={{ marginTop: "1.25rem" }} testId="s-concierge">
+        <div style={{ fontSize: ".8rem", color: "var(--wp-text-dim)", marginBottom: ".6rem" }}>Setup help requested (self-serve sites we were asked to connect)</div>
+        {concierge.length === 0 ? (
+          <p data-testid="s-concierge-empty" style={{ color: "var(--wp-text-dim)" }}>No open setup-help requests.</p>
+        ) : (
+          <ul style={{ listStyle: "none", padding: 0, margin: 0, fontSize: ".85rem" }}>
+            {concierge.map((r) => (
+              <li key={r.id} data-testid={`s-concierge-${r.id}`} style={{ borderTop: "1px solid var(--wp-border)", padding: ".5rem 0", color: "var(--wp-text)" }}>
+                <strong>{r.siteUrl}</strong> · {r.email} · asked {String(r.conciergeRequestedAt ?? "").slice(0, 10)}
+                {r.ownershipVerifiedAt ? " · ownership verified" : " · ownership not yet verified"}
+                {r.conciergeNote ? <div style={{ color: "var(--wp-text-dim)", fontSize: ".78rem" }}>{r.conciergeNote}</div> : null}
+              </li>
+            ))}
+          </ul>
         )}
       </GlassPanel>
     </div>

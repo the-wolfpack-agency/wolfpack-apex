@@ -67,9 +67,11 @@ Source: `src/lib/forcefield-web/alerts.ts`, run by the `forcefield-alerts` cron
   for an automatic block, the decision (applied, or not applied because the
   fingerprint is shared by legitimate visitors) is recorded and shown in the
   incident email. It is never a second email.
-- **Recipients.** Wolfpack only (`FORCEFIELD_ALERT_RECIPIENT_EMAIL`). During the
-  build phase no client or tenant receives Forcefield alerts; a client-facing
-  version of the template exists for previews only.
+- **Recipients.** The operator alert goes to Wolfpack (`FORCEFIELD_ALERT_RECIPIENT_EMAIL`).
+  A self-serve tenant's confirmed address also gets its own site's alerts
+  (`self-serve-onboarding.md`), but only when the address is on the recipient
+  allowlist (`FORCEFIELD_RECIPIENT_DOMAINS`, Wolfpack domains during the build
+  phase), so no client receives anything until the operator opens it.
 - **The outcome is recorded.** Each alert row keeps `delivery_status`
   (`delivered` or `failed`), `delivery_detail` (the reason, such as
   `email:no_mail_from`), `attempts` and `dispatched_at` (migration 291). Every

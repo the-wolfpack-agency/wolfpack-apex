@@ -85,6 +85,10 @@
       "schedule": "*/10 * * * *"
     },
     {
+      "path": "/api/cron/forcefield-tenant-notify",
+      "schedule": "5-59/10 * * * *"
+    },
+    {
       "path": "/api/cron/forcefield-learn",
       "schedule": "0 * * * *"
     },

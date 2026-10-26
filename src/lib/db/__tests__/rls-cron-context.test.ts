@@ -98,6 +98,10 @@ const CRON_CONTEXT: Record<string, CronContext> = {
     workspace: ["src/lib/forcefield-web/alerts.ts"],
     reason: "Reads the automatic-block decision for an incident from the Forcefield edge workspace only (FORCEFIELD_EDGE_WORKSPACE_ID), the one autoBlockFingerprint writes.",
   },
+  [CRON("forcefield-tenant-notify")]: {
+    workspace: ["src/lib/forcefield-web/alerts.ts"],
+    reason: "Reaches alerts.ts only for the shared dispatch path and renderers; the one RLS-covered read there (lookupBlockDecision) runs in the Forcefield edge workspace and is never called by the tenant path, which reads only forcefield_tenants and site_analytics_events by tenant id.",
+  },
   [CRON("integration-health")]: {
     workspace: [CRON("integration-health"), "src/lib/health/integration-probes.ts"],
     reason: "Per-workspace probes; the work list reads instinct_connector_credentials, which has no policy yet. Self-checks run in default.",

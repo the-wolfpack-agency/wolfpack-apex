@@ -125,6 +125,7 @@ describe("Forcefield surfaces in the wolfpack-instinct manifest", () => {
     expect(publicPaths).toEqual(expect.arrayContaining(["/forcefield/signup", "/forcefield/dashboard"]));
     expect(publicPaths).not.toContain("/forcefield");
     expect(publicPaths).toContain("/forcefield/status");
+    expect(publicPaths).toEqual(expect.arrayContaining(["/forcefield/setup", "/forcefield/confirm", "/forcefield/unsubscribe"]));
   });
 
   it("gates the Forcefield control-plane APIs and leaves public-stats open", () => {

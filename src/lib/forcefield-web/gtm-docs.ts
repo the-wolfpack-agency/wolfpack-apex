@@ -31,6 +31,7 @@ export const GTM_DOCS: readonly GtmDocMeta[] = [
   { key: "launch", title: "Launch readiness + compliance scope (deterministic core)", category: "Overview", file: "launch-readiness.md" },
   { key: "rollout", title: "Rollout runbook: protect a site + join the network (shim)", category: "Overview", file: "rollout.md" },
   { key: "alerts", title: "Alerts, automatic blocking and the tripwire", category: "Overview", file: "alerts-blocking-tripwire.md" },
+  { key: "onboarding", title: "Self-serve onboarding and the client email switch", category: "Overview", file: "self-serve-onboarding.md" },
   { key: "premortem", title: "Pre-mortem: failure scenarios + controls", category: "Overview", file: "pre-mortem.md" },
   { key: "pricing", title: "Pricing and packaging", category: "Commercial", file: "pricing-and-packaging.md" },
   { key: "licensing", title: "Licensing and subscription", category: "Commercial", file: "licensing.md" },
