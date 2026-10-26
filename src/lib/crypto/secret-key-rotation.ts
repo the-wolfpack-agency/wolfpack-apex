@@ -38,10 +38,12 @@ export interface RotationTarget {
   columns: string[];
 }
 
-/** Every column written through encryptSecret / sealGraphToken. */
+/** Every column written through encryptSecret / sealGraphToken (sealStoredToken). */
 export const ROTATION_TARGETS: RotationTarget[] = [
   { table: "instinct_connector_credentials", pk: "id", columns: ["auth_header_enc", "refresh_token_enc"] },
   { table: "instinct_ms_tokens", pk: "id", columns: ["access_token", "refresh_token"] },
+  { table: "instinct_qbo_tokens", pk: "id", columns: ["access_token", "refresh_token"] },
+  { table: "instinct_delegation_issuers", pk: "id", columns: ["secret"] },
   { table: "instinct_admin_mfa", pk: "id", columns: ["encrypted_secret"] },
   { table: "instinct_workspace_model_keys", pk: "id", columns: ["encrypted_key"] },
   { table: "instinct_tenant_registry", pk: "tenant_id", columns: ["db_url_encrypted"] },

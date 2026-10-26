@@ -119,6 +119,12 @@ describe("POST /api/team/invite (inviteFlow)", () => {
 
     expect(mockSafeQuery).toHaveBeenCalledTimes(1);
     expect(mockSafeQuery.mock.calls[0][0]).toMatch(/INSERT INTO instinct_invites/);
+    /* The token is stored hashed at rest: the INSERT carries sha256(token),
+       never the token the invitee receives. */
+    const { hashBearerToken } = await import("@/lib/crypto/token-hash");
+    const params = mockSafeQuery.mock.calls[0][1] as unknown[];
+    expect(params[3]).toBe(hashBearerToken(body.invites[0].token));
+    expect(params).not.toContain(body.invites[0].token);
 
     expect(mailer).toHaveBeenCalledTimes(1);
     const arg = mailer.mock.calls[0][0];

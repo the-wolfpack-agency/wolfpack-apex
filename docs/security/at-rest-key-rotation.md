@@ -1,6 +1,6 @@
 # At-rest key rotation
 
-Secrets stored in Postgres (connector credentials, Microsoft Graph tokens, admin MFA seeds, workspace model keys, tenant connection strings) are encrypted with AES-256-GCM by `src/lib/crypto/secret-storage.ts`. This runbook moves them onto a dedicated key, `INSTINCT_SECRET_KEY`, with no downtime and no unreadable rows.
+Secrets stored in Postgres (connector credentials, Microsoft Graph tokens, QuickBooks tokens, delegation issuer secrets, admin MFA seeds, workspace model keys, tenant connection strings) are encrypted with AES-256-GCM by `src/lib/crypto/secret-storage.ts`. This runbook moves them onto a dedicated key, `INSTINCT_SECRET_KEY`, with no downtime and no unreadable rows.
 
 ## How the keyring works
 
@@ -73,6 +73,43 @@ Run these in order. Times are whatever is convenient; nothing here needs a maint
 
 6. **Verify the legacy count is zero.** Run the dry run again (`npm run security:rotate-secret-key`). `TOTAL` must show `legacy=0 previous=0`. The `--apply` run exits non-zero if either is still above zero. Over the following days `security.secret_old_key_decrypt` should stop appearing in `instinct_events`.
 
+## Sealing QuickBooks tokens and delegation issuer secrets
+
+QuickBooks access and refresh tokens (`instinct_qbo_tokens`) and delegation issuer hs256 secrets (`instinct_delegation_issuers.secret`) are sealed at rest under this keyring like Graph tokens. Every write is sealed, and a write that cannot be sealed is refused. A value the app reads that is not sealed yet is sealed in place on that read. Values nobody reads are sealed by the backfill.
+
+With the same shell as step 5:
+
+```
+npm run security:seal-qbo-tokens                       # dry run, read-only
+npm run security:seal-qbo-tokens -- --apply
+npm run security:seal-delegation-secrets               # dry run, read-only
+npm run security:seal-delegation-secrets -- --apply
+```
+
+Output is counts only:
+
+- `rows`
+- `already_sealed`
+- `empty` (for example, an es256 issuer has no secret)
+- `to_seal`
+- `sealed`
+- `failed` (unreadable values, round-trip failures, and rows the app changed mid-run)
+
+The script refuses to write unless this shell's key opens every value the app already sealed. When the shell holds `INSTINCT_SECRET_KEY`, it also refuses unless the deployed app is proven to use that key (step 4). A re-run reports every row as `already_sealed` and writes nothing. Exit codes: 0 done, 1 refused, 2 error, 3 applied with failures. With a primary key in the shell, values are sealed under it directly. Without one, they are sealed under the legacy key, and the rotation in step 5 later moves them to the primary.
+
+`scripts/encrypt-graph-tokens.ts` applies the same app-key proof before sealing Graph tokens.
+
+## Hashing team invite tokens
+
+Team invite tokens (`instinct_invites.token`) are only ever compared, so they are stored as a SHA-256 hash rather than sealed. New invites, accepted invites and resent invites hold only the hash; a resend issues a new token. The accept route matches the hash of the presented token, and still matches an invite that has not been converted yet, so links already in people's inboxes keep working. The backfill converts the rest. It needs no key:
+
+```
+npm run security:hash-invite-tokens                    # dry run, read-only
+npm run security:hash-invite-tokens -- --apply
+```
+
+Output is counts only: `rows`, `already_hashed`, `to_hash`, `hashed`, `failed`. A re-run reports every row as `already_hashed`.
+
 ## After the count is zero
 
 The legacy fallback stays in `secret-storage.ts` until a follow-up change removes it. That change is safe only after step 6 reads zero on every database that shares this code (production, and any Preview database), and after a period with no `security.secret_old_key_decrypt` events. Removing it earlier would make any remaining legacy value unreadable.
@@ -89,4 +126,7 @@ The legacy fallback stays in `secret-storage.ts` until a follow-up change remove
 - `src/lib/crypto/secret-storage.ts`: the keyring.
 - `src/lib/crypto/secret-key-rotation.ts`: survey, proof and rotation logic.
 - `src/db/__tests__/secret-key-rotation.db.test.ts`: the backfill against a real Postgres (rotation, idempotent re-run, resume after a crash).
-- `scripts/encrypt-graph-tokens.ts`: seals legacy plaintext Graph tokens; separate from key rotation.
+- `scripts/encrypt-graph-tokens.ts`: seals Graph tokens not sealed yet; separate from key rotation.
+- `scripts/seal-at-rest-secrets.ts` and `src/lib/crypto/at-rest-seal-backfill.ts`: seal QuickBooks tokens and delegation issuer secrets not sealed yet; tested in `src/db/__tests__/at-rest-seal-backfill.db.test.ts`.
+- `scripts/hash-invite-tokens.ts` and `src/lib/team/invite-tokens.ts`: invite token lookup and hash backfill; tested in `src/db/__tests__/invite-token-hash.db.test.ts`.
+- `src/lib/crypto/__tests__/at-rest-secret-columns.test.ts`: fails the build when a migration adds a credential-shaped column that is neither in `ROTATION_TARGETS` nor classified with a reason.

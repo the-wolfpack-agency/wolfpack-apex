@@ -28,6 +28,12 @@
  * Format detection is by prefix. A Microsoft access token is a JWT ("eyJ...")
  * and a refresh token is an opaque string ("0.A..." / "M.C5..."); neither can
  * begin with "v1." or "plain.", so the prefix is unambiguous.
+ *
+ * QUICKBOOKS. The QuickBooks Online tokens in instinct_qbo_tokens use the same
+ * sealer and reader (sealStoredToken / openStoredToken below are the same
+ * functions under a provider-neutral name). An Intuit access token is a JWT
+ * ("eyJ...") and its refresh token is an opaque "AB11..." string, so the prefix
+ * rule holds for them too.
  */
 
 import { decryptSecret, encryptSecret } from "@/lib/crypto/secret-storage";
@@ -93,3 +99,8 @@ export function openGraphToken(stored: string | null | undefined): OpenedToken {
   }
   return { ok: true, value: stored, format: "legacy_plaintext" };
 }
+
+/** Provider-neutral names for the same sealer and reader. Every OAuth token
+ *  store (Microsoft Graph, QuickBooks) seals and opens through these. */
+export const sealStoredToken = sealGraphToken;
+export const openStoredToken = openGraphToken;

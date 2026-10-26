@@ -10,6 +10,7 @@
  *   GET  -> { issuers: [{ issuer, algorithm, allowedScopes, createdAt }] }
  *   POST { issuer, secret, allowedScopes? } -> { ok }
  *   400 invalid | 401/403 via requireCapability("settings.manage_team")
+ *   503 secret_storage_unavailable: the secret could not be sealed at rest, nothing stored
  */
 import { NextRequest, NextResponse } from "next/server";
 import { requireCapability } from "@/lib/auth/require-capability";
@@ -48,7 +49,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     : [];
 
   const workspaceId = auth.user.workspaceId ?? "default";
-  await registerDelegationIssuer({ workspaceId, issuer, ...(publicKey ? { publicKey } : { secret }), allowedScopes, createdBy: auth.user.id });
+  const registered = await registerDelegationIssuer({ workspaceId, issuer, ...(publicKey ? { publicKey } : { secret }), allowedScopes, createdBy: auth.user.id });
+  if (!registered.ok) {
+    // The secret is sealed at rest; when that is impossible nothing is stored.
+    return NextResponse.json({ error: "secret_storage_unavailable" }, { status: 503 });
+  }
 
   // The secret is never logged or echoed; only that an issuer was registered.
   await recordAudit({

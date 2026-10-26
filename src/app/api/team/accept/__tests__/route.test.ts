@@ -127,6 +127,11 @@ describe("POST /api/team/accept", () => {
     expect(mockWriteQuery).toHaveBeenCalledTimes(2);
     expect(mockWriteQuery.mock.calls[0][0]).toMatch(/INSERT INTO instinct_team_members/);
     expect(mockWriteQuery.mock.calls[1][0]).toMatch(/UPDATE instinct_invites SET status = 'accepted'/);
+    // The invite is looked up by the hash of the presented token, and the
+    // accepted row keeps only the hash.
+    const { hashBearerToken } = await import("@/lib/crypto/token-hash");
+    expect(mockSafeQuery.mock.calls[0][1]).toEqual([hashBearerToken("abc"), "abc"]);
+    expect(mockWriteQuery.mock.calls[1][1]).toEqual(["inv_a", hashBearerToken("abc")]);
 
     expect(mockTrackEvent).toHaveBeenCalledWith(
       "system.team_invite_accepted",
@@ -205,6 +210,27 @@ describe("POST /api/team/accept", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.member_id).toMatch(/^tm_/);
+    expect(mockWriteQuery).not.toHaveBeenCalled();
+  });
+
+  it("410 when the invite has expired, and nothing is written", async () => {
+    mockSafeQuery.mockResolvedValueOnce({
+      rows: [{ ...PENDING_INVITE, expires_at: new Date(Date.now() - 60_000).toISOString() }],
+      fromCache: false,
+    });
+    const { POST } = await import("@/app/api/team/accept/route");
+    const res = await POST(mkReq({ token: "abc", password: "supersecret" }));
+    expect(res.status).toBe(410);
+    expect(mockWriteQuery).not.toHaveBeenCalled();
+  });
+
+  it("404 for a wrong token: the lookup is by hash, and a raw match is limited to unhashed rows", async () => {
+    mockSafeQuery.mockResolvedValueOnce({ rows: [], fromCache: false });
+    const { POST } = await import("@/app/api/team/accept/route");
+    const res = await POST(mkReq({ token: "wrong-token", password: "supersecret" }));
+    expect(res.status).toBe(404);
+    const [sql] = mockSafeQuery.mock.calls[0];
+    expect(sql).toMatch(/token = \$1 OR \(token = \$2 AND token !~ '\^\[0-9a-f\]\{64\}\$'\)/);
     expect(mockWriteQuery).not.toHaveBeenCalled();
   });
 });

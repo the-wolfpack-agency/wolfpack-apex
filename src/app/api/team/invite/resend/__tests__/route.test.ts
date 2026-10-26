@@ -38,6 +38,7 @@ jest.mock("@/lib/mail/send-invite", () => ({
 }));
 
 import { resendFlow } from "@/app/api/team/invite/resend/route";
+import { hashBearerToken } from "@/lib/crypto/token-hash";
 
 function mkReq(body: unknown): any {
   return {
@@ -94,7 +95,6 @@ describe("POST /api/team/invite/resend", () => {
           id: "inv-max",
           email: "max@thewolfpack.agency",
           role: "evp",
-          token: "tok-abc",
           status: "pending",
         },
       ],
@@ -113,15 +113,24 @@ describe("POST /api/team/invite/resend", () => {
     const body = await res.json();
     expect(body.id).toBe("inv-max");
     expect(body.email).toBe("max@thewolfpack.agency");
-    expect(body.acceptUrl).toContain("tok-abc");
+    /* A NEW token is issued (the stored one is a hash and is never read
+       back); the database receives only its hash. */
+    expect(body.token).toMatch(/^[0-9a-f-]{36}$/);
+    expect(body.acceptUrl).toBe(`https://x/accept?token=${body.token}`);
     expect(body.emailDelivered).toBe(true);
+    const [updateSql, updateParams] = mockSafeQuery.mock.calls[1];
+    expect(updateSql).toMatch(/UPDATE instinct_invites[\s\S]*token = \$3/);
+    expect(updateParams[2]).toBe(hashBearerToken(body.token));
+    expect(JSON.stringify(mockSafeQuery.mock.calls)).not.toContain(body.token);
+    // The SELECT never reads the stored token.
+    expect(mockSafeQuery.mock.calls[0][0]).not.toMatch(/\btoken\b/);
 
     /* Email actually got called with the right shape */
     expect(mockSendInviteEmail).toHaveBeenCalledWith(
       expect.objectContaining({
         to: "max@thewolfpack.agency",
         role: "evp",
-        acceptUrl: expect.stringContaining("tok-abc"),
+        acceptUrl: body.acceptUrl,
       }),
     );
 
@@ -134,6 +143,7 @@ describe("POST /api/team/invite/resend", () => {
         invited_email: "max@thewolfpack.agency",
         extension_days: 30,
         email_delivered: true,
+        token_reissued: true,
       }),
     );
 
@@ -170,5 +180,17 @@ describe("POST /api/team/invite/resend", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.emailDelivered).toBe(false);
+  });
+
+  test("503 and no email when the re-issued token could not be stored", async () => {
+    mockRequireCapability.mockResolvedValue({ ok: true, user: ADMIN_USER });
+    mockSafeQuery.mockResolvedValueOnce({
+      rows: [{ id: "inv-1", email: "a@x", role: "dev", status: "pending" }],
+      fromCache: false,
+    });
+    mockSafeQuery.mockResolvedValueOnce({ rows: [], fromCache: true });
+    const res = await resendFlow(mkReq({ email: "a@x" }));
+    expect(res.status).toBe(503);
+    expect(mockSendInviteEmail).not.toHaveBeenCalled();
   });
 });

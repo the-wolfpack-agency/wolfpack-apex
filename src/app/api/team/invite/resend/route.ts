@@ -4,9 +4,13 @@
  *
  * Use case: a teammate (e.g. Max) didn't accept the invite before it
  * lapsed (or before the email rotted out of their inbox). An admin
- * clicks "Resend invite" and the same token gets a fresh 30-day
- * window + a new email goes out. No new invite row is created — the
- * accept link stays stable for audit trails.
+ * clicks "Resend invite" and the invite gets a fresh 30-day window, a
+ * NEW token, and a new email. No new invite row is created, so the invite
+ * id stays stable for audit trails.
+ *
+ * A new token, not the old one: invite tokens are hashed at rest
+ * (token-hash.ts) and the raw value is never read back. Re-issuing also
+ * means a stale link from an old email stops working once a new one is sent.
  *
  * CTO/CEO only via the existing settings.manage_team capability.
  *
@@ -27,6 +31,8 @@ import { requireCapability } from "@/lib/auth/require-capability";
 import { safeQuery } from "@/lib/db";
 import { trackEvent } from "@/lib/analytics";
 import { recordAudit, extractRequestMetadata } from "@/lib/audit-log";
+import { hashBearerToken } from "@/lib/crypto/token-hash";
+import { randomUUID } from "crypto";
 import {
   buildAcceptUrl,
   sendInviteEmail,
@@ -59,10 +65,9 @@ export async function resendFlow(
     id: string;
     email: string;
     role: string;
-    token: string;
     status: string;
   }>(
-    `SELECT id, email, role, token, status
+    `SELECT id, email, role, status
        FROM instinct_invites
       WHERE LOWER(email) = $1
       ORDER BY created_at DESC
@@ -85,17 +90,23 @@ export async function resendFlow(
     );
   }
 
-  /* Extend expiry, ensure status is pending. */
+  /* Re-issue the token (stored hashed), extend expiry, ensure pending. */
+  const token = randomUUID();
   const extended = await safeQuery<{ expires_at: string | Date }>(
     `UPDATE instinct_invites
         SET expires_at = NOW() + ($2 || ' days')::interval,
-            status = 'pending'
+            status = 'pending',
+            token = $3
       WHERE id = $1
       RETURNING expires_at`,
-    [inv.id, RESEND_EXTENSION_DAYS],
+    [inv.id, RESEND_EXTENSION_DAYS, hashBearerToken(token)],
   );
+  if (extended.fromCache || extended.rows.length === 0) {
+    /* The new token was not stored; a link built from it would never work. */
+    return NextResponse.json({ error: "Could not re-issue the invite. Please try again." }, { status: 503 });
+  }
 
-  const acceptUrl = buildAcceptUrl(inv.token);
+  const acceptUrl = buildAcceptUrl(token);
   const inviterName =
     typeof user.email === "string" ? user.email.split("@")[0] : user.role;
   const send = mailer ?? sendInviteEmail;
@@ -113,6 +124,7 @@ export async function resendFlow(
     invited_role: inv.role,
     extension_days: RESEND_EXTENSION_DAYS,
     email_delivered: email.delivered,
+    token_reissued: true,
   });
 
   const meta = extractRequestMetadata(req);
@@ -137,7 +149,7 @@ export async function resendFlow(
     id: inv.id,
     email: inv.email,
     role: inv.role,
-    token: inv.token,
+    token,
     acceptUrl,
     emailDelivered: email.delivered,
     emailReason: email.reason ?? "ok",

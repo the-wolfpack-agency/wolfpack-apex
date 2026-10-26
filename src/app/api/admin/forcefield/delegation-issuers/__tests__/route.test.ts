@@ -16,7 +16,7 @@ const OK = { ok: true, user: { id: "u1", role: "cto", workspaceId: "w1" }, capab
 const req = (body?: unknown) =>
   new NextRequest("http://localhost/api/admin/forcefield/delegation-issuers", body === undefined ? {} : { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 
-beforeEach(() => { [requireCapability, listDelegationIssuers, registerDelegationIssuer, recordAudit].forEach((m) => m.mockReset()); recordAudit.mockResolvedValue(undefined); });
+beforeEach(() => { [requireCapability, listDelegationIssuers, registerDelegationIssuer, recordAudit].forEach((m) => m.mockReset()); recordAudit.mockResolvedValue(undefined); registerDelegationIssuer.mockResolvedValue({ ok: true }); });
 
 it("403 when not capable", async () => {
   requireCapability.mockResolvedValue({ ok: false, response: new Response("", { status: 403 }) });
@@ -58,4 +58,13 @@ it("POST 400s a too-short secret and never registers", async () => {
 it("POST 400s a missing issuer", async () => {
   requireCapability.mockResolvedValue(OK);
   expect((await POST(req({ secret: "a-strong-secret-value" }))).status).toBe(400);
+});
+
+it("POST 503s and does not audit a registration whose secret could not be sealed at rest", async () => {
+  requireCapability.mockResolvedValue(OK);
+  registerDelegationIssuer.mockResolvedValue({ ok: false, reason: "secret_seal_failed" });
+  const res = await POST(req({ issuer: "acme-fleet", secret: "a-strong-secret-value" }));
+  expect(res.status).toBe(503);
+  expect(await res.json()).toEqual({ error: "secret_storage_unavailable" });
+  expect(recordAudit).not.toHaveBeenCalled();
 });

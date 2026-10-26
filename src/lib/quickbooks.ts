@@ -10,6 +10,7 @@
 
 import { safeQuery, query } from "@/lib/db";
 import { trackEvent } from "@/lib/analytics";
+import { openStoredToken, sealStoredToken, type OpenedToken } from "@/lib/crypto/graph-token-storage";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -267,10 +268,28 @@ export async function refreshToken(currentRefreshToken: string): Promise<QboToke
 // ---------------------------------------------------------------------------
 
 /**
- * Store QBO tokens in the database.
+ * Store QBO tokens in the database. Returns true only when the row was written.
+ *
+ * SEALED AT REST, exactly like the Microsoft Graph tokens: both tokens are
+ * encrypted with secret-storage.ts (AES-256-GCM, the at-rest keyring) before
+ * they reach the database. A seal failure refuses the write rather than
+ * storing it readably, and is reported as quickbooks.token_store_failed.
  */
-export async function storeTokens(tokens: QboTokens, userId: string, companyName?: string): Promise<void> {
-  if (!process.env.DATABASE_URL) return;
+export async function storeTokens(tokens: QboTokens, userId: string, companyName?: string): Promise<boolean> {
+  if (!process.env.DATABASE_URL) return false;
+
+  let sealedAccess: string;
+  let sealedRefresh: string;
+  try {
+    sealedAccess = sealStoredToken(tokens.access_token);
+    sealedRefresh = sealStoredToken(tokens.refresh_token);
+  } catch {
+    trackEvent("quickbooks.token_store_failed", userId, "system", {
+      realm_id: tokens.realm_id,
+      code: "seal_failed",
+    });
+    return false;
+  }
 
   try {
     await query(
@@ -282,28 +301,36 @@ export async function storeTokens(tokens: QboTokens, userId: string, companyName
          expires_at = EXCLUDED.expires_at,
          company_name = COALESCE(EXCLUDED.company_name, instinct_qbo_tokens.company_name),
          updated_at = NOW()`,
-      [tokens.realm_id, tokens.access_token, tokens.refresh_token, tokens.expires_at, companyName || null, userId],
+      [tokens.realm_id, sealedAccess, sealedRefresh, tokens.expires_at, companyName || null, userId],
     );
+    return true;
   } catch (err) {
     console.error("[quickbooks] Failed to store tokens:", (err as Error).message);
+    trackEvent("quickbooks.token_store_failed", userId, "system", {
+      realm_id: tokens.realm_id,
+      code: "db_error",
+    });
+    return false;
   }
 }
 
 /**
  * Get a valid (non-expired) access token, auto-refreshing if needed.
- * Returns null if no tokens are stored or refresh fails.
+ * Returns null if no tokens are stored, a stored token cannot be opened, or
+ * refresh fails.
  */
 export async function getValidToken(): Promise<{ accessToken: string; realmId: string } | null> {
   if (isShadowMode()) return null;
 
   const { rows } = await safeQuery<{
+    id: string;
     access_token: string;
     refresh_token: string;
     realm_id: string;
     expires_at: string;
     connected_by: string;
   }>(
-    `SELECT access_token, refresh_token, realm_id, expires_at, connected_by
+    `SELECT id::text AS id, access_token, refresh_token, realm_id, expires_at, connected_by
      FROM instinct_qbo_tokens
      ORDER BY updated_at DESC
      LIMIT 1`,
@@ -312,25 +339,89 @@ export async function getValidToken(): Promise<{ accessToken: string; realmId: s
   if (rows.length === 0) return null;
 
   const row = rows[0];
+
+  /* OPEN BOTH TOKENS. A row not sealed yet keeps working and is sealed on
+     this read. A sealed value that fails to authenticate (tampered, or the
+     key changed) is NOT used and NOT treated as unsealed: the connection reads
+     as unavailable, the failure is reported,
+     and the row is left in place so a key misconfiguration destroys nothing. */
+  const openedAccess = openStoredToken(row.access_token);
+  const openedRefresh = openStoredToken(row.refresh_token);
+  if (!openedAccess.ok || !openedRefresh.ok) {
+    trackEvent("security.qbo_token_decrypt_failed", row.connected_by, "system", {
+      realm_id: row.realm_id,
+      field: !openedAccess.ok ? "access_token" : "refresh_token",
+    });
+    return null;
+  }
+  const accessToken = openedAccess.value ?? "";
+  const refreshTokenValue = openedRefresh.value ?? "";
+  const legacy = isLegacy(openedAccess) || isLegacy(openedRefresh);
+
   const expiresAt = new Date(row.expires_at).getTime();
   const bufferMs = 5 * 60 * 1000; // refresh 5 min before expiry
 
   if (Date.now() < expiresAt - bufferMs) {
-    return { accessToken: row.access_token, realmId: row.realm_id };
+    /* LAZY BACKFILL: a row not sealed yet is sealed the first time it is
+       read. Best effort; a failed backfill never fails the read. */
+    if (legacy) await backfillSealedRow(row, accessToken, refreshTokenValue);
+    return { accessToken, realmId: row.realm_id };
   }
 
   // Token expired or expiring soon — refresh
-  const refreshed = await refreshToken(row.refresh_token);
+  const refreshed = await refreshToken(refreshTokenValue);
   if (!refreshed) return null;
 
   refreshed.realm_id = row.realm_id;
-  await storeTokens(refreshed, row.connected_by);
+  const stored = await storeTokens(refreshed, row.connected_by);
+  /* A legacy row replaced by this sealed write is now migrated. */
+  if (stored && legacy) {
+    trackEvent("security.qbo_token_encrypted", row.connected_by, "system", {
+      realm_id: row.realm_id,
+      source: "refresh_write",
+    });
+  }
 
   trackEvent("quickbooks.token_refreshed", row.connected_by, "system", {
     realm_id: row.realm_id,
   });
 
   return { accessToken: refreshed.access_token, realmId: row.realm_id };
+}
+
+function isLegacy(t: OpenedToken): boolean {
+  return t.ok && t.format === "legacy_plaintext";
+}
+
+/**
+ * Seal a row in place. Conditional on the row still holding the values just
+ * read, so a concurrent refresh is never clobbered.
+ * updated_at is left alone: it orders the rows and is shown as last sync.
+ * security.qbo_token_encrypted fires only when a row was rewritten.
+ */
+async function backfillSealedRow(
+  row: { id: string; access_token: string; refresh_token: string; realm_id: string; connected_by: string },
+  accessToken: string,
+  refreshTokenValue: string,
+): Promise<void> {
+  try {
+    const sealedAccess = sealStoredToken(accessToken);
+    const sealedRefresh = sealStoredToken(refreshTokenValue);
+    const res = await query(
+      `UPDATE instinct_qbo_tokens
+          SET access_token = $1, refresh_token = $2
+        WHERE id::text = $3 AND access_token = $4 AND refresh_token = $5`,
+      [sealedAccess, sealedRefresh, row.id, row.access_token, row.refresh_token],
+    );
+    if ((res.rowCount ?? 0) > 0) {
+      trackEvent("security.qbo_token_encrypted", row.connected_by, "system", {
+        realm_id: row.realm_id,
+        source: "lazy_read",
+      });
+    }
+  } catch (err) {
+    console.error("[quickbooks] token backfill failed:", (err as Error).message);
+  }
 }
 
 /**
