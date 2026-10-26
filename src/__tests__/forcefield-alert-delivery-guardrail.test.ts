@@ -24,7 +24,8 @@ jest.mock("@/lib/mail/send-via-graph", () => ({ sendViaGraph: (a: { to: string }
 jest.mock("@/lib/analytics", () => ({ trackEventAwait: jest.fn(async () => {}), trackEvent: jest.fn() }));
 jest.mock("@/lib/db", () => ({ query: jest.fn(), safeQuery: jest.fn(async () => ({ rows: [] })) }));
 
-import { deliverForcefieldAlert, alertFromSignal, alertRecipientEmails } from "@/lib/forcefield-web/alerts";
+import { deliverForcefieldAlert, alertFromSignal, alertFromIncident, alertRecipientEmails } from "@/lib/forcefield-web/alerts";
+import { buildDigest, buildIncidents } from "@/lib/forcefield-web/incidents";
 
 const ROOT = path.resolve(__dirname, "..", "..");
 const SRC = path.join(ROOT, "src");
@@ -97,5 +98,22 @@ describe("deliverForcefieldAlert reaches the Wolfpack list only", () => {
     expect(mockSendViaGraph.mock.calls.map((c) => c[0].to)).toEqual(allowed);
     expect(mockFanout).toHaveBeenCalledTimes(1);
     expect(mockFanout.mock.calls[0][0].recipientEmails).toEqual(allowed);
+  });
+
+  it("the daily digest and grouped incidents take the same path to the same list", async () => {
+    process.env.FORCEFIELD_ALERT_RECIPIENT_EMAIL = "sec-a@wolfpack.example";
+    mockSendViaGraph.mockClear();
+    mockFanout.mockClear();
+    const g = {
+      kind: "payload_attack" as const, site: "client-site.example", attackClass: "xss", windowStart: "2026-10-26T12:00:00.000Z",
+      fp: "f", sig: "s", path: "/?to=owner@client-site.example", country: "US", hosting: "", clientType: "", agent: "", network: "",
+      outcome: "blocked" as const, posture: "enforce", reasonKind: "payload", count: 2, firstAt: "2026-10-26T14:00:00.000Z", lastAt: "2026-10-26T14:00:01.000Z",
+    };
+    const digest = buildDigest(buildIncidents([g]), { etDate: "2026-10-27", start: new Date("2026-10-26T12:00:00Z"), end: new Date("2026-10-27T12:00:00Z") });
+    await deliverForcefieldAlert({ kind: "alert_digest", dedupeKey: "d", title: "t", body: "b", digest });
+    const [inc] = buildIncidents([{ ...g, outcome: "recorded" }]);
+    await deliverForcefieldAlert(alertFromIncident(inc));
+    expect(mockSendViaGraph.mock.calls.map((c) => c[0].to)).toEqual(["sec-a@wolfpack.example", "sec-a@wolfpack.example"]);
+    expect(mockFanout.mock.calls.map((c) => c[0].recipientEmails)).toEqual([["sec-a@wolfpack.example"], ["sec-a@wolfpack.example"]]);
   });
 });

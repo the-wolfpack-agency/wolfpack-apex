@@ -9,7 +9,7 @@
  * All fetches go through fetchWithRefresh (15-min access TTL) per repo policy.
  */
 
-import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { fetchWithRefresh, jsonHeaders } from "@/lib/client-auth";
 import { SiteUsagePanel } from "@/components/site-analytics/SiteUsagePanel";
 import { LearnedSignaturesPanel } from "@/components/site-analytics/LearnedSignaturesPanel";
@@ -197,7 +197,8 @@ export default function SiteAnalyticsPage() {
   const [highlightOp, setHighlightOp] = useState<string | null>(null);
 
   // Deep link (e.g. from a Forcefield alert email): ?tab=forcefield&view=operator
-  // &find=<session signature | path>&days=7 lands on that incident. Read once on
+  // &find=<session signature | path>&days=7&site=<label> lands on that incident
+  // (site selects the property filter, as the digest's per-site links do). Read once on
   // mount; unknown values are ignored by parseBoardDeepLink.
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -206,6 +207,7 @@ export default function SiteAnalyticsPage() {
     if (link.tab) setActiveTab(link.tab);
     if (link.view) setJourneyView(link.view);
     if (link.find) setOperatorFilter(link.find);
+    if (link.site) setSurface(link.site);
   }, []);
 
   const toggleProfile = useCallback((key: string) => {
@@ -326,7 +328,11 @@ export default function SiteAnalyticsPage() {
     }
   }, []);
 
+  // A deep link changes the range or site right after mount, so two loads can
+  // be in flight; only the latest one may write state.
+  const loadSeq = useRef(0);
   const load = useCallback(async (range: number, surf: string) => {
+    const seq = ++loadSeq.current;
     setState("loading");
     setTriageOverride({});
     setOperatorTriageOverride({});
@@ -334,11 +340,13 @@ export default function SiteAnalyticsPage() {
     setPromotedOps({});
     try {
       const res = await fetchWithRefresh(`/api/admin/site-analytics?days=${range}&surface=${encodeURIComponent(surf)}`);
+      if (seq !== loadSeq.current) return;
       if (!res.ok) {
         setState("error");
         return;
       }
       const body = (await res.json()) as { summary: Summary; permissions?: { triage: boolean; manageOperators: boolean; viewIntel: boolean } };
+      if (seq !== loadSeq.current) return;
       setSummary(body.summary);
       setLoadedAt({ at: new Date().toISOString(), days: range, surface: surf });
       if (body.permissions) setPermissions(body.permissions);
@@ -357,7 +365,7 @@ export default function SiteAnalyticsPage() {
         .catch(() => {});
       setState("ready");
     } catch {
-      setState("error");
+      if (seq === loadSeq.current) setState("error");
     }
   }, []);
 

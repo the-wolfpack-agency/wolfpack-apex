@@ -22,3 +22,17 @@ describe("parseBoardDeepLink", () => {
     expect(parseBoardDeepLink(`?find=${"a".repeat(500)}`).find).toHaveLength(200);
   });
 });
+
+describe("site filter (the digest's per-site links)", () => {
+  it("emits and round-trips a site label", () => {
+    const href = boardHref({ tab: "forcefield", days: 7, site: "instinct" });
+    expect(href).toBe("/admin/site-analytics?tab=forcefield&days=7&site=instinct");
+    expect(parseBoardDeepLink(href.split("?")[1])).toEqual({ tab: "forcefield", days: 7, site: "instinct" });
+    expect(parseBoardDeepLink("?site=ogiam.com").site).toBe("ogiam.com");
+  });
+  it("drops a malformed site (a crafted link selects only a label-shaped value)", () => {
+    expect(boardHref({ site: "<x>" })).toBe("/admin/site-analytics");
+    expect(parseBoardDeepLink("?site=%3Cscript%3E").site).toBeUndefined();
+    expect(parseBoardDeepLink(`?site=${"a".repeat(150)}`).site).toBeUndefined();
+  });
+});
