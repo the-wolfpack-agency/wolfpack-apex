@@ -40,6 +40,32 @@ const SPEC_NAME = "sites-upload-reality-check";
  */
 const FIXTURE_WORDS = ["ACME", "RACING", "PARTNER"];
 
+/**
+ * Wait for whichever comes first: the review card or the error banner.
+ *
+ * Waiting on the review alone is how the multi-file test failed in run
+ * 40245271617: production answers parse-brief with a 503 (ANTHROPIC_API_KEY
+ * is unset there) and the banner shows within seconds, but the test kept
+ * waiting 60s for a review that was never coming. 60s is the whole test
+ * budget, so it timed out before it ever looked at the banner it was
+ * written to tolerate.
+ */
+async function waitForReviewOrBanner(
+  page: Page,
+  timeout: number,
+): Promise<"review" | "error" | "timeout"> {
+  return Promise.race([
+    page
+      .getByTestId("wireframe-extract-review")
+      .waitFor({ state: "visible", timeout })
+      .then(() => "review" as const),
+    page
+      .getByTestId("wireframe-error-banner")
+      .waitFor({ state: "visible", timeout })
+      .then(() => "error" as const),
+  ]).catch(() => "timeout" as const);
+}
+
 async function hasStubFallbackText(iframeBodyText: string): Promise<boolean> {
   const stubs = ["test11", "Get in touch", "Edit this brief in Instinct"];
   return stubs.some((s) => iframeBodyText.toLowerCase().includes(s.toLowerCase()));
@@ -55,6 +81,7 @@ test.describe("sites — wireframe upload reality check", () => {
     page,
     request,
   }) => {
+    test.setTimeout(120_000);
     const start = Date.now();
     let result: "pass" | "fail" | "skip" = "pass";
     let note: string | undefined;
@@ -83,13 +110,9 @@ test.describe("sites — wireframe upload reality check", () => {
       const review = page.getByTestId("wireframe-extract-review");
       const errorBanner = page.getByTestId("wireframe-error-banner");
 
-      const seenReview = await review
-        .waitFor({ state: "visible", timeout: 45_000 })
-        .then(() => true)
-        .catch(() => false);
-      if (!seenReview) {
-        const errVisible = await errorBanner.isVisible().catch(() => false);
-        if (errVisible) {
+      const seen = await waitForReviewOrBanner(page, 45_000);
+      if (seen !== "review") {
+        if (seen === "error") {
           const errText = (await errorBanner.innerText()).toLowerCase();
           if (/not configured|anthropic_api_key|admin/i.test(errText)) {
             result = "skip";
@@ -129,8 +152,11 @@ test.describe("sites — wireframe upload reality check", () => {
         `Extracted brief contains NONE of the fixture's distinctive words (${FIXTURE_WORDS.join(", ")}). This means the vision extractor fell back to boilerplate. Review pane text started: "${reviewText.slice(0, 240)}"`,
       ).toBeGreaterThan(0);
     } catch (err) {
-      result = "fail";
-      note = (err as Error).message?.slice(0, 240);
+      // test.skip() throws to stop the test; that is a skip, not a failure.
+      if (result !== "skip") {
+        result = "fail";
+        note = (err as Error).message?.slice(0, 240);
+      }
       throw err;
     } finally {
       await recordRealityCheckRun(request, target, await authToken(page).catch(() => ""), {
@@ -146,6 +172,7 @@ test.describe("sites — wireframe upload reality check", () => {
     page,
     request,
   }) => {
+    test.setTimeout(120_000);
     const start = Date.now();
     let result: "pass" | "fail" | "skip" = "pass";
     let note: string | undefined;
@@ -176,13 +203,9 @@ test.describe("sites — wireframe upload reality check", () => {
       const review = page.getByTestId("wireframe-extract-review");
       const errorBanner = page.getByTestId("wireframe-error-banner");
 
-      const seenReview = await review
-        .waitFor({ state: "visible", timeout: 60_000 })
-        .then(() => true)
-        .catch(() => false);
-      if (!seenReview) {
-        const errVisible = await errorBanner.isVisible().catch(() => false);
-        if (errVisible) {
+      const seen = await waitForReviewOrBanner(page, 60_000);
+      if (seen !== "review") {
+        if (seen === "error") {
           const errText = await errorBanner.innerText();
           if (/not configured|anthropic_api_key/i.test(errText)) {
             result = "skip";
@@ -214,8 +237,11 @@ test.describe("sites — wireframe upload reality check", () => {
         `Expected both "ACME" and "PARTNER" to survive multi-file extraction, got ACME=${homeMatches} PARTNER=${partnerMatches}. Review text started: "${reviewText.slice(0, 240)}"`,
       ).toBe(true);
     } catch (err) {
-      result = "fail";
-      note = (err as Error).message?.slice(0, 240);
+      // test.skip() throws to stop the test; that is a skip, not a failure.
+      if (result !== "skip") {
+        result = "fail";
+        note = (err as Error).message?.slice(0, 240);
+      }
       throw err;
     } finally {
       await recordRealityCheckRun(

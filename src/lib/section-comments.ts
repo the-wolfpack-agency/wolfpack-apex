@@ -267,7 +267,8 @@ export async function deleteComment(opts: {
   await writeQuery(
     `UPDATE instinct_site_section_comments
         SET body = '[deleted]'
-      WHERE id = $1`,
+      WHERE id = $1
+  RETURNING id`,
     [opts.commentId],
     { expectRows: 1 },
   );
