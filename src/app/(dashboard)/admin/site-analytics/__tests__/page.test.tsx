@@ -7,7 +7,7 @@ jest.mock("@/lib/client-auth", () => ({
   jsonHeaders: () => ({ "Content-Type": "application/json" }),
 }));
 
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
 import SiteAnalyticsPage from "@/app/(dashboard)/admin/site-analytics/page";
 
 const SUMMARY = {
@@ -1024,6 +1024,40 @@ describe("deep link from a Forcefield alert email", () => {
     await waitFor(() => expect(screen.getByTestId("tab-usage")).toHaveAttribute("aria-selected", "true"));
     expect(screen.getByTestId("tab-panel-usage")).not.toHaveAttribute("hidden");
     expect(screen.queryByTestId("tab-panel-forcefield")).toBeNull();
+  });
+
+  test("?site=<label> (the digest's per-site link) loads the board filtered to that property", async () => {
+    window.history.replaceState({}, "", "/admin/site-analytics?tab=forcefield&view=operator&days=7&site=instinct");
+    const calls: string[] = [];
+    mockFetchWithRefresh.mockImplementation((url: string) => {
+      calls.push(String(url));
+      return Promise.resolve({ ok: true, json: async () => ({ summary: { ...SUMMARY, surfaces: ["ogiam.com", "instinct"], surface: "instinct" }, permissions: PERMS }) });
+    });
+    render(<SiteAnalyticsPage />);
+    await waitFor(() => expect(calls.some((u) => u.startsWith("/api/admin/site-analytics?days=7&surface=instinct"))).toBe(true));
+    await waitFor(() => expect(screen.getByTestId("tab-forcefield")).toHaveAttribute("aria-selected", "true"));
+    expect(await screen.findByTestId("surface-instinct")).toHaveAttribute("aria-pressed", "true");
+  });
+
+  test("a stale response for the pre-deep-link range never overwrites the filtered board", async () => {
+    window.history.replaceState({}, "", "/admin/site-analytics?site=instinct");
+    let releaseFirst: (v: unknown) => void = () => {};
+    let n = 0;
+    mockFetchWithRefresh.mockImplementation((url: string) => {
+      if (!String(url).startsWith("/api/admin/site-analytics?")) return Promise.resolve({ ok: true, json: async () => ({}) });
+      n++;
+      const surf = String(url).includes("surface=instinct") ? "instinct" : "all";
+      // The stale (pre-deep-link, all sites) response carries no property list,
+      // so if it ever overwrote the filtered board the property filter would vanish.
+      const body = { summary: { ...SUMMARY, surfaces: surf === "instinct" ? ["ogiam.com", "instinct"] : [], surface: surf }, permissions: PERMS };
+      if (n === 1) return new Promise((r) => { releaseFirst = () => r({ ok: true, json: async () => body }); });
+      return Promise.resolve({ ok: true, json: async () => body });
+    });
+    render(<SiteAnalyticsPage />);
+    await screen.findByTestId("surface-instinct");
+    await act(async () => { releaseFirst(undefined); });
+    expect(screen.getByTestId("surface-instinct")).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTestId("surface-filter")).toBeInTheDocument();
   });
 
   test("unknown params are ignored (default board)", async () => {

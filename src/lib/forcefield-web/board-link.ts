@@ -8,6 +8,8 @@
  *   &find=<text>           prefill the operator finder: a session signature
  *                          (exact journey key), a target path or an operator key
  *   &days=7|30|90          the board range
+ *   &site=<label>          the property (surface) filter, e.g. instinct or
+ *                          ogiam.com (the internal site label the board uses)
  */
 export const BOARD_PATH = "/admin/site-analytics";
 export const BOARD_RANGES = [7, 30, 90] as const;
@@ -17,7 +19,12 @@ export interface BoardDeepLink {
   view?: "operator" | "severity";
   find?: string;
   days?: (typeof BOARD_RANGES)[number];
+  /** The board's property filter (an internal site label). */
+  site?: string;
 }
+
+/** A site label as the board accepts it: short, lowercase host-like characters. */
+const SITE_LABEL = /^[a-z0-9][a-z0-9.-]{0,99}$/;
 
 /** Longest finder text accepted from a URL (a path or a key, never a payload). */
 const MAX_FIND = 200;
@@ -30,6 +37,7 @@ export function boardHref(link: BoardDeepLink = {}): string {
   if (link.view) q.set("view", link.view);
   if (link.find) q.set("find", link.find.slice(0, MAX_FIND));
   if (link.days) q.set("days", String(link.days));
+  if (link.site && SITE_LABEL.test(link.site)) q.set("site", link.site);
   const s = q.toString();
   return s ? `${BOARD_PATH}?${s}` : BOARD_PATH;
 }
@@ -47,5 +55,7 @@ export function parseBoardDeepLink(search: string): BoardDeepLink {
   if (find) out.find = find.slice(0, MAX_FIND);
   const days = Number(q.get("days"));
   if ((BOARD_RANGES as readonly number[]).includes(days)) out.days = days as BoardDeepLink["days"];
+  const site = (q.get("site") ?? "").trim().toLowerCase();
+  if (SITE_LABEL.test(site)) out.site = site;
   return out;
 }

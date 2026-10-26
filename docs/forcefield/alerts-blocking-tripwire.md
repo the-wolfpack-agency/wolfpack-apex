@@ -10,13 +10,39 @@ Source: `src/lib/forcefield-web/alerts.ts`, run by the `forcefield-alerts` cron
 
 - **What alerts.** Honeytoken (trap) trips and payload attacks seen in the live
   inspection stream, plus canary trips (section 3) and the silence check (below).
-- **One alert per incident and window.** An incident is one site plus one attack
-  class (for example `sql_injection`, or `honeytoken_trip`) inside a fixed
+- **Incidents, not attack classes.** Events are grouped into incidents
+  (`src/lib/forcefield-web/incidents.ts`): one site, one source burst, one fixed
   6-hour window (`ALERT_WINDOW_HOURS`, aligned to 00:00, 06:00, 12:00 and 18:00
-  UTC). A repeat inside the window does not alert again. The same attack in the
-  next window does. A different attack class in the same window is its own
-  incident. The old key was the site and kind with no window, so the first alert
-  per site silenced every later one; that is what stopped alerts after 09-28.
+  UTC). Two events are the same burst when they share a fingerprint, share a
+  session signature, or follow each other within 120 seconds
+  (`BURST_GAP_SECONDS`). A scanner that rotates its headers on every request is
+  therefore one incident, with every attack class it tried listed in it. Synthetic
+  probes (`props.synthetic`, token-attested) are never alerted on or counted.
+- **Severity routing.** An incident is emailed IMMEDIATELY only when it needs
+  attention: a decoy or honeytoken trip (proven hostile reached hidden content),
+  or any request that was recorded but not stopped (watch / report-only). One
+  email per incident lists each attack class with its attempts, sources,
+  outcome, first and last time and paths. A repeat inside the window does not
+  email again; a new burst does. An incident where every request was blocked or
+  contained is NOT emailed when it happens; it goes into the daily digest.
+- **Daily digest.** The first cron run at or after 08:00 US Eastern each day
+  sends one digest (claimed once per Eastern date in the dedupe store, so it
+  cannot double-send; a failed send is retried on later runs). It covers every
+  blocked incident whose window started between the previous and the current
+  08:00 ET cutoff (each floored to a window boundary), per site: attack type,
+  attempts, distinct sources (fingerprints), first and last time in UTC and ET,
+  top paths and outcome, plus totals and a link to the board filtered to the
+  site (`/admin/site-analytics?tab=forcefield&view=operator&days=7&site=<label>`).
+  Consecutive periods partition time, so every blocked incident appears in
+  exactly one digest. A digest that failed or was never sent rolls its period
+  into the next one (at most 7 days back). With nothing to report the digest is
+  skipped and recorded as `empty`. Each run records
+  `forcefield.alert_digest_built`. On demand: `?job=digest`.
+- **Site names.** Emails show the site's hostname, never the internal label:
+  `instinct` is the Instinct public URL host, shim labels map through the
+  product catalog (`weekendwithporsche` to weekendwithporsche.com), a label that
+  is already a hostname is kept, and an unknown label falls back to itself
+  (`src/lib/forcefield-web/site-host.ts`).
 - **Delivery.** In-app through `fanoutToTeam` and email through Microsoft Graph
   (`sendViaGraph`), to the security owner only (`FORCEFIELD_ALERT_RECIPIENT_EMAIL`,
   comma-separated to widen). Never Resend.
@@ -49,10 +75,17 @@ Source: `src/lib/forcefield-web/alerts.ts`, run by the `forcefield-alerts` cron
   `email:no_mail_from`), `attempts` and `dispatched_at` (migration 291). Every
   dispatch records an awaited `forcefield.web_alert_dispatched` event with the
   outcome. A failed alert is retried on later scans, up to 5 attempts.
-- **Silence check.** Once a day (the 12:00 UTC run, or on demand with
-  `?job=silence`), if there were hostile events in the last 24 hours but no alert
-  was delivered to anyone, Forcefield records `forcefield.alert_silence_detected`
-  and sends an alert saying the alert path is broken. At most one per UTC day.
+- **Silence check.** Once a day (the 15:00 UTC run, after the digest in both EDT
+  and EST, or on demand with `?job=silence`), Forcefield raises an alert when
+  events needing attention arrived in the last 24 hours but no immediate alert
+  was delivered, or when hostile traffic fell in today's digest period but the
+  digest was neither delivered nor found empty. It records
+  `forcefield.alert_silence_detected` with the reason. At most one per UTC day.
+- **Sender.** Mail goes out through `sendViaGraph` as the `MS_MAIL_FROM`
+  mailbox (shared with password resets and invites). Exchange shows that
+  mailbox's own display name, so the `fromName` the alert passes is not what
+  readers see. Sending from a dedicated shared mailbox needs a per-call sender
+  in `sendViaGraph` (not supported today) and a mailbox created in Exchange.
 
 ## 2. Automatic blocking
 

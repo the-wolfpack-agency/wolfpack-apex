@@ -20,6 +20,8 @@
  */
 import type { ForcefieldAlert } from "@/lib/forcefield-web/alerts";
 import { boardHref } from "@/lib/forcefield-web/board-link";
+import { siteHost } from "@/lib/forcefield-web/site-host";
+import type { ClassLine, DigestData } from "@/lib/forcefield-web/incidents";
 
 /* --------------------------------- types ---------------------------------- */
 
@@ -155,10 +157,22 @@ const ATTACK_LABEL: Record<string, string> = {
   open_redirect: "open redirect",
   xxe: "XML external entity",
   ssrf: "server-side request forgery",
+  nextjs_middleware_bypass: "Next.js middleware bypass",
+  php_cgi_injection: "PHP CGI injection",
+  prompt_injection: "prompt injection",
+  template_injection: "template injection",
+  log4shell: "Log4Shell (JNDI injection)",
+  honeytoken_trip: "decoy or honeytoken trip",
 };
 
 function attackLabel(attackClass: string): string {
   return ATTACK_LABEL[attackClass] ?? attackClass.replace(/_/g, " ");
+}
+
+/** The site as a reader knows it: the hostname, never the internal label
+ *  ("instinct" -> wolfpack-instinct.vercel.app). Falls back to the label. */
+export function displaySite(label: string | undefined): string {
+  return label ? siteHost(label) || label : "";
 }
 
 const cap1 = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);
@@ -197,28 +211,55 @@ const OUTCOME_WORD: Record<ResponseKind, string> = {
   unknown: "detected",
 };
 
-export type Severity = "Critical" | "High" | "Warning" | "Review";
+export type Severity = "Critical" | "High" | "Warning" | "Review" | "Info";
 
 export function alertSeverity(alert: ForcefieldAlert): Severity {
   switch (alert.kind) {
     case "canary_trip": return "Critical";
     case "honeytoken_trip":
-    case "payload_attack": return "High";
+    case "payload_attack":
+    case "hostile_incident": return "High";
+    case "alert_digest": return "Info";
     case "alert_silence": return "Warning";
     default: return "Review";
   }
 }
 
+/**
+ * A grouped incident (hostile_incident) reads like the single-class kinds:
+ * a burst with a trap trip reads as a trap trip, anything else as a payload
+ * attack. The class list itself is rendered as its own table.
+ */
+function effectiveKind(alert: ForcefieldAlert): ForcefieldAlert["kind"] {
+  if (alert.kind !== "hostile_incident") return alert.kind;
+  return alert.attention?.includes("decoy") || alert.classes?.some((c) => c.kind === "honeytoken_trip") ? "honeytoken_trip" : "payload_attack";
+}
+
+/** Payload classes of a grouped incident (trap trips excluded). */
+function payloadClasses(alert: ForcefieldAlert): ClassLine[] {
+  return (alert.classes ?? []).filter((c) => c.kind === "payload_attack");
+}
+
+/** "SQL injection" for one class, "3 attack types" for several. */
+function classesPhrase(alert: ForcefieldAlert): string {
+  const p = payloadClasses(alert);
+  if (alert.kind !== "hostile_incident" || p.length === 0) return attackLabel(alert.attackClass ?? "payload attack");
+  return p.length === 1 ? attackLabel(p[0].attackClass) : `${p.length} attack types`;
+}
+
 /** The outcome-first subject line. */
 export function alertSubject(alert: ForcefieldAlert): string {
-  const site = alert.site || "Forcefield";
+  if (alert.kind === "alert_digest" && alert.digest) return digestSubject(alert.digest);
+  const site = displaySite(alert.site) || "Forcefield";
   const i = alert.incident;
   const r = responseKind(i);
-  if (alert.kind === "honeytoken_trip") {
-    return `[Forcefield] ${site}: ${actorPhrase(i).noun} ${OUTCOME_WORD[r]} (${trapNoun(i)})`;
+  const kind = effectiveKind(alert);
+  if (kind === "honeytoken_trip") {
+    const extra = payloadClasses(alert).length;
+    return `[Forcefield] ${site}: ${actorPhrase(i).noun} ${OUTCOME_WORD[r]} (${trapNoun(i)}${extra > 0 ? `, plus ${plural(extra, "attack type")}` : ""})`;
   }
-  if (alert.kind === "payload_attack") {
-    const what = cap1(attackLabel(alert.attackClass ?? "payload attack"));
+  if (kind === "payload_attack") {
+    const what = cap1(classesPhrase(alert));
     const n = i?.count ?? (Number(alert.metadata?.count) || 0);
     return `[Forcefield] ${site}: ${what} ${OUTCOME_WORD[r]}${n > 0 ? ` (${plural(n, "attempt")})` : ""}`;
   }
@@ -230,10 +271,12 @@ export function alertSubject(alert: ForcefieldAlert): string {
 
 /** The one-line headline, in plain words. */
 export function alertHeadline(alert: ForcefieldAlert): string {
-  const site = alert.site || "a connected site";
+  if (alert.kind === "alert_digest" && alert.digest) return digestHeadline(alert.digest);
+  const site = displaySite(alert.site) || "a connected site";
   const i = alert.incident;
   const r = responseKind(i);
-  if (alert.kind === "honeytoken_trip") {
+  const kind = effectiveKind(alert);
+  if (kind === "honeytoken_trip") {
     const a = actorPhrase(i);
     const subj = a.one ? "A hostile agent" : `${plural(Math.max(i?.signatureCount ?? 0, i?.fingerprintCount ?? 0), "hostile agent")}`;
     const took = `took a ${trapNoun(i)} on ${site}`;
@@ -243,9 +286,17 @@ export function alertHeadline(alert: ForcefieldAlert): string {
     if (r === "partial") return `${subj} ${took}; some requests were stopped, some only recorded`;
     return `${subj} ${took}`;
   }
-  if (alert.kind === "payload_attack") {
-    const what = attackLabel(alert.attackClass ?? "payload");
+  if (kind === "payload_attack") {
+    const multi = alert.kind === "hostile_incident" && payloadClasses(alert).length > 1;
+    const what = multi ? "attack" : attackLabel(alert.kind === "hostile_incident" ? payloadClasses(alert)[0]?.attackClass ?? "payload" : alert.attackClass ?? "payload");
     const n = i?.count ?? 1;
+    if (multi) {
+      const lead = `${n.toLocaleString("en-US")} attack attempts across ${payloadClasses(alert).length} attack types on ${site}`;
+      if (r === "blocked" || r === "contained") return `${lead} were blocked`;
+      if (r === "recorded") return `${lead} were recorded, not blocked`;
+      if (r === "partial") return `${lead}: some were blocked, some only recorded`;
+      return `${lead} were detected`;
+    }
     const lead = n === 1 ? `A ${what} attack on ${site}` : `${n.toLocaleString("en-US")} ${what} attempts on ${site}`;
     const verb = n === 1 ? "was" : "were";
     if (r === "blocked" || r === "contained") return `${lead} ${verb} blocked`;
@@ -266,6 +317,7 @@ interface StatusBlock {
 
 function statusBlock(alert: ForcefieldAlert, audience: AlertAudience): StatusBlock {
   const i = alert.incident;
+  if (alert.kind === "alert_digest" && alert.digest) return digestStatus(alert.digest);
   if (alert.kind === "alert_silence") {
     return { tone: "bad", status: "Alert delivery is failing", action: "Action needed: check the forcefield-alerts cron and the Microsoft Graph mail settings." };
   }
@@ -305,7 +357,8 @@ function statusBlock(alert: ForcefieldAlert, audience: AlertAudience): StatusBlo
 /** One plain sentence on what the signal is and why it is trusted. */
 function signalExplanation(alert: ForcefieldAlert): { signal: string; confidence: string; explain: string } | null {
   const i = alert.incident;
-  if (alert.kind === "honeytoken_trip") {
+  const kind = effectiveKind(alert);
+  if (kind === "honeytoken_trip") {
     const noun = trapNoun(i);
     return {
       signal: noun === "honeytoken" ? "Honeytoken used" : "Decoy taken",
@@ -315,9 +368,11 @@ function signalExplanation(alert: ForcefieldAlert): { signal: string; confidence
         : "A decoy is a link or record hidden from people and never offered to them, so only an automated agent acting on content it should not touch can reach it.",
     };
   }
-  if (alert.kind === "payload_attack") {
+  if (kind === "payload_attack") {
     return {
-      signal: `${cap1(attackLabel(alert.attackClass ?? "payload"))} payload`,
+      signal: alert.kind === "hostile_incident" && payloadClasses(alert).length > 1
+        ? `Attack payloads (${payloadClasses(alert).length} types)`
+        : `${cap1(classesPhrase(alert))} payload`,
       confidence: "High: rule match on a live attack payload",
       explain: "The request carried an attack payload aimed at the site's inputs; payload rules match the attack itself, not a guess about the visitor.",
     };
@@ -381,7 +436,8 @@ function sourceLine(i: IncidentDetail): string {
 function detailRows(alert: ForcefieldAlert, audience: AlertAudience, tenantName?: string): Row[] {
   const i = alert.incident;
   const rows: Row[] = [];
-  rows.push({ label: "Site", value: alert.site ? (tenantName && audience === "tenant" ? `${alert.site} (${tenantName})` : alert.site) : "Not site-specific" });
+  const site = displaySite(alert.site);
+  rows.push({ label: "Site", value: site ? (tenantName && audience === "tenant" ? `${site} (${tenantName})` : site) : "Not site-specific" });
   if (i) {
     if (i.firstAt === i.lastAt || i.count <= 1) {
       rows.push({ label: "When", value: formatWhen(i.firstAt) });
@@ -414,7 +470,9 @@ function detailRows(alert: ForcefieldAlert, audience: AlertAudience, tenantName?
 
 /* --------------------------------- links ---------------------------------- */
 
-function linksFor(alert: ForcefieldAlert, opts: RenderOptions): { primary: { label: string; href: string }; secondary: { label: string; href: string }[] } {
+interface Link { label: string; href: string }
+
+function linksFor(alert: ForcefieldAlert, opts: RenderOptions): { primary: Link; secondary: Link[] } {
   const base = opts.baseUrl.replace(/\/$/, "");
   if (opts.audience === "tenant") {
     return {
@@ -422,16 +480,27 @@ function linksFor(alert: ForcefieldAlert, opts: RenderOptions): { primary: { lab
       secondary: [{ label: "Forcefield status", href: `${base}/forcefield/status` }],
     };
   }
+  const docs = { label: "What this alert means", href: `${base}/admin/forcefield/docs?doc=alerts` };
+  if (alert.kind === "alert_digest") {
+    return { primary: { label: "Open the Forcefield board", href: `${base}${boardHref({ tab: "forcefield", days: 7 })}` }, secondary: [docs] };
+  }
   const i = alert.incident;
+  if (alert.kind === "hostile_incident") {
+    // A burst usually spans many sessions: land on the site's board, narrowed to
+    // the session only when the burst is one session.
+    const site = alert.site ? { site: alert.site } : {};
+    const find = i && i.signatureCount === 1 ? { find: i.signatures[0] } : {};
+    return {
+      primary: { label: "Open this incident on the board", href: `${base}${boardHref({ tab: "forcefield", view: "operator", days: 7, ...site, ...find })}` },
+      secondary: [{ label: "Forcefield board", href: `${base}${boardHref({ tab: "forcefield" })}` }, docs],
+    };
+  }
   // Land on THIS incident: the exact session signature when there is one (the
   // board's journey key), else the path, else the operator view.
   const find = i && i.signatureCount === 1 ? i.signatures[0] : i && i.pathCount === 1 ? i.paths[0] : i?.paths[0];
   return {
     primary: { label: alert.incident ? "Open this incident on the board" : "Open the Forcefield board", href: `${base}${boardHref({ tab: "forcefield", view: "operator", ...(find ? { find } : {}) })}` },
-    secondary: [
-      { label: "Forcefield board", href: `${base}${boardHref({ tab: "forcefield" })}` },
-      { label: "What this alert means", href: `${base}/admin/forcefield/docs?doc=alerts` },
-    ],
+    secondary: [{ label: "Forcefield board", href: `${base}${boardHref({ tab: "forcefield" })}` }, docs],
   };
 }
 
@@ -457,6 +526,7 @@ const SEV: Record<Severity, { bg: string; ink: string }> = {
   High: { bg: "#b42318", ink: "#ffffff" },
   Warning: { bg: "#b54708", ink: "#ffffff" },
   Review: { bg: "#344054", ink: "#ffffff" },
+  Info: { bg: "#175cd3", ink: "#ffffff" },
 };
 const FONT = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
 const MONO = "SFMono-Regular,Consolas,'Liberation Mono',Menlo,monospace";
@@ -467,7 +537,112 @@ function button(label: string, href: string, primary: boolean): string {
   return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;display:inline-table;margin:0 8px 8px 0;"><tr><td bgcolor="${bg}" style="background:${bg};border:1px solid ${border};border-radius:6px;mso-padding-alt:10px 18px;"><a href="${escapeHtml(href)}" style="display:inline-block;padding:10px 18px;font-family:${FONT};font-size:14px;font-weight:600;line-height:20px;color:${C.brandBg};text-decoration:none;">${escapeHtml(label)}</a></td></tr></table>`;
 }
 
+const e = escapeHtml;
+
+function sectionTitle(title: string): string {
+  return `<div style="font-family:${FONT};font-size:12px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:${C.muted};padding-bottom:6px;">${e(title)}</div>`;
+}
+
+/** One attack class as a two-line table row: the numbers, then times and paths
+ *  full width (reads on a 390 px phone and a desktop client alike). */
+function classRowHtml(c: ClassLine): string {
+  const td = `border-top:1px solid ${C.line};font-family:${FONT};font-size:14px;line-height:19px;color:${C.ink};`;
+  const times = c.firstAt === c.lastAt ? `At ${formatWhen(c.firstAt)}` : `First ${formatWhen(c.firstAt)}<br>Last ${formatWhen(c.lastAt)}`;
+  return `<tr><td valign="top" style="${td}padding:9px 8px 2px 0;font-weight:600;">${e(cap1(attackLabel(c.attackClass)))}</td><td valign="top" align="right" style="${td}padding:9px 8px 2px;white-space:nowrap;">${e(c.count.toLocaleString("en-US"))}</td><td valign="top" align="right" style="${td}padding:9px 8px 2px;white-space:nowrap;">${e(sourcesText(c.sources))}</td><td valign="top" style="${td}padding:9px 0 2px 8px;">${e(outcomeText(c.outcomes))}</td></tr>`
+    + `<tr><td colspan="4" style="padding:0 0 9px;font-family:${FONT};font-size:12px;line-height:18px;color:${C.muted};word-break:break-word;">${times.split("<br>").map(e).join("<br>")}<br><span style="font-family:${MONO};font-size:11px;">${e(pathsText(c))}</span></td></tr>`;
+}
+
+function classTableHtml(lines: ClassLine[]): string {
+  const th = `padding:0 8px 6px 0;font-family:${FONT};font-size:12px;font-weight:600;color:${C.muted};`;
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;"><tr><td style="${th}">Attack type</td><td align="right" style="${th}padding-left:8px;">Attempts</td><td align="right" style="${th}padding-left:8px;">Sources</td><td style="${th}padding-left:8px;">Outcome</td></tr>${lines.map(classRowHtml).join("")}</table>`;
+}
+
+function sourcesText(n: number): string {
+  return n > 0 ? n.toLocaleString("en-US") : "not recorded";
+}
+
+export function outcomeText(o: { blocked: number; contained: number; recorded: number }): string {
+  const parts: string[] = [];
+  if (o.blocked) parts.push(`${o.blocked.toLocaleString("en-US")} blocked`);
+  if (o.contained) parts.push(`${o.contained.toLocaleString("en-US")} contained`);
+  if (o.recorded) parts.push(`${o.recorded.toLocaleString("en-US")} not blocked`);
+  return parts.length ? parts.join(", ") : "no outcome recorded";
+}
+
+function pathsText(c: Pick<ClassLine, "paths" | "pathCount">): string {
+  return `${c.pathCount === 1 ? "Path" : "Top paths"}: ${listWithMore(c.paths, c.pathCount)}`;
+}
+
+function classLinesText(lines: ClassLine[]): string[] {
+  const t: string[] = [];
+  for (const c of lines) {
+    t.push(`- ${cap1(attackLabel(c.attackClass))}: ${plural(c.count, "attempt")}, sources ${sourcesText(c.sources)}, ${outcomeText(c.outcomes)}`);
+    t.push(c.firstAt === c.lastAt ? `  At ${formatWhen(c.firstAt)}` : `  First ${formatWhen(c.firstAt)}; last ${formatWhen(c.lastAt)}`);
+    t.push(`  ${pathsText(c)}`);
+  }
+  return t;
+}
+
+interface ShellParts {
+  audience: AlertAudience;
+  subject: string;
+  severity: Severity;
+  headline: string;
+  status: StatusBlock;
+  primary: Link;
+  secondary: Link[];
+  /** Pre-escaped HTML sections between the buttons and the footer. */
+  sectionsHtml: string;
+  footerWhy: string;
+  footerList: string;
+  footerChange: string;
+  footerIds: string;
+}
+
+/** The one enterprise frame every Forcefield email uses (alert and digest). */
+function renderShell(p: ShellParts): string {
+  const tone = TONE[p.status.tone];
+  const sevc = SEV[p.severity];
+  const links = [p.primary, ...p.secondary];
+  return `<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><meta name="supported-color-schemes" content="light"><title>${e(p.subject)}</title></head>
+<body style="margin:0;padding:0;background:#eef1f4;">
+<div style="display:none;max-height:0;overflow:hidden;opacity:0;">${e(`${p.headline}. ${p.status.status}. ${p.status.action}`)}</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;background:#eef1f4;"><tr><td align="center" style="padding:24px 12px;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;max-width:640px;background:#ffffff;border:1px solid ${C.line};border-radius:8px;">
+<tr><td bgcolor="${C.brandBg}" style="background:${C.brandBg};padding:16px 28px;border-radius:8px 8px 0 0;"><span style="font-family:${FONT};font-size:15px;font-weight:800;letter-spacing:0.12em;color:#ffffff;">OGIAM</span><span style="font-family:${FONT};font-size:15px;font-weight:600;color:${C.gold};padding-left:10px;">Forcefield</span><span style="font-family:${FONT};font-size:12px;color:#c9cdd4;padding-left:10px;">${p.severity === "Info" ? "Daily security digest" : p.audience === "operator" ? "Security alert" : "Site protection alert"}</span></td></tr>
+<tr><td style="padding:24px 28px 0;"><span style="display:inline-block;padding:3px 10px;border-radius:999px;background:${sevc.bg};color:${sevc.ink};font-family:${FONT};font-size:12px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;">${p.severity === "Info" ? "Digest" : `${e(p.severity)} severity`}</span>
+<h1 style="margin:12px 0 0;font-family:${FONT};font-size:22px;line-height:29px;font-weight:700;color:${C.ink};">${e(p.headline)}</h1></td></tr>
+<tr><td style="padding:18px 28px 0;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;"><tr><td style="padding:14px 16px;background:${tone.bg};border:1px solid ${tone.border};border-left:4px solid ${tone.border};border-radius:6px;font-family:${FONT};"><div style="font-size:15px;font-weight:700;line-height:21px;color:${tone.ink};">${e(p.status.status)}</div><div style="margin-top:4px;font-size:14px;line-height:20px;color:${tone.ink};">${e(p.status.action)}</div></td></tr></table></td></tr>
+<tr><td style="padding:20px 28px 4px;">${button(p.primary.label, p.primary.href, true)}${p.secondary.map((l) => button(l.label, l.href, false)).join("")}</td></tr>
+${p.sectionsHtml}
+<tr><td style="padding:16px 28px 24px;border-top:1px solid ${C.line};font-family:${FONT};font-size:12px;line-height:18px;color:${C.muted};">${e(p.footerWhy)} ${e(p.footerList)}<br>${e(p.footerChange)}${p.footerIds ? `<br><span style="font-family:${MONO};font-size:11px;">${e(p.footerIds)}</span>` : ""}<br>Links: ${links.map((l) => `<a href="${e(l.href)}" style="color:${C.link};">${e(l.label)}</a>`).join(" · ")}</td></tr>
+</table>
+<div style="font-family:${FONT};font-size:11px;line-height:16px;color:${C.muted};padding-top:12px;">OGIAM Forcefield${p.audience === "operator" ? " · operated from Wolfpack Instinct" : ""}</div>
+</td></tr></table>
+</body></html>`;
+}
+
+function footers(audience: AlertAudience, recipients: string[], siteLabel: string | undefined) {
+  return {
+    footerWhy: audience === "operator"
+      ? "You receive this because you are on the Forcefield security alert list for Wolfpack Instinct."
+      : `You receive this because alerts are turned on for ${displaySite(siteLabel) || "your site"} in Forcefield.`,
+    footerList: recipients.length ? `Sent to: ${recipients.join(", ")}.` : "",
+    footerChange: audience === "operator"
+      ? "To change who receives these, update FORCEFIELD_ALERT_RECIPIENT_EMAIL (comma-separated) in the Wolfpack Instinct Vercel project."
+      : "To change who receives these, contact your OGIAM representative.",
+  };
+}
+
+function footerText(f: { footerWhy: string; footerList: string; footerChange: string }, ids: string): string[] {
+  const t = ["--", `${f.footerWhy} ${f.footerList}`.trim(), f.footerChange];
+  if (ids) t.push(ids);
+  return t;
+}
+
 export function renderForcefieldAlertEmail(alert: ForcefieldAlert, opts: RenderOptions): RenderedAlertEmail {
+  if (alert.kind === "alert_digest" && alert.digest) return renderDigest(alert, alert.digest, opts);
   const audience = opts.audience;
   const subject = alertSubject(alert);
   const headline = alertHeadline(alert);
@@ -479,42 +654,21 @@ export function renderForcefieldAlertEmail(alert: ForcefieldAlert, opts: RenderO
   const { primary, secondary } = linksFor(alert, opts);
   const links = [primary, ...secondary];
   const recipients = opts.recipients.filter(Boolean);
-
-  const footerWhy = audience === "operator"
-    ? "You receive this because you are on the Forcefield security alert list for Wolfpack Instinct."
-    : `You receive this because alerts are turned on for ${alert.site ?? "your site"} in Forcefield.`;
-  const footerList = recipients.length ? `Sent to: ${recipients.join(", ")}.` : "";
-  const footerChange = audience === "operator"
-    ? "To change who receives these, update FORCEFIELD_ALERT_RECIPIENT_EMAIL (comma-separated) in the Wolfpack Instinct Vercel project."
-    : "To change who receives these, contact your OGIAM representative.";
+  const f = footers(audience, recipients, alert.site);
   const footerIds = audience === "operator" ? `Alert id: ${opts.alertId ?? "n/a"} · Dedupe key: ${alert.dedupeKey}` : "";
+  // The class table appears when the burst spans more than one attack class; a
+  // single class is already named by the subject and headline.
+  const classes = alert.kind === "hostile_incident" && (alert.classes?.length ?? 0) > 1 ? alert.classes ?? [] : [];
 
   /* ---------- HTML ---------- */
-  const e = escapeHtml;
   const rowHtml = rows.map((r) => `<tr><td valign="top" style="padding:9px 12px 9px 0;border-top:1px solid ${C.line};font-family:${FONT};font-size:13px;line-height:19px;color:${C.muted};width:132px;white-space:nowrap;">${e(r.label)}</td><td valign="top" style="padding:9px 0;border-top:1px solid ${C.line};font-family:${r.mono ? MONO : FONT};font-size:${r.mono ? 12 : 14}px;line-height:19px;color:${C.ink};word-break:break-word;">${e(r.value)}</td></tr>`).join("");
-  const tone = TONE[st.tone];
-  const sevc = SEV[sev];
   const explainHtml = sig ? `<p style="margin:16px 0 0;font-family:${FONT};font-size:13px;line-height:20px;color:${C.muted};"><strong style="color:${C.ink};">What this alert means.</strong> ${e(sig.explain)}</p>` : "";
   const decisionHtml = decision ? `<tr><td style="padding:0 28px 8px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;"><tr><td style="padding:14px 16px;background:${C.soft};border:1px solid ${C.line};border-radius:6px;font-family:${FONT};"><div style="font-size:13px;font-weight:700;line-height:19px;color:${C.ink};">${e(decision.title)}</div><div style="margin-top:4px;font-size:13px;line-height:20px;color:${C.muted};">${e(decision.text)}</div></td></tr></table></td></tr>` : "";
-
-  const html = `<!DOCTYPE html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><meta name="supported-color-schemes" content="light"><title>${e(subject)}</title></head>
-<body style="margin:0;padding:0;background:#eef1f4;">
-<div style="display:none;max-height:0;overflow:hidden;opacity:0;">${e(`${headline}. ${st.status}. ${st.action}`)}</div>
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;background:#eef1f4;"><tr><td align="center" style="padding:24px 12px;">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;max-width:640px;background:#ffffff;border:1px solid ${C.line};border-radius:8px;">
-<tr><td bgcolor="${C.brandBg}" style="background:${C.brandBg};padding:16px 28px;border-radius:8px 8px 0 0;"><span style="font-family:${FONT};font-size:15px;font-weight:800;letter-spacing:0.12em;color:#ffffff;">OGIAM</span><span style="font-family:${FONT};font-size:15px;font-weight:600;color:${C.gold};padding-left:10px;">Forcefield</span><span style="font-family:${FONT};font-size:12px;color:#c9cdd4;padding-left:10px;">${audience === "operator" ? "Security alert" : "Site protection alert"}</span></td></tr>
-<tr><td style="padding:24px 28px 0;"><span style="display:inline-block;padding:3px 10px;border-radius:999px;background:${sevc.bg};color:${sevc.ink};font-family:${FONT};font-size:12px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;">${e(sev)} severity</span>
-<h1 style="margin:12px 0 0;font-family:${FONT};font-size:22px;line-height:29px;font-weight:700;color:${C.ink};">${e(headline)}</h1></td></tr>
-<tr><td style="padding:18px 28px 0;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;"><tr><td style="padding:14px 16px;background:${tone.bg};border:1px solid ${tone.border};border-left:4px solid ${tone.border};border-radius:6px;font-family:${FONT};"><div style="font-size:15px;font-weight:700;line-height:21px;color:${tone.ink};">${e(st.status)}</div><div style="margin-top:4px;font-size:14px;line-height:20px;color:${tone.ink};">${e(st.action)}</div></td></tr></table></td></tr>
-<tr><td style="padding:20px 28px 4px;">${button(primary.label, primary.href, true)}${secondary.map((l) => button(l.label, l.href, false)).join("")}</td></tr>
-<tr><td style="padding:8px 28px 8px;"><div style="font-family:${FONT};font-size:12px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:${C.muted};padding-bottom:6px;">Details</div><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">${rowHtml}</table>${explainHtml}</td></tr>
-${decisionHtml}
-<tr><td style="padding:16px 28px 24px;border-top:1px solid ${C.line};font-family:${FONT};font-size:12px;line-height:18px;color:${C.muted};">${e(footerWhy)} ${e(footerList)}<br>${e(footerChange)}${footerIds ? `<br><span style="font-family:${MONO};font-size:11px;">${e(footerIds)}</span>` : ""}<br>Links: ${links.map((l) => `<a href="${e(l.href)}" style="color:${C.link};">${e(l.label)}</a>`).join(" · ")}</td></tr>
-</table>
-<div style="font-family:${FONT};font-size:11px;line-height:16px;color:${C.muted};padding-top:12px;">OGIAM Forcefield${audience === "operator" ? " · operated from Wolfpack Instinct" : ""}</div>
-</td></tr></table>
-</body></html>`;
+  const classesHtml = classes.length > 0 ? `<tr><td style="padding:8px 28px 8px;">${sectionTitle(classes.length === 1 ? "Attack type in this incident" : `${classes.length} attack types in this incident`)}${classTableHtml(classes)}</td></tr>` : "";
+  const sectionsHtml = `${classesHtml}
+<tr><td style="padding:8px 28px 8px;">${sectionTitle("Details")}<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">${rowHtml}</table>${explainHtml}</td></tr>
+${decisionHtml}`;
+  const html = renderShell({ audience, subject, severity: sev, headline, status: st, primary, secondary, sectionsHtml, ...f, footerIds });
 
   /* ---------- plain text (same facts, same links) ---------- */
   const t: string[] = [];
@@ -525,6 +679,11 @@ ${decisionHtml}
   t.push(st.action);
   t.push("");
   t.push(`${primary.label}: ${primary.href}`);
+  if (classes.length > 0) {
+    t.push("");
+    t.push(classes.length === 1 ? "ATTACK TYPE IN THIS INCIDENT" : `${classes.length} ATTACK TYPES IN THIS INCIDENT`);
+    t.push(...classLinesText(classes));
+  }
   t.push("");
   t.push("DETAILS");
   for (const r of rows) t.push(`${r.label}: ${r.value}`);
@@ -534,10 +693,7 @@ ${decisionHtml}
   t.push("LINKS");
   for (const l of links) t.push(`${l.label}: ${l.href}`);
   t.push("");
-  t.push("--");
-  t.push(`${footerWhy} ${footerList}`.trim());
-  t.push(footerChange);
-  if (footerIds) t.push(footerIds);
+  t.push(...footerText(f, footerIds));
 
   return { subject, html, text: t.join("\n"), links };
 }
@@ -546,4 +702,92 @@ ${decisionHtml}
 export function alertSummary(alert: ForcefieldAlert): string {
   const st = statusBlock(alert, "operator");
   return `${alertHeadline(alert)}. ${st.status}. ${st.action}`;
+}
+
+/* --------------------------------- digest ---------------------------------- */
+
+function etDay(etDate: string): string {
+  const [y, m, d] = etDate.split("-").map(Number);
+  return new Intl.DateTimeFormat("en-US", { timeZone: "UTC", month: "short", day: "numeric", year: "numeric" }).format(new Date(Date.UTC(y, m - 1, d, 12)));
+}
+
+export function digestSubject(d: DigestData): string {
+  const t = d.totals;
+  return `[Forcefield] Daily digest ${etDay(d.etDate)}: ${plural(t.incidents, "blocked incident")} on ${plural(t.sites, "site")} (${plural(t.attempts, "attempt")})`;
+}
+
+function digestHeadline(d: DigestData): string {
+  const t = d.totals;
+  return `${plural(t.attempts, "attack attempt")} in ${plural(t.incidents, "incident")} on ${plural(t.sites, "site")}, all stopped at the edge`;
+}
+
+function digestStatus(d: DigestData): StatusBlock {
+  const o = d.sites.reduce((a, s) => ({ blocked: a.blocked + s.outcomes.blocked, contained: a.contained + s.outcomes.contained, recorded: a.recorded + s.outcomes.recorded }), { blocked: 0, contained: 0, recorded: 0 });
+  const status = o.contained > 0 ? `Stopped: ${outcomeText(o)}` : `Blocked at the edge (${plural(o.blocked, "request")})`;
+  const immediate = d.immediateIncidents > 0
+    ? ` ${plural(d.immediateIncidents, "other incident")} in this period needed attention and ${d.immediateIncidents === 1 ? "was" : "were"} emailed when ${d.immediateIncidents === 1 ? "it" : "they"} happened.`
+    : "";
+  return { tone: "good", status, action: `No action needed. Every request below was stopped before it reached the site.${immediate}` };
+}
+
+function periodText(d: DigestData): string {
+  return `${formatWhen(d.periodStart)} to ${formatWhen(d.periodEnd)}`;
+}
+
+function renderDigest(alert: ForcefieldAlert, d: DigestData, opts: RenderOptions): RenderedAlertEmail {
+  // Operator only: the digest names internal board links for every site.
+  const audience: AlertAudience = "operator";
+  const base = opts.baseUrl.replace(/\/$/, "");
+  const subject = digestSubject(d);
+  const headline = digestHeadline(d);
+  const st = digestStatus(d);
+  const { primary, secondary } = linksFor(alert, { ...opts, audience });
+  const siteLinks: Link[] = d.sites.map((s) => ({ label: `Open ${displaySite(s.site)} on the board`, href: `${base}${boardHref({ tab: "forcefield", view: "operator", days: 7, site: s.site })}` }));
+  const recipients = opts.recipients.filter(Boolean);
+  const f = footers(audience, recipients, undefined);
+  const footerIds = `Digest id: ${opts.alertId ?? "n/a"} · Dedupe key: ${alert.dedupeKey}`;
+  const t = d.totals;
+
+  const totalsRows: Row[] = [
+    { label: "Period", value: periodText(d) },
+    { label: "Sites", value: d.sites.map((s) => displaySite(s.site)).join(", ") },
+    { label: "Incidents", value: t.incidents.toLocaleString("en-US") },
+    { label: "Attempts", value: t.attempts.toLocaleString("en-US") },
+    { label: "Sources", value: t.sources > 0 ? `${t.sources.toLocaleString("en-US")} distinct fingerprints` : "Fingerprint not recorded" },
+    { label: "Sent immediately", value: d.immediateIncidents > 0 ? `${plural(d.immediateIncidents, "incident")} (decoy trips or requests not blocked), emailed when they happened` : "None in this period" },
+  ];
+  const rowHtml = (rows: Row[]) => rows.map((r) => `<tr><td valign="top" style="padding:9px 12px 9px 0;border-top:1px solid ${C.line};font-family:${FONT};font-size:13px;line-height:19px;color:${C.muted};width:132px;white-space:nowrap;">${e(r.label)}</td><td valign="top" style="padding:9px 0;border-top:1px solid ${C.line};font-family:${FONT};font-size:14px;line-height:19px;color:${C.ink};word-break:break-word;">${e(r.value)}</td></tr>`).join("");
+  const siteSummary = (s: DigestData["sites"][number]) =>
+    `${plural(s.incidents, "incident")} · ${plural(s.attempts, "attempt")} · ${s.sources > 0 ? plural(s.sources, "source") : "sources not recorded"} · ${outcomeText(s.outcomes)}`;
+  const siteHtml = d.sites.map((s, n) => `<tr><td style="padding:16px 28px 8px;">${sectionTitle(displaySite(s.site))}<div style="font-family:${FONT};font-size:13px;line-height:19px;color:${C.muted};padding-bottom:10px;">${e(siteSummary(s))}</div>${classTableHtml(s.rows)}<div style="padding-top:6px;font-family:${FONT};font-size:13px;line-height:19px;"><a href="${e(siteLinks[n].href)}" style="color:${C.link};">${e(siteLinks[n].label)}</a></div></td></tr>`).join("\n");
+  const sectionsHtml = `<tr><td style="padding:8px 28px 8px;">${sectionTitle("Summary")}<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">${rowHtml(totalsRows)}</table></td></tr>
+${siteHtml}
+<tr><td style="padding:8px 28px 16px;"><p style="margin:0;font-family:${FONT};font-size:13px;line-height:20px;color:${C.muted};"><strong style="color:${C.ink};">What this digest is.</strong> Payload attacks that were blocked or contained at the edge do not page anyone. They are collected here once a day, one row per attack type per site. Decoy and honeytoken trips, and any request that was recorded but not stopped, are still emailed as they happen. Times are exact; sources are distinct client fingerprints.</p></td></tr>`;
+  const allLinks = [primary, ...siteLinks, ...secondary];
+  const html = renderShell({ audience, subject, severity: "Info", headline, status: st, primary, secondary, sectionsHtml, ...f, footerIds });
+
+  const txt: string[] = [];
+  txt.push("DAILY DIGEST");
+  txt.push(headline);
+  txt.push("");
+  txt.push(st.status);
+  txt.push(st.action);
+  txt.push("");
+  txt.push(`${primary.label}: ${primary.href}`);
+  txt.push("");
+  txt.push("SUMMARY");
+  for (const r of totalsRows) txt.push(`${r.label}: ${r.value}`);
+  for (const [n, s] of d.sites.entries()) {
+    txt.push("");
+    txt.push(displaySite(s.site).toUpperCase());
+    txt.push(siteSummary(s));
+    txt.push(...classLinesText(s.rows));
+    txt.push(`${siteLinks[n].label}: ${siteLinks[n].href}`);
+  }
+  txt.push("");
+  txt.push("LINKS");
+  for (const l of allLinks) txt.push(`${l.label}: ${l.href}`);
+  txt.push("");
+  txt.push(...footerText(f, footerIds));
+  return { subject, html, text: txt.join("\n"), links: allLinks };
 }

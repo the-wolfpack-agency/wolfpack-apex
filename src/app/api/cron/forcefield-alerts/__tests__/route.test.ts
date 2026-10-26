@@ -1,15 +1,18 @@
 /**
  * Contract for the forcefield-alerts cron: CRON_SECRET gate (401), job
- * validation (400), the 200 report shape (scan + delivery outcome + silence
- * check), and the never-throw 200 with ok:false on a scan failure. There is no
+ * validation (400), the 200 report shape (scan routing + delivery outcome +
+ * daily digest + silence check), and the never-throw 200 with ok:false on a
+ * scan failure (the digest still runs). There is no
  * role on a cron bearer, so there is no 403 path.
  */
 const mockScan = jest.fn();
 const mockSilence = jest.fn();
+const mockDigest = jest.fn();
 const mockIsSilenceHour = jest.fn();
 jest.mock("@/lib/forcefield-web/alerts", () => ({
   scanForcefieldWebAlerts: (...a: unknown[]) => mockScan(...a),
   runAlertSilenceCheck: (...a: unknown[]) => mockSilence(...a),
+  runDailyDigest: (...a: unknown[]) => mockDigest(...a),
   isSilenceCheckHour: (...a: unknown[]) => mockIsSilenceHour(...a),
   liveForcefieldAlertDeps: () => ({}),
 }));
@@ -22,8 +25,9 @@ const auth = { headers: { authorization: "Bearer s3cret" } };
 
 beforeEach(() => {
   process.env.CRON_SECRET = "s3cret";
-  mockScan.mockReset().mockResolvedValue({ detected: 2, dispatched: 1, delivered: 1, failed: 0 });
-  mockSilence.mockReset().mockResolvedValue({ hostileEvents: 5, deliveredAlerts: 0, silent: true, alert: { status: "delivered" } });
+  mockScan.mockReset().mockResolvedValue({ detected: 2, immediate: 1, digestOnly: 1, dispatched: 1, delivered: 1, failed: 0 });
+  mockSilence.mockReset().mockResolvedValue({ hostileEvents: 5, deliveredAlerts: 0, silent: true, reasons: ["immediate"], alert: { status: "delivered" } });
+  mockDigest.mockReset().mockResolvedValue({ due: true, claimed: true, outcome: "sent", incidents: 3, attempts: 41, etDate: "2026-10-27" });
   mockIsSilenceHour.mockReset().mockReturnValue(false);
 });
 afterEach(() => { process.env = { ...ENV }; });
@@ -45,7 +49,8 @@ it("200 with the scan's delivery outcome; no silence check outside its hour", as
   const res = await GET(new Request(URL_BASE, auth));
   expect(res.status).toBe(200);
   const body = await res.json();
-  expect(body).toMatchObject({ ok: true, detected: 2, dispatched: 1, delivered: 1, failed: 0, silence: { checked: false } });
+  expect(body).toMatchObject({ ok: true, detected: 2, immediate: 1, digestOnly: 1, dispatched: 1, delivered: 1, failed: 0, silence: { checked: false } });
+  expect(body.digest).toEqual({ due: true, claimed: true, outcome: "sent", incidents: 3, attempts: 41, etDate: "2026-10-27" });
   expect(mockSilence).not.toHaveBeenCalled();
 });
 
@@ -53,14 +58,23 @@ it("runs the daily silence check during its hour, alongside the scan", async () 
   mockIsSilenceHour.mockReturnValue(true);
   const body = await (await GET(new Request(URL_BASE, auth))).json();
   expect(mockScan).toHaveBeenCalledTimes(1);
-  expect(body.silence).toEqual({ checked: true, silent: true, hostileEvents: 5, deliveredAlerts: 0, alert: "delivered" });
+  expect(body.silence).toEqual({ checked: true, silent: true, reasons: ["immediate"], hostileEvents: 5, deliveredAlerts: 0, alert: "delivered" });
 });
 
 it("?job=silence runs only the silence check", async () => {
   const body = await (await GET(new Request(`${URL_BASE}?job=silence`, auth))).json();
   expect(mockScan).not.toHaveBeenCalled();
   expect(mockSilence).toHaveBeenCalledTimes(1);
+  expect(mockDigest).not.toHaveBeenCalled();
   expect(body.silence.checked).toBe(true);
+});
+
+it("?job=digest runs only the digest step", async () => {
+  const body = await (await GET(new Request(`${URL_BASE}?job=digest`, auth))).json();
+  expect(mockScan).not.toHaveBeenCalled();
+  expect(mockSilence).not.toHaveBeenCalled();
+  expect(mockDigest).toHaveBeenCalledTimes(1);
+  expect(body).toMatchObject({ ok: true, digest: { outcome: "sent", incidents: 3 } });
 });
 
 it("a scan failure still returns 200 (schedule keeps running) but says ok:false", async () => {
@@ -70,4 +84,7 @@ it("a scan failure still returns 200 (schedule keeps running) but says ok:false"
   const body = await res.json();
   expect(body.ok).toBe(false);
   expect(body.error).toBe("scan_failed");
+  // The digest is a separate path and still ran.
+  expect(mockDigest).toHaveBeenCalledTimes(1);
+  expect(body.digest.outcome).toBe("sent");
 });

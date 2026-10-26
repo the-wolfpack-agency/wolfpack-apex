@@ -3473,6 +3473,11 @@ export type InstinctEventType =
   // the daily silence check found hostile events in the last 24h but no alert
   // that reached a person. Raised as an alert itself.
   | "forcefield.alert_silence_detected"
+  // forcefield.alert_digest_built { et_date, period_start, period_end, incidents,
+  // attempts, sites, immediate_incidents, outcome } - the once-a-day digest of
+  // blocked incidents was built (outcome sent | empty | failed). Its delivery
+  // outcome is forcefield.web_alert_dispatched (kind alert_digest).
+  | "forcefield.alert_digest_built"
   // forcefield.autoblock_capped { operatorKey, reason, resolved, proven, cap } - an
   // automatic operator block resolved to more fingerprints than the cap, so only
   // the fingerprints that carried proof were blocked and the rest were left for

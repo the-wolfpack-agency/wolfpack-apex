@@ -12,9 +12,12 @@ import {
   responseKind,
   formatUtc,
   formatEastern,
+  displaySite,
+  digestSubject,
   type IncidentDetail,
 } from "../alert-email";
-import { alertFromSignal, type ForcefieldAlert, type HostileSignal } from "../alerts";
+import { alertFromSignal, alertFromIncident, digestKey, type ForcefieldAlert, type HostileSignal } from "../alerts";
+import { buildIncidents, buildDigest, type HostileEventGroup } from "../incidents";
 
 const BASE = "https://instinct.example.test";
 
@@ -258,5 +261,136 @@ describe("tenant version (template only; not sent in the build phase)", () => {
   it("recommends turning on blocking in client words", () => {
     const e = tenant(alertFromSignal(signal({}, { outcomes: { blocked: 0, contained: 0, recorded: 1 } })));
     expect(e.text).toContain("Recommended: turn on blocking for your site");
+  });
+});
+
+/* ------------------- grouped incidents and the daily digest ------------------ */
+
+
+function grp(over: Partial<HostileEventGroup> = {}): HostileEventGroup {
+  const firstAt = over.firstAt ?? "2026-10-26T14:02:44.388Z";
+  return {
+    kind: "payload_attack", site: "instinct", attackClass: "open_redirect", windowStart: "2026-10-26T12:00:00.000Z",
+    fp: "fp-a:browser", sig: "s1", path: "/bitrix/redirect.php", country: "US", hosting: "residential", clientType: "browser",
+    agent: "unidentified", network: "", outcome: "blocked", posture: "enforce", reasonKind: "payload", count: 1, firstAt, lastAt: firstAt, ...over,
+  };
+}
+
+function digestAlert(groups: HostileEventGroup[]): ForcefieldAlert {
+  const digest = buildDigest(buildIncidents(groups), { etDate: "2026-10-27", start: new Date("2026-10-26T12:00:00Z"), end: new Date("2026-10-27T12:00:00Z") });
+  return { kind: "alert_digest", dedupeKey: digestKey("2026-10-27"), title: "", body: "", windowStart: digest.periodEnd, digest };
+}
+
+describe("hostname, never the internal label", () => {
+  it("displaySite maps instinct to its host and keeps hostnames", () => {
+    expect(displaySite("instinct")).toBe("wolfpack-instinct.vercel.app");
+    expect(displaySite("ogiam.com")).toBe("ogiam.com");
+    expect(displaySite(undefined)).toBe("");
+  });
+  it("the subject, headline and Site row of an instinct alert show the host", () => {
+    const e = op(alertFromSignal(signal({ kind: "payload_attack", site: "instinct", attackClass: "xss" }, { reasonKinds: ["payload"], outcomes: { blocked: 1, contained: 0, recorded: 0 } })));
+    expect(e.subject).toBe("[Forcefield] wolfpack-instinct.vercel.app: Cross-site scripting blocked (1 attempt)");
+    expect(e.text).toContain("Site: wolfpack-instinct.vercel.app");
+    expect(e.text).not.toMatch(/\binstinct:/);
+  });
+});
+
+describe("grouped incident email (hostile_incident)", () => {
+  const mixed = () => buildIncidents([
+    grp({ attackClass: "open_redirect", count: 14 }),
+    grp({ attackClass: "sql_injection", sig: "s2", count: 4, path: "/wp-admin/admin-ajax.php" }),
+    grp({ attackClass: "xss", sig: "s3", outcome: "recorded", posture: "monitor", path: "/<b>x</b>", firstAt: "2026-10-26T14:02:46.000Z" }),
+  ])[0];
+
+  it("one email lists every class with its count, outcome, times and paths", () => {
+    const e = op(alertFromIncident(mixed()));
+    expect(e.subject).toBe("[Forcefield] wolfpack-instinct.vercel.app: 3 attack types partly stopped (19 attempts)");
+    expect(e.text).toContain("19 attack attempts across 3 attack types on wolfpack-instinct.vercel.app: some were blocked, some only recorded");
+    expect(e.text).toContain("3 ATTACK TYPES IN THIS INCIDENT");
+    expect(e.text).toContain("- Open redirect: 14 attempts, sources 1, 14 blocked");
+    expect(e.text).toContain("- SQL injection: 4 attempts, sources 1, 4 blocked");
+    expect(e.text).toContain("- Cross-site scripting: 1 attempt, sources 1, 1 not blocked");
+    expect(e.text).toContain("Partly stopped: 18 blocked, 0 sent into the decoy maze, 1 recorded only");
+    expect(e.html).toContain("3 attack types in this incident");
+    expect(e.html).not.toContain("<b>x</b>");
+    expect(e.html).toContain("&lt;b&gt;x&lt;/b&gt;");
+  });
+
+  it("links land on the site's board, absolute", () => {
+    const e = op(alertFromIncident(mixed()));
+    expect(e.links[0].href).toBe(`${BASE}/admin/site-analytics?tab=forcefield&view=operator&days=7&site=instinct`);
+    for (const l of e.links) expect(l.href.startsWith(BASE)).toBe(true);
+    expect(e.html).not.toMatch(/href="\//);
+  });
+
+  it("a burst with a decoy trip reads as the trap trip, plus the other classes", () => {
+    const [inc] = buildIncidents([
+      grp({ kind: "honeytoken_trip", attackClass: "honeytoken_trip", outcome: "contained", reasonKind: "decoy", site: "ogiam.com" }),
+      grp({ site: "ogiam.com", attackClass: "path_traversal" }),
+    ]);
+    expect(op(alertFromIncident(inc)).subject).toBe("[Forcefield] ogiam.com: hostile agent contained (decoy, plus 1 attack type)");
+  });
+
+  it("no em dashes", () => {
+    const e = op(alertFromIncident(mixed()));
+    expect(e.html + e.text + e.subject).not.toContain(String.fromCharCode(0x2014));
+  });
+});
+
+describe("daily digest email", () => {
+  const groups = () => [
+    grp({ attackClass: "open_redirect", count: 14, lastAt: "2026-10-26T14:02:46.000Z" }),
+    grp({ attackClass: "path_traversal", fp: "fp-c:unknown", sig: "s9", count: 6, path: "/vpn/user/download/client" }),
+    grp({ site: "ogiam.com", attackClass: "sql_injection", fp: "fp-z", sig: "z", windowStart: "2026-10-27T06:00:00.000Z", firstAt: "2026-10-27T07:00:00.000Z", path: "/?q=<script>" }),
+  ];
+
+  it("subject and headline carry exact totals; the status says no action needed", () => {
+    const a = digestAlert(groups());
+    const e = op(a);
+    expect(e.subject).toBe("[Forcefield] Daily digest Oct 27, 2026: 2 blocked incidents on 2 sites (21 attempts)");
+    expect(digestSubject(a.digest!)).toBe(e.subject);
+    expect(e.text).toContain("21 attack attempts in 2 incidents on 2 sites, all stopped at the edge");
+    expect(e.text).toContain("Blocked at the edge (21 requests)");
+    expect(e.text).toContain("No action needed.");
+    expect(e.text).toContain("Period: 2026-10-26 12:00:00 UTC (Oct 26, 2026, 8:00:00 AM EDT) to 2026-10-27 12:00:00 UTC (Oct 27, 2026, 8:00:00 AM EDT)");
+  });
+
+  it("one table per site (hostname), one row per attack type with attempts, sources, first/last, top paths, outcome", () => {
+    const e = op(digestAlert(groups()));
+    expect(e.text).toContain("WOLFPACK-INSTINCT.VERCEL.APP");
+    expect(e.text).toContain("1 incident · 20 attempts · 2 sources · 20 blocked");
+    expect(e.text).toContain("- Open redirect: 14 attempts, sources 1, 14 blocked");
+    expect(e.text).toContain("  First 2026-10-26 14:02:44 UTC (Oct 26, 2026, 10:02:44 AM EDT); last 2026-10-26 14:02:46 UTC (Oct 26, 2026, 10:02:46 AM EDT)");
+    expect(e.text).toContain("  Path: /vpn/user/download/client");
+    expect(e.text).toContain("OGIAM.COM");
+    expect(e.html).toContain("Attack type</td>");
+    expect(e.html).toContain("Sources</td>");
+  });
+
+  it("per-site links are absolute and filtered to the site", () => {
+    const e = op(digestAlert(groups()));
+    const hrefs = e.links.map((l) => l.href);
+    expect(hrefs).toContain(`${BASE}/admin/site-analytics?tab=forcefield&view=operator&days=7&site=instinct`);
+    expect(hrefs).toContain(`${BASE}/admin/site-analytics?tab=forcefield&view=operator&days=7&site=ogiam.com`);
+    for (const h of hrefs) {
+      expect(h.startsWith(BASE)).toBe(true);
+      expect(e.text).toContain(h);
+      expect(e.html).toContain(h.replace(/&/g, "&amp;"));
+    }
+    expect(e.html).not.toMatch(/href="\//);
+  });
+
+  it("escapes every field and has no em dashes", () => {
+    const e = op(digestAlert(groups()));
+    expect(e.html).not.toContain("<script>");
+    expect(e.html).toContain("/?q=&lt;script&gt;");
+    expect(e.html + e.text + e.subject).not.toContain(String.fromCharCode(0x2014));
+  });
+
+  it("counts incidents emailed immediately without repeating them", () => {
+    const a = digestAlert([...groups(), grp({ kind: "honeytoken_trip", attackClass: "honeytoken_trip", outcome: "contained", fp: "t", sig: "t", firstAt: "2026-10-26T20:00:00.000Z", windowStart: "2026-10-26T18:00:00.000Z" })]);
+    const e = op(a);
+    expect(a.digest!.totals.incidents).toBe(2);
+    expect(e.text).toContain("Sent immediately: 1 incident (decoy trips or requests not blocked), emailed when they happened");
   });
 });
