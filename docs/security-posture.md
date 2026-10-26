@@ -2,7 +2,7 @@
 
 ## Executive Summary
 
-Wolfpack Instinct is designed to be crypto-agile and post-quantum migration-ready. Data in transit is protected by hybrid TLS (classical ECDH + ML-KEM-768 where the client supports it). Integration credentials, multi-factor seeds, and Microsoft Graph and QuickBooks OAuth tokens are encrypted by the application with AES-256-GCM under a dedicated encryption key before they are written. Team invite tokens are stored as one-way hashes for new invites; invites issued earlier are converted by a one-time backfill that has not yet run. The remaining application data is protected by the managed database's own volume encryption rather than by per-column encryption, and the difference is set out in the table below. Session tokens are short-lived by design, so the harvest-now-decrypt-later window for authentication material is minutes, not years.
+Wolfpack Instinct is designed to be crypto-agile and post-quantum migration-ready. Data in transit is protected by hybrid TLS (classical ECDH + ML-KEM-768 where the client supports it). Integration credentials, multi-factor seeds, and Microsoft Graph and QuickBooks OAuth tokens are encrypted by the application with AES-256-GCM under a dedicated encryption key before they are written. Team invite tokens are stored only as one-way hashes; invites issued before hashing was introduced were converted on 2026-10-26. The remaining application data is protected by the managed database's own volume encryption rather than by per-column encryption, and the difference is set out in the table below. Session tokens are short-lived by design, so the harvest-now-decrypt-later window for authentication material is minutes, not years.
 
 This page states what is true today. Each control below names the evidence that proves it, and an automated parity check compares this page with that evidence: a control may only be listed as "In place" while its evidence check passes. Work that has started but is not finished is listed as "In progress", never as done.
 
@@ -29,7 +29,7 @@ This page states what is true today. Each control below names the evidence that 
 | TLS in transit | TLS 1.3 + X25519MLKEM768 (hybrid KEX) | Yes (hybrid) | Classical fallback to X25519 when the client does not support the PQ extension |
 | Integration credentials, MFA seeds | AES-256-GCM, encrypted by the application under a dedicated key | Yes | Grover's algorithm halves effective key size to 128 bits, still beyond brute-force reach. The key can be rotated while stored values stay readable |
 | Microsoft Graph and QuickBooks OAuth tokens | AES-256-GCM, encrypted by the application under the same dedicated key | Yes | A database connection alone does not reveal these tokens; the encryption key is held outside the database |
-| Team invite tokens | SHA-256 one-way hash | Yes | New invites are stored only as a hash. Invites issued before hashing was introduced on 2026-10-26 are converted to hashes by a one-time backfill, which has not yet run |
+| Team invite tokens | SHA-256 one-way hash | Yes | Stored only as a hash and compared on use, never read back. Invites issued before hashing was introduced were converted on 2026-10-26 |
 | Other application data at rest (messages, documents, records, compliance evidence) | AES-256 at the storage volume, managed by the database provider | Yes | Protects against loss of the physical media. It is NOT per-column encryption: anything able to query the database reads plaintext, so access control and the audit log are the controls that matter here, not cryptography |
 | Session tokens | JWT (HS256), 15-minute TTL | Partial | HS256 uses a symmetric key; HMAC-SHA256 is quantum-resistant. Short TTL limits harvest risk |
 | Refresh tokens | Opaque random (256-bit), single-use rotation | Yes | Rotation + revocation means a stolen token has a narrow replay window |
@@ -38,7 +38,6 @@ This page states what is true today. Each control below names the evidence that 
 
 ## Known Weaknesses
 
-- **Older team invite tokens not yet hashed.** Invites issued before hashing was introduced on 2026-10-26 are still stored as issued until a one-time conversion runs. New invites are stored only as a hash.
 - **No database-level tenant isolation.** Tenant isolation is enforced in the application by a workspace predicate on every query and a build-failing guardrail. Row-level security in the database does not enforce it.
 - **MFA is not enforced.** Administrators can enroll a second factor, but sign-in does not require it yet.
 - **ECDSA / RSA signatures.** Shor's algorithm on a Cryptographically Relevant Quantum Computer (CRQC) can break P-256 and RSA-2048 in polynomial time. No CRQC exists today; current estimates put CRQC capability at 2030 to 2035 at the earliest.
@@ -68,7 +67,6 @@ Short-lived session tokens mean the worst-case exposure window for authenticatio
 This document is maintained by the Wolfpack engineering team and updated at least quarterly. It is publicly accessible at `/security-posture`. The Control status table is checked against measured evidence by an automated parity check; a control is moved to "In place" only in the same change that makes its evidence check pass.
 
 **Follow-up actions (not yet complete):**
-- Convert team invite tokens issued before hashing was introduced to one-way hashes.
 - Enforce MFA at sign-in for administrators.
 - Configure the CI hybrid-TLS handshake check so the TLS claim is asserted continuously.
 - Make CodeQL a required check on the main branch.
