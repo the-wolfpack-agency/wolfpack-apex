@@ -68,8 +68,8 @@ export const POSTURE_CLAIMS: readonly PostureClaim[] = [
   {
     key: "secrets.oauth_tokens_encrypted",
     control: "Microsoft Graph and QuickBooks OAuth tokens encrypted by the application at rest",
-    docStatus: "in_progress",
-    proof: "count of stored OAuth access/refresh tokens that are not v1.* ciphertext is 0",
+    docStatus: "in_place",
+    proof: "count of stored Microsoft Graph and QuickBooks access/refresh tokens that are not v1.* ciphertext is 0 (the write paths seal and refuse to store an unsealed token)",
     evaluate: (f) => {
       const t = f.platform?.oauthTokens;
       if (!t) return "unknown";
@@ -79,12 +79,15 @@ export const POSTURE_CLAIMS: readonly PostureClaim[] = [
   {
     key: "secrets.app_encrypted",
     control: "Integration credentials and MFA seeds encrypted by the application at rest under a dedicated key",
-    docStatus: "in_progress",
-    proof: "no stored connector credential is outside v1.* ciphertext AND the at-rest key is a dedicated INSTINCT_SECRET_KEY (not derived from another secret)",
+    docStatus: "in_place",
+    proof: "the running app holds a dedicated INSTINCT_SECRET_KEY (not derived from another secret) AND no stored connector credential or MFA seed is plaintext or sealed under any key other than that primary key (legacy-key and previous-key values count as a gap)",
     evaluate: (f) => {
-      const c = f.platform?.connectorCredentials;
-      if (!c || !f.platform) return "unknown";
-      return c.plaintext === 0 && f.platform.kekSource === "dedicated" ? "proven" : "gap";
+      const p = f.platform;
+      const c = p?.connectorCredentials;
+      const m = p?.mfaSeeds;
+      if (!p || !c || !m) return "unknown";
+      const sealedUnderPrimary = (x: { plaintext: number; offPrimaryKey: number }) => x.plaintext === 0 && x.offPrimaryKey === 0;
+      return p.kekSource === "dedicated" && sealedUnderPrimary(c) && sealedUnderPrimary(m) ? "proven" : "gap";
     },
   },
   {
