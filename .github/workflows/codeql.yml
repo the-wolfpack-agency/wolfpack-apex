@@ -1,10 +1,12 @@
 name: CodeQL
 
 on:
-  push:
-    branches: [main]
+  # No push-to-main run (2026-10-26, CI cost): the PR run covers the change and
+  # the weekly scheduled run catches anything two merged PRs break together.
   pull_request:
     branches: [main]
+    # documentation-only changes have no code to analyze
+    paths-ignore: ['**/*.md', 'docs/**', 'demo/**']
     types: [opened, synchronize, reopened, ready_for_review]
   schedule:
     - cron: '17 4 * * 2'

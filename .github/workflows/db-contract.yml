@@ -34,8 +34,11 @@ permissions:
 on:
   pull_request:
     branches: [main]
-  push:
-    branches: [main]
+  # No push-to-main run (2026-10-26, CI cost): the PR run covers the change and
+  # the scheduled run below catches anything two merged PRs break together.
+  schedule:
+    - cron: '20 3 * * *'
+  workflow_dispatch:
 
 concurrency:
   group: db-contract-${{ github.ref }}
