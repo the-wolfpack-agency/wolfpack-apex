@@ -12,6 +12,7 @@
  
 
 import { NextRequest, NextResponse } from "next/server";
+import { providerNotConnected, type NotConnectedUser } from "@/lib/integrations/not-connected";
 import { getUserFromRequest } from "@/lib/auth";
 import {
   getMeeting,
@@ -20,6 +21,8 @@ import {
 
 function mapError(
   result: Extract<Awaited<ReturnType<typeof updateMeeting>>, { ok: false }>,
+  req: { method?: string },
+  user: NotConnectedUser,
 ) {
   switch (result.code) {
     case "invalid_input":
@@ -42,7 +45,7 @@ function mapError(
         { status: 429, headers: { "Retry-After": String(result.retryAfter ?? 60) } },
       );
     case "not_connected":
-      return NextResponse.json({ error: "microsoft_not_connected" }, { status: 401 });
+      return providerNotConnected(req, user, "microsoft", { surface: "online-meetings/[id]" });
     case "not_found":
       return NextResponse.json({ error: "not_found" }, { status: 404 });
     case "graph_error":
@@ -106,6 +109,6 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
   if (Array.isArray(body?.participants)) patch.participants = body.participants;
 
   const result = await updateMeeting(user.id, id, patch as any, user.role);
-  if (!result.ok) return mapError(result);
+  if (!result.ok) return mapError(result, req, user);
   return NextResponse.json({ id: result.value.id });
 }

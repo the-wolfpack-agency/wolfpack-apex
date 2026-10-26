@@ -100,7 +100,7 @@ export interface FormSubmitFailure {
   fieldErrors?: Record<string, string>;
   /** Top-level error message rendered above the form. */
   message: string;
-  code: "validation" | "auth" | "scope" | "rate_limit" | "internal";
+  code: "validation" | "auth" | "not_connected" | "scope" | "rate_limit" | "internal";
 }
 
 export type FormSubmitResult = FormSubmitSuccess | FormSubmitFailure;

@@ -157,3 +157,18 @@ describe("<NotebookPicker />", () => {
     });
   });
 });
+
+describe("<NotebookPicker /> with no Microsoft connection", () => {
+  test("a 200 { notebooks: [], connected: false } shows the connect message", async () => {
+    mockByUrl({
+      "GET /api/onenote/notebooks": {
+        status: 200,
+        body: { notebooks: [], connected: false, provider: "microsoft", error: "microsoft_not_connected", notice: "x" },
+      },
+    });
+    await renderPicker();
+    await waitFor(() => {
+      expect(screen.getByText(/Microsoft 365 isn't connected/)).toBeInTheDocument();
+    });
+  });
+});

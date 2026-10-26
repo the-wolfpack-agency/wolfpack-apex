@@ -13,6 +13,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { authHeaders, jsonHeaders, fetchWithRefresh } from "@/lib/client-auth";
+import { isProviderNotConnected } from "@/lib/integrations/connection-state";
 import AssigneePicker, { type AssigneeOption } from "@/components/AssigneePicker";
 
 interface Group { id: string; msGroupId: string; displayName: string }
@@ -349,6 +350,8 @@ function TaskDrawer({
       }),
     });
     setSaving(false);
+    /* 409 is shared by an etag conflict and "Microsoft not connected"; the body tells them apart. */
+    if (!res.ok && isProviderNotConnected(await res.clone().json().catch(() => null))) { setErr("Microsoft 365 isn't connected. Connect it in Settings, Integrations."); return; }
     if (res.status === 409) { setErr("Task changed by someone else — reload and try again."); return; }
     if (!res.ok) { setErr("Save failed."); return; }
     if (assigneesChanged && assignees.length > 0) {
@@ -373,6 +376,7 @@ function TaskDrawer({
       body: JSON.stringify({ etag: task.etag }),
     });
     setSaving(false);
+    if (!res.ok && isProviderNotConnected(await res.clone().json().catch(() => null))) { setErr("Microsoft 365 isn't connected. Connect it in Settings, Integrations."); return; }
     if (!res.ok) { setErr("Complete failed."); return; }
     onSaved();
   }
@@ -481,6 +485,7 @@ function NewTaskModal({
       }),
     });
     setCreating(false);
+    if (!res.ok && isProviderNotConnected(await res.clone().json().catch(() => null))) { setErr("Microsoft 365 isn't connected. Connect it in Settings, Integrations."); return; }
     if (!res.ok) { setErr("Create failed."); return; }
     if (assignees.length > 0) {
       fetchWithRefresh("/api/analytics", {

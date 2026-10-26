@@ -1,6 +1,7 @@
 "use client";
 
 import { fetchWithRefresh } from "@/lib/client-auth";
+import { isProviderNotConnected } from "@/lib/integrations/connection-state";
 
 /**
  * NotebookPicker — drill-down notebook → section → create-page drawer.
@@ -69,6 +70,7 @@ export default function NotebookPicker({
       .then(async (res) => {
         if (!res.ok) throw new Error(`notebooks ${res.status}`);
         const data = (await res.json()) as { notebooks?: Notebook[] };
+        if (isProviderNotConnected(data)) throw new Error("Microsoft 365 isn't connected. Connect it in Settings, Integrations.");
         setNotebooks(data.notebooks ?? []);
         setStatus("idle");
       })
@@ -117,7 +119,7 @@ export default function NotebookPicker({
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        throw new Error(data?.error ?? `create failed ${res.status}`);
+        throw new Error(data?.notice ?? data?.error ?? `create failed ${res.status}`);
       }
       const data = (await res.json()) as { page?: { id: string; webUrl?: string } };
       if (data.page && onCreated) onCreated(data.page);

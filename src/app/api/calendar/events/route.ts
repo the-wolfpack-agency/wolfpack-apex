@@ -11,6 +11,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { providerNotConnected } from "@/lib/integrations/not-connected";
 import { getUserFromRequest } from "@/lib/auth";
 import { trackEvent } from "@/lib/analytics";
 import { createEvent, listEvents } from "@/lib/integrations/microsoft-calendar";
@@ -86,7 +87,7 @@ export async function POST(req: NextRequest) {
           { status: 429, headers: { "Retry-After": String(result.retryAfter ?? 60) } },
         );
       case "not_connected":
-        return NextResponse.json({ error: "microsoft_not_connected" }, { status: 401 });
+        return providerNotConnected(req, user, "microsoft", { surface: "calendar/events" });
       case "not_found":
         return NextResponse.json({ error: "not_found" }, { status: 404 });
       case "graph_error":

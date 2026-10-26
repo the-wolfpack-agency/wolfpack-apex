@@ -35,7 +35,17 @@ Per-user OAuth (migration 006 moved tokens from tenant-wide to per-user). One fi
 5. Add routes in `src/app/api/<surface>/`. Every handler starts with `requireCapability`.
 6. Add a signal extractor in `src/lib/learning/<surface>-signals.ts` so the data feeds the learning loop.
 7. Add the scope to the user's consent flow — the existing consent UI reads from `src/lib/ms-capabilities.ts`.
-8. Contract tests: 200, 401, 403, and 403-with-scope-missing (Graph returns 403 → integration returns `{ error: { kind: 'scope_missing' } }` → route returns 403 with clear message).
+8. Contract tests: 200, 401, 403, and 403-with-scope-missing (Graph returns 403 → integration returns `{ error: { kind: 'scope_missing' } }` → route returns 403 with clear message), plus not-connected (below).
+
+### Not connected is never a 401
+
+401 means only "the Instinct session is invalid": `fetchWithRefresh` answers every 401 by rotating the refresh token, retrying, and on failure sending the user to `/login`. A user with no (or a lapsed) provider connection is still signed in, so the route answers through `providerNotConnected(req, user, provider, { empty, surface })` from `src/lib/integrations/not-connected.ts`:
+
+- read (GET/HEAD): 200 `{ ...empty, connected: false, provider, error: "<provider>_not_connected", notice }` (same convention as the unread-count routes), so a widget renders its connect state from a normal response;
+- action (POST/PATCH/PUT/DELETE): 409 with the same body, so a `res.ok` check never reports "sent" for something that did not happen;
+- each answer emits `integration.not_connected_served`.
+
+UI consumers test the body with `isProviderNotConnected()` from `src/lib/integrations/connection-state.ts` (client-safe). `src/__tests__/no-provider-401.test.ts` fails the build on a 401 emitted for a provider-connection reason; `src/app/api/__tests__/provider-not-connected-contract.test.ts` holds the contract per route.
 
 ### Graph-specific known failures
 

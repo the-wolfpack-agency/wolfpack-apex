@@ -1445,6 +1445,12 @@ export type InstinctEventType =
   //     sent to a model that would answer fluently about data it has never seen.
   //     Zero tokens, and the count IS the demand signal for what to connect next.
   | "assistant.answered_not_connected"
+  //   integration.not_connected_served { provider, method, surface } - a route
+  //     answered "provider not connected" (200 connected:false for a read, 409
+  //     for an action) instead of a 401 that would have been mistaken for an
+  //     expired Instinct session. The count is which surfaces people reach
+  //     before connecting a provider.
+  | "integration.not_connected_served"
   //   assistant.social_turn { kind } - a greeting, thank-you, farewell or
   //     "I am new here" was answered as what it is. Before this they reached
   //     retrieval, which cannot decline: given "hi" it returns the least-far

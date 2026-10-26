@@ -7,6 +7,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { providerNotConnected } from "@/lib/integrations/not-connected";
 import { getUserFromRequest } from "@/lib/auth";
 import { trackEvent } from "@/lib/analytics";
 import {
@@ -71,7 +72,7 @@ export async function POST(req: NextRequest) {
 
     if (err instanceof TeamsChatError) {
       if (err.status === 401) {
-        return NextResponse.json({ error: "Microsoft not connected" }, { status: 401 });
+        return providerNotConnected(req, user, "microsoft", { surface: "teams/sync" });
       }
       if (err.status === 429) {
         return NextResponse.json(

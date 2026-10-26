@@ -483,3 +483,56 @@ describe("unrouted + fetch-failure error paths", () => {
     expect((global.fetch as jest.Mock).mock.calls).toHaveLength(2);
   });
 });
+
+/* Provider not connected is NOT a session failure. Upstream routes answer it
+   409 { connected: false } (or 200 { connected: false } for /api/ms/chats);
+   only a missing/invalid Instinct session is a 401. The executor must keep the
+   two apart so the form shows "connect Microsoft" rather than "sign in". */
+describe("provider not connected vs expired session", () => {
+  const NOT_CONNECTED = {
+    connected: false,
+    provider: "microsoft",
+    error: "microsoft_not_connected",
+    notice: "Microsoft 365 is not connected.",
+  };
+
+  test.each([
+    ["create_email", { to: "a@b.com", subject: "Hi", body: "Body" }],
+    ["create_task", { title: "T", listId: "list-1" }],
+  ] as Array<[FormKind, Record<string, string>]>)(
+    "%s: upstream 409 { connected: false } maps to not_connected (409, never 401)",
+    async (kind, fields) => {
+      (global.fetch as jest.Mock).mockResolvedValueOnce(jsonResponse(409, NOT_CONNECTED));
+      const res = await executeFormAction(kind, fields, { origin: ORIGIN, authHeader: AUTH });
+      const body = await res.json();
+      expect(res.status).toBe(409);
+      expect(body).toMatchObject({ ok: false, code: "not_connected" });
+      expect(body.message).toMatch(/not connected/i);
+    },
+  );
+
+  test("create_message: a 200 { chats: [], connected: false } lookup is not_connected, not 'no matching chat'", async () => {
+    (global.fetch as jest.Mock).mockResolvedValueOnce(jsonResponse(200, { chats: [], ...NOT_CONNECTED }));
+    const res = await executeFormAction(
+      "create_message",
+      { recipient: "Alice", body: "Hello" },
+      { origin: ORIGIN, authHeader: AUTH },
+    );
+    expect(res.status).toBe(409);
+    expect((await res.json()).code).toBe("not_connected");
+  });
+
+  test("upstream 401 is the Instinct session, and says so", async () => {
+    (global.fetch as jest.Mock).mockResolvedValueOnce(jsonResponse(401, { error: "unauthorized" }));
+    const res = await executeFormAction(
+      "create_email",
+      { to: "a@b.com", subject: "Hi", body: "Body" },
+      { origin: ORIGIN, authHeader: AUTH },
+    );
+    expect(res.status).toBe(401);
+    const body = await res.json();
+    expect(body.code).toBe("auth");
+    expect(body.message).toMatch(/session/i);
+    expect(body.message).not.toMatch(/Microsoft/i);
+  });
+});

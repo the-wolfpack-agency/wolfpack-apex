@@ -10,6 +10,7 @@
 
  
 import { NextRequest, NextResponse } from "next/server";
+import { providerNotConnected } from "@/lib/integrations/not-connected";
 import { getUserFromRequest } from "@/lib/auth";
 import { createMeeting } from "@/lib/integrations/microsoft-online-meetings";
 
@@ -60,7 +61,7 @@ export async function POST(req: NextRequest) {
           { status: 429, headers: { "Retry-After": String(result.retryAfter ?? 60) } },
         );
       case "not_connected":
-        return NextResponse.json({ error: "microsoft_not_connected" }, { status: 401 });
+        return providerNotConnected(req, user, "microsoft", { surface: "online-meetings" });
       case "graph_error":
         return NextResponse.json(
           { error: "graph_error", status: result.status, detail: result.message },

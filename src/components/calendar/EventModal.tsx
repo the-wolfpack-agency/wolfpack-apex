@@ -11,6 +11,7 @@
 
 import { useEffect, useState } from "react";
 import { jsonHeaders, fetchWithRefresh } from "@/lib/client-auth";
+import { isProviderNotConnected } from "@/lib/integrations/connection-state";
 
 export interface EventModalProps {
   open: boolean;
@@ -119,10 +120,10 @@ export function EventModal({ open, onClose, onCreated, initialStart, initialEnd 
           setError(`Microsoft is missing the ${data.scope ?? "Calendars.ReadWrite"} scope. Reconnect in Settings > Integrations.`);
         } else if (res.status === 429) {
           setError(`Too many calendar changes recently. Try again in ${data?.retryAfter ?? 60}s.`);
+        } else if (isProviderNotConnected(data)) {
+          setError("Microsoft isn't connected. Settings > Integrations to link your account.");
         } else if (res.status === 401) {
-          setError(data?.error === "microsoft_not_connected"
-            ? "Microsoft isn't connected."
-            : "Your session expired.");
+          setError("Your session expired.");
         } else {
           setError(data?.detail || data?.error || "Failed to create event");
         }

@@ -30,6 +30,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { fetchWithRefresh, jsonHeaders } from "@/lib/client-auth";
+import { isProviderNotConnected } from "@/lib/integrations/connection-state";
 import { emitInsight } from "@/lib/insights/emit";
 import { htmlToText } from "@/lib/html-sanitize";
 
@@ -114,7 +115,7 @@ function buildActionError(
         "Reconnect Microsoft 365 in Settings > Integrations.",
     };
   }
-  if (status === 401 || body?.error === "microsoft_not_connected") {
+  if (isProviderNotConnected(body)) {
     return {
       kind: "error",
       action,
@@ -205,6 +206,11 @@ export default function EmailReader({ id, onClose, onMutated, _now }: EmailReade
         headers: jsonHeaders(),
       });
       const body = await res.json().catch(() => ({}));
+      /* Not connected is a 200 { connected: false }; 401 is only a bad session. */
+      if (isProviderNotConnected(body)) {
+        setState({ kind: "error", code: "not_connected" });
+        return;
+      }
       if (res.status === 200 && body?.message) {
         setState({ kind: "ready", message: body.message as MessageDetail });
         emitInsight({
@@ -218,10 +224,7 @@ export default function EmailReader({ id, onClose, onMutated, _now }: EmailReade
         return;
       }
       if (res.status === 401) {
-        setState({
-          kind: "error",
-          code: body?.error === "microsoft_not_connected" ? "not_connected" : "unauthorized",
-        });
+        setState({ kind: "error", code: "unauthorized" });
         return;
       }
       if (res.status === 403 && body?.code === "scope_missing") {

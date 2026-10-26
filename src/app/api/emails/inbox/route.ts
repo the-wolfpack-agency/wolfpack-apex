@@ -34,6 +34,7 @@ import {
   type AppMailFolder,
   type ListFolderMessagesOptions,
 } from "@/lib/integrations/microsoft-mail";
+import { providerNotConnected } from "@/lib/integrations/not-connected";
 
 // ---------------------------------------------------------------------------
 // Per-user rate limiter — 60/min. Inbox lists hit Graph hard so we cap.
@@ -133,7 +134,10 @@ export async function GET(req: NextRequest) {
   if (!result.ok) {
     switch (result.code) {
       case "not_connected":
-        return NextResponse.json({ error: "microsoft_not_connected" }, { status: 401 });
+        return providerNotConnected(req, user, "microsoft", {
+          empty: { messages: [], nextSkip: null, unreadCount: 0, folder: parsed.folder },
+          surface: "emails/inbox",
+        });
       case "scope_missing":
         return NextResponse.json(
           { error: "forbidden", code: "scope_missing", scope: result.scope ?? "Mail.Read" },

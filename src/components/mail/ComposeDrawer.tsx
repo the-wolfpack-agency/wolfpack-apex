@@ -17,6 +17,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { authHeaders, jsonHeaders, fetchWithRefresh } from "@/lib/client-auth";
+import { isProviderNotConnected } from "@/lib/integrations/connection-state";
 
 const DRAFT_KEY = "instinct.mail.compose.draft.v1";
 
@@ -237,10 +238,10 @@ export function ComposeDrawer({ open, onClose, onSent, initialTo, initialSubject
         } else if (res.status === 429) {
           const ra = data?.retryAfter ?? 60;
           setError(`Too many emails sent recently. Try again in ${ra}s.`);
+        } else if (isProviderNotConnected(data)) {
+          setError("Microsoft isn't connected. Settings > Integrations to link your account.");
         } else if (res.status === 401) {
-          setError(data?.error === "microsoft_not_connected"
-            ? "Microsoft isn't connected. Settings > Integrations to link your account."
-            : "Your session expired. Sign in again.");
+          setError("Your session expired. Sign in again.");
         } else {
           setError(data?.detail || data?.error || "Send failed");
         }

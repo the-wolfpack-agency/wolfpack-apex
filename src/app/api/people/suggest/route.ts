@@ -6,6 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { providerNotConnected } from "@/lib/integrations/not-connected";
 import { getUserFromRequest } from "@/lib/auth";
 import { suggestPeople, GraphPeopleError } from "@/lib/integrations/microsoft-people";
 
@@ -25,7 +26,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ suggestions });
   } catch (err) {
     if (err instanceof GraphPeopleError) {
-      if (err.status === 401) return NextResponse.json({ error: "Microsoft not connected" }, { status: 401 });
+      if (err.status === 401) return providerNotConnected(req, user, "microsoft", { surface: "people/suggest", empty: { suggestions: [] } });
       return NextResponse.json({ error: err.message }, { status: err.status >= 500 ? 502 : err.status });
     }
     return NextResponse.json({ error: "Internal error" }, { status: 500 });

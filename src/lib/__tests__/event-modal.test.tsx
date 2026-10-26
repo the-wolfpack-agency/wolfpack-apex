@@ -98,3 +98,22 @@ describe("EventModal", () => {
     expect((screen.getByTestId("event-submit") as HTMLButtonElement).disabled).toBe(true);
   });
 });
+
+describe("EventModal with no Microsoft connection", () => {
+  it("a 409 { connected: false } shows the connect message, not 'session expired'", async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 409,
+      json: async () => ({ connected: false, provider: "microsoft", error: "microsoft_not_connected", notice: "x" }),
+    });
+    render(<EventModal open={true} onClose={() => {}} />);
+    fireEvent.change(screen.getByLabelText(/^Subject/i), { target: { value: "s" } });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("event-submit"));
+    });
+    await waitFor(() => {
+      expect(screen.getByRole("alert").textContent).toMatch(/Microsoft isn't connected/);
+    });
+    expect(screen.getByRole("alert").textContent).not.toMatch(/session/i);
+  });
+});

@@ -5,6 +5,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { providerNotConnected } from "@/lib/integrations/not-connected";
 import { getUserFromRequest } from "@/lib/auth";
 import { createShareLink, GraphFilesError } from "@/lib/integrations/microsoft-files";
 
@@ -36,7 +37,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     return NextResponse.json({ share }, { status: 201 });
   } catch (err) {
     if (err instanceof GraphFilesError) {
-      if (err.status === 401) return NextResponse.json({ error: "Microsoft not connected" }, { status: 401 });
+      if (err.status === 401) return providerNotConnected(req, user, "microsoft", { surface: "files/share" });
       if (err.status === 403) return NextResponse.json({ error: "scope_missing", scope: "Files.ReadWrite" }, { status: 403 });
       if (err.status === 404) return NextResponse.json({ error: "Not found" }, { status: 404 });
       return NextResponse.json({ error: err.message }, { status: err.status >= 500 ? 502 : err.status });

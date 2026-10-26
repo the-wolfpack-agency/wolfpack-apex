@@ -359,7 +359,7 @@ function TaskDrawer({
     setSaving(false);
     if (res.ok) return onSaved();
     const b = await res.json().catch(() => ({}));
-    setError((b as { error?: string }).error || `Save failed (HTTP ${res.status})`);
+    setError((b as { notice?: string }).notice || (b as { error?: string }).error || `Save failed (HTTP ${res.status})`);
   }
 
   async function handleDelete() {
@@ -373,7 +373,7 @@ function TaskDrawer({
     setDeleting(false);
     if (res.ok) return onSaved();
     const b = await res.json().catch(() => ({}));
-    setError((b as { error?: string }).error || `Delete failed (HTTP ${res.status})`);
+    setError((b as { notice?: string }).notice || (b as { error?: string }).error || `Delete failed (HTTP ${res.status})`);
   }
 
   return (
@@ -575,7 +575,8 @@ function NewTaskModal({
       setCreating(false);
       if (res.ok) { fireAssigned(assignees.length, planId); return onCreated(); }
       const b = await res.json().catch(() => ({}));
-      setError((b as { message?: string; error?: string }).message
+      setError((b as { notice?: string }).notice
+        || (b as { message?: string; error?: string }).message
         || (b as { error?: string }).error
         || `Assign failed (HTTP ${res.status}).`);
       return;
@@ -600,7 +601,8 @@ function NewTaskModal({
     if (res.ok) return onCreated();
     const b = await res.json().catch(() => ({}));
     setError(
-      (b as { error?: string }).error ||
+      (b as { notice?: string }).notice ||
+        (b as { error?: string }).error ||
         `Create failed (HTTP ${res.status}). The task was NOT written to Microsoft To Do.`,
     );
   }

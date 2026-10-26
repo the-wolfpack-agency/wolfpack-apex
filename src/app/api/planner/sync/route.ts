@@ -8,6 +8,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { providerNotConnected } from "@/lib/integrations/not-connected";
 import { getUserFromRequest } from "@/lib/auth";
 import { trackEvent } from "@/lib/analytics";
 import { syncAllForUser } from "@/lib/integrations/microsoft-planner";
@@ -44,8 +45,10 @@ export async function POST(req: NextRequest) {
 
   const result = await syncAllForUser(user.id);
   if (!result.ok) {
+    if (result.code === "not_connected") {
+      return providerNotConnected(req, user, "microsoft", { surface: "planner/sync" });
+    }
     const status =
-      result.code === "not_connected" ? 401 :
       result.code === "scope_missing" ? 403 :
       result.code === "rate_limited" ? 429 :
       result.status ?? 502;

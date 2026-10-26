@@ -6,10 +6,15 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { providerNotConnected, type NotConnectedUser } from "@/lib/integrations/not-connected";
 import { getUserFromRequest } from "@/lib/auth";
 import { updateEvent, deleteEvent } from "@/lib/integrations/microsoft-calendar";
 
-function mapError(result: Extract<Awaited<ReturnType<typeof updateEvent>>, { ok: false }>) {
+function mapError(
+  result: Extract<Awaited<ReturnType<typeof updateEvent>>, { ok: false }>,
+  req: { method?: string },
+  user: NotConnectedUser,
+) {
   switch (result.code) {
     case "invalid_input":
       return NextResponse.json(
@@ -27,7 +32,7 @@ function mapError(result: Extract<Awaited<ReturnType<typeof updateEvent>>, { ok:
         { status: 429, headers: { "Retry-After": String(result.retryAfter ?? 60) } },
       );
     case "not_connected":
-      return NextResponse.json({ error: "microsoft_not_connected" }, { status: 401 });
+      return providerNotConnected(req, user, "microsoft", { surface: "calendar/events/[id]" });
     case "not_found":
       return NextResponse.json({ error: "not_found" }, { status: 404 });
     case "graph_error":
@@ -68,7 +73,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
   if (body?.onlineMeetingProvider !== undefined) patch.onlineMeetingProvider = body.onlineMeetingProvider;
 
   const result = await updateEvent(user.id, id, patch as any, user.role);
-  if (!result.ok) return mapError(result);
+  if (!result.ok) return mapError(result, req, user);
   return NextResponse.json({ id: result.value.id });
 }
 
@@ -91,7 +96,7 @@ export async function DELETE(req: NextRequest, ctx: { params: Promise<{ id: stri
 
   const result = await deleteEvent(user.id, id, user.role);
   if (!result.ok) {
-    return mapError(result as Extract<typeof result, { ok: false }>);
+    return mapError(result as Extract<typeof result, { ok: false }>, req, user);
   }
   return NextResponse.json({ ok: true });
 }

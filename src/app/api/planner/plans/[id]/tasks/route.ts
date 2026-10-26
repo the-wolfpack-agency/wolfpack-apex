@@ -10,6 +10,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { providerNotConnected } from "@/lib/integrations/not-connected";
 import { getUserFromRequest } from "@/lib/auth";
 import { listTasks } from "@/lib/integrations/microsoft-planner";
 import { trackEvent } from "@/lib/analytics";
@@ -38,8 +39,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   });
 
   if (!result.ok) {
+    if (result.code === "not_connected") {
+      return providerNotConnected(req, user, "microsoft", { surface: "planner/plans/tasks", empty: { tasks: [] } });
+    }
     const status =
-      result.code === "not_connected" ? 401 :
       result.code === "not_found" ? 404 :
       result.status ?? 502;
     return NextResponse.json(

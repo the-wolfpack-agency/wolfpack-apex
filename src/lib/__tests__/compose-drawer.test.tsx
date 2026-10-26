@@ -135,3 +135,28 @@ describe("ComposeDrawer", () => {
     });
   });
 });
+
+describe("ComposeDrawer with no Microsoft connection", () => {
+  it("a 409 { connected: false } on send shows the connect message, not 'session expired'", async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 409,
+      json: async () => ({ connected: false, provider: "microsoft", error: "microsoft_not_connected", notice: "x" }),
+    });
+    openDrawer();
+    fireEvent.change(screen.getByLabelText(/To email input/i), { target: { value: "a@b.com" } });
+    fireEvent.keyDown(screen.getByLabelText(/To email input/i), { key: "Enter" });
+    fireEvent.change(screen.getByLabelText(/Subject/i), { target: { value: "Hi" } });
+    const body = screen.getByTestId("compose-body");
+    body.innerHTML = "hello";
+    fireEvent.input(body);
+    await waitFor(() => expect((screen.getByTestId("compose-send") as HTMLButtonElement).disabled).toBe(false));
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("compose-send"));
+    });
+    await waitFor(() => {
+      expect(screen.getByRole("alert").textContent).toMatch(/Microsoft isn't connected/);
+    });
+    expect(screen.getByRole("alert").textContent).not.toMatch(/session/i);
+  });
+});

@@ -14,6 +14,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { authHeaders, jsonHeaders, fetchWithRefresh } from "@/lib/client-auth";
+import { isProviderNotConnected } from "@/lib/integrations/connection-state";
 
 export interface PickerDriveItem {
   id: string;
@@ -80,6 +81,11 @@ export default function FilePickerModal({ open, onClose, onPick, allowUpload = t
         return;
       }
       const data = (await res.json()) as { items?: PickerDriveItem[] };
+      if (isProviderNotConnected(data)) {
+        setError("Microsoft 365 isn't connected. Connect it in Settings, Integrations.");
+        setItems([]);
+        return;
+      }
       setItems(Array.isArray(data.items) ? data.items : []);
     } catch {
       setError("Network error");
@@ -134,7 +140,7 @@ export default function FilePickerModal({ open, onClose, onPick, allowUpload = t
         });
         if (!res.ok) {
           const data = await res.json().catch(() => ({}));
-          setError(data.error ?? "Upload failed");
+          setError(data.notice ?? data.error ?? "Upload failed");
           return;
         }
       } else {
@@ -146,7 +152,7 @@ export default function FilePickerModal({ open, onClose, onPick, allowUpload = t
         });
         if (!sessionRes.ok) {
           const data = await sessionRes.json().catch(() => ({}));
-          setError(data.error ?? "Could not start upload session");
+          setError(data.notice ?? data.error ?? "Could not start upload session");
           return;
         }
         const session = (await sessionRes.json()) as { uploadUrl: string };

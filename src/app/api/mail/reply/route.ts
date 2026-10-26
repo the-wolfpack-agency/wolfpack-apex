@@ -8,6 +8,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { providerNotConnected } from "@/lib/integrations/not-connected";
 import { getUserFromRequest } from "@/lib/auth";
 import { requireCapability } from "@/lib/auth/require-capability";
 import { trackEvent } from "@/lib/analytics";
@@ -77,7 +78,7 @@ export async function POST(req: NextRequest) {
           { status: 429, headers: { "Retry-After": String(result.retryAfter ?? 60) } },
         );
       case "not_connected":
-        return NextResponse.json({ error: "microsoft_not_connected" }, { status: 401 });
+        return providerNotConnected(req, user, "microsoft", { surface: "mail/reply" });
       case "graph_error":
         return NextResponse.json(
           { error: "graph_error", status: result.status, detail: result.message },

@@ -4,6 +4,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { providerNotConnected } from "@/lib/integrations/not-connected";
 import { getUserFromRequest } from "@/lib/auth";
 import {
   listContacts,
@@ -64,7 +65,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ contact: out }, { status: 201 });
   } catch (err) {
     if (err instanceof GraphContactsError) {
-      if (err.status === 401) return NextResponse.json({ error: "Microsoft not connected" }, { status: 401 });
+      if (err.status === 401) return providerNotConnected(req, user, "microsoft", { surface: "contacts" });
       if (err.status === 403) return NextResponse.json({ error: "scope_missing", scope: "Contacts.ReadWrite" }, { status: 403 });
       if (err.status === 429) {
         return NextResponse.json(
