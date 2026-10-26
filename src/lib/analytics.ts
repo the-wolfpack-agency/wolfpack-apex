@@ -1053,6 +1053,14 @@ export type InstinctEventType =
   // unless an active ui_probe scope authorizes it. { platform, action, reason }
   | "platform.browser_action_allowed"
   | "platform.browser_action_blocked"
+  // Edge-device exposure classifier (OFF by default, verified/curated targets
+  // only). A recognised firewall/VPN appliance login or portal page was matched
+  // from an already-collected HTTP response and mapped to public KEV entries.
+  // platform.edge_exposure_detected { platform, product, vendor, kev_count, severity }
+  | "platform.edge_exposure_detected"
+  // The classifier was refused before running: OFF by default (setting disabled)
+  // or the target is not verified as client-owned. { platform, reason }
+  | "platform.edge_exposure_blocked"
   // Continuous sweep observability: a sweep run finished / failed, so a silently
   // broken sweep (stale client posture) is visible. { kind, targets, succeeded, failed }
   | "platform.sweep_completed"
