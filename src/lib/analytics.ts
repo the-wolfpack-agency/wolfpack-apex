@@ -617,6 +617,9 @@ export type InstinctEventType =
   | "ogiam.action_authorized"
   | "ogiam.action_flagged"
   | "ogiam.action_blocked_unauditable"
+  // OGIAM intent mismatch: an agent tool call whose target or effect is outside
+  // its declared task scope was held for the owner (forcefield/intent-scope.ts).
+  | "ogiam.intent_mismatch_held"
   // ogiam.checkpoint_signed  { workspace_id, through_seq, algorithm, key_id,
   //                            signed, chain_ok, verified_count }
   //   fired when the scheduled sweep notarizes a workspace's decision chain by
@@ -785,6 +788,9 @@ export type InstinctEventType =
   // forcefield.block_withheld_watch { site, reasonKind } - a hostile request the
   // engine would block, withheld because the tenant's console enforce toggle is off.
   | "forcefield.block_withheld_watch"
+  // Forcefield intent scoring: one per session step-up (watch / tarpit / block),
+  // with reason ids, the score and whether the posture applied it (intent.ts).
+  | "forcefield.intent_decided"
   // forcefield.integration_provisioned { provider, site } - a one-click platform
   // integration (e.g. Vercel) provisioned a tenant + wrote the site's config.
   | "forcefield.integration_provisioned"

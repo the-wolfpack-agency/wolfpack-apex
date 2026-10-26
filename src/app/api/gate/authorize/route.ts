@@ -47,6 +47,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { verifyApiKey } from "@/lib/ogiam/api-keys";
 import { checkRateLimit } from "@/lib/ogiam/gate-rate-limit";
 import { authorize } from "@/lib/ogiam/authorize";
+import { coerceDeclaredScope } from "@/lib/forcefield/intent-scope";
 import { trackEvent } from "@/lib/analytics";
 
 /** Generic auth-failure message - never reveals which part failed. */
@@ -57,6 +58,8 @@ interface GateBody {
   capability?: unknown;
   isMutation?: unknown;
   params?: unknown;
+  /** Optional declared task scope ({ access, outbound?, secrets? }). */
+  declaredScope?: unknown;
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
@@ -165,7 +168,18 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     surface: "/external",
     params,
     mode: "enforce",
+    // Optional declared task scope: a call outside it is held (escalate) by
+    // R-INTENT-MISMATCH-ESCALATE. Malformed -> no scope (never a wider one).
+    declaredScope: coerceDeclaredScope(body.declaredScope),
   });
+  if (decision.ruleId === "R-INTENT-MISMATCH-ESCALATE") {
+    trackEvent("ogiam.intent_mismatch_held", `apikey:${key.id}`, "external_agent", {
+      agent: key.agent,
+      tool,
+      capability,
+      enforced: decision.enforced,
+    });
+  }
 
   // FAIL CLOSED ON UNAUDITABLE. The whole point of the gate is that every
   // external decision lands in the tamper-evident ledger: "no audit, no action".

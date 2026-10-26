@@ -15,7 +15,7 @@ Dual proof that the governed agentic workforce functions end to end and produces
 ## Proof Run (emitted from the live test outputs)
 
 - 1. ONBOARDING: agent onboarded as role "ops". Discovered 4 tools, 3 within its capability ceiling, 3 state-changing. Tiering matches the runtime gate: "read_status" = low, "delete_everything" = high.
-- 2. GOVERNED DELEGATION: parsed "Agent1" -> "add a task titled Doctors Appointment". OGIAM (enforce) decided allow via R-MUTATION-ALLOW [risk medium, policy ogiam-2026-06-24.1], wouldBlock=false. The authorized agent does its job; it is not blocked.
+- 2. GOVERNED DELEGATION: parsed "Agent1" -> "add a task titled Doctors Appointment". OGIAM (enforce) decided allow via R-MUTATION-ALLOW [risk medium, policy ogiam-2026-10-26.1], wouldBlock=false. The authorized agent does its job; it is not blocked.
 - 3. GOVERNED EXECUTION: ran 2 steps as principal "proof-agent-1". Step 1 "add a task titled Doctors Appointment" -> ran; step 2 "delete everything" -> blocked. Terminal status "blocked"; owner "owner-proof" notified for approval (priority high). The dangerous step did not execute.
 - 4. CUMULATIVE LEARNING: "proof-agent-2" inherited "proof-agent-1"'s procedure for the same goal (inherited=true, status "succeeded"). No re-exploration, no duplicate learning.
 - 5. DRIFT GOVERNANCE: behavior drift verdict "critical" (score 1.00) from blockRateDelta=1, tierDistance=1, toolDistance=1. shouldPause=true -> agent auto-paused.

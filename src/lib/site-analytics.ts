@@ -37,6 +37,9 @@ export const SITE_EVENT_TYPES = [
   "site.agent_form_too_fast",
   "site.agent_payload_attack",
   "site.agent_high_rate",
+  // Forcefield intent scoring: one row per session step-up (watch / tarpit /
+  // block) with its reason ids. Not hostile tradecraft on its own.
+  "site.intent_scored",
 ] as const;
 export type SiteEventType = (typeof SITE_EVENT_TYPES)[number];
 

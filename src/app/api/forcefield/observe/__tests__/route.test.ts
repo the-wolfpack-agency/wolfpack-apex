@@ -24,17 +24,20 @@ jest.mock("@/lib/forcefield-web/billing", () => ({
 }));
 jest.mock("@/lib/forcefield-web/tenants", () => ({ resolveTenantByToken: (...a: unknown[]) => resolveTenantByToken(...a) }));
 jest.mock("@/lib/analytics", () => ({ trackEvent: (...a: unknown[]) => trackEvent(...a) }));
+jest.mock("@/lib/forcefield/intent-carryover", () => ({ getIntentCarryover: async () => [] }));
 const checkInboundForCanaries = jest.fn();
 jest.mock("@/lib/forcefield/canary-store", () => ({ checkInboundForCanaries: (...a: unknown[]) => checkInboundForCanaries(...a) }));
 
 import { NextRequest } from "next/server";
 import { POST } from "../route";
+import { _resetIntentLedger } from "@/lib/forcefield-web/monitor";
 import { _resetRateWindow } from "@/lib/forcefield/rate-window";
 import { parseCidr } from "@/lib/forcefield-web/hosting";
 
 const OLD = process.env;
 beforeEach(() => {
   jest.clearAllMocks();
+  _resetIntentLedger();
   process.env = { ...OLD, FORCEFIELD_EDGE_TOKEN: "secret-token", FORCEFIELD_DISTRIBUTE_BLOCKS: "on" };
   getBlockedFingerprints.mockResolvedValue([]);
   getDatacenterPrefixes.mockResolvedValue([]);

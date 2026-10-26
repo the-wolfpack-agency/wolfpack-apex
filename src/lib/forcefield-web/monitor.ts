@@ -19,9 +19,21 @@
  *                                from the request - that would be SSRF)
  *   FORCEFIELD_RULESET_URL       central ruleset endpoint (unset => bundled defaults)
  */
-import { observeRequest, withEnforcement, type ObserveInput } from "./observe";
+import { observeRequest, withEnforcement, clientKeys, isStaticAsset, type ObserveInput, type Observation } from "./observe";
 import { fetchRuleset, type ForcefieldRuleset } from "./ruleset";
-import { decideEnforcement, type EnforcementDecision } from "./enforce";
+import { decideEnforcement, type EnforcementDecision, type BlockReasonKind } from "./enforce";
+import { headerSignature } from "./fingerprint";
+import {
+  IntentLedger,
+  carriesOver,
+  decideIntent,
+  intentEventProps,
+  intentSessionKey,
+  intentSignalsFor,
+  resolveStackProfile,
+  type IntentDecision,
+  type IntentProofKind,
+} from "./intent";
 
 /** The subset of a NextRequest this needs - structural, so a NextRequest fits
  *  without importing framework types (keeps the module edge- and test-friendly). */
@@ -48,6 +60,10 @@ export interface ForcefieldArgs {
    *  Forcefield control-plane paths), so the monitor never records a block that
    *  did not happen. */
   skipEnforcement?: boolean;
+  /** The site's declared stack (e.g. ["nextjs"]), for intent scoring: a request
+   *  for a product or server-side runtime outside it is reconnaissance. Absent
+   *  -> the platform is used; neither -> recon scoring is off. */
+  stack?: string[];
 }
 
 /** The header a VERIFIED synthetic monitor (our own Playwright smoke tests,
@@ -132,6 +148,109 @@ function observeInputFor(args: ForcefieldArgs): ObserveInput {
   };
 }
 
+/* ------------------------------ intent scoring ----------------------------- */
+
+/** One ledger per instance (bounded; IP-free keys), shared by the vendored
+ *  guard/monitor and the central observe route. */
+const _intentLedger = new IntentLedger();
+
+/** The instance's intent ledger (the central observe route uses it too). */
+export function intentLedger(): IntentLedger {
+  return _intentLedger;
+}
+
+/** Test-only: clear the intent ledger and the per-request memo. */
+export function _resetIntentLedger(): void {
+  _intentLedger.clear();
+}
+
+/** The block reason that counts as PROOF for intent (every enforce rule except
+ *  the intent rule itself). */
+function proofFor(d: EnforcementDecision): IntentProofKind | undefined {
+  if (!d.block) return undefined;
+  const k = d.reasonKind;
+  return k === "decoy" || k === "payload" || k === "attack_tool" || k === "blocked_fingerprint" ? k : undefined;
+}
+
+/** Intent is applied (tarpit / sticky block) only when enforcement is on AND
+ *  intent enforcement is explicitly on. Default: record-only (measured, see
+ *  the PR): the decision is computed and recorded with applied:false. */
+function intentPosture(): "watch" | "enforce" {
+  return process.env.FORCEFIELD_ENFORCE === "on" && process.env.FORCEFIELD_INTENT_ENFORCE === "on" ? "enforce" : "watch";
+}
+
+export interface RequestIntent {
+  decision: IntentDecision;
+  /** True when this request stepped the session up (record an event). */
+  report: boolean;
+  props: Record<string, string | number | boolean>;
+}
+
+/**
+ * Score one request into its session and decide the step-up. Shared by the
+ * vendored guard/monitor and the central observe route so both run identical
+ * logic. `ledger` is the caller's (one per instance). Never throws.
+ */
+export function evaluateRequestIntent(
+  input: ObserveInput,
+  ruleset: ForcefieldRuleset,
+  opts: {
+    ledger: IntentLedger;
+    obs: Observation | null;
+    enforcement: EnforcementDecision;
+    posture: "watch" | "enforce";
+    stack?: readonly string[];
+  },
+): RequestIntent | null {
+  try {
+    const { sig, fp, client } = clientKeys(input, ruleset);
+    const profile = resolveStackProfile({ stack: opts.stack, platform: input.platform }, ruleset);
+    const welcomed = opts.obs?.type === "site.agent_welcomed";
+    const probe = typeof opts.obs?.props.probe === "string" ? (opts.obs.props.probe as string) : null;
+    const authenticated = input.authenticated === true || input.synthetic === true;
+    const signals = intentSignalsFor(
+      { path: input.path, rawUrl: input.rawUrl, clientType: client.clientType, authenticated, welcomed, probe, staticAsset: isStaticAsset(input.path) },
+      profile,
+      ruleset,
+    );
+    const { key, scope } = intentSessionKey({ ip: input.ip, userAgent: input.userAgent, headerShape: headerSignature(input.headerNames), sig });
+    const carryover = !authenticated && !welcomed && carriesOver(fp, client.clientType, ruleset.intentCarryover, input.nowMs);
+    const ownProof = authenticated ? undefined : proofFor(opts.enforcement);
+    const intent = opts.ledger.note(key, input.nowMs, {
+      path: input.path,
+      signals,
+      proof: ownProof,
+      nonBrowser: !authenticated && !welcomed && client.clientType !== "browser" && !isStaticAsset(input.path),
+      carryover,
+    });
+    const decision = decideIntent(intent, { posture: opts.posture, keyScope: scope, clientType: client.clientType });
+    // Record a step-up only when it says something the request's own event does
+    // not: real intent signals, or a follow-on request of a proven session. A
+    // lone proof request is already recorded (and blocked) by its own event.
+    const meaningful = decision.reasons.some((r) => r !== "automation_client") || !ownProof;
+    const report = decision.action !== "none" && meaningful && opts.ledger.shouldReport(key, decision.action);
+    const props = intentEventProps(decision, { site: input.site, sig, fp, clientType: client.clientType });
+    if (input.synthetic === true) props.synthetic = true;
+    return { decision, report, props };
+  } catch {
+    return null;
+  }
+}
+
+/** Per-request memo so the guard and the monitor (both run for one request)
+ *  note it into the ledger ONCE. */
+const _intentMemo = new WeakMap<object, RequestIntent | null>();
+
+function intentFor(args: ForcefieldArgs, input: ObserveInput, ruleset: ForcefieldRuleset, d: EnforcementDecision): RequestIntent | null {
+  if (_intentMemo.has(args.req)) return _intentMemo.get(args.req) ?? null;
+  const obs = observeRequest(input, ruleset);
+  const r = evaluateRequestIntent(input, ruleset, { ledger: _intentLedger, obs, enforcement: d, posture: intentPosture(), stack: args.stack });
+  _intentMemo.set(args.req, r);
+  return r;
+}
+
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
 function decide(input: ObserveInput, ruleset: ForcefieldRuleset): EnforcementDecision {
   // decideEnforcement computes the operator fingerprint itself (header shape
   // bound to the client's tool), matching what observe.ts stamps on events, so
@@ -169,18 +288,28 @@ export async function forcefieldMonitor(args: ForcefieldArgs): Promise<void> {
     const ruleset = await fetchRuleset(process.env.FORCEFIELD_RULESET_URL ?? "");
     const input = observeInputFor(args);
     let obs = observeRequest(input, ruleset);
+    const d = decide(input, ruleset);
+    // Intent: control-plane requests (skipEnforcement) are never scored.
+    const intent = args.skipEnforcement ? null : intentFor(args, input, ruleset, d);
+    const intentBlocked = !d.block && intent?.decision.action === "block" && intent.decision.applied;
     if (process.env.FORCEFIELD_ENFORCE === "on" && !args.skipEnforcement) {
-      const d = decide(input, ruleset);
-      obs = withEnforcement(obs, input, ruleset, { wouldBlock: d.block, blocked: d.block, reasonKind: d.reasonKind, attack: d.attack });
+      if (d.block) {
+        obs = withEnforcement(obs, input, ruleset, { wouldBlock: true, blocked: true, reasonKind: d.reasonKind, attack: d.attack });
+      } else if (intentBlocked) {
+        obs = withEnforcement(obs, input, ruleset, { wouldBlock: true, blocked: true, reasonKind: "intent" });
+      }
     }
-    if (!obs) return;
 
     const country = input.country;
-    await fetch(ingestUrl, {
-      method: "POST",
-      headers: { "content-type": "application/json", "x-ingest-token": token },
-      body: JSON.stringify({ type: obs.type, path: obs.path, country: country || undefined, props: obs.props }),
-    }).catch(() => {});
+    const send = (type: string, path: string, props: Record<string, string | number | boolean>) =>
+      fetch(ingestUrl, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-ingest-token": token },
+        body: JSON.stringify({ type, path, country: country || undefined, props }),
+      }).catch(() => {});
+    if (obs) await send(obs.type, obs.path, obs.props);
+    // One intent event per step-up (watch -> tarpit -> block), with its reasons.
+    if (intent?.report) await send("site.intent_scored", input.path, intent.props);
   } catch {
     /* Forcefield must never affect the request. */
   }
@@ -200,8 +329,24 @@ export async function forcefieldGuard(args: ForcefieldArgs): Promise<Enforcement
   try {
     if (process.env.FORCEFIELD_WEB !== "on" || process.env.FORCEFIELD_ENFORCE !== "on") return null;
     const ruleset = await fetchRuleset(process.env.FORCEFIELD_RULESET_URL ?? "");
-    const decision = decide(observeInputFor(args), ruleset);
-    return decision.block ? decision : null;
+    const input = observeInputFor(args);
+    const decision = decide(input, ruleset);
+    if (decision.block) {
+      intentFor(args, input, ruleset, decision); // record the proof into the session
+      return decision;
+    }
+    // INTENT step-up (applied only with FORCEFIELD_INTENT_ENFORCE=on): a proven
+    // session's follow-on requests are turned away; a tarpitted session is slowed
+    // here, so a host middleware gets the slow-down with no code change.
+    const intent = args.skipEnforcement ? null : intentFor(args, input, ruleset, decision);
+    if (intent?.decision.applied) {
+      if (intent.decision.action === "block") {
+        const reasonKind: BlockReasonKind = "intent";
+        return { block: true, reasonKind, reason: intent.decision.summary };
+      }
+      if (intent.decision.action === "tarpit" && intent.decision.delayMs > 0) await sleep(intent.decision.delayMs);
+    }
+    return null;
   } catch {
     return null; // fail-open: enforcement must never break the site.
   }

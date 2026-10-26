@@ -25,6 +25,7 @@ import { DEFAULT_RULESET } from "@/lib/forcefield-web/ruleset";
 import { getBlockedFingerprints } from "@/lib/forcefield/blocked-fingerprints";
 import { getDatacenterPrefixes } from "@/lib/forcefield/datacenter-ranges";
 import { getCrawlerRanges } from "@/lib/forcefield/crawler-ranges";
+import { getIntentCarryover } from "@/lib/forcefield/intent-carryover";
 
 export const runtime = "nodejs";
 
@@ -48,8 +49,13 @@ export async function GET() {
   // to {} (every claimed agent "unverifiable", never an impersonation).
   const verifiedAgentRanges = await getCrawlerRanges({ waitMs: 3000 }).catch(() => ({}));
 
+  // Intent carryover: distinctive fingerprints proven hostile on any Forcefield
+  // site, each expiring (intent-carryover.ts). Consumed as tarpit only, never a
+  // block. Fail-safe to [].
+  const intentCarryover = await getIntentCarryover().catch(() => []);
+
   return NextResponse.json(
-    { ruleset: { ...DEFAULT_RULESET, blockedFingerprints, datacenterPrefixes, verifiedAgentRanges } },
+    { ruleset: { ...DEFAULT_RULESET, blockedFingerprints, datacenterPrefixes, verifiedAgentRanges, intentCarryover } },
     {
       status: 200,
       headers: {

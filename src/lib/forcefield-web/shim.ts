@@ -26,6 +26,9 @@ export interface ForcefieldShimConfig {
   /** The platform the site runs on (e.g. "wordpress"), so the engine treats that
    *  platform's own paths as the site's, not as recon. Optional. */
   platform?: string;
+  /** The site's declared stack (e.g. ["nextjs"]) so the engine can tell a
+   *  request for a product the site does not run (reconnaissance). Optional. */
+  stack?: string[];
   /** SITE-ATTESTED sign-in check. Return true ONLY when the site itself verified a
    *  real signed-in session or service credential for this request (for example by
    *  validating its session cookie). Never base it on header presence. A request
@@ -100,6 +103,9 @@ export async function resolveAuthenticated(req: Request, cfg: Pick<ForcefieldShi
   }
 }
 
+/** Upper bound on an engine-requested tarpit delay, whatever the engine says. */
+export const SHIM_MAX_TARPIT_MS = 4_000;
+
 /** Ship signals to the central engine and return whether to BLOCK this request.
  *  Fail-open: any error (network, non-200, bad body) returns false (allow), so a
  *  Forcefield outage can never turn away a real visitor. A request marked
@@ -111,11 +117,18 @@ export async function forcefieldDecide(signals: ForcefieldSignals, cfg: Forcefie
     const res = await fetch(cfg.endpoint, {
       method: "POST",
       headers: { "content-type": "application/json", "x-edge-token": cfg.token },
-      body: JSON.stringify({ site: cfg.site, ...signals, ...(platform ? { platform } : {}) }),
+      body: JSON.stringify({ site: cfg.site, ...signals, ...(platform ? { platform } : {}), ...(cfg.stack?.length ? { stack: cfg.stack } : {}) }),
     });
     if (signals.authenticated === true) return false; // never block a signed-in user
     if (!res.ok) return false;
-    const data = (await res.json().catch(() => ({ action: "allow" }))) as { action?: string };
+    const data = (await res.json().catch(() => ({ action: "allow" }))) as { action?: string; delayMs?: number };
+    // INTENT tarpit: the engine judged this session hostile in intent but not yet
+    // proven. Slow it (bounded) and let it through; never a block.
+    const delayMs = typeof data?.delayMs === "number" ? data.delayMs : 0;
+    if (data?.action === "tarpit" && delayMs > 0) {
+      await new Promise<void>((resolve) => setTimeout(resolve, Math.min(SHIM_MAX_TARPIT_MS, delayMs)));
+      return false;
+    }
     return data?.action === "block";
   } catch {
     return false;

@@ -66,6 +66,11 @@ export interface OgiamSignals {
   /** Whether CI has FULLY passed for this change. false blocks handoff to a
    *  human reviewer; undefined means "not applicable to this action". */
   ciComplete?: boolean;
+  /** Reason ids when the action does not match the agent's DECLARED task scope
+   *  (forcefield/intent-scope.ts): a write in a read-only task, a credential
+   *  target, an outbound send the task did not allow. Absent when no scope was
+   *  declared, so existing actions are unaffected. */
+  intentMismatch?: string[];
 }
 
 /** A typed AI action: what the agent wants to do. Derived from the tool the

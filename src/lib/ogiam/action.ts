@@ -11,6 +11,7 @@
 import { createHash } from "crypto";
 import { redactText, type RedactionKind } from "@/lib/ai/redaction";
 import type { OgiamAction, OgiamSignals } from "./types";
+import { checkIntentMismatch, type DeclaredTaskScope } from "@/lib/forcefield/intent-scope";
 
 const SECRET_KINDS: ReadonlySet<RedactionKind> = new Set(["api_key"]);
 const PII_KINDS: ReadonlySet<RedactionKind> = new Set([
@@ -49,6 +50,9 @@ export interface BuildActionInput {
   params: unknown;
   /** An externally supplied injection score (advisory), if a PIP computed one. */
   injectionScore?: number;
+  /** The task's declared scope, when the caller has one. The action is compared
+   *  against it (on the raw params, before redaction; only reason ids are kept). */
+  declaredScope?: DeclaredTaskScope | null;
 }
 
 /**
@@ -61,6 +65,14 @@ export function buildAction(input: BuildActionInput): {
   redactedParams: string;
 } {
   const raw = canonicalJSON(input.params ?? {});
+  const mismatch = input.declaredScope
+    ? checkIntentMismatch(input.declaredScope, {
+        tool: input.tool,
+        capability: input.capability,
+        isMutation: input.isMutation,
+        params: input.params,
+      })
+    : null;
   const { text: redactedParams, hits } = redactText(raw);
 
   const signals: OgiamSignals = {
@@ -69,6 +81,7 @@ export function buildAction(input: BuildActionInput): {
     ...(typeof input.injectionScore === "number"
       ? { injectionScore: input.injectionScore }
       : {}),
+    ...(mismatch?.mismatch ? { intentMismatch: mismatch.reasons } : {}),
   };
 
   // Hash the REDACTED parameters: the ledger proves which (sanitized) inputs the

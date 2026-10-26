@@ -189,7 +189,7 @@ export async function middleware(req: NextRequest, event?: NextFetchEvent) {
   // are no-ops otherwise), so the dark default costs nothing.
   const ffOn = process.env.FORCEFIELD_WEB === "on";
   const authenticated = ffOn ? await forcefieldAuthenticated(req) : false;
-  const ffArgs = { site: "instinct", req, authenticated, skipEnforcement: ffControlPlane };
+  const ffArgs = { site: "instinct", req, authenticated, skipEnforcement: ffControlPlane, stack: ["nextjs"] };
   const block = ffControlPlane || !ffOn ? null : await forcefieldGuard(ffArgs);
   if (block) {
     if (event) event.waitUntil(forcefieldMonitor(ffArgs));

@@ -310,3 +310,26 @@ describe("body validation", () => {
     );
   });
 });
+
+describe("declared task scope (intent mismatch)", () => {
+  it("passes a valid declaredScope to the gate and reports a held call as allowed:false + intent_mismatch_held", async () => {
+    mockAuthorize.mockResolvedValueOnce({
+      ...ALLOW_DECISION,
+      intendedOutcome: "escalate",
+      effectiveOutcome: "escalate",
+      ruleId: "R-INTENT-MISMATCH-ESCALATE",
+      reason: "the action does not match the declared task scope (credential_target); held for the owner",
+      wouldBlock: true,
+    });
+    const res = await post({ ...IN_SCOPE_BODY, declaredScope: { access: "read_only" } }, BEARER);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ allowed: false, decision: { ruleId: "R-INTENT-MISMATCH-ESCALATE", effectiveOutcome: "escalate" } });
+    expect(mockAuthorize).toHaveBeenCalledWith(expect.objectContaining({ declaredScope: { access: "read_only", outbound: false, secrets: false } }));
+    expect(mockTrack).toHaveBeenCalledWith("ogiam.intent_mismatch_held", "apikey:key-1", "external_agent", expect.objectContaining({ agent: "acme-bot" }));
+  });
+
+  it("a malformed declaredScope is dropped (no scope), never widened", async () => {
+    await post({ ...IN_SCOPE_BODY, declaredScope: { access: "god_mode" } }, BEARER);
+    expect(mockAuthorize).toHaveBeenCalledWith(expect.objectContaining({ declaredScope: null }));
+  });
+});

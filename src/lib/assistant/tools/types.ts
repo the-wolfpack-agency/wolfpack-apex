@@ -90,6 +90,9 @@ export interface ToolContext {
     role: string;
     workspaceId: string;
     ownerUserId: string;
+    /** The task's declared scope, when the caller assigned one. Each tool call is
+     *  compared against it by the OGIAM gate (R-INTENT-MISMATCH-ESCALATE). */
+    declaredScope?: import("@/lib/forcefield/intent-scope").DeclaredTaskScope;
   };
   /**
    * The human OWNER an agent is acting for in this dispatch. Set by the agent
