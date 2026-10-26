@@ -38,7 +38,7 @@ import {
   totals,
   type ColumnCounts,
 } from "../src/lib/crypto/secret-key-rotation";
-import { allowLegacyKeyForRotation, secretKeyringStatus, setSecretKeySignalSink } from "../src/lib/crypto/secret-storage";
+import { allowLegacyKeyForBackfill, secretKeyringStatus, setSecretKeySignalSink } from "../src/lib/crypto/secret-storage";
 import { trackEventAwait } from "../src/lib/analytics";
 import { recordAuditNonFatal } from "../src/lib/audit-log";
 
@@ -73,7 +73,7 @@ async function main(): Promise<number> {
   setSecretKeySignalSink(() => {});
   /* The app no longer opens legacy values once a primary is set; this
      backfill must, to move them under the primary. */
-  allowLegacyKeyForRotation();
+  allowLegacyKeyForBackfill();
 
   const key = checkRotationKey(process.env);
   if (!key.ok) {

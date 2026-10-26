@@ -8,7 +8,7 @@ Secrets stored in Postgres (connector credentials, Microsoft Graph tokens, Quick
 |---|---|---|
 | primary | `INSTINCT_SECRET_KEY` (32 bytes, hex or base64) | every new encryption, and decryption |
 | previous | `INSTINCT_SECRET_KEY_PREVIOUS` (comma-separated) | decryption only |
-| legacy | the original derivation from `INSTINCT_JWT_SECRET` (or its built-in fallback) | used only while no primary is set. Once one is, the app never opens a legacy value; only the backfill script does, to move it under the primary |
+| legacy | the original derivation from `INSTINCT_JWT_SECRET` (or its built-in fallback) | used only while no primary is set. Once one is, the app never opens a legacy value; only the operator backfill scripts do, to move it under the primary |
 
 - Values encrypted under the primary carry its key id: `v1.k<16 hex>.<iv>.<tag>.<ct>`. Older values (`v1.<iv>.<tag>.<ct>`) still parse and decrypt. The key id is a hash of the key and does not reveal it.
 - With no valid `INSTINCT_SECRET_KEY`, the app behaves exactly as before and, in production, logs a `DEGRADED` line and records `security.secret_key_degraded` once per process.
@@ -112,7 +112,7 @@ Output is counts only: `rows`, `already_hashed`, `to_hash`, `hashed`, `failed`. 
 
 ## After the count is zero
 
-Once a primary is set, the app does not open legacy values at all: a legacy value it meets reads as unavailable, and the dry run counts it as `unreadable`. Only `scripts/rotate-secret-key.ts` opts back in (`allowLegacyKeyForRotation`), so a deployment that started without a primary still rotates with steps 5 and 6. A guard test fails if any other code calls it. Production was checked before this change: `legacy=0`, and no `security.secret_old_key_decrypt` event after the rotation run.
+Once a primary is set, the app does not open legacy values at all: a legacy value it meets reads as unavailable, and the dry run counts it as `unreadable`. Only the operator backfill scripts (`rotate-secret-key`, `seal-at-rest-secrets`, `encrypt-graph-tokens`) opt back in (`allowLegacyKeyForBackfill`), so a deployment that started without a primary still rotates with steps 5 and 6. A guard test fails if any other code calls it. Production was checked before this change: `legacy=0`, and no `security.secret_old_key_decrypt` event after the rotation run.
 
 ## Rotating the primary later
 

@@ -21,7 +21,7 @@ import {
   PrimaryKeyUnavailableError,
   __resetSecretKeyCacheForTests,
   setSecretKeySignalSink,
-  allowLegacyKeyForRotation,
+  allowLegacyKeyForBackfill,
   type SecretKeySignal,
 } from "@/lib/crypto/secret-storage";
 import { checkRotationKey, classifyValue } from "@/lib/crypto/secret-key-rotation";
@@ -42,11 +42,11 @@ function setEnv(vars: Record<string, string | undefined>): void {
 
 /** A token exactly as the pre-keyring code wrote it (3 segments, no key id). */
 function asRotation(fn: () => void): void {
-  allowLegacyKeyForRotation();
+  allowLegacyKeyForBackfill();
   try {
     fn();
   } finally {
-    allowLegacyKeyForRotation(false);
+    allowLegacyKeyForBackfill(false);
   }
 }
 
@@ -143,12 +143,17 @@ describe("decrypt", () => {
     });
   });
 
-  test("only the rotation script turns the legacy key back on", () => {
-    const callers = execSync("git grep -l allowLegacyKeyForRotation -- src scripts", { cwd: join(__dirname, "../../../.."), encoding: "utf8" })
+  test("only the operator backfill scripts turn the legacy key back on", () => {
+    const callers = execSync("git grep -l allowLegacyKeyForBackfill -- src scripts", { cwd: join(__dirname, "../../../.."), encoding: "utf8" })
       .split("\n")
       .filter(Boolean)
       .filter((f) => !f.includes("__tests__/"));
-    expect(callers.sort()).toEqual(["scripts/rotate-secret-key.ts", "src/lib/crypto/secret-storage.ts"]);
+    expect(callers.sort()).toEqual([
+      "scripts/encrypt-graph-tokens.ts",
+      "scripts/rotate-secret-key.ts",
+      "scripts/seal-at-rest-secrets.ts",
+      "src/lib/crypto/secret-storage.ts",
+    ]);
   });
 
   test("a value from a key that is no longer in the ring reads as unavailable", () => {

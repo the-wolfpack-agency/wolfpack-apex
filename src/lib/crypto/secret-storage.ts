@@ -12,8 +12,8 @@
  *   legacy    The original derivation: sha256("secret-storage:v1:" +
  *             (INSTINCT_JWT_SECRET ?? "instinct-dev-only")). Once a primary is
  *             set, the app never opens a value with it: the key derives from a
- *             string in this public repo. Only the rotation backfill opts in
- *             (allowLegacyKeyForRotation) so a deployment that began without a
+ *             string in this public repo. Only the operator backfills opt in
+ *             (allowLegacyKeyForBackfill) so a deployment that began without a
  *             primary can still move its legacy values under one
  *             (docs/security/at-rest-key-rotation.md).
  *
@@ -175,12 +175,13 @@ function signalOnce(key: string, signal: SecretKeySignal): void {
 }
 
 let _cachedKeyring: Keyring | null = null;
-/* Off in the app. Only scripts/rotate-secret-key.ts turns it on. */
+/* Off in the app. Only the operator backfill scripts turn it on
+   (rotate-secret-key, seal-at-rest-secrets, encrypt-graph-tokens). */
 let _legacyForRotation = false;
 
 /** Let this process open legacy values while a primary is set. For the
- *  rotation backfill only: the app must never call this. */
-export function allowLegacyKeyForRotation(on = true): void {
+ *  operator backfill scripts only: the app must never call this. */
+export function allowLegacyKeyForBackfill(on = true): void {
   _legacyForRotation = on;
 }
 

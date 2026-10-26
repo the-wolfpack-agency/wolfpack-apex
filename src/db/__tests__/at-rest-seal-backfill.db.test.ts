@@ -16,7 +16,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Client } from "pg";
 import { requireLocalTestDatabase } from "./db-test-safety";
-import { encryptSecret, decryptSecretWithInfo, secretKeyId, __resetSecretKeyCacheForTests, setSecretKeySignalSink } from "@/lib/crypto/secret-storage";
+import { encryptSecret, decryptSecretWithInfo, secretKeyId, __resetSecretKeyCacheForTests, setSecretKeySignalSink, allowLegacyKeyForBackfill } from "@/lib/crypto/secret-storage";
 import { SEAL_TARGETS, sealAtRest } from "@/lib/crypto/at-rest-seal-backfill";
 
 const sealQboTokens = (db: Client, opts: { apply: boolean }) => sealAtRest(db, SEAL_TARGETS.qbo_tokens, opts);
@@ -43,6 +43,7 @@ describeIfDb("at-rest sealing backfill", () => {
 
   beforeAll(async () => {
     setSecretKeySignalSink(() => {});
+    allowLegacyKeyForBackfill(); // as scripts/seal-at-rest-secrets.ts does
     db = new Client({ connectionString: requireLocalTestDatabase(URL) });
     await db.connect();
     for (const t of TABLES) await db.query(`DROP TABLE IF EXISTS ${t} CASCADE`);
