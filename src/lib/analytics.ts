@@ -1637,6 +1637,9 @@ export type InstinctEventType =
   | "quickbooks.connected"
   | "quickbooks.disconnected"
   | "quickbooks.token_refreshed"
+  /* QuickBooks tokens were not stored. Metadata: { realm_id, code:
+     "seal_failed" (refused rather than written readably) | "db_error" }. */
+  | "quickbooks.token_store_failed"
   | "quickbooks.sync_completed"
   // Microsoft Graph
   | "microsoft.api_called"
@@ -1752,6 +1755,24 @@ export type InstinctEventType =
   /* A sealed Graph token failed to authenticate on read (tampered, or the key
      changed). The connection reads as unavailable. Metadata: { user_email, field }. */
   | "security.graph_token_decrypt_failed"
+  /* A QuickBooks token row was sealed at rest (AES-256-GCM).
+     Metadata: { realm_id, source: "lazy_read" | "refresh_write" | "operator_script" }. */
+  | "security.qbo_token_encrypted"
+  /* A sealed QuickBooks token failed to authenticate on read (tampered, or the
+     key changed). The connection reads as unavailable. Metadata: { realm_id, field }. */
+  | "security.qbo_token_decrypt_failed"
+  /* A delegation issuer's hs256 secret was sealed at rest (AES-256-GCM).
+     Metadata: { workspace_id, issuer, source: "lazy_read" | "operator_script" }. */
+  | "security.delegation_secret_encrypted"
+  /* A sealed delegation issuer secret failed to authenticate on read. The
+     issuer's delegations read as "claimed". Metadata: { workspace_id, issuer }. */
+  | "security.delegation_secret_decrypt_failed"
+  /* A delegation issuer was not registered because its secret could not be
+     sealed at rest. Metadata: { workspace_id, issuer, code: "seal_failed" }. */
+  | "forcefield.delegation_issuer_store_failed"
+  /* Team invite tokens were converted to their SHA-256 hash at rest by the
+     operator backfill. Metadata: { hashed, already_hashed, source: "operator_script" }. */
+  | "security.invite_tokens_hashed"
   /* At-rest keyring (src/lib/crypto/secret-storage.ts). Each is emitted ONCE
      per process and never carries key material, plaintext or ciphertext.
      secret_key_primary_active { primary_kid, previous_count, invalid_previous }:

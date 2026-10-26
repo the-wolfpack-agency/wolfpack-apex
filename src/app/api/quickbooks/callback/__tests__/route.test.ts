@@ -57,11 +57,24 @@ describe("quickbooks callback redirects to / (dashboard route group root)", () =
     mockExchangeCode.mockResolvedValue({
       access_token: "a", refresh_token: "r", realm_id: "r1", expires_at: "2030-01-01",
     });
-    mockStoreTokens.mockResolvedValue(undefined);
+    mockStoreTokens.mockResolvedValue(true);
     mockFetchCompanyInfo.mockResolvedValue({ companyName: "Acme" });
     const res = await GET(get("https://x.test/api/quickbooks/callback?code=c&realmId=r1"));
     const u = new URL(res.headers.get("location")!);
     expect(u.pathname).toBe("/");
     expect(u.searchParams.get("qbo")).toBe("connected");
+  });
+
+  test("a refused token store (cannot be sealed) is not reported as connected", async () => {
+    mockExchangeCode.mockResolvedValue({
+      access_token: "a", refresh_token: "r", realm_id: "r1", expires_at: "2030-01-01",
+    });
+    mockStoreTokens.mockResolvedValue(false);
+    const res = await GET(get("https://x.test/api/quickbooks/callback?code=c&realmId=r1"));
+    const u = new URL(res.headers.get("location")!);
+    expect(u.pathname).toBe("/");
+    expect(u.searchParams.get("qbo")).toBe("error");
+    expect(u.searchParams.get("detail")).toBe("Token storage failed");
+    expect(mockFetchCompanyInfo).not.toHaveBeenCalled();
   });
 });

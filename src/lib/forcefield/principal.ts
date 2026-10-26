@@ -23,6 +23,8 @@
  * verification agree byte-for-byte instead of drifting in prose.
  */
 import { hasDatabase, query, safeQuery } from "@/lib/db";
+import { trackEvent } from "@/lib/analytics";
+import { openStoredToken, sealStoredToken } from "@/lib/crypto/graph-token-storage";
 import { verifyDelegationSignature } from "@/lib/ogiam/delegate";
 import { verifyEs256, type EcPublicJwk } from "@/lib/ogiam/signing";
 
@@ -223,14 +225,23 @@ export async function verifyPresentedDelegation(
 
 // ── Issuer registry (workspace-scoped) ───────────────────────────────────────
 
-/** Load one trusted issuer for a workspace, or null. Never throws. */
+/**
+ * Load one trusted issuer for a workspace, or null. Never throws.
+ *
+ * The hs256 secret is sealed at rest under the at-rest keyring
+ * (secret-storage.ts), like the Graph and QuickBooks tokens. A sealed value
+ * that fails to authenticate (tampered, or the key changed) is NOT used: the
+ * issuer comes back with no secret, so its delegations read as "claimed",
+ * never "verified", and the failure is reported. A row not sealed yet is
+ * read and sealed in place.
+ */
 export async function getDelegationIssuer(
   workspaceId: string,
   issuer: string,
 ): Promise<DelegationIssuer | null> {
   if (!hasDatabase()) return null;
-  const res = await safeQuery<{ issuer: string; algorithm: string; secret: string | null; public_key: Record<string, unknown> | null; allowed_scopes: string[] }>(
-    `SELECT issuer, algorithm, secret, public_key, allowed_scopes
+  const res = await safeQuery<{ id: string; issuer: string; algorithm: string; secret: string | null; public_key: Record<string, unknown> | null; allowed_scopes: string[] }>(
+    `SELECT id::text AS id, issuer, algorithm, secret, public_key, allowed_scopes
        FROM instinct_delegation_issuers
       WHERE workspace_id = $1 AND issuer = $2
       LIMIT 1`,
@@ -239,7 +250,38 @@ export async function getDelegationIssuer(
   const row = res?.rows[0];
   if (!row) return null;
   const algorithm = row.algorithm === "es256" ? "es256" : row.algorithm === "ml-dsa-65-hybrid" ? "ml-dsa-65-hybrid" : "hs256";
-  return { issuer: row.issuer, algorithm, secret: row.secret, publicKey: row.public_key, allowedScopes: row.allowed_scopes ?? [] };
+  const opened = openStoredToken(row.secret);
+  let secret: string | null = null;
+  if (!opened.ok) {
+    trackEvent("security.delegation_secret_decrypt_failed", "system", "system", { workspace_id: workspaceId, issuer: row.issuer });
+  } else {
+    secret = opened.value;
+    if (opened.format === "legacy_plaintext" && opened.value) {
+      await resealIssuerSecret(workspaceId, row.id, row.issuer, row.secret as string, opened.value);
+    }
+  }
+  return { issuer: row.issuer, algorithm, secret, publicKey: row.public_key, allowedScopes: row.allowed_scopes ?? [] };
+}
+
+/**
+ * Re-seal an issuer secret in place, conditional on the row still holding the
+ * value just read so a concurrent rotation always wins. Best effort: a failed
+ * re-seal never fails the read. Records security.delegation_secret_encrypted
+ * only when a row was rewritten.
+ */
+async function resealIssuerSecret(workspaceId: string, id: string, issuer: string, stored: string, value: string): Promise<void> {
+  try {
+    const res = await query(
+      `UPDATE instinct_delegation_issuers SET secret = $1
+        WHERE id::text = $2 AND workspace_id = $3 AND secret = $4`,
+      [sealStoredToken(value), id, workspaceId, stored],
+    );
+    if ((res.rowCount ?? 0) > 0) {
+      trackEvent("security.delegation_secret_encrypted", "system", "system", { workspace_id: workspaceId, issuer, source: "lazy_read" });
+    }
+  } catch {
+    /* next read tries again */
+  }
 }
 
 /** List a workspace's trusted issuers WITHOUT their secrets (for the admin UI). */
@@ -262,6 +304,8 @@ export async function listDelegationIssuers(
   }));
 }
 
+export type RegisterIssuerResult = { ok: true } | { ok: false; reason: "secret_seal_failed" };
+
 /** Register (or rotate) a trusted issuer for a workspace. Upsert on (ws, issuer). */
 export async function registerDelegationIssuer(input: {
   workspaceId: string;
@@ -273,17 +317,34 @@ export async function registerDelegationIssuer(input: {
   publicKey?: Record<string, unknown>;
   allowedScopes?: string[];
   createdBy?: string;
-}): Promise<void> {
-  if (!hasDatabase()) return;
+}): Promise<RegisterIssuerResult> {
+  if (!hasDatabase()) return { ok: true };
   const algorithm = input.publicKey ? "es256" : "hs256";
+  /* SEALED AT REST. An hs256 secret is encrypted under the at-rest keyring
+     before it is written. If it cannot be sealed the registration is refused
+     rather than stored readably. */
+  let sealedSecret: string | null = null;
+  if (input.secret) {
+    try {
+      sealedSecret = sealStoredToken(input.secret);
+    } catch {
+      trackEvent("forcefield.delegation_issuer_store_failed", input.createdBy ?? "system", "system", {
+        workspace_id: input.workspaceId,
+        issuer: input.issuer,
+        code: "seal_failed",
+      });
+      return { ok: false, reason: "secret_seal_failed" };
+    }
+  }
   await query(
     `INSERT INTO instinct_delegation_issuers (workspace_id, issuer, algorithm, secret, public_key, allowed_scopes, created_by)
      VALUES ($1, $2, $3, $4, $5, $6, $7)
      ON CONFLICT (workspace_id, issuer) DO UPDATE
        SET algorithm = EXCLUDED.algorithm, secret = EXCLUDED.secret, public_key = EXCLUDED.public_key,
            allowed_scopes = EXCLUDED.allowed_scopes, updated_at = now()`,
-    [input.workspaceId, input.issuer, algorithm, input.secret ?? null, input.publicKey ? JSON.stringify(input.publicKey) : null, input.allowedScopes ?? [], input.createdBy ?? null],
+    [input.workspaceId, input.issuer, algorithm, sealedSecret, input.publicKey ? JSON.stringify(input.publicKey) : null, input.allowedScopes ?? [], input.createdBy ?? null],
   );
+  return { ok: true };
 }
 
 /**

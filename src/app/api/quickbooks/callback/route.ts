@@ -49,9 +49,17 @@ export async function GET(req: NextRequest) {
   // Fetch company name to store alongside tokens
   // We temporarily need to set process-level token for the fetch
   let companyName: string | undefined;
+
+  // Store tokens first, then fetch company info. Tokens are sealed at rest; a
+  // store that is refused (cannot be sealed) or fails is not a connection.
+  if (!(await storeTokens(tokens, userId))) {
+    const redirectUrl = new URL("/", req.url);
+    redirectUrl.searchParams.set("qbo", "error");
+    redirectUrl.searchParams.set("detail", "Token storage failed");
+    return NextResponse.redirect(redirectUrl);
+  }
+
   try {
-    // Store tokens first, then fetch company info
-    await storeTokens(tokens, userId);
     clearCache();
 
     const companyInfo = await fetchCompanyInfo();

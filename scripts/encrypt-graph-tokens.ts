@@ -15,6 +15,11 @@
  *     ALREADY sealed (a connector credential or a sealed Graph token). Sealing
  *     under the wrong key would make every token unreadable to the app.
  *     `vercel env pull` redacts sensitive values; a redacted key is refused.
+ *   - When this shell has a primary key (INSTINCT_SECRET_KEY), also refuses
+ *     unless the deployed app is proven to use that same key id (proveAppKey:
+ *     a stored value under it, or the app's security.secret_key_primary_active
+ *     event). Sealed samples that open under the legacy key alone do not prove
+ *     the shell's primary is the app's.
  *   - Each UPDATE is conditional on the row still holding the exact plaintext
  *     read, so a concurrent refresh by the app is never overwritten.
  *   - Prints counts and user ids only. Never prints a token.
@@ -23,9 +28,14 @@
 import "./load-env";
 import { Client } from "pg";
 import { checkKey, planBackfill, type StoredTokenRow } from "../src/lib/crypto/graph-token-backfill";
+import { checkRotationKey, proveAppKey } from "../src/lib/crypto/secret-key-rotation";
+import { setSecretKeySignalSink } from "../src/lib/crypto/secret-storage";
 
 async function main(): Promise<void> {
   const apply = process.argv.includes("--apply");
+  /* This process is not the app: its keyring must never report itself as the
+     deployment, or proveAppKey would accept the shell's own report. */
+  setSecretKeySignalSink(() => {});
   const url = process.env.DATABASE_URL;
   if (!url) {
     console.error("DATABASE_URL is not set.");
@@ -49,7 +59,13 @@ async function main(): Promise<void> {
       /* table absent in this environment: rely on sealed Graph tokens alone */
     }
 
-    const key = checkKey(process.env, samples);
+    const sampleCheck = checkKey(process.env, samples);
+    let key: typeof sampleCheck | { ok: false; reason: "app_key_not_observed" | "app_reports_different_key" } = sampleCheck;
+    const primary = checkRotationKey(process.env);
+    if (sampleCheck.ok && primary.ok) {
+      const proof = await proveAppKey(db, primary.primaryKid);
+      if (!proof.ok) key = proof;
+    }
     const plan = planBackfill(rows);
     console.log(`[encrypt-graph-tokens] rows=${plan.total} already_sealed=${plan.alreadySealed} to_seal=${plan.updates.length} unreadable=${plan.unreadable.length}`);
     if (plan.unreadable.length > 0) console.log(`  unreadable (sealed but not openable with this key): ${plan.unreadable.join(", ")}`);

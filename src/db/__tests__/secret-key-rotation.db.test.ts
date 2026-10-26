@@ -41,7 +41,7 @@ const legacyMode = () => setKeys({});
 const previousMode = () => setKeys({ INSTINCT_SECRET_KEY: KEY_PREVIOUS });
 const primaryMode = () => setKeys({ INSTINCT_SECRET_KEY: KEY_PRIMARY, INSTINCT_SECRET_KEY_PREVIOUS: KEY_PREVIOUS });
 
-const MIGRATIONS = ["136_connector_credentials.sql", "138_connector_oauth.sql", "216_admin_mfa.sql", "250_workspace_model_keys.sql", "253_tenant_registry.sql"];
+const MIGRATIONS = ["136_connector_credentials.sql", "138_connector_oauth.sql", "216_admin_mfa.sql", "250_workspace_model_keys.sql", "253_tenant_registry.sql", "261_delegation_issuers.sql", "265_delegation_issuer_asymmetric.sql"];
 
 describeIfDb("at-rest key rotation backfill", () => {
   let db: Client;
@@ -62,6 +62,19 @@ describeIfDb("at-rest key rotation backfill", () => {
         access_token  TEXT NOT NULL,
         refresh_token TEXT NOT NULL,
         expires_at    TIMESTAMPTZ NOT NULL,
+        connected_by  TEXT NOT NULL,
+        connected_at  TIMESTAMPTZ DEFAULT NOW(),
+        updated_at    TIMESTAMPTZ DEFAULT NOW()
+      )`);
+    /* Same shape as migrations 004 + 042 + 047 (QuickBooks tokens). */
+    await db.query(`
+      CREATE TABLE instinct_qbo_tokens (
+        id            TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+        realm_id      TEXT NOT NULL UNIQUE,
+        access_token  TEXT NOT NULL,
+        refresh_token TEXT NOT NULL,
+        expires_at    TIMESTAMPTZ NOT NULL,
+        company_name  TEXT,
         connected_by  TEXT NOT NULL,
         connected_at  TIMESTAMPTZ DEFAULT NOW(),
         updated_at    TIMESTAMPTZ DEFAULT NOW()
@@ -104,6 +117,13 @@ describeIfDb("at-rest key rotation backfill", () => {
               ('b@example.test', 'raw-legacy-plaintext', 'raw-legacy-plaintext-r', NOW() + INTERVAL '1 hour', 'u-b')`,
       [encryptSecret("eyJ.access"), encryptSecret("0.A.refresh")],
     );
+    await db.query(
+      `INSERT INTO instinct_qbo_tokens (realm_id, access_token, refresh_token, expires_at, connected_by)
+       VALUES ('realm-sealed', $1, $2, NOW() + INTERVAL '1 hour', 'u-a'),
+              ('realm-plain', 'unsealed-qbo-a', 'unsealed-qbo-r', NOW() + INTERVAL '1 hour', 'u-b')`,
+      [encryptSecret("eyJ.qbo-access"), encryptSecret("AB11.qbo-refresh")],
+    );
+    await db.query(`INSERT INTO instinct_delegation_issuers (workspace_id, issuer, algorithm, secret) VALUES ('ws-1', 'acme', 'hs256', $1)`, [encryptSecret("shared-issuer-secret")]);
     await db.query(`INSERT INTO instinct_admin_mfa (id, user_id, workspace_id, encrypted_secret) VALUES ('m1', 'u-a', 'ws-1', $1)`, [encryptSecret("JBSWY3DPEHPK3PXP")]);
     await db.query(`INSERT INTO instinct_tenant_registry (tenant_id, org_name, status, db_url_encrypted) VALUES ('t-acme-ab12', 'Acme', 'active', $1)`, [
       encryptSecret("postgres://u:p@h/db"),
@@ -129,14 +149,17 @@ describeIfDb("at-rest key rotation backfill", () => {
     expect(by("instinct_connector_credentials", "refresh_token_enc")).toMatchObject({ legacy: 1 });
     expect(by("instinct_ms_tokens", "access_token")).toMatchObject({ legacy: 1, plaintext: 1 });
     expect(by("instinct_workspace_model_keys", "encrypted_key")).toMatchObject({ previous: 1 });
-    expect(totals(counts)).toEqual({ primary: 0, previous: 1, legacy: 7, plaintext: 2, unreadable: 0 });
+    expect(by("instinct_qbo_tokens", "access_token")).toMatchObject({ present: true, legacy: 1, plaintext: 1 });
+    expect(by("instinct_qbo_tokens", "refresh_token")).toMatchObject({ present: true, legacy: 1, plaintext: 1 });
+    expect(by("instinct_delegation_issuers", "secret")).toMatchObject({ present: true, legacy: 1 });
+    expect(totals(counts)).toEqual({ primary: 0, previous: 1, legacy: 10, plaintext: 4, unreadable: 0 });
   });
 
   it("rotates legacy and previous values to the primary; every value still opens", async () => {
     await seedAll();
     const r = await rotateSecrets(db, ROTATION_TARGETS, { batchSize: 2 });
-    expect(r).toMatchObject({ rotated: 8, skippedConcurrent: 0, unreadable: 0, roundTripFailures: 0 });
-    expect(totals(await surveySecrets(db))).toEqual({ primary: 8, previous: 0, legacy: 0, plaintext: 2, unreadable: 0 });
+    expect(r).toMatchObject({ rotated: 11, skippedConcurrent: 0, unreadable: 0, roundTripFailures: 0 });
+    expect(totals(await surveySecrets(db))).toEqual({ primary: 11, previous: 0, legacy: 0, plaintext: 4, unreadable: 0 });
 
     const cred = (await db.query(`SELECT auth_header_enc, refresh_token_enc FROM instinct_connector_credentials WHERE connector_name = 'c1'`)).rows[0];
     expect(cred.auth_header_enc.startsWith(`v1.${PRIMARY_KID}.`)).toBe(true);
@@ -144,12 +167,18 @@ describeIfDb("at-rest key rotation backfill", () => {
     expect(decryptSecret(cred.refresh_token_enc)).toBe("refresh-one");
     const ms = (await db.query(`SELECT access_token, refresh_token FROM instinct_ms_tokens WHERE connected_by = 'u-b'`)).rows[0];
     expect(ms).toEqual({ access_token: "raw-legacy-plaintext", refresh_token: "raw-legacy-plaintext-r" }); // plaintext untouched
+    const qbo = (await db.query(`SELECT access_token, refresh_token FROM instinct_qbo_tokens ORDER BY realm_id`)).rows;
+    expect(qbo[0]).toEqual({ access_token: "unsealed-qbo-a", refresh_token: "unsealed-qbo-r" }); // realm-plain untouched
+    expect(qbo[1].access_token.startsWith(`v1.${PRIMARY_KID}.`)).toBe(true);
+    expect(decryptSecret(qbo[1].access_token)).toBe("eyJ.qbo-access");
+    expect(decryptSecret(qbo[1].refresh_token)).toBe("AB11.qbo-refresh");
     const mk = (await db.query(`SELECT encrypted_key FROM instinct_workspace_model_keys`)).rows[0].encrypted_key;
     expect(decryptSecretWithInfo(mk)).toMatchObject({ ok: true, value: "sk-previous", keyClass: "primary" });
 
     /* With only the primary in the ring (legacy fallback removed later), all rotated values open. */
     setKeys({ INSTINCT_SECRET_KEY: KEY_PRIMARY, INSTINCT_JWT_SECRET: "a-different-jwt-secret-so-legacy-is-useless" });
     expect(decryptSecret((await db.query(`SELECT encrypted_secret FROM instinct_admin_mfa`)).rows[0].encrypted_secret)).toBe("JBSWY3DPEHPK3PXP");
+    expect(decryptSecret((await db.query(`SELECT secret FROM instinct_delegation_issuers`)).rows[0].secret)).toBe("shared-issuer-secret");
     expect(decryptSecret((await db.query(`SELECT db_url_encrypted FROM instinct_tenant_registry`)).rows[0].db_url_encrypted)).toBe("postgres://u:p@h/db");
   });
 

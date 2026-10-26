@@ -13,6 +13,7 @@ import { hashPassword } from "@/lib/auth";
 import { trackEvent } from "@/lib/analytics";
 import { randomUUID } from "crypto";
 import { recordAudit, extractRequestMetadata } from "@/lib/audit-log";
+import { INVITE_BY_TOKEN_SQL, inviteLookupParams } from "@/lib/team/invite-tokens";
 
 /**
  * Is this write failure a genuine duplicate email?
@@ -45,6 +46,11 @@ export async function POST(req: NextRequest) {
   // Look up the invite (migration 134 added expires_at — read it so we
   // can return a clear 410 Gone instead of a generic 404 when the
   // window has lapsed; the UI hints at "ask your admin to resend.")
+  //
+  // Invite tokens are hashed at rest (SHA-256); the lookup and its rollout
+  // rule live in src/lib/team/invite-tokens.ts.
+  const lookup = inviteLookupParams(String(body.token));
+  const presentedHash = lookup[0];
   const invite = await safeQuery<{
     id: string;
     email: string;
@@ -54,8 +60,8 @@ export async function POST(req: NextRequest) {
     expires_at: string | Date | null;
     workspace_id: string | null;
   }>(
-    "SELECT id, email, role, status, invited_by, expires_at, workspace_id FROM instinct_invites WHERE token = $1 LIMIT 1",
-    [body.token],
+    INVITE_BY_TOKEN_SQL,
+    lookup,
   );
 
   /* `fromCache=true` from safeQuery means EITHER (a) DATABASE_URL is
@@ -182,8 +188,10 @@ export async function POST(req: NextRequest) {
     memberId = upsert.rows[0]?.id ?? newMemberId;
 
     await writeQuery(
-      "UPDATE instinct_invites SET status = 'accepted', accepted_at = NOW() WHERE id = $1",
-      [inv.id],
+      /* Store the hash on accept too, so an invite accepted during the rollout
+         window holds only its hash from here on. */
+      "UPDATE instinct_invites SET status = 'accepted', accepted_at = NOW(), token = $2 WHERE id = $1",
+      [inv.id, presentedHash],
     );
   } catch (err) {
     const wqe = err instanceof WriteQueryError ? err : null;
