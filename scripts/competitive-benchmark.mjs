@@ -75,6 +75,34 @@ function argOf(flag, envKey, fallback) {
 }
 
 /** Run a command, capturing stdout/stderr; never throws (returns the result). */
+/* Our own Forcefield sites are in the consent corpus. Without this header every
+   weekly run reads as a real attack burst (it was 66% of all "hostile" sessions
+   in the 2026-10-26 earliest-signal analysis). The sites hold the same
+   FORCEFIELD_SYNTHETIC_TOKEN and record these requests as synthetic. */
+const SYNTHETIC_HEADER = "x-forcefield-synthetic";
+const SYNTHETIC_TOKEN = (process.env.FORCEFIELD_SYNTHETIC_TOKEN ?? "").trim();
+const syntheticOn = SYNTHETIC_TOKEN.length >= 32;
+/* The token goes ONLY to our own Forcefield hosts. The consent corpus also holds
+   third-party targets, which must never receive it. */
+const OWN_FORCEFIELD_HOSTS = new Set(["ogiam.com", "www.ogiam.com", "wolfpack-instinct.vercel.app", "weekendwithporsche.com", "www.weekendwithporsche.com", "aidanmulready.com", "www.aidanmulready.com"]);
+function isOwnForcefieldHost(url) {
+  try {
+    return OWN_FORCEFIELD_HOSTS.has(new URL(url).hostname.toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
+function zapSyntheticArgs(url) {
+  if (!syntheticOn || !isOwnForcefieldHost(url)) return [];
+  const r = "replacer.full_list(0)";
+  return ["-z", [`-config ${r}.description=ff-synthetic`, `-config ${r}.enabled=true`, `-config ${r}.matchtype=REQ_HEADER`, `-config ${r}.matchstr=${SYNTHETIC_HEADER}`, `-config ${r}.regex=false`, `-config ${r}.replacement=${SYNTHETIC_TOKEN}`].join(" ")];
+}
+
+function nucleiSyntheticArgs(url) {
+  return syntheticOn && isOwnForcefieldHost(url) ? ["-H", `${SYNTHETIC_HEADER}: ${SYNTHETIC_TOKEN}`] : [];
+}
+
 function run(cmd, args, opts = {}) {
   return spawnSync(cmd, args, { encoding: "utf8", timeout: 600_000, ...opts });
 }
@@ -102,6 +130,7 @@ function runZap(url) {
     "-J",
     reportName,
     "-I", // do not fail the process on warnings
+    ...zapSyntheticArgs(url),
   ]);
   const reportPath = join(outDir, reportName);
   if (!existsSync(reportPath)) {
@@ -144,6 +173,9 @@ function runNuclei(url) {
     // Read-only floor: exclude any template tagged intrusive/destructive/fuzz/dos.
     "-exclude-tags",
     "intrusive,dos,fuzz,destructive",
+    // -omit-raw: never echo request/response (which would carry the header) to stdout.
+    "-omit-raw",
+    ...nucleiSyntheticArgs(url),
   ]);
   if (res.status !== 0 && !res.stdout) {
     console.warn(`[competitive] nuclei failed for ${url} (exit ${res.status}): ${res.stderr ?? ""}`);
@@ -171,6 +203,7 @@ function runNuclei(url) {
 const TOOL_RUNNERS = { zap: runZap, nuclei: runNuclei };
 
 async function main() {
+  if (!syntheticOn) console.warn("[competitive] FORCEFIELD_SYNTHETIC_TOKEN not set: our own Forcefield sites will record this run as a real attack");
   const baseUrl = argOf("--base", "BASE_URL", "https://wolfpack-instinct.vercel.app").replace(/\/$/, "");
   const secret = argOf("--secret", "CRON_SECRET", "");
   const toolsArg = argOf("--tools", "COMPETITIVE_TOOLS", "zap,nuclei");
