@@ -65,12 +65,20 @@ function mockAlertEmail(page: import("@playwright/test").Page) {
   });
 }
 
+/** The "Is your server exposed?" panel (tests/e2e/forcefield-server-exposure.spec.ts covers its states). */
+function mockExposure(page: import("@playwright/test").Page) {
+  return page.route(/\/api\/forcefield\/my-exposure$/, async (route: Route) => {
+    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, report: null }) });
+  });
+}
+
 test.describe("Forcefield client dashboard", () => {
   test("connects with a token and renders the client's scoped numbers", async ({ page }) => {
     const getFailures = collectConsoleAndNetworkFailures(page);
     await mockMyStats(page, 200, STATS);
     await mockMySetup(page);
     await mockAlertEmail(page);
+    await mockExposure(page);
 
     await page.goto(`${target.baseUrl}${PATH}`, { waitUntil: "domcontentloaded", timeout: 20_000 });
 
@@ -126,6 +134,7 @@ test.describe("Forcefield client dashboard", () => {
     await page.route(/\/api\/forcefield\/my-setup/, (route: Route) =>
       route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, tenant: STATS.tenant, quickstart: null, connection: { connected: true, everConnected: true, lastEventAt: "2026-10-26T00:00:00Z" } }) }));
     await mockAlertEmail(page);
+    await mockExposure(page);
     await page.addInitScript(() => window.localStorage.setItem("ff_dashboard_token", "eyJhbGciOiJIUzI1NiJ9.e2e.session"));
 
     const res = await page.goto(`${target.baseUrl}${PATH}`, { waitUntil: "domcontentloaded", timeout: 20_000 });
@@ -151,6 +160,7 @@ test.describe("Forcefield client dashboard", () => {
     await mockMyStats(page, 200, { ...STATS, activity: { sinceIso: "x", counts: { agentsSeen: 0, welcomed: 0, slowed: 0, blocked: 0, caught: 0 }, agents: [] } });
     await mockMySetup(page);
     await mockAlertEmail(page);
+    await mockExposure(page);
     await page.addInitScript(() => window.localStorage.setItem("ff_dashboard_token", "ff_e2e_token"));
     await page.goto(`${target.baseUrl}${PATH}`, { waitUntil: "domcontentloaded", timeout: 20_000 });
     await expect(page.getByTestId("ff-visitors-empty")).toContainText("No automated agents yet");

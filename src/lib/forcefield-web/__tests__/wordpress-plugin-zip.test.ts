@@ -43,7 +43,7 @@ describe("wordpress plugin zip", () => {
   it("holds every plugin file under one ogiam-forcefield/ folder, nothing else", () => {
     expect(entries[0].name).toBe(`${PLUGIN_SLUG}/`);
     for (const e of entries) expect(e.name.startsWith(`${PLUGIN_SLUG}/`)).toBe(true);
-    for (const f of ["ogiam-forcefield.php", "readme.txt", "includes/connect.php"]) expect(files).toContain(f);
+    for (const f of ["ogiam-forcefield.php", "readme.txt", "includes/connect.php", "includes/inventory.php"]) expect(files).toContain(f);
     expect(entries.some((e) => /\/\./.test(e.name))).toBe(false);
   });
 

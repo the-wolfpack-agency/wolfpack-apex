@@ -115,6 +115,9 @@ function ogiam_ff_try_claim() {
         update_option('ogiam_ff_linked_at', time(), false);
         delete_option('ogiam_ff_connect');
         wp_clear_scheduled_hook('ogiam_ff_claim_event');
+        // Linked: report the server's software versions now, then daily (includes/inventory.php).
+        ogiam_ff_send_inventory();
+        ogiam_ff_schedule_inventory();
         return true;
     }
     if ($code === 401 || $code === 409 || $code === 422) {
@@ -219,6 +222,8 @@ add_action('admin_post_ogiam_ff_connect_action', 'ogiam_ff_handle_connect_action
 
 function ogiam_ff_deactivate() {
     wp_clear_scheduled_hook('ogiam_ff_claim_event');
+    wp_clear_scheduled_hook('ogiam_ff_inventory_event');
+    wp_clear_scheduled_hook('ogiam_ff_inventory_once');
 }
 
 /** A plain-words reason for a failed ownership check. */
@@ -253,6 +258,7 @@ function ogiam_ff_render_connect_panel() {
     if (!empty($token)) {
         echo '<h2>' . esc_html__('Connected', 'ogiam-forcefield') . '</h2>';
         echo '<p>' . esc_html__('Forcefield is watching this site. It starts in watch mode: it records and reports automated visitors and never blocks one until you turn blocking on below.', 'ogiam-forcefield') . '</p>';
+        echo '<p id="ogiam-ff-server-check">' . esc_html(ogiam_ff_inventory_status_text()) . '</p>';
         echo '<p><a class="button button-primary" target="_blank" rel="noopener" href="' . esc_url($dashboard) . '">' . esc_html__('Open your Forcefield dashboard', 'ogiam-forcefield') . '</a></p>';
         echo '</div>';
         return;

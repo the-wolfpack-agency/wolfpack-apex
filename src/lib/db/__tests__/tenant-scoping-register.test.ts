@@ -103,6 +103,13 @@ const GLOBAL_BY_DESIGN: readonly string[] = [
      impossible. It holds routing state only (hostname, tenant id, DNS
      verification), no client business data. */
   "forcefield_edge_hostnames",
+  /* Forcefield server inventory (migration 302), a child of forcefield_tenants
+     like forcefield_edge_hostnames above: one row per Forcefield tenant, keyed
+     by tenant_id (PRIMARY KEY, FK ON DELETE CASCADE), which IS the Forcefield
+     isolation key; every read and write filters on it. It has no workspace_id
+     because Forcefield tenants are not Instinct workspaces. It holds software
+     version strings only, no client business data. */
+  "forcefield_server_inventory",
   /* Dedupe store for Forcefield-web hostile-signal alerts, computed over the
      GLOBAL site_analytics_events stream (public-site protection). A public-site
      attack has no tenant to attribute, so per-workspace rows would be WRONG: two
@@ -343,8 +350,10 @@ describe("every table declares whether it is tenant-scoped", () => {
        exists before the tenant it may provision). Raised to 9 on 2026-10-26 for
        forcefield_edge_hostnames, the Edge hostname -> tenant map (a DNS name has
        one owner; it is keyed by the global hostname, a child of
-       forcefield_tenants). */
-    expect(GLOBAL_BY_DESIGN.length).toBeLessThanOrEqual(9);
+       forcefield_tenants). Raised to 10 on 2026-10-27 for
+       forcefield_server_inventory, one row per Forcefield tenant keyed by
+       tenant_id (a child of forcefield_tenants, no workspace). */
+    expect(GLOBAL_BY_DESIGN.length).toBeLessThanOrEqual(10);
     for (const table of GLOBAL_BY_DESIGN) {
       expect(NO_WORKSPACE_COLUMN).not.toContain(table);
     }
