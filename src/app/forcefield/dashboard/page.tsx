@@ -22,6 +22,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { GlassPanel, MetricTile, SectionHeader, ConsoleGrid, StatusPill } from "@/components/console";
 import { AlertEmailPanel } from "@/components/forcefield/AlertEmailPanel";
+import { ServerExposurePanel } from "@/components/forcefield/ServerExposurePanel";
 import { attackLabel } from "@/lib/forcefield-web/attack-labels";
 
 const TOKEN_KEY = "ff_dashboard_token";
@@ -340,6 +341,12 @@ export default function ForcefieldDashboardPage() {
                     </>
                   )}
                 </GlassPanel>
+              </div>
+            )}
+
+            {token && (
+              <div className="mb-6">
+                <ServerExposurePanel token={token} />
               </div>
             )}
 

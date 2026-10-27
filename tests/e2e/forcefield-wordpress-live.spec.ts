@@ -17,12 +17,16 @@
  *   5. The plugin collects its key: the settings page shows Connected.
  *   6. Automated visitors reach the WordPress site; the dashboard shows each
  *      agent, what it did and how Forcefield handled it.
+ *   7. "Is your server exposed?": the plugin reported its server on link, and
+ *      the panel matches the PHP the image really runs (FF_EXPECT_EXPOSURE).
  * Every Instinct page answers 200 with no CSP violation or JS error.
  *
  * Env: FF_WP_URL (http://wp.localtest.me:8080), FF_WP_USER, FF_WP_PASS,
  * FF_OUTBOX_DIR (the dev server's FORCEFIELD_MAIL_OUTBOX_DIR), FF_EMAIL
  * (a thewolfpack.agency address; the build-phase rule), FF_PROOF_DIR (where
- * screenshots and the tenant id are written).
+ * screenshots and the tenant id are written), FF_EXPECT_EXPOSURE (exposed |
+ * ok: the panel state this image's PHP must produce; unset = any reported
+ * state, never the empty or error state).
  */
 import { test, expect, type Page } from "@playwright/test";
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -35,6 +39,7 @@ const PASS = process.env.FF_WP_PASS ?? "";
 const OUTBOX = process.env.FF_OUTBOX_DIR ?? "";
 const EMAIL = process.env.FF_EMAIL ?? "forcefield-wp-proof@thewolfpack.agency";
 const PROOF = process.env.FF_PROOF_DIR ?? "test-results/ff-wp-proof";
+const EXPECT_EXPOSURE = process.env.FF_EXPECT_EXPOSURE ?? "";
 const target = resolveSmokeTarget();
 const site = () => new URL(WP).host;
 
@@ -161,10 +166,30 @@ test("a site owner gets running on Forcefield in two actions", async ({ page, re
   await expect(page.getByTestId("ff-visitors")).toContainText(/Googlebot|googlebot/);
   await expect(page.getByTestId("ff-visitors")).toContainText("sqlmap");
   await shot(page, "6-dashboard-populated");
+
+  // 7. The server inventory the plugin sent on link, matched on read.
+  const panel = page.getByTestId("ff-exposure-report");
+  await expect(panel).toBeVisible({ timeout: 30_000 });
+  const state = await panel.getAttribute("data-state");
+  if (EXPECT_EXPOSURE) expect(state, "the panel state for this image's PHP").toBe(EXPECT_EXPOSURE);
+  else expect(["exposed", "ok", "unknown"]).toContain(state);
+  const php = page.getByTestId("ff-exposure-row").filter({ hasText: "PHP" }).first();
+  await expect(php).toBeVisible();
+  if (EXPECT_EXPOSURE === "exposed") {
+    await expect(php).toHaveAttribute("data-state", "exposed");
+    await expect(page.getByTestId("ff-exposure-fix").first()).toContainText("Your hosting company updates PHP");
+  }
+  await panel.scrollIntoViewIfNeeded();
+  await shot(page, `7-server-exposure-${state}`);
   const stats = await page.evaluate(async () => {
     const r = await fetch("/api/forcefield/my-stats", { headers: { "x-forcefield-token": window.localStorage.getItem("ff_dashboard_token") ?? "" } });
     return r.json();
   });
-  writeFileSync(join(PROOF, "tenant.json"), JSON.stringify({ tenantId: stats.tenant.id, site: site(), counts: stats.activity.counts, agents: stats.activity.agents }, null, 2));
+  const exposure = await page.evaluate(async () => {
+    const r = await fetch("/api/forcefield/my-exposure", { headers: { "x-forcefield-token": window.localStorage.getItem("ff_dashboard_token") ?? "" } });
+    return { status: r.status, body: await r.json() };
+  });
+  expect(exposure.status).toBe(200);
+  writeFileSync(join(PROOF, "tenant.json"), JSON.stringify({ tenantId: stats.tenant.id, site: site(), counts: stats.activity.counts, agents: stats.activity.agents, exposure: exposure.body }, null, 2));
   expect(instinctFailures(), "no CSP violations or JS errors on the Instinct pages").toEqual([]);
 });

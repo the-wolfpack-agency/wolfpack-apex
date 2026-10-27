@@ -48,6 +48,8 @@ const EXCEPTIONS = [
   "src/components/forcefield/AlertEmailPanel", // dashboard alert-address panel; the
                              //   tenant ingest token (x-forcefield-token) is the
                              //   credential, same as the dashboard itself.
+  "src/components/forcefield/ServerExposurePanel", // dashboard "Is your server
+                             //   exposed?" panel; same x-forcefield-token credential.
   "src/app/accept-invite",   // pre-auth: invitee has no session yet
   "src/app/forgot-password", // pre-auth: no session by definition
   "src/app/reset-password",  // pre-auth: token-in-URL flow, no session

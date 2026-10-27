@@ -100,6 +100,10 @@ async function stubApi(page: Page, s: Stub) {
     if (route.request().headers()["x-forcefield-token"] !== TOKEN) return json(route, 401, { ok: false });
     return json(route, 200, { ok: true, tenant: { id: "t-e2e", name: SITE, siteLabel: SITE }, stats: { rangeDays: 30, agentsDetected: 0, welcomed: 0, trapped: 0, probed: 0, payloads: 0, hostile: 0, sitesProtected: 1, attacks: [] } });
   });
+  await page.route(/\/api\/forcefield\/my-exposure$/, async (route) => {
+    if (route.request().headers()["x-forcefield-token"] !== TOKEN) return json(route, 401, { ok: false });
+    return json(route, 200, { ok: true, report: null }); // the server check panel's empty state
+  });
   await page.route(/\/api\/forcefield\/alert-email$/, async (route) => {
     const req = route.request();
     if (req.headers()["x-forcefield-token"] !== TOKEN) return json(route, 401, { ok: false });

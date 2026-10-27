@@ -71,6 +71,7 @@ const KNOWN_DORMANT: Record<string, string> = {
   FF_OUTBOX_DIR: "Local WordPress proof only: the dev server's FORCEFIELD_MAIL_OUTBOX_DIR (ignored in production).",
   FF_EMAIL: "Local WordPress proof only: the Wolfpack address the proof signs up with.",
   FF_PROOF_DIR: "Local WordPress proof only: where its screenshots are written.",
+  FF_EXPECT_EXPOSURE: "Local WordPress proof only: the server-exposure panel state (exposed | ok) the chosen WordPress image's PHP must produce.",
 
   // The platform-scan specs point at a customer's system, by definition per-run.
   TARGET_BASE_URL: "Names an external target to scan; chosen per engagement.",

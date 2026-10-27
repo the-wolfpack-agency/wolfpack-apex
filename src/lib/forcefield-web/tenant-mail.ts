@@ -28,7 +28,7 @@ import { trackEvent } from "@/lib/analytics";
 import { isRecipientAllowed, emailDomain } from "@/lib/forcefield-web/recipient-allowlist";
 
 /** What a tenant email is for (analytics + the outcome record). */
-export type TenantMailPurpose = "confirm" | "first_evidence" | "alert" | "digest";
+export type TenantMailPurpose = "confirm" | "first_evidence" | "alert" | "digest" | "exposure";
 
 export interface TenantMail {
   to: string;

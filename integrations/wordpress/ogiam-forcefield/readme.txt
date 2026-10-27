@@ -4,7 +4,7 @@ Tags: security, bots, ai, firewall, bot-protection
 Requires at least: 6.0
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 0.3.0
+Stable tag: 0.4.0
 License: Proprietary
 
 Protect your site from hostile AI agents and bots. Click Connect, click the emailed link, done. Watch-first and fail-open.
@@ -66,6 +66,13 @@ decides whether a request is a hostile automated action.
   whether the visitor is signed in, and the client IP, which is classified and
   then discarded). No request bodies, cookies or account details are sent.
 
+* Once connected, it also sends the server's software versions when it is
+  linked and then once a day: the PHP version, the WordPress version, the web
+  server software name and version, and the slug and version of each active
+  plugin. Forcefield compares them with the flaws attackers are actively using
+  and shows the result on your dashboard. No content, visitor data, accounts or
+  settings are sent.
+
 Nothing is sent until you click Connect or enter a site key.
 
 == Frequently Asked Questions ==
@@ -115,6 +122,17 @@ part of the request body at the edge, before PHP parses it, and turns the known
 attack shapes away. The same Cloudflare-only inspection covers React2Shell
 (CVE-2025-55182) for sites that serve React Server Components.
 
+= What is the server check? =
+
+Some flaws live in the server software itself. PHP2Shell, for example, triggers
+inside PHP before WordPress or any plugin runs, so no plugin can block it. Once
+connected, the plugin reports your server's PHP, WordPress and active plugin
+versions (versions only) on link and then daily. Your Forcefield dashboard then
+answers "Is your server exposed?": exposed (with who fixes it and how), up to
+date, or could not check (for example a Linux distribution build that may carry
+a fix the version number does not show). A newly found exposure is also emailed
+to your confirmed alert address.
+
 = Can it lock me out of my own site? =
 
 No. A signed-in user is never blocked, in any mode. Saving the plugin's settings
@@ -129,6 +147,13 @@ reverse proxy, choose it under Client IP source. Do not choose a proxy if visito
 can reach your server directly: they could then send a fake IP header.
 
 == Changelog ==
+
+= 0.4.0 =
+* Server check: once connected, the plugin reports the server's PHP, WordPress,
+  web server and active plugin versions (versions only) on link and then daily,
+  so your Forcefield dashboard can tell you when the server runs a version open
+  to an actively exploited flaw such as PHP2Shell, and who fixes it.
+* The settings page shows the result of the last server check.
 
 = 0.3.0 =
 * One-click Connect: no key to copy. The plugin answers a server-issued

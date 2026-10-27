@@ -196,3 +196,68 @@ describe("wordpress plugin one-click connect (includes/connect.php)", () => {
     }
   });
 });
+
+describe("wordpress plugin server check (includes/inventory.php)", () => {
+  const inv = readFileSync(
+    join(process.cwd(), "integrations", "wordpress", "ogiam-forcefield", "includes", "inventory.php"),
+    "utf8",
+  );
+  const connect = readFileSync(
+    join(process.cwd(), "integrations", "wordpress", "ogiam-forcefield", "includes", "connect.php"),
+    "utf8",
+  );
+  const fn = (name: string) => inv.slice(inv.indexOf(`function ${name}(`), inv.indexOf("\n}\n", inv.indexOf(`function ${name}(`)));
+
+  it("is loaded by the main file and blocks direct access", () => {
+    expect(php).toContain("require_once __DIR__ . '/includes/inventory.php';");
+    expect(inv).toMatch(/if \(!defined\('ABSPATH'\)\) \{ exit; \}/);
+  });
+
+  it("sends versions only: exactly the five inventory fields", () => {
+    const body = fn("ogiam_ff_inventory");
+    const keys = [...body.matchAll(/^\s*'([A-Za-z]+)'\s*=>/gm)].map((m) => m[1]).filter((k) => k !== "slug" && k !== "version");
+    expect(keys.sort()).toEqual(["phpVersion", "pluginVersion", "plugins", "serverSoftware", "wordpressVersion"].sort());
+    expect(body).toContain("PHP_VERSION");
+    expect(body).toContain("get_bloginfo('version')");
+    expect(body).toContain("get_option('active_plugins'");
+    // each plugin entry is slug + version, nothing else
+    expect(body).toMatch(/\$plugins\[\] = array\('slug' => \$slug, 'version' => \$version\);/);
+  });
+
+  it("never reads visitor, account or content data", () => {
+    for (const s of ["$_POST", "$_GET", "$_COOKIE", "$_REQUEST", "php://input", "file_get_contents", "get_users", "wp_get_current_user", "get_posts", "HTTP_", "REMOTE_ADDR", "admin_email", "DB_PASSWORD"]) {
+      expect(inv).not.toContain(s);
+    }
+    // the only $_SERVER entry read is the web server software name
+    const serverReads = [...inv.matchAll(/\$_SERVER\['([A-Z_]+)'\]/g)].map((m) => m[1]);
+    expect(new Set(serverReads)).toEqual(new Set(["SERVER_SOFTWARE"]));
+  });
+
+  it("is dark until a site key is set, and authorizes with it as x-edge-token", () => {
+    const send = fn("ogiam_ff_send_inventory");
+    expect(send).toMatch(/if \(empty\(\$token\) \|\| !is_string\(\$token\)\) \{ return 0; \}/);
+    expect(send).toContain("'/api/forcefield/wordpress/inventory'");
+    expect(send).toMatch(/'x-edge-token'\s*=>\s*\$token/);
+    expect(send).toMatch(/update_option\('ogiam_ff_inventory_last', [^;]*, false\)/); // autoload off
+  });
+
+  it("runs on link and then daily via WP-Cron, and clears its cron on deactivation", () => {
+    const claim = connect.slice(connect.indexOf("function ogiam_ff_try_claim("), connect.indexOf("function ogiam_ff_schedule_claim("));
+    expect(claim.indexOf("ogiam_ff_send_inventory();")).toBeGreaterThan(claim.indexOf("update_option('ogiam_ff_token'"));
+    expect(inv).toContain("wp_schedule_event(time() + MINUTE_IN_SECONDS, 'daily', OGIAM_FF_INVENTORY_HOOK)");
+    expect(inv).toContain("add_action(OGIAM_FF_INVENTORY_HOOK, 'ogiam_ff_send_inventory');");
+    expect(connect).toContain("wp_clear_scheduled_hook('ogiam_ff_inventory_event');");
+    expect(connect).toContain("wp_clear_scheduled_hook('ogiam_ff_inventory_once');");
+  });
+
+  it("escapes the status line it shows on the settings page", () => {
+    expect(connect).toContain("esc_html(ogiam_ff_inventory_status_text())");
+    expect(inv).not.toMatch(/\becho\b/);
+  });
+
+  it("is plain PHP 7.4 (no PHP 8-only helpers)", () => {
+    for (const f of ["str_starts_with(", "str_ends_with(", "str_contains(", "match ("]) {
+      expect(inv).not.toContain(f);
+    }
+  });
+});

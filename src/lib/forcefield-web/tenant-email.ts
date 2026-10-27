@@ -3,6 +3,8 @@
  *   - the double opt-in confirmation ("Confirm alerts for <site>"),
  *   - the "first hour" email (sent once, shortly after the first real visitors),
  *   - the daily digest for one tenant's site,
+ *   - the server exposure alert (an actively exploited flaw in the server's PHP
+ *     or a WordPress plugin, from the plugin's daily inventory),
  *   - the footer appended to a tenant's immediate alert (rendered by the shared
  *     alert template with audience "tenant").
  *
@@ -200,6 +202,46 @@ export function renderTenantDigestEmail(input: { site: string; to: string; day: 
       { label: "Payload attacks", value: n(c.payloads) },
     ],
     cta: { label: "Open your Forcefield dashboard", href: dashboardUrl(input.baseUrl) },
+    ...f,
+  });
+}
+
+/** One exposed finding, as the exposure alert needs it (server-exposure.ts ServerFinding). */
+export interface ExposureEmailFinding {
+  productName: string;
+  installed: string | null;
+  flaw: string | null;
+  impact: string | null;
+  fixedVersion: string | null;
+  howToFix: string | null;
+  cves: string[];
+}
+
+/** The "your server is exposed" alert: the server the site runs on carries a
+ *  version that is open to an actively exploited flaw. Plain words: what, why it
+ *  matters, who fixes it and how. Only newly found exposures are passed in. */
+export function renderExposureEmail(input: { site: string; to: string; findings: ExposureEmailFinding[] } & TenantEmailLinks): RenderedTenantEmail {
+  const f = standardFooter(input.site, input.to, input);
+  const label = (x: ExposureEmailFinding) => `${x.productName}${x.installed ? ` ${x.installed}` : ""}`;
+  const first = input.findings[0];
+  const one = input.findings.length === 1;
+  const subject = one
+    ? `Your server for ${input.site} runs ${label(first)}, which is open to ${first.flaw ?? "an actively exploited flaw"}`
+    : `${input.findings.length} actively exploited flaws affect the server for ${input.site}`;
+  return render({
+    subject,
+    preheader: one ? (first.howToFix ?? "Your host can fix this.") : "Each one has a fixed version. Here is who updates what.",
+    heading: one ? `${input.site} is open to ${first.flaw ?? "an actively exploited flaw"}` : `${input.site}: ${input.findings.length} flaws to fix`,
+    paragraphs: [
+      ...input.findings.map((x) => `Your server runs ${label(x)}, which is open to ${x.flaw ?? "an actively exploited flaw"}${x.impact ? `: ${x.impact}` : ""}. ${x.howToFix ?? ""}`.trim()),
+      "These flaws are on the list of security holes attackers are actively using right now (the US government's Known Exploited Vulnerabilities catalog). They sit in the server software itself, so no WordPress plugin can block them; updating is the fix.",
+    ],
+    rows: input.findings.flatMap((x) => [
+      { label: "Installed", value: label(x) },
+      { label: "Fixed in", value: x.fixedVersion ? `${x.productName} ${x.fixedVersion} or later` : "See the advisory" },
+      ...(x.cves.length ? [{ label: "Reference", value: x.cves.join(", ") }] : []),
+    ]),
+    cta: { label: "See your server check", href: dashboardUrl(input.baseUrl) },
     ...f,
   });
 }

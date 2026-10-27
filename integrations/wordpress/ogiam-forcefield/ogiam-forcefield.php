@@ -2,7 +2,7 @@
 /**
  * Plugin Name: OGIAM Forcefield
  * Description: Protects your site from hostile AI agents and bots. Click Connect, then the sign-in link we email you: no key to copy, no DNS change. Watch-first and fail-open: it never takes your site down.
- * Version: 0.3.0
+ * Version: 0.4.0
  * Requires at least: 6.0
  * Requires PHP: 7.4
  * License: Proprietary
@@ -17,6 +17,11 @@
  * network or not) and then discarded, never stored. It is dark until you set a
  * site key, watch-only until you enable blocking, never blocks a signed-in user,
  * and fails open on any error.
+ *
+ * Server check: once linked it also reports the server's software VERSIONS
+ * (PHP, WordPress, web server, active plugin slugs and versions) on link and
+ * then daily, so Forcefield can warn the owner when the server runs a version
+ * open to an actively exploited flaw (includes/inventory.php). Versions only.
  */
 
 if (!defined('ABSPATH')) { exit; } // No direct access.
@@ -28,6 +33,8 @@ if (!defined('OGIAM_FF_DEFAULT_INGEST')) {
 // One-click Connect: the plugin proves it runs on this site and collects its own
 // site key after the owner clicks the emailed sign-in link (includes/connect.php).
 require_once __DIR__ . '/includes/connect.php';
+// Server check: software versions only, on link and daily (includes/inventory.php).
+require_once __DIR__ . '/includes/inventory.php';
 register_deactivation_hook(__FILE__, 'ogiam_ff_deactivate');
 
 /**

@@ -886,6 +886,14 @@ export type InstinctEventType =
   | "forcefield.tenant_mail_blocked"
   | "forcefield.tenant_first_evidence_sent"
   | "forcefield.tenant_digest_sent"
+  // Server exposure (WordPress plugin inventory, src/app/api/forcefield/wordpress/inventory):
+  // server_inventory_received { tenant_id, status: exposed|ok|unknown, php_line,
+  //   exposed, unknown, plugins } - one per plugin report (on link, then daily).
+  // server_exposure_found { tenant_id, rule, product, installed, fixed, cve, alert }
+  //   - a NEW exposure to an actively exploited flaw (fixed-versions.ts); alert is
+  //   the owner email outcome (sent | not_confirmed | not_delivered:<reason> | ...).
+  | "forcefield.server_inventory_received"
+  | "forcefield.server_exposure_found"
   // assistant.insecure_output_flagged { kinds, count } - the live model-output
   // lens (LLM02): the assistant's free-text answer carried active/executable
   // content (script/iframe/js-uri/event-handler/data-html) outside code fences.
