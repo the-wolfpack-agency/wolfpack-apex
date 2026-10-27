@@ -24,6 +24,7 @@ import {
   classifyVercelError,
   httpStatusForCode,
   VercelDomainError,
+  getDomainConfig,
 } from "@/lib/sites-domain";
 
 function mkResponse(
@@ -345,5 +346,58 @@ describe("removeDomainFromProject", () => {
       fetchImpl,
     }).catch((e) => e);
     expect(err.code).toBe("rate_limited");
+  });
+});
+
+describe("apexName on the normalized record", () => {
+  it("keeps apexName when returned, omits it otherwise", async () => {
+    const withApex = jest.fn().mockResolvedValue(mkResponse(200, { name: "shop.example.co.uk", apexName: "example.co.uk", verified: true }));
+    const r = await addDomainToProject({ ...BASE, domain: "shop.example.co.uk", fetchImpl: withApex });
+    expect(r.apexName).toBe("example.co.uk");
+    const without = jest.fn().mockResolvedValue(mkResponse(200, { name: "a.example.com", verified: true }));
+    const r2 = await addDomainToProject({ ...BASE, domain: "a.example.com", fetchImpl: without });
+    expect("apexName" in r2).toBe(false);
+  });
+});
+
+describe("getDomainConfig", () => {
+  it("hits /v6/domains/{d}/config with teamId + projectIdOrName and picks the rank-1 values", async () => {
+    const fetchImpl = jest.fn().mockResolvedValue(
+      mkResponse(200, {
+        misconfigured: true,
+        configuredBy: null,
+        acceptedChallenges: ["http-01"],
+        recommendedCNAME: [
+          { rank: 2, value: "cname.vercel-dns.com." },
+          { rank: 1, value: "d1e2f3.vercel-dns-017.com." },
+        ],
+        recommendedIPv4: [{ rank: 1, value: ["216.198.79.1"] }],
+      }),
+    );
+    const c = await getDomainConfig({ ...BASE, domain: "Edge-Test.Example.com", fetchImpl });
+    const url = String(fetchImpl.mock.calls[0][0]);
+    expect(url).toContain("/v6/domains/edge-test.example.com/config?");
+    expect(url).toContain("teamId=team_abc");
+    expect(url).toContain("projectIdOrName=prj_123");
+    expect(fetchImpl.mock.calls[0][1].headers.Authorization).toBe("Bearer tok_xyz");
+    expect(c).toEqual({ misconfigured: true, configuredBy: null, recommendedCname: "d1e2f3.vercel-dns-017.com", recommendedIpv4: "216.198.79.1" });
+  });
+
+  it("misconfigured defaults to true when absent; empty recommendations -> null", async () => {
+    const c = await getDomainConfig({ ...BASE, domain: "a.example.com", fetchImpl: jest.fn().mockResolvedValue(mkResponse(200, {})) });
+    expect(c).toEqual({ misconfigured: true, configuredBy: null, recommendedCname: null, recommendedIpv4: null });
+  });
+
+  it("reports configured once DNS points at the project", async () => {
+    const c = await getDomainConfig({ ...BASE, domain: "a.example.com", fetchImpl: jest.fn().mockResolvedValue(mkResponse(200, { misconfigured: false, configuredBy: "CNAME" })) });
+    expect(c.misconfigured).toBe(false);
+    expect(c.configuredBy).toBe("CNAME");
+  });
+
+  it("403 -> typed unauthorized error; invalid domain rejected before fetch", async () => {
+    await expect(getDomainConfig({ ...BASE, domain: "a.example.com", fetchImpl: jest.fn().mockResolvedValue(mkResponse(403, "forbidden")) })).rejects.toMatchObject({ code: "unauthorized" });
+    const f = jest.fn();
+    await expect(getDomainConfig({ ...BASE, domain: "localhost", fetchImpl: f })).rejects.toBeInstanceOf(VercelDomainError);
+    expect(f).not.toHaveBeenCalled();
   });
 });

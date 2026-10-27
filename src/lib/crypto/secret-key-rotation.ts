@@ -47,6 +47,8 @@ export const ROTATION_TARGETS: RotationTarget[] = [
   { table: "instinct_admin_mfa", pk: "id", columns: ["encrypted_secret"] },
   { table: "instinct_workspace_model_keys", pk: "id", columns: ["encrypted_key"] },
   { table: "instinct_tenant_registry", pk: "tenant_id", columns: ["db_url_encrypted"] },
+  // Forcefield Edge per-tenant origin secret (sent as x-forcefield-edge), migration 301.
+  { table: "forcefield_tenants", pk: "id", columns: ["edge_origin_secret_sealed"] },
 ];
 
 const IDENT = /^[a-z_][a-z0-9_]*$/;

@@ -17,6 +17,7 @@
     "campaign.ts",
     "intent.ts",
     "kev-rules.ts",
-    "accountability.ts"
+    "accountability.ts",
+    "gateway.ts"
   ]
 }

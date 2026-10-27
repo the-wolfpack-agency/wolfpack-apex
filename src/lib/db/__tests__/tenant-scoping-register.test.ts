@@ -95,6 +95,14 @@ const GLOBAL_BY_DESIGN: readonly string[] = [
      forcefield_tenants above. It holds intake data only, no client business data;
      approval links it to a tenant via tenant_id. */
   "forcefield_signup_requests",
+  /* Forcefield Edge's hostname -> tenant routing map (migration 301), a child of
+     forcefield_tenants above. A public DNS name has exactly ONE owner, and the
+     hostname is the primary key precisely so two tenants can never both claim
+     it: per-tenant rows would let two tenants hold different beliefs about who
+     a hostname routes to, which is the bug this table exists to make
+     impossible. It holds routing state only (hostname, tenant id, DNS
+     verification), no client business data. */
+  "forcefield_edge_hostnames",
   /* Dedupe store for Forcefield-web hostile-signal alerts, computed over the
      GLOBAL site_analytics_events stream (public-site protection). A public-site
      attack has no tenant to attribute, so per-workspace rows would be WRONG: two
@@ -332,8 +340,11 @@ describe("every table declares whether it is tenant-scoped", () => {
        keyed by the tenant it defines) - the identical chicken-and-egg as
        instinct_tenant_registry already on this list. Raised to 8 the same day for
        forcefield_signup_requests, the pre-tenant signup intake queue (a request
-       exists before the tenant it may provision). */
-    expect(GLOBAL_BY_DESIGN.length).toBeLessThanOrEqual(8);
+       exists before the tenant it may provision). Raised to 9 on 2026-10-26 for
+       forcefield_edge_hostnames, the Edge hostname -> tenant map (a DNS name has
+       one owner; it is keyed by the global hostname, a child of
+       forcefield_tenants). */
+    expect(GLOBAL_BY_DESIGN.length).toBeLessThanOrEqual(9);
     for (const table of GLOBAL_BY_DESIGN) {
       expect(NO_WORKSPACE_COLUMN).not.toContain(table);
     }

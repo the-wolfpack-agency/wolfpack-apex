@@ -27,12 +27,14 @@
  * session check), never inferred from a cookie or Authorization header being
  * present, which any client can send.
  */
-import { observeRequest, type Observation, type ObserveInput } from "../observe";
-import { decideEnforcement, type EnforcementDecision, type EnforceInput } from "../enforce";
+import type { Observation } from "../observe";
 import { fetchRuleset } from "../ruleset";
-import { operatorFingerprint } from "../fingerprint";
 import { resolveAuthenticated } from "../shim";
-import { inspectRequestBody, bodyInspectionApplies, BODY_SCAN_CAP_BYTES } from "../body-inspect";
+import { evaluateRequest, shouldBlock, inspectBodyBounded, type RequestSignals } from "../gateway";
+
+// The verdict, the bounded body read and the signal shape are shared with every
+// gateway adapter (gateway.ts); re-exported so existing imports keep working.
+export { evaluateRequest, shouldBlock, inspectBodyBounded, type RequestSignals };
 
 /** Env bindings the Worker reads. Platform-neutral names (no VERCEL_*), matching
  *  the shim's env so a site can move between adapters without renaming secrets. */
@@ -69,25 +71,6 @@ export interface ForcefieldWorkerOptions {
    *  never blocked. A throw or rejection means anonymous. Optional; absent means
    *  every request is anonymous. */
   isAuthenticated?: (request: Request, env: ForcefieldWorkerEnv) => boolean | Promise<boolean>;
-}
-
-/** Request signals the engine needs, pulled from a standard Request. Pure. */
-export interface RequestSignals {
-  url: URL;
-  method: string;
-  userAgent: string;
-  country: string;
-  ip: string;
-  accept: string;
-  secFetchDest: string;
-  /** Client network ASN from request.cf, when Cloudflare provides it. */
-  asn?: number;
-  /** Client network operator name from request.cf, when Cloudflare provides it. */
-  asOrg?: string;
-  /** Site-attested sign-in (see ForcefieldWorkerOptions.isAuthenticated). */
-  authenticated: boolean;
-  headerNames: string[];
-  nowMs: number;
 }
 
 /** The slice of Cloudflare's `request.cf` object this adapter reads. */
@@ -136,65 +119,6 @@ export async function workerAuthenticated(
   return resolveAuthenticated(request, { isAuthenticated: check ? (r) => check(r, env) : undefined });
 }
 
-/** PURE: should this request be turned away? Only when the engine proved it
- *  hostile, enforcement is on, AND the site did not attest a signed-in user. */
-export function shouldBlock(verdict: EnforcementDecision, s: RequestSignals, enforce: boolean): boolean {
-  return verdict.block === true && enforce && !s.authenticated;
-}
-
-/**
- * PURE: given a site label, request signals, and the ruleset, compute the block
- * verdict and the observation to forward. No I/O, deterministic - the testable
- * heart of the adapter. Mirrors exactly what monitor.ts does for Next, so the two
- * runtimes can never diverge in what they detect.
- */
-export function evaluateRequest(
-  site: string,
-  s: RequestSignals,
-  ruleset: Parameters<typeof decideEnforcement>[1],
-  opts: Pick<ForcefieldWorkerOptions, "platform"> & { bodyAttack?: string } = {},
-): { verdict: EnforcementDecision; observation: Observation | null } {
-  const fingerprint = operatorFingerprint(s.headerNames);
-  const rawUrl = s.url.pathname + s.url.search;
-  // authenticated + platform ride along so an engine that reads them honors them;
-  // the never-block-a-signed-in-user guarantee itself is enforced in shouldBlock.
-  const enforceInput: EnforceInput & { authenticated?: boolean; platform?: string } = {
-    path: s.url.pathname,
-    rawUrl,
-    method: s.method,
-    userAgent: s.userAgent,
-    headerNames: s.headerNames,
-    fingerprint,
-    authenticated: s.authenticated,
-    platform: opts.platform,
-    bodyAttack: opts.bodyAttack,
-  };
-  const verdict = decideEnforcement(enforceInput, ruleset);
-  // asn / asOrg are edge network hints the engine may use for classification
-  // (then discards); carried as extra fields so this adapter needs no change when
-  // the engine starts reading them.
-  const observeInput: ObserveInput & { asn?: number; asOrg?: string } = {
-    site,
-    path: s.url.pathname,
-    rawUrl,
-    method: s.method,
-    userAgent: s.userAgent,
-    country: s.country,
-    headerNames: s.headerNames,
-    accept: s.accept,
-    secFetchDest: s.secFetchDest,
-    ip: s.ip || undefined,
-    authenticated: s.authenticated,
-    platform: opts.platform,
-    bodyAttack: opts.bodyAttack,
-    asn: s.asn,
-    asOrg: s.asOrg,
-    nowMs: s.nowMs,
-  };
-  const observation = observeRequest(observeInput, ruleset);
-  return { verdict, observation };
-}
-
 /** Forward one observation to the analytics ingest. Fire-and-forget, never throws.
  *  Mirrors the monitor.ts body shape so both adapters hit the same ingest contract. */
 async function forwardObservation(env: ForcefieldWorkerEnv, obs: Observation, country: string): Promise<void> {
@@ -207,72 +131,6 @@ async function forwardObservation(env: ForcefieldWorkerEnv, obs: Observation, co
     });
   } catch {
     /* ingest is best-effort; a down store never affects the request */
-  }
-}
-
-/**
- * Read AT MOST BODY_SCAN_CAP_BYTES of the request body for inspection, without
- * disturbing the body that reaches the origin. A `request.clone()` gives an
- * independent body stream; we read the first chunks up to the cap, then CANCEL
- * the clone, so memory stays bounded by the cap even for a trickled multi-MB or
- * never-finishing body. The ORIGINAL request is forwarded untouched, so every
- * legitimate upload still reaches the origin whole.
- *
- * Decoded latin1 (byte == code point) so raw null / control bytes survive and
- * the ASCII markers the analyzer looks for still match. Returns the attack label
- * or null; never throws (fail-open: a read error inspects nothing).
- */
-export async function inspectBodyBounded(request: Request): Promise<string | null> {
-  try {
-    const contentType = request.headers.get("content-type") ?? "";
-    const hasNextAction = request.headers.has("next-action") || request.headers.has("rsc-action-id");
-    if (!bodyInspectionApplies(request.method, contentType, hasNextAction)) return null;
-    if (!request.body) return null;
-
-    const reader = request.clone().body!.getReader();
-    const chunks: Uint8Array[] = [];
-    let total = 0;
-    let truncated = false;
-    try {
-      while (total < BODY_SCAN_CAP_BYTES) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        if (value) {
-          chunks.push(value);
-          total += value.byteLength;
-        }
-      }
-      // If more is left, we stopped at the cap: mark truncated and stop reading.
-      if (total >= BODY_SCAN_CAP_BYTES) truncated = true;
-    } finally {
-      try {
-        await reader.cancel();
-      } catch {
-        /* cancelling the inspection clone never affects the forwarded body */
-      }
-    }
-
-    // Concatenate up to the cap and decode latin1 (binary-safe, 1 byte -> 1 char).
-    let body = "";
-    let used = 0;
-    for (const c of chunks) {
-      const take = Math.min(c.byteLength, BODY_SCAN_CAP_BYTES - used);
-      for (let i = 0; i < take; i++) body += String.fromCharCode(c[i]);
-      used += take;
-      if (used >= BODY_SCAN_CAP_BYTES) break;
-    }
-
-    const declared = Number(request.headers.get("content-length") ?? "");
-    const result = inspectRequestBody({
-      method: request.method,
-      contentType,
-      declaredLength: Number.isFinite(declared) ? declared : undefined,
-      body,
-      truncated,
-    });
-    return result ? result.attack : null;
-  } catch {
-    return null; // fail-open: Forcefield never breaks the request over inspection.
   }
 }
 

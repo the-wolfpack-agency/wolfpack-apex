@@ -785,6 +785,21 @@ export type InstinctEventType =
   // forcefield.tenant_enforce_set { tenantId, enforce } - operator toggled a managed
   // tenant's blocking on/off from the console (watch <-> enforce).
   | "forcefield.tenant_enforce_set"
+  // Forcefield Edge (the one-DNS-record full-protection proxy, edge/):
+  // forcefield.edge_origin_set { tenantId, secretIssued } - operator set the
+  //   tenant's origin server (a first set issues the x-forcefield-edge secret).
+  // forcefield.edge_secret_rotated { tenantId } - operator rotated that secret.
+  // forcefield.edge_hostname_added { tenantId, hostname, created, provisioned, live }
+  //   - operator put a hostname on Edge (claimed + added to the Edge project).
+  // forcefield.edge_hostname_checked { tenantId, hostname, ok, live } - operator
+  //   re-read a hostname's DNS / verification state.
+  // forcefield.edge_site_resolved { host, found } - the Edge app looked up how to
+  //   serve a hostname (found:false = a hostname pointed at Edge with no tenant).
+  | "forcefield.edge_origin_set"
+  | "forcefield.edge_secret_rotated"
+  | "forcefield.edge_hostname_added"
+  | "forcefield.edge_hostname_checked"
+  | "forcefield.edge_site_resolved"
   // forcefield.block_withheld_watch { site, reasonKind } - a hostile request the
   // engine would block, withheld because the tenant's console enforce toggle is off.
   | "forcefield.block_withheld_watch"

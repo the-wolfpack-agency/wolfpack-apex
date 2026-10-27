@@ -6,7 +6,7 @@
  * call the same engine; these tests pin that the Worker's request-mapping feeds
  * the engine correctly, against the REAL bundled ruleset (no mocks of the engine).
  */
-import { requestSignals, evaluateRequest, shouldBlock, workerAuthenticated, inspectBodyBounded } from "../cloudflare-worker";
+import { requestSignals, evaluateRequest, shouldBlock, workerAuthenticated, inspectBodyBounded, createForcefieldWorker } from "../cloudflare-worker";
 import { DEFAULT_RULESET } from "../../ruleset";
 
 const AT = 1_700_000_000_000; // fixed nowMs for determinism
@@ -199,5 +199,61 @@ describe("inspectBodyBounded (bounded body read, clone never disturbs the origin
 
   it("returns null for a GET (no body to inspect)", async () => {
     expect(await inspectBodyBounded(req("https://site.example/"))).toBeNull();
+  });
+});
+
+describe("over-cap bodies never hang the Worker (the awaited-cancel deadlock)", () => {
+  // Cancelling one branch of a tee only settles once the OTHER branch (the body
+  // forwarded to the origin) is consumed. The inspection used to await that
+  // cancel, so any streaming body over the 256 KB cap hung before the forward
+  // could start. A buffered body does not reproduce it; a streaming one does.
+  function streamingBody(bytes: number): ReadableStream<Uint8Array> {
+    let sent = 0;
+    return new ReadableStream<Uint8Array>(
+      {
+        pull(c) {
+          if (sent >= bytes) return c.close();
+          const n = Math.min(65_536, bytes - sent);
+          c.enqueue(new Uint8Array(n).fill(0x61));
+          sent += n;
+        },
+      },
+      { highWaterMark: 0 },
+    );
+  }
+  const SIZE = 3 * 1024 * 1024;
+  const withTimeout = <T>(p: Promise<T>, ms: number) =>
+    Promise.race([p, new Promise<never>((_, rej) => setTimeout(() => rej(new Error(`hung > ${ms} ms`)), ms))]);
+
+  it("inspectBodyBounded completes on a 3 MB streaming body and leaves the original whole", async () => {
+    const r = new Request("https://site.example/upload", { method: "POST", headers: { "content-type": "text/plain" }, body: streamingBody(SIZE), duplex: "half" } as RequestInit);
+    expect(await withTimeout(inspectBodyBounded(r), 5_000)).toBeNull();
+    expect((await withTimeout(r.arrayBuffer(), 5_000)).byteLength).toBe(SIZE);
+  });
+
+  it("the Worker forwards a 3 MB streaming upload to the origin intact", async () => {
+    const realFetch = global.fetch;
+    let originBytes = -1;
+    global.fetch = jest.fn(async (input: RequestInfo | URL) => {
+      originBytes = (await (input as Request).arrayBuffer()).byteLength;
+      return new Response("ok", { status: 200 });
+    }) as typeof fetch;
+    try {
+      const worker = createForcefieldWorker();
+      const r = new Request("https://site.example/wp-admin/async-upload.php", {
+        method: "POST",
+        headers: { "content-type": "multipart/form-data; boundary=B", "user-agent": "Mozilla/5.0" },
+        body: streamingBody(SIZE),
+        duplex: "half",
+      } as RequestInit);
+      const res = await withTimeout(
+        worker.fetch(r, { FORCEFIELD_SITE: "s", FORCEFIELD_ORIGIN: "https://origin.example", FORCEFIELD_ENFORCE: "on" }, { waitUntil: () => {} }),
+        5_000,
+      );
+      expect(res.status).toBe(200);
+      expect(originBytes).toBe(SIZE);
+    } finally {
+      global.fetch = realFetch;
+    }
   });
 });
