@@ -94,3 +94,35 @@ it("stores CLAIMED for a replayed credential (same jti presented twice)", async 
   expect(recordSiteEvent.mock.calls[0][0].props.principal_status).toBe("verified");
   expect(recordSiteEvent.mock.calls[1][0].props.principal_status).toBe("claimed");
 });
+
+// Accountable actions: the edge stamps a provisional verdict; this boundary
+// carries it past the props cap and refines it with the verified principal.
+const FILLER = Object.fromEntries(Array.from({ length: 14 }, (_, i) => [`k${i}`, "v"]));
+const action = (over: Record<string, unknown> = {}) => ({
+  ...FILLER, // pushes the action keys past the 12-key cap
+  accountability: "unaccountable", acct_reason: "agent_without_principal", action_kind: "checkout", method: "POST", would_hold: true,
+  ...over,
+});
+
+it("an action with a verified delegation INSIDE its mandate is signed_principal / within, not held", async () => {
+  const delegation = mint({ principal: "org:acme", issuer: "acme-fleet", scopes: ["/checkout"] });
+  await POST(req({ type: "site.agent_welcomed", path: "/checkout/pay", delegation, props: action() }));
+  expect(recordSiteEvent.mock.calls[0][0].props).toMatchObject({
+    accountability: "signed_principal", acct_reason: "verified_principal", mandate: "within", would_hold: false,
+    action_kind: "checkout", method: "POST", principal: "org:acme",
+  });
+});
+
+it("an action with a verified delegation OUTSIDE its mandate would be held", async () => {
+  const delegation = mint({ principal: "org:acme", issuer: "acme-fleet", scopes: ["/catalog"] });
+  await POST(req({ type: "site.agent_welcomed", path: "/account/delete", delegation, props: action({ action_kind: "account" }) }));
+  expect(recordSiteEvent.mock.calls[0][0].props).toMatchObject({ accountability: "signed_principal", mandate: "outside", would_hold: true });
+});
+
+it("a body claiming signed_principal without a credential is downgraded; junk values are dropped", async () => {
+  await POST(req({ type: "site.agent_welcomed", path: "/checkout", props: action({ accountability: "signed_principal", acct_reason: "verified_principal", mandate: "within", would_hold: false, method: "<x>" }) }));
+  const props = recordSiteEvent.mock.calls[0][0].props;
+  expect(props).toMatchObject({ accountability: "unaccountable", acct_reason: "principal_unverified", would_hold: true });
+  expect(props.mandate).toBeUndefined();
+  expect(props.method).toBeUndefined();
+});

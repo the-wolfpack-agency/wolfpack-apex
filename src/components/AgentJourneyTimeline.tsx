@@ -20,6 +20,7 @@
  * and probes the same way everywhere.
  */
 import type { JourneyStep } from "@/lib/agent-behavior";
+import { ATTACK_LABEL, attackLabel } from "@/lib/forcefield-web/attack-labels";
 
 type Tone = "muted" | "good" | "warn" | "bad";
 
@@ -45,28 +46,8 @@ const TONE_COLOR: Record<Tone, string> = {
   bad: "var(--wp-error, #ef4444)",
 };
 
-/** Plain-language names for the payload families the engine emits
- *  (props.attack). Unknown families fall back to the raw id, de-underscored. */
-export const ATTACK_LABEL: Record<string, string> = {
-  sql_injection: "SQL injection",
-  nosql_injection: "NoSQL injection",
-  xss: "cross-site scripting",
-  path_traversal: "path traversal",
-  open_redirect: "open redirect",
-  command_injection: "command injection",
-  ssti: "template injection",
-  template_injection: "template injection",
-  log4shell: "Log4Shell (JNDI lookup)",
-  crlf_injection: "header injection (CRLF)",
-  ssrf: "server-side request forgery",
-  xxe: "XML external entity",
-  nextjs_middleware_bypass: "Next.js middleware bypass",
-  php_cgi_injection: "PHP-CGI argument injection",
-  prompt_injection: "prompt injection",
-};
-export function attackLabel(attack: string): string {
-  return ATTACK_LABEL[attack] ?? attack.replace(/_/g, " ");
-}
+/** Plain-language payload-family names: one shared map (forcefield-web/attack-labels.ts). */
+export { ATTACK_LABEL, attackLabel };
 
 /** Named probe labels the engine emits in props.probe that are not a path. A
  *  path-shaped probe ("/.env") is shown as-is. */

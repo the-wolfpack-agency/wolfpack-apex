@@ -16,6 +16,7 @@
     "hosting.ts",
     "campaign.ts",
     "intent.ts",
-    "kev-rules.ts"
+    "kev-rules.ts",
+    "accountability.ts"
   ]
 }

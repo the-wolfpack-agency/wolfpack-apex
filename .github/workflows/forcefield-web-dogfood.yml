@@ -23,6 +23,7 @@ on:
       - "tests/e2e/site-analytics-agent-profile.spec.ts"
       - "tests/e2e/site-analytics-defense.spec.ts"
       - "tests/e2e/site-analytics-proven.spec.ts"
+      - "tests/e2e/site-analytics-accountable.spec.ts"
       - "tests/e2e/evidence-backed-status.spec.ts"
       - "tests/e2e/forcefield-threat-coverage.spec.ts"
       - "tests/e2e/forcefield-exposure.spec.ts"
@@ -35,6 +36,7 @@ on:
       - "src/app/api/site-analytics/**"
       - "src/lib/site-analytics.ts"
       - "src/lib/site-analytics-proven.ts"
+      - "src/lib/site-analytics-accountability.ts"
       - "src/components/site-analytics/**"
       - "src/lib/agent-operators.ts"
       - "src/lib/agent-profile.ts"
@@ -135,6 +137,7 @@ jobs:
           tests/e2e/site-analytics-agent-profile.spec.ts
           ${{ github.event_name != 'pull_request' && 'tests/e2e/site-analytics-defense.spec.ts' || '' }}
           ${{ github.event_name != 'pull_request' && 'tests/e2e/site-analytics-proven.spec.ts' || '' }}
+          ${{ github.event_name != 'pull_request' && 'tests/e2e/site-analytics-accountable.spec.ts' || '' }}
           ${{ github.event_name != 'pull_request' && 'tests/e2e/evidence-backed-status.spec.ts' || '' }}
           ${{ github.event_name != 'pull_request' && 'tests/e2e/forcefield-threat-coverage.spec.ts' || '' }}
           ${{ github.event_name != 'pull_request' && 'tests/e2e/forcefield-exposure.spec.ts' || '' }}
@@ -215,6 +218,7 @@ jobs:
           npx playwright test
           tests/e2e/site-analytics-defense.spec.ts
           tests/e2e/site-analytics-proven.spec.ts
+          tests/e2e/site-analytics-accountable.spec.ts
           tests/e2e/evidence-backed-status.spec.ts
           tests/e2e/forcefield-threat-coverage.spec.ts
           tests/e2e/forcefield-exposure.spec.ts

@@ -140,3 +140,39 @@ describe("GET /api/admin/site-analytics - proven attacks block", () => {
     expect(surface).toBe("all");
   });
 });
+
+describe("GET /api/admin/site-analytics - accountable actions tile", () => {
+  const ACCOUNTABILITY = {
+    available: true, rangeDays: 30, surface: "all",
+    totals: { total: 5, browserSession: 3, signedWithin: 1, signedOutside: 0, unaccountable: 1, wouldHold: 1 },
+    sites: [{ site: "instinct", total: 5, browserSession: 3, signedWithin: 1, signedOutside: 0, unaccountable: 1, wouldHold: 1 }],
+    heldReasons: [{ reason: "script_client", count: 1 }], kinds: [{ kind: "login", count: 5, wouldHold: 1 }],
+  };
+  const full = { rangeDays: 30, surfaces: [], totalPageViews: 0, collectsPageViews: false, totalEvents: 0, byHour: [], byPage: [], byCountry: [], byType: [], forcefield: { blocked: 0 }, agentOrigins: [], accountability: ACCOUNTABILITY };
+
+  it("401 passes through and nothing is read", async () => {
+    mockRequireCapability.mockResolvedValueOnce({ ok: false, response: new Response("{}", { status: 401 }) });
+    expect((await GET(mkReq())).status).toBe(401);
+    expect(mockGetSummary).not.toHaveBeenCalled();
+  });
+
+  it("200 with the per-site accountability counts for forcefield.view holders", async () => {
+    mockGetSummary.mockResolvedValue(full);
+    mockRequireCapability.mockResolvedValueOnce({ ok: true, user: { id: "u1", role: "cto", workspaceId: "w1" }, capabilities: new Set(["analytics.view", "forcefield.view"]) });
+    const res = await GET(mkReq());
+    expect(res.status).toBe(200);
+    expect((await res.json()).summary.accountability).toEqual(ACCOUNTABILITY);
+  });
+
+  it("is agent-defense intel: an analytics.view-only viewer never receives it", async () => {
+    mockGetSummary.mockResolvedValue(full);
+    mockRequireCapability.mockResolvedValueOnce({ ok: true, user: { id: "u2", role: "sales", workspaceId: "w1" }, capabilities: new Set(["analytics.view"]) });
+    const body = await (await GET(mkReq())).json();
+    expect(body.summary.accountability).toBeUndefined();
+  });
+
+  it("403 passes through from the gate", async () => {
+    mockRequireCapability.mockResolvedValueOnce({ ok: false, response: new Response("{}", { status: 403 }) });
+    expect((await GET(mkReq())).status).toBe(403);
+  });
+});

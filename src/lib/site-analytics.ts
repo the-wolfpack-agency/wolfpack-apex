@@ -17,6 +17,7 @@ import { getFindingTriage, type TriageStatus } from "@/lib/site-finding-triage";
 import { listBlockedOperatorKeys, liveAgentIntelligence, type AgentIntelSummary } from "@/lib/agent-operators";
 import { getProvenAttacks, NOT_CONTROL_PLANE_FP, type ProvenAttacks } from "@/lib/site-analytics-proven";
 import { annotateKevProps } from "@/lib/forcefield/kev";
+import { getAccountableActions, type AccountableActionsSummary } from "@/lib/site-analytics-accountability";
 
 /** Closed event vocabulary, mirrored from the marketing site's analytics. A
  *  value outside this set is rejected at the ingest boundary. */
@@ -41,6 +42,9 @@ export const SITE_EVENT_TYPES = [
   // Forcefield intent scoring: one row per session step-up (watch / tarpit /
   // block) with its reason ids. Not hostile tradecraft on its own.
   "site.intent_scored",
+  // Accountable actions (watch mode): a state-changing request with no other
+  // tell, carrying its accountability verdict (forcefield-web/accountability.ts).
+  "site.action_observed",
 ] as const;
 export type SiteEventType = (typeof SITE_EVENT_TYPES)[number];
 
@@ -210,6 +214,9 @@ export interface SiteAnalyticsSummary {
      report-only, with the control-plane false positive excluded. The top of the
      board. available=false means the read failed, never "zero attacks". */
   proven: ProvenAttacks;
+  /** Accountable actions (watch mode): per site, who was accountable for each
+   *  state-changing request and what "hold for review" would have held. */
+  accountability: AccountableActionsSummary;
 }
 
 export interface DefenseSignals {
@@ -601,7 +608,10 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
   ]);
 
   const surfaces = surfacesRows.rows.map((r) => r.surface).filter((x): x is string => typeof x === "string" && x.length > 0);
-  const proven = await getProvenAttacks(sinceClause, surfaceClause, params, surfaces);
+  const [proven, accountability] = await Promise.all([
+    getProvenAttacks(sinceClause, surfaceClause, params, surfaces),
+    getAccountableActions(days, filtered ? surface : "all"),
+  ]);
   const t = totals.rows[0];
   const journeys = await attachTriage(
     buildJourneys(
@@ -691,6 +701,7 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
     verdictFeedback: { falsePositives },
     defense,
     proven,
+    accountability,
     principalByOperator,
     agentOrigins: agentOriginRows.rows.map((r) => ({
       country: r.country,
