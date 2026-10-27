@@ -279,3 +279,19 @@ describe("authenticated requests (site-attested)", () => {
     expect(decideEnforcement({ ...base, path: "/", userAgent: "Nuclei - Open-source project" }, R).reasonKind).toBe("attack_tool");
   });
 });
+
+describe("bodyAttack - a body-proven attack an adapter supplies", () => {
+  it("blocks on a bodyAttack label, recorded as a payload", () => {
+    const d = decideEnforcement({ ...base, method: "POST", path: "/upload.php", bodyAttack: "php2shell" }, R);
+    expect(d).toMatchObject({ block: true, reasonKind: "payload", attack: "php2shell" });
+  });
+
+  it("a signed-in request is still blocked for a body attack (auth never exempts proof)", () => {
+    const d = decideEnforcement({ ...base, method: "POST", path: "/action", authenticated: true, bodyAttack: "react2shell" }, R);
+    expect(d).toMatchObject({ block: true, attack: "react2shell" });
+  });
+
+  it("no bodyAttack -> no block (the field is additive, never a new false positive)", () => {
+    expect(decideEnforcement({ ...base, method: "POST", path: "/upload.php" }, R).block).toBe(false);
+  });
+});

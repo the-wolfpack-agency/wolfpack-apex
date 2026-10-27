@@ -68,6 +68,12 @@ export interface EnforceInput {
   /** Client IP, used only to verify a claimed crawler against its vendor's
    *  published ranges (an impersonator loses the welcome lane). Never stored. */
   ip?: string;
+  /** A body-marker attack family an adapter THAT CAN SEE THE BODY already proved
+   *  from the request body (body-inspect.ts: "php2shell" / "react2shell"). This
+   *  module never reads bodies itself; it trusts a label the adapter computed
+   *  with the same pure engine and treats it as a payload block. Absent on the
+   *  Next middleware path, which has no body. Optional. */
+  bodyAttack?: string;
 }
 
 const ALLOW: EnforcementDecision = { block: false, reason: "no proven-hostile signal" };
@@ -197,10 +203,11 @@ const PAYLOAD_SIGNATURES: ReadonlyArray<{ attack: string; patterns: readonly Reg
     // (https://github.com/watchtowrlabs/CVE-2024-4577, DEVCORE advisory via
     // https://www.tenable.com/blog/cve-2024-4577-proof-of-concept-available-for-php-cgi-argument-injection-vulnerability).
     // Matched on the INI directive being SET, which no legitimate URL does.
-    // NOT covered: PHP2Shell (CVE-2026-109618 / CVE-2026-109619). Its public
-    // indicators are multipart BODY markers (PHP_SESSION_UPLOAD_PROGRESS fields,
-    // oversized nested field names, https://securitylabs.datadoghq.com/articles/php2shell-critical-vulnerabilities-in-php/),
-    // and this engine sees only the request target + header names, never bodies.
+    // PHP2Shell (CVE-2026-109618 / CVE-2026-109619) is NOT this URL-target rule:
+    // its indicators are multipart/urlencoded BODY markers. This URL engine never
+    // reads bodies; an adapter that can (the Cloudflare Worker) runs the shared
+    // body analyzer (body-inspect.ts) and passes the verdict in as `bodyAttack`,
+    // handled below. See https://securitylabs.datadoghq.com/articles/php2shell-critical-vulnerabilities-in-php/.
     attack: "php_cgi_injection",
     patterns: [
       /(?:%ad|\u00ad|(?:^|[?&+\s])-)d(?:\+|\s|%20)+(?:allow_url_include|auto_prepend_file|auto_append_file|disable_functions|open_basedir|safe_mode)(?:\s*=|%3d)/i,
@@ -252,6 +259,12 @@ export const PAYLOAD_CWE: Readonly<Record<string, string>> = {
   unrestricted_upload: "CWE-434",
   prompt_injection: "CWE-1427",
   nextjs_middleware_bypass: "CWE-288",
+  // Body-marker families proved by an adapter (body-inspect.ts). php2shell is
+  // PHP's multipart/urlencoded parser corrupting memory during request start-up
+  // (CVE-2026-109618/109619); react2shell is RSC Flight deserialization reaching
+  // the Function constructor via the prototype chain (CVE-2025-55182).
+  php2shell: "CWE-787",
+  react2shell: "CWE-502",
 };
 
 /** The attack families the payload engine can return, in match order. */
@@ -347,6 +360,12 @@ export function decideEnforcement(
     const attack = detectPayload(input.rawUrl ?? input.path);
     if (attack) {
       return { block: true, reasonKind: "payload", reason: `injection payload: ${attack}`, attack };
+    }
+    // A body-marker attack an adapter already proved from the request body
+    // (body-inspect.ts). Ranked with the other request-carried proof: evaluated
+    // whatever the UA claims, never exempted by the welcome lane below.
+    if (input.bodyAttack) {
+      return { block: true, reasonKind: "payload", reason: `body payload: ${input.bodyAttack}`, attack: input.bodyAttack };
     }
 
     // 3. The welcome lane - an allowlisted agent skips only the CLIENT-identity

@@ -44,7 +44,16 @@ Collected:
 NOT collected by the engine:
 - Page content, response bodies, or rendered HTML.
 - Header VALUES (only the names), cookies, authorization headers, or tokens.
-- Form field values or request bodies.
+- Request bodies in the stored record. The Cloudflare Worker connector (only the
+  Worker, because it sits in front of the origin) reads a bounded prefix of a POST
+  body - at most 256 KB, constant memory, never the whole body - to match the two
+  body-borne RCEs the request target cannot reveal (PHP2Shell CVE-2026-109618 /
+  CVE-2026-109619, React2Shell CVE-2025-55182). It is inspected in memory and
+  discarded; the event keeps only the attack class name (`php2shell` / `react2shell`),
+  never any body bytes. The WordPress plugin and the Next.js middleware never read
+  bodies at all.
+- Form field values stored anywhere. Only the in-memory body scan above sees them,
+  and it keeps none.
 - Query-string contents in the stored record. Connectors send the request target
   (path plus query string, length-capped) so the engine can match attack payloads
   such as SQL injection in a parameter; it is inspected in memory and discarded.

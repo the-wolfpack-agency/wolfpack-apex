@@ -6,7 +6,7 @@
  * call the same engine; these tests pin that the Worker's request-mapping feeds
  * the engine correctly, against the REAL bundled ruleset (no mocks of the engine).
  */
-import { requestSignals, evaluateRequest, shouldBlock, workerAuthenticated } from "../cloudflare-worker";
+import { requestSignals, evaluateRequest, shouldBlock, workerAuthenticated, inspectBodyBounded } from "../cloudflare-worker";
 import { DEFAULT_RULESET } from "../../ruleset";
 
 const AT = 1_700_000_000_000; // fixed nowMs for determinism
@@ -137,5 +137,67 @@ describe("new contract fields (ip, asn/asOrg, authenticated, platform)", () => {
     const { verdict, observation } = evaluateRequest("blog", s, DEFAULT_RULESET, { platform: "wordpress" });
     expect(verdict.block).toBe(false);
     expect(observation).not.toBeNull();
+  });
+
+  it("evaluateRequest blocks and records a body-proven attack passed in as bodyAttack", () => {
+    const s = requestSignals(req("https://site.example/wp-admin/admin-ajax.php", { "User-Agent": "Mozilla/5.0" }), AT);
+    const { verdict, observation } = evaluateRequest("blog", s, DEFAULT_RULESET, { platform: "wordpress", bodyAttack: "php2shell" });
+    expect(verdict.block).toBe(true);
+    expect(verdict.reasonKind).toBe("payload");
+    expect(verdict.attack).toBe("php2shell");
+    expect(observation?.type).toBe("site.agent_payload_attack");
+    expect(observation?.props.attack).toBe("php2shell");
+    expect(observation?.props.cwe).toBe("CWE-787"); // KEV enrichment can annotate from here
+  });
+
+  it("evaluateRequest without a bodyAttack is unaffected (recorded traffic replays identically)", () => {
+    const s = requestSignals(req("https://site.example/wp-admin/admin-ajax.php", { "User-Agent": "Mozilla/5.0" }), AT);
+    const { verdict } = evaluateRequest("blog", s, DEFAULT_RULESET, { platform: "wordpress" });
+    expect(verdict.block).toBe(false);
+  });
+});
+
+describe("inspectBodyBounded (bounded body read, clone never disturbs the origin body)", () => {
+  function php2shellBody(): string {
+    let out = "";
+    out += '--B\r\nContent-Disposition: form-data; name="PHP_SESSION_UPLOAD_PROGRESS"\r\n\r\nx\r\n';
+    out += '--B\r\nContent-Disposition: form-data; name="files[a][b][c][d][e][f]"\r\n\r\ny\r\n';
+    out += "--B--\r\n";
+    return out;
+  }
+
+  it("detects PHP2Shell in a multipart POST body", async () => {
+    const r = new Request("https://site.example/upload.php", {
+      method: "POST",
+      headers: { "content-type": "multipart/form-data; boundary=B" },
+      body: php2shellBody(),
+    });
+    expect(await inspectBodyBounded(r)).toBe("php2shell");
+    // The original request body is still readable (the inspection used a clone).
+    expect(await r.text()).toContain("PHP_SESSION_UPLOAD_PROGRESS");
+  });
+
+  it("detects React2Shell in a Server Action POST body", async () => {
+    const body = '--B\r\nContent-Disposition: form-data; name="1_$ACTION"\r\n\r\n[{"x":"$1:__proto__:then"}]\r\n--B--\r\n';
+    const r = new Request("https://site.example/", {
+      method: "POST",
+      headers: { "content-type": "multipart/form-data; boundary=B", "next-action": "x" },
+      body,
+    });
+    expect(await inspectBodyBounded(r)).toBe("react2shell");
+  });
+
+  it("returns null for a benign multipart upload", async () => {
+    const body = '--B\r\nContent-Disposition: form-data; name="file"; filename="photo.jpg"\r\n\r\nJFIF...\r\n--B--\r\n';
+    const r = new Request("https://site.example/upload", {
+      method: "POST",
+      headers: { "content-type": "multipart/form-data; boundary=B" },
+      body,
+    });
+    expect(await inspectBodyBounded(r)).toBeNull();
+  });
+
+  it("returns null for a GET (no body to inspect)", async () => {
+    expect(await inspectBodyBounded(req("https://site.example/"))).toBeNull();
   });
 });

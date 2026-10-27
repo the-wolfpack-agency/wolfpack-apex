@@ -168,6 +168,13 @@ describe("payload records (site.agent_payload_attack)", () => {
   it("PHP-CGI injection is recorded as php_cgi_injection", () => {
     expect(observeRequest({ ...base, path: "/index.php", rawUrl: "/index.php?%ADd+allow_url_include%3d1+-d+auto_prepend_file%3dphp://input", userAgent: "x" }, R)!.props.attack).toBe("php_cgi_injection");
   });
+  it("a body-proven attack (bodyAttack) is recorded as a payload attack with its CWE", () => {
+    const o = observeRequest({ ...base, method: "POST", path: "/upload.php", userAgent: "x", bodyAttack: "php2shell" }, R)!;
+    expect(o.type).toBe("site.agent_payload_attack");
+    expect(o.props.attack).toBe("php2shell");
+    expect(o.props.cwe).toBe("CWE-787");
+    expect(o.props.blocked).toBe(false); // observe is monitor-only
+  });
 });
 
 describe("secret-file variants (dotfile rule + data)", () => {

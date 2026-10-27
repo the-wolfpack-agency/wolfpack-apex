@@ -10,8 +10,8 @@ import type { KevSnapshot } from "./types";
 
 export const KEV_SNAPSHOT: KevSnapshot = {
   source: "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json",
-  catalogVersion: "2026.10.23",
-  dateReleased: "2026-10-23T19:30:18.9209Z",
+  catalogVersion: "2026.10.26",
+  dateReleased: "2026-10-26T22:24:24.6101Z",
   entries: {
     "CVE-2012-1823": {
       cveId: "CVE-2012-1823",
@@ -220,6 +220,22 @@ export const KEV_SNAPSHOT: KevSnapshot = {
       vulnerabilityName: "Meta React Server Components Remote Code Execution Vulnerability",
       dateAdded: "2025-12-05",
       knownRansomware: true,
+    },
+    "CVE-2026-109618": {
+      cveId: "CVE-2026-109618",
+      vendorProject: "PHP Group",
+      product: "PHP",
+      vulnerabilityName: "PHP Memory Corruption Vulnerability",
+      dateAdded: "2026-10-26",
+      knownRansomware: false,
+    },
+    "CVE-2026-109619": {
+      cveId: "CVE-2026-109619",
+      vendorProject: "PHP Group",
+      product: "PHP",
+      vulnerabilityName: "PHP Stale Internal Request-State Vulnerability",
+      dateAdded: "2026-10-26",
+      knownRansomware: false,
     },
   },
 };

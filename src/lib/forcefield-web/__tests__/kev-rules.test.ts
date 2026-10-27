@@ -65,6 +65,15 @@ describe("CVE mapping", () => {
     expect(kevCveFor("/.env", "xss")).toBeNull();
     expect(FORCEFIELD_KEV_CVES).toEqual([...FORCEFIELD_KEV_CVES].sort());
   });
+
+  it("maps the body-marker attacks to their KEV CVEs and tracks both PHP CVEs", () => {
+    expect(kevCveFor(undefined, "php2shell")).toBe("CVE-2026-109618");
+    expect(kevCveFor(undefined, "react2shell")).toBe("CVE-2025-55182");
+    // php2shell spans two CVEs; both ship in the tracked set so the snapshot
+    // carries them even though the annotation records the primary.
+    expect(FORCEFIELD_KEV_CVES).toContain("CVE-2026-109618");
+    expect(FORCEFIELD_KEV_CVES).toContain("CVE-2026-109619");
+  });
 });
 
 const NOW = Date.UTC(2026, 9, 26, 12);

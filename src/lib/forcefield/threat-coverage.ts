@@ -37,6 +37,7 @@
  * is the same everywhere it renders (server, admin page, tests).
  */
 import { decideEnforcement } from "@/lib/forcefield-web/enforce";
+import { inspectRequestBody } from "@/lib/forcefield-web/body-inspect";
 import { observeRequest, type ObserveInput } from "@/lib/forcefield-web/observe";
 import { DEFAULT_RULESET, type ForcefieldRuleset } from "@/lib/forcefield-web/ruleset";
 import { noteRequest, type RateConfig } from "@/lib/forcefield/rate-window";
@@ -50,6 +51,7 @@ import { fenceUntrusted } from "@/lib/ai/provenance";
 export type DetectionLens =
   | "probe-path" // agent-probe-signatures: what an agent scans for
   | "payload" // forcefield-payload (ogiam-site): what an agent sends
+  | "request-body" // forcefield-web/body-inspect: body-marker RCE, adapter-only (Cloudflare Worker)
   | "agent-behavior" // agent-behavior: how an agent acts (rate, decoys, violations)
   | "tool-composition" // agent-tool-composition: what an agent is equipped to do
   | "web-classifier" // forcefield-web/classify: UA + decoy classification
@@ -129,6 +131,13 @@ function payloadObserved(rawUrl: string): boolean {
 }
 
 const payload = (...urls: string[]) => (): CheckLevel => weakest(urls.map((u) => (payloadBlocked(u) || payloadObserved(u) ? "covered" : null)));
+
+/** A body-marker attack is detected by the shared body analyzer (body-inspect),
+ *  the real function the Cloudflare Worker adapter runs on the request body. */
+function bodyAttackDetected(input: Parameters<typeof inspectRequestBody>[0], family: string): CheckLevel {
+  const r = inspectRequestBody(input);
+  return r && r.attack === family ? "covered" : null;
+}
 
 /** covered: the edge reports the path as a recon probe even from a browser-
  *  shaped client. partial: only the board's probe intel names it (with the
@@ -236,6 +245,8 @@ const SPEC_ROWS: readonly ThreatSpec[] = [
     return (d.block && d.attack === "nextjs_middleware_bypass") || o?.props.attack === "nextjs_middleware_bypass" ? "covered" : null;
   } },
   { id: "PHP-CGI-INJECTION", name: "PHP-CGI argument injection", family: "agent-llm", lenses: ["payload"], note: "CVE-2024-4577: a soft-hyphen smuggles PHP CLI flags (allow_url_include, auto_prepend_file) through the query string.", sample: "/index.php?%ADd+allow_url_include%3d1+%ADd+auto_prepend_file%3dphp://input", check: payload("/index.php?%ADd+allow_url_include%3d1+%ADd+auto_prepend_file%3dphp://input") },
+  { id: "PHP2SHELL", name: "PHP2Shell (PHP request-parser RCE)", family: "agent-llm", lenses: ["request-body"], note: "CVE-2026-109618 / CVE-2026-109619: PHP's multipart/urlencoded parser corrupts memory / reuses stale request state during start-up. ADAPTER-ONLY: the Cloudflare Worker inspects the body (bounded, constant-memory) before it reaches the PHP worker. The Next middleware and the WordPress plugin cannot - the plugin runs after PHP has already parsed the body. Cannot catch bodies padded past the 256 KB scan cap or chunked variants the proxy reassembles differently.", sample: "multipart POST with PHP_SESSION_UPLOAD_PROGRESS plus machine-generated deep field-name nesting", check: () => bodyAttackDetected({ method: "POST", contentType: "multipart/form-data; boundary=B", truncated: false, body: '--B\r\nContent-Disposition: form-data; name="PHP_SESSION_UPLOAD_PROGRESS"\r\n\r\nx\r\n--B\r\nContent-Disposition: form-data; name="files[a][b][c][d][e][f]"\r\n\r\ny\r\n--B--\r\n' }, "php2shell") },
+  { id: "REACT2SHELL", name: "React2Shell (RSC Flight deserialization RCE)", family: "agent-llm", lenses: ["request-body"], note: "CVE-2025-55182: a crafted React Server Components Flight payload reaches the Function constructor via the prototype chain. Blocked on the never-legitimate body marker (a Flight reference paired with a prototype-pollution token), NOT on the Next-Action header, which every real Server Action sends. ADAPTER-ONLY (Cloudflare Worker body inspection); the header-only tell stays a report-only probe (next_server_action) in the middleware, which would false-positive if promoted to a block.", sample: "multipart Server Action POST whose Flight data carries $1:__proto__:then", check: () => bodyAttackDetected({ method: "POST", contentType: "multipart/form-data; boundary=B", truncated: false, body: '--B\r\nContent-Disposition: form-data; name="1_$ACTION"\r\n\r\n[{"a":"$1:__proto__:then"}]\r\n--B--\r\n' }, "react2shell") },
 ];
 
 /** Run one check, fail-safe: a check that throws is a gap, never a crash. */

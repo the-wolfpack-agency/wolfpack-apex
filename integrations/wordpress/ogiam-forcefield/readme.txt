@@ -74,6 +74,17 @@ Two installer screens, wp-admin/install.php and wp-admin/setup-config.php, run
 before WordPress loads any plugin, so no plugin can see them. To cover those too,
 use the OGIAM Forcefield Cloudflare connector in front of the site.
 
+= Does it protect against PHP2Shell (the PHP request-parser RCE)? =
+
+Not from WordPress. PHP2Shell (CVE-2026-109618 / CVE-2026-109619) triggers inside
+PHP's own request parser before any plugin loads, so no WordPress plugin can stop
+it - this one does not read request bodies and does not try. Patch PHP to a fixed
+release (8.5.12 / 8.4.27 / 8.3.36 / 8.2.35 or your vendor's backport), and put the
+OGIAM Forcefield Cloudflare connector in front of your site: it inspects a bounded
+part of the request body at the edge, before PHP parses it, and turns the known
+attack shapes away. The same Cloudflare-only inspection covers React2Shell
+(CVE-2025-55182) for sites that serve React Server Components.
+
 = Can it lock me out of my own site? =
 
 No. A signed-in user is never blocked, in any mode. Saving the plugin's settings
