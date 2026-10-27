@@ -101,7 +101,8 @@ export function classifySiteResponse(headers: HeaderBag, html: string): { platfo
   const h = (n: string) => (headers.get(n) ?? "").toLowerCase();
   const wp: string[] = [];
   const vercel: string[] = [];
-  if (h("link").includes("api.w.org")) wp.push("wp_api_header");
+  // WordPress announces its REST API with Link: <...>; rel="https://api.w.org/".
+  if (/rel="?https:\/\/api\.w\.org\/"?/.test(h("link"))) wp.push("wp_api_header");
   if (h("x-powered-by").includes("wp engine") || h("x-pingback").includes("xmlrpc.php")) wp.push("wp_header");
   for (const [re, name] of WP_HTML) if (re.test(html)) wp.push(name);
   if (h("x-vercel-id") || h("x-vercel-cache")) vercel.push("vercel_header");

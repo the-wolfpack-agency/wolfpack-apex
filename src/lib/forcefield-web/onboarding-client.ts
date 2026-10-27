@@ -29,11 +29,17 @@ export const WORDPRESS_DIRECTORY_LISTED = false;
  *  directory zip (src/lib/forcefield-web/wordpress-plugin-zip.ts). */
 export const WORDPRESS_PLUGIN_DOWNLOAD = "/api/forcefield/wordpress/plugin";
 
+const SITE_HOST = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+(?::\d{1,5})?$/i;
+
 /** The site's own WordPress admin: the directory install once listed, the zip
- *  upload screen until then. */
+ *  upload screen until then. Only a plain hostname (optionally with a port) is
+ *  ever placed in the link, always over https; anything else yields the
+ *  plugin download instead, so the value can never become a script URL. */
 export function wordpressInstallUrl(site: string): string {
   const host = String(site ?? "").trim().replace(/^https?:\/\//i, "").split(/[/?#]/)[0];
-  return WORDPRESS_DIRECTORY_LISTED
-    ? `https://${host}/wp-admin/plugin-install.php?tab=plugin-information&plugin=ogiam-forcefield`
-    : `https://${host}/wp-admin/plugin-install.php?tab=upload`;
+  if (!SITE_HOST.test(host)) return WORDPRESS_PLUGIN_DOWNLOAD;
+  const url = new URL("https://wordpress.invalid/wp-admin/plugin-install.php");
+  url.host = host;
+  url.search = WORDPRESS_DIRECTORY_LISTED ? "?tab=plugin-information&plugin=ogiam-forcefield" : "?tab=upload";
+  return url.toString();
 }
