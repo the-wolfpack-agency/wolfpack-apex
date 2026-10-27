@@ -38,6 +38,9 @@ import { verifyBoundaryDelegation, stampPrincipal } from "@/lib/forcefield/actio
 import { coerceActionProps } from "@/lib/forcefield-web/accountability";
 import { ingestSigningEnforced, verifyIngestSignature } from "@/lib/forcefield/ingest-signing";
 import { noteRequest, rateKey } from "@/lib/forcefield/rate-window";
+import { resolveActiveTenantById } from "@/lib/forcefield-web/edge-sites";
+import { EDGE_TENANT_HEADER } from "@/lib/forcefield-web/gateway";
+import { edgeServiceTokenMatches } from "@/lib/forcefield-web/edge-service-token";
 
 const WINDOW_MS = 60 * 1000;
 const MAX_PER_WINDOW = 600; // generous for a marketing site; bounds abuse.
@@ -67,6 +70,13 @@ function countsTowardRate(type: string): boolean {
   return type.startsWith("site.agent_") && type !== "site.agent_high_rate";
 }
 
+/** The tenant an Edge observation belongs to: only when the presented token is
+ *  the Edge service token AND the named tenant is active. Otherwise null. */
+async function resolveEdgeIngestTenant(provided: string, tenantId: string | null): Promise<{ id: string; siteLabel: string } | null> {
+  if (!tenantId || !edgeServiceTokenMatches(provided)) return null;
+  return resolveActiveTenantById(tenantId).catch(() => null);
+}
+
 export async function POST(req: NextRequest) {
   // Accept ANY configured shared ingest token, so each internal property can
   // carry its own secret without sharing one value or rotating the others. The
@@ -84,12 +94,17 @@ export async function POST(req: NextRequest) {
   }
 
   const provided = req.headers.get("x-ingest-token") || "";
-  const sharedOk = expected.some((t) => tokenMatches(provided, t));
+  // FORCEFIELD EDGE: the edge app serves many tenants with one service token and
+  // names the tenant per event in x-forcefield-edge-tenant. That pair is treated
+  // exactly like the tenant's own token (site pinned to the tenant's label, the
+  // tenant's own rate bucket); a tenant id without the service token is ignored.
+  const edgeTenant = await resolveEdgeIngestTenant(provided, req.headers.get(EDGE_TENANT_HEADER));
+  const sharedOk = !edgeTenant && expected.some((t) => tokenMatches(provided, t));
   // A tenant's OWN token is the self-serve path. It used to be dead: the shared
   // secret check above returned 401 for any other value, so the tenant lookup
   // further down was never reached with a tenant token. Resolve it here, before
   // anything else, only when the shared secret did not match.
-  const tenant = sharedOk || !provided ? null : await resolveTenantByToken(provided);
+  const tenant = edgeTenant ?? (sharedOk || !provided ? null : await resolveTenantByToken(provided));
   if (!sharedOk && !tenant) {
     return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
   }

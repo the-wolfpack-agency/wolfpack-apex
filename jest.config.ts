@@ -46,7 +46,7 @@ const config: Config = {
   // only mask slowness instead of removing it, and would let a genuinely slow
   // test sail through. workerIdleMemoryLimit is a native Jest knob - no dep.
   workerIdleMemoryLimit: "512MB",
-  testMatch: ["<rootDir>/src/**/__tests__/**/*.test.{ts,tsx}"],
+  testMatch: ["<rootDir>/src/**/__tests__/**/*.test.{ts,tsx}", "<rootDir>/edge/__tests__/**/*.test.ts"],
   // ts-jest's preset omits mjs/cjs; some allowlisted ESM deps resolve to
   // .mjs via package "exports", so Jest must know to look for them.
   moduleFileExtensions: ["ts", "tsx", "js", "jsx", "mjs", "cjs", "json", "node"],

@@ -1,0 +1,21 @@
+{
+  "providerId": "ogiam.com",
+  "providerName": "OGIAM",
+  "serviceId": "forcefield-edge",
+  "serviceName": "Forcefield Edge protection for a website hostname",
+  "version": 1,
+  "logoUrl": "https://ogiam.com/ogiam-logo.png",
+  "description": "Points one hostname (for example www) at Forcefield Edge, which inspects every request and forwards allowed traffic to the site's own server. Adds a single CNAME at the chosen host to the hosting platform's documented generic target; no other records in the zone are changed.",
+  "syncBlock": false,
+  "syncPubKeyDomain": "ogiam.com",
+  "syncRedirectDomain": "wolfpack-instinct.vercel.app",
+  "hostRequired": true,
+  "records": [
+    {
+      "type": "CNAME",
+      "host": "@",
+      "pointsTo": "cname.vercel-dns.com",
+      "ttl": 600
+    }
+  ]
+}

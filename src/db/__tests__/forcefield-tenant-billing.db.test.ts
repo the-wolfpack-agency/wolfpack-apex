@@ -19,7 +19,7 @@ describeIfDb("forcefield tenant billing schema (migration 286)", () => {
   beforeAll(async () => {
     db = new Client({ connectionString: requireLocalTestDatabase(URL) });
     await db.connect();
-    await db.query(`DROP TABLE IF EXISTS forcefield_tenants`);
+    await db.query(`DROP TABLE IF EXISTS forcefield_tenants CASCADE`); // CASCADE: 301 adds the first FK onto it
     // 284 cross-ALTERs site_analytics_events; these db-tests are self-contained
     // (not pre-migrated), so stub that table first (CREATE IF NOT EXISTS is a no-op
     // when it already exists). We are testing 286's columns, not 178's table.

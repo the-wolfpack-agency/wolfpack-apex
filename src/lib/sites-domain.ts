@@ -27,6 +27,9 @@ export interface VercelDomainRecord {
     reason?: string;
   }>;
   createdAt: number;
+  /** The registrable (apex) domain the platform derived for this name, e.g.
+   *  "example.com" for "shop.example.com". Present when it is returned. */
+  apexName?: string;
 }
 
 /** Codes callers map to HTTP status. */
@@ -144,6 +147,7 @@ function normalizeRecord(raw: unknown): VercelDomainRecord {
     }>;
     createdAt?: number;
     created?: number;
+    apexName?: string;
   };
   const verification = Array.isArray(r.verification)
     ? r.verification
@@ -164,6 +168,7 @@ function normalizeRecord(raw: unknown): VercelDomainRecord {
       : typeof r.created === "number"
         ? r.created
         : Date.now(),
+    ...(typeof r.apexName === "string" && r.apexName ? { apexName: r.apexName } : {}),
   };
 }
 
@@ -304,6 +309,66 @@ export async function removeDomainFromProject(opts: {
     throw new VercelDomainError(classifyVercelError(res.status, text), res.status, text);
   }
   return { success: true };
+}
+
+/** How the platform sees a domain's DNS, and what it recommends the owner create. */
+export interface VercelDomainConfig {
+  /** True until the DNS points at the project AND a certificate can be issued. */
+  misconfigured: boolean;
+  /** "CNAME" | "A" | "http" | "dns-01" | null (not resolving yet). */
+  configuredBy: string | null;
+  /** Rank-1 recommended CNAME target, when returned. */
+  recommendedCname: string | null;
+  /** Rank-1 recommended IPv4 for an apex A record, when returned. */
+  recommendedIpv4: string | null;
+}
+
+/** Pick the rank-1 value from a ranked recommendation list. */
+function rankOne<T>(list: unknown, pick: (v: unknown) => T | null): T | null {
+  if (!Array.isArray(list)) return null;
+  const sorted = [...list].sort((a, b) => Number((a as { rank?: unknown })?.rank ?? 99) - Number((b as { rank?: unknown })?.rank ?? 99));
+  for (const item of sorted) {
+    const v = pick((item as { value?: unknown })?.value);
+    if (v) return v;
+  }
+  return null;
+}
+
+/**
+ * GET /v6/domains/{domain}/config?teamId=...&projectIdOrName=... - the DNS state
+ * observed for a domain plus the record values recommended for it (the
+ * project-specific CNAME target for a subdomain, the IPv4 for an apex).
+ */
+export async function getDomainConfig(opts: {
+  projectId: string;
+  domain: string;
+  teamId: string;
+  token: string;
+  fetchImpl?: FetchLike;
+}): Promise<VercelDomainConfig> {
+  if (!isValidDomain(opts.domain)) {
+    throw new VercelDomainError("domain_invalid", 400, `domain "${String(opts.domain)}" failed local validation`);
+  }
+  const f = resolveFetch(opts.fetchImpl);
+  const params = new URLSearchParams({ teamId: opts.teamId, projectIdOrName: opts.projectId });
+  const url = `${VERCEL_API}/v6/domains/${encodeURIComponent(opts.domain.trim().toLowerCase())}/config?${params.toString()}`;
+  let res: Response;
+  try {
+    res = await f(url, { method: "GET", headers: authHeaders(opts.token) });
+  } catch (err) {
+    throw new VercelDomainError("network", 0, (err as Error).message ?? "network error");
+  }
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new VercelDomainError(classifyVercelError(res.status, text), res.status, text);
+  }
+  const raw = ((await res.json().catch(() => ({}))) ?? {}) as Record<string, unknown>;
+  return {
+    misconfigured: raw.misconfigured !== false,
+    configuredBy: typeof raw.configuredBy === "string" ? raw.configuredBy : null,
+    recommendedCname: rankOne(raw.recommendedCNAME, (v) => (typeof v === "string" && v ? v.replace(/\.$/, "") : null)),
+    recommendedIpv4: rankOne(raw.recommendedIPv4, (v) => (Array.isArray(v) && typeof v[0] === "string" ? (v[0] as string) : null)),
+  };
 }
 
 /**

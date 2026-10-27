@@ -86,7 +86,9 @@
     "forcefield:intent-replay": "npx tsx scripts/forcefield-intent-replay.ts",
     "forcefield:wp-plugin-zip": "npx tsx scripts/forcefield-wp-plugin-zip.ts",
     "forcefield:email-preview": "npx tsx scripts/forcefield-alert-preview.ts",
-    "forcefield:accountability-replay": "npx tsx scripts/forcefield-accountability-replay.ts"
+    "forcefield:accountability-replay": "npx tsx scripts/forcefield-accountability-replay.ts",
+    "forcefield:vendor:edge": "node scripts/forcefield-vendor.mjs . --target-dir edge/lib/forcefield-web",
+    "edge:proof": "bash edge/scripts/local-proof.sh"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.92.0",
