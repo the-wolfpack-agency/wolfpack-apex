@@ -12,10 +12,18 @@ import { NextRequest } from "next/server";
 const mockResolve = jest.fn();
 const mockStats = jest.fn();
 const mockBilling = jest.fn();
+const mockActivity = jest.fn();
+const mockById = jest.fn();
+process.env.INSTINCT_JWT_SECRET = process.env.INSTINCT_JWT_SECRET || "test-secret-0123456789abcdef0123456789abcd";
 
 jest.mock("@/lib/forcefield-web/tenants", () => ({
   resolveTenantByToken: (...a: unknown[]) => mockResolve(...a),
+  getActiveTenantById: (...a: unknown[]) => mockById(...a),
 }));
+jest.mock("@/lib/forcefield-web/tenant-activity", () => ({
+  getTenantActivity: (...a: unknown[]) => mockActivity(...a),
+}));
+jest.mock("@/lib/analytics", () => ({ trackEvent: jest.fn(), trackEventAwait: jest.fn(async () => {}) }));
 jest.mock("@/lib/forcefield-web/public-stats", () => ({
   getPublicForcefieldStats: (...a: unknown[]) => mockStats(...a),
 }));
@@ -27,6 +35,8 @@ jest.mock("@/lib/forcefield-web/billing", () => ({
 }));
 
 import { GET } from "../route";
+import { mintDashboardSession } from "@/lib/forcefield-web/dashboard-session";
+import { mintConfirmToken } from "@/lib/forcefield-web/tenant-notify";
 
 const TENANT = { id: "t-abc", name: "Before U Trade", siteLabel: "beforeutrade" };
 const STATS = {
@@ -39,7 +49,7 @@ const req = (token?: string) =>
     headers: token ? { "x-forcefield-token": token } : {},
   });
 
-beforeEach(() => jest.clearAllMocks());
+beforeEach(() => jest.resetAllMocks());
 
 it("401 when no token is presented, and the stats helper is never called", async () => {
   mockResolve.mockResolvedValueOnce(null);
@@ -105,4 +115,33 @@ it("no billing row -> enforcing:false, never overclaims a block", async () => {
   const body = await (await GET(req("ff_realtoken"))).json();
   expect(body.enforcing).toBe(false);
   expect(body.plan).toBe("none");
+});
+
+const ACTIVITY = { sinceIso: "x", counts: { agentsSeen: 2, welcomed: 1, slowed: 0, blocked: 1, caught: 0 }, agents: [{ name: "Googlebot", kind: "known_crawler", requests: 4, did: "Read your public pages", handled: "welcomed", lastSeen: null }] };
+
+it("returns who visited, scoped to the same tenant over the same 30 days", async () => {
+  mockResolve.mockResolvedValueOnce(TENANT);
+  mockStats.mockResolvedValueOnce(STATS);
+  mockBilling.mockResolvedValueOnce(null);
+  mockActivity.mockResolvedValueOnce(ACTIVITY);
+  const body = await (await GET(req("ff_realtoken"))).json();
+  expect(body.activity).toEqual(ACTIVITY);
+  const [tenantId, since] = mockActivity.mock.calls[0];
+  expect(tenantId).toBe("t-abc");
+  expect(Math.abs(Date.now() - 30 * 86400_000 - Date.parse(since))).toBeLessThan(60_000);
+});
+
+it("a dashboard session from the sign-in link reads the same tenant; a confirmation token does not", async () => {
+  const id = "6f1d0c2a-1111-4222-8333-944455556666";
+  mockById.mockResolvedValueOnce({ ...TENANT, id });
+  mockStats.mockResolvedValueOnce(STATS);
+  mockBilling.mockResolvedValueOnce(null);
+  mockActivity.mockResolvedValueOnce(ACTIVITY);
+  const res = await GET(req(mintDashboardSession(id)));
+  expect(res.status).toBe(200);
+  expect(mockById).toHaveBeenCalledWith(id);
+  expect(mockResolve).not.toHaveBeenCalled();
+  expect(mockStats).toHaveBeenCalledWith(30, undefined, id);
+  const wrongPurpose = await GET(req(mintConfirmToken(id, "qa@thewolfpack.agency")));
+  expect(wrongPurpose.status).toBe(401);
 });

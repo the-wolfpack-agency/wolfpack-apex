@@ -25,6 +25,7 @@ const CLASSIFIED: Record<string, string> = {
   "instinct_agents.onboarding_secret_hash": "one-way hash",
   "forcefield_tenants.token_sha256": "one-way hash",
   "forcefield_tenants.notify_confirm_token_sha256": "one-way hash (SHA-256 of the emailed alert-address confirmation token)",
+  "forcefield_signup_requests.plugin_secret_sha256": "one-way hash (SHA-256 of the WordPress plugin's connect secret; looked up by hash)",
   "instinct_target_verifications.verification_token": "published by the owner as proof of control; not a credential",
   "instinct_ms_sync_state.delta_token": "Graph delta-query cursor; grants nothing on its own",
   "instinct_invites.token": "one-way hash (SHA-256 via token-hash.ts; looked up by hash)",

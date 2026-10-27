@@ -1,18 +1,20 @@
 # Forcefield for WordPress
 
 A one-install plugin that protects a WordPress site from hostile AI agents and bots.
-No code: install, paste your site key, done. Watch-first and fail-open, so it never
+No code: install, click Connect, click the emailed link. Watch-first and fail-open, so it never
 takes the site down.
 
 ## Install (non-technical)
 
-1. Copy the `ogiam-forcefield/` folder into `wp-content/plugins/` (or zip it and
-   upload via Plugins -> Add New -> Upload).
-2. Activate **OGIAM Forcefield**.
-3. Go to **Settings -> Forcefield**, paste your **Site label** and **Site key**
-   (from `/admin/forcefield` onboarding), and Save.
-4. It now watches. When you are ready, tick **Blocking** and Save to turn away
-   proven-hostile requests.
+1. Download the plugin from the Forcefield signup page (or
+   `npm run forcefield:wp-plugin-zip`) and upload it via Plugins -> Add New ->
+   Upload. Activate **OGIAM Forcefield**.
+2. Go to **Settings -> Forcefield** and click **Connect**. The plugin proves it
+   runs on the site (Forcefield fetches a challenge from it); no key to copy.
+3. Click the sign-in link Forcefield emails you. The plugin collects its own key
+   and starts watching; the same link signs you in to the dashboard.
+4. When you are ready, tick **Blocking** under Settings and Save to turn away
+   proven-hostile requests. A key can still be pasted by hand under Settings.
 
 ## What it does
 

@@ -3,7 +3,81 @@
 Status: built, in the build phase. Only Wolfpack addresses can complete it and
 receive email (see "Opening it to clients" below).
 
-## What a person does
+## The two-step journey (current)
+
+1. **Website and email** at `/forcefield/signup`. The server takes one
+   read-only look at the site's home page (`platform-detect.ts`: a single GET
+   through the platform-scan SSRF guard, re-checked on every redirect, 5 s
+   timeout, 512 KB cap; a failure is "other") and the page shows the one
+   install option that fits: WordPress, Vercel / Next.js, or "Connect it for
+   me" (the concierge request). The DNS / file path below stays one click away.
+2. **One install button.** For WordPress: install the plugin (the zip from
+   `GET /api/forcefield/wordpress/plugin` until the WordPress.org listing is
+   live; then flip `WORDPRESS_DIRECTORY_LISTED` in `onboarding-client.ts` and
+   the button installs from the site's own wp-admin), then Settings ->
+   Forcefield -> Connect. No key, no DNS record, no file:
+   - `POST /api/forcefield/wordpress/connect` { site, email, secret }: the
+     plugin's random secret (`ffp_...`) is stored only as a SHA-256
+     (`forcefield_signup_requests.plugin_secret_sha256`, migration 299) and a
+     server-issued challenge comes back, which the plugin stores.
+   - `POST .../connect/prove` { secret }: the server fetches the challenge from
+     the site itself (`/?rest_route=/ogiam-forcefield/v1/challenge`, SSRF guard
+     on every hop, redirects only within the site, constant-time compare).
+     The plugin running on the site and answering is the ownership proof
+     (`ownership_method = 'wordpress_plugin'`, also stamped on the challenge
+     row). It provisions the tenant (platform `wordpress`) and sends the
+     existing confirmation email.
+   - The email's link is the **sign-in link**: clicking Confirm confirms the
+     address and returns a signed dashboard session (`dashboard-session.ts`,
+     purpose `ff_dashboard`, 30 days, tenant id only), so that browser lands
+     on its dashboard without ever handling a key.
+   - `POST .../connect/claim` { secret }: answers 202 until the link is clicked,
+     then returns a fresh site key exactly once (`rotateTenantToken`;
+     `plugin_linked_at`). The plugin checks on its settings page and once a
+     minute through WP-Cron, saves the key and starts in watch mode.
+3. **First hour.** Within minutes of the first real visitor (synthetic monitor
+   traffic excluded; at least 5 minutes after the first event, then the next
+   10-minute cron run) the confirmed address gets "Your first hour with
+   Forcefield on <site>": agents seen, welcomed, slowed and blocked, the top
+   three by activity, and the dashboard link (`renderFirstHourEmail`, sent
+   once through the guarded sender, claimed by `first_evidence_at`).
+4. **Live dashboard.** `/forcefield/dashboard` "Who visited" lists each agent,
+   what it did and how Forcefield handled it (blocked, slowed, welcomed,
+   caught in watch mode, watched), from `tenant-activity.ts`.
+
+The ingest (`/api/forcefield/observe`) now tags every row it records with the
+tenant whose key sent it (`site_analytics_events.forcefield_tenant_id`); before
+this, events arriving on a tenant key through the WordPress plugin or the
+Next.js middleware never reached that tenant's dashboard or alerts.
+
+Analytics for the new steps: `forcefield.onboarding_platform_detected`,
+`forcefield.wordpress_connect_started`, `forcefield.wordpress_ownership_verified`
+/ `_failed`, `forcefield.wordpress_linked`, `forcefield.dashboard_signed_in`,
+`forcefield.wordpress_plugin_downloaded`. Audit (hash-chained): connect started,
+ownership verified (never the secret or challenge), plugin linked (never the key).
+
+### Local WordPress proof
+
+`scripts/forcefield-wp-local-proof.sh up|run|down` starts a throwaway WordPress
+and MySQL (official images), runs `tests/e2e/forcefield-wordpress-live.spec.ts`
+(signup, plugin install, Connect, sign-in link, dashboard populated) and removes
+them. It needs a local dev server on a throwaway Postgres started with
+`FORCEFIELD_DEV_SITE_ORIGINS=http://wp.localtest.me:8080` (lets the server reach
+the local site) and `FORCEFIELD_MAIL_OUTBOX_DIR=<dir>` (mail is written there,
+never sent). Both settings are ignored whenever `NODE_ENV` is `production`.
+The first-hour email is rendered without sending by
+`npm run forcefield:email-preview -- --first-hour --tenant <id> --out <dir>`
+(read-only: `PGOPTIONS="-c default_transaction_read_only=on"`).
+
+### WordPress.org submission
+
+`npm run forcefield:wp-plugin-zip` writes `dist/wordpress/ogiam-forcefield-<version>.zip`
+(the same writer as the in-app download; it checks the readme's Stable tag and
+changelog). The readme carries the "External services" disclosure the
+directory requires. Open item before submitting: the directory only accepts
+GPL-compatible plugins, and the plugin is marked `License: Proprietary`.
+
+## What a person does (the DNS / file path)
 
 1. **Add the site** at `/forcefield/signup`: the website and the email that
    should receive its alerts (name optional). Behind it:

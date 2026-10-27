@@ -1,7 +1,7 @@
 /**
  * Tenant-facing Forcefield emails (pure renderers, no IO):
  *   - the double opt-in confirmation ("Confirm alerts for <site>"),
- *   - the first-evidence email ("Forcefield is watching <site>"),
+ *   - the "first hour" email (sent once, shortly after the first real visitors),
  *   - the daily digest for one tenant's site,
  *   - the footer appended to a tenant's immediate alert (rendered by the shared
  *     alert template with audience "tenant").
@@ -129,28 +129,49 @@ export interface EvidenceCounts {
 
 const n = (v: number) => (Number.isFinite(v) ? Math.max(0, v) : 0).toLocaleString("en-US");
 
-/** "Forcefield is watching <site>": sent once, when the first event arrives. */
-export function renderFirstEvidenceEmail(input: { site: string; to: string; firstEventAt: string; counts: EvidenceCounts } & TenantEmailLinks): RenderedTenantEmail {
-  const c = input.counts;
+/** What the first-hour email summarizes (tenant-activity.ts). */
+export interface FirstHourActivity {
+  counts: { agentsSeen: number; welcomed: number; slowed: number; blocked: number; caught: number };
+  agents: { name: string; requests: number; did: string; handled: string }[];
+}
+
+const HANDLED_LABEL: Record<string, string> = {
+  blocked: "blocked",
+  slowed: "slowed down",
+  welcomed: "welcomed",
+  caught: "caught (watch mode, not blocked)",
+  watched: "watched",
+};
+
+/** The "first hour" email: sent once, shortly after the first real visitors
+ *  reach the site. Counts of agents seen, welcomed, slowed and blocked, the top
+ *  few by activity, and the dashboard link. */
+export function renderFirstHourEmail(input: { site: string; to: string; firstEventAt: string; activity: FirstHourActivity } & TenantEmailLinks): RenderedTenantEmail {
+  const c = input.activity.counts;
   const f = standardFooter(input.site, input.to, input);
+  const top = input.activity.agents.slice(0, 3);
+  const plural = (v: number, one: string, many: string) => `${n(v)} ${v === 1 ? one : many}`;
   return render({
-    subject: `Forcefield is watching ${input.site}`,
-    preheader: `Traffic from ${input.site} is reaching Forcefield. Your site is connected.`,
-    heading: `Forcefield is watching ${input.site}`,
+    subject: `Your first hour with Forcefield on ${input.site}`,
+    preheader: `${plural(c.agentsSeen, "automated agent", "automated agents")} reached ${input.site} so far. Here is what Forcefield did.`,
+    heading: `Your first hour on ${input.site}`,
     paragraphs: [
-      `Your site is connected. Forcefield received its first request from ${input.site} and is now watching every automated visitor.`,
-      c.hostile > 0
-        ? `It has already caught ${n(c.hostile)} hostile ${c.hostile === 1 ? "action" : "actions"}. You will get an alert for each new incident.`
-        : "Nothing hostile so far. When Forcefield catches a hostile agent, you will get an alert with what it tried and what happened.",
-      "Forcefield starts in watch mode: it records and reports, and never blocks a visitor until you turn blocking on.",
+      `Forcefield is connected and saw its first visitor on ${input.site} at ${new Date(input.firstEventAt).toUTCString()}.`,
+      c.agentsSeen > 0
+        ? `Since then ${plural(c.agentsSeen, "automated agent has", "automated agents have")} visited: ${n(c.welcomed)} welcomed, ${n(c.slowed)} slowed down, ${n(c.blocked)} blocked${c.caught > 0 ? ` and ${n(c.caught)} caught in watch mode` : ""}.`
+        : "No automated agents yet, only people. When bots and AI agents arrive, your dashboard shows each one and what Forcefield did.",
+      c.caught > 0 && c.blocked === 0
+        ? "Forcefield is in watch mode: it records and reports hostile agents but does not block them until you turn blocking on."
+        : "Forcefield never blocks a signed-in user or a known-good crawler.",
     ],
     rows: [
-      { label: "First request", value: new Date(input.firstEventAt).toUTCString() },
-      { label: "Automated agents seen", value: n(c.agentsDetected) },
-      { label: "Good bots welcomed", value: n(c.welcomed) },
-      { label: "Hostile actions caught", value: n(c.hostile) },
+      { label: "Agents seen", value: n(c.agentsSeen) },
+      { label: "Welcomed", value: n(c.welcomed) },
+      { label: "Slowed", value: n(c.slowed) },
+      { label: "Blocked", value: n(c.blocked) },
+      ...top.map((a) => ({ label: a.name, value: `${plural(a.requests, "request", "requests")}. ${a.did}. ${HANDLED_LABEL[a.handled] ?? a.handled}.` })),
     ],
-    cta: { label: "Open your Forcefield dashboard", href: dashboardUrl(input.baseUrl) },
+    cta: { label: "Open your live dashboard", href: dashboardUrl(input.baseUrl) },
     ...f,
   });
 }

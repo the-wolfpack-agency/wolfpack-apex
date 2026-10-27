@@ -2,7 +2,7 @@
 
 /**
  * /forcefield/confirm?token=... - the double opt-in link from the confirmation
- * email. One click confirms the address (POST /api/forcefield/alert-email/confirm);
+ * email, which is also the owner's dashboard sign-in. One click confirms the address (POST /api/forcefield/alert-email/confirm);
  * nothing happens on page load. PUBLIC, no session: the signed token is the
  * credential.
  */
@@ -13,7 +13,8 @@ const COPY: TokenActionCopy = {
   intro: "Click below to confirm this address. Forcefield will then email you when it first sees your site's traffic, when it catches a hostile agent, and once a day with a summary.",
   button: "Confirm alerts",
   busy: "Confirming...",
-  done: (site) => `Confirmed. Alerts for ${site} will come to this address. The first one arrives when Forcefield sees your site's traffic.`,
+  done: (site) => `Confirmed, and you are signed in. Alerts for ${site} will come to this address. If you connected from the WordPress plugin, it links itself within a minute; your first-hour summary arrives shortly after the first visitors.`,
+  doneCta: "Open your dashboard",
   errors: {
     expired: "This link has expired. Open your dashboard and resend the confirmation email.",
     invalid: "This link is not valid. Use the most recent confirmation email, or resend it from your dashboard.",

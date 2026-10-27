@@ -18,3 +18,28 @@ export function writeStored(key: string, value: string): void {
 export function clearStored(key: string): void {
   try { window.localStorage.removeItem(key); } catch { /* ignore */ }
 }
+
+/** The install option the signup page shows (platform-detect.ts). */
+export type SignupPlatform = "wordpress" | "vercel" | "other";
+
+/** Flip to true once the plugin is live in the WordPress.org directory: the
+ *  WordPress button then installs it from the site's own admin in one click. */
+export const WORDPRESS_DIRECTORY_LISTED = false;
+/** The plugin zip, built from the plugin source by the same writer as the
+ *  directory zip (src/lib/forcefield-web/wordpress-plugin-zip.ts). */
+export const WORDPRESS_PLUGIN_DOWNLOAD = "/api/forcefield/wordpress/plugin";
+
+const SITE_HOST = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+(?::\d{1,5})?$/i;
+
+/** The site's own WordPress admin: the directory install once listed, the zip
+ *  upload screen until then. Only a plain hostname (optionally with a port) is
+ *  ever placed in the link, always over https; anything else yields the
+ *  plugin download instead, so the value can never become a script URL. */
+export function wordpressInstallUrl(site: string): string {
+  const host = String(site ?? "").trim().replace(/^https?:\/\//i, "").split(/[/?#]/)[0];
+  if (!SITE_HOST.test(host)) return WORDPRESS_PLUGIN_DOWNLOAD;
+  const url = new URL("https://wordpress.invalid/wp-admin/plugin-install.php");
+  url.host = host;
+  url.search = WORDPRESS_DIRECTORY_LISTED ? "?tab=plugin-information&plugin=ogiam-forcefield" : "?tab=upload";
+  return url.toString();
+}

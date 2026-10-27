@@ -215,11 +215,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       const props = { ...obs.props };
       if (asn !== undefined && obs.type !== "site.page_viewed") props.asn = asn;
       if (asOrg && obs.type !== "site.page_viewed") props.as_org = asOrg;
-      await recordSiteEvent({ eventType: obs.type, path: obs.path, country: country || null, props }).catch(() => {});
+      // Tag the row with the tenant whose key sent it, so the tenant's dashboard,
+      // first-hour email and alerts (all scoped by forcefield_tenant_id) see it.
+      await recordSiteEvent({ eventType: obs.type, path: obs.path, country: country || null, props, tenantId: tenant?.id ?? null }).catch(() => {});
     }
     // The intent step-up, recorded AFTER the request's own event.
     if (intent?.report) {
-      await recordSiteEvent({ eventType: "site.intent_scored", path, country: country || null, props: intent.props }).catch(() => {});
+      await recordSiteEvent({ eventType: "site.intent_scored", path, country: country || null, props: intent.props, tenantId: tenant?.id ?? null }).catch(() => {});
       void trackEvent("forcefield.intent_decided", `site:${site}`, "forcefield", {
         site,
         action: intent.decision.action,
@@ -247,6 +249,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           path,
           country: country || null,
           props: { site, sig: k.sig, fp: k.fp, client_type: k.client.clientType, rate: hit.count, window_s: Math.round(hit.windowMs / 1000) },
+          tenantId: tenant?.id ?? null,
         }).catch(() => {});
       }
     }

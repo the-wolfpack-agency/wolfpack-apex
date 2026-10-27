@@ -834,6 +834,27 @@ export type InstinctEventType =
   | "forcefield.onboarding_ownership_verified"
   | "forcefield.onboarding_ownership_failed"
   | "forcefield.onboarding_concierge_requested"
+  // Two-step onboarding (platform-detect.ts, wordpress-connect.ts,
+  // dashboard-session.ts):
+  // onboarding_platform_detected { requestId, platform, checked, evidence } -
+  //   the read-only home-page check on signup picked the install option.
+  // wordpress_connect_started { requestId, site, email_domain, source } - the
+  //   plugin's Connect button; a challenge was issued.
+  // wordpress_ownership_verified { requestId, tenantId, site,
+  //   confirm_email_delivered } / wordpress_ownership_failed { requestId,
+  //   reason } - the plugin answered (or did not answer) the challenge on the site.
+  // wordpress_linked { tenantId, requestId, site } - after the sign-in link was
+  //   clicked, the plugin collected its site key (once).
+  // dashboard_signed_in { tenantId, via } - the confirmation link signed a
+  //   browser in to the client dashboard.
+  | "forcefield.onboarding_platform_detected"
+  | "forcefield.wordpress_connect_started"
+  | "forcefield.wordpress_ownership_verified"
+  | "forcefield.wordpress_ownership_failed"
+  | "forcefield.wordpress_linked"
+  | "forcefield.dashboard_signed_in"
+  // wordpress_plugin_downloaded { version } - the plugin zip download.
+  | "forcefield.wordpress_plugin_downloaded"
   // Tenant alert address (src/lib/forcefield-web/tenant-notify.ts):
   // alert_email_set { tenantId, delivered } / _confirmed { tenantId, site } /
   // _removed { tenantId } / _unsubscribed { tenantId }.
@@ -844,7 +865,7 @@ export type InstinctEventType =
   // Tenant mail (src/lib/forcefield-web/tenant-mail.ts): tenant_mail_sent
   //   { purpose, tenant_id, delivered, reason }; tenant_mail_blocked { purpose,
   //   tenant_id, recipient_domain } - the recipient allowlist refused the address.
-  // tenant_first_evidence_sent { tenant_id, site } / tenant_digest_sent
+  // tenant_first_evidence_sent { tenant_id, site, kind: "first_hour", agents, blocked } / tenant_digest_sent
   //   { tenant_id, site, hostile, agents } (src/lib/forcefield-web/tenant-alerts.ts).
   | "forcefield.tenant_mail_sent"
   | "forcefield.tenant_mail_blocked"

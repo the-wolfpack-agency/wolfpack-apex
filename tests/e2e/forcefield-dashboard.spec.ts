@@ -10,6 +10,10 @@
  *      or JS crash over the flow.
  *   3. A 401 (unknown token) shows the clear "not recognized" message and no
  *      stats - never a blank page or a crash.
+ *   4. Signed in from the emailed link (a dashboard session, the WordPress
+ *      path): "Who visited" lists each agent, what it did and how Forcefield
+ *      handled it, with the agents seen / welcomed / slowed / blocked counts,
+ *      the live connection, and an explicit empty state before any agent.
  *
  * The my-stats endpoint is intercepted so the test is fast, deterministic and
  * needs no real tenant token or database. The page bundle, the token wiring and
@@ -101,5 +105,56 @@ test.describe("Forcefield client dashboard", () => {
     // The expected 401 is the auth signal, not a defect; assert only that the
     // page did not CRASH (no CSP violation / pageerror).
     expect(getFailures().filter((f) => f.kind === "console"), "no CSP / JS crash").toEqual([]);
+  });
+
+  test("signed in from the emailed link: who visited, what each did, how it was handled", async ({ page }) => {
+    const getFailures = collectConsoleAndNetworkFailures(page);
+    const activity = {
+      sinceIso: "2026-09-26T00:00:00Z",
+      counts: { agentsSeen: 3, welcomed: 1, slowed: 1, blocked: 1, caught: 0 },
+      agents: [
+        { name: "Googlebot", kind: "known_crawler", requests: 40, did: "Read your public pages", handled: "welcomed", lastSeen: null },
+        { name: "sqlmap", kind: "scanner", requests: 12, did: "Sent an attack payload (sql injection)", handled: "blocked", lastSeen: null },
+        { name: "python-requests", kind: "scripted_library", requests: 5, did: "Probed a sensitive path (env file)", handled: "slowed", lastSeen: null },
+      ],
+    };
+    let presented = "";
+    await page.route(/\/api\/forcefield\/my-stats/, (route: Route) => {
+      presented = route.request().headers()["x-forcefield-token"] ?? "";
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ...STATS, activity }) });
+    });
+    await page.route(/\/api\/forcefield\/my-setup/, (route: Route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, tenant: STATS.tenant, quickstart: null, connection: { connected: true, everConnected: true, lastEventAt: "2026-10-26T00:00:00Z" } }) }));
+    await mockAlertEmail(page);
+    await page.addInitScript(() => window.localStorage.setItem("ff_dashboard_token", "eyJhbGciOiJIUzI1NiJ9.e2e.session"));
+
+    const res = await page.goto(`${target.baseUrl}${PATH}`, { waitUntil: "domcontentloaded", timeout: 20_000 });
+    expect(res?.status()).toBe(200);
+    await expect(page.getByTestId("ff-visitors")).toBeVisible();
+    const rows = page.getByTestId("ff-visitor-row");
+    await expect(rows).toHaveCount(3);
+    await expect(rows.nth(0)).toContainText("Googlebot");
+    await expect(rows.nth(0)).toContainText("Welcomed");
+    await expect(rows.nth(1)).toContainText("Sent an attack payload (sql injection)");
+    await expect(rows.nth(1)).toContainText("Blocked");
+    await expect(rows.nth(2)).toContainText("Slowed");
+    await expect(page.getByTestId("ff-v-seen")).toContainText("3");
+    await expect(page.getByTestId("ff-v-blocked")).toContainText("1");
+    await expect(page.getByTestId("ff-connection")).toContainText("Connected");
+    await expect(page.getByTestId("ff-setup")).toHaveCount(0); // no paste-config for the plugin path
+    expect(presented).toBe("eyJhbGciOiJIUzI1NiJ9.e2e.session");
+    expect(getFailures(), "no CSP violations or JS errors").toEqual([]);
+  });
+
+  test("an explicit empty state before the first agent arrives", async ({ page }) => {
+    const getFailures = collectConsoleAndNetworkFailures(page);
+    await mockMyStats(page, 200, { ...STATS, activity: { sinceIso: "x", counts: { agentsSeen: 0, welcomed: 0, slowed: 0, blocked: 0, caught: 0 }, agents: [] } });
+    await mockMySetup(page);
+    await mockAlertEmail(page);
+    await page.addInitScript(() => window.localStorage.setItem("ff_dashboard_token", "ff_e2e_token"));
+    await page.goto(`${target.baseUrl}${PATH}`, { waitUntil: "domcontentloaded", timeout: 20_000 });
+    await expect(page.getByTestId("ff-visitors-empty")).toContainText("No automated agents yet");
+    await expect(page.getByTestId("ff-visitors-table")).toHaveCount(0);
+    expect(getFailures(), "no CSP violations or JS errors").toEqual([]);
   });
 });

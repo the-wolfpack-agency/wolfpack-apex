@@ -13,7 +13,7 @@ jest.mock("@/lib/db", () => ({ query: jest.fn(), safeQuery: jest.fn(async () => 
 
 import {
   runTenantNotifications, tenantAlertFromIncident, renderTenantAlert, tenantIncidentKey, TENANT_EVENTS_SQL,
-  MAX_ALERTS_PER_TENANT_RUN, DIGEST_HOUR_UTC, type TenantNotifyDeps, type ConfirmedTenant,
+  MAX_ALERTS_PER_TENANT_RUN, DIGEST_HOUR_UTC, FIRST_HOUR_SETTLE_MS, type TenantNotifyDeps, type ConfirmedTenant,
 } from "@/lib/forcefield-web/tenant-alerts";
 import { alertFromIncident, HOSTILE_EVENTS_SQL } from "@/lib/forcefield-web/alerts";
 import { buildIncidents, type HostileEventGroup } from "@/lib/forcefield-web/incidents";
@@ -29,6 +29,16 @@ const GROUP: HostileEventGroup = {
 /** The same burst fully blocked at the edge: routed to the summary. */
 const BLOCKED: HostileEventGroup = { ...GROUP, outcome: "blocked", posture: "enforce" };
 const INC = buildIncidents([GROUP])[0];
+const ACTIVITY = {
+  sinceIso: "2026-10-26T09:00:00.000Z",
+  counts: { agentsSeen: 4, welcomed: 1, slowed: 1, blocked: 1, caught: 1 },
+  agents: [
+    { name: "Googlebot", kind: "known_crawler", requests: 12, did: "Read your public pages", handled: "welcomed" as const, lastSeen: null },
+    { name: "sqlmap", kind: "scanner", requests: 7, did: "Sent an attack payload (sql injection)", handled: "blocked" as const, lastSeen: null },
+    { name: "python-requests", kind: "scripted_library", requests: 5, did: "Probed a sensitive path (env file)", handled: "slowed" as const, lastSeen: null },
+    { name: "curl", kind: "scripted_library", requests: 2, did: "Visited as automation", handled: "caught" as const, lastSeen: null },
+  ],
+};
 const STATS = { rangeDays: 1, agentsDetected: 9, welcomed: 2, trapped: 1, probed: 2, payloads: 3, hostile: 6, sitesProtected: 1, attacks: [{ attack: "sql_injection", count: 3 }] };
 
 function deps(over: Partial<TenantNotifyDeps> = {}) {
@@ -36,6 +46,7 @@ function deps(over: Partial<TenantNotifyDeps> = {}) {
   const d: TenantNotifyDeps = {
     listConfirmedTenants: async () => [T],
     firstEventAt: async () => "2026-10-26T09:00:00.000Z",
+    activity: jest.fn(async () => ACTIVITY),
     claimFirstEvidence: jest.fn(async () => true),
     releaseFirstEvidence: jest.fn(async () => {}),
     stats: jest.fn(async () => STATS),
@@ -90,16 +101,24 @@ it("tenant alert emails link only to the client dashboard and carry one unsubscr
   expect(email.text).toContain("Unsubscribe: https://instinct.example/forcefield/unsubscribe?token=unsub-tok");
 });
 
-it("first evidence + one incident alert, outside the digest hour", async () => {
+it("first hour + one incident alert, outside the digest hour", async () => {
   const { d, mails } = deps();
   const r = await runTenantNotifications(d, NOT_DIGEST);
   expect(r).toMatchObject({ tenants: 1, firstEvidence: 1, alertsDispatched: 1, alertsDelivered: 1, digests: 0, blocked: 0 });
   expect(mails.map((m) => m.purpose)).toEqual(["first_evidence", "alert"]);
   expect(mails.every((m) => m.to === T.email && m.tenantId === "t1")).toBe(true);
-  expect(mails[0].subject).toBe("Forcefield is watching acme.com");
+  expect(mails[0].subject).toBe("Your first hour with Forcefield on acme.com");
+  // Counts of agents seen, welcomed, slowed and blocked, the top three by activity, the dashboard.
+  expect(mails[0].text).toMatch(/Agents seen: 4\nWelcomed: 1\nSlowed: 1\nBlocked: 1/);
+  expect(mails[0].text).toContain("Googlebot: 12 requests. Read your public pages. welcomed.");
+  expect(mails[0].text).toContain("sqlmap: 7 requests");
+  expect(mails[0].text).toContain("python-requests: 5 requests");
+  expect(mails[0].text).not.toContain("curl: 2 requests");
+  expect(mails[0].text).toContain("Open your live dashboard: https://instinct.example/forcefield/dashboard");
+  expect(d.activity).toHaveBeenCalledWith("t1", "2026-10-26T09:00:00.000Z");
   expect(mails[0].text).toContain("/forcefield/unsubscribe?token=unsub-t1-qa%40thewolfpack.agency");
   expect(d.listTenantEvents).toHaveBeenCalledWith("t1", expect.any(String), expect.any(String));
-  expect(d.track).toHaveBeenCalledWith("forcefield.tenant_first_evidence_sent", { tenant_id: "t1", site: "acme.com" });
+  expect(d.track).toHaveBeenCalledWith("forcefield.tenant_first_evidence_sent", { tenant_id: "t1", site: "acme.com", kind: "first_hour", agents: 4, blocked: 1 });
   expect(d.recordOutcome).toHaveBeenCalledWith(expect.objectContaining({ site: "acme.com" }), expect.objectContaining({ status: "delivered", detail: "tenant" }));
 });
 
@@ -120,6 +139,23 @@ it("alerts only since the address was confirmed (when within the lookback)", asy
   await runTenantNotifications(old.d, NOT_DIGEST);
   // Window-aligned lookback, the same floor the operator scan uses.
   expect((old.d.listTenantEvents as jest.Mock).mock.calls[0][1]).toBe("2026-10-25T06:00:00.000Z");
+});
+
+it("the first-hour email waits until the first real event has settled", async () => {
+  const first = new Date(NOT_DIGEST.getTime() - FIRST_HOUR_SETTLE_MS + 60_000).toISOString();
+  const early = deps({ firstEventAt: async () => first, listTenantEvents: async () => [] });
+  expect((await runTenantNotifications(early.d, NOT_DIGEST)).firstEvidence).toBe(0);
+  expect(early.d.claimFirstEvidence).not.toHaveBeenCalled();
+  const later = new Date(NOT_DIGEST.getTime() + 120_000);
+  expect((await runTenantNotifications(early.d, later)).firstEvidence).toBe(1);
+});
+
+it("the live first-event query excludes synthetic monitor traffic", async () => {
+  const db = jest.requireMock("@/lib/db") as { query: jest.Mock };
+  db.query.mockResolvedValueOnce({ rows: [{ at: null }] });
+  const { liveTenantNotifyDeps } = await import("@/lib/forcefield-web/tenant-alerts");
+  await liveTenantNotifyDeps().firstEventAt("t1");
+  expect(db.query.mock.calls.at(-1)[0]).toMatch(/forcefield_tenant_id = \$1 AND COALESCE\(props->>'synthetic', ''\) <> 'true'/);
 });
 
 it("no first evidence without an event, and not again once sent", async () => {

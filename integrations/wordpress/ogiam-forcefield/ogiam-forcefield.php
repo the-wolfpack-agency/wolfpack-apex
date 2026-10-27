@@ -1,8 +1,8 @@
 <?php
 /**
  * Plugin Name: OGIAM Forcefield
- * Description: Protects your site from hostile AI agents and bots. Paste your site key and go. Watch-first and fail-open: it never takes your site down.
- * Version: 0.2.0
+ * Description: Protects your site from hostile AI agents and bots. Click Connect, then the sign-in link we email you: no key to copy, no DNS change. Watch-first and fail-open: it never takes your site down.
+ * Version: 0.3.0
  * Requires at least: 6.0
  * Requires PHP: 7.4
  * License: Proprietary
@@ -24,6 +24,11 @@ if (!defined('ABSPATH')) { exit; } // No direct access.
 if (!defined('OGIAM_FF_DEFAULT_INGEST')) {
     define('OGIAM_FF_DEFAULT_INGEST', 'https://wolfpack-instinct.vercel.app/api/forcefield/observe');
 }
+
+// One-click Connect: the plugin proves it runs on this site and collects its own
+// site key after the owner clicks the emailed sign-in link (includes/connect.php).
+require_once __DIR__ . '/includes/connect.php';
+register_deactivation_hook(__FILE__, 'ogiam_ff_deactivate');
 
 /**
  * Proxy headers the site owner may choose to trust for the client IP. Anything
@@ -78,7 +83,10 @@ function ogiam_ff_settings_page() {
     ?>
     <div class="wrap">
         <h1><?php echo esc_html__('Forcefield', 'ogiam-forcefield'); ?></h1>
-        <p><?php echo esc_html__('Paste the site label and key from your OGIAM onboarding. Protection starts in watch mode; enable blocking when you are ready. Signed-in users are never blocked.', 'ogiam-forcefield'); ?></p>
+        <?php ogiam_ff_render_connect_panel(); ?>
+        <details style="margin-top:20px;max-width:720px;" <?php if (get_option('ogiam_ff_token', '') !== '') { echo 'open'; } ?>>
+        <summary style="cursor:pointer;font-weight:600;"><?php echo esc_html__('Settings', 'ogiam-forcefield'); ?></summary>
+        <p><?php echo esc_html__('Connect fills these in for you. You can also paste a site label and key from your Forcefield setup. Protection starts in watch mode; enable blocking when you are ready. Signed-in users are never blocked.', 'ogiam-forcefield'); ?></p>
         <form method="post" action="options.php">
             <?php settings_fields('ogiam_ff'); ?>
             <table class="form-table">
@@ -111,6 +119,7 @@ function ogiam_ff_settings_page() {
             </table>
             <?php submit_button(); ?>
         </form>
+        </details>
     </div>
     <?php
 }

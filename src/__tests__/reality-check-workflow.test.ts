@@ -94,6 +94,9 @@ const KNOWN_UNRUN: string[] = [
   // .github/workflows/factory-live-dogfood.yml (runs its large-file routing
   // scenario against prod on a schedule + factory PRs, using SMOKE_TEST creds).
   "tests/e2e/agent-control-plane.spec.ts",
+  // Forcefield on a real WordPress: needs Docker + a local dev server, so it runs
+  // through scripts/forcefield-wp-local-proof.sh, not against the deployed app.
+  "tests/e2e/forcefield-wordpress-live.spec.ts",
   "tests/e2e/agent-deployments-pipeline.spec.ts",
   "tests/e2e/agent-detail-console.spec.ts",
   "tests/e2e/agent-model-regression.spec.ts",

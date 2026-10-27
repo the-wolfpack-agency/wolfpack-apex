@@ -113,6 +113,25 @@ export async function resolveTenantByToken(token: string, q: TenantQuery = liveQ
   }
 }
 
+/** The ACTIVE tenant with this id, or null. Used to resolve a signed dashboard
+ *  session (dashboard-session.ts), which carries the tenant id, never a token. */
+export async function getActiveTenantById(id: string, q: TenantQuery = liveQuery): Promise<ForcefieldTenant | null> {
+  const v = String(id ?? "").trim();
+  if (!/^[0-9a-f-]{36}$/i.test(v)) return null;
+  try {
+    const [row] = await q<TenantRow>(
+      `SELECT id, name, site_label, status, created_at::text AS created_at, platform, shares_intel, enforce_enabled
+         FROM forcefield_tenants
+        WHERE id = $1 AND status = 'active'
+        LIMIT 1`,
+      [v],
+    );
+    return row ? rowToTenant(row) : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Registry listing for an admin surface. NEVER returns the token or its hash. */
 export async function listForcefieldTenants(q: TenantQuery = liveQuery): Promise<ForcefieldTenant[]> {
   try {

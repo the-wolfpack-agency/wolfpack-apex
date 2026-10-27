@@ -10,13 +10,15 @@
  *
  * PUBLIC: not capability-gated in the session sense - a client wires this into
  * their own dashboard where no apex user session exists. It is locked down by the
- * per-tenant ingest token in the `x-forcefield-token` header, resolved by sha256
- * hash to an ACTIVE tenant; an unknown, disabled, or missing token returns 401 and
+ * per-tenant credential in the `x-forcefield-token` header: the ingest token
+ * (resolved by sha256 hash) or a signed dashboard session from the confirmation
+ * link (dashboard-session.ts), either resolving to an ACTIVE tenant; an unknown, disabled, or missing token returns 401 and
  * never another tenant's data. Same posture as forcefield/observe and the
  * site-analytics ingest endpoint. Never 500s: the stats helper degrades to zeros.
  */
 import { NextRequest, NextResponse } from "next/server";
-import { resolveTenantByToken } from "@/lib/forcefield-web/tenants";
+import { resolveTenantCredential } from "@/lib/forcefield-web/dashboard-session";
+import { getTenantActivity } from "@/lib/forcefield-web/tenant-activity";
 import { getPublicForcefieldStats } from "@/lib/forcefield-web/public-stats";
 import { getTenantBilling, isLicensed } from "@/lib/forcefield-web/billing";
 
@@ -25,11 +27,15 @@ export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const token = req.headers.get("x-forcefield-token") ?? "";
-  const tenant = await resolveTenantByToken(token);
+  const cred = await resolveTenantCredential(token);
+  const tenant = cred?.tenant;
   if (!tenant) {
     return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
   }
   const stats = await getPublicForcefieldStats(30, undefined, tenant.id);
+  // Who visited: each agent, what it did, how Forcefield handled it (30 days,
+  // synthetic monitor traffic excluded). Degrades to empty, never a 500.
+  const activity = await getTenantActivity(tenant.id, new Date(Date.now() - 30 * 86400_000).toISOString());
   // Enforce-to-paid: is this tenant entitled to ACTUALLY block, or watch-only?
   // Drives the honest dashboard labeling ("stopped" vs "caught") + the upgrade
   // prompt. Defaults to watch-only (false) if billing is absent or a read fails,
@@ -40,6 +46,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     ok: true,
     tenant: { id: tenant.id, name: tenant.name, siteLabel: tenant.siteLabel },
     stats,
+    activity,
     enforcing,
     plan: billing?.plan ?? "none",
   });
