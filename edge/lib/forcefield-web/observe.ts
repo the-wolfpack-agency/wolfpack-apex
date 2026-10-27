@@ -19,6 +19,13 @@ import { classifyHosting, datacenterPrefixesFrom, verifyAgentByRanges, type Agen
 import { detectHeaderAttack, detectPayload, PAYLOAD_CWE } from "./enforce";
 import type { ForcefieldRuleset } from "./ruleset";
 import { kevProbe } from "./kev-rules";
+import {
+  ACTION_PROP_KEYS,
+  DEFAULT_STATE_CHANGE_RULES,
+  accountabilityVerdict,
+  actionProps,
+  stateChangeOf,
+} from "./accountability";
 
 export type ForcefieldEventType =
   | "site.page_viewed"
@@ -29,7 +36,10 @@ export type ForcefieldEventType =
   | "site.agent_payload_attack"
   | "site.agent_high_rate"
   /** An intent step-up (watch / tarpit / block) with its reasons (intent.ts). */
-  | "site.intent_scored";
+  | "site.intent_scored"
+  /** A state-changing request (accountability.ts) with no other tell, recorded
+   *  so its accountability verdict is counted. Watch mode: never a block. */
+  | "site.action_observed";
 
 export interface Observation {
   type: ForcefieldEventType;
@@ -377,6 +387,26 @@ export function observeRequest(input: ObserveInput, ruleset: ForcefieldRuleset):
   }
   const signedAgent = presentsSignedAgent(names);
 
+  // ACCOUNTABLE ACTIONS (watch mode): a state-changing request carries who is
+  // accountable for it. Recorded on whatever event the request produces; never
+  // changes the event type, the block decision, or the request.
+  const rules = ruleset.stateChange ?? DEFAULT_STATE_CHANGE_RULES;
+  const change = stateChangeOf({ site: input.site, path, method, staticAsset: isStaticAsset(path) }, rules);
+  const hosting = change ? classifyHosting(input.ip, datacenterPrefixesFrom(ruleset.datacenterPrefixes)) : "unknown";
+  const action = change
+    ? actionProps(
+        change,
+        accountabilityVerdict({
+          clientType: client.clientType,
+          headerMismatch: client.headerMismatch,
+          hosting,
+          authenticated,
+          headerNames: input.headerNames,
+          identifiedAgent: verdict.class === "known_agent" || signedAgent,
+        }),
+      )
+    : null;
+
   // A NAMED scanner is flagged on any path - proven tradecraft. A scripted HTTP
   // library is too, unless the site attested a verified credential (our own
   // crons and monitors are curl/urllib with a real secret).
@@ -408,8 +438,25 @@ export function observeRequest(input: ObserveInput, ruleset: ForcefieldRuleset):
         props: {
           site: input.site,
           sig: sessionSig(userAgent, input.country, input.headerNames, input.nowMs),
+          ...(action ?? {}),
         },
       };
+    }
+    // A state-changing request with no other tell is still recorded, so every
+    // action is counted. A session the site attested is accountable by
+    // definition and not forwarded on its own (rules.recordAttested), and our
+    // own verified synthetic probes never are.
+    if (action && input.synthetic !== true && (!authenticated || rules.recordAttested === true)) {
+      const props: Record<string, string | number | boolean> = { site: input.site, ...action, client_type: client.clientType, hosting };
+      // Link an unaccountable action to its operator; a browser action carries
+      // no session key (volume, and nothing to correlate).
+      if (action.accountability !== "browser_session") {
+        const k = clientKeys(input, ruleset);
+        props.sig = k.sig;
+        props.fp = k.fp;
+      }
+      stampAttestation(props, input);
+      return { type: "site.action_observed", path, props };
     }
     return null;
   }
@@ -425,6 +472,7 @@ export function observeRequest(input: ObserveInput, ruleset: ForcefieldRuleset):
   if (verification) props.agent_verification = verification;
   if (verification === "impersonation" && verdict.matchedAgentId) props.impersonating = verdict.matchedAgentId;
   if (signedAgent) props.signed_agent = true;
+  if (action) Object.assign(props, action);
   stampAttestation(props, input);
   return { type, path, props };
 }
@@ -457,12 +505,15 @@ export function withEnforcement(
 ): Observation | null {
   if (!outcome.wouldBlock) return obs;
   let base = obs;
-  if (!base || base.type === "site.page_viewed") {
+  if (!base || base.type === "site.page_viewed" || base.type === "site.action_observed") {
     const verdict = classifyWebRequest(
       { path: input.path, method: input.method, userAgent: input.userAgent },
       { trapPaths: ruleset.trapPaths, knownAgents: ruleset.knownAgents },
     );
-    base = { type: "site.agent_flagged", path: input.path, props: agentProps(input, ruleset, verdict.matchedAgentId) };
+    const rebuilt = agentProps(input, ruleset, verdict.matchedAgentId);
+    // Keep the action verdict when the event is rebuilt as a block record.
+    for (const k of ACTION_PROP_KEYS) if (base?.props[k] !== undefined) rebuilt[k] = base.props[k];
+    base = { type: "site.agent_flagged", path: input.path, props: rebuilt };
   }
   const props = { ...base.props };
   if (outcome.reasonKind) props.reason_kind = outcome.reasonKind;
