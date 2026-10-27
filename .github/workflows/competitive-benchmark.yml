@@ -71,6 +71,8 @@ jobs:
           # benchmark-sweep.yml.
           BASE_URL: ${{ github.event.inputs.base != '' && github.event.inputs.base || secrets.TARGET_BASE_URL }}
           CRON_SECRET: ${{ secrets.INGEST_SECRET }}
+          # Marks every ZAP + Nuclei request as our synthetic monitor on our own Forcefield sites.
+          FORCEFIELD_SYNTHETIC_TOKEN: ${{ secrets.FORCEFIELD_SYNTHETIC_TOKEN }}
           TOOLS: ${{ github.event.inputs.tools != '' && github.event.inputs.tools || 'zap,nuclei' }}
           # Optional self-hosted labeled targets (our infra). Read-only here.
           BENCHMARK_JUICE_SHOP_URL: ${{ secrets.BENCHMARK_JUICE_SHOP_URL }}
