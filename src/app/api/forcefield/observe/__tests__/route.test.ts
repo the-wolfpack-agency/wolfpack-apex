@@ -90,6 +90,17 @@ describe("per-tenant token auth (self-serve onboarding)", () => {
   test("the shared secret path never does a tenant lookup", async () => {
     await POST(post(sqlmap)); // correct secret
     expect(resolveTenantByToken).not.toHaveBeenCalled();
+    // A first-party event belongs to no tenant.
+    expect(recordSiteEvent.mock.calls[0][0]).toMatchObject({ tenantId: null });
+  });
+
+  test("a tenant token tags every recorded row with that tenant (its dashboard, first-hour email and alerts read by it)", async () => {
+    resolveTenantByToken.mockResolvedValueOnce({ id: "t1", name: "Acme", siteLabel: "acme", status: "active", sharesIntel: true, enforceEnabled: false });
+    await POST(post({ ...sqlmap, site: "someone-elses-site" }, "ff_tenanttoken"));
+    expect(recordSiteEvent).toHaveBeenCalled();
+    for (const [row] of recordSiteEvent.mock.calls) {
+      expect(row).toMatchObject({ tenantId: "t1", props: expect.objectContaining({ site: "acme" }) });
+    }
   });
 });
 

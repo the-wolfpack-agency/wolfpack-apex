@@ -194,3 +194,45 @@ it("shows 'No recent traffic' (stale) when the site connected before but went qu
   // stale must NOT re-show the copy-paste config (the shim was wired before)
   expect(screen.queryByTestId("ff-setup-cf")).not.toBeInTheDocument();
 });
+
+describe("who visited", () => {
+  const ACTIVITY = {
+    counts: { agentsSeen: 3, welcomed: 1, slowed: 1, blocked: 1, caught: 0 },
+    agents: [
+      { name: "Googlebot", kind: "known_crawler", requests: 40, did: "Read your public pages", handled: "welcomed", lastSeen: null },
+      { name: "sqlmap", kind: "scanner", requests: 12, did: "Sent an attack payload (sql injection)", handled: "blocked", lastSeen: null },
+      { name: "python-requests", kind: "scripted_library", requests: 5, did: "Probed a sensitive path (env file)", handled: "slowed", lastSeen: null },
+    ],
+  };
+  const route = (activity: unknown) => (url: string) => {
+    if (url === "/api/forcefield/my-stats") return Promise.resolve(okResponse({ ...STATS, activity }));
+    if (url === "/api/forcefield/my-setup") return Promise.resolve(okResponse({ ok: true, quickstart: null, connection: { connected: true, everConnected: true, lastEventAt: "2026-10-26T00:00:00Z" } }));
+    return Promise.resolve(okResponse({ ok: true, notify: { email: "qa@thewolfpack.agency", status: "confirmed", confirmedAt: "x" } }));
+  };
+
+  it("lists each agent, what it did and how Forcefield handled it, with the four counts", async () => {
+    window.localStorage.setItem("ff_dashboard_token", "eyJ.session.token");
+    mockFetch.mockImplementation(route(ACTIVITY));
+    render(<ForcefieldDashboardPage />);
+    const rows = await screen.findAllByTestId("ff-visitor-row");
+    expect(rows).toHaveLength(3);
+    expect(rows[0]).toHaveTextContent("Googlebot");
+    expect(rows[0]).toHaveTextContent("Welcomed");
+    expect(rows[1]).toHaveTextContent("Sent an attack payload (sql injection)");
+    expect(rows[1]).toHaveTextContent("Blocked");
+    expect(rows[2]).toHaveTextContent("Slowed");
+    expect(screen.getByTestId("ff-v-seen")).toHaveTextContent("3");
+    expect(screen.getByTestId("ff-v-blocked")).toHaveTextContent("1");
+    // A session credential (the WordPress path) shows the live connection, no paste-config panel.
+    expect(await screen.findByTestId("ff-connection")).toHaveTextContent("Connected");
+    expect(screen.queryByTestId("ff-setup")).not.toBeInTheDocument();
+  });
+
+  it("an explicit empty state before any agent arrives", async () => {
+    window.localStorage.setItem("ff_dashboard_token", "ff_realtoken");
+    mockFetch.mockImplementation(route({ counts: { agentsSeen: 0, welcomed: 0, slowed: 0, blocked: 0, caught: 0 }, agents: [] }));
+    render(<ForcefieldDashboardPage />);
+    expect(await screen.findByTestId("ff-visitors-empty")).toHaveTextContent("No automated agents yet");
+    expect(screen.queryByTestId("ff-visitors-table")).not.toBeInTheDocument();
+  });
+});

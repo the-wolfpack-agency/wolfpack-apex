@@ -2,12 +2,12 @@
 Contributors: ogiam
 Tags: security, bots, ai, firewall, bot-protection
 Requires at least: 6.0
-Tested up to: 6.7
+Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 0.2.0
+Stable tag: 0.3.0
 License: Proprietary
 
-Protect your site from hostile AI agents and bots. Install, paste your site key, done. Watch-first and fail-open: it never takes your site down.
+Protect your site from hostile AI agents and bots. Click Connect, click the emailed link, done. Watch-first and fail-open.
 
 == Description ==
 
@@ -37,15 +37,45 @@ updating the plugin.
 
 == Installation ==
 
-1. Upload the `ogiam-forcefield` folder to `/wp-content/plugins/`, or install the
-   zip via Plugins -> Add New -> Upload.
-2. Activate the plugin.
-3. Go to Settings -> Forcefield, paste your Site label and Site key (from your OGIAM
-   /admin/forcefield onboarding), and Save.
-4. It now watches. When ready, tick Blocking and Save to turn away proven-hostile
+1. Install the plugin from Plugins -> Add New (search for OGIAM Forcefield), or
+   upload the zip via Plugins -> Add New -> Upload, and activate it.
+2. Go to Settings -> Forcefield, check the email address and click Connect.
+   Forcefield checks that the plugin is running on your site; there is no key to
+   copy, no DNS record and no file to upload.
+3. Click the sign-in link Forcefield emails you. The plugin connects itself
+   within a minute and starts watching. The same link signs you in to your live
+   Forcefield dashboard.
+4. When ready, tick Blocking under Settings and Save to turn away proven-hostile
    requests.
 
+You can still paste a site key by hand under Settings if you were given one.
+
+== External services ==
+
+This plugin connects your site to the OGIAM Forcefield engine
+(https://wolfpack-instinct.vercel.app, operated by The Wolfpack Agency), which
+decides whether a request is a hostile automated action.
+
+* When you click Connect, it sends your site address, the email you entered and
+  your site name, plus a random secret the plugin generated, so Forcefield can
+  check ownership and email you a sign-in link. Forcefield then requests one
+  address on your site (/?rest_route=/ogiam-forcefield/v1/challenge) to confirm
+  the plugin is running there.
+* Once connected, on each request it sends the request shape described above
+  (path, method, header names, user-agent, accept, sec-fetch-dest, country,
+  whether the visitor is signed in, and the client IP, which is classified and
+  then discarded). No request bodies, cookies or account details are sent.
+
+Nothing is sent until you click Connect or enter a site key.
+
 == Frequently Asked Questions ==
+
+= Do I need to copy a key or change DNS? =
+
+No. Click Connect: Forcefield verifies the site by asking the plugin itself
+(a check only code running on your site can answer), then emails you a sign-in
+link. When you click it, the plugin collects its own key. The DNS record and
+file methods are only for sites without this plugin.
 
 = Will this block real visitors? =
 
@@ -99,6 +129,13 @@ reverse proxy, choose it under Client IP source. Do not choose a proxy if visito
 can reach your server directly: they could then send a fake IP header.
 
 == Changelog ==
+
+= 0.3.0 =
+* One-click Connect: no key to copy. The plugin answers a server-issued
+  ownership check from your site, Forcefield emails a sign-in link, and the
+  plugin collects its own site key once you click it (checked on the settings
+  page and once a minute through WP-Cron).
+* The manual site key settings move under a Settings section on the same page.
 
 = 0.2.0 =
 * Coverage: the guard now runs on `init` (priority 0) instead of

@@ -7,7 +7,9 @@
  * POST returned (header x-forcefield-setup), stored only as a SHA-256.
  *
  * POST { siteUrl, email, name?, note? }
- *   201 { ok, mode: "self_serve", requestId, setupKey, site, email, ownership }
+ *   201 { ok, mode: "self_serve", requestId, setupKey, site, email, ownership, platform }
+ *       platform: "wordpress" | "vercel" | "other", from one read-only,
+ *       SSRF-guarded look at the site's home page (platform-detect.ts).
  *       the address is on the recipient allowlist: continue to /forcefield/setup.
  *   202 { ok, mode: "request" } any other address (build phase): filed in the
  *       operator-reviewed queue; nothing is sent to it. A tripped honeypot also
@@ -53,10 +55,19 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       requestId: result.requestId,
       email_domain: emailDomain(String(raw.email ?? "")) ?? "invalid",
     });
+    if (result.platform) {
+      void trackEvent("forcefield.onboarding_platform_detected", "anonymous", "public", {
+        requestId: result.requestId,
+        platform: result.platform.platform,
+        checked: result.platform.checked,
+        evidence: result.platform.evidence.join(","),
+        reason: result.platform.reason ?? "",
+      });
+    }
   }
   if (mode === "request") return NextResponse.json({ ok: true, mode }, { status: 202 });
   return NextResponse.json(
-    { ok: true, mode, requestId: result.requestId, setupKey: result.setupKey, site: result.site, email: result.email, ownership: result.ownership },
+    { ok: true, mode, requestId: result.requestId, setupKey: result.setupKey, site: result.site, email: result.email, ownership: result.ownership, platform: result.platform?.platform ?? "other" },
     { status: 201 },
   );
 }

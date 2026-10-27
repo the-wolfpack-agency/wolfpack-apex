@@ -17,6 +17,9 @@
  * --digest: a digest over the last --since-hours (default 24, window aligned,
  * including the window in progress), as digest.html / digest.txt, plus a
  * routing summary on stdout.
+ * --first-hour --tenant <id>: the tenant's "first hour" email exactly as the
+ * notify cron would render it from the LIVE tenant events (read-only, same
+ * SQL), as first-hour.html / first-hour.txt. Nothing is claimed or sent.
  * --png screenshots each HTML at 1280 and 390 px wide in Chromium (Playwright).
  */
 import "./load-env";
@@ -26,6 +29,41 @@ import { alertFromIncident, alertRecipientEmails, alertRowId, digestKey, liveFor
 import { renderForcefieldAlertEmail, alertSubject, alertSummary } from "@/lib/forcefield-web/alert-email";
 import { buildDigest, buildIncidents, easternParts, type HostileEventGroup } from "@/lib/forcefield-web/incidents";
 import { instinctPublicBaseUrl } from "@/lib/mail/public-base-url";
+import { query } from "@/lib/db";
+import { liveTenantNotifyDeps } from "@/lib/forcefield-web/tenant-alerts";
+import { renderFirstHourEmail } from "@/lib/forcefield-web/tenant-email";
+import { mintUnsubscribeToken } from "@/lib/forcefield-web/tenant-notify";
+
+function requireReadOnly(): void {
+  if (!/default_transaction_read_only\s*=\s*on/.test(process.env.PGOPTIONS ?? "")) {
+    throw new Error('Refusing a live read without PGOPTIONS="-c default_transaction_read_only=on"');
+  }
+}
+
+/** The first-hour email for one tenant, rendered from live reads only. */
+async function firstHourPreview(out: string): Promise<string[]> {
+  const tenantId = arg("tenant");
+  if (!tenantId) throw new Error("--first-hour needs --tenant <id>");
+  requireReadOnly();
+  const { rows } = await query<{ site_label: string; notify_email: string | null }>(
+    `SELECT site_label, notify_email FROM forcefield_tenants WHERE id = $1`,
+    [tenantId],
+  );
+  if (!rows[0]) throw new Error(`No tenant ${tenantId}`);
+  const deps = liveTenantNotifyDeps();
+  const first = await deps.firstEventAt(tenantId);
+  if (!first) {
+    console.log("No real (non-synthetic) event yet: the first-hour email would not be sent.");
+    return [];
+  }
+  const activity = await deps.activity(tenantId, first);
+  const to = rows[0].notify_email ?? "owner@thewolfpack.agency";
+  const mail = renderFirstHourEmail({ site: rows[0].site_label, to, firstEventAt: first, activity, baseUrl: deps.baseUrl, unsubscribeToken: mintUnsubscribeToken(tenantId, to) });
+  writeFileSync(join(out, "first-hour.html"), mail.html.replace(/<body([^>]*)>/, `<body$1>${BUILD_PHASE_BANNER.replace("client-facing template, not sent (build phase)", "dry run, not sent")}`));
+  writeFileSync(join(out, "first-hour.txt"), `DRY RUN: not sent\nTo: ${to}\nSubject: ${mail.subject}\n\n${mail.text}\n`);
+  console.log(`${mail.subject}\n  first event ${first}; agents ${activity.counts.agentsSeen}, welcomed ${activity.counts.welcomed}, slowed ${activity.counts.slowed}, blocked ${activity.counts.blocked}, caught ${activity.counts.caught}\n  -> ${join(out, "first-hour.html")}`);
+  return [join(out, "first-hour.html")];
+}
 
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`);
@@ -49,6 +87,10 @@ async function loadEvents(since: string, until: string): Promise<HostileEventGro
 async function main(): Promise<void> {
   const out = resolve(arg("out") ?? "ff-email-preview");
   mkdirSync(out, { recursive: true });
+  if (flag("first-hour")) {
+    await screenshots(await firstHourPreview(out));
+    return;
+  }
   const now = new Date();
   const hours = Number(arg("since-hours") ?? 24);
   const since = windowStartOf(new Date(now.getTime() - hours * 3600_000));
@@ -99,7 +141,11 @@ async function main(): Promise<void> {
       console.log(`${op.subject}\n  -> ${join(out, `${prefix}operator.html`)}`);
     }
   }
-  if (flag("png")) {
+  await screenshots(htmlFiles);
+}
+
+async function screenshots(htmlFiles: string[]): Promise<void> {
+  if (flag("png") && htmlFiles.length) {
     const { chromium } = await import("playwright");
     const browser = await chromium.launch();
     try {

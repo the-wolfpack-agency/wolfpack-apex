@@ -16,7 +16,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { recordAudit, extractRequestMetadata } from "@/lib/audit-log";
 import { trackEvent } from "@/lib/analytics";
-import { resolveTenantByToken, type ForcefieldTenant } from "@/lib/forcefield-web/tenants";
+import { type ForcefieldTenant } from "@/lib/forcefield-web/tenants";
+import { resolveTenantCredential } from "@/lib/forcefield-web/dashboard-session";
 import { getNotifyState, setNotifyEmail, removeNotifyEmail, CONFIRM_SEND_WINDOW_MS } from "@/lib/forcefield-web/tenant-notify";
 import { isBuildPhase, emailDomain } from "@/lib/forcefield-web/recipient-allowlist";
 
@@ -24,7 +25,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 async function tenantFrom(req: NextRequest): Promise<ForcefieldTenant | null> {
-  return resolveTenantByToken(req.headers.get("x-forcefield-token") ?? "");
+  return (await resolveTenantCredential(req.headers.get("x-forcefield-token") ?? ""))?.tenant ?? null;
 }
 const unauthorized = () => NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
 

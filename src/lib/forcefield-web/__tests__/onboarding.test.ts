@@ -17,6 +17,7 @@ import {
 } from "@/lib/forcefield-web/onboarding";
 
 const allow = async () => ({ allowed: true });
+const wp = async () => ({ platform: "wordpress" as const, evidence: ["wp_content"], checked: true });
 
 describe("validateOnboarding", () => {
   it("normalizes the site and email; name defaults to the site", () => {
@@ -50,8 +51,10 @@ describe("startForcefieldOnboarding", () => {
   it("self-serve: inserts with only the key hash and issues the challenge in the onboarding workspace", async () => {
     const q = jest.fn(async () => [{ id: "req-1" }]);
     const issue = jest.fn(async () => ({ token: "chal" }));
-    const r = await startForcefieldOnboarding({ raw: { siteUrl: "acme.com", email: "qa@thewolfpack.agency" }, ipHash: "h" }, { q: q as never, limiter: allow, issue });
+    const r = await startForcefieldOnboarding({ raw: { siteUrl: "acme.com", email: "qa@thewolfpack.agency" }, ipHash: "h" }, { q: q as never, limiter: allow, issue, detect: wp });
     expect(r.reason).toBe("ok");
+    expect(r.platform).toEqual({ platform: "wordpress", evidence: ["wp_content"], checked: true });
+    expect(((q.mock.calls[0] as unknown[])[1] as unknown[])[6]).toBe("wordpress");
     expect(r.setupKey).toMatch(/^ffs_/);
     const params = (q.mock.calls[0] as unknown[])[1] as unknown[];
     expect(params[5]).toBe(hashToken(r.setupKey!));
@@ -64,7 +67,24 @@ describe("startForcefieldOnboarding", () => {
 
   it("a store error is 'error', not a throw", async () => {
     const q = jest.fn(async () => { throw new Error("down"); });
-    expect((await startForcefieldOnboarding({ raw: { siteUrl: "acme.com", email: "qa@thewolfpack.agency" }, ipHash: "h" }, { q: q as never, limiter: allow, issue: async () => ({ token: "t" }) })).reason).toBe("error");
+    expect((await startForcefieldOnboarding({ raw: { siteUrl: "acme.com", email: "qa@thewolfpack.agency" }, ipHash: "h" }, { q: q as never, limiter: allow, issue: async () => ({ token: "t" }), detect: wp })).reason).toBe("error");
+  });
+
+  it("a failed platform check never blocks signup: it is 'other'", async () => {
+    const q = jest.fn(async () => [{ id: "req-1" }]);
+    const r = await startForcefieldOnboarding(
+      { raw: { siteUrl: "acme.com", email: "qa@thewolfpack.agency" }, ipHash: "h" },
+      { q: q as never, limiter: allow, issue: async () => ({ token: "t" }), detect: async () => { throw new Error("boom"); } },
+    );
+    expect(r.reason).toBe("ok");
+    expect(r.platform).toMatchObject({ platform: "other", checked: false });
+    expect(((q.mock.calls[0] as unknown[])[1] as unknown[])[6]).toBe("other");
+  });
+
+  it("the build-phase fallback never runs the platform check", async () => {
+    const detect = jest.fn(wp);
+    await startForcefieldOnboarding({ raw: { siteUrl: "client.example", email: "owner@client.example" }, ipHash: "h" }, { limiter: allow, fallbackRequest: (async () => ({ ok: true, reason: "ok", requestId: "r" })) as never, detect });
+    expect(detect).not.toHaveBeenCalled();
   });
 });
 
@@ -119,7 +139,7 @@ describe("verifyOwnership", () => {
     const r = await verifyOwnership(s.key, { q: s.q, limiter: allow, check: check as never, provision: provision as never, notify });
     expect(r).toMatchObject({ ok: true, reason: "ok", method: "http_well_known", token: "ff_tok", tenant: { id: "t1" }, notify: { status: "pending", delivered: true } });
     expect(r.quickstart?.cloudflareEnv.SITE_ANALYTICS_INGEST_TOKEN).toBe("ff_tok");
-    expect(provision).toHaveBeenCalledWith({ name: "acme.com", siteLabel: "acme.com" });
+    expect(provision).toHaveBeenCalledWith({ name: "acme.com", siteLabel: "acme.com", platform: "generic" });
     expect(notify).toHaveBeenCalledWith("t1", "qa@thewolfpack.agency");
     expect(s.row).toMatchObject({ status: "approved", tenant_id: "t1", ownership_method: "http_well_known" });
     // A second click: already verified, nothing provisioned again.
@@ -182,5 +202,18 @@ describe("getOnboardingState + concierge", () => {
     const q = jest.fn(async () => []);
     expect((await requestConcierge({ tenantId: "t9" }, null, q as never)).reason).toBe("not_found");
     expect((q.mock.calls[0] as unknown[])[0]).toContain("WHERE tenant_id = $1");
+  });
+});
+
+describe("verifyOwnership provisions with the detected platform", () => {
+  it("a WordPress site found on signup becomes a WordPress tenant", async () => {
+    const s = store({ detected_platform: "wordpress" });
+    const provision = jest.fn(async () => ({ tenant, token: "ff_tok" }));
+    await verifyOwnership(s.key, {
+      q: s.q, limiter: allow, provision: provision as never,
+      check: (async () => ({ ok: true })) as never,
+      notify: async () => ({ ok: true, reason: "ok" as const, delivered: true }),
+    });
+    expect(provision).toHaveBeenCalledWith({ name: "acme.com", siteLabel: "acme.com", platform: "wordpress" });
   });
 });

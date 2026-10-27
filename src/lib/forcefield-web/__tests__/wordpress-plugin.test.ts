@@ -128,3 +128,71 @@ describe("wordpress plugin safety invariants", () => {
     }
   });
 });
+
+describe("wordpress plugin one-click connect (includes/connect.php)", () => {
+  const connect = readFileSync(
+    join(process.cwd(), "integrations", "wordpress", "ogiam-forcefield", "includes", "connect.php"),
+    "utf8",
+  );
+
+  it("is loaded by the main file, blocks direct access, and clears its cron on deactivation", () => {
+    expect(php).toContain("require_once __DIR__ . '/includes/connect.php';");
+    expect(php).toContain("register_deactivation_hook(__FILE__, 'ogiam_ff_deactivate');");
+    expect(connect).toMatch(/if \(!defined\('ABSPATH'\)\) \{ exit; \}/);
+    expect(connect).toMatch(/function ogiam_ff_deactivate\(\) \{\s*wp_clear_scheduled_hook\('ogiam_ff_claim_event'\);/);
+  });
+
+  it("every admin action checks the capability and a nonce first", () => {
+    for (const fn of ["ogiam_ff_handle_connect", "ogiam_ff_handle_connect_action"]) {
+      const body = connect.slice(connect.indexOf(`function ${fn}(`));
+      const head = body.slice(0, 400);
+      expect(head).toContain("current_user_can('manage_options')");
+      expect(head).toMatch(/check_admin_referer\('ogiam_ff_connect(_action)?'\)/);
+    }
+    expect(connect).toContain("wp_nonce_field('ogiam_ff_connect')");
+    expect(connect).toContain("wp_nonce_field('ogiam_ff_connect_action')");
+  });
+
+  it("the secret is CSPRNG-generated and stored with autoload off", () => {
+    expect(connect).toContain("'ffp_' . bin2hex(random_bytes(24))");
+    expect(connect).not.toMatch(/\b(rand|mt_rand|uniqid)\(/);
+    expect(connect).toMatch(/update_option\('ogiam_ff_connect', \$c, false\)/);
+  });
+
+  it("stores the challenge BEFORE asking Forcefield to check it", () => {
+    const handler = connect.slice(connect.indexOf("function ogiam_ff_handle_connect("));
+    expect(handler.indexOf("ogiam_ff_save_connect_state($c);")).toBeGreaterThan(-1);
+    expect(handler.indexOf("ogiam_ff_save_connect_state($c);")).toBeLessThan(handler.indexOf("ogiam_ff_prove($c);"));
+  });
+
+  it("the challenge route serves only a pending challenge, and only the challenge", () => {
+    expect(connect).toContain("register_rest_route('ogiam-forcefield/v1', '/challenge'");
+    const fn = connect.slice(connect.indexOf("function ogiam_ff_challenge_response("), connect.indexOf("function ogiam_ff_prove("));
+    expect(fn).toMatch(/\$c\['state'\] !== 'proving'/);
+    expect(fn).toContain("array('status' => 404)");
+    expect(fn).toContain("array('challenge' => (string) $c['challenge'])");
+    expect(fn).not.toContain("secret");
+  });
+
+  it("collects the site key only from the claim answer, then stops polling", () => {
+    const fn = connect.slice(connect.indexOf("function ogiam_ff_try_claim("), connect.indexOf("function ogiam_ff_schedule_claim("));
+    expect(fn).toContain("'/api/forcefield/wordpress/connect/claim'");
+    expect(fn).toMatch(/\$code === 200 && !empty\(\$body\['token'\]\)/);
+    expect(fn).toContain("update_option('ogiam_ff_token', sanitize_text_field($body['token']));");
+    expect(fn).toContain("wp_clear_scheduled_hook('ogiam_ff_claim_event');");
+  });
+
+  it("forwards nothing about visitors and escapes every output", () => {
+    expect(connect).not.toContain("$_COOKIE");
+    expect(connect).not.toContain("php://input");
+    expect(connect).not.toMatch(/echo \$_(GET|POST)/);
+    expect(connect).not.toMatch(/echo get_option\(/);
+    expect(connect).toContain("sanitize_email(wp_unslash($_POST['ogiam_ff_email']))");
+  });
+
+  it("is plain PHP 7.4 (no PHP 8-only helpers)", () => {
+    for (const fn of ["str_starts_with(", "str_ends_with(", "str_contains(", "match ("]) {
+      expect(connect).not.toContain(fn);
+    }
+  });
+});

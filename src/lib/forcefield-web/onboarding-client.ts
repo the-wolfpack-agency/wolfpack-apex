@@ -18,3 +18,22 @@ export function writeStored(key: string, value: string): void {
 export function clearStored(key: string): void {
   try { window.localStorage.removeItem(key); } catch { /* ignore */ }
 }
+
+/** The install option the signup page shows (platform-detect.ts). */
+export type SignupPlatform = "wordpress" | "vercel" | "other";
+
+/** Flip to true once the plugin is live in the WordPress.org directory: the
+ *  WordPress button then installs it from the site's own admin in one click. */
+export const WORDPRESS_DIRECTORY_LISTED = false;
+/** The plugin zip, built from the plugin source by the same writer as the
+ *  directory zip (src/lib/forcefield-web/wordpress-plugin-zip.ts). */
+export const WORDPRESS_PLUGIN_DOWNLOAD = "/api/forcefield/wordpress/plugin";
+
+/** The site's own WordPress admin: the directory install once listed, the zip
+ *  upload screen until then. */
+export function wordpressInstallUrl(site: string): string {
+  const host = String(site ?? "").trim().replace(/^https?:\/\//i, "").split(/[/?#]/)[0];
+  return WORDPRESS_DIRECTORY_LISTED
+    ? `https://${host}/wp-admin/plugin-install.php?tab=plugin-information&plugin=ogiam-forcefield`
+    : `https://${host}/wp-admin/plugin-install.php?tab=upload`;
+}

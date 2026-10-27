@@ -2,7 +2,8 @@
  * Forcefield self-serve onboarding E2E: the whole journey a person takes, in a
  * real browser, against the built pages.
  *
- *   /forcefield/signup      enter site + Wolfpack alert address -> continue
+ *   /forcefield/signup      enter site + Wolfpack alert address -> the install
+ *                           step -> continue with a DNS record / file
  *   /forcefield/setup       prove ownership (a failed check explains itself,
  *                           then the check passes), connect (no-code marked
  *                           coming soon, concierge, the quick-start), the
@@ -142,10 +143,15 @@ test.describe("Forcefield self-serve onboarding", () => {
 
     // Step 1: site + alert address.
     await open(page, "/forcefield/signup");
-    await expect(page.getByTestId("ff-s-submit")).toBeEnabled();
+    await expect(page.getByTestId("ff-s-submit")).toBeDisabled(); // both fields required
     await page.getByTestId("ff-s-site").fill(SITE);
     await page.getByTestId("ff-s-email").fill(EMAIL);
+    await expect(page.getByTestId("ff-s-submit")).toBeEnabled();
     await page.getByTestId("ff-s-submit").click();
+    // Step 2 on the signup page: the install option (no platform found -> concierge),
+    // with the DNS / file path one click away.
+    await expect(page.getByTestId("ff-install")).toBeVisible();
+    await page.getByTestId("ff-install-setup").click();
     await expect(page).toHaveURL(/\/forcefield\/setup$/);
 
     // Step 2: both proofs shown with exact values; a failed check explains itself.

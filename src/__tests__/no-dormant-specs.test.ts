@@ -62,6 +62,16 @@ const KNOWN_DORMANT: Record<string, string> = {
   SITES_SMOKE_PROJECT_ID: "Identifies a specific Sites project; supplied by hand.",
   TOOLS_HONESTY_MATRIX_LIVE: "Opt-in live sweep; the offline matrix runs in CI already.",
 
+  // The live WordPress proof (tests/e2e/forcefield-wordpress-live.spec.ts) needs a
+  // throwaway local WordPress in Docker plus a local dev server on a throwaway
+  // Postgres; scripts/forcefield-wp-local-proof.sh up|run|down supplies all of it.
+  FF_WP_URL: "Local WordPress proof only (scripts/forcefield-wp-local-proof.sh): a throwaway Docker WordPress, never a CI target.",
+  FF_WP_USER: "Local WordPress proof only: the throwaway site's admin, created by the script.",
+  FF_WP_PASS: "Local WordPress proof only: the throwaway site's admin password, created by the script.",
+  FF_OUTBOX_DIR: "Local WordPress proof only: the dev server's FORCEFIELD_MAIL_OUTBOX_DIR (ignored in production).",
+  FF_EMAIL: "Local WordPress proof only: the Wolfpack address the proof signs up with.",
+  FF_PROOF_DIR: "Local WordPress proof only: where its screenshots are written.",
+
   // The platform-scan specs point at a customer's system, by definition per-run.
   TARGET_BASE_URL: "Names an external target to scan; chosen per engagement.",
   TARGET_ADMIN_EMAIL: "Credential for an external scan target.",

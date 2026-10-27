@@ -55,3 +55,4 @@ __pycache__/
 jest-results*.json
 .dogfood/
 forcefield-ai-redteam-report*.json
+/dist/

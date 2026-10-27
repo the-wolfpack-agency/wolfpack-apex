@@ -83,7 +83,9 @@
     "forcefield:selftest": "npx tsx scripts/forcefield-selftest.ts",
     "forcefield:redteam": "npx tsx scripts/forcefield-redteam.ts",
     "forcefield:ai-redteam": "npx tsx scripts/forcefield-ai-redteam.ts",
-    "forcefield:intent-replay": "npx tsx scripts/forcefield-intent-replay.ts"
+    "forcefield:intent-replay": "npx tsx scripts/forcefield-intent-replay.ts",
+    "forcefield:wp-plugin-zip": "npx tsx scripts/forcefield-wp-plugin-zip.ts",
+    "forcefield:email-preview": "npx tsx scripts/forcefield-alert-preview.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.92.0",

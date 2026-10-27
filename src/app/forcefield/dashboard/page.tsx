@@ -36,8 +36,15 @@ interface Stats {
   sitesProtected: number;
   attacks: Array<{ attack: string; count: number }>;
 }
+type Handling = "blocked" | "slowed" | "welcomed" | "caught" | "watched";
+interface Activity {
+  counts: { agentsSeen: number; welcomed: number; slowed: number; blocked: number; caught: number };
+  agents: Array<{ name: string; kind: string; requests: number; did: string; handled: Handling; lastSeen: string | null }>;
+}
 interface MyStatsResponse {
   ok: boolean;
+  /** Who visited: each agent, what it did, how Forcefield handled it. */
+  activity?: Activity;
   tenant?: { id: string; name: string; siteLabel: string };
   stats?: Stats;
   /** True when the tenant is licensed to ACTUALLY block; false = watch-only (free
@@ -54,7 +61,8 @@ interface Quickstart {
 interface MySetupResponse {
   ok: boolean;
   tenant?: { id: string; name: string; siteLabel: string };
-  quickstart?: Quickstart;
+  /** Null when signed in with a dashboard session (the plugin holds the key). */
+  quickstart?: Quickstart | null;
   connection?: { connected: boolean; everConnected?: boolean; lastEventAt: string | null };
 }
 
@@ -71,6 +79,14 @@ const ATTACK_LABELS: Record<string, string> = {
   xxe: "XML external entity",
   ssrf: "Server-side request forgery",
 };
+const HANDLED: Record<Handling, { label: string; color: string }> = {
+  blocked: { label: "Blocked", color: "#f87171" },
+  slowed: { label: "Slowed", color: "#fb923c" },
+  welcomed: { label: "Welcomed", color: "#34d399" },
+  caught: { label: "Caught (watch mode)", color: "#fbbf24" },
+  watched: { label: "Watched", color: "var(--wp-muted, #9aa0a6)" },
+};
+
 const prettyAttack = (a: string) =>
   ATTACK_LABELS[a] ?? a.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
@@ -186,7 +202,7 @@ export default function ForcefieldDashboardPage() {
             testId="ff-token-form"
             padded
             title="Connect your dashboard"
-            subtitle="Paste the Forcefield token you were given at onboarding. It stays in this browser."
+            subtitle="Open the sign-in link from your Forcefield email, or paste the site key you were given at onboarding. It stays in this browser."
           >
             <form onSubmit={connect} className="mt-4 flex flex-col gap-3 sm:flex-row">
               <input
@@ -335,6 +351,67 @@ export default function ForcefieldDashboardPage() {
             {token && (
               <div className="mb-6">
                 <AlertEmailPanel token={token} site={data?.tenant?.siteLabel ?? "your site"} />
+              </div>
+            )}
+
+            {!setup?.quickstart && setup?.connection && (
+              <div className="mb-6 flex items-center gap-2" data-testid="ff-connection">
+                <StatusPill
+                  status={receiving ? "live" : stale ? "degraded" : "queued"}
+                  tone={receiving ? "success" : stale ? "warning" : undefined}
+                  label={receiving ? "Connected" : stale ? "No recent traffic" : "Waiting for the first visitor"}
+                />
+                <button data-testid="ff-check-connection" type="button" onClick={() => void loadSetup(token)} disabled={checking} className="text-xs underline" style={{ color: "var(--wp-muted, #9aa0a6)" }}>
+                  {checking ? "Checking..." : "Check connection"}
+                </button>
+              </div>
+            )}
+
+            {data?.activity && (
+              <div className="mb-6">
+                <GlassPanel testId="ff-visitors" padded title="Who visited" subtitle="Each automated agent, what it did, and how Forcefield handled it">
+                  <div className="mt-3 flex flex-wrap gap-2 text-xs" data-testid="ff-visitor-counts">
+                    {([
+                      ["ff-v-seen", "Agents seen", data.activity.counts.agentsSeen],
+                      ["ff-v-welcomed", "Welcomed", data.activity.counts.welcomed],
+                      ["ff-v-slowed", "Slowed", data.activity.counts.slowed],
+                      ["ff-v-blocked", "Blocked", data.activity.counts.blocked],
+                      ["ff-v-caught", "Caught in watch mode", data.activity.counts.caught],
+                    ] as const).map(([id, label, value]) => (
+                      <span key={id} data-testid={id} className="rounded-md px-2.5 py-1" style={{ background: "rgba(255,255,255,0.05)" }}>
+                        {label}: <strong className="tabular-nums">{value.toLocaleString()}</strong>
+                      </span>
+                    ))}
+                  </div>
+                  {data.activity.agents.length === 0 ? (
+                    <p data-testid="ff-visitors-empty" className="mt-3 text-sm" style={{ color: "var(--wp-muted, #9aa0a6)" }}>
+                      No automated agents yet. When bots and AI agents reach your site, each one appears here with what it did.
+                    </p>
+                  ) : (
+                    <div className="mt-3 overflow-x-auto">
+                      <table className="w-full text-left text-sm" data-testid="ff-visitors-table">
+                        <thead>
+                          <tr className="text-xs" style={{ color: "var(--wp-muted, #9aa0a6)" }}>
+                            <th className="py-2 pr-3 font-normal">Agent</th>
+                            <th className="py-2 pr-3 font-normal">What it did</th>
+                            <th className="py-2 pr-3 font-normal">Forcefield</th>
+                            <th className="py-2 text-right font-normal">Requests</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {data.activity.agents.map((a) => (
+                            <tr key={a.name} data-testid="ff-visitor-row" className="border-t" style={{ borderColor: "rgba(255,255,255,0.08)" }}>
+                              <td className="py-2 pr-3">{a.name}</td>
+                              <td className="py-2 pr-3" style={{ color: "var(--wp-muted, #9aa0a6)" }}>{a.did}</td>
+                              <td className="py-2 pr-3" style={{ color: HANDLED[a.handled]?.color }}>{HANDLED[a.handled]?.label ?? a.handled}</td>
+                              <td className="py-2 text-right tabular-nums">{a.requests.toLocaleString()}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </GlassPanel>
               </div>
             )}
 

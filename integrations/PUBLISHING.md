@@ -25,10 +25,15 @@ registered.
 
 The plugin + its `readme.txt` are submission-ready in `wordpress/ogiam-forcefield/`.
 
+0. Build the zip: `npm run forcefield:wp-plugin-zip` (writes
+   `dist/wordpress/ogiam-forcefield-<version>.zip`; fails if the readme Stable tag
+   or changelog does not match the plugin Version).
+   The directory accepts GPL-compatible plugins only; the plugin is currently
+   `License: Proprietary`, which must be decided before submitting.
 1. Validate the `readme.txt` against the official WordPress readme validator.
 2. Submit the plugin for review via the WordPress.org account.
 3. On approval, push the `ogiam-forcefield/` folder to the assigned SVN repo and tag
-   the stable version (`0.1.0`).
+   the stable version (the readme's Stable tag).
 4. Until listed, clients can install it by uploading the zip (Plugins -> Add New ->
    Upload) - no account needed for that path.
 

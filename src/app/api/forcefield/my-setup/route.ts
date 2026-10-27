@@ -16,7 +16,7 @@
  * Never 500s: the connection signal degrades to "not connected" on any error.
  */
 import { NextRequest, NextResponse } from "next/server";
-import { resolveTenantByToken } from "@/lib/forcefield-web/tenants";
+import { resolveTenantCredential } from "@/lib/forcefield-web/dashboard-session";
 import { buildTenantQuickstart } from "@/lib/forcefield-web/tenant-quickstart";
 import { getTenantConnection } from "@/lib/forcefield-web/public-stats";
 
@@ -25,13 +25,16 @@ export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const token = req.headers.get("x-forcefield-token") ?? "";
-  const tenant = await resolveTenantByToken(token);
-  if (!tenant) {
+  const cred = await resolveTenantCredential(token);
+  if (!cred) {
     return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
   }
+  const { tenant } = cred;
   // The caller already holds the raw token (they sent it); echoing it in the
   // ready-to-paste config is safe and is the whole point of self-serve setup.
-  const quickstart = buildTenantQuickstart(tenant, token);
+  // A dashboard session (the WordPress path: the plugin holds the key) has no
+  // key to paste, so it gets no quick-start.
+  const quickstart = cred.via === "ingest" ? buildTenantQuickstart(tenant, token) : null;
   const connection = await getTenantConnection(tenant.id);
   return NextResponse.json({
     ok: true,

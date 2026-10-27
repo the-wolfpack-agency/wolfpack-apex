@@ -11,6 +11,7 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import { GlassPanel } from "@/components/console";
+import { DASHBOARD_TOKEN_STORAGE, readStored, writeStored } from "@/lib/forcefield-web/onboarding-client";
 
 export interface TokenActionCopy {
   title: string;
@@ -21,6 +22,8 @@ export interface TokenActionCopy {
   /** Message per API error code (invalid, expired, not_found, already_confirmed, ...). */
   errors: Record<string, string>;
   fallbackError: string;
+  /** Optional button shown after success (links to the dashboard). */
+  doneCta?: string;
 }
 
 export function TokenActionPage({ endpoint, copy, testPrefix }: { endpoint: string; copy: TokenActionCopy; testPrefix: string }) {
@@ -41,8 +44,11 @@ export function TokenActionPage({ endpoint, copy, testPrefix }: { endpoint: stri
     setStatus("sending");
     try {
       const res = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token }) });
-      const body = (await res.json().catch(() => ({}))) as { ok?: boolean; site?: string; error?: string };
+      const body = (await res.json().catch(() => ({}))) as { ok?: boolean; site?: string; error?: string; dashboardToken?: string };
       if (res.ok && body.ok) {
+        // The confirmation link doubles as the dashboard sign-in. Never replace a
+        // site key this browser already holds (the DNS / file setup path).
+        if (body.dashboardToken && !readStored(DASHBOARD_TOKEN_STORAGE)) writeStored(DASHBOARD_TOKEN_STORAGE, body.dashboardToken);
         setStatus("done");
         setMessage(copy.done(body.site ?? "your site"));
       } else {
@@ -69,7 +75,14 @@ export function TokenActionPage({ endpoint, copy, testPrefix }: { endpoint: stri
               This link is incomplete. Open the link from the email again, or manage alerts from your dashboard.
             </p>
           ) : status === "done" ? (
-            <p data-testid={`${testPrefix}-done`} className="text-sm">{message}</p>
+            <>
+              <p data-testid={`${testPrefix}-done`} className="text-sm">{message}</p>
+              {copy.doneCta && (
+                <a data-testid={`${testPrefix}-dashboard`} href="/forcefield/dashboard" className="mt-4 inline-block rounded-md px-5 py-2 text-sm font-medium" style={{ background: "var(--wp-gold, #e8b528)", color: "#0b0d11" }}>
+                  {copy.doneCta}
+                </a>
+              )}
+            </>
           ) : (
             <>
               <p className="text-sm" style={{ color: "var(--wp-muted, #9aa0a6)" }}>{copy.intro}</p>

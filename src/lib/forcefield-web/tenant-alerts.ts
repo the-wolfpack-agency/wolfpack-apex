@@ -1,9 +1,11 @@
 /**
  * Forcefield TENANT notifications: what a confirmed tenant address receives.
  *
- *   - FIRST EVIDENCE: "Forcefield is watching <site>", once per tenant, on the
- *     first run after the tenant's first event arrives (or after the address is
- *     confirmed, whichever is later).
+ *   - FIRST HOUR: "Your first hour with Forcefield on <site>", once per tenant,
+ *     on the first run at least FIRST_HOUR_SETTLE_MS after the tenant's first
+ *     REAL event (synthetic monitor traffic excluded), or after the address is
+ *     confirmed, whichever is later: agents seen / welcomed / slowed / blocked,
+ *     the top few by activity (tenant-activity.ts), and the dashboard link.
  *   - IMMEDIATE ALERTS: the same severity routing as the operator path. The
  *     tenant's own events (site_analytics_events.forcefield_tenant_id, a
  *     tenant-scoped copy of HOSTILE_EVENTS_SQL) are grouped into incidents with
@@ -45,7 +47,8 @@ import { buildIncidents, type HostileEventGroup, type HostileIncident } from "@/
 import { renderForcefieldAlertEmail } from "@/lib/forcefield-web/alert-email";
 import { getPublicForcefieldStats, type PublicForcefieldStats } from "@/lib/forcefield-web/public-stats";
 import { sendForcefieldTenantMail, type TenantMail, type TenantMailResult } from "@/lib/forcefield-web/tenant-mail";
-import { renderFirstEvidenceEmail, renderTenantDigestEmail, withTenantFooter } from "@/lib/forcefield-web/tenant-email";
+import { renderFirstHourEmail, renderTenantDigestEmail, withTenantFooter } from "@/lib/forcefield-web/tenant-email";
+import { getTenantActivity, type TenantActivity } from "@/lib/forcefield-web/tenant-activity";
 import { mintUnsubscribeToken } from "@/lib/forcefield-web/tenant-notify";
 
 /** The UTC hour the daily digest goes out (13:00 UTC = 9:00 AM US Eastern in summer). */
@@ -53,6 +56,10 @@ export const DIGEST_HOUR_UTC = 13;
 /** At most this many incident emails per tenant per run (a flood guard). */
 export const MAX_ALERTS_PER_TENANT_RUN = 10;
 const LOOKBACK_HOURS = 24;
+/** Wait this long after the first real event, so the first-hour email has
+ *  something to summarize. With the 10-minute cron it arrives 5 to 15 minutes
+ *  after the first visitor. */
+export const FIRST_HOUR_SETTLE_MS = 5 * 60 * 1000;
 
 export interface ConfirmedTenant {
   id: string;
@@ -65,7 +72,10 @@ export interface ConfirmedTenant {
 
 export interface TenantNotifyDeps {
   listConfirmedTenants: () => Promise<ConfirmedTenant[]>;
+  /** When the tenant's first REAL event arrived (synthetic excluded), or null. */
   firstEventAt: (tenantId: string) => Promise<string | null>;
+  /** Who visited since an instant (tenant-activity.ts). */
+  activity: (tenantId: string, sinceIso: string) => Promise<TenantActivity>;
   claimFirstEvidence: (tenantId: string) => Promise<boolean>;
   releaseFirstEvidence: (tenantId: string) => Promise<void>;
   stats: (tenantId: string, rangeDays: number) => Promise<PublicForcefieldStats>;
@@ -138,17 +148,18 @@ export async function runTenantNotifications(deps: TenantNotifyDeps, now: Date =
     const unsub = deps.unsubscribeToken(t.id, t.email);
     const links = { baseUrl: deps.baseUrl, unsubscribeToken: unsub };
 
-    // 1. First evidence.
+    // 1. First hour.
     if (!t.firstEvidenceAt) {
       try {
         const first = await deps.firstEventAt(t.id);
-        if (first && (await deps.claimFirstEvidence(t.id))) {
-          const s = await deps.stats(t.id, 30);
-          const mail = renderFirstEvidenceEmail({ site: t.siteLabel, to: t.email, firstEventAt: first, counts: counts(s), ...links });
+        const settled = !!first && now.getTime() - Date.parse(first) >= FIRST_HOUR_SETTLE_MS;
+        if (first && settled && (await deps.claimFirstEvidence(t.id))) {
+          const activity = await deps.activity(t.id, first);
+          const mail = renderFirstHourEmail({ site: t.siteLabel, to: t.email, firstEventAt: first, activity, ...links });
           const res = await deps.send({ to: t.email, subject: mail.subject, text: mail.text, html: mail.html, purpose: "first_evidence", tenantId: t.id });
           if (res.delivered) {
             report.firstEvidence++;
-            await deps.track("forcefield.tenant_first_evidence_sent", { tenant_id: t.id, site: t.siteLabel }).catch(() => {});
+            await deps.track("forcefield.tenant_first_evidence_sent", { tenant_id: t.id, site: t.siteLabel, kind: "first_hour", agents: activity.counts.agentsSeen, blocked: activity.counts.blocked }).catch(() => {});
           } else if (res.reason === "recipient_not_allowlisted") {
             report.blocked++;
           } else {
@@ -241,7 +252,12 @@ export function liveTenantNotifyDeps(): TenantNotifyDeps {
         [],
       )).map((r) => ({ id: r.id, name: r.name, siteLabel: r.site_label, email: r.notify_email, confirmedAt: r.notify_confirmed_at, firstEvidenceAt: r.first_evidence_at })),
     firstEventAt: async (tenantId) =>
-      (await rows<{ at: string | null }>(`SELECT min(created_at)::text AS at FROM site_analytics_events WHERE forcefield_tenant_id = $1`, [tenantId]))[0]?.at ?? null,
+      (await rows<{ at: string | null }>(
+        `SELECT min(created_at)::text AS at FROM site_analytics_events
+          WHERE forcefield_tenant_id = $1 AND COALESCE(props->>'synthetic', '') <> 'true'`,
+        [tenantId],
+      ))[0]?.at ?? null,
+    activity: (tenantId, sinceIso) => getTenantActivity(tenantId, sinceIso),
     claimFirstEvidence: async (tenantId) =>
       (await rows(`UPDATE forcefield_tenants SET first_evidence_at = now() WHERE id = $1 AND first_evidence_at IS NULL RETURNING id`, [tenantId])).length > 0,
     releaseFirstEvidence: async (tenantId) => {

@@ -125,7 +125,7 @@ describe("only guarded Forcefield delivery paths exist", () => {
   });
 
   it("every tenant email is built by a file that sends only through sendForcefieldTenantMail", () => {
-    const builders = SOURCES.filter((s) => isForcefield(s.file) && /render(Confirm|FirstEvidence|TenantDigest)Email\s*\(|renderTenantAlert\s*\(/.test(s.text) && !s.file.endsWith("tenant-email.ts"));
+    const builders = SOURCES.filter((s) => isForcefield(s.file) && /render(Confirm|FirstHour|TenantDigest)Email\s*\(|renderTenantAlert\s*\(/.test(s.text) && !s.file.endsWith("tenant-email.ts"));
     expect(builders.map((b) => b.file).sort()).toEqual(["src/lib/forcefield-web/tenant-alerts.ts", "src/lib/forcefield-web/tenant-notify.ts"]);
     for (const b of builders) expect([b.file, /sendForcefieldTenantMail/.test(b.text)]).toEqual([b.file, true]);
   });
@@ -161,6 +161,7 @@ describe("tenant delivery paths, driven end to end, stay inside the allowlist", 
     return {
       listConfirmedTenants: async () => [{ id: "t1", name: "Client", siteLabel: "client-site.example", email, confirmedAt: "2026-10-26T00:00:00.000Z", firstEvidenceAt: null }],
       firstEventAt: async () => "2026-10-26T01:00:00.000Z",
+      activity: async () => ({ sinceIso: "x", counts: { agentsSeen: 3, welcomed: 1, slowed: 0, blocked: 1, caught: 1 }, agents: [] }),
       claimFirstEvidence: async () => true,
       releaseFirstEvidence: async () => {},
       stats: async () => ({ rangeDays: 1, agentsDetected: 5, welcomed: 1, trapped: 1, probed: 1, payloads: 1, hostile: 3, sitesProtected: 1, attacks: [] }),

@@ -466,7 +466,9 @@ const forcefield: ToolSpec = {
     // Isolation: the client read path (my-stats) scopes by the resolved tenant id,
     // and the registry of tenant tables is held honest by the tenant-scoping guard.
     const tokenScopedReads =
-      fileMatches(reader, FF_MYSTATS, /resolveTenantByToken/) &&
+      // resolveTenantCredential (dashboard-session.ts) resolves the ingest token by
+      // hash or a signed dashboard session, each to one ACTIVE tenant.
+      fileMatches(reader, FF_MYSTATS, /resolveTenantByToken|resolveTenantCredential/) &&
       fileMatches(reader, FF_MYSTATS, /tenant\.id/);
     const scopingGuardrail = reader.exists(FF_SCOPING_GUARDRAIL);
     // DB-level RLS on the tenant attribution column is the defense-in-depth goal.

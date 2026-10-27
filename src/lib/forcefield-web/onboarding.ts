@@ -42,6 +42,7 @@ import { buildTenantQuickstart, type TenantQuickstart } from "@/lib/forcefield-w
 import { getTenantConnection, type TenantConnection } from "@/lib/forcefield-web/public-stats";
 import { createSignupRequest, normalizeSite, HONEYPOT_FIELD } from "@/lib/forcefield-web/signup";
 import { isRecipientAllowed } from "@/lib/forcefield-web/recipient-allowlist";
+import { detectSitePlatform, connectorForPlatform, isDetectedPlatform, type DetectedPlatform, type PlatformDetection } from "@/lib/forcefield-web/platform-detect";
 import { getNotifyState, normalizeEmail, setNotifyEmail, type NotifyState, type SetNotifyResult } from "@/lib/forcefield-web/tenant-notify";
 
 /** The verification rows for self-serve sites live in their own workspace, so
@@ -87,8 +88,8 @@ export function ownershipInstructions(site: string, token: string): OwnershipIns
 
 const liveQuery: TenantQuery = async (sql, params) => (await query(sql, params ?? [])).rows as never;
 
-type Limiter = (key: string) => Promise<{ allowed: boolean }>;
-const limiterFor = (prefix: string, limit: number, windowMs: number): Limiter => async (key) => ({
+export type Limiter = (key: string) => Promise<{ allowed: boolean }>;
+export const limiterFor = (prefix: string, limit: number, windowMs: number): Limiter => async (key) => ({
   allowed: (await checkRateLimit(`${prefix}:${key}`, { limit, windowMs })).ok,
 });
 
@@ -102,6 +103,8 @@ export interface OnboardingDeps {
   fallbackRequest?: typeof createSignupRequest;
   connection?: (tenantId: string) => Promise<TenantConnection>;
   notifyState?: (tenantId: string) => Promise<NotifyState | null>;
+  /** The read-only home-page platform check (platform-detect.ts). */
+  detect?: (site: string) => Promise<PlatformDetection>;
 }
 
 const issueLive = (ws: string, platform: string) => runWithRequestWorkspace(ws, () => issueVerificationToken(ws, platform));
@@ -117,6 +120,8 @@ export interface StartResult {
   site?: string;
   email?: string;
   ownership?: OwnershipInstructions[];
+  /** Which install option fits the site (wordpress | vercel | other). */
+  platform?: PlatformDetection;
 }
 
 export function validateOnboarding(raw: Record<string, unknown>): { site: string; email: string; name: string } | null {
@@ -155,20 +160,23 @@ export async function startForcefieldOnboarding(input: { raw: Record<string, unk
 
   const q = deps.q ?? liveQuery;
   const setupKey = generateSetupKey();
+  // Never blocks signup: any failure is "other" (the concierge + DIY options).
+  const platform = await (deps.detect ?? detectSitePlatform)(v.site).catch((): PlatformDetection => ({ platform: "other", evidence: [], checked: false, reason: "detect_error" }));
   try {
     // A second start for the same open site + email (another browser, a lost
     // key) rotates the setup key; ownership is still required to go further.
     const [row] = await q<{ id: string }>(
-      `INSERT INTO forcefield_signup_requests (name, email, site_url, note, ip_hash, kind, setup_key_sha256)
-       VALUES ($1, $2, $3, $4, $5, 'self_serve', $6)
+      `INSERT INTO forcefield_signup_requests (name, email, site_url, note, ip_hash, kind, setup_key_sha256, detected_platform)
+       VALUES ($1, $2, $3, $4, $5, 'self_serve', $6, $7)
        ON CONFLICT (lower(email), lower(site_url)) WHERE status = 'pending'
-       DO UPDATE SET setup_key_sha256 = EXCLUDED.setup_key_sha256, kind = 'self_serve', updated_at = now()
+       DO UPDATE SET setup_key_sha256 = EXCLUDED.setup_key_sha256, kind = 'self_serve',
+                     detected_platform = EXCLUDED.detected_platform, updated_at = now()
        RETURNING id`,
-      [v.name, v.email, v.site, String(input.raw.note ?? "").trim().slice(0, 2000) || null, input.ipHash, hashToken(setupKey)],
+      [v.name, v.email, v.site, String(input.raw.note ?? "").trim().slice(0, 2000) || null, input.ipHash, hashToken(setupKey), platform.platform],
     );
     if (!row) return { ok: false, reason: "error" };
     const issued = await (deps.issue ?? issueLive)(ONBOARDING_WORKSPACE, verificationPlatform(row.id));
-    return { ok: true, reason: "ok", requestId: row.id, setupKey, site: v.site, email: v.email, ownership: ownershipInstructions(v.site, issued.token) };
+    return { ok: true, reason: "ok", requestId: row.id, setupKey, site: v.site, email: v.email, ownership: ownershipInstructions(v.site, issued.token), platform };
   } catch {
     return { ok: false, reason: "error" };
   }
@@ -186,6 +194,7 @@ interface OnboardingRow {
   ownership_verified_at: string | null;
   concierge_requested_at: string | null;
   name: string;
+  detected_platform?: string | null;
 }
 
 export async function findOnboarding(setupKey: string, q: TenantQuery = liveQuery): Promise<OnboardingRow | null> {
@@ -193,7 +202,8 @@ export async function findOnboarding(setupKey: string, q: TenantQuery = liveQuer
   if (!key.startsWith("ffs_") || key.length > 200) return null;
   const [row] = await q<OnboardingRow>(
     `SELECT id, name, email, site_url, status, tenant_id, ownership_method,
-            ownership_verified_at::text AS ownership_verified_at, concierge_requested_at::text AS concierge_requested_at
+            ownership_verified_at::text AS ownership_verified_at, concierge_requested_at::text AS concierge_requested_at,
+            detected_platform
        FROM forcefield_signup_requests
       WHERE setup_key_sha256 = $1 AND kind = 'self_serve'
       LIMIT 1`,
@@ -213,9 +223,11 @@ export interface OnboardingState {
   notify: NotifyState | null;
   conciergeRequested: boolean;
   noCodeConnect: typeof NO_CODE_CONNECT;
+  /** The platform found on signup, or null when it was not checked. */
+  platform: DetectedPlatform | null;
 }
 
-async function loadChallenge(requestId: string, q: TenantQuery): Promise<string | null> {
+export async function loadChallenge(requestId: string, q: TenantQuery): Promise<string | null> {
   const [row] = await q<{ verification_token: string }>(
     `SELECT verification_token FROM instinct_target_verifications WHERE workspace_id = $1 AND platform = $2 LIMIT 1`,
     [ONBOARDING_WORKSPACE, verificationPlatform(requestId)],
@@ -249,6 +261,7 @@ export async function getOnboardingState(setupKey: string, deps: OnboardingDeps 
         notify: tenantId ? await (deps.notifyState ?? ((id: string) => getNotifyState(id)))(tenantId) : null,
         conciergeRequested: !!row.concierge_requested_at,
         noCodeConnect: NO_CODE_CONNECT,
+        platform: isDetectedPlatform(row.detected_platform) ? row.detected_platform : null,
       },
     };
   } catch {
@@ -321,7 +334,7 @@ export async function verifyOwnership(setupKey: string, deps: OnboardingDeps = {
     );
     if (claimed.length === 0) return { ok: false, reason: "already_verified", requestId: row.id };
 
-    const created = await (deps.provision ?? createForcefieldTenant)({ name: row.name, siteLabel: site });
+    const created = await (deps.provision ?? createForcefieldTenant)({ name: row.name, siteLabel: site, platform: connectorForPlatform(isDetectedPlatform(row.detected_platform) ? row.detected_platform : null) });
     if (!created) {
       await q(`UPDATE forcefield_signup_requests SET status = 'pending', updated_at = now() WHERE id = $1 RETURNING id`, [row.id]).catch(() => []);
       return { ok: false, reason: "provision_failed", requestId: row.id };

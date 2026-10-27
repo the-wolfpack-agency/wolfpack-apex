@@ -89,14 +89,14 @@ export const CONNECTORS: readonly ConnectorMeta[] = [
   {
     key: "wordpress",
     title: "WordPress",
-    description: "A WordPress site. Install the plugin and paste your key - a setup wizard does the rest.",
-    status: "coming_soon",
+    description: "A WordPress site. Install the plugin and click Connect - no key to copy, no DNS change.",
+    status: "available",
     emits: { next: false, cloudflare: false },
     managed: false,
     steps: [
-      "Install the OGIAM Forcefield plugin from your WordPress admin.",
-      "Paste your site key and save; watch mode turns on automatically.",
-      "Enable blocking from the plugin when ready.",
+      "Install the OGIAM Forcefield plugin from your WordPress admin and activate it.",
+      "Open Settings -> Forcefield and click Connect. The plugin proves it runs on your site.",
+      "Click the sign-in link we email you. The plugin connects itself and starts in watch mode.",
     ],
   },
   {

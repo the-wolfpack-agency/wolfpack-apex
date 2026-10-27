@@ -13,6 +13,8 @@ const nextConfig: NextConfig = {
   // bundle (otherwise they are pruned and the viewer 404s in production).
   outputFileTracingIncludes: {
     "/api/admin/forcefield/docs": ["./docs/forcefield/**/*.md"],
+    // The WordPress plugin download zips the plugin source at request time.
+    "/api/forcefield/wordpress/plugin": ["./integrations/wordpress/ogiam-forcefield/**/*"],
   },
   // unpdf wraps pdfjs-dist's legacy build which uses dynamic require
   // for its worker. @react-pdf/renderer is ESM-only and pulls in
