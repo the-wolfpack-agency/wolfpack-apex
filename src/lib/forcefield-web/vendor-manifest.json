@@ -10,6 +10,7 @@
     "ruleset.ts",
     "observe.ts",
     "enforce.ts",
+    "body-inspect.ts",
     "monitor.ts",
     "index.ts",
     "hosting.ts",

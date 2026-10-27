@@ -1,4 +1,4 @@
-import { consolidateByOperator, filterOperators, aggregateTradecraft, clusterByTradecraft, detectCampaigns, tradecraftTrend, matchOperatorsToNetwork, type OperatorViewJourney } from "@/lib/agent-operators-view";
+import { consolidateByOperator, filterOperators, aggregateTradecraft, clusterByTradecraft, detectCampaigns, tradecraftTrend, matchOperatorsToNetwork, tellSetOf, type OperatorViewJourney } from "@/lib/agent-operators-view";
 
 function j(over: Partial<OperatorViewJourney> & { operatorKey: string }): OperatorViewJourney {
   const { operatorKey, ...rest } = over;
@@ -341,6 +341,48 @@ describe("matchOperatorsToNetwork - recognize a network actor on first contact",
   it("returns [] when there is no network corpus to match against", () => {
     const groups = consolidateByOperator([mine("op_local", ["payload_attack", "id_enumeration"])]);
     expect(matchOperatorsToNetwork(groups, [])).toEqual([]);
+  });
+
+  // The direction the earliest-detection-by-profiling mandate asks for: a
+  // body-proven PHP2Shell block on site A becomes a tradecraft LABEL that
+  // recognizes the same actor at first contact on site B. A payload_attack with
+  // attack=php2shell makes `attack:php2shell` a tell on BOTH the view layer
+  // (tellSetOf, used here) and the reputation layer (agent-dossier tells, which
+  // the network corpus is built from), so the two cannot diverge.
+  const php2shell = (operatorKey: string) =>
+    j({ operatorKey, behaviorClass: "exploit_attempt", key: operatorKey,
+        profile: { operatorKey, scaffolding: { pathDiscovery: "none", readsRobotsFirst: false }, toolComposition: { usedTools: ["fetch"] },
+          insights: [{ kind: "payload_attack", attack: "php2shell" }] } });
+
+  it("a PHP2Shell hit on site A matches the same tradecraft on site B", () => {
+    // Site A: an operator caught throwing a PHP2Shell body payload.
+    const siteA = consolidateByOperator([php2shell("op_siteA")])[0];
+    expect(siteA.attacks).toContain("php2shell");
+    // The network actor the reputation layer would publish from site A: its exact
+    // tradecraft tells (NOT the operator key, never a workspace).
+    const network = [{ tells: Array.from(tellSetOf(siteA)), workspaceCount: 3, severity: "hostile" as const }];
+    expect(network[0].tells).toContain("attack:php2shell");
+
+    // Site B: a brand-NEW operator (different key) throwing the same PHP2Shell
+    // tradecraft. It is recognized on first contact.
+    const siteBGroups = consolidateByOperator([php2shell("op_siteB")]);
+    const matches = matchOperatorsToNetwork(siteBGroups, network);
+    expect(matches).toHaveLength(1);
+    expect(matches[0].operatorKey).toBe("op_siteB");
+    expect(matches[0].sharedTells).toContain("attack:php2shell");
+    expect(matches[0].severity).toBe("hostile");
+    expect(matches[0].networkWorkspaces).toBe(3);
+  });
+
+  it("React2Shell is a distinct tradecraft label (does not collide with PHP2Shell)", () => {
+    const react = j({ operatorKey: "op_react", behaviorClass: "exploit_attempt", key: "op_react",
+      profile: { operatorKey: "op_react", scaffolding: { pathDiscovery: "none", readsRobotsFirst: false }, toolComposition: { usedTools: ["fetch"] },
+        insights: [{ kind: "payload_attack", attack: "react2shell" }] } });
+    const g = consolidateByOperator([react])[0];
+    expect(Array.from(tellSetOf(g))).toContain("attack:react2shell");
+    // A PHP2Shell-only network actor does not match a React2Shell-only operator.
+    const php2shellNetwork = [{ tells: ["exploit_attempt", "payload_attack", "attack:php2shell"], workspaceCount: 2, severity: "hostile" as const }];
+    expect(matchOperatorsToNetwork([g], php2shellNetwork).map((m) => m.sharedTells)).not.toContainEqual(expect.arrayContaining(["attack:react2shell"]));
   });
 });
 

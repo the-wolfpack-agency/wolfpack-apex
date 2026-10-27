@@ -183,11 +183,20 @@ export const KEV_CVE_BY_PROBE: Readonly<Record<string, string>> = {
 
 export const KEV_CVE_BY_ATTACK: Readonly<Record<string, string>> = {
   log4shell: "CVE-2021-44228",
+  // body-inspect.ts body-marker attacks. php2shell spans TWO CVEs (memory
+  // corruption + stale request state); the annotation records the primary, and
+  // EXTRA_TRACKED_KEV below pins the second so both ship in the KEV snapshot.
+  php2shell: "CVE-2026-109618",
+  react2shell: "CVE-2025-55182",
 };
+
+/** CVE ids a single attack label maps to but that KEV_CVE_BY_ATTACK can only
+ *  carry one of. Tracked so the snapshot includes them; never the annotation. */
+const EXTRA_TRACKED_KEV: readonly string[] = ["CVE-2026-109619"];
 
 /** Every CVE id this module references (the KEV refresh tracks these). */
 export const FORCEFIELD_KEV_CVES: readonly string[] = [
-  ...new Set([...Object.values(KEV_CVE_BY_PROBE), ...Object.values(KEV_CVE_BY_ATTACK)]),
+  ...new Set([...Object.values(KEV_CVE_BY_PROBE), ...Object.values(KEV_CVE_BY_ATTACK), ...EXTRA_TRACKED_KEV]),
 ].sort();
 
 function context(path: string, rawUrl: string | undefined): KevMatchContext {

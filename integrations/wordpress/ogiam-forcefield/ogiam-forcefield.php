@@ -310,5 +310,16 @@ function ogiam_ff_guard() {
  * Not covered: wp-admin/install.php and wp-admin/setup-config.php. WordPress
  * loads those in installing mode, where regular plugins are not loaded at all.
  * Use the Cloudflare Worker connector to cover them at the edge.
+ *
+ * Also NOT covered here: PHP2Shell (CVE-2026-109618 / CVE-2026-109619). That
+ * vulnerability triggers inside PHP's OWN multipart/urlencoded parser during
+ * request start-up - before `init`, before any plugin runs. By the time this
+ * hook fires PHP has already parsed the hostile body, so a plugin cannot defend
+ * against it and this one deliberately does not try (it forwards request SHAPE
+ * only, never bodies). The only place PHP2Shell can be stopped is a reverse proxy
+ * in FRONT of the PHP worker: deploy the Cloudflare Worker connector, whose
+ * bounded body inspection turns the request away before PHP parses it. React2Shell
+ * (CVE-2025-55182) body-marker blocking is likewise Worker-only and does not apply
+ * to a PHP origin. See docs/forcefield/threat-coverage and body-inspect.ts.
  */
 add_action('init', 'ogiam_ff_guard', 0);

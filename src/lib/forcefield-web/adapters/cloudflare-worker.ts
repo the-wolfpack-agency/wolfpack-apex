@@ -32,6 +32,7 @@ import { decideEnforcement, type EnforcementDecision, type EnforceInput } from "
 import { fetchRuleset } from "../ruleset";
 import { operatorFingerprint } from "../fingerprint";
 import { resolveAuthenticated } from "../shim";
+import { inspectRequestBody, bodyInspectionApplies, BODY_SCAN_CAP_BYTES } from "../body-inspect";
 
 /** Env bindings the Worker reads. Platform-neutral names (no VERCEL_*), matching
  *  the shim's env so a site can move between adapters without renaming secrets. */
@@ -151,7 +152,7 @@ export function evaluateRequest(
   site: string,
   s: RequestSignals,
   ruleset: Parameters<typeof decideEnforcement>[1],
-  opts: Pick<ForcefieldWorkerOptions, "platform"> = {},
+  opts: Pick<ForcefieldWorkerOptions, "platform"> & { bodyAttack?: string } = {},
 ): { verdict: EnforcementDecision; observation: Observation | null } {
   const fingerprint = operatorFingerprint(s.headerNames);
   const rawUrl = s.url.pathname + s.url.search;
@@ -166,6 +167,7 @@ export function evaluateRequest(
     fingerprint,
     authenticated: s.authenticated,
     platform: opts.platform,
+    bodyAttack: opts.bodyAttack,
   };
   const verdict = decideEnforcement(enforceInput, ruleset);
   // asn / asOrg are edge network hints the engine may use for classification
@@ -184,6 +186,7 @@ export function evaluateRequest(
     ip: s.ip || undefined,
     authenticated: s.authenticated,
     platform: opts.platform,
+    bodyAttack: opts.bodyAttack,
     asn: s.asn,
     asOrg: s.asOrg,
     nowMs: s.nowMs,
@@ -204,6 +207,72 @@ async function forwardObservation(env: ForcefieldWorkerEnv, obs: Observation, co
     });
   } catch {
     /* ingest is best-effort; a down store never affects the request */
+  }
+}
+
+/**
+ * Read AT MOST BODY_SCAN_CAP_BYTES of the request body for inspection, without
+ * disturbing the body that reaches the origin. A `request.clone()` gives an
+ * independent body stream; we read the first chunks up to the cap, then CANCEL
+ * the clone, so memory stays bounded by the cap even for a trickled multi-MB or
+ * never-finishing body. The ORIGINAL request is forwarded untouched, so every
+ * legitimate upload still reaches the origin whole.
+ *
+ * Decoded latin1 (byte == code point) so raw null / control bytes survive and
+ * the ASCII markers the analyzer looks for still match. Returns the attack label
+ * or null; never throws (fail-open: a read error inspects nothing).
+ */
+export async function inspectBodyBounded(request: Request): Promise<string | null> {
+  try {
+    const contentType = request.headers.get("content-type") ?? "";
+    const hasNextAction = request.headers.has("next-action") || request.headers.has("rsc-action-id");
+    if (!bodyInspectionApplies(request.method, contentType, hasNextAction)) return null;
+    if (!request.body) return null;
+
+    const reader = request.clone().body!.getReader();
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    let truncated = false;
+    try {
+      while (total < BODY_SCAN_CAP_BYTES) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (value) {
+          chunks.push(value);
+          total += value.byteLength;
+        }
+      }
+      // If more is left, we stopped at the cap: mark truncated and stop reading.
+      if (total >= BODY_SCAN_CAP_BYTES) truncated = true;
+    } finally {
+      try {
+        await reader.cancel();
+      } catch {
+        /* cancelling the inspection clone never affects the forwarded body */
+      }
+    }
+
+    // Concatenate up to the cap and decode latin1 (binary-safe, 1 byte -> 1 char).
+    let body = "";
+    let used = 0;
+    for (const c of chunks) {
+      const take = Math.min(c.byteLength, BODY_SCAN_CAP_BYTES - used);
+      for (let i = 0; i < take; i++) body += String.fromCharCode(c[i]);
+      used += take;
+      if (used >= BODY_SCAN_CAP_BYTES) break;
+    }
+
+    const declared = Number(request.headers.get("content-length") ?? "");
+    const result = inspectRequestBody({
+      method: request.method,
+      contentType,
+      declaredLength: Number.isFinite(declared) ? declared : undefined,
+      body,
+      truncated,
+    });
+    return result ? result.attack : null;
+  } catch {
+    return null; // fail-open: Forcefield never breaks the request over inspection.
   }
 }
 
@@ -245,7 +314,12 @@ export function createForcefieldWorker(options: ForcefieldWorkerOptions = {}) {
         const ruleset = await fetchRuleset(env.FORCEFIELD_RULESET_URL ?? "");
         const authenticated = await workerAuthenticated(request, env, options);
         const s = requestSignals(request, Date.now(), { authenticated });
-        const { verdict, observation } = evaluateRequest(env.FORCEFIELD_SITE, s, ruleset, { platform: options.platform });
+        // Bounded body inspection for the two body-borne RCEs (PHP2Shell,
+        // React2Shell) the URL/header engine cannot see. Monitor-first: computed
+        // whatever the mode, so a watch-mode hit is still recorded; blocking stays
+        // gated by shouldBlock below. Reads the clone, never the forwarded body.
+        const bodyAttack = (await inspectBodyBounded(request)) ?? undefined;
+        const { verdict, observation } = evaluateRequest(env.FORCEFIELD_SITE, s, ruleset, { platform: options.platform, bodyAttack });
 
         if (observation) ctx.waitUntil(forwardObservation(env, observation, s.country));
 

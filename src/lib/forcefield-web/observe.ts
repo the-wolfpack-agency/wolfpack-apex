@@ -71,6 +71,11 @@ export interface ObserveInput {
   /** The platform the site runs on (e.g. "wordpress"), so that platform's own
    *  paths (ruleset.platformPaths) are not reported as recon. Optional. */
   platform?: string;
+  /** A body-marker attack family an adapter that can see the body already proved
+   *  (body-inspect.ts: "php2shell" / "react2shell"). Recorded as a payload attack
+   *  just like a URL-target payload, so the board, carryover and the reputation
+   *  tells all treat a body-proven RCE as the proof it is. Optional. */
+  bodyAttack?: string;
   nowMs: number;
 }
 
@@ -345,7 +350,7 @@ export function observeRequest(input: ObserveInput, ruleset: ForcefieldRuleset):
   // Proof carried by the request itself: a header attack (CVE-2025-29927) or an
   // injection payload in the full target (query included). Ranked right after a
   // decoy trip, and evaluated whatever the UA claims.
-  const attack = detectHeaderAttack(input.headerNames, path) ?? detectPayload(input.rawUrl ?? path);
+  const attack = detectHeaderAttack(input.headerNames, path) ?? detectPayload(input.rawUrl ?? path) ?? input.bodyAttack ?? null;
   const native = input.platform ? ruleset.platformPaths?.[input.platform] ?? [] : [];
   const sensitive = matchedSensitive(path, ruleset.sensitivePaths, native);
   // A request shaped like a known-exploited CVE's exploit (kev-rules.ts) is the

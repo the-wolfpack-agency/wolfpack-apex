@@ -113,6 +113,17 @@ export function buildDossier(sightings: readonly Sighting[]): AttributionDossier
     new Set([
       ...sorted.flatMap((s) => s.journey.signals ?? []),
       ...sorted.flatMap((s) => (s.journey.insights ?? []).map((i) => i.kind)),
+      // The SPECIFIC named attack family (e.g. attack:php2shell), not just the
+      // generic "payload_attack" kind, so the reputation network recognizes an
+      // actor by WHICH exploit it threw and a body-proven RCE on one site flags
+      // the same tradecraft at first contact on another (matchOperatorsToNetwork).
+      // Generic by construction: every named payload family rides this, not just
+      // the latest CVE. Mirrors the view layer's `attack:<name>` tell (tellSetOf).
+      ...sorted.flatMap((s) =>
+        (s.journey.insights ?? [])
+          .filter((i): i is { kind: "payload_attack"; attack: string; detail: string } => i.kind === "payload_attack" && typeof (i as { attack?: unknown }).attack === "string")
+          .map((i) => `attack:${i.attack}`),
+      ),
     ]),
   ).sort();
   const policies = Array.from(new Set(sorted.flatMap((s) => s.tools.policies)));

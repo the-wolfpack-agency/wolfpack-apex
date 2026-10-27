@@ -35,8 +35,9 @@ it("aggregates the tradecraft tells (signals + insight kinds) across sightings",
     sighting("ogiam.com", "t1", j1, scaff(), tools()),
     sighting("ogiam.com", "t2", j2, scaff(), tools()),
   ]);
-  // deduped + sorted union of every signal and insight kind observed
-  expect(d.tells).toEqual(["payload_attack", "probed_sensitive", "tripped_decoy"]);
+  // deduped + sorted union of every signal, insight kind, and the specific
+  // named attack family (attack:<name>) observed
+  expect(d.tells).toEqual(["attack:sqli", "payload_attack", "probed_sensitive", "tripped_decoy"]);
 });
 
 it("a proven hostile behavior makes the dossier proven-hostile", () => {

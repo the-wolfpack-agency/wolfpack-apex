@@ -47,6 +47,14 @@ describe("annotateKevProps", () => {
     expect(annotateKevProps("site.agent_payload_attack", { attack: "log4shell" }).cve).toBe("CVE-2021-44228");
   });
 
+  it("annotates the body-marker RCEs as KEV-listed (both PHP CVEs shipped in the snapshot)", () => {
+    const php = annotateKevProps("site.agent_payload_attack", { attack: "php2shell" });
+    expect(php).toMatchObject({ cve: "CVE-2026-109618", kev: true });
+    expect(kevEntry("CVE-2026-109619")).not.toBeNull(); // the second PHP CVE is tracked too
+    const react = annotateKevProps("site.agent_payload_attack", { attack: "react2shell" });
+    expect(react).toMatchObject({ cve: "CVE-2025-55182", kev: true });
+  });
+
   it("strips client-sent cve/kev props and re-derives them (no forging)", () => {
     const forged = annotateKevProps("site.agent_probed_sensitive", { probe: "/.env", cve: "CVE-2099-0001", kev: true, kev_added: "x", kev_ransomware: true, kev_catalog: "x" });
     for (const k of KEV_PROP_KEYS) expect(forged).not.toHaveProperty(k);
