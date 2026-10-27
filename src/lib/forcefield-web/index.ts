@@ -77,3 +77,13 @@ export {
   type CampaignVerdict,
   type CampaignOptions,
 } from "./campaign";
+export {
+  stateChangeOf,
+  accountabilityVerdict,
+  applyPrincipalToAction,
+  DEFAULT_STATE_CHANGE_RULES,
+  type AccountabilityClass,
+  type AccountabilityVerdict,
+  type StateChangeRules,
+  type ActionRoute,
+} from "./accountability";

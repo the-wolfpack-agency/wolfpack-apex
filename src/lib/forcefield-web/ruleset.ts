@@ -17,6 +17,7 @@
 import { DEFAULT_TOOL_SIGNATURES, type ToolSignature } from "./fingerprint";
 import type { KnownAgent } from "./classify";
 import { coerceCarryover, type CarryoverEntry } from "./intent";
+import { DEFAULT_STATE_CHANGE_RULES, coerceStateChangeRules, type StateChangeRules } from "./accountability";
 
 export interface ForcefieldRuleset {
   /** Version marker so a site can log which ruleset it is running. */
@@ -70,6 +71,11 @@ export interface ForcefieldRuleset {
    *  autoblock-scope before serving). Consumed as tarpit, never as a block.
    *  Optional. */
   intentCarryover?: CarryoverEntry[];
+  /** ACCOUNTABLE ACTIONS (accountability.ts): which requests are state-changing
+   *  (methods + named action routes, shared and per site label) and which paths
+   *  never are. Watch mode only: recorded, never blocked. Optional; absent or
+   *  malformed falls back to the bundled defaults. */
+  stateChange?: StateChangeRules;
 }
 
 /**
@@ -239,6 +245,7 @@ export const DEFAULT_RULESET: ForcefieldRuleset = {
   // (src/lib/forcefield/crawler-ranges.ts). Empty in the bundle = every claimed
   // agent is "unverifiable", never an impersonation.
   verifiedAgentRanges: {},
+  stateChange: DEFAULT_STATE_CHANGE_RULES,
 };
 
 /** Validate + coerce an untrusted payload into a ruleset, or null if it is not
@@ -307,6 +314,7 @@ export function coerceRuleset(data: unknown): ForcefieldRuleset | null {
     runtimeExtensions,
     stackComponents,
     intentCarryover,
+    stateChange: coerceStateChangeRules(d.stateChange) ?? DEFAULT_STATE_CHANGE_RULES,
   };
 }
 

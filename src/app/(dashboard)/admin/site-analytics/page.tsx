@@ -26,7 +26,9 @@ import { ForcefieldAssurance } from "@/components/forcefield/ForcefieldAssurance
 import { ProbeIntelPanel } from "@/components/forcefield/ProbeIntelPanel";
 import { PayloadIntelPanel } from "@/components/forcefield/PayloadIntelPanel";
 import { ProvenAttacksPanel } from "@/components/site-analytics/ProvenAttacksPanel";
+import { AccountableActionsPanel } from "@/components/site-analytics/AccountableActionsPanel";
 import type { ProvenAttacks } from "@/lib/site-analytics-proven";
+import type { AccountableActionsSummary } from "@/lib/site-analytics-accountability";
 import { parseBoardDeepLink } from "@/lib/forcefield-web/board-link";
 
 interface Summary {
@@ -89,6 +91,7 @@ interface Summary {
   networkTradecraft?: Array<{ tells: string[]; workspaceCount: number; severity: "hostile" | "elevated" | "benign" }>;
   principalByOperator?: Record<string, { status: "verified" | "claimed"; principal?: string; issuer?: string; scopes: string[]; mandateExceeded: boolean; violations: string[] }>;
   defense?: DefenseSignals;
+  accountability?: AccountableActionsSummary;
   /** Per-site proven attacks (forcefield.view only; stripped for everyone else). */
   proven?: ProvenAttacks;
 }
@@ -767,6 +770,10 @@ export default function SiteAnalyticsPage() {
           {/* What the edge did: blocks vs withheld blocks, payload families, fast
               agents, claimed-vs-verified identity, probe labels, source network. */}
           <DefenseSignalsPanel defense={summary.defense} payloadIntel={summary.payloadIntel ?? []} agentIntel={summary.agentIntel} rangeDays={summary.rangeDays} />
+
+          {/* Actions need a person (watch mode): who was accountable for each
+              state-changing request, and what "hold for review" would hold. */}
+          <AccountableActionsPanel data={summary.accountability} rangeDays={summary.rangeDays} />
 
           {/* Probe intelligence + payload attacks. Placed BELOW the agent-traffic
               summary - that section ties directly to the map above, so it leads;

@@ -39,6 +39,7 @@ import { trackEvent } from "@/lib/analytics";
 import { checkInboundForCanaries } from "@/lib/forcefield/canary-store";
 import { evaluateRequestIntent, intentLedger } from "@/lib/forcefield-web/monitor";
 import { getIntentCarryover } from "@/lib/forcefield/intent-carryover";
+import { verifyBoundaryDelegation, stampPrincipal } from "@/lib/forcefield/action-accountability";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -94,6 +95,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const site = tenant?.siteLabel ?? s("site", "unknown");
   const headerNames = Array.isArray(b.headerNames) ? (b.headerNames as unknown[]).map(String) : [];
   const ip = typeof b.ip === "string" ? (b.ip as string) : undefined;
+  // A signed delegation credential the shim forwarded for a state-changing
+  // request (x-forcefield-delegation). Verified below, never stored.
+  const delegation = typeof b.delegation === "string" && b.delegation.length > 0 && b.delegation.length <= 8192 ? (b.delegation as string) : null;
   const rawUrl = typeof b.rawUrl === "string" ? (b.rawUrl as string) : path;
   const accept = typeof b.accept === "string" ? (b.accept as string) : undefined;
   const secFetchDest = typeof b.secFetchDest === "string" ? (b.secFetchDest as string) : undefined;
@@ -215,6 +219,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       const props = { ...obs.props };
       if (asn !== undefined && obs.type !== "site.page_viewed") props.asn = asn;
       if (asOrg && obs.type !== "site.page_viewed") props.as_org = asOrg;
+      // Accountable actions: a presented principal is ALWAYS verified (never gated
+      // on request-derived values; CodeQL js/user-controlled-bypass), as in the
+      // ingest route; stampPrincipal itself downgrades an unverified claim.
+      stampPrincipal(props, await verifyBoundaryDelegation(delegation || null, EDGE_WORKSPACE_ID), obs.path);
       // Tag the row with the tenant whose key sent it, so the tenant's dashboard,
       // first-hour email and alerts (all scoped by forcefield_tenant_id) see it.
       await recordSiteEvent({ eventType: obs.type, path: obs.path, country: country || null, props, tenantId: tenant?.id ?? null }).catch(() => {});

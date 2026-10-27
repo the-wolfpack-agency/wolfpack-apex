@@ -22,6 +22,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { GlassPanel, MetricTile, SectionHeader, ConsoleGrid, StatusPill } from "@/components/console";
 import { AlertEmailPanel } from "@/components/forcefield/AlertEmailPanel";
+import { attackLabel } from "@/lib/forcefield-web/attack-labels";
 
 const TOKEN_KEY = "ff_dashboard_token";
 
@@ -70,14 +71,10 @@ function envBlock(env: Record<string, string>): string {
   return Object.entries(env).map(([k, v]) => `${k}=${v}`).join("\n");
 }
 
-const ATTACK_LABELS: Record<string, string> = {
-  path_traversal: "Path traversal",
-  open_redirect: "Open redirect",
-  xss: "Cross-site scripting",
-  sql_injection: "SQL injection",
-  command_injection: "Command injection",
-  xxe: "XML external entity",
-  ssrf: "Server-side request forgery",
+/** Shared plain-language attack names (forcefield-web/attack-labels.ts), sentence-cased. */
+const prettyAttack = (a: string) => {
+  const l = attackLabel(a);
+  return l.charAt(0).toUpperCase() + l.slice(1);
 };
 const HANDLED: Record<Handling, { label: string; color: string }> = {
   blocked: { label: "Blocked", color: "#f87171" },
@@ -87,8 +84,6 @@ const HANDLED: Record<Handling, { label: string; color: string }> = {
   watched: { label: "Watched", color: "var(--wp-muted, #9aa0a6)" },
 };
 
-const prettyAttack = (a: string) =>
-  ATTACK_LABELS[a] ?? a.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
 export default function ForcefieldDashboardPage() {
   const [input, setInput] = useState("");

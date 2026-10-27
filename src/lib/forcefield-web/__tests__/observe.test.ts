@@ -30,8 +30,9 @@ describe("observeRequest - ruleset-driven, monitor-only", () => {
     expect(observeRequest({ ...base, ...br, path: "/dashboard", accept: "application/json", secFetchDest: "empty" }, R)).toBeNull();
     // no document signal at all -> nothing forwarded
     expect(observeRequest({ ...base, ...br, path: "/dashboard" }, R)).toBeNull();
-    // non-GET
-    expect(observeRequest({ ...base, ...br, path: "/dashboard", method: "POST", secFetchDest: "document" }, R)).toBeNull();
+    // non-GET: never a page view. It is a state-changing ACTION, recorded as
+    // site.action_observed with its accountability verdict (accountability.ts).
+    expect(observeRequest({ ...base, ...br, path: "/dashboard", method: "POST", secFetchDest: "document" }, R)?.type).toBe("site.action_observed");
   });
 
   it("an agent on an HTML page is still an agent event, never a page view", () => {
@@ -257,7 +258,11 @@ describe("Next.js server-action probe", () => {
     expect(o.type).toBe("site.agent_probed_sensitive");
     expect(o.props.probe).toBe("next_server_action");
     expect(o.props.blocked).toBe(false);
-    expect(observeRequest({ ...chrome, path: "/login", method: "POST", secFetchDest: "empty", headerNames: [...CHROME_HEADERS, "next-action"] }, R)).toBeNull();
+    // From a real browser it is no probe: only the action's accountability verdict.
+    const fromBrowser = observeRequest({ ...chrome, path: "/login", method: "POST", secFetchDest: "empty", headerNames: [...CHROME_HEADERS, "next-action"] }, R)!;
+    expect(fromBrowser.type).toBe("site.action_observed");
+    expect(fromBrowser.props.probe).toBeUndefined();
+    expect(fromBrowser.props.accountability).toBe("browser_session");
   });
 });
 

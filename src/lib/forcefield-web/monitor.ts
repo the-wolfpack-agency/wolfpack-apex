@@ -71,6 +71,25 @@ export interface ForcefieldArgs {
  *  never logged, never forwarded (only header NAMES ever leave this module). */
 export const SYNTHETIC_HEADER = "x-forcefield-synthetic";
 
+/** The header an AI agent presents its signed delegation credential in (Know
+ *  the Principal: `<base64url(body)>.<timestamp>.<signature>`). The edge cannot
+ *  verify it (it holds no issuer keys), so on a STATE-CHANGING request only it
+ *  is forwarded to the ingest, which verifies it fail-closed and stores only
+ *  the verdict, never the credential. */
+export const DELEGATION_HEADER = "x-forcefield-delegation";
+const MAX_DELEGATION_BYTES = 8 * 1024;
+
+/** The delegation credential to forward for an action event, or undefined. */
+export function delegationFor(headers: Headers, obs: Observation | null): string | undefined {
+  try {
+    if (!obs || typeof obs.props.accountability !== "string") return undefined;
+    const raw = headers.get(DELEGATION_HEADER) ?? "";
+    return raw && raw.length <= MAX_DELEGATION_BYTES ? raw : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Constant-time string equality without Node's crypto (the portable core runs
  *  in any edge runtime). Length is not secret; the per-char compare does not
  *  short-circuit. Exported so a host middleware comparing its own service
@@ -301,13 +320,13 @@ export async function forcefieldMonitor(args: ForcefieldArgs): Promise<void> {
     }
 
     const country = input.country;
-    const send = (type: string, path: string, props: Record<string, string | number | boolean>) =>
+    const send = (type: string, path: string, props: Record<string, string | number | boolean>, delegation?: string) =>
       fetch(ingestUrl, {
         method: "POST",
         headers: { "content-type": "application/json", "x-ingest-token": token },
-        body: JSON.stringify({ type, path, country: country || undefined, props }),
+        body: JSON.stringify({ type, path, country: country || undefined, props, ...(delegation ? { delegation } : {}) }),
       }).catch(() => {});
-    if (obs) await send(obs.type, obs.path, obs.props);
+    if (obs) await send(obs.type, obs.path, obs.props, delegationFor(args.req.headers, obs));
     // One intent event per step-up (watch -> tarpit -> block), with its reasons.
     if (intent?.report) await send("site.intent_scored", input.path, intent.props);
   } catch {

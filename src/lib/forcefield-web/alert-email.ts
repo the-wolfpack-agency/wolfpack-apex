@@ -21,6 +21,7 @@
 import type { ForcefieldAlert } from "@/lib/forcefield-web/alerts";
 import { boardHref } from "@/lib/forcefield-web/board-link";
 import { siteHost } from "@/lib/forcefield-web/site-host";
+import { attackLabel } from "@/lib/forcefield-web/attack-labels";
 import type { ClassLine, DigestData } from "@/lib/forcefield-web/incidents";
 
 /* --------------------------------- types ---------------------------------- */
@@ -148,26 +149,6 @@ const HOSTING_LABEL: Record<string, string> = {
   mobile: "mobile network",
   unknown: "network type not recorded",
 };
-
-const ATTACK_LABEL: Record<string, string> = {
-  sql_injection: "SQL injection",
-  xss: "cross-site scripting",
-  path_traversal: "path traversal",
-  command_injection: "command injection",
-  open_redirect: "open redirect",
-  xxe: "XML external entity",
-  ssrf: "server-side request forgery",
-  nextjs_middleware_bypass: "Next.js middleware bypass",
-  php_cgi_injection: "PHP CGI injection",
-  prompt_injection: "prompt injection",
-  template_injection: "template injection",
-  log4shell: "Log4Shell (JNDI injection)",
-  honeytoken_trip: "decoy or honeytoken trip",
-};
-
-function attackLabel(attackClass: string): string {
-  return ATTACK_LABEL[attackClass] ?? attackClass.replace(/_/g, " ");
-}
 
 /** The site as a reader knows it: the hostname, never the internal label
  *  ("instinct" -> wolfpack-instinct.vercel.app). Falls back to the label. */

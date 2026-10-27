@@ -34,7 +34,8 @@ import { checkRateLimit } from "@/lib/ogiam/gate-rate-limit";
 import { isSiteEventType, recordSiteEvent } from "@/lib/site-analytics";
 import { autoBlockFingerprint } from "@/lib/forcefield/blocked-fingerprints";
 import { resolveTenantByToken } from "@/lib/forcefield-web/tenants";
-import { verifyPresentedDelegation, getDelegationIssuer, consumeDelegationJti } from "@/lib/forcefield/principal";
+import { verifyBoundaryDelegation, stampPrincipal } from "@/lib/forcefield/action-accountability";
+import { coerceActionProps } from "@/lib/forcefield-web/accountability";
 import { ingestSigningEnforced, verifyIngestSignature } from "@/lib/forcefield/ingest-signing";
 import { noteRequest, rateKey } from "@/lib/forcefield/rate-window";
 
@@ -148,6 +149,9 @@ export async function POST(req: NextRequest) {
     const raw = b.props as Record<string, unknown>;
     if (raw.authenticated === true) props.authenticated = true;
     if (raw.synthetic === true) props.synthetic = true;
+    // Accountable actions: the verdict keys are stamped late too, so carry them
+    // explicitly, validated against their closed vocabularies.
+    Object.assign(props, coerceActionProps(raw));
   }
 
   // Know the Principal: if the agent presented a signed delegation credential,
@@ -161,21 +165,11 @@ export async function POST(req: NextRequest) {
   // missing credential can never bypass anything - absent is the untrusted
   // default. Only a non-absent verdict writes principal props.
   const presented = typeof b.delegation === "string" && b.delegation.length > 0 ? b.delegation : null;
-  const verdict = await verifyPresentedDelegation(presented, {
-    resolveIssuer: (iss) => getDelegationIssuer(SITE_WORKSPACE_ID, iss),
-    nowSeconds: Math.floor(Date.now() / 1000),
-    audience: process.env.SITE_ANALYTICS_AUDIENCE,
-    // Reject a credential signed more than 10 minutes ago, and accept each jti
-    // only once - a captured credential cannot be replayed.
-    maxAgeSeconds: 600,
-    consumeJti: (jti, exp) => consumeDelegationJti(SITE_WORKSPACE_ID, jti, exp),
-  });
-  if (verdict.status !== "absent") {
-    props.principal_status = verdict.status;
-    if (verdict.principal) props.principal = verdict.principal.slice(0, 120);
-    if (verdict.issuer) props.principal_issuer = verdict.issuer.slice(0, 120);
-    if (verdict.scopes.length > 0) props.principal_scopes = JSON.stringify(verdict.scopes).slice(0, 400);
-  }
+  // Max signing age 10 minutes and single-use jti (verifyBoundaryDelegation), so
+  // a captured credential cannot be replayed. A verified principal also refines
+  // an action's accountability verdict (signed_principal, in or out of mandate).
+  const verdict = await verifyBoundaryDelegation(presented, SITE_WORKSPACE_ID);
+  stampPrincipal(props, verdict, typeof b.path === "string" ? b.path : "");
   // The raw credential is never persisted.
   delete (props as Record<string, unknown>).delegation;
 
