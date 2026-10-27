@@ -42,7 +42,7 @@ const legacyMode = () => setKeys({});
 const previousMode = () => setKeys({ INSTINCT_SECRET_KEY: KEY_PREVIOUS });
 const primaryMode = () => setKeys({ INSTINCT_SECRET_KEY: KEY_PRIMARY, INSTINCT_SECRET_KEY_PREVIOUS: KEY_PREVIOUS });
 
-const MIGRATIONS = ["136_connector_credentials.sql", "138_connector_oauth.sql", "216_admin_mfa.sql", "250_workspace_model_keys.sql", "253_tenant_registry.sql", "261_delegation_issuers.sql", "265_delegation_issuer_asymmetric.sql"];
+const MIGRATIONS = ["136_connector_credentials.sql", "138_connector_oauth.sql", "216_admin_mfa.sql", "250_workspace_model_keys.sql", "253_tenant_registry.sql", "261_delegation_issuers.sql", "265_delegation_issuer_asymmetric.sql", "284_forcefield_tenants.sql", "301_forcefield_edge.sql"];
 
 describeIfDb("at-rest key rotation backfill", () => {
   let db: Client;
@@ -54,6 +54,9 @@ describeIfDb("at-rest key rotation backfill", () => {
     await db.connect();
     for (const t of ROTATION_TARGETS) await db.query(`DROP TABLE IF EXISTS ${t.table} CASCADE`);
     await db.query(`DROP TABLE IF EXISTS instinct_events CASCADE`);
+    await db.query(`DROP TABLE IF EXISTS forcefield_edge_hostnames CASCADE`);
+    // 284 cross-ALTERs site_analytics_events; stub it when absent (no-op otherwise).
+    await db.query(`CREATE TABLE IF NOT EXISTS site_analytics_events (id bigserial PRIMARY KEY, props jsonb)`);
     for (const m of MIGRATIONS) await db.query(readFileSync(join(__dirname, "..", "migrations", m), "utf8"));
     /* Same shape as ms-tokens-columns.db.test.ts (migrations 005 + 044). */
     await db.query(`
@@ -89,6 +92,7 @@ describeIfDb("at-rest key rotation backfill", () => {
     if (db) {
       for (const t of ROTATION_TARGETS) await db.query(`DROP TABLE IF EXISTS ${t.table} CASCADE`);
       await db.query(`DROP TABLE IF EXISTS instinct_events CASCADE`);
+      await db.query(`DROP TABLE IF EXISTS forcefield_edge_hostnames CASCADE`);
     }
     await db?.end();
     process.env = SAVED;
@@ -97,7 +101,8 @@ describeIfDb("at-rest key rotation backfill", () => {
   });
 
   beforeEach(async () => {
-    for (const t of ROTATION_TARGETS) await db.query(`TRUNCATE ${t.table}`);
+    // CASCADE: forcefield_edge_hostnames references forcefield_tenants (migration 301).
+    for (const t of ROTATION_TARGETS) await db.query(`TRUNCATE ${t.table} CASCADE`);
     await db.query(`TRUNCATE instinct_events`);
   });
 
@@ -130,6 +135,9 @@ describeIfDb("at-rest key rotation backfill", () => {
     await db.query(`INSERT INTO instinct_tenant_registry (tenant_id, org_name, status, db_url_encrypted) VALUES ('t-acme-ab12', 'Acme', 'active', $1)`, [
       encryptSecret("postgres://u:p@h/db"),
     ]);
+    await db.query(`INSERT INTO forcefield_tenants (name, site_label, token_sha256, edge_origin_url, edge_origin_secret_sealed) VALUES ('Edge', 'edge.example', 'h', 'https://origin.edge.example', $1)`, [
+      encryptSecret("ffe_edge-origin-secret"),
+    ]);
     previousMode();
     await db.query(`INSERT INTO instinct_workspace_model_keys (workspace_id, provider, encrypted_key, key_hint) VALUES ('ws-1', 'openai', $1, '...ious')`, [encryptSecret("sk-previous")]);
     primaryMode();
@@ -154,14 +162,15 @@ describeIfDb("at-rest key rotation backfill", () => {
     expect(by("instinct_qbo_tokens", "access_token")).toMatchObject({ present: true, legacy: 1, plaintext: 1 });
     expect(by("instinct_qbo_tokens", "refresh_token")).toMatchObject({ present: true, legacy: 1, plaintext: 1 });
     expect(by("instinct_delegation_issuers", "secret")).toMatchObject({ present: true, legacy: 1 });
-    expect(totals(counts)).toEqual({ primary: 0, previous: 1, legacy: 10, plaintext: 4, unreadable: 0 });
+    expect(by("forcefield_tenants", "edge_origin_secret_sealed")).toMatchObject({ present: true, legacy: 1 });
+    expect(totals(counts)).toEqual({ primary: 0, previous: 1, legacy: 11, plaintext: 4, unreadable: 0 });
   });
 
   it("rotates legacy and previous values to the primary; every value still opens", async () => {
     await seedAll();
     const r = await rotateSecrets(db, ROTATION_TARGETS, { batchSize: 2 });
-    expect(r).toMatchObject({ rotated: 11, skippedConcurrent: 0, unreadable: 0, roundTripFailures: 0 });
-    expect(totals(await surveySecrets(db))).toEqual({ primary: 11, previous: 0, legacy: 0, plaintext: 4, unreadable: 0 });
+    expect(r).toMatchObject({ rotated: 12, skippedConcurrent: 0, unreadable: 0, roundTripFailures: 0 });
+    expect(totals(await surveySecrets(db))).toEqual({ primary: 12, previous: 0, legacy: 0, plaintext: 4, unreadable: 0 });
 
     const cred = (await db.query(`SELECT auth_header_enc, refresh_token_enc FROM instinct_connector_credentials WHERE connector_name = 'c1'`)).rows[0];
     expect(cred.auth_header_enc.startsWith(`v1.${PRIMARY_KID}.`)).toBe(true);
@@ -183,6 +192,7 @@ describeIfDb("at-rest key rotation backfill", () => {
     expect(decryptSecret((await db.query(`SELECT encrypted_secret FROM instinct_admin_mfa`)).rows[0].encrypted_secret)).toBe("JBSWY3DPEHPK3PXP");
     expect(decryptSecret((await db.query(`SELECT secret FROM instinct_delegation_issuers`)).rows[0].secret)).toBe("shared-issuer-secret");
     expect(decryptSecret((await db.query(`SELECT db_url_encrypted FROM instinct_tenant_registry`)).rows[0].db_url_encrypted)).toBe("postgres://u:p@h/db");
+    expect(decryptSecret((await db.query(`SELECT edge_origin_secret_sealed FROM forcefield_tenants`)).rows[0].edge_origin_secret_sealed)).toBe("ffe_edge-origin-secret");
     allowLegacyKeyForBackfill();
   });
 

@@ -292,11 +292,11 @@ export function coerceEdgeSite(raw: unknown, opts: { allowHttp?: boolean } = {})
   const site: EdgeSite = { tenantId, siteLabel, originUrl, originSecret, enforce: r.enforce === true };
   const platform = str(r.platform);
   if (platform) site.platform = platform;
-  if (Array.isArray(r.stack)) {
-    const stack = r.stack.filter((s): s is string => typeof s === "string" && s.length > 0 && s.length < 40).slice(0, 8);
-    if (stack.length) site.stack = stack;
-  }
-  return site;
+  // The site's declared technology list (e.g. ["php"]), for intent scoring.
+  const technologies = Array.isArray(r.stack)
+    ? r.stack.filter((s): s is string => typeof s === "string" && s.length > 0 && s.length < 40).slice(0, 8)
+    : [];
+  return technologies.length ? { ...site, stack: technologies } : site;
 }
 
 /** The URL the request is forwarded to: the origin plus the visitor's path and
