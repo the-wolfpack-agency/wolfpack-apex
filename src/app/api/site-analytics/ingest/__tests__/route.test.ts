@@ -133,3 +133,18 @@ describe("POST /api/site-analytics/ingest", () => {
     expect(arg.props).toEqual({ ok: "v" }); // nested object dropped
   });
 });
+
+describe("provenance survives ingest", () => {
+  it("a decoy replay with the 12 standard engine props keeps its token_origin and path", async () => {
+    process.env.SITE_ANALYTICS_INGEST_TOKEN = "secret-token";
+    const props = {
+      action: "block", agent: "unidentified", blocked: true, canary: true, client_type: "unknown", fp: "f:unknown",
+      hosting: "residential", posture: "enforce", reason: "honeytoken_replay", reason_kind: "honeytoken", sig: "s1", site: "ogiam.com",
+      token_origin: "registry-a54504", path: "/_ff/v1/export",
+    };
+    const res = await POST(mkReq({ type: "site.agent_trap_tripped", path: "/_ff/v1/export", props }, "secret-token"));
+    expect(res.status).toBe(200);
+    const stored = mockRecordSiteEvent.mock.calls.at(-1)[0].props;
+    expect(stored).toMatchObject({ token_origin: "registry-a54504", path: "/_ff/v1/export", reason: "honeytoken_replay" });
+  });
+});
