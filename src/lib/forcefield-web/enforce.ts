@@ -286,6 +286,8 @@ export const FORCEFIELD_CONTROL_PLANE_PATHS: ReadonlySet<string> = new Set([
   "/api/site-analytics/ingest",
   "/api/forcefield/ruleset",
   "/api/forcefield/observe",
+  // a site's middleware reads its own agent policy here (monitor.ts sitePolicyUrl)
+  "/api/forcefield/site-policy",
 ]);
 
 /**
