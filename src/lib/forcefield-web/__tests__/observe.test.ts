@@ -410,3 +410,10 @@ describe("synthetic attestation stamp", () => {
     expect(o.props.authenticated).toBeUndefined();
   });
 });
+
+describe("accountable action from a spoofed modern browser", () => {
+  it("a Chrome UA posting a form without Fetch Metadata is unaccountable for that reason (end to end through observeRequest)", () => {
+    const o = observeRequest({ ...base, method: "POST", path: "/api/contact", userAgent: CHROME_UA, headerNames: ["host", "user-agent", "accept", "accept-language", "accept-encoding", "content-type"] }, R);
+    expect(o?.props).toMatchObject({ accountability: "unaccountable", acct_reason: "no_fetch_metadata", would_hold: true });
+  });
+});

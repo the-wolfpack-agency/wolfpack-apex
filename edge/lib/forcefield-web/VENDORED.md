@@ -1,7 +1,7 @@
 # Vendored: Forcefield-web core
 
 GENERATED - do not edit here. Source of truth: `the-wolfpack-agency/wolfpack-apex` `src/lib/forcefield-web/`.
-Vendored from apex commit `ed7518686d85c36760ee8a2f4f4c57777e121c54`.
+Vendored from apex commit `df889664e15117f534c78de401bde66eeac8cc89`.
 Re-sync with `node scripts/forcefield-vendor.mjs <this-repo>` from apex (lands in `edge/lib/forcefield-web`).
 
 The ENGINE is vendored (stable). The RULES (scanners, allowlists, trap paths)

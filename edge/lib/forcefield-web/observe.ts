@@ -408,6 +408,7 @@ export function observeRequest(input: ObserveInput, ruleset: ForcefieldRuleset):
         accountabilityVerdict({
           clientType: client.clientType,
           headerMismatch: client.headerMismatch,
+          spoof: client.spoof,
           hosting,
           authenticated,
           headerNames: input.headerNames,
