@@ -24,6 +24,7 @@ on:
       - "tests/e2e/site-analytics-defense.spec.ts"
       - "tests/e2e/site-analytics-proven.spec.ts"
       - "tests/e2e/site-analytics-accountable.spec.ts"
+      - "tests/e2e/site-analytics-ai-visibility.spec.ts"
       - "tests/e2e/evidence-backed-status.spec.ts"
       - "tests/e2e/forcefield-threat-coverage.spec.ts"
       - "tests/e2e/forcefield-exposure.spec.ts"
@@ -138,6 +139,7 @@ jobs:
           ${{ github.event_name != 'pull_request' && 'tests/e2e/site-analytics-defense.spec.ts' || '' }}
           ${{ github.event_name != 'pull_request' && 'tests/e2e/site-analytics-proven.spec.ts' || '' }}
           ${{ github.event_name != 'pull_request' && 'tests/e2e/site-analytics-accountable.spec.ts' || '' }}
+          ${{ github.event_name != 'pull_request' && 'tests/e2e/site-analytics-ai-visibility.spec.ts' || '' }}
           ${{ github.event_name != 'pull_request' && 'tests/e2e/evidence-backed-status.spec.ts' || '' }}
           ${{ github.event_name != 'pull_request' && 'tests/e2e/forcefield-threat-coverage.spec.ts' || '' }}
           ${{ github.event_name != 'pull_request' && 'tests/e2e/forcefield-exposure.spec.ts' || '' }}
@@ -219,6 +221,7 @@ jobs:
           tests/e2e/site-analytics-defense.spec.ts
           tests/e2e/site-analytics-proven.spec.ts
           tests/e2e/site-analytics-accountable.spec.ts
+          tests/e2e/site-analytics-ai-visibility.spec.ts
           tests/e2e/evidence-backed-status.spec.ts
           tests/e2e/forcefield-threat-coverage.spec.ts
           tests/e2e/forcefield-exposure.spec.ts

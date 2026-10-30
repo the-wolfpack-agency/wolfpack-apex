@@ -23,6 +23,7 @@ import { useCallback, useEffect, useState } from "react";
 import { GlassPanel, MetricTile, SectionHeader, ConsoleGrid, StatusPill } from "@/components/console";
 import { AlertEmailPanel } from "@/components/forcefield/AlertEmailPanel";
 import { ServerExposurePanel } from "@/components/forcefield/ServerExposurePanel";
+import { AiVisibilityPanel, type AiVisibilityData } from "@/components/forcefield/AiVisibilityPanel";
 import { attackLabel } from "@/lib/forcefield-web/attack-labels";
 
 const TOKEN_KEY = "ff_dashboard_token";
@@ -47,6 +48,8 @@ interface MyStatsResponse {
   ok: boolean;
   /** Who visited: each agent, what it did, how Forcefield handled it. */
   activity?: Activity;
+  /** Which AI agents and search engines read the site, for what, and whether verified. */
+  aiVisibility?: AiVisibilityData;
   tenant?: { id: string; name: string; siteLabel: string };
   stats?: Stats;
   /** True when the tenant is licensed to ACTUALLY block; false = watch-only (free
@@ -414,6 +417,12 @@ export default function ForcefieldDashboardPage() {
                     </div>
                   )}
                 </GlassPanel>
+              </div>
+            )}
+
+            {data?.aiVisibility && (
+              <div className="mb-6">
+                <AiVisibilityPanel data={data.aiVisibility} />
               </div>
             )}
 

@@ -27,6 +27,7 @@ import { ProbeIntelPanel } from "@/components/forcefield/ProbeIntelPanel";
 import { PayloadIntelPanel } from "@/components/forcefield/PayloadIntelPanel";
 import { ProvenAttacksPanel } from "@/components/site-analytics/ProvenAttacksPanel";
 import { AccountableActionsPanel } from "@/components/site-analytics/AccountableActionsPanel";
+import { SiteAiVisibility } from "@/components/site-analytics/SiteAiVisibility";
 import type { ProvenAttacks } from "@/lib/site-analytics-proven";
 import type { AccountableActionsSummary } from "@/lib/site-analytics-accountability";
 import { parseBoardDeepLink } from "@/lib/forcefield-web/board-link";
@@ -774,6 +775,12 @@ export default function SiteAnalyticsPage() {
           {/* Actions need a person (watch mode): who was accountable for each
               state-changing request, and what "hold for review" would hold. */}
           <AccountableActionsPanel data={summary.accountability} rangeDays={summary.rangeDays} />
+
+          {/* AI visibility: which AI agents and search engines read the selected
+              site, for what, which pages, and whether each was really who it claimed. */}
+          <div style={card} data-testid="admin-ai-visibility-section">
+            <SiteAiVisibility site={surface} days={days} />
+          </div>
 
           {/* Probe intelligence + payload attacks. Placed BELOW the agent-traffic
               summary - that section ties directly to the map above, so it leads;

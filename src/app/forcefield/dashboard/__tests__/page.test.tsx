@@ -236,3 +236,41 @@ describe("who visited", () => {
     expect(screen.queryByTestId("ff-visitors-table")).not.toBeInTheDocument();
   });
 });
+
+describe("AI agents reading this site", () => {
+  const connect = async (body: unknown) => {
+    window.localStorage.setItem("ff_dashboard_token", "ff_saved");
+    mockFetch.mockResolvedValue(okResponse(body));
+    render(<ForcefieldDashboardPage />);
+    await waitFor(() => expect(screen.getByTestId("ff-stats")).toBeInTheDocument());
+  };
+  const AGENT = { vendor: "Anthropic", purpose: "ai_training", requests: 471, verifiedRequests: 40, impersonations: 0, identity: "verified", pages: 8, topPages: [{ path: "/", requests: 300 }, { path: "/pricing", requests: 50 }], daily: [1, 0, 3], lastSeen: null };
+
+  it("groups agents by purpose with their vendor, pages, identity and most-read pages", async () => {
+    await connect({ ...STATS, aiVisibility: { days: 30, byPurpose: { ai_training: 471, ai_search: 7 }, agents: [
+      { ...AGENT, agent: "ClaudeBot" },
+      { ...AGENT, agent: "GPTBot", vendor: "OpenAI", purpose: "ai_training", requests: 0, verifiedRequests: 0, impersonations: 6, identity: "impersonation", pages: 0, topPages: [] },
+      { ...AGENT, agent: "OAI-SearchBot", vendor: "OpenAI", purpose: "ai_search", requests: 7, verifiedRequests: 0, identity: "unverified", pages: 1, topPages: [{ path: "/", requests: 7 }] },
+    ] } });
+    expect(screen.getByTestId("ff-ai-visibility-purpose-ai_training")).toHaveTextContent("AI training: 471 requests");
+    expect(screen.getByTestId("ff-ai-visibility-purpose-ai_search")).toHaveTextContent("7");
+    const rows = screen.getAllByTestId("ff-ai-visibility-agent");
+    expect(rows.map((r) => r.getAttribute("data-agent"))).toEqual(["ClaudeBot", "GPTBot", "OAI-SearchBot"]);
+    expect(rows[0]).toHaveTextContent("by Anthropic");
+    expect(rows[0]).toHaveTextContent("471 requests, 8 pages");
+    expect(rows[0]).toHaveTextContent("Most read: / (300), /pricing (50)");
+    expect(rows[0]).toHaveTextContent("Verified (40 of 471 checked)");
+    expect(rows[1]).toHaveTextContent("Impersonated 6 times, never the real agent");
+    expect(rows[2]).toHaveTextContent("Not verifiable");
+  });
+
+  it("an explicit empty state when no AI agent has read the site", async () => {
+    await connect({ ...STATS, aiVisibility: { days: 30, byPurpose: {}, agents: [] } });
+    expect(screen.getByTestId("ff-ai-visibility-empty")).toHaveTextContent(/No AI agents or search engines/);
+  });
+
+  it("no panel when the report is absent (an older API)", async () => {
+    await connect(STATS);
+    expect(screen.queryByTestId("ff-ai-visibility")).not.toBeInTheDocument();
+  });
+});
