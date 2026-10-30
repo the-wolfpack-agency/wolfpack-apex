@@ -543,7 +543,7 @@ describe("one email per incident, with the block decision", () => {
     expect(mockSendViaGraph).toHaveBeenCalledTimes(1);
     const mail = mockSendViaGraph.mock.calls[0][0];
     expect(mail.subject).toBe("[Forcefield] ogiam.com: hostile agent contained (decoy)");
-    expect(mail.text).toContain("Automatic block not applied");
+    expect(mail.text).toContain("Why we did not block this visitor everywhere");
     expect(mail.text).toContain("When: 2026-10-26 10:05:37 UTC");
     expect(mail.html).toContain("https://wolfpack-instinct.vercel.app/admin/site-analytics?tab=forcefield&amp;view=operator&amp;find=bbbb2222&amp;days=7&amp;site=ogiam.com");
     expect(mail.html).not.toMatch(/href="\//);

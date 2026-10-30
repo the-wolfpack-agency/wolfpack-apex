@@ -21,7 +21,7 @@
 import type { ForcefieldAlert } from "@/lib/forcefield-web/alerts";
 import { boardHref } from "@/lib/forcefield-web/board-link";
 import { siteHost } from "@/lib/forcefield-web/site-host";
-import { attackLabel } from "@/lib/forcefield-web/attack-labels";
+import { attackAim, attackLabel } from "@/lib/forcefield-web/attack-labels";
 import type { ClassLine, DigestData } from "@/lib/forcefield-web/incidents";
 
 /* --------------------------------- types ---------------------------------- */
@@ -259,13 +259,14 @@ export function alertHeadline(alert: ForcefieldAlert): string {
   const kind = effectiveKind(alert);
   if (kind === "honeytoken_trip") {
     const a = actorPhrase(i);
-    const subj = a.one ? "A hostile agent" : `${plural(Math.max(i?.signatureCount ?? 0, i?.fingerprintCount ?? 0), "hostile agent")}`;
-    const took = `took a ${trapNoun(i)} on ${site}`;
-    if (r === "contained") return `${subj} ${took} and ${a.one ? "was" : "were"} contained`;
-    if (r === "blocked") return `${subj} ${took} and ${a.one ? "was" : "were"} blocked`;
-    if (r === "recorded") return `${subj} ${took}; it was recorded, not blocked`;
-    if (r === "partial") return `${subj} ${took}; some requests were stopped, some only recorded`;
-    return `${subj} ${took}`;
+    // Lead with what Forcefield did, in the reader's terms; the outcome is exact.
+    const who = a.one ? "an automated attacker" : `${plural(Math.max(i?.signatureCount ?? 0, i?.fingerprintCount ?? 0), "automated attacker")}`;
+    const it = a.one ? "it" : "them";
+    if (r === "contained") return `Forcefield caught ${who} on ${site} and kept ${it} away from your real pages`;
+    if (r === "blocked") return `Forcefield caught ${who} on ${site} and turned ${it} away`;
+    if (r === "recorded") return `Forcefield caught ${who} on ${site}; it was recorded, not blocked`;
+    if (r === "partial") return `Forcefield caught ${who} on ${site}; some requests were stopped, some only recorded`;
+    return `Forcefield caught ${who} on ${site}`;
   }
   if (kind === "payload_attack") {
     const multi = alert.kind === "hostile_incident" && payloadClasses(alert).length > 1;
@@ -273,14 +274,14 @@ export function alertHeadline(alert: ForcefieldAlert): string {
     const n = i?.count ?? 1;
     if (multi) {
       const lead = `${n.toLocaleString("en-US")} attack attempts across ${payloadClasses(alert).length} attack types on ${site}`;
-      if (r === "blocked" || r === "contained") return `${lead} were blocked`;
+      if (r === "blocked" || r === "contained") return `Forcefield stopped ${lead}`;
       if (r === "recorded") return `${lead} were recorded, not blocked`;
       if (r === "partial") return `${lead}: some were blocked, some only recorded`;
       return `${lead} were detected`;
     }
     const lead = n === 1 ? `A ${what} attack on ${site}` : `${n.toLocaleString("en-US")} ${what} attempts on ${site}`;
     const verb = n === 1 ? "was" : "were";
-    if (r === "blocked" || r === "contained") return `${lead} ${verb} blocked`;
+    if (r === "blocked" || r === "contained") return `Forcefield stopped ${n === 1 ? `a ${what} attack` : `${n.toLocaleString("en-US")} ${what} attempts`} on ${site}`;
     if (r === "recorded") return `${lead} ${verb} recorded, not blocked`;
     if (r === "partial") return `${lead}: some were blocked, some only recorded`;
     return `${lead} ${verb} detected`;
@@ -335,6 +336,50 @@ function statusBlock(alert: ForcefieldAlert, audience: AlertAudience): StatusBlo
   }
 }
 
+/**
+ * "What Forcefield did for you": what it spotted, what it did, and what that
+ * means for the site, in the reader's words. Every sentence follows the actual
+ * outcome: a request that was only recorded (watch mode) is never described as
+ * stopped, and "not affected" is said only when every request was stopped.
+ * Empty for alert kinds that are not about a visitor (delivery checks, reviews).
+ */
+export function benefitLines(alert: ForcefieldAlert): string[] {
+  const i = alert.incident;
+  const kind = effectiveKind(alert);
+  const r = responseKind(i);
+  const o = i?.outcomes ?? { blocked: 0, contained: 0, recorded: 0 };
+  const stoppedAll = r === "blocked" || r === "contained";
+  if (kind === "honeytoken_trip") {
+    const a = actorPhrase(i);
+    const spotted = trapNoun(i) === "honeytoken"
+      ? `Spotted ${a.one ? "a program" : "programs"} using a fake credential we planted, which only someone who harvested it from our decoys could have.`
+      : `Spotted ${a.one ? "an automated program" : "automated programs"} reaching for a hidden link that no real visitor can see, a sure sign of hunting for weaknesses.`;
+    const did =
+      r === "contained" ? `Sent ${a.one ? "it" : "them"} into a maze of fake pages, so the time was wasted there instead of on your real site.`
+      : r === "blocked" ? `Turned ${a.one ? "it" : "them"} away before reaching your site.`
+      : r === "partial" ? `Stopped ${(o.blocked + o.contained).toLocaleString("en-US")} of the requests; ${o.recorded.toLocaleString("en-US")} were only recorded because the site was in watch mode.`
+      : r === "recorded" ? "Your site is in watch mode, so Forcefield recorded this but did not stop it."
+      : "Recorded the activity for review.";
+    return stoppedAll ? [spotted, did, "Your pages, your data and your visitors were not affected."] : [spotted, did];
+  }
+  if (kind === "payload_attack") {
+    const classes = payloadClasses(alert);
+    const n = i?.count ?? 1;
+    const attempts = n === 1 ? "an attempt" : `${n.toLocaleString("en-US")} attempts`;
+    const aim = classes.length > 1
+      ? `break into your site in ${classes.length} different ways`
+      : attackAim(alert.kind === "hostile_incident" ? classes[0]?.attackClass ?? "payload" : alert.attackClass ?? "payload");
+    const spotted = `Recognized ${attempts} to ${aim}.`;
+    const did =
+      stoppedAll ? `Turned ${n === 1 ? "it" : "every one"} away before ${n === 1 ? "it" : "they"} reached your site.`
+      : r === "partial" ? `Stopped ${(o.blocked + o.contained).toLocaleString("en-US")} of them; ${o.recorded.toLocaleString("en-US")} were only recorded because the site was in watch mode.`
+      : r === "recorded" ? "Your site is in watch mode, so these were recorded, not stopped."
+      : "Recorded the activity for review.";
+    return stoppedAll ? [spotted, did, "Nothing reached your pages or your data, so there is nothing for you to fix."] : [spotted, did];
+  }
+  return [];
+}
+
 /** One plain sentence on what the signal is and why it is trusted. */
 function signalExplanation(alert: ForcefieldAlert): { signal: string; confidence: string; explain: string } | null {
   const i = alert.incident;
@@ -376,14 +421,14 @@ function blockDecisionText(d: BlockDecision | undefined, clientType: string | un
       ?? "this fingerprint is shared by legitimate visitors";
     const kind = clientType === "browser" ? "browser fingerprint" : "fingerprint";
     return {
-      title: "Automatic block not applied",
-      text: `${cap1(why.replace("this client fingerprint", `this ${kind}`))}, so blocking it everywhere would turn them away. Decoy, payload and attack-tool rules still stop this client's hostile requests. Block the operator from the board only if a tool-wide block is warranted.`,
+      title: "Why we did not block this visitor everywhere",
+      text: `${cap1(why.replace("this client fingerprint", `this ${kind}`))}, so blocking it everywhere would turn real people away. Forcefield still stops every harmful request this visitor sends. Block the operator from the board only if a tool-wide block is warranted.`,
     };
   }
   if (d.state === "blocked") {
     return {
-      title: "Automatic block applied",
-      text: `This client's fingerprint is now turned away on every connected site${d.expiresAt ? ` until ${formatUtc(d.expiresAt)}` : ""}. It expires on its own; unblock it from the board at any time.`,
+      title: "Blocked on every protected site",
+      text: `This visitor is now turned away on every site Forcefield protects${d.expiresAt ? `, until ${formatUtc(d.expiresAt)}` : ""}. The block expires on its own; you can lift it from the board at any time.`,
     };
   }
   return {
@@ -640,14 +685,19 @@ export function renderForcefieldAlertEmail(alert: ForcefieldAlert, opts: RenderO
   // The class table appears when the burst spans more than one attack class; a
   // single class is already named by the subject and headline.
   const classes = alert.kind === "hostile_incident" && (alert.classes?.length ?? 0) > 1 ? alert.classes ?? [] : [];
+  const benefits = benefitLines(alert);
 
   /* ---------- HTML ---------- */
   const rowHtml = rows.map((r) => `<tr><td valign="top" style="padding:9px 12px 9px 0;border-top:1px solid ${C.line};font-family:${FONT};font-size:13px;line-height:19px;color:${C.muted};width:132px;white-space:nowrap;">${e(r.label)}</td><td valign="top" style="padding:9px 0;border-top:1px solid ${C.line};font-family:${r.mono ? MONO : FONT};font-size:${r.mono ? 12 : 14}px;line-height:19px;color:${C.ink};word-break:break-word;">${e(r.value)}</td></tr>`).join("");
   const explainHtml = sig ? `<p style="margin:16px 0 0;font-family:${FONT};font-size:13px;line-height:20px;color:${C.muted};"><strong style="color:${C.ink};">What this alert means.</strong> ${e(sig.explain)}</p>` : "";
   const decisionHtml = decision ? `<tr><td style="padding:0 28px 8px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;"><tr><td style="padding:14px 16px;background:${C.soft};border:1px solid ${C.line};border-radius:6px;font-family:${FONT};"><div style="font-size:13px;font-weight:700;line-height:19px;color:${C.ink};">${e(decision.title)}</div><div style="margin-top:4px;font-size:13px;line-height:20px;color:${C.muted};">${e(decision.text)}</div></td></tr></table></td></tr>` : "";
   const classesHtml = classes.length > 0 ? `<tr><td style="padding:8px 28px 8px;">${sectionTitle(classes.length === 1 ? "Attack type in this incident" : `${classes.length} attack types in this incident`)}${classTableHtml(classes)}</td></tr>` : "";
-  const sectionsHtml = `${classesHtml}
-<tr><td style="padding:8px 28px 8px;">${sectionTitle("Details")}<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">${rowHtml}</table>${explainHtml}</td></tr>
+  const benefitHtml = benefits.length > 0
+    ? `<tr><td style="padding:8px 28px 8px;">${sectionTitle("What Forcefield did for you")}<ul style="margin:0;padding:0 0 0 18px;font-family:${FONT};font-size:14px;line-height:21px;color:${C.ink};">${benefits.map((b) => `<li style="margin:0 0 6px;">${e(b)}</li>`).join("")}</ul></td></tr>`
+    : "";
+  const sectionsHtml = `${benefitHtml}
+${classesHtml}
+<tr><td style="padding:8px 28px 8px;">${sectionTitle("Technical details (for your security contact)")}<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">${rowHtml}</table>${explainHtml}</td></tr>
 ${decisionHtml}`;
   const html = renderShell({ audience, subject, severity: sev, headline, status: st, primary, secondary, sectionsHtml, ...f, footerIds });
 
@@ -660,13 +710,18 @@ ${decisionHtml}`;
   t.push(st.action);
   t.push("");
   t.push(`${primary.label}: ${primary.href}`);
+  if (benefits.length > 0) {
+    t.push("");
+    t.push("WHAT FORCEFIELD DID FOR YOU");
+    for (const b of benefits) t.push(`- ${b}`);
+  }
   if (classes.length > 0) {
     t.push("");
     t.push(classes.length === 1 ? "ATTACK TYPE IN THIS INCIDENT" : `${classes.length} ATTACK TYPES IN THIS INCIDENT`);
     t.push(...classLinesText(classes));
   }
   t.push("");
-  t.push("DETAILS");
+  t.push("TECHNICAL DETAILS (FOR YOUR SECURITY CONTACT)");
   for (const r of rows) t.push(`${r.label}: ${r.value}`);
   if (sig) { t.push(""); t.push(`What this alert means: ${sig.explain}`); }
   if (decision) { t.push(""); t.push(`${decision.title}: ${decision.text}`); }
@@ -699,7 +754,7 @@ export function digestSubject(d: DigestData): string {
 
 function digestHeadline(d: DigestData): string {
   const t = d.totals;
-  return `${plural(t.attempts, "attack attempt")} in ${plural(t.incidents, "incident")} on ${plural(t.sites, "site")}, all stopped at the edge`;
+  return `Forcefield stopped ${plural(t.attempts, "attack attempt")} on ${plural(t.sites, "site")} before they reached them (${plural(t.incidents, "incident")})`;
 }
 
 function digestStatus(d: DigestData): StatusBlock {
