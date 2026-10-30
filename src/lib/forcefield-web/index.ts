@@ -87,3 +87,4 @@ export {
   type StateChangeRules,
   type ActionRoute,
 } from "./accountability";
+export { verifyAgentSignature, type AgentSignatureResult, type SignatureVerdict } from "./web-bot-auth";

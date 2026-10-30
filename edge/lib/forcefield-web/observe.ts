@@ -15,6 +15,7 @@
  */
 import { classifyWebRequest } from "./classify";
 import { classifyClient, headerSignature, operatorFingerprint, type ClientFingerprint } from "./fingerprint";
+import type { AgentSignatureResult } from "./web-bot-auth";
 import { classifyHosting, datacenterPrefixesFrom, verifyAgentByRanges, type AgentVerification } from "./hosting";
 import { detectHeaderAttack, detectPayload, PAYLOAD_CWE } from "./enforce";
 import type { ForcefieldRuleset } from "./ruleset";
@@ -81,6 +82,10 @@ export interface ObserveInput {
   /** The platform the site runs on (e.g. "wordpress"), so that platform's own
    *  paths (ruleset.platformPaths) are not reported as recon. Optional. */
   platform?: string;
+  /** The Web Bot Auth verdict for a request that presented a signature, computed
+   *  by the caller (web-bot-auth.ts needs header values and a key fetch, which
+   *  this pure module does not do). Absent: the signature was not checked. */
+  agentSignature?: AgentSignatureResult;
   /** A body-marker attack family an adapter that can see the body already proved
    *  (body-inspect.ts: "php2shell" / "react2shell"). Recorded as a payload attack
    *  just like a URL-target payload, so the board, carryover and the reputation
@@ -386,7 +391,10 @@ export function observeRequest(input: ObserveInput, ruleset: ForcefieldRuleset):
   if (verdict.class === "known_agent") {
     verification = verifyAgentByRanges(verdict.matchedAgentId, input.ip, ruleset.verifiedAgentRanges);
   }
-  const signedAgent = presentsSignedAgent(names);
+  const presented = presentsSignedAgent(names);
+  // A signature that was checked and is wrong is a forgery, not an agent.
+  const forgedSignature = presented && input.agentSignature?.verdict === "invalid";
+  const signedAgent = presented && !forgedSignature;
 
   // ACCOUNTABLE ACTIONS (watch mode): a state-changing request carries who is
   // accountable for it. Recorded on whatever event the request produces; never
@@ -427,7 +435,7 @@ export function observeRequest(input: ObserveInput, ruleset: ForcefieldRuleset):
   // A request that PRESENTS an agent signature is announcing who it is; the weak
   // tells below (no browser headers) are expected of an agent, so it is welcomed
   // as signed rather than flagged as spoofing. A named hostile tool still is.
-  else if (hostileTool) type = "site.agent_flagged";
+  else if (hostileTool || forgedSignature) type = "site.agent_flagged";
   else if (signedAgent) type = "site.agent_welcomed";
   else if (weakTell && !isStaticAsset(path)) type = "site.agent_flagged";
 
@@ -466,7 +474,8 @@ export function observeRequest(input: ObserveInput, ruleset: ForcefieldRuleset):
     return null;
   }
 
-  const props = agentProps(input, ruleset, verdict.matchedAgentId ?? (signedAgent ? "signed_agent" : undefined));
+  const verifiedAgent = signedAgent && input.agentSignature?.verdict === "verified" ? input.agentSignature.agent : undefined;
+  const props = agentProps(input, ruleset, verdict.matchedAgentId ?? verifiedAgent ?? (signedAgent ? "signed_agent" : undefined));
   if (probe) props.probe = probe;
   const probeClass = sensitive ? probeClassOf(sensitive, ruleset.probeClasses) : null;
   if (probeClass) props.probe_class = probeClass;
@@ -477,6 +486,10 @@ export function observeRequest(input: ObserveInput, ruleset: ForcefieldRuleset):
   if (verification) props.agent_verification = verification;
   if (verification === "impersonation" && verdict.matchedAgentId) props.impersonating = verdict.matchedAgentId;
   if (signedAgent) props.signed_agent = true;
+  if (presented && input.agentSignature) {
+    props.signature_verification = input.agentSignature.verdict;
+    props.signature_reason = input.agentSignature.reason;
+  }
   if (action) Object.assign(props, action);
   stampAttestation(props, input);
   return { type, path, props };
