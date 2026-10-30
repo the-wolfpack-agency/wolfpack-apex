@@ -16,7 +16,10 @@ if [ ! -f "$TOOL/scripts/run_client_scan.py" ]; then
   exit 0
 fi
 OUT="$(mktemp -d)"
-trap 'rm -rf "$OUT"' EXIT
+# The scan appends a run to the tracked .agenticqa/scan_trend.jsonl; a local run
+# must never leave that (local counts and paths, public repository) for a commit
+# to pick up, so it is restored on exit.
+trap 'rm -rf "$OUT"; git -C "$ROOT" checkout -q -- .agenticqa/scan_trend.jsonl 2>/dev/null || true' EXIT
 python3 "$TOOL/scripts/run_client_scan.py" "$ROOT" --output "$OUT/scan-results.json" > /dev/null 2> "$OUT/scan-stderr.log" || {
   echo "static-scan-local: the scan failed"; tail -n 20 "$OUT/scan-stderr.log"; exit 2;
 }
