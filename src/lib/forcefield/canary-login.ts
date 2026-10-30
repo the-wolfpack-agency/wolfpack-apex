@@ -20,7 +20,7 @@
  * chance, and a sign-in check only sends usernames of this exact shape. Nothing
  * here can lock out or affect a real account.
  */
-import { createHmac, randomBytes } from "node:crypto";
+import { createHmac, randomBytes, randomInt } from "node:crypto";
 import { query, safeQuery } from "@/lib/db";
 
 // The canary username shape lives in the vendored engine (one definition, the
@@ -33,11 +33,10 @@ const B32 = "abcdefghijklmnopqrstuvwxyz234567";
 /** The workspace site canaries live under (the same one the edge ruleset uses). */
 export const SITE_CANARY_WORKSPACE = process.env.FORCEFIELD_EDGE_WORKSPACE_ID || "default";
 
-export function newCanaryUsername(rand: (n: number) => Buffer = randomBytes): string {
-  const b = rand(7);
+export function newCanaryUsername(): string {
   let tail = "";
-  for (let i = 0; i < 6; i++) tail += B32[b[i] % 32];
-  return `svc_${WORDS[b[6] % WORDS.length]}_${tail}`;
+  for (let i = 0; i < 6; i++) tail += B32[randomInt(B32.length)];
+  return `svc_${WORDS[randomInt(WORDS.length)]}_${tail}`;
 }
 
 // Without the server key the passwords come from a random key made at start-up:
