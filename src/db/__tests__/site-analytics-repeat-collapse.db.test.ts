@@ -12,7 +12,7 @@ const MIGRATION = join(__dirname, "..", "migrations", "178_site_analytics_events
 
 describeIfDb("site analytics repeat collapse (recordSiteEvent)", () => {
   let db: Client;
-  let recordSiteEvent: typeof import("@/lib/site-analytics").recordSiteEvent;
+  let recordSiteEvent: (input: Parameters<typeof import("@/lib/site-analytics").recordSiteEventWith>[1]) => Promise<void>;
   const maze = (fp: string, extra: Record<string, unknown> = {}) => ({
     eventType: "site.agent_trap_tripped" as const,
     path: "/_ff/index-abc123",
@@ -26,9 +26,10 @@ describeIfDb("site analytics repeat collapse (recordSiteEvent)", () => {
     await db.query(readFileSync(MIGRATION, "utf8"));
     // Column added by migration 284 (which also builds the tenant registry this test does not need).
     await db.query("ALTER TABLE site_analytics_events ADD COLUMN IF NOT EXISTS forcefield_tenant_id uuid");
-    process.env.DATABASE_URL = url;
-    jest.resetModules();
-    ({ recordSiteEvent } = await import("@/lib/site-analytics"));
+    // The app's pool requires SSL, which a local test database has not; the same write runs on this
+    // client through recordSiteEventWith, so the SQL under test is exactly the production SQL.
+    const { recordSiteEventWith } = await import("@/lib/site-analytics");
+    recordSiteEvent = (input) => recordSiteEventWith((text, params) => db.query(text, params), input);
   });
   afterAll(async () => { await db?.end(); });
   beforeEach(async () => { await db.query("TRUNCATE site_analytics_events"); });
