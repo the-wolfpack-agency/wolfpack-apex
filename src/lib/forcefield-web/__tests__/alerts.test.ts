@@ -482,7 +482,9 @@ describe("the collapsed row", () => {
     expect(HOSTILE_EVENTS_SQL).toMatch(/WHEN props->>'blocked' = 'true' THEN 'blocked'/);
     expect(HOSTILE_EVENTS_SQL).toMatch(/props->>'tarpit' = 'true' OR props->>'action' = 'tarpit' THEN 'contained'/);
     expect(HOSTILE_EVENTS_SQL).toMatch(/ELSE 'recorded'/);
-    expect(HOSTILE_EVENTS_SQL).toContain("count(*) AS n");
+    // Attempts sum repeat_count: a collapsed decoy row stands for many requests.
+    expect(HOSTILE_EVENTS_SQL).toContain("sum(COALESCE((props->>'repeat_count')::int, 1)) AS n");
+    expect(HOSTILE_EVENTS_SQL).toContain("last_seen");
   });
 });
 

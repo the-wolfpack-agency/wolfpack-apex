@@ -13,6 +13,7 @@
  * meant to be served from a cached public route so the database is hit rarely.
  */
 import { safeQuery } from "@/lib/db";
+import { EVENT_WEIGHT_SQL } from "@/lib/site-analytics-weight";
 
 export interface PublicForcefieldStats {
   /** Window the counts cover, in days. */
@@ -67,7 +68,7 @@ export async function getPublicForcefieldStats(
       `SELECT
          count(*) FILTER (WHERE event_type LIKE 'site.agent_%')              AS agents,
          count(*) FILTER (WHERE event_type = 'site.agent_welcomed')          AS welcomed,
-         count(*) FILTER (WHERE event_type = 'site.agent_trap_tripped')      AS trapped,
+         sum(${EVENT_WEIGHT_SQL}) FILTER (WHERE event_type = 'site.agent_trap_tripped') AS trapped,
          count(*) FILTER (WHERE event_type = 'site.agent_probed_sensitive')  AS probed,
          count(*) FILTER (WHERE event_type = 'site.agent_payload_attack')    AS payloads,
          count(DISTINCT coalesce(props->>'site', 'ogiam.com'))               AS sites

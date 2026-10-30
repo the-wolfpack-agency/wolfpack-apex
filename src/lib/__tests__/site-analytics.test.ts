@@ -12,6 +12,7 @@ jest.mock("@/lib/db", () => ({
 
 import {
   recordSiteEvent,
+  repeatCollapseKey,
   getSiteAnalyticsSummary,
   isSiteEventType,
   countVerdictFalsePositives,
@@ -35,6 +36,35 @@ describe("isSiteEventType", () => {
     expect(isSiteEventType("site.cta_clicked")).toBe(true);
     expect(isSiteEventType("site.evil")).toBe(false);
     expect(isSiteEventType(42)).toBe(false);
+  });
+});
+
+describe("repeat trap trips collapse (one row per source per 10 minutes)", () => {
+  const trap = { site: "ogiam.com", fp: "fpA", reason_kind: "decoy" };
+
+  it("keys a trap trip on site, source and kind; fingerprint first, else session sig", () => {
+    expect(repeatCollapseKey("site.agent_trap_tripped", trap)).toEqual({ site: "ogiam.com", source: "fpA", kind: "decoy" });
+    expect(repeatCollapseKey("site.agent_trap_tripped", { site: "s", sig: "sig1" })).toEqual({ site: "s", source: "sig1", kind: "" });
+  });
+
+  it("never collapses synthetic probes, sourceless trips or other event types", () => {
+    expect(repeatCollapseKey("site.agent_trap_tripped", { ...trap, synthetic: true })).toBeNull();
+    expect(repeatCollapseKey("site.agent_trap_tripped", { site: "s" })).toBeNull();
+    expect(repeatCollapseKey("site.agent_payload_attack", trap)).toBeNull();
+  });
+
+  it("a repeat folds into the open row and inserts nothing", async () => {
+    mockQuery.mockResolvedValueOnce({ rowCount: 1, rows: [{ id: "1" }] });
+    await recordSiteEvent({ eventType: "site.agent_trap_tripped", path: "/_ff/x", props: trap });
+    expect(mockQuery).toHaveBeenCalledTimes(1);
+    expect(String(mockQuery.mock.calls[0][0])).toMatch(/UPDATE site_analytics_events[\s\S]*repeat_count/);
+  });
+
+  it("the first trip in a window inserts a row", async () => {
+    mockQuery.mockResolvedValueOnce({ rowCount: 0, rows: [] }).mockResolvedValueOnce({ rowCount: 1, rows: [] });
+    await recordSiteEvent({ eventType: "site.agent_trap_tripped", path: "/_ff/x", props: trap });
+    expect(mockQuery).toHaveBeenCalledTimes(2);
+    expect(String(mockQuery.mock.calls[1][0])).toMatch(/INSERT INTO site_analytics_events/);
   });
 });
 
