@@ -110,6 +110,13 @@ const GLOBAL_BY_DESIGN: readonly string[] = [
      because Forcefield tenants are not Instinct workspaces. It holds software
      version strings only, no client business data. */
   "forcefield_server_inventory",
+  /* Forcefield per-site AI agent policy (migration 303): one row per scope, the
+     row's own isolation key - "tenant:<uuid>" for a Forcefield client (a child of
+     forcefield_tenants, which are not Instinct workspaces) or "site:<label>" for
+     one of our own properties. Every read and write filters on that scope, and a
+     CHECK constraint holds its shape. It stores agent ids only (which AI training
+     crawlers a site turns away), no client business data. */
+  "forcefield_agent_policies",
   /* Dedupe store for Forcefield-web hostile-signal alerts, computed over the
      GLOBAL site_analytics_events stream (public-site protection). A public-site
      attack has no tenant to attribute, so per-workspace rows would be WRONG: two
@@ -352,8 +359,10 @@ describe("every table declares whether it is tenant-scoped", () => {
        one owner; it is keyed by the global hostname, a child of
        forcefield_tenants). Raised to 10 on 2026-10-27 for
        forcefield_server_inventory, one row per Forcefield tenant keyed by
-       tenant_id (a child of forcefield_tenants, no workspace). */
-    expect(GLOBAL_BY_DESIGN.length).toBeLessThanOrEqual(10);
+       tenant_id (a child of forcefield_tenants, no workspace). Raised to 11 on
+       2026-10-30 for forcefield_agent_policies, keyed by its own scope (a
+       Forcefield tenant id or one of our site labels, CHECK-constrained). */
+    expect(GLOBAL_BY_DESIGN.length).toBeLessThanOrEqual(11);
     for (const table of GLOBAL_BY_DESIGN) {
       expect(NO_WORKSPACE_COLUMN).not.toContain(table);
     }

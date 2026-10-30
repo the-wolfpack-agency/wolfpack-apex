@@ -44,8 +44,17 @@ const REPORT = {
   ],
 };
 
-async function stub(page: Page, visibility: { status: number; body: unknown }): Promise<{ asked: () => string[] }> {
+async function stub(page: Page, visibility: { status: number; body: unknown }, policy: { canEdit: boolean } = { canEdit: true }): Promise<{ asked: () => string[]; puts: () => unknown[] }> {
   const asked: string[] = [];
+  const puts: unknown[] = [];
+  await page.route(/\/api\/admin\/forcefield\/agent-policy/, (route: Route) => {
+    if (route.request().method() === "PUT") {
+      const body = route.request().postDataJSON();
+      puts.push({ site: new URL(route.request().url()).searchParams.get("site"), ...body });
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ blockedAgents: body.blockedAgents }) });
+    }
+    return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ blockedAgents: [], choices: ["Bytespider", "ClaudeBot", "GPTBot", "Meta-ExternalAgent"], canEdit: policy.canEdit, updatedAt: null }) });
+  });
   await page.route(/\/api\/admin\/site-analytics(\?|$)/, (route: Route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ summary: summary(), permissions: INTEL }) }));
   await page.route(/\/api\/admin\/site-analytics\/ai-visibility/, (route: Route) => {
@@ -53,7 +62,7 @@ async function stub(page: Page, visibility: { status: number; body: unknown }): 
     return route.fulfill({ status: visibility.status, contentType: "application/json", body: JSON.stringify(visibility.body) });
   });
   await page.route(/\/api\/admin\/forcefield\/(edge-policy|reputation-optin)/, (route) => route.fulfill({ status: 200, contentType: "application/json", body: "{}" }));
-  return { asked: () => asked };
+  return { asked: () => asked, puts: () => puts };
 }
 
 async function openDefenseTab(page: Page): Promise<void> {
@@ -121,5 +130,29 @@ test.describe("Forcefield board: AI agents reading this site", () => {
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     expect(overflow, "no horizontal page overflow at 390px").toBeLessThanOrEqual(1);
     expectNoFailures(snapshot);
+  });
+
+  test("an admin turns an AI training crawler away for the selected site", async ({ page }) => {
+    await stubInstinctSession(page, { role: "cto" });
+    const s = await stub(page, { status: 200, body: { visibility: REPORT } }, { canEdit: true });
+    const snapshot = collectConsoleAndNetworkFailures(page);
+    await openDefenseTab(page);
+    await page.getByTestId("surface-weekendwithporsche").click();
+    const claude = page.getByTestId("admin-ai-visibility-allow-ClaudeBot");
+    await expect(claude).toBeChecked();
+    await claude.click();
+    await expect(page.getByTestId("admin-ai-visibility-control-status")).toContainText("Saved");
+    expect(s.puts()).toEqual([{ site: "weekendwithporsche", blockedAgents: ["ClaudeBot"] }]);
+    expectNoFailures(snapshot);
+  });
+
+  test("a viewer sees the policy read-only and cannot change it", async ({ page }) => {
+    await stubInstinctSession(page, { role: "cto" });
+    const s = await stub(page, { status: 200, body: { visibility: REPORT } }, { canEdit: false });
+    await openDefenseTab(page);
+    await page.getByTestId("surface-ogiam.com").click();
+    await expect(page.getByTestId("admin-ai-visibility-allow-GPTBot")).toBeDisabled();
+    await expect(page.getByTestId("admin-ai-visibility-control-status")).toContainText("Only an administrator");
+    expect(s.puts()).toEqual([]);
   });
 });

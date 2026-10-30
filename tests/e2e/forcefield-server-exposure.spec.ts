@@ -32,6 +32,7 @@ async function open(page: Page, exposure: { status: number; body: unknown }) {
   const seen: string[] = [];
   const json = (route: Route, status: number, body: unknown) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
   await page.route(/\/api\/forcefield\/my-stats$/, (r) => json(r, 200, STATS));
+  await page.route(/\/api\/forcefield\/my-agent-policy$/, (r) => json(r, 200, { ok: true, blockedAgents: [], choices: [] }));
   await page.route(/\/api\/forcefield\/my-setup$/, (r) => json(r, 200, { ok: true, tenant: TENANT, quickstart: null, connection: { connected: true, everConnected: true, lastEventAt: "2026-10-27T00:00:00Z" } }));
   await page.route(/\/api\/forcefield\/alert-email$/, (r) => json(r, 200, { ok: true, notify: { email: "e2e@thewolfpack.agency", status: "confirmed", confirmedAt: "2026-10-27T00:00:00Z", restricted: true } }));
   await page.route(/\/api\/forcefield\/my-exposure$/, (r) => {

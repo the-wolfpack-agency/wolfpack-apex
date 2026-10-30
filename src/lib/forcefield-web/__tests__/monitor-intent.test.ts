@@ -32,7 +32,8 @@ afterEach(() => {
 });
 
 function bodies(f: jest.SpyInstance): Array<{ type: string; props: Record<string, unknown> }> {
-  return f.mock.calls.map((c) => JSON.parse(String((c[1] as RequestInit).body)));
+  // ingest sends only (the site-policy fetch is a GET without a body)
+  return f.mock.calls.filter((c) => !String(c[0]).includes("/site-policy")).map((c) => JSON.parse(String((c[1] as RequestInit).body)));
 }
 
 describe("intent in the vendored monitor/guard", () => {

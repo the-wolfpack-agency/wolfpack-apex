@@ -71,6 +71,8 @@ export interface AiAgentVisibility {
   verifiedRequests: number;
   /** Requests that CLAIMED this agent from outside its published ranges. */
   impersonations: number;
+  /** Of `requests`, how many the site's own policy turned away (agent-policy.ts). */
+  policyBlocked: number;
   identity: Identity;
   /** Distinct pages read, and the most-read ones (path, requests). */
   pages: number;
@@ -98,6 +100,7 @@ export function visibilitySql(scope: VisibilityScope): string {
 SELECT props->>'agent' AS agent,
        COALESCE(NULLIF(props->>'agent_verification', ''), CASE WHEN props->>'signature_verification' = 'verified' THEN 'verified' ELSE '' END) AS verification,
        (event_type = 'site.agent_flagged') AS flagged,
+       (COALESCE(props->>'reason_kind', '') = 'agent_policy' AND COALESCE(props->>'blocked', '') = 'true') AS policy_blocked,
        COALESCE(path, '/') AS path,
        to_char(date_trunc('day', created_at), 'YYYY-MM-DD') AS day,
        sum(${EVENT_WEIGHT_SQL})::int AS n,
@@ -108,13 +111,14 @@ SELECT props->>'agent' AS agent,
    AND event_type IN ('site.agent_welcomed', 'site.agent_flagged')
    AND COALESCE(props->>'agent', 'unidentified') NOT IN ('unidentified', 'signed_agent', '')
    AND COALESCE(props->>'synthetic', '') <> 'true'
- GROUP BY 1, 2, 3, 4, 5`;
+ GROUP BY 1, 2, 3, 4, 5, 6`;
 }
 
 export interface VisibilityRow {
   agent: string;
   verification: string | null;
   flagged: boolean;
+  policy_blocked?: boolean;
   path: string;
   day: string;
   n: number | string;
@@ -131,15 +135,16 @@ export function foldVisibility(rows: VisibilityRow[], sinceIso: string, days: nu
   const start = Date.parse(sinceIso);
   for (let i = 0; i < days; i++) dayKeys.push(new Date(start + i * 86400_000).toISOString().slice(0, 10));
   const index = new Map(dayKeys.map((d, i) => [d, i]));
-  const by = new Map<string, { requests: number; impersonations: number; verified: number; paths: Map<string, number>; daily: number[]; last: string | null }>();
+  const by = new Map<string, { requests: number; impersonations: number; verified: number; policyBlocked: number; paths: Map<string, number>; daily: number[]; last: string | null }>();
   for (const r of rows) {
     const n = Math.max(0, Number(r.n) || 0);
-    const a = by.get(r.agent) ?? { requests: 0, impersonations: 0, verified: 0, paths: new Map(), daily: dayKeys.map(() => 0), last: null };
+    const a = by.get(r.agent) ?? { requests: 0, impersonations: 0, verified: 0, policyBlocked: 0, paths: new Map(), daily: dayKeys.map(() => 0), last: null };
     if (r.flagged) {
       if (r.verification === "impersonation") a.impersonations += n;
       else { by.set(r.agent, a); continue; }
     } else {
       a.requests += n;
+      if (r.policy_blocked) a.policyBlocked += n;
       if (r.verification === "verified") a.verified += n;
       a.paths.set(r.path, (a.paths.get(r.path) ?? 0) + n);
       const i = index.get(r.day);
@@ -159,6 +164,7 @@ export function foldVisibility(rows: VisibilityRow[], sinceIso: string, days: nu
         requests: a.requests,
         verifiedRequests: a.verified,
         impersonations: a.impersonations,
+        policyBlocked: a.policyBlocked,
         identity: a.verified > 0 ? "verified" : a.impersonations > 0 && a.requests === 0 ? "impersonation" : "unverified",
         pages: a.paths.size,
         topPages: [...a.paths.entries()].sort((x, y) => y[1] - x[1] || x[0].localeCompare(y[0])).slice(0, 5).map(([path, requests]) => ({ path, requests })),

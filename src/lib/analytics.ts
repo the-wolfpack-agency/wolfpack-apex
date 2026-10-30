@@ -764,6 +764,9 @@ export type InstinctEventType =
   | "forcefield.signup_approved"
   // forcefield.signup_rejected { requestId } - an operator rejected a signup request.
   | "forcefield.signup_rejected"
+  // forcefield.agent_policy_changed { tenantId | site, blocked, count } - a client or
+  //   an operator changed which AI training crawlers a site turns away.
+  | "forcefield.agent_policy_changed"
   // forcefield.trust_center_viewed {} - someone opened the Trust Center (the
   //   reviewer-facing security/compliance summary). A buying/assurance signal.
   | "forcefield.trust_center_viewed"

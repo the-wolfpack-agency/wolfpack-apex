@@ -29,18 +29,15 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { timingSafeEqual } from "crypto";
 import { checkRateLimit } from "@/lib/ogiam/gate-rate-limit";
 import { isSiteEventType, recordSiteEvent } from "@/lib/site-analytics";
 import { autoBlockFingerprint } from "@/lib/forcefield/blocked-fingerprints";
-import { resolveTenantByToken } from "@/lib/forcefield-web/tenants";
+import { resolveIngestCaller, sharedIngestTokens } from "@/lib/forcefield-web/ingest-auth";
 import { verifyBoundaryDelegation, stampPrincipal } from "@/lib/forcefield/action-accountability";
 import { coerceActionProps } from "@/lib/forcefield-web/accountability";
 import { ingestSigningEnforced, verifyIngestSignature } from "@/lib/forcefield/ingest-signing";
 import { noteRequest, rateKey } from "@/lib/forcefield/rate-window";
-import { resolveActiveTenantById } from "@/lib/forcefield-web/edge-sites";
 import { EDGE_TENANT_HEADER } from "@/lib/forcefield-web/gateway";
-import { edgeServiceTokenMatches } from "@/lib/forcefield-web/edge-service-token";
 
 const WINDOW_MS = 60 * 1000;
 const MAX_PER_WINDOW = 600; // generous for a marketing site; bounds abuse.
@@ -48,13 +45,6 @@ const MAX_PER_WINDOW = 600; // generous for a marketing site; bounds abuse.
 // delegation issuers live under this workspace id.
 const SITE_WORKSPACE_ID = process.env.SITE_ANALYTICS_WORKSPACE_ID || "default";
 
-/** Constant-time string compare that never throws on length mismatch. */
-function tokenMatches(provided: string, expected: string): boolean {
-  const a = Buffer.from(provided);
-  const b = Buffer.from(expected);
-  if (a.length !== b.length) return false;
-  return timingSafeEqual(a, b);
-}
 
 function cap(v: unknown, max: number): string | null {
   if (typeof v !== "string") return null;
@@ -70,12 +60,6 @@ function countsTowardRate(type: string): boolean {
   return type.startsWith("site.agent_") && type !== "site.agent_high_rate";
 }
 
-/** The tenant an Edge observation belongs to: only when the presented token is
- *  the Edge service token AND the named tenant is active. Otherwise null. */
-async function resolveEdgeIngestTenant(provided: string, tenantId: string | null): Promise<{ id: string; siteLabel: string } | null> {
-  if (!tenantId || !edgeServiceTokenMatches(provided)) return null;
-  return resolveActiveTenantById(tenantId).catch(() => null);
-}
 
 export async function POST(req: NextRequest) {
   // Accept ANY configured shared ingest token, so each internal property can
@@ -83,10 +67,7 @@ export async function POST(req: NextRequest) {
   // primary SITE_ANALYTICS_INGEST_TOKEN stays for existing forwarders (e.g.
   // ogiam.com); SITE_ANALYTICS_INGEST_TOKEN_2 lets new sites onboard without
   // touching it. Each candidate is compared in constant time.
-  const expected = [
-    process.env.SITE_ANALYTICS_INGEST_TOKEN,
-    process.env.SITE_ANALYTICS_INGEST_TOKEN_2,
-  ].filter((t): t is string => typeof t === "string" && t.length > 0);
+  const expected = sharedIngestTokens();
   // With no shared token AND no tenant registry there is nothing a caller could
   // authenticate against: disabled, never open.
   if (expected.length === 0 && !process.env.DATABASE_URL) {
@@ -98,13 +79,11 @@ export async function POST(req: NextRequest) {
   // names the tenant per event in x-forcefield-edge-tenant. That pair is treated
   // exactly like the tenant's own token (site pinned to the tenant's label, the
   // tenant's own rate bucket); a tenant id without the service token is ignored.
-  const edgeTenant = await resolveEdgeIngestTenant(provided, req.headers.get(EDGE_TENANT_HEADER));
-  const sharedOk = !edgeTenant && expected.some((t) => tokenMatches(provided, t));
-  // A tenant's OWN token is the self-serve path. It used to be dead: the shared
-  // secret check above returned 401 for any other value, so the tenant lookup
-  // further down was never reached with a tenant token. Resolve it here, before
-  // anything else, only when the shared secret did not match.
-  const tenant = edgeTenant ?? (sharedOk || !provided ? null : await resolveTenantByToken(provided));
+  // A tenant's OWN token is the self-serve path, resolved only when no shared
+  // secret matched (ingest-auth.ts, shared with the per-site policy endpoint).
+  const caller = await resolveIngestCaller(provided, req.headers.get(EDGE_TENANT_HEADER));
+  const sharedOk = caller?.kind === "shared";
+  const tenant = caller?.kind === "tenant" ? caller.tenant : null;
   if (!sharedOk && !tenant) {
     return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
   }

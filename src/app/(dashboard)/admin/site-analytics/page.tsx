@@ -1510,6 +1510,7 @@ const REASON_LABEL: Record<BlockReasonKind | "unspecified", string> = {
   attack_tool: "named attack tool",
   blocked_fingerprint: "operator you blocked",
   intent: "proven session, follow-on request",
+  agent_policy: "AI crawler the site turned away",
   unspecified: "other rule",
 };
 
