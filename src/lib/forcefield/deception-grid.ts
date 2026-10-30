@@ -14,6 +14,7 @@
 import { CANARY_KINDS, type CanaryKind } from "./tripwire";
 import { createCanary, listCanariesForMatching } from "./canary-store";
 import { randomBytes } from "node:crypto";
+import { newCanaryUsername } from "./canary-login";
 
 /** Where each kind must be EMITTED for an agent to encounter (and trip) it. */
 export const KIND_PLACEMENT: Record<CanaryKind, string> = {
@@ -21,6 +22,7 @@ export const KIND_PLACEMENT: Record<CanaryKind, string> = {
   route: "Add to robots.txt Disallow + sitemap - only an agent that ignores the rules visits it.",
   row: "Return as a decoy record in a list/API response - only bulk-harvesting reaches it.",
   tool: "Advertise as a plausible endpoint (sitemap / tool manifest) - only a path-guesser calls it.",
+  login: "Plant as a service sign-in in a decoy file or maze page - only a harvester that tries it at a sign-in form trips.",
 };
 
 function decoyValue(kind: CanaryKind): string {
@@ -30,6 +32,7 @@ function decoyValue(kind: CanaryKind): string {
     case "route": return `/internal/export-${rnd}`;
     case "row": return `decoy-${rnd}@example.invalid`;
     case "tool": return `admin_bulk_export_${rnd}`;
+    case "login": return newCanaryUsername();
   }
 }
 

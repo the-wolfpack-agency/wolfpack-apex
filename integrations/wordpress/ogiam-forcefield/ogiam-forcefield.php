@@ -307,6 +307,38 @@ function ogiam_ff_guard() {
     }
 }
 
+/**
+ * Canary sign-ins. Forcefield plants fake service sign-ins (svc_<word>_<6 chars>)
+ * in decoys that only a harvester reads. A sign-in attempt with one is proof the
+ * decoy was scraped and replayed: the username is reported to the engine, which
+ * records where that canary was planted and to which session.
+ *
+ * Only a username of that exact shape is ever sent (a real username never leaves
+ * this site), and the attempt is never changed here: it continues through
+ * WordPress's own checks, and as no such user exists it fails like any wrong
+ * password, so the trap is invisible. Fail-open: a slow or unreachable engine
+ * only means nothing is recorded.
+ */
+function ogiam_ff_canary_check_url() {
+    $u = wp_parse_url(get_option('ogiam_ff_ingest_url', OGIAM_FF_DEFAULT_INGEST));
+    if (empty($u['scheme']) || empty($u['host'])) { return ''; }
+    return $u['scheme'] . '://' . $u['host'] . (isset($u['port']) ? ':' . (int) $u['port'] : '') . '/api/forcefield/canary/check';
+}
+
+function ogiam_ff_canary_signin($user, $username, $password) {
+    if (!is_string($username) || !preg_match('/^svc_[a-z]{3,8}_[a-z2-7]{6}$/', $username)) { return $user; }
+    $token = get_option('ogiam_ff_token', '');
+    $url   = ogiam_ff_canary_check_url();
+    if (empty($token) || $url === '') { return $user; }
+    wp_remote_post($url, array(
+        'timeout' => 2,
+        'headers' => array('content-type' => 'application/json', 'x-ingest-token' => $token),
+        'body'    => wp_json_encode(array('username' => $username, 'path' => ogiam_ff_request_path())),
+    ));
+    return $user; // unchanged: WordPress's own checks decide, and fail it
+}
+add_filter('authenticate', 'ogiam_ff_canary_signin', 1, 3);
+
 /*
  * Why `init` at priority 0.
  *

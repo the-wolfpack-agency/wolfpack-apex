@@ -10,6 +10,8 @@ import {
   ACCESS_TOKEN_TTL,
   REFRESH_TOKEN_TTL_SECONDS,
 } from "@/lib/crypto/cookies";
+import { canaryUsernameFrom } from "@/lib/forcefield-web/canary-signin";
+import { reportCanarySignIn } from "@/lib/forcefield/canary-trip";
 
 // Rate limit: lenient by design so a legitimate user mistyping their
 // password on shared Wi-Fi (client site, co-working space) isn't locked
@@ -58,6 +60,13 @@ export async function POST(req: NextRequest) {
   }
 
   const meta = extractRequestMetadata(req);
+  // A planted canary sign-in (canary-login.ts) is recorded, then the attempt
+  // continues down the normal path: no such user exists, so it fails exactly
+  // like a wrong password and the trap is never revealed.
+  const canary = canaryUsernameFrom(email);
+  if (canary) {
+    await reportCanarySignIn({ site: "instinct", username: canary, path: "/api/auth/login" });
+  }
   const result = await authenticate(email, password);
 
   if (!result) {

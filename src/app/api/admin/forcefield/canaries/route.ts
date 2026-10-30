@@ -25,6 +25,8 @@ import {
   deactivateCanary,
   isCanaryKind,
 } from "@/lib/forcefield/canary-store";
+import { CANARY_KINDS } from "@/lib/forcefield/tripwire";
+import { CANARY_LOGIN_RE } from "@/lib/forcefield-web/canary-signin";
 
 const MAX_VALUE = 4096;
 const MAX_SEEDED_IN = 512;
@@ -56,9 +58,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const seededIn = typeof b.seededIn === "string" ? b.seededIn.trim() : "";
 
   if (!isCanaryKind(kind)) {
-    return NextResponse.json({ error: "kind must be one of token, route, row, tool" }, { status: 400 });
+    return NextResponse.json({ error: `kind must be one of ${CANARY_KINDS.join(", ")}` }, { status: 400 });
   }
   if (!value) return NextResponse.json({ error: "value is required" }, { status: 400 });
+  // A sign-in canary only trips when a site sends it for checking, and sites send
+  // only this exact shape, so any other value could never trip.
+  if (kind === "login" && !CANARY_LOGIN_RE.test(value)) {
+    return NextResponse.json({ error: "a sign-in canary must look like svc_<word>_<6 letters or digits 2-7>, e.g. svc_backup_k7q2m4" }, { status: 400 });
+  }
   if (value.length > MAX_VALUE) return NextResponse.json({ error: "value too large" }, { status: 400 });
   if (!seededIn) return NextResponse.json({ error: "seededIn is required" }, { status: 400 });
   if (seededIn.length > MAX_SEEDED_IN) return NextResponse.json({ error: "seededIn too large" }, { status: 400 });

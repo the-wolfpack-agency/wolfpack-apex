@@ -40,6 +40,14 @@ export const AUDIT_ALLOWLIST: ReadonlyArray<AuditAllowlistEntry> = [
     reason: "An Agent Gate decision IS an authorization decision, so it is audited to the OGIAM hash-chained ledger (recordGateDecision -> recordDecision in src/lib/gates/audit.ts), not the recordAudit log - the stronger, tamper-evident home for an allow/transform/escalate/deny verdict, and the one the client verifies. Adding a second recordAudit row would be redundant. Delegated-to-a-downstream-library-that-already-audits case.",
   },
   {
+    route: "src/app/api/forcefield/canary/check/route.ts",
+    reason: "Canary sign-in check: a match is recorded through recordCanaryTrip (src/lib/forcefield/canary-store.ts), which writes the hash-chained audit entry itself, alongside the event and the alert. A non-match writes nothing. Adding a recordAudit row here would duplicate it. Delegated-to-a-downstream-library-that-already-audits case.",
+  },
+  {
+    route: "src/app/api/forcefield/canary/mint/route.ts",
+    reason: "Canary sign-in issue: a site's decoy page asks for the fake credential it shows, once per decoy and session (idempotent, cached by the site). It plants bait, changes no user, permission or configuration, and is high volume under the maze. The security event is the later USE of the credential, which IS audited by recordCanaryTrip at /api/forcefield/canary/check.",
+  },
+  {
     route: "src/app/api/forcefield/observe/route.ts",
     reason: "Central Forcefield engine: one call per inbound request across every connected site is a high-volume observability event, recorded via recordSiteEvent (the site.* analytics event) for the protection/learning rollup, not a durable state mutation. A per-request hash-chained audit row would flood the ledger without compliance value; classification and the block decision are deterministic and reconstructable from the recorded signals. This is the unified central form of forcefield/edge/decide, allowlisted for the same reason; the operator-block CHANGES that govern it ARE audited at their admin endpoints.",
   },

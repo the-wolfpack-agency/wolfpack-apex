@@ -22,8 +22,7 @@ import { GlassPanel, MetricTile, StatusPill, SectionHeader } from "@/components/
 import { assessDeceptionCoverage } from "@/lib/forcefield/deception-coverage";
 import { THREAT_COVERAGE, coverageSummary, type CoverageStatus } from "@/lib/forcefield/threat-coverage";
 import { ExposurePanel } from "@/components/forcefield/ExposurePanel";
-
-type CanaryKind = "token" | "route" | "row" | "tool";
+import type { CanaryKind } from "@/lib/forcefield/tripwire";
 
 interface CanaryDisplay {
   id: string;
@@ -48,6 +47,7 @@ const KINDS: { kind: CanaryKind; label: string; hint: string; placeholder: strin
   { kind: "route", label: "Route", hint: "A decoy endpoint no legitimate flow calls.", placeholder: "/admin/export-all" },
   { kind: "row", label: "Row", hint: "A honey-row id seeded into the data.", placeholder: "row-honey-42" },
   { kind: "tool", label: "Tool", hint: "A honeypot tool a hijacked agent reaches for.", placeholder: "export_all_customer_data" },
+  { kind: "login", label: "Sign-in", hint: "A fake service username. Trips when someone tries to sign in with it.", placeholder: "svc_backup_k7q2m4" },
 ];
 
 function fmtDate(iso: string): string {
@@ -195,7 +195,7 @@ export default function ForcefieldPage() {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "0.9rem", margin: "1.25rem 0" }}>
         <MetricTile label="Active decoys" display={String(active.length)} accent="var(--wp-success, #30a46c)" testId="metric-active" />
         <MetricTile label="Retired" display={String(list.length - active.length)} testId="metric-retired" />
-        <MetricTile label="Decoy types in use" display={`${kindsInUse} / 4`} testId="metric-kinds" />
+        <MetricTile label="Decoy types in use" display={`${kindsInUse} / ${KINDS.length}`} testId="metric-kinds" />
         <MetricTile label="Trips" display={String(tripList.length)} accent={tripList.length ? "var(--wp-error, #e5484d)" : undefined} testId="metric-trips" />
       </div>
 

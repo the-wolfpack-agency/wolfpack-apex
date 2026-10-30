@@ -10,6 +10,7 @@
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { CANARY_LOGIN_RE } from "@/lib/forcefield-web/canary-signin";
 
 const php = readFileSync(
   join(process.cwd(), "integrations", "wordpress", "ogiam-forcefield", "ogiam-forcefield.php"),
@@ -259,5 +260,28 @@ describe("wordpress plugin server check (includes/inventory.php)", () => {
     for (const f of ["str_starts_with(", "str_ends_with(", "str_contains(", "match ("]) {
       expect(inv).not.toContain(f);
     }
+  });
+});
+
+describe("wordpress plugin canary sign-ins", () => {
+  const fn = php.slice(php.indexOf("function ogiam_ff_canary_signin"), php.indexOf("add_filter('authenticate', 'ogiam_ff_canary_signin'"));
+  it("hooks WordPress's authenticate filter early (wp-login.php and XML-RPC sign-ins)", () => {
+    expect(php).toContain("add_filter('authenticate', 'ogiam_ff_canary_signin', 1, 3);");
+  });
+  it("sends only usernames of the engine's exact canary shape (a real username never leaves the site)", () => {
+    const m = /preg_match\('\/(.+?)\/', \$username\)/.exec(fn);
+    expect(m).not.toBeNull();
+    expect(m![1]).toBe(CANARY_LOGIN_RE.source);
+    expect(fn.indexOf("preg_match")).toBeLessThan(fn.indexOf("wp_remote_post"));
+  });
+  it("never changes the sign-in outcome (returns the user it was given, no WP_Error) and never sends the password", () => {
+    expect(fn).not.toMatch(/WP_Error|wp_die|exit/);
+    expect(fn.match(/return \$user;/g)?.length).toBeGreaterThanOrEqual(3);
+    expect(fn).not.toMatch(/'password'\s*=>/);
+  });
+  it("authenticates with the site key as x-ingest-token, to the canary check endpoint, with a bounded timeout", () => {
+    expect(fn).toContain("'x-ingest-token' => $token");
+    expect(php).toContain("'/api/forcefield/canary/check'");
+    expect(fn).toMatch(/'timeout' => 2/);
   });
 });

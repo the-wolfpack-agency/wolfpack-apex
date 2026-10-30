@@ -6,13 +6,13 @@ describe("assessDeceptionCoverage", () => {
   it("flags a completely unseeded grid as 'no traps, not safe'", () => {
     const cov = assessDeceptionCoverage([], 0);
     expect(cov.kindsSeeded).toBe(0);
-    expect(cov.gaps).toEqual(["token", "route", "row", "tool"]);
+    expect(cov.gaps).toEqual(["token", "route", "row", "tool", "login"]);
     expect(cov.assessment).toMatch(/no traps, not a safe site/i);
   });
 
   it("reads low trips on a full grid as expected-by-design, not weak", () => {
-    const cov = assessDeceptionCoverage([c("token"), c("route"), c("row"), c("tool")], 2);
-    expect(cov.kindsSeeded).toBe(4);
+    const cov = assessDeceptionCoverage([c("token"), c("route"), c("row"), c("tool"), c("login")], 2);
+    expect(cov.kindsSeeded).toBe(5);
     expect(cov.gaps).toEqual([]);
     expect(cov.assessment).toMatch(/expected to be low by design/i);
   });
@@ -20,7 +20,7 @@ describe("assessDeceptionCoverage", () => {
   it("names the missing kinds when the grid is thin (few traps, not few trips)", () => {
     const cov = assessDeceptionCoverage([c("route"), c("route")], 2);
     expect(cov.kindsSeeded).toBe(1);
-    expect(cov.gaps).toEqual(["token", "row", "tool"]);
+    expect(cov.gaps).toEqual(["token", "row", "tool", "login"]);
     expect(cov.byKind.find((k) => k.kind === "route")!.active).toBe(2);
     expect(cov.assessment).toMatch(/few traps/i);
   });

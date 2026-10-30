@@ -288,6 +288,9 @@ export const FORCEFIELD_CONTROL_PLANE_PATHS: ReadonlySet<string> = new Set([
   "/api/forcefield/observe",
   // a site's middleware reads its own agent policy here (monitor.ts sitePolicyUrl)
   "/api/forcefield/site-policy",
+  // a site mints and checks its fake sign-ins here (canary-login.ts in the engine)
+  "/api/forcefield/canary/mint",
+  "/api/forcefield/canary/check",
 ]);
 
 /**

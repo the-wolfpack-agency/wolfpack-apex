@@ -19,6 +19,7 @@
     "kev-rules.ts",
     "accountability.ts",
     "gateway.ts",
-    "web-bot-auth.ts"
+    "web-bot-auth.ts",
+    "canary-signin.ts"
   ]
 }

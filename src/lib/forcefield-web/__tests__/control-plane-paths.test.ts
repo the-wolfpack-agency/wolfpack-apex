@@ -10,6 +10,7 @@
  */
 import { FORCEFIELD_CONTROL_PLANE_PATHS, detectHeaderAttack } from "@/lib/forcefield-web/enforce";
 import { sitePolicyUrl } from "@/lib/forcefield-web/monitor";
+import { canaryEndpoint } from "@/lib/forcefield-web/canary-signin";
 
 const HUB = "https://hub.example";
 const env = { FORCEFIELD_INGEST_URL: `${HUB}/api/site-analytics/ingest` } as unknown as NodeJS.ProcessEnv;
@@ -20,6 +21,8 @@ describe("Forcefield control-plane endpoints are exempt from the middleware-bypa
     "/api/forcefield/ruleset", // FORCEFIELD_RULESET_URL (tenant-quickstart.ts)
     "/api/forcefield/observe", // the Cloudflare Worker / plugin decision
     new URL(sitePolicyUrl("s", env)!).pathname, // the site's agent policy
+    new URL(canaryEndpoint("mint", env)!).pathname, // canary sign-ins planted in decoys
+    new URL(canaryEndpoint("check", env)!).pathname, // ... and checked at sign-in
   ];
 
   it.each(called)("%s is listed", (path) => {
