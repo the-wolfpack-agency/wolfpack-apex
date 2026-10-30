@@ -327,6 +327,18 @@ describe("AI agents + verified crawler identity", () => {
     // partial header set is not a signed agent
     expect(observeRequest({ ...chrome, path: "/", headerNames: [...CHROME_HEADERS, "signature"] }, R)!.type).toBe("site.page_viewed");
   });
+  it("a signed agent without browser headers is welcomed as signed, not flagged as a spoof (it announced itself)", () => {
+    const o = observeRequest({ ...base, path: "/admin/login", userAgent: CHROME_UA, headerNames: ["host", "user-agent", "signature-agent", "signature", "signature-input"] }, R)!;
+    expect(o.type).toBe("site.agent_welcomed");
+    expect(o.props.signed_agent).toBe(true);
+    // a named hostile tool presenting a signature is still flagged
+    expect(observeRequest({ ...base, path: "/", userAgent: "python-requests/2.31", headerNames: ["host", "user-agent", "signature-agent", "signature", "signature-input"] }, R)!.type).toBe("site.agent_flagged");
+  });
+  it("a spoofed browser (Chrome UA, no Fetch Metadata) is flagged with its reason", () => {
+    const o = observeRequest({ ...base, path: "/pricing", userAgent: CHROME_UA, headerNames: ["host", "user-agent", "accept", "accept-language", "accept-encoding"] }, R)!;
+    expect(o.type).toBe("site.agent_flagged");
+    expect(o.props).toMatchObject({ client_type: "unknown", spoof: "no_fetch_metadata" });
+  });
 });
 
 describe("withEnforcement - the stored row says what happened", () => {

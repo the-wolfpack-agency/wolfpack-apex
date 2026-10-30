@@ -327,6 +327,7 @@ function agentProps(
     hosting: classifyHosting(input.ip, datacenterPrefixesFrom(ruleset.datacenterPrefixes)),
   };
   if (client.tool) props.tool = client.tool;
+  if (client.spoof) props.spoof = client.spoof;
   return props;
 }
 
@@ -423,8 +424,12 @@ export function observeRequest(input: ObserveInput, ruleset: ForcefieldRuleset):
   else if (attack) type = "site.agent_payload_attack";
   else if (probe) type = "site.agent_probed_sensitive";
   else if (verdict.class === "known_agent") type = verification === "impersonation" ? "site.agent_flagged" : "site.agent_welcomed";
-  else if (hostileTool || (weakTell && !isStaticAsset(path))) type = "site.agent_flagged";
+  // A request that PRESENTS an agent signature is announcing who it is; the weak
+  // tells below (no browser headers) are expected of an agent, so it is welcomed
+  // as signed rather than flagged as spoofing. A named hostile tool still is.
+  else if (hostileTool) type = "site.agent_flagged";
   else if (signedAgent) type = "site.agent_welcomed";
+  else if (weakTell && !isStaticAsset(path)) type = "site.agent_flagged";
 
   // Not an agent. If it is a real human page navigation, forward it as a page
   // view so the property reports the SAME analytics as ogiam.com (page views,

@@ -3,9 +3,11 @@ import { operatorFingerprint } from "@/lib/forcefield-web/fingerprint";
 import { DEFAULT_RULESET } from "@/lib/forcefield-web/ruleset";
 
 const R = DEFAULT_RULESET;
+// What a real Chrome 120 navigation sends (Fetch Metadata included: a Chrome claim
+// without it is a spoofed browser, see fingerprint.ts).
 const base = {
   method: "GET",
-  headerNames: ["host", "user-agent", "accept", "accept-language", "accept-encoding"],
+  headerNames: ["host", "user-agent", "accept", "accept-language", "accept-encoding", "sec-fetch-site", "sec-fetch-mode", "sec-fetch-dest", "sec-fetch-user"],
   userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120.0 Safari/537.36",
 };
 
@@ -55,6 +57,12 @@ describe("decideEnforcement - blocks proven-hostile requests only", () => {
     );
     expect(d.block).toBe(true);
     expect(d.reasonKind).toBe("blocked_fingerprint");
+  });
+
+  it("a spoofed browser (Chrome UA, no Fetch Metadata) loses the browser exemption: its blocked fingerprint is enforced", () => {
+    const spoof = { ...base, headerNames: ["host", "user-agent", "accept", "accept-language", "accept-encoding"] };
+    const d = decideEnforcement({ ...spoof, path: "/", fingerprint: "abcd1234" }, R, { blockedFingerprints: ["abcd1234"] });
+    expect(d).toMatchObject({ block: true, reasonKind: "blocked_fingerprint" });
   });
 
   it("SAFETY: does NOT block a blocked fingerprint when the client is a real browser", () => {

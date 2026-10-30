@@ -1,4 +1,4 @@
-import { classifyClient, headerSignature, DEFAULT_TOOL_SIGNATURES , operatorFingerprint } from "@/lib/forcefield-web/fingerprint"
+import { classifyClient, headerSignature, DEFAULT_TOOL_SIGNATURES , operatorFingerprint, judgeableBrowserClaim } from "@/lib/forcefield-web/fingerprint"
 
 describe("classifyClient - name the tool, resolve the actor", () => {
   it("names a scanner (strongest hostile tell), outranking its base library", () => {
@@ -65,5 +65,46 @@ describe("operatorFingerprint - header shape bound to the tool", () => {
   });
   it("is stable: same inputs -> same fingerprint", () => {
     expect(operatorFingerprint(H, "curl")).toBe(operatorFingerprint(H, "curl"));
+  });
+});
+
+describe("spoofed browsers: a modern Chromium / Firefox claim must carry Fetch Metadata", () => {
+  const TRINITY = ["host", "user-agent", "accept", "accept-language", "accept-encoding"];
+  const FETCH_META = ["sec-fetch-site", "sec-fetch-mode", "sec-fetch-dest"];
+  const CHROME = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
+  const EDGE = `${CHROME} Edg/130.0.0.0`;
+  const ANDROID = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36";
+  const FIREFOX = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:131.0) Gecko/20100101 Firefox/131.0";
+  const SAFARI_OLD = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.6 Safari/605.1.15";
+  const IOS_CHROME = "Mozilla/5.0 (iPhone; CPU iPhone OS 15_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/130.0.6723.90 Mobile/15E148 Safari/604.1";
+  const CHROME_OLD = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/75.0.3770.100 Safari/537.36";
+
+  it.each([CHROME, EDGE, ANDROID, FIREFOX])("a real modern browser (with Fetch Metadata) stays a browser: %s", (ua) => {
+    expect(classifyClient(ua, [...TRINITY, ...FETCH_META])).toEqual({ clientType: "browser", headerMismatch: false });
+  });
+
+  it.each([CHROME, EDGE, ANDROID, FIREFOX])("the same claim without Fetch Metadata is a spoofed browser: %s", (ua) => {
+    expect(classifyClient(ua, TRINITY)).toEqual({ clientType: "unknown", headerMismatch: true, spoof: "no_fetch_metadata" });
+  });
+
+  it.each([SAFARI_OLD, IOS_CHROME, CHROME_OLD])("never judged where the browser may not send it (Safari, iOS, pre-cut-off): %s", (ua) => {
+    expect(classifyClient(ua, TRINITY)).toEqual({ clientType: "browser", headerMismatch: false });
+  });
+
+  it("one of the Fetch Metadata headers is enough (mode or dest)", () => {
+    expect(classifyClient(CHROME, [...TRINITY, "sec-fetch-dest"]).clientType).toBe("browser");
+    expect(classifyClient(CHROME, [...TRINITY, "sec-fetch-mode"]).clientType).toBe("browser");
+  });
+
+  it("a missing accept trinity keeps its own reason", () => {
+    expect(classifyClient(CHROME, ["host", "user-agent"])).toEqual({ clientType: "unknown", headerMismatch: true, spoof: "missing_browser_headers" });
+  });
+
+  it("judgeableBrowserClaim parses the family and major version, and refuses what it cannot judge", () => {
+    expect(judgeableBrowserClaim(CHROME)).toEqual({ family: "chromium", major: 130 });
+    expect(judgeableBrowserClaim(FIREFOX)).toEqual({ family: "firefox", major: 131 });
+    expect(judgeableBrowserClaim(SAFARI_OLD)).toBeNull();
+    expect(judgeableBrowserClaim(IOS_CHROME)).toBeNull();
+    expect(judgeableBrowserClaim(CHROME_OLD)).toBeNull();
   });
 });
