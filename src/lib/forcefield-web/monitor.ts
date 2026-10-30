@@ -19,6 +19,7 @@
  *                                from the request - that would be SSRF)
  *   FORCEFIELD_RULESET_URL       central ruleset endpoint (unset => bundled defaults)
  */
+import { verifyAgentSignature } from "./web-bot-auth";
 import { observeRequest, withEnforcement, clientKeys, isStaticAsset, type ObserveInput, type Observation } from "./observe";
 import { fetchRuleset, type ForcefieldRuleset } from "./ruleset";
 import { decideEnforcement, type EnforcementDecision, type BlockReasonKind } from "./enforce";
@@ -139,6 +140,11 @@ export function requestTarget(req: MonitorRequestLike): string {
 
 /** Build the ObserveInput for a request (one derivation shared by monitor and
  *  guard so the recorded event and the block decision see the same request). */
+/** The three Web Bot Auth headers are present (names only; verified separately). */
+function presentsAgentSignature(h: Headers): boolean {
+  return h.has("signature-agent") || (h.has("signature") && h.has("signature-input"));
+}
+
 function observeInputFor(args: ForcefieldArgs): ObserveInput {
   const { req } = args;
   // Client IP for hosting classification + crawler verification only - used in
@@ -306,6 +312,14 @@ export async function forcefieldMonitor(args: ForcefieldArgs): Promise<void> {
 
     const ruleset = await fetchRuleset(process.env.FORCEFIELD_RULESET_URL ?? "");
     const input = observeInputFor(args);
+    // A request presenting a Web Bot Auth signature is VERIFIED here (header
+    // values + the agent's key directory), then classified with the verdict.
+    if (presentsAgentSignature(args.req.headers)) {
+      input.agentSignature = await verifyAgentSignature(
+        { method: args.req.method, url: args.req.url ?? `https://${args.req.headers.get("host") ?? "localhost"}${args.req.nextUrl.pathname}${args.req.nextUrl.search ?? ""}`, header: (n) => args.req.headers.get(n) },
+        { agents: ruleset.signatureAgents },
+      );
+    }
     let obs = observeRequest(input, ruleset);
     const d = decide(input, ruleset);
     // Intent: control-plane requests (skipEnforcement) are never scored.

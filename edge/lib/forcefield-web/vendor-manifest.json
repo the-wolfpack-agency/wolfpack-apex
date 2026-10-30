@@ -18,6 +18,7 @@
     "intent.ts",
     "kev-rules.ts",
     "accountability.ts",
-    "gateway.ts"
+    "gateway.ts",
+    "web-bot-auth.ts"
   ]
 }

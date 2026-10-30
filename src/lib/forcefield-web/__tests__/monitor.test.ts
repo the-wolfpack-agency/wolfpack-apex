@@ -297,3 +297,43 @@ describe("forcefieldMonitor - payloads, platform, enforcement records", () => {
     }
   });
 });
+
+describe("forcefieldMonitor verifies a presented Web Bot Auth signature", () => {
+  const signedReq = (sigInput: string) => ({
+    method: "GET",
+    url: "https://example.com/",
+    nextUrl: { pathname: "/" },
+    headers: new Headers({
+      host: "example.com",
+      "user-agent": "Mozilla/5.0 (compatible; agent)",
+      "x-vercel-ip-country": "US",
+      "signature-agent": 'agent2="https://signature-agent.test"',
+      "signature-input": sigInput,
+      signature: "sig2=:DGiW2ErlQh0hc8wY2FQdbnFd6CEmonyY8nlvECIJFaUSYYNvNvSsGyP99BUGtq51gA4ouXlkUwjnta084bpjCg==:",
+    }),
+  });
+  const forwarded = (f: jest.SpyInstance) =>
+    f.mock.calls.filter(([u]) => String(u).includes("/ingest")).map(([, i]) => JSON.parse(String((i as RequestInit).body)));
+
+  it("a malformed signature is recorded as forged (flagged, invalid), never welcomed", async () => {
+    enable();
+    const f = jest.spyOn(global, "fetch").mockResolvedValue(new Response(null));
+    await forcefieldMonitor({ site: "s", req: signedReq("sig2=((((") as never });
+    const [ev] = forwarded(f);
+    expect(ev.type).toBe("site.agent_flagged");
+    expect(ev.props).toMatchObject({ signature_verification: "invalid", signature_reason: "malformed_signature_headers" });
+  });
+
+  it("an agent not on the ruleset's list is welcomed as presented (unverifiable) and its directory is never fetched", async () => {
+    enable();
+    const f = jest.spyOn(global, "fetch").mockResolvedValue(new Response(null));
+    await forcefieldMonitor({
+      site: "s",
+      req: signedReq(`sig2=("@authority" "signature-agent";key="agent2");created=1735689600;keyid="poqkLGiymh_W0uP6PZFw-dvez3QJT5SolqXBCW38r0U";alg="ed25519";expires=4889289600;nonce="XeP72svPKNiGEg3aDE7WJuTpN69H08oMFqC8NLFy1MptpENAT3WZTYwK+MYdsFMlaqHCJGo9ZAhqer1NWY9Epg==";tag="web-bot-auth"`) as never,
+    });
+    expect(f.mock.calls.some(([u]) => String(u).includes("/.well-known/"))).toBe(false);
+    const [ev] = forwarded(f);
+    expect(ev.type).toBe("site.agent_welcomed");
+    expect(ev.props).toMatchObject({ signed_agent: true, signature_verification: "unverifiable", signature_reason: "agent_not_listed" });
+  });
+});

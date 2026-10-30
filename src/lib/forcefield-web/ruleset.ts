@@ -71,6 +71,10 @@ export interface ForcefieldRuleset {
    *  autoblock-scope before serving). Consumed as tarpit, never as a block.
    *  Optional. */
   intentCarryover?: CarryoverEntry[];
+  /** Web Bot Auth signature agents (web-bot-auth.ts): HTTPS origins whose key
+   *  directories a site may fetch to VERIFY a signed agent. Added to the bundled
+   *  default; an agent not listed is "unverifiable", never fetched. Optional. */
+  signatureAgents?: string[];
   /** ACCOUNTABLE ACTIONS (accountability.ts): which requests are state-changing
    *  (methods + named action routes, shared and per site label) and which paths
    *  never are. Watch mode only: recorded, never blocked. Optional; absent or

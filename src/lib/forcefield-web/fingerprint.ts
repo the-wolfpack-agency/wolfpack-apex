@@ -91,6 +91,36 @@ const KNOWN_CRAWLER_MARKERS = [
  *  browser is a stronger bot tell. */
 const BROWSER_HEADER_HINTS = ["accept", "accept-language", "accept-encoding"];
 
+/**
+ * Fetch Metadata (sec-fetch-site / -mode / -dest) is set by the BROWSER on every
+ * request to an HTTPS origin since Chromium 76 and Firefox 90 (the W3C Fetch
+ * Metadata spec; https://developer.mozilla.org/docs/Web/HTTP/Headers/Sec-Fetch-Mode),
+ * and page scripts cannot remove it. HTTP libraries copying a Chrome user-agent
+ * and the accept headers almost never add it, so a modern Chromium or Firefox
+ * claim WITHOUT it is a spoofed browser. Precision first: Safari, iOS browsers
+ * (CriOS / FxiOS / EdgiOS run on WebKit) and anything older than the cut-off
+ * are never judged by it, because older WebKit did not send it.
+ */
+export const FETCH_METADATA_SINCE: Readonly<{ chromium: number; firefox: number }> = { chromium: 80, firefox: 90 };
+
+/** The modern-browser family and major version a user-agent claims, when it is one
+ *  this check can judge (desktop or Android Chromium, Firefox). Null otherwise. */
+export function judgeableBrowserClaim(userAgent: string): { family: "chromium" | "firefox"; major: number } | null {
+  const ua = lc(userAgent);
+  if (/\b(crios|fxios|edgios)\//.test(ua)) return null; // iOS: WebKit underneath
+  const ff = /\bfirefox\/(\d+)/.exec(ua);
+  if (ff && !ua.includes("seamonkey")) {
+    const major = Number(ff[1]);
+    return major >= FETCH_METADATA_SINCE.firefox ? { family: "firefox", major } : null;
+  }
+  const cr = /\bchrome\/(\d+)/.exec(ua);
+  if (cr) {
+    const major = Number(cr[1]);
+    return major >= FETCH_METADATA_SINCE.chromium ? { family: "chromium", major } : null;
+  }
+  return null;
+}
+
 export interface ClientFingerprint {
   clientType: ClientType;
   /** The specific tool name when recognized (e.g. "sqlmap", "curl"). */
@@ -98,6 +128,9 @@ export interface ClientFingerprint {
   /** True when the UA self-declares a browser but the request lacks the header
    *  shape a real browser sends - a spoofed-browser tell. */
   headerMismatch: boolean;
+  /** Why a browser claim was not believed: the accept trinity is missing, or a
+   *  modern Chromium / Firefox claim arrived without Fetch Metadata. */
+  spoof?: "missing_browser_headers" | "no_fetch_metadata";
 }
 
 function lc(s: string): string {
@@ -134,7 +167,12 @@ export function classifyClient(
   const claimsBrowser = ua.includes("mozilla/");
   const hasBrowserHeaders = BROWSER_HEADER_HINTS.every((h) => names.has(h));
   if (claimsBrowser) {
-    return { clientType: hasBrowserHeaders ? "browser" : "unknown", headerMismatch: !hasBrowserHeaders };
+    if (!hasBrowserHeaders) return { clientType: "unknown", headerMismatch: true, spoof: "missing_browser_headers" };
+    // A modern Chromium / Firefox claim must carry Fetch Metadata (see above).
+    if (judgeableBrowserClaim(userAgent) && !names.has("sec-fetch-mode") && !names.has("sec-fetch-dest")) {
+      return { clientType: "unknown", headerMismatch: true, spoof: "no_fetch_metadata" };
+    }
+    return { clientType: "browser", headerMismatch: false };
   }
 
   // 4. Automation with no marker we recognize.
