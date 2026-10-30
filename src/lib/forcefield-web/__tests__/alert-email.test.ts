@@ -9,6 +9,7 @@ import {
   renderForcefieldAlertEmail,
   alertSubject,
   alertHeadline,
+  benefitLines,
   responseKind,
   formatUtc,
   formatEastern,
@@ -68,7 +69,7 @@ describe("subject and headline say the outcome", () => {
   it("contained decoy trip", () => {
     const a = alertFromSignal(signal());
     expect(a.title).toBe("[Forcefield] ogiam.com: hostile agent contained (decoy)");
-    expect(alertHeadline(a)).toBe("A hostile agent took a decoy on ogiam.com and was contained");
+    expect(alertHeadline(a)).toBe("Forcefield caught an automated attacker on ogiam.com and kept it away from your real pages");
   });
 
   it("blocked, recorded-only and partial", () => {
@@ -156,8 +157,8 @@ describe("automatic-block decision is folded into the incident email", () => {
     const a = alertFromSignal(signal());
     a.incident!.blockDecision = { state: "withheld", fingerprints: ["aaaa1111:browser"], why: "common_client_kind" };
     const e = op(a);
-    expect(e.text).toContain("Automatic block not applied: This browser fingerprint is shared by many legitimate visitors, so blocking it everywhere would turn them away. Decoy, payload and attack-tool rules still stop this client's hostile requests.");
-    expect(e.html).toContain("Automatic block not applied");
+    expect(e.text).toContain("Why we did not block this visitor everywhere: This browser fingerprint is shared by many legitimate visitors, so blocking it everywhere would turn real people away. Forcefield still stops every harmful request this visitor sends.");
+    expect(e.html).toContain("Why we did not block this visitor everywhere");
   });
 
   it("blocked: names the expiry", () => {
@@ -216,7 +217,7 @@ describe("plain-text parity", () => {
       expect(e.text).toContain(l.href);
       expect(e.html).toContain(l.href.replace(/&/g, "&amp;"));
     }
-    for (const fact of ["ogiam.com", "/_ff/records", "Iceland (IS)", "aaaa1111:browser", "bbbb2222", "2026-10-26 10:05:37 UTC", "Contained: sent into the decoy maze", "No action needed.", "Automatic block not applied", "row123", a.dedupeKey, "sec@wolfpack.example"]) {
+    for (const fact of ["ogiam.com", "/_ff/records", "Iceland (IS)", "aaaa1111:browser", "bbbb2222", "2026-10-26 10:05:37 UTC", "Contained: sent into the decoy maze", "No action needed.", "Why we did not block this visitor everywhere", "row123", a.dedupeKey, "sec@wolfpack.example"]) {
       expect(e.text).toContain(fact);
       expect(e.html).toContain(fact);
     }
@@ -349,7 +350,7 @@ describe("daily digest email", () => {
     const e = op(a);
     expect(e.subject).toBe("[Forcefield] Daily digest Oct 27, 2026: 2 blocked incidents on 2 sites (21 attempts)");
     expect(digestSubject(a.digest!)).toBe(e.subject);
-    expect(e.text).toContain("21 attack attempts in 2 incidents on 2 sites, all stopped at the edge");
+    expect(e.text).toContain("Forcefield stopped 21 attack attempts on 2 sites before they reached them (2 incidents)");
     expect(e.text).toContain("Blocked at the edge (21 requests)");
     expect(e.text).toContain("No action needed.");
     expect(e.text).toContain("Period: 2026-10-26 12:00:00 UTC (Oct 26, 2026, 8:00:00 AM EDT) to 2026-10-27 12:00:00 UTC (Oct 27, 2026, 8:00:00 AM EDT)");
@@ -392,5 +393,35 @@ describe("daily digest email", () => {
     const e = op(a);
     expect(a.digest!.totals.incidents).toBe(2);
     expect(e.text).toContain("Sent immediately: 1 incident (decoy trips or requests not blocked), emailed when they happened");
+  });
+});
+
+describe("What Forcefield did for you: plain words that follow the real outcome", () => {
+  it("contained decoy trip: spotted, sent into the maze, nothing affected; in the email before the technical details", () => {
+    const a = alertFromSignal(signal());
+    expect(benefitLines(a)).toEqual([
+      "Spotted an automated program reaching for a hidden link that no real visitor can see, a sure sign of hunting for weaknesses.",
+      "Sent it into a maze of fake pages, so the time was wasted there instead of on your real site.",
+      "Your pages, your data and your visitors were not affected.",
+    ]);
+    const e = op(a);
+    expect(e.text.indexOf("WHAT FORCEFIELD DID FOR YOU")).toBeLessThan(e.text.indexOf("TECHNICAL DETAILS (FOR YOUR SECURITY CONTACT)"));
+    expect(e.html).toContain("What Forcefield did for you");
+  });
+
+  it("recorded only (watch mode): never says stopped or not affected", () => {
+    const lines = benefitLines(alertFromSignal(signal({}, { outcomes: { blocked: 0, contained: 0, recorded: 1 } })));
+    expect(lines.join(" ")).toContain("watch mode, so Forcefield recorded this but did not stop it");
+    expect(lines.join(" ")).not.toMatch(/not affected|turned .* away|maze/);
+  });
+
+  it("partly stopped: counts what was stopped and what was only recorded, no all-clear", () => {
+    const lines = benefitLines(alertFromSignal(signal({}, { outcomes: { blocked: 2, contained: 1, recorded: 4 } })));
+    expect(lines[1]).toBe("Stopped 3 of the requests; 4 were only recorded because the site was in watch mode.");
+    expect(lines.join(" ")).not.toContain("not affected");
+  });
+
+  it("alerts that are not about a visitor carry no benefit section", () => {
+    expect(benefitLines({ ...alertFromSignal(signal()), kind: "alert_silence" } as never)).toEqual([]);
   });
 });
