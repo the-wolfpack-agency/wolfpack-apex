@@ -165,6 +165,8 @@ export interface AccountabilityInput {
   /** The fingerprint.ts client class ("browser", "headless", "scanner", ...). */
   clientType: string;
   headerMismatch: boolean;
+  /** Why the browser claim was not believed (fingerprint.ts), when it was not. */
+  spoof?: "missing_browser_headers" | "no_fetch_metadata";
   /** hosting.ts label: "datacenter" | "residential" | "unknown". */
   hosting: string;
   /** SITE-ATTESTED session or service credential (never inferred). */
@@ -212,7 +214,8 @@ export function accountabilityVerdict(input: AccountabilityInput): Accountabilit
     if (!FETCH_METADATA.some((h) => names.has(h))) return held("no_fetch_metadata");
     return { class: "browser_session", reason: "browser_signals", wouldHold: false };
   }
-  if (input.headerMismatch) return held("header_mismatch");
+  // A modern browser claim without Fetch Metadata keeps that specific reason.
+  if (input.headerMismatch) return held(input.spoof === "no_fetch_metadata" ? "no_fetch_metadata" : "header_mismatch");
   return held("script_client");
 }
 

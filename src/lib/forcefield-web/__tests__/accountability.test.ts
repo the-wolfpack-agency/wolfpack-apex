@@ -91,6 +91,9 @@ describe("accountabilityVerdict", () => {
     expect(accountabilityVerdict(input({ headerNames: ["accept", "accept-language", "accept-encoding"] })).reason).toBe("no_fetch_metadata");
     expect(accountabilityVerdict(input({ hosting: "datacenter" })).reason).toBe("browser_from_datacenter");
     expect(accountabilityVerdict(input({ clientType: "unknown", headerMismatch: true })).reason).toBe("header_mismatch");
+    // a modern browser claim the fingerprint rejected for missing Fetch Metadata keeps that reason
+    expect(accountabilityVerdict(input({ clientType: "unknown", headerMismatch: true, spoof: "no_fetch_metadata" })).reason).toBe("no_fetch_metadata");
+    expect(accountabilityVerdict(input({ clientType: "unknown", headerMismatch: true, spoof: "missing_browser_headers" })).reason).toBe("header_mismatch");
     expect(accountabilityVerdict(input({ clientType: "headless" })).reason).toBe("headless_browser");
   });
 
