@@ -126,3 +126,9 @@ it("a body claiming signed_principal without a credential is downgraded; junk va
   expect(props.mandate).toBeUndefined();
   expect(props.method).toBeUndefined();
 });
+
+it("a body cannot claim a verified principal by itself: client-sent principal fields are dropped without a credential", async () => {
+  await POST(req({ type: "site.agent_welcomed", path: "/", props: { site: "s", principal: "org:forged", principal_status: "verified", principal_issuer: "x", principal_scopes: "[\"/\"]" } }));
+  const props = recordSiteEvent.mock.calls[0][0].props;
+  for (const k of ["principal", "principal_status", "principal_issuer", "principal_scopes"]) expect(props[k]).toBeUndefined();
+});

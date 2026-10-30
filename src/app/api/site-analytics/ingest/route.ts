@@ -34,13 +34,15 @@ import { isSiteEventType, recordSiteEvent } from "@/lib/site-analytics";
 import { autoBlockFingerprint } from "@/lib/forcefield/blocked-fingerprints";
 import { resolveIngestCaller, sharedIngestTokens } from "@/lib/forcefield-web/ingest-auth";
 import { verifyBoundaryDelegation, stampPrincipal } from "@/lib/forcefield/action-accountability";
-import { coerceActionProps } from "@/lib/forcefield-web/accountability";
+import { ACTION_PROP_KEYS, coerceActionProps } from "@/lib/forcefield-web/accountability";
 import { ingestSigningEnforced, verifyIngestSignature } from "@/lib/forcefield/ingest-signing";
 import { noteRequest, rateKey } from "@/lib/forcefield/rate-window";
 import { EDGE_TENANT_HEADER } from "@/lib/forcefield-web/gateway";
 
 const WINDOW_MS = 60 * 1000;
 const MAX_PER_WINDOW = 600; // generous for a marketing site; bounds abuse.
+/** Props kept per event (each value is capped at 120 chars, so a row stays small). */
+const MAX_PROPS = 24;
 // The marketing-site event stream is a single global tenant; its trusted
 // delegation issuers live under this workspace id.
 const SITE_WORKSPACE_ID = process.env.SITE_ANALYTICS_WORKSPACE_ID || "default";
@@ -132,7 +134,10 @@ export async function POST(req: NextRequest) {
   // Coarse, non-identifying props only; bounded to avoid an oversized row.
   const props: Record<string, string | number | boolean> = {};
   if (b.props && typeof b.props === "object" && !Array.isArray(b.props)) {
-    for (const [k, v] of Object.entries(b.props as Record<string, unknown>).slice(0, 12)) {
+    // 24 keys: an engine event already carries about 12 standard keys (sig, fp,
+    // site, posture, action, ...) before a site adds its provenance (which decoy
+    // leaked a token, the path). A 12-key cap silently dropped exactly that link.
+    for (const [k, v] of Object.entries(b.props as Record<string, unknown>).slice(0, MAX_PROPS)) {
       if (typeof v === "string") props[k] = v.slice(0, 120);
       else if (typeof v === "number" || typeof v === "boolean") props[k] = v;
     }
@@ -141,6 +146,15 @@ export async function POST(req: NextRequest) {
     // only): props.synthetic is what keeps our own verified probes out of the
     // Forcefield alert scan (src/lib/forcefield-web/alerts.ts).
     const raw = b.props as Record<string, unknown>;
+    // Fields with a validated vocabulary never keep the raw value the loop above
+    // copied: only a literal boolean true is a mark (a string "true" would read as
+    // ours in the alert scan's SQL), and the action verdict keys are re-applied
+    // from coerceActionProps below. The old 12-key cap hid this by dropping them.
+    delete props.authenticated;
+    delete props.synthetic;
+    for (const k of ACTION_PROP_KEYS) delete props[k];
+    // The principal is proven HERE (stampPrincipal below) or not at all.
+    for (const k of ["principal", "principal_status", "principal_issuer", "principal_scopes"]) delete props[k];
     if (raw.authenticated === true) props.authenticated = true;
     if (raw.synthetic === true) props.synthetic = true;
     // Accountable actions: the verdict keys are stamped late too, so carry them
