@@ -65,6 +65,7 @@ import {
   type HostileEventGroup,
   type HostileIncident,
 } from "@/lib/forcefield-web/incidents";
+import { EVENT_WEIGHT_SQL } from "@/lib/site-analytics-weight";
 
 /**
  * Forcefield is still in testing and most of the team does not know it exists,
@@ -724,9 +725,9 @@ export const HOSTILE_EVENTS_SQL = `SELECT event_type AS kind,
              ELSE 'recorded' END AS outcome,
         COALESCE(props->>'posture', '') AS posture,
         COALESCE(props->>'reason_kind', '') AS reason_kind,
-        count(*) AS n,
+        sum(${EVENT_WEIGHT_SQL}) AS n,
         min(created_at) AS first_at,
-        max(created_at) AS last_at
+        max(COALESCE((props->>'last_seen')::timestamptz, created_at)) AS last_at
    FROM site_analytics_events
   WHERE event_type = ANY($4::text[])
     AND created_at >= $1::timestamptz
@@ -825,7 +826,7 @@ export function liveForcefieldAlertDeps(): ForcefieldAlertDeps {
     },
     countHostileEventsBetween: async (sinceIso, untilIso) => {
       const { rows } = await safeQuery<{ n: string }>(
-        `SELECT count(*) AS n FROM site_analytics_events
+        `SELECT sum(${EVENT_WEIGHT_SQL}) AS n FROM site_analytics_events
           WHERE event_type = ANY($3::text[])
             AND created_at >= $1::timestamptz
             AND created_at < $2::timestamptz

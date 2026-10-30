@@ -17,6 +17,7 @@ import { getFindingTriage, type TriageStatus } from "@/lib/site-finding-triage";
 import { listBlockedOperatorKeys, liveAgentIntelligence, type AgentIntelSummary } from "@/lib/agent-operators";
 import { getProvenAttacks, NOT_CONTROL_PLANE_FP, type ProvenAttacks } from "@/lib/site-analytics-proven";
 import { annotateKevProps } from "@/lib/forcefield/kev";
+import { EVENT_WEIGHT_SQL } from "@/lib/site-analytics-weight";
 import { getAccountableActions, type AccountableActionsSummary } from "@/lib/site-analytics-accountability";
 
 /** Closed event vocabulary, mirrored from the marketing site's analytics. A
@@ -84,28 +85,74 @@ export interface RecordSiteEventInput {
   tenantId?: string | null;
 }
 
-/** Persist one site event. Best effort: no DATABASE_URL -> no-op; never throws,
- *  so analytics can never break the ingest request. */
-export async function recordSiteEvent(input: RecordSiteEventInput): Promise<void> {
-  if (!process.env.DATABASE_URL) return;
+export { EVENT_WEIGHT_SQL };
+
+/** Minutes one collapsed trap row keeps absorbing repeats from the same source. */
+export const REPEAT_COLLAPSE_WINDOW_MIN = 10;
+
+/**
+ * The collapse key for a repeat decoy or honeytoken trip, or null when the event is always its
+ * own row. A looping scraper in the decoy maze wrote one row per maze page, so repeats from one
+ * source (fingerprint, else session sig) of one kind on one site fold into the first row of a
+ * 10-minute window: repeat_count and last_seen keep the evidence. Our own synthetic probes stay
+ * exact, one row each.
+ */
+export function repeatCollapseKey(eventType: string, props: Record<string, unknown>): { site: string; source: string; kind: string } | null {
+  if (eventType !== "site.agent_trap_tripped" || props.synthetic === true) return null;
+  const source = typeof props.fp === "string" && props.fp ? props.fp : typeof props.sig === "string" && props.sig ? props.sig : null;
+  if (!source) return null;
+  return { site: typeof props.site === "string" ? props.site : "", source, kind: typeof props.reason_kind === "string" ? props.reason_kind : "" };
+}
+
+/** The query function recordSiteEventWith runs on (the app's query(), or a test's pg client). */
+export type SiteEventQuery = (text: string, params: unknown[]) => Promise<{ rowCount: number | null; rows: unknown[] }>;
+
+/** The write itself, on a given query function: fold a repeat trap trip into its open row, else
+ *  insert. Throws on a database error (recordSiteEvent catches). */
+export async function recordSiteEventWith(q: SiteEventQuery, input: RecordSiteEventInput): Promise<void> {
   // CVE / KEV enrichment at the single write chokepoint: every writer (the
   // central observe route, the vendored-site ingest, the rate events) gets the
   // same deterministic annotation, and a client-sent cve/kev prop is replaced by
   // the server's own lookup. See src/lib/forcefield/kev/index.ts.
   const props = annotateKevProps(input.eventType, input.props);
-  try {
-    await query(
-      `INSERT INTO site_analytics_events (event_type, path, country, referrer_host, props, forcefield_tenant_id)
-       VALUES ($1, $2, $3, $4, $5::jsonb, $6)`,
-      [
-        input.eventType,
-        input.path ?? null,
-        input.country ?? null,
-        input.referrerHost ?? null,
-        JSON.stringify(props),
-        input.tenantId ?? null,
-      ],
+  const key = repeatCollapseKey(input.eventType, props);
+  if (key) {
+    const folded = await q(
+      `UPDATE site_analytics_events
+          SET props = props || jsonb_build_object('repeat_count', ${EVENT_WEIGHT_SQL} + 1, 'last_seen', to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))
+        WHERE id = (SELECT id FROM site_analytics_events
+                     WHERE event_type = $1
+                       AND created_at > now() - ($2 || ' minutes')::interval
+                       AND COALESCE(props->>'site', '') = $3
+                       AND COALESCE(NULLIF(props->>'fp', ''), props->>'sig') = $4
+                       AND COALESCE(props->>'reason_kind', '') = $5
+                       AND COALESCE(props->>'synthetic', '') <> 'true'
+                     ORDER BY created_at DESC LIMIT 1)
+        RETURNING id`,
+      [input.eventType, String(REPEAT_COLLAPSE_WINDOW_MIN), key.site, key.source, key.kind],
     );
+    if ((folded.rowCount ?? folded.rows.length) > 0) return;
+  }
+  await q(
+    `INSERT INTO site_analytics_events (event_type, path, country, referrer_host, props, forcefield_tenant_id)
+     VALUES ($1, $2, $3, $4, $5::jsonb, $6)`,
+    [
+      input.eventType,
+      input.path ?? null,
+      input.country ?? null,
+      input.referrerHost ?? null,
+      JSON.stringify(props),
+      input.tenantId ?? null,
+    ],
+  );
+}
+
+/** Persist one site event. Best effort: no DATABASE_URL -> no-op; never throws,
+ *  so analytics can never break the ingest request. */
+export async function recordSiteEvent(input: RecordSiteEventInput): Promise<void> {
+  if (!process.env.DATABASE_URL) return;
+  try {
+    await recordSiteEventWith((text, params) => query(text, params), input);
   } catch (err) {
     console.warn("[site-analytics] record failed:", (err as Error).message);
   }
