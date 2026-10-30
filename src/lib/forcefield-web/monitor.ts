@@ -276,7 +276,46 @@ function intentFor(args: ForcefieldArgs, input: ObserveInput, ruleset: Forcefiel
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
-function decide(input: ObserveInput, ruleset: ForcefieldRuleset): EnforcementDecision {
+/* ------------------------------ site policy ------------------------------ */
+
+/** Each site's own agent policy (which AI training crawlers it turns away), read
+ *  from Instinct with the site's ingest token and cached. Fail-open: an
+ *  unreadable policy blocks nothing; the last good policy is kept on an error. */
+const POLICY_TTL_MS = 5 * 60_000;
+const _policyCache = new Map<string, { at: number; agents: string[] }>();
+export function _resetPolicyCache(): void { _policyCache.clear(); }
+
+export function sitePolicyUrl(site: string, env: NodeJS.ProcessEnv = process.env): string | null {
+  try {
+    const base = env.FORCEFIELD_POLICY_URL || (env.FORCEFIELD_INGEST_URL ? `${new URL(env.FORCEFIELD_INGEST_URL).origin}/api/forcefield/site-policy` : "");
+    if (!base) return null;
+    const u = new URL(base);
+    u.searchParams.set("site", site);
+    return u.toString();
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchSitePolicy(site: string, env: NodeJS.ProcessEnv = process.env, nowMs = Date.now()): Promise<string[]> {
+  const hit = _policyCache.get(site);
+  if (hit && nowMs - hit.at < POLICY_TTL_MS) return hit.agents;
+  const url = sitePolicyUrl(site, env);
+  const token = env.SITE_ANALYTICS_INGEST_TOKEN;
+  if (!url || !token) return hit?.agents ?? [];
+  try {
+    const r = await fetch(url, { headers: { "x-ingest-token": token }, signal: AbortSignal.timeout(1500) });
+    if (!r.ok) return hit?.agents ?? [];
+    const j = (await r.json()) as { blockedAgents?: unknown };
+    const agents = Array.isArray(j.blockedAgents) ? j.blockedAgents.filter((a): a is string => typeof a === "string").slice(0, 32) : [];
+    _policyCache.set(site, { at: nowMs, agents });
+    return agents;
+  } catch {
+    return hit?.agents ?? [];
+  }
+}
+
+function decide(input: ObserveInput, ruleset: ForcefieldRuleset, blockedAgents: readonly string[] = []): EnforcementDecision {
   // decideEnforcement computes the operator fingerprint itself (header shape
   // bound to the client's tool), matching what observe.ts stamps on events, so
   // an admin block distributed via ruleset.blockedFingerprints is enforced here.
@@ -291,7 +330,7 @@ function decide(input: ObserveInput, ruleset: ForcefieldRuleset): EnforcementDec
       ip: input.ip,
     },
     ruleset,
-    { blockedFingerprints: ruleset.blockedFingerprints },
+    { blockedFingerprints: ruleset.blockedFingerprints, blockedAgents },
   );
 }
 
@@ -312,6 +351,8 @@ export async function forcefieldMonitor(args: ForcefieldArgs): Promise<void> {
 
     const ruleset = await fetchRuleset(process.env.FORCEFIELD_RULESET_URL ?? "");
     const input = observeInputFor(args);
+    // The site's agent policy matters only when it enforces (the block it records).
+    const blockedAgents = args.skipEnforcement || process.env.FORCEFIELD_ENFORCE !== "on" ? [] : await fetchSitePolicy(args.site);
     // A request presenting a Web Bot Auth signature is VERIFIED here (header
     // values + the agent's key directory), then classified with the verdict.
     if (presentsAgentSignature(args.req.headers)) {
@@ -321,7 +362,7 @@ export async function forcefieldMonitor(args: ForcefieldArgs): Promise<void> {
       );
     }
     let obs = observeRequest(input, ruleset);
-    const d = decide(input, ruleset);
+    const d = decide(input, ruleset, blockedAgents);
     // Intent: control-plane requests (skipEnforcement) are never scored.
     const intent = args.skipEnforcement ? null : intentFor(args, input, ruleset, d);
     const intentBlocked = !d.block && intent?.decision.action === "block" && intent.decision.applied;
@@ -363,7 +404,7 @@ export async function forcefieldGuard(args: ForcefieldArgs): Promise<Enforcement
     if (process.env.FORCEFIELD_WEB !== "on" || process.env.FORCEFIELD_ENFORCE !== "on") return null;
     const ruleset = await fetchRuleset(process.env.FORCEFIELD_RULESET_URL ?? "");
     const input = observeInputFor(args);
-    const decision = decide(input, ruleset);
+    const decision = decide(input, ruleset, args.skipEnforcement ? [] : await fetchSitePolicy(args.site));
     if (decision.block) {
       intentFor(args, input, ruleset, decision); // record the proof into the session
       return decision;

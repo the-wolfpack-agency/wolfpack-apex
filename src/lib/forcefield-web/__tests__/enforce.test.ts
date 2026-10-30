@@ -303,3 +303,21 @@ describe("bodyAttack - a body-proven attack an adapter supplies", () => {
     expect(decideEnforcement({ ...base, method: "POST", path: "/upload.php" }, R).block).toBe(false);
   });
 });
+
+describe("decideEnforcement - the site's own AI training crawler policy", () => {
+  const GPTBOT = "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; GPTBot/1.2; +https://openai.com/gptbot)";
+  it("turns away an agent the site blocked, with reason agent_policy", () => {
+    const d = decideEnforcement({ ...base, path: "/", userAgent: GPTBOT }, R, { blockedAgents: ["GPTBot"] });
+    expect(d).toMatchObject({ block: true, reasonKind: "agent_policy" });
+    expect(d.reason).toContain("GPTBot");
+  });
+  it("leaves other agents and real browsers alone, and blocks nothing with an empty policy", () => {
+    expect(decideEnforcement({ ...base, path: "/", userAgent: "Mozilla/5.0 (compatible; OAI-SearchBot/1.0)" }, R, { blockedAgents: ["GPTBot"] }).block).toBe(false);
+    expect(decideEnforcement({ ...base, path: "/" }, R, { blockedAgents: ["GPTBot"] }).block).toBe(false);
+    expect(decideEnforcement({ ...base, path: "/", userAgent: GPTBOT }, R, { blockedAgents: [] }).block).toBe(false);
+    expect(decideEnforcement({ ...base, path: "/", userAgent: GPTBOT }, R).block).toBe(false);
+  });
+  it("an attack payload from the same agent is still reported as a payload, not as policy", () => {
+    expect(decideEnforcement({ ...base, path: "/x", rawUrl: "/x?q=<script>alert(1)</script>", userAgent: GPTBOT }, R, { blockedAgents: ["GPTBot"] }).reasonKind).toBe("payload");
+  });
+});

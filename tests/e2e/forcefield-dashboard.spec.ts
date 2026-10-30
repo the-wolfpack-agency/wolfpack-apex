@@ -65,8 +65,12 @@ function mockAlertEmail(page: import("@playwright/test").Page) {
   });
 }
 
-/** The "Is your server exposed?" panel (tests/e2e/forcefield-server-exposure.spec.ts covers its states). */
-function mockExposure(page: import("@playwright/test").Page) {
+/** The "Is your server exposed?" panel (tests/e2e/forcefield-server-exposure.spec.ts covers its states),
+ *  plus the AI training crawler policy the AI panel loads (nothing turned away). */
+async function mockExposure(page: import("@playwright/test").Page) {
+  await page.route(/\/api\/forcefield\/my-agent-policy$/, async (route: Route) => {
+    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, blockedAgents: [], choices: ["Bytespider", "ClaudeBot", "GPTBot", "Meta-ExternalAgent"] }) });
+  });
   return page.route(/\/api\/forcefield\/my-exposure$/, async (route: Route) => {
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, report: null }) });
   });
@@ -217,6 +221,33 @@ test.describe("Forcefield client dashboard", () => {
     await page.goto(`${target.baseUrl}${PATH}`, { waitUntil: "domcontentloaded", timeout: 20_000 });
     await expect(page.getByTestId("ff-ai-visibility-empty")).toContainText("No AI agents or search engines");
     await expect(page.getByTestId("ff-ai-visibility-agent")).toHaveCount(0);
+    expect(getFailures(), "no CSP violations or JS errors").toEqual([]);
+  });
+
+  test("AI training crawlers: turning one away saves the choice for this site", async ({ page }) => {
+    const getFailures = collectConsoleAndNetworkFailures(page);
+    await mockMyStats(page, 200, { ...STATS, aiVisibility: AI });
+    await mockMySetup(page);
+    await mockAlertEmail(page);
+    await mockExposure(page);
+    const puts: unknown[] = [];
+    await page.route(/\/api\/forcefield\/my-agent-policy$/, async (route: Route) => {
+      if (route.request().method() === "PUT") {
+        const body = route.request().postDataJSON();
+        puts.push(body);
+        return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, blockedAgents: body.blockedAgents }) });
+      }
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, blockedAgents: [], choices: ["Bytespider", "ClaudeBot", "GPTBot", "Meta-ExternalAgent"] }) });
+    });
+    await page.addInitScript(() => window.localStorage.setItem("ff_dashboard_token", "ff_e2e_token"));
+    const res = await page.goto(`${target.baseUrl}${PATH}`, { waitUntil: "domcontentloaded", timeout: 20_000 });
+    expect(res?.status()).toBe(200);
+    const gpt = page.getByTestId("ff-ai-visibility-allow-GPTBot");
+    await expect(gpt).toBeChecked();
+    await gpt.click();
+    await expect(page.getByTestId("ff-ai-visibility-control-status")).toContainText("Saved");
+    await expect(gpt).not.toBeChecked();
+    expect(puts).toEqual([{ blockedAgents: ["GPTBot"] }]);
     expect(getFailures(), "no CSP violations or JS errors").toEqual([]);
   });
 });

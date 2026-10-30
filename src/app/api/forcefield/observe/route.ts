@@ -40,6 +40,7 @@ import { checkInboundForCanaries } from "@/lib/forcefield/canary-store";
 import { evaluateRequestIntent, intentLedger } from "@/lib/forcefield-web/monitor";
 import { getIntentCarryover } from "@/lib/forcefield/intent-carryover";
 import { verifyBoundaryDelegation, stampPrincipal } from "@/lib/forcefield/action-accountability";
+import { getAgentPolicy, siteScope, tenantScope } from "@/lib/forcefield-web/agent-policy";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -154,10 +155,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // 1. The DECISION first (deterministic policy, not a model): decoy / payload
     //    / header attack / attack tool / an admin-blocked operator fingerprint.
     //    Decided BEFORE recording so the stored row says what actually happened.
+    // The site's own agent policy (AI training crawlers it turns away): a tenant's
+    // by its id, one of our sites by its label. Fail-open (an unreadable policy
+    // blocks nothing).
+    const blockedAgents = (await getAgentPolicy(tenant ? tenantScope(tenant.id) : siteScope(site)).catch(() => ({ blockedAgents: [] as string[] }))).blockedAgents;
     const decision = decideEnforcement(
       { path, method, userAgent, headerNames, rawUrl, authenticated, ip },
       ruleset,
-      { blockedFingerprints },
+      { blockedFingerprints, blockedAgents },
     );
     // INTENT: score this request into its session (deterministic, intent.ts).
     // Applied only with FORCEFIELD_INTENT_ENFORCE=on and, for a managed tenant,

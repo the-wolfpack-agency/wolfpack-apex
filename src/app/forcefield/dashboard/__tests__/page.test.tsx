@@ -274,3 +274,31 @@ describe("AI agents reading this site", () => {
     expect(screen.queryByTestId("ff-ai-visibility")).not.toBeInTheDocument();
   });
 });
+
+describe("AI training crawler control on the dashboard", () => {
+  it("loads the tenant's policy with the token and saves a change with a PUT", async () => {
+    window.localStorage.setItem("ff_dashboard_token", "ff_saved");
+    mockFetch.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url === "/api/forcefield/my-agent-policy" && init?.method === "PUT") return okResponse({ ok: true, blockedAgents: JSON.parse(String(init.body)).blockedAgents });
+      if (url === "/api/forcefield/my-agent-policy") return okResponse({ ok: true, blockedAgents: [], choices: ["Bytespider", "ClaudeBot", "GPTBot", "Meta-ExternalAgent"] });
+      return okResponse({ ...STATS, aiVisibility: { days: 30, byPurpose: {}, agents: [] } });
+    });
+    render(<ForcefieldDashboardPage />);
+    const gpt = await screen.findByTestId("ff-ai-visibility-allow-GPTBot");
+    expect(gpt).toBeChecked();
+    fireEvent.click(gpt);
+    await waitFor(() => expect(screen.getByTestId("ff-ai-visibility-control-status")).toHaveTextContent("Saved"));
+    const put = mockFetch.mock.calls.find(([u, i]) => u === "/api/forcefield/my-agent-policy" && (i as RequestInit)?.method === "PUT")!;
+    expect((put[1] as RequestInit).headers).toMatchObject({ "x-forcefield-token": "ff_saved" });
+    expect(JSON.parse(String((put[1] as RequestInit).body))).toEqual({ blockedAgents: ["GPTBot"] });
+  });
+
+  it("a policy that cannot be read hides the control, never the stats", async () => {
+    window.localStorage.setItem("ff_dashboard_token", "ff_saved");
+    mockFetch.mockImplementation(async (url: string) => (url === "/api/forcefield/my-agent-policy" ? okResponse({ ok: false }, 503) : okResponse({ ...STATS, aiVisibility: { days: 30, byPurpose: {}, agents: [] } })));
+    render(<ForcefieldDashboardPage />);
+    await waitFor(() => expect(screen.getByTestId("ff-stats")).toBeInTheDocument());
+    expect(screen.getByTestId("ff-ai-visibility")).toBeInTheDocument();
+    expect(screen.queryByTestId("ff-ai-visibility-control")).toBeNull();
+  });
+});

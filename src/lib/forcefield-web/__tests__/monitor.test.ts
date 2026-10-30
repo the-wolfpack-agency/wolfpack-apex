@@ -1,5 +1,5 @@
 /** @jest-environment node */
-import { forcefieldMonitor, forcefieldGuard } from "@/lib/forcefield-web/monitor";
+import { forcefieldMonitor, forcefieldGuard, fetchSitePolicy, sitePolicyUrl, _resetPolicyCache } from "@/lib/forcefield-web/monitor";
 import { _resetRulesetCache } from "@/lib/forcefield-web/ruleset";
 
 const req = (path: string, ua = "Mozilla/5.0") => ({
@@ -136,7 +136,7 @@ function mockNet(ruleset = DEFAULT_RULESET) {
   });
 }
 const ingestBodies = (f: jest.SpyInstance) =>
-  f.mock.calls.filter(([u]) => !String(u).includes("/ruleset")).map(([, init]) => JSON.parse(String((init as RequestInit).body)));
+  f.mock.calls.filter(([u]) => !/\/ruleset|\/site-policy/.test(String(u))).map(([, init]) => JSON.parse(String((init as RequestInit).body)));
 
 describe("synthetic-monitor attestation (x-forcefield-synthetic)", () => {
   it("is OFF when the env token is unset or shorter than 32 chars", () => {
@@ -335,5 +335,38 @@ describe("forcefieldMonitor verifies a presented Web Bot Auth signature", () => 
     const [ev] = forwarded(f);
     expect(ev.type).toBe("site.agent_welcomed");
     expect(ev.props).toMatchObject({ signed_agent: true, signature_verification: "unverifiable", signature_reason: "agent_not_listed" });
+  });
+});
+
+describe("the site's agent policy, fetched with the site's ingest token", () => {
+  const GPTBOT = "Mozilla/5.0 (compatible; GPTBot/1.2; +https://openai.com/gptbot)";
+  const policyReq = (ua: string) => ({ method: "GET", nextUrl: { pathname: "/" }, headers: new Headers({ "user-agent": ua, "x-vercel-ip-country": "US" }) });
+  beforeEach(() => { _resetPolicyCache(); });
+
+  it("the policy URL comes from the ingest URL's origin, with the site named", () => {
+    expect(sitePolicyUrl("weekendwithporsche", { FORCEFIELD_INGEST_URL: "https://hub.example/api/site-analytics/ingest" } as never)).toBe("https://hub.example/api/forcefield/site-policy?site=weekendwithporsche");
+    expect(sitePolicyUrl("s", { FORCEFIELD_POLICY_URL: "https://p.example/x" } as never)).toBe("https://p.example/x?site=s");
+    expect(sitePolicyUrl("s", {} as never)).toBeNull();
+  });
+
+  it("fetched with x-ingest-token, cached; an error keeps the last policy, none blocks nothing", async () => {
+    const env = { FORCEFIELD_INGEST_URL: "https://hub.example/ingest", SITE_ANALYTICS_INGEST_TOKEN: "secret" } as never;
+    const f = jest.spyOn(global, "fetch").mockResolvedValueOnce(new Response(JSON.stringify({ blockedAgents: ["GPTBot"] })));
+    expect(await fetchSitePolicy("s", env, 0)).toEqual(["GPTBot"]);
+    expect((f.mock.calls[0][1] as RequestInit).headers).toMatchObject({ "x-ingest-token": "secret" });
+    expect(await fetchSitePolicy("s", env, 1000)).toEqual(["GPTBot"]); // cached
+    expect(f).toHaveBeenCalledTimes(1);
+    f.mockRejectedValueOnce(new Error("down"));
+    expect(await fetchSitePolicy("s", env, 10 * 60_000)).toEqual(["GPTBot"]); // last good policy kept
+    expect(await fetchSitePolicy("other", {} as never, 0)).toEqual([]); // nothing configured: allow
+  });
+
+  it("guard: a blocked crawler is turned away when the site enforces; others pass", async () => {
+    enable();
+    process.env.FORCEFIELD_ENFORCE = "on";
+    jest.spyOn(global, "fetch").mockImplementation(async (u) => new Response(JSON.stringify(String(u).includes("site-policy") ? { blockedAgents: ["GPTBot"] } : {})));
+    const d = await forcefieldGuard({ site: "s", req: policyReq(GPTBOT) as never });
+    expect(d).toMatchObject({ block: true, reasonKind: "agent_policy" });
+    expect(await forcefieldGuard({ site: "s", req: policyReq("Mozilla/5.0 (compatible; OAI-SearchBot/1.0)") as never })).toBeNull();
   });
 });

@@ -17,6 +17,8 @@
  *                     nikto, nmap, nuclei, ...).
  *   4. BLOCKED FP   - it matches a fingerprint a human explicitly blocked from
  *                     the board, distributed via the central ruleset.
+ *   5. SITE POLICY  - it is (or claims to be) an AI training crawler the site
+ *                     chose to turn away (opts.blockedAgents).
  * 3 and 4 are skipped for a welcomed agent (unless proven an impersonator) and
  * for a site-attested authenticated request; 1 and 2 never are.
  * Everything else - a normal visitor, a welcomed crawler, a weak "suspicious"
@@ -35,7 +37,9 @@ import type { ForcefieldRuleset } from "./ruleset";
 
 /** "intent" is never returned by decideEnforcement: it is the sticky block the
  *  intent step-up applies to a PROVEN session's follow-on requests (intent.ts). */
-export type BlockReasonKind = "decoy" | "attack_tool" | "payload" | "blocked_fingerprint" | "intent";
+/** "agent_policy": the SITE chose to turn this agent away (an AI training crawler
+ *  on its block list, agent-policy.ts). Not hostile, so never intent proof. */
+export type BlockReasonKind = "decoy" | "attack_tool" | "payload" | "blocked_fingerprint" | "intent" | "agent_policy";
 
 export interface EnforcementDecision {
   /** True only when the request is proven-hostile and should be turned away. */
@@ -337,7 +341,7 @@ export function detectPayload(rawUrl: string): string | null {
 export function decideEnforcement(
   input: EnforceInput,
   ruleset: ForcefieldRuleset,
-  opts: { blockedFingerprints?: readonly string[] } = {},
+  opts: { blockedFingerprints?: readonly string[]; blockedAgents?: readonly string[] } = {},
 ): EnforcementDecision {
   try {
     // 1. Decoy trip - the single highest-confidence bot signal.
@@ -373,6 +377,11 @@ export function decideEnforcement(
     //    PROVEN impersonation: a UA claiming an agent whose vendor publishes
     //    ranges, from an IP outside them.
     if (verdict.class === "known_agent") {
+      // The site's own choice comes first: an agent it turned away is turned away
+      // whether it is the real crawler or someone claiming to be it.
+      if (verdict.matchedAgentId && opts.blockedAgents?.includes(verdict.matchedAgentId)) {
+        return { block: true, reasonKind: "agent_policy", reason: `site policy: ${verdict.matchedAgentId} is not allowed on this site` };
+      }
       const v = verifyAgentByRanges(verdict.matchedAgentId, input.ip, ruleset.verifiedAgentRanges);
       if (v !== "impersonation") return ALLOW;
     }

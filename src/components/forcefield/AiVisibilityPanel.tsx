@@ -7,6 +7,7 @@
  * dashboard via /api/forcefield/my-stats, our own sites via
  * /api/admin/site-analytics/ai-visibility). Renders an explicit empty state.
  */
+import { useState } from "react";
 import { GlassPanel } from "@/components/console";
 
 type Purpose = "ai_training" | "ai_search" | "ai_assistant" | "search_engine" | "other";
@@ -21,6 +22,7 @@ export interface AiVisibilityData {
     requests: number;
     verifiedRequests: number;
     impersonations: number;
+    policyBlocked?: number;
     identity: "verified" | "impersonation" | "unverified";
     pages: number;
     topPages: Array<{ path: string; requests: number }>;
@@ -58,7 +60,61 @@ function identityText(a: AiVisibilityData["agents"][number]): { text: string; co
   return { text: `Not verifiable by its vendor's published ranges${imp}`, color: a.impersonations > 0 ? "#fbbf24" : MUTED };
 }
 
-export function AiVisibilityPanel({ data, testId = "ff-ai-visibility" }: { data: AiVisibilityData; testId?: string }) {
+/** The site's AI training crawler policy, as the panel shows and changes it. */
+export interface TrainingControl {
+  /** Every AI training crawler the site may turn away (agent-policy.ts). */
+  choices: string[];
+  blocked: string[];
+  /** False: shown read-only (a viewer without the permission). */
+  canEdit: boolean;
+  /** Save the new block list; resolves true when it was stored. */
+  save: (blocked: string[]) => Promise<boolean>;
+}
+
+function TrainingControlSection({ control, testId }: { control: TrainingControl; testId: string }) {
+  const [blocked, setBlocked] = useState<string[]>(control.blocked);
+  const [state, setState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const toggle = async (agent: string) => {
+    if (!control.canEdit || state === "saving") return;
+    const next = blocked.includes(agent) ? blocked.filter((a) => a !== agent) : [...blocked, agent].sort();
+    setState("saving");
+    const ok = await control.save(next).catch(() => false);
+    if (ok) { setBlocked(next); setState("saved"); } else setState("error");
+  };
+  return (
+    <div className="mt-5" data-testid={`${testId}-control`}>
+      <h3 className="text-xs uppercase tracking-wide" style={{ color: MUTED }}>AI training crawlers</h3>
+      <p className="mt-1 text-xs" style={{ color: MUTED }}>
+        Choose which may read your pages to train AI models. Turning one away does not change how your site appears in search or in AI answers.
+      </p>
+      <ul className="mt-2 flex flex-col gap-1">
+        {control.choices.map((agent) => {
+          const allowed = !blocked.includes(agent);
+          return (
+            <li key={agent} className="flex items-center justify-between gap-3 rounded-md px-3 py-2 text-sm" style={{ background: "rgba(255,255,255,0.03)" }}>
+              <span>{agent}</span>
+              <label className="flex items-center gap-2 text-xs">
+                <input
+                  type="checkbox"
+                  data-testid={`${testId}-allow-${agent}`}
+                  checked={allowed}
+                  disabled={!control.canEdit || state === "saving"}
+                  onChange={() => void toggle(agent)}
+                />
+                <span style={{ color: allowed ? "#34d399" : "#f87171" }}>{allowed ? "Allowed" : "Turned away"}</span>
+              </label>
+            </li>
+          );
+        })}
+      </ul>
+      <p className="mt-1 text-xs" role="status" data-testid={`${testId}-control-status`} style={{ color: state === "error" ? "#f87171" : MUTED }}>
+        {state === "saving" ? "Saving..." : state === "saved" ? "Saved. Your site applies it within a few minutes." : state === "error" ? "Could not save. Nothing changed; try again." : control.canEdit ? "" : "Only an administrator can change this."}
+      </p>
+    </div>
+  );
+}
+
+export function AiVisibilityPanel({ data, testId = "ff-ai-visibility", control }: { data: AiVisibilityData; testId?: string; control?: TrainingControl }) {
   const present = ORDER.filter((p) => (data.byPurpose[p] ?? 0) > 0 || data.agents.some((a) => a.purpose === p));
   return (
     <GlassPanel testId={testId} padded title="AI agents reading this site" subtitle={`Who read your pages in the last ${data.days} days, for what, and whether each was really who it claimed to be`}>
@@ -94,6 +150,11 @@ export function AiVisibilityPanel({ data, testId = "ff-ai-visibility" }: { data:
                         </span>
                       </div>
                       <div className="mt-1 text-xs" data-testid={`${testId}-identity`} style={{ color: id.color }}>{id.text}</div>
+                      {(a.policyBlocked ?? 0) > 0 ? (
+                        <div className="mt-1 text-xs" data-testid={`${testId}-policy-blocked`} style={{ color: "#f87171" }}>
+                          Turned away by your policy: {(a.policyBlocked ?? 0).toLocaleString()} requests
+                        </div>
+                      ) : null}
                       {a.topPages.length > 0 ? (
                         <div className="mt-1 text-xs break-all" style={{ color: MUTED }}>
                           Most read: {a.topPages.map((t) => `${t.path} (${t.requests.toLocaleString()})`).join(", ")}
@@ -107,6 +168,7 @@ export function AiVisibilityPanel({ data, testId = "ff-ai-visibility" }: { data:
           ))}
         </>
       )}
+      {control ? <TrainingControlSection control={control} testId={testId} /> : null}
     </GlassPanel>
   );
 }

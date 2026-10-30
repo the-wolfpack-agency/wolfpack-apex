@@ -23,7 +23,7 @@ import { useCallback, useEffect, useState } from "react";
 import { GlassPanel, MetricTile, SectionHeader, ConsoleGrid, StatusPill } from "@/components/console";
 import { AlertEmailPanel } from "@/components/forcefield/AlertEmailPanel";
 import { ServerExposurePanel } from "@/components/forcefield/ServerExposurePanel";
-import { AiVisibilityPanel, type AiVisibilityData } from "@/components/forcefield/AiVisibilityPanel";
+import { AiVisibilityPanel, type AiVisibilityData, type TrainingControl } from "@/components/forcefield/AiVisibilityPanel";
 import { attackLabel } from "@/lib/forcefield-web/attack-labels";
 
 const TOKEN_KEY = "ff_dashboard_token";
@@ -95,6 +95,9 @@ export default function ForcefieldDashboardPage() {
   const [data, setData] = useState<MyStatsResponse | null>(null);
   const [setup, setSetup] = useState<MySetupResponse | null>(null);
   const [checking, setChecking] = useState(false);
+  // The site's AI training crawler policy (my-agent-policy). Isolated like the
+  // setup card: a failed read hides the control, never the stats.
+  const [agentPolicy, setAgentPolicy] = useState<{ choices: string[]; blockedAgents: string[] } | null>(null);
   const [status, setStatus] = useState<"idle" | "loading" | "ok" | "unauthorized" | "error">("idle");
 
   // The onboarding payload: the client's copy-paste quick-start + whether we have
@@ -110,6 +113,16 @@ export default function ForcefieldDashboardPage() {
       if (res.ok) setSetup((await res.json()) as MySetupResponse);
     } catch { /* leave setup as-is; the stats view does not depend on it */ }
     setChecking(false);
+  }, []);
+
+  const loadAgentPolicy = useCallback(async (t: string) => {
+    try {
+      const res = await fetch("/api/forcefield/my-agent-policy", { headers: { "x-forcefield-token": t }, cache: "no-store" });
+      if (res.ok) {
+        const b = (await res.json()) as { choices?: string[]; blockedAgents?: string[] };
+        setAgentPolicy({ choices: b.choices ?? [], blockedAgents: b.blockedAgents ?? [] });
+      }
+    } catch { /* the control stays hidden; the stats view does not depend on it */ }
   }, []);
 
   const load = useCallback(async (t: string) => {
@@ -136,10 +149,11 @@ export default function ForcefieldDashboardPage() {
       setStatus("ok");
       try { window.localStorage.setItem(TOKEN_KEY, t); } catch { /* ignore */ }
       void loadSetup(t);
+      void loadAgentPolicy(t);
     } catch {
       setStatus("error");
     }
-  }, [loadSetup]);
+  }, [loadSetup, loadAgentPolicy]);
 
   // Restore a previously-connected token so a returning client lands on their numbers.
   useEffect(() => {
@@ -165,6 +179,7 @@ export default function ForcefieldDashboardPage() {
     setToken("");
     setData(null);
     setSetup(null);
+    setAgentPolicy(null);
     setStatus("idle");
     try { window.localStorage.removeItem(TOKEN_KEY); } catch { /* ignore */ }
   }, []);
@@ -422,7 +437,22 @@ export default function ForcefieldDashboardPage() {
 
             {data?.aiVisibility && (
               <div className="mb-6">
-                <AiVisibilityPanel data={data.aiVisibility} />
+                <AiVisibilityPanel
+                  data={data.aiVisibility}
+                  control={agentPolicy && agentPolicy.choices.length > 0 ? ({
+                    choices: agentPolicy.choices,
+                    blocked: agentPolicy.blockedAgents,
+                    canEdit: true,
+                    save: async (blocked) => {
+                      const res = await fetch("/api/forcefield/my-agent-policy", {
+                        method: "PUT",
+                        headers: { "x-forcefield-token": token, "content-type": "application/json" },
+                        body: JSON.stringify({ blockedAgents: blocked }),
+                      });
+                      return res.ok;
+                    },
+                  } satisfies TrainingControl) : undefined}
+                />
               </div>
             )}
 
