@@ -1,4 +1,7 @@
 /**
+ * PUBLIC: the client's own dashboard has no Instinct session; authorized by the
+ * tenant credential below, never another tenant's.
+ *
  * The client's own AI agent policy: which AI TRAINING crawlers their site turns
  * away (agent-policy.ts). Authorized by the tenant credential (x-forcefield-token,
  * the ingest token or a dashboard session), same posture as my-stats and

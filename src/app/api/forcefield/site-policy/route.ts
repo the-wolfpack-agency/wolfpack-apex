@@ -1,7 +1,8 @@
 /**
  * GET /api/forcefield/site-policy?site=<label>
  *
- * PUBLIC endpoint, authenticated by the SITE's own ingest token (x-ingest-token),
+ * PUBLIC: a site reads its own policy with its ingest token, not a user session.
+ * Authenticated by the SITE's own ingest token (x-ingest-token),
  * the same credential it already uses to send events (ingest-auth.ts): a tenant's
  * token returns that tenant's policy (the site parameter is ignored, a tenant can
  * never read another's); one of our shared tokens returns the policy of the named
