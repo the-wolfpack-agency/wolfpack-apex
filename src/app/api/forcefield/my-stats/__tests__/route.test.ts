@@ -23,6 +23,10 @@ jest.mock("@/lib/forcefield-web/tenants", () => ({
 jest.mock("@/lib/forcefield-web/tenant-activity", () => ({
   getTenantActivity: (...a: unknown[]) => mockActivity(...a),
 }));
+const mockVisibility = jest.fn();
+jest.mock("@/lib/forcefield-web/ai-visibility", () => ({
+  getAiVisibility: (...a: unknown[]) => mockVisibility(...a),
+}));
 jest.mock("@/lib/analytics", () => ({ trackEvent: jest.fn(), trackEventAwait: jest.fn(async () => {}) }));
 jest.mock("@/lib/forcefield-web/public-stats", () => ({
   getPublicForcefieldStats: (...a: unknown[]) => mockStats(...a),
@@ -79,6 +83,22 @@ it("200 with stats scoped to the resolved tenant id", async () => {
   expect(body.stats.agentsDetected).toBe(120);
   // the isolation guarantee: stats were requested for THIS tenant's id only
   expect(mockStats).toHaveBeenCalledWith(30, undefined, "t-abc");
+});
+
+it("200 includes the AI visibility report, scoped to the resolved tenant only", async () => {
+  mockResolve.mockResolvedValueOnce(TENANT);
+  mockStats.mockResolvedValueOnce(STATS);
+  mockBilling.mockResolvedValueOnce(null);
+  mockVisibility.mockResolvedValueOnce({ sinceIso: "x", days: 30, byPurpose: { ai_training: 3 }, agents: [{ agent: "ClaudeBot", requests: 3 }] });
+  const body = await (await GET(req("ff_realtoken"))).json();
+  expect(body.aiVisibility.agents[0].agent).toBe("ClaudeBot");
+  expect(mockVisibility).toHaveBeenCalledWith({ tenantId: "t-abc" }, { days: 30 });
+});
+
+it("401 never reads the AI visibility report", async () => {
+  mockResolve.mockResolvedValueOnce(null);
+  await GET(req("ff_bogus"));
+  expect(mockVisibility).not.toHaveBeenCalled();
 });
 
 it("resolves the tenant using the exact token from the header", async () => {

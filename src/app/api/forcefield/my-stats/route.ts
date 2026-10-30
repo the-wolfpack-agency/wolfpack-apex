@@ -19,6 +19,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveTenantCredential } from "@/lib/forcefield-web/dashboard-session";
 import { getTenantActivity } from "@/lib/forcefield-web/tenant-activity";
+import { getAiVisibility } from "@/lib/forcefield-web/ai-visibility";
 import { getPublicForcefieldStats } from "@/lib/forcefield-web/public-stats";
 import { getTenantBilling, isLicensed } from "@/lib/forcefield-web/billing";
 
@@ -36,6 +37,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   // Who visited: each agent, what it did, how Forcefield handled it (30 days,
   // synthetic monitor traffic excluded). Degrades to empty, never a 500.
   const activity = await getTenantActivity(tenant.id, new Date(Date.now() - 30 * 86400_000).toISOString());
+  // AI visibility: which AI agents and search engines read the site, for what
+  // purpose, which pages, and whether each was really who it claimed. Never throws.
+  const aiVisibility = await getAiVisibility({ tenantId: tenant.id }, { days: 30 });
   // Enforce-to-paid: is this tenant entitled to ACTUALLY block, or watch-only?
   // Drives the honest dashboard labeling ("stopped" vs "caught") + the upgrade
   // prompt. Defaults to watch-only (false) if billing is absent or a read fails,
@@ -47,6 +51,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     tenant: { id: tenant.id, name: tenant.name, siteLabel: tenant.siteLabel },
     stats,
     activity,
+    aiVisibility,
     enforcing,
     plan: billing?.plan ?? "none",
   });

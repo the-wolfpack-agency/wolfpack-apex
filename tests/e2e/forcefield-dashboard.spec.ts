@@ -167,4 +167,56 @@ test.describe("Forcefield client dashboard", () => {
     await expect(page.getByTestId("ff-visitors-table")).toHaveCount(0);
     expect(getFailures(), "no CSP violations or JS errors").toEqual([]);
   });
+
+  const AI = {
+    sinceIso: "2026-10-01T00:00:00Z",
+    days: 30,
+    byPurpose: { ai_training: 471, ai_search: 51, search_engine: 198 },
+    agents: [
+      { agent: "ClaudeBot", vendor: "Anthropic", purpose: "ai_training", requests: 471, verifiedRequests: 0, impersonations: 0, identity: "unverified", pages: 8, topPages: [{ path: "/", requests: 300 }, { path: "/pricing", requests: 50 }], daily: [3, 0, 5], lastSeen: null },
+      { agent: "GPTBot", vendor: "OpenAI", purpose: "ai_training", requests: 0, verifiedRequests: 0, impersonations: 6, identity: "impersonation", pages: 0, topPages: [], daily: [0, 0, 0], lastSeen: null },
+      { agent: "OAI-SearchBot", vendor: "OpenAI", purpose: "ai_search", requests: 51, verifiedRequests: 6, impersonations: 0, identity: "verified", pages: 3, topPages: [{ path: "/", requests: 40 }], daily: [1, 1, 1], lastSeen: null },
+      { agent: "Googlebot", vendor: "Google", purpose: "search_engine", requests: 198, verifiedRequests: 43, impersonations: 0, identity: "verified", pages: 8, topPages: [{ path: "/", requests: 120 }], daily: [2, 2, 2], lastSeen: null },
+    ],
+  };
+
+  for (const viewport of [{ name: "desktop", width: 1280, height: 900 }, { name: "phone", width: 390, height: 844 }]) {
+    test(`AI agents reading this site: purpose, identity and pages (${viewport.name})`, async ({ page }) => {
+      await page.setViewportSize({ width: viewport.width, height: viewport.height });
+      const getFailures = collectConsoleAndNetworkFailures(page);
+      await mockMyStats(page, 200, { ...STATS, aiVisibility: AI });
+      await mockMySetup(page);
+      await mockAlertEmail(page);
+      await mockExposure(page);
+      await page.addInitScript(() => window.localStorage.setItem("ff_dashboard_token", "ff_e2e_token"));
+      const res = await page.goto(`${target.baseUrl}${PATH}`, { waitUntil: "domcontentloaded", timeout: 20_000 });
+      expect(res?.status()).toBe(200);
+      const panel = page.getByTestId("ff-ai-visibility");
+      await expect(panel).toBeVisible();
+      await expect(page.getByTestId("ff-ai-visibility-purpose-ai_training")).toContainText("AI training: 471 requests");
+      await expect(page.getByTestId("ff-ai-visibility-purpose-search_engine")).toContainText("198");
+      const agents = page.getByTestId("ff-ai-visibility-agent");
+      await expect(agents).toHaveCount(4);
+      await expect(page.locator('[data-agent="ClaudeBot"]')).toContainText("Most read: / (300), /pricing (50)");
+      await expect(page.locator('[data-agent="GPTBot"]')).toContainText("Impersonated 6 times");
+      await expect(page.locator('[data-agent="Googlebot"]')).toContainText("Verified (43 of 198 checked)");
+      // no horizontal page scroll at phone width
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+      expect(overflow).toBeLessThanOrEqual(1);
+      expect(getFailures(), "no CSP violations or JS errors").toEqual([]);
+    });
+  }
+
+  test("AI agents reading this site: an explicit empty state", async ({ page }) => {
+    const getFailures = collectConsoleAndNetworkFailures(page);
+    await mockMyStats(page, 200, { ...STATS, aiVisibility: { ...AI, byPurpose: {}, agents: [] } });
+    await mockMySetup(page);
+    await mockAlertEmail(page);
+    await mockExposure(page);
+    await page.addInitScript(() => window.localStorage.setItem("ff_dashboard_token", "ff_e2e_token"));
+    await page.goto(`${target.baseUrl}${PATH}`, { waitUntil: "domcontentloaded", timeout: 20_000 });
+    await expect(page.getByTestId("ff-ai-visibility-empty")).toContainText("No AI agents or search engines");
+    await expect(page.getByTestId("ff-ai-visibility-agent")).toHaveCount(0);
+    expect(getFailures(), "no CSP violations or JS errors").toEqual([]);
+  });
 });
