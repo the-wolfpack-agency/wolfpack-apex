@@ -234,7 +234,7 @@ const b64url = (bytes: ArrayBuffer | Uint8Array) => {
   for (const b of a) s += String.fromCharCode(b);
   return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 };
-const fromB64 = (s: string) => Uint8Array.from(atob(s), (ch) => ch.charCodeAt(0));
+const fromB64 = (s: string): Bytes => Uint8Array.from(atob(s), (ch) => ch.charCodeAt(0));
 
 /** The key's JWK SHA-256 thumbprint (RFC 7638; RFC 8037 A.3 for OKP), the
  *  Web Bot Auth keyid. Null for a key type we do not handle. */
@@ -244,7 +244,9 @@ export async function jwkThumbprint(k: Jwk): Promise<string | null> {
   return b64url(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canon)));
 }
 
-type Verifier = (key: Jwk, signature: Uint8Array, data: Uint8Array) => Promise<boolean>;
+/** Byte arrays backed by a plain ArrayBuffer: what WebCrypto accepts (BufferSource). */
+type Bytes = Uint8Array<ArrayBuffer>;
+type Verifier = (key: Jwk, signature: Bytes, data: Bytes) => Promise<boolean>;
 
 /** Named algorithms (crypto agility). Null = reserved, not verified yet. */
 export const WBA_ALGORITHMS: Readonly<Record<string, Verifier | null>> = {

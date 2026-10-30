@@ -186,7 +186,10 @@ stage_enabled lint      && run_stage "commit-hygiene" npm run check:commit-hygie
 # the same core; this stage names the leak in the gate summary, not inside a
 # 13k-test shard log.
 stage_enabled lint      && run_stage "tenant-isolation" npm run scan:tenant-isolation
-stage_enabled typecheck && run_stage "typecheck"  npx tsc --noEmit
+# --incremental false: never trust tsconfig.tsbuildinfo. The cache skipped changed
+# files and gave a false green twice (a new scripts/*.ts on 2026-10-07; a WebCrypto
+# BufferSource error in web-bot-auth.ts on 2026-10-30 that Vercel's build caught).
+stage_enabled typecheck && run_stage "typecheck"  npx tsc --noEmit --incremental false
 stage_enabled unit      && run_stage "unit-tests" run_unit_tests
 
 # Real-browser guard for the QR download rasterizer (no dev server/DB).
