@@ -24,7 +24,7 @@ jest.mock("@/lib/forcefield/canary-store", () => ({
   createCanary: (...a: unknown[]) => mockCreate(...a),
   deactivateCanary: (...a: unknown[]) => mockDeactivate(...a),
   // The real predicate - the route validates kind through it.
-  isCanaryKind: (v: unknown) => v === "token" || v === "route" || v === "row" || v === "tool",
+  isCanaryKind: (v: unknown) => v === "token" || v === "route" || v === "row" || v === "tool" || v === "login",
 }));
 jest.mock("@/lib/analytics", () => ({ trackEvent: (...a: unknown[]) => mockTrackEvent(...a) }));
 jest.mock("@/lib/audit-log", () => ({ recordAudit: (...a: unknown[]) => mockRecordAudit(...a) }));
@@ -80,6 +80,15 @@ describe("POST /api/admin/forcefield/canaries", () => {
     const res = await POST(req("POST", { kind: "nope", value: "x", seededIn: "y" }));
     expect(res.status).toBe(400);
     expect(mockCreate).not.toHaveBeenCalled();
+  });
+  it("400 on a sign-in canary that is not the canary shape (it could never trip)", async () => {
+    const res = await POST(req("POST", { kind: "login", value: "admin", seededIn: "y" }));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/svc_/);
+  });
+  it("names every kind, login included, when the kind is unknown", async () => {
+    const res = await POST(req("POST", { kind: "bogus", value: "x", seededIn: "y" }));
+    expect((await res.json()).error).toBe("kind must be one of token, route, row, tool, login");
   });
   it("400 when value is missing", async () => {
     expect((await POST(req("POST", { kind: "token", seededIn: "y" }))).status).toBe(400);

@@ -15,6 +15,7 @@ jest.mock("@/lib/client-auth", () => ({
 
 import ForcefieldPage from "../page";
 import { coverageSummary } from "@/lib/forcefield/threat-coverage";
+import { CANARY_KINDS } from "@/lib/forcefield/tripwire";
 
 function resp(status: number, body: unknown): Response {
   return { ok: status >= 200 && status < 300, status, json: async () => body } as unknown as Response;
@@ -32,9 +33,9 @@ function routedFetch() {
     if (url.includes("/forcefield/grid")) {
       canaries = [
         { ...CANARY, id: "a", kind: "token" }, { ...CANARY, id: "b", kind: "route" },
-        { ...CANARY, id: "c", kind: "row" }, { ...CANARY, id: "d", kind: "tool" },
+        { ...CANARY, id: "c", kind: "row" }, { ...CANARY, id: "d", kind: "tool" }, { ...CANARY, id: "e", kind: "login" },
       ];
-      return resp(200, { result: { seeded: [{ kind: "row", placement: "x" }, { kind: "tool", placement: "x" }], alreadyPresent: ["token", "route"], pendingPlacement: [] } });
+      return resp(200, { result: { seeded: [{ kind: "row", placement: "x" }, { kind: "tool", placement: "x" }, { kind: "login", placement: "x" }], alreadyPresent: ["token", "route"], pendingPlacement: [] } });
     }
     if (url.includes("/forcefield/trips")) return resp(200, { trips });
     if (url.includes("/forcefield/canaries")) {
@@ -117,14 +118,15 @@ test("trips empty state reads as the good state", async () => {
 });
 
 test("deception coverage panel: shows kind gaps and reads thin coverage honestly", async () => {
-  canaries = [CANARY]; // only a 'token' decoy -> 3 kinds are gaps
+  canaries = [CANARY]; // only a 'token' decoy -> 4 kinds are gaps
   render(<ForcefieldPage />);
   await waitFor(() => expect(screen.getByTestId("deception-coverage")).toBeInTheDocument());
-  expect(screen.getByTestId("coverage-kinds")).toHaveTextContent("1 / 4");
+  expect(screen.getByTestId("coverage-kinds")).toHaveTextContent("1 / 5");
   expect(screen.getByTestId("coverage-kind-token")).toHaveTextContent(/✓/);
   expect(screen.getByTestId("coverage-kind-route")).toHaveTextContent(/gap/i);
   expect(screen.getByTestId("coverage-kind-row")).toHaveTextContent(/gap/i);
   expect(screen.getByTestId("coverage-kind-tool")).toHaveTextContent(/gap/i);
+  expect(screen.getByTestId("coverage-kind-login")).toHaveTextContent(/gap/i);
   // The whole point: a thin grid is not reassurance.
   expect(screen.getByTestId("coverage-assessment")).toHaveTextContent(/few traps/i);
 });
@@ -135,16 +137,17 @@ test("deception coverage panel: full grid reads low trips as expected-by-design"
     { ...CANARY, id: "b", kind: "route" },
     { ...CANARY, id: "c", kind: "row" },
     { ...CANARY, id: "d", kind: "tool" },
+    { ...CANARY, id: "e", kind: "login" },
   ];
   trips = [TRIP];
   render(<ForcefieldPage />);
   await waitFor(() => expect(screen.getByTestId("deception-coverage")).toBeInTheDocument());
-  expect(screen.getByTestId("coverage-kinds")).toHaveTextContent("4 / 4");
+  expect(screen.getByTestId("coverage-kinds")).toHaveTextContent("5 / 5");
   expect(screen.getByTestId("coverage-assessment")).toHaveTextContent(/expected to be low by design/i);
 });
 
 test("seed-grid button appears only on gaps, POSTs to the grid route, and fills coverage", async () => {
-  canaries = [{ ...CANARY, id: "a", kind: "token" }]; // 3 gaps -> button shows
+  canaries = [{ ...CANARY, id: "a", kind: "token" }]; // 4 gaps -> button shows
   render(<ForcefieldPage />);
   await waitFor(() => expect(screen.getByTestId("coverage-seed-grid")).toBeInTheDocument());
   await act(async () => { fireEvent.click(screen.getByTestId("coverage-seed-grid")); });
@@ -152,7 +155,7 @@ test("seed-grid button appears only on gaps, POSTs to the grid route, and fills 
   const call = mockFetch.mock.calls.find((c) => String(c[0]).includes("/forcefield/grid") && (c[1] as { method?: string })?.method === "POST");
   expect(call).toBeTruthy();
   // ...and after reload the grid is full, so the button (gaps-only) is gone.
-  await waitFor(() => expect(screen.getByTestId("coverage-kinds")).toHaveTextContent("4 / 4"));
+  await waitFor(() => expect(screen.getByTestId("coverage-kinds")).toHaveTextContent("5 / 5"));
   expect(screen.queryByTestId("coverage-seed-grid")).not.toBeInTheDocument();
 });
 
@@ -200,4 +203,12 @@ test("threat coverage panel: the gap count is the computed one, and the closed g
     const callout = screen.queryByTestId("coverage-gaps");
     if (callout) expect(callout).not.toHaveTextContent(id);
   }
+});
+
+test("the seed form offers every canary kind the engine knows (a new kind cannot be left out of the UI)", async () => {
+  render(<ForcefieldPage />);
+  await waitFor(() => expect(screen.getByTestId("seed-kind")).toBeInTheDocument());
+  const offered = Array.from((screen.getByTestId("seed-kind") as HTMLSelectElement).options).map((o) => o.value);
+  expect(offered).toEqual([...CANARY_KINDS]);
+  expect(screen.getByTestId("metric-kinds")).toHaveTextContent(`/ ${CANARY_KINDS.length}`);
 });

@@ -26,12 +26,14 @@
  *  on the same string instead of two drifting literals. */
 export const CANARY_TRIP_RULE_ID = "forcefield.canary_trip";
 
-export type CanaryKind = "token" | "route" | "row" | "tool";
+/** "login": a fake sign-in (service username) planted where only a harvester
+ *  looks; a sign-in attempt with it is proof (canary-login.ts). */
+export type CanaryKind = "token" | "route" | "row" | "tool" | "login";
 
 /** The canonical decoy kinds, in display order. Lives here (the pure tripwire
  *  core, no DB) so read-only consumers can import it without pulling in the
  *  store's database dependencies. */
-export const CANARY_KINDS: readonly CanaryKind[] = ["token", "route", "row", "tool"];
+export const CANARY_KINDS: readonly CanaryKind[] = ["token", "route", "row", "tool", "login"];
 
 export interface Canary {
   id: string;
@@ -140,6 +142,7 @@ const KIND_REASON: Record<CanaryKind, string> = {
   route: "decoy endpoint accessed",
   row: "honey-row reached",
   tool: "honeypot tool invoked",
+  login: "canary sign-in credential used",
 };
 
 /**
