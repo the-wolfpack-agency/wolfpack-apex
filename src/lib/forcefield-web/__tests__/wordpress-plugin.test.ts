@@ -11,6 +11,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { CANARY_LOGIN_RE } from "@/lib/forcefield-web/canary-signin";
+import { integrityPolicy } from "@/lib/forcefield-web/integrity";
 
 const php = readFileSync(
   join(process.cwd(), "integrations", "wordpress", "ogiam-forcefield", "ogiam-forcefield.php"),
@@ -283,5 +284,28 @@ describe("wordpress plugin canary sign-ins", () => {
     expect(fn).toContain("'x-ingest-token' => $token");
     expect(php).toContain("'/api/forcefield/canary/check'");
     expect(fn).toMatch(/'timeout' => 2/);
+  });
+});
+
+describe("wordpress plugin page integrity", () => {
+  const fwd = php.slice(php.indexOf("function ogiam_ff_integrity_forward"), php.indexOf("function ogiam_ff_integrity_route"));
+  const hdr = php.slice(php.indexOf("function ogiam_ff_integrity_header"), php.indexOf("add_action('send_headers'"));
+  it("sends the engine's report-only policy (never an enforcing one), added beside any existing policy", () => {
+    expect(hdr).toContain("header('Content-Security-Policy-Report-Only: ' . ogiam_ff_integrity_policy(), false);");
+    expect(php).not.toMatch(/header\('Content-Security-Policy:/);
+    const m = /return "(.+?) report-uri " \. \$report;/.exec(php);
+    expect(m).not.toBeNull();
+    expect(`${m![1]} report-uri X`).toBe(integrityPolicy({ reportPath: "X" }));
+  });
+  it("is dark until configured and leaves wp-admin alone", () => {
+    expect(hdr).toMatch(/empty\(get_option\('ogiam_ff_token', ''\)\) \|\| is_admin\(\)/);
+  });
+  it("forwards to the engine's integrity endpoint, non-blocking, size-capped, with the request shape only (no cookies, no IP)", () => {
+    expect(fwd).toContain("ogiam_ff_instinct_url('/api/forcefield/integrity')");
+    expect(fwd).toMatch(/'blocking' => false/);
+    expect(fwd).toMatch(/strlen\(\$raw\) <= 16384/);
+    expect(fwd).toContain("'client' => array('userAgent' => $shape['userAgent'], 'headerNames' => $shape['headerNames'])");
+    expect(fwd).not.toMatch(/\$shape\['ip'\]|COOKIE|rawUrl/);
+    expect(fwd).toContain("return new WP_REST_Response(null, 204);");
   });
 });

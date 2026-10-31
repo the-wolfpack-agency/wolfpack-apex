@@ -28,6 +28,7 @@ import { PayloadIntelPanel } from "@/components/forcefield/PayloadIntelPanel";
 import { ProvenAttacksPanel } from "@/components/site-analytics/ProvenAttacksPanel";
 import { AccountableActionsPanel } from "@/components/site-analytics/AccountableActionsPanel";
 import { SiteAiVisibility } from "@/components/site-analytics/SiteAiVisibility";
+import { SitePageIntegrity } from "@/components/site-analytics/SitePageIntegrity";
 import type { ProvenAttacks } from "@/lib/site-analytics-proven";
 import type { AccountableActionsSummary } from "@/lib/site-analytics-accountability";
 import { parseBoardDeepLink } from "@/lib/forcefield-web/board-link";
@@ -780,6 +781,12 @@ export default function SiteAnalyticsPage() {
               site, for what, which pages, and whether each was really who it claimed. */}
           <div style={card} data-testid="admin-ai-visibility-section">
             <SiteAiVisibility site={surface} days={days} />
+          </div>
+
+          {/* Page integrity: what visitors' browsers saw the selected site's pages
+              load from places the site never uses (injected or hijacked scripts). */}
+          <div style={card} data-testid="admin-page-integrity-section">
+            <SitePageIntegrity site={surface} />
           </div>
 
           {/* Probe intelligence + payload attacks. Placed BELOW the agent-traffic

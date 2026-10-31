@@ -319,10 +319,15 @@ function ogiam_ff_guard() {
  * password, so the trap is invisible. Fail-open: a slow or unreachable engine
  * only means nothing is recorded.
  */
-function ogiam_ff_canary_check_url() {
+/** An Instinct endpoint on the same origin as the configured engine URL. */
+function ogiam_ff_instinct_url($path) {
     $u = wp_parse_url(get_option('ogiam_ff_ingest_url', OGIAM_FF_DEFAULT_INGEST));
     if (empty($u['scheme']) || empty($u['host'])) { return ''; }
-    return $u['scheme'] . '://' . $u['host'] . (isset($u['port']) ? ':' . (int) $u['port'] : '') . '/api/forcefield/canary/check';
+    return $u['scheme'] . '://' . $u['host'] . (isset($u['port']) ? ':' . (int) $u['port'] : '') . $path;
+}
+
+function ogiam_ff_canary_check_url() {
+    return ogiam_ff_instinct_url('/api/forcefield/canary/check');
 }
 
 function ogiam_ff_canary_signin($user, $username, $password) {
@@ -338,6 +343,63 @@ function ogiam_ff_canary_signin($user, $username, $password) {
     return $user; // unchanged: WordPress's own checks decide, and fail it
 }
 add_filter('authenticate', 'ogiam_ff_canary_signin', 1, 3);
+
+/**
+ * Page integrity. Public pages carry a REPORT-ONLY Content Security Policy: each
+ * visitor's browser reports a script, frame, connection or form target the page
+ * loads from a place this site does not serve, such as an injected card skimmer.
+ * Report-only means the browser enforces nothing, so no page can break. The
+ * policy is ADDED alongside any the site already sends (never replacing one),
+ * and wp-admin is left alone.
+ *
+ * The browser posts its report to this site's REST route, which forwards it with
+ * the site key to the engine, together with the request shape only (user agent
+ * and header names, as the guard already forwards). The engine keeps the
+ * directive, the blocked origin and the page path; never a full URL or anything
+ * about the visitor. Fail-open and non-blocking: the browser always gets 204.
+ */
+function ogiam_ff_integrity_policy() {
+    $report = esc_url_raw(rest_url('ogiam-forcefield/v1/integrity-report'));
+    return "script-src 'self' 'unsafe-inline' 'unsafe-eval'; frame-src 'self'; connect-src 'self'; form-action 'self'; report-uri " . $report;
+}
+
+function ogiam_ff_integrity_header() {
+    if (empty(get_option('ogiam_ff_token', '')) || is_admin() || headers_sent()) { return; }
+    header('Content-Security-Policy-Report-Only: ' . ogiam_ff_integrity_policy(), false);
+}
+add_action('send_headers', 'ogiam_ff_integrity_header');
+
+function ogiam_ff_integrity_forward($request) {
+    $token = get_option('ogiam_ff_token', '');
+    $url   = ogiam_ff_instinct_url('/api/forcefield/integrity');
+    $raw   = $request->get_body();
+    if (!empty($token) && $url !== '' && is_string($raw) && strlen($raw) <= 16384) {
+        $decoded = json_decode($raw, true);
+        if (is_array($decoded)) {
+            $shape = ogiam_ff_request_shape(false);
+            wp_remote_post($url, array(
+                'timeout'  => 2,
+                'blocking' => false,
+                'headers'  => array('content-type' => 'application/json', 'x-ingest-token' => $token),
+                'body'     => wp_json_encode(array(
+                    'site'   => get_option('ogiam_ff_site', ''),
+                    'raw'    => $decoded,
+                    'client' => array('userAgent' => $shape['userAgent'], 'headerNames' => $shape['headerNames']),
+                )),
+            ));
+        }
+    }
+    return new WP_REST_Response(null, 204);
+}
+
+function ogiam_ff_integrity_route() {
+    register_rest_route('ogiam-forcefield/v1', '/integrity-report', array(
+        'methods'             => 'POST',
+        'callback'            => 'ogiam_ff_integrity_forward',
+        'permission_callback' => '__return_true', // browsers post reports without credentials
+    ));
+}
+add_action('rest_api_init', 'ogiam_ff_integrity_route');
 
 /*
  * Why `init` at priority 0.
