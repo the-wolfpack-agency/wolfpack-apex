@@ -40,6 +40,10 @@ export const AUDIT_ALLOWLIST: ReadonlyArray<AuditAllowlistEntry> = [
     reason: "An Agent Gate decision IS an authorization decision, so it is audited to the OGIAM hash-chained ledger (recordGateDecision -> recordDecision in src/lib/gates/audit.ts), not the recordAudit log - the stronger, tamper-evident home for an allow/transform/escalate/deny verdict, and the one the client verifies. Adding a second recordAudit row would be redundant. Delegated-to-a-downstream-library-that-already-audits case.",
   },
   {
+    route: "src/app/api/forcefield/integrity/route.ts",
+    reason: "Page integrity ingest: browser-side tamper reports forwarded by a protected site, one per visitor page view that loads an unexpected origin. A high-volume observability record (directive, origin, page, session signature) kept in forcefield_page_integrity, not a durable state mutation: it changes no user, permission or configuration. A per-report hash-chained audit row would flood the ledger without compliance value.",
+  },
+  {
     route: "src/app/api/forcefield/canary/check/route.ts",
     reason: "Canary sign-in check: a match is recorded through recordCanaryTrip (src/lib/forcefield/canary-store.ts), which writes the hash-chained audit entry itself, alongside the event and the alert. A non-match writes nothing. Adding a recordAudit row here would duplicate it. Delegated-to-a-downstream-library-that-already-audits case.",
   },

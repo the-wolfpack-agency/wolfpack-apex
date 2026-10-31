@@ -27,6 +27,10 @@ const mockVisibility = jest.fn();
 jest.mock("@/lib/forcefield-web/ai-visibility", () => ({
   getAiVisibility: (...a: unknown[]) => mockVisibility(...a),
 }));
+const mockIntegrity = jest.fn(async (..._a: unknown[]) => ({ learning: null, origins: [], totals: { origins: 0, newOrigins: 0, wouldAlert: 0 } }));
+jest.mock("@/lib/forcefield/page-integrity", () => ({
+  getPageIntegrity: (...a: unknown[]) => mockIntegrity(...a),
+}));
 jest.mock("@/lib/analytics", () => ({ trackEvent: jest.fn(), trackEventAwait: jest.fn(async () => {}) }));
 jest.mock("@/lib/forcefield-web/public-stats", () => ({
   getPublicForcefieldStats: (...a: unknown[]) => mockStats(...a),
@@ -93,6 +97,23 @@ it("200 includes the AI visibility report, scoped to the resolved tenant only", 
   const body = await (await GET(req("ff_realtoken"))).json();
   expect(body.aiVisibility.agents[0].agent).toBe("ClaudeBot");
   expect(mockVisibility).toHaveBeenCalledWith({ tenantId: "t-abc" }, { days: 30 });
+});
+
+it("200 includes the page integrity report, scoped to the resolved tenant only", async () => {
+  mockResolve.mockResolvedValueOnce(TENANT);
+  mockStats.mockResolvedValueOnce(STATS);
+  mockBilling.mockResolvedValueOnce(null);
+  mockIntegrity.mockResolvedValueOnce({ learning: null, origins: [], totals: { origins: 0, newOrigins: 0, wouldAlert: 0 } });
+  const body = await (await GET(req("ff_realtoken"))).json();
+  expect(body.pageIntegrity).toEqual({ learning: null, origins: [], totals: { origins: 0, newOrigins: 0, wouldAlert: 0 } });
+  expect(mockIntegrity).toHaveBeenCalledWith("tenant:t-abc");
+});
+
+it("401 never reads the page integrity report", async () => {
+  mockResolve.mockResolvedValueOnce(null);
+  mockIntegrity.mockClear();
+  await GET(req("ff_bogus"));
+  expect(mockIntegrity).not.toHaveBeenCalled();
 });
 
 it("401 never reads the AI visibility report", async () => {

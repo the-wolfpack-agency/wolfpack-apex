@@ -20,6 +20,7 @@
     "accountability.ts",
     "gateway.ts",
     "web-bot-auth.ts",
-    "canary-signin.ts"
+    "canary-signin.ts",
+    "integrity.ts"
   ]
 }

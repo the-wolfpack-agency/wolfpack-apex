@@ -11,6 +11,7 @@
 import { FORCEFIELD_CONTROL_PLANE_PATHS, detectHeaderAttack } from "@/lib/forcefield-web/enforce";
 import { sitePolicyUrl } from "@/lib/forcefield-web/monitor";
 import { canaryEndpoint } from "@/lib/forcefield-web/canary-signin";
+import { integrityEndpoint } from "@/lib/forcefield-web/integrity";
 
 const HUB = "https://hub.example";
 const env = { FORCEFIELD_INGEST_URL: `${HUB}/api/site-analytics/ingest` } as unknown as NodeJS.ProcessEnv;
@@ -23,6 +24,7 @@ describe("Forcefield control-plane endpoints are exempt from the middleware-bypa
     new URL(sitePolicyUrl("s", env)!).pathname, // the site's agent policy
     new URL(canaryEndpoint("mint", env)!).pathname, // canary sign-ins planted in decoys
     new URL(canaryEndpoint("check", env)!).pathname, // ... and checked at sign-in
+    new URL(integrityEndpoint(env)!).pathname, // visitors' page integrity reports
   ];
 
   it.each(called)("%s is listed", (path) => {

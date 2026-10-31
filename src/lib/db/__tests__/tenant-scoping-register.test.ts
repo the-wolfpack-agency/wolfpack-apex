@@ -117,6 +117,11 @@ const GLOBAL_BY_DESIGN: readonly string[] = [
      CHECK constraint holds its shape. It stores agent ids only (which AI training
      crawlers a site turns away), no client business data. */
   "forcefield_agent_policies",
+  /* Page integrity reports (browser-side tamper reports), keyed by the same
+     CHECK-constrained scope as forcefield_agent_policies: a Forcefield tenant id
+     or one of our site labels, filtered on every read and write. Origins, page
+     paths, directives and hourly session signatures only; no client data. */
+  "forcefield_page_integrity",
   /* Dedupe store for Forcefield-web hostile-signal alerts, computed over the
      GLOBAL site_analytics_events stream (public-site protection). A public-site
      attack has no tenant to attribute, so per-workspace rows would be WRONG: two
@@ -361,8 +366,10 @@ describe("every table declares whether it is tenant-scoped", () => {
        forcefield_server_inventory, one row per Forcefield tenant keyed by
        tenant_id (a child of forcefield_tenants, no workspace). Raised to 11 on
        2026-10-30 for forcefield_agent_policies, keyed by its own scope (a
-       Forcefield tenant id or one of our site labels, CHECK-constrained). */
-    expect(GLOBAL_BY_DESIGN.length).toBeLessThanOrEqual(11);
+       Forcefield tenant id or one of our site labels, CHECK-constrained).
+       Raised to 12 on 2026-10-31 for forcefield_page_integrity, keyed by the
+       same scope. */
+    expect(GLOBAL_BY_DESIGN.length).toBeLessThanOrEqual(12);
     for (const table of GLOBAL_BY_DESIGN) {
       expect(NO_WORKSPACE_COLUMN).not.toContain(table);
     }

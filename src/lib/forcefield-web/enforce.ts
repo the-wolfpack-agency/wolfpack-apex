@@ -291,6 +291,8 @@ export const FORCEFIELD_CONTROL_PLANE_PATHS: ReadonlySet<string> = new Set([
   // a site mints and checks its fake sign-ins here (canary-login.ts in the engine)
   "/api/forcefield/canary/mint",
   "/api/forcefield/canary/check",
+  // a site forwards its visitors' page integrity reports here (integrity.ts)
+  "/api/forcefield/integrity",
 ]);
 
 /**

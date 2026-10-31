@@ -62,6 +62,9 @@ async function stub(page: Page, visibility: { status: number; body: unknown }, p
     return route.fulfill({ status: visibility.status, contentType: "application/json", body: JSON.stringify(visibility.body) });
   });
   await page.route(/\/api\/admin\/forcefield\/(edge-policy|reputation-optin)/, (route) => route.fulfill({ status: 200, contentType: "application/json", body: "{}" }));
+  // The board also loads the selected site's page integrity (its own spec covers it).
+  await page.route(/\/api\/admin\/site-analytics\/page-integrity/, (route) =>
+    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ integrity: { learning: null, origins: [], totals: { origins: 0, newOrigins: 0, wouldAlert: 0 } } }) }));
   return { asked: () => asked, puts: () => puts };
 }
 

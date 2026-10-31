@@ -24,6 +24,7 @@ import { GlassPanel, MetricTile, SectionHeader, ConsoleGrid, StatusPill } from "
 import { AlertEmailPanel } from "@/components/forcefield/AlertEmailPanel";
 import { ServerExposurePanel } from "@/components/forcefield/ServerExposurePanel";
 import { AiVisibilityPanel, type AiVisibilityData, type TrainingControl } from "@/components/forcefield/AiVisibilityPanel";
+import { PageIntegrityPanel, type PageIntegrityData } from "@/components/forcefield/PageIntegrityPanel";
 import { attackLabel } from "@/lib/forcefield-web/attack-labels";
 
 const TOKEN_KEY = "ff_dashboard_token";
@@ -50,6 +51,7 @@ interface MyStatsResponse {
   activity?: Activity;
   /** Which AI agents and search engines read the site, for what, and whether verified. */
   aiVisibility?: AiVisibilityData;
+  pageIntegrity?: PageIntegrityData;
   tenant?: { id: string; name: string; siteLabel: string };
   stats?: Stats;
   /** True when the tenant is licensed to ACTUALLY block; false = watch-only (free
@@ -453,6 +455,12 @@ export default function ForcefieldDashboardPage() {
                     },
                   } satisfies TrainingControl) : undefined}
                 />
+              </div>
+            )}
+
+            {data?.pageIntegrity && (
+              <div className="mb-6">
+                <PageIntegrityPanel data={data.pageIntegrity} />
               </div>
             )}
 

@@ -108,7 +108,10 @@ export const DEFAULT_STATE_CHANGE_RULES: StateChangeRules = {
     { pattern: "/wp-comments-post.php", kind: "comment" },
   ],
   siteRoutes: {},
-  ignorePaths: ["/api/site-analytics", "/api/forcefield", "/_vercel", "/monitoring", "/cdn-cgi"],
+  // Our own telemetry, never a visitor's action: the site's report routes (a
+  // browser posts a page integrity report under /api/forcefield, and under the
+  // WordPress plugin's own REST namespace) would otherwise log one per page view.
+  ignorePaths: ["/api/site-analytics", "/api/forcefield", "/wp-json/ogiam-forcefield", "/_vercel", "/monitoring", "/cdn-cgi"],
   recordAttested: false,
 };
 
