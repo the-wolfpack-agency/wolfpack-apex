@@ -73,8 +73,11 @@ describe("grouping", () => {
 });
 
 describe("routing", () => {
-  it("decoy -> immediate; not stopped -> immediate; blocked or contained only -> digest", () => {
-    expect(attentionReasons([g({ kind: "honeytoken_trip", attackClass: "honeytoken_trip", outcome: "contained" })])).toEqual(["decoy"]);
+  it("a decoy trip not stopped -> immediate; not stopped -> immediate; blocked or contained only (decoy trips included) -> digest", () => {
+    expect(attentionReasons([g({ kind: "honeytoken_trip", attackClass: "honeytoken_trip", outcome: "recorded" })])).toEqual(["decoy", "unblocked"]);
+    expect(attentionReasons([g({ kind: "honeytoken_trip", attackClass: "honeytoken_trip", outcome: "contained" })])).toEqual([]);
+    expect(attentionReasons([g({ kind: "honeytoken_trip", attackClass: "honeytoken_trip", outcome: "blocked" })])).toEqual([]);
+    expect(buildIncidents([g({ kind: "honeytoken_trip", attackClass: "honeytoken_trip", outcome: "contained" })])[0]).toMatchObject({ route: "digest", attention: [] });
     expect(attentionReasons([g({ outcome: "recorded" })])).toEqual(["unblocked"]);
     expect(attentionReasons([g(), g({ outcome: "contained" })])).toEqual([]);
     expect(buildIncidents([g()])[0].route).toBe("digest");
@@ -127,7 +130,7 @@ describe("buildDigest", () => {
       g({ fp: "a", count: 3, attackClass: "xss" }),
       g({ fp: "a", count: 2, attackClass: "sql_injection" }),
       g({ site: "ogiam.com", fp: "b", count: 1, windowStart: "2026-10-26T18:00:00.000Z", firstAt: "2026-10-26T19:00:00.000Z" }),
-      g({ site: "ogiam.com", fp: "c", kind: "honeytoken_trip", attackClass: "honeytoken_trip", outcome: "contained", firstAt: "2026-10-26T13:00:00.000Z" }),
+      g({ site: "ogiam.com", fp: "c", kind: "honeytoken_trip", attackClass: "honeytoken_trip", outcome: "recorded", firstAt: "2026-10-26T13:00:00.000Z" }),
     ]);
     const d = buildDigest(inc, period);
     expect(d.totals).toEqual({ incidents: 2, attempts: 6, sites: 2, sources: 2 });

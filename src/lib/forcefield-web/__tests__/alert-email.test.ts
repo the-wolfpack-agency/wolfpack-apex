@@ -389,10 +389,10 @@ describe("daily digest email", () => {
   });
 
   it("counts incidents emailed immediately without repeating them", () => {
-    const a = digestAlert([...groups(), grp({ kind: "honeytoken_trip", attackClass: "honeytoken_trip", outcome: "contained", fp: "t", sig: "t", firstAt: "2026-10-26T20:00:00.000Z", windowStart: "2026-10-26T18:00:00.000Z" })]);
+    const a = digestAlert([...groups(), grp({ kind: "honeytoken_trip", attackClass: "honeytoken_trip", outcome: "recorded", fp: "t", sig: "t", firstAt: "2026-10-26T20:00:00.000Z", windowStart: "2026-10-26T18:00:00.000Z" })]);
     const e = op(a);
     expect(a.digest!.totals.incidents).toBe(2);
-    expect(e.text).toContain("Sent immediately: 1 incident (decoy trips or requests not blocked), emailed when they happened");
+    expect(e.text).toContain("Sent immediately: 1 incident (requests not blocked, decoy trips included), emailed when they happened");
   });
 });
 

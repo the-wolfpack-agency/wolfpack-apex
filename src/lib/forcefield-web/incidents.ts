@@ -15,12 +15,13 @@
  * request, so the burst rule is what keeps a 16-second scan one incident.
  *
  * Routing:
- *   - immediate: the incident needs attention now. A decoy or honeytoken trip
- *     (proven hostile reached hidden content), or ANY request that was recorded
- *     but not stopped (watch / report-only posture). A mixed burst with one
- *     unblocked request is immediate, and the email lists every class in it.
- *   - digest: every request was blocked or contained. Reported once, in the
- *     daily digest that covers the incident's window.
+ *   - immediate: the incident needs attention now: ANY request that was
+ *     recorded but not stopped (watch / report-only posture), including a decoy
+ *     or honeytoken trip that was not stopped. A mixed burst with one unblocked
+ *     request is immediate, and the email lists every class in it.
+ *   - digest: every request was blocked or contained, decoy and honeytoken
+ *     trips included (the trap did its job). Reported once, in the daily digest
+ *     that covers the incident's window.
  *
  * Digest period: windows are aligned to 00/06/12/18 UTC. The digest for US
  * Eastern date D covers windows starting in [cutoff(D-1), cutoff(D)), where
@@ -200,7 +201,11 @@ function groupOrder(a: HostileEventGroup, b: HostileEventGroup): number {
 /** Why an incident needs attention now (empty = digest only). */
 export function attentionReasons(groups: readonly HostileEventGroup[]): AttentionReason[] {
   const out: AttentionReason[] = [];
-  if (groups.some((g) => g.kind === "honeytoken_trip")) out.push("decoy");
+  // A trip that was blocked, or served a decoy and slowed down (contained), is
+  // the trap working: it goes in the digest. Only a trip that was recorded but
+  // not stopped needs someone now (operator, 2026-11-06: an immediate email per
+  // contained trip buried the alerts that matter).
+  if (groups.some((g) => g.kind === "honeytoken_trip" && g.outcome === "recorded" && g.count > 0)) out.push("decoy");
   if (groups.some((g) => g.outcome === "recorded" && g.count > 0)) out.push("unblocked");
   return out;
 }

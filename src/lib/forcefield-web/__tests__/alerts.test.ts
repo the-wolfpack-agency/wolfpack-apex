@@ -121,13 +121,19 @@ const AT_1430 = new Date("2026-10-26T14:30:00Z");
 beforeEach(() => jest.clearAllMocks());
 
 describe("severity routing", () => {
-  it("a decoy trip is immediate, even when it was contained", async () => {
+  it("a contained decoy trip goes to the digest, not an immediate email (the trap worked)", async () => {
     const m = memoryDeps([ev({ kind: "honeytoken_trip", attackClass: "honeytoken_trip", outcome: "contained", reasonKind: "decoy", site: "ogiam.com", path: "/_ff/records" })]);
+    const r = await scanForcefieldWebAlerts(m.deps, AT_1430);
+    expect(r).toMatchObject({ detected: 1, immediate: 0, digestOnly: 1 });
+    expect(m.sent.filter((s: { kind: string }) => s.kind === "hostile_incident")).toEqual([]);
+  });
+
+  it("a decoy trip that was NOT stopped is still immediate", async () => {
+    const m = memoryDeps([ev({ kind: "honeytoken_trip", attackClass: "honeytoken_trip", outcome: "recorded", posture: "monitor", reasonKind: "decoy", site: "ogiam.com", path: "/_ff/records" })]);
     const r = await scanForcefieldWebAlerts(m.deps, AT_1430);
     expect(r).toMatchObject({ detected: 1, immediate: 1, digestOnly: 0, dispatched: 1, delivered: 1 });
     expect(m.sent[0].kind).toBe("hostile_incident");
-    expect(m.sent[0].attention).toEqual(["decoy"]);
-    expect(m.sent[0].title).toBe("[Forcefield] ogiam.com: hostile agent contained (decoy)");
+    expect(m.sent[0].attention).toEqual(["decoy", "unblocked"]);
   });
 
   it("a request recorded but not blocked (watch / report-only) is immediate", async () => {
@@ -248,7 +254,7 @@ describe("daily digest", () => {
   });
 
   it("an immediate incident is not repeated in the digest (counted as sent immediately)", async () => {
-    const m = memoryDeps([ev({ kind: "honeytoken_trip", attackClass: "honeytoken_trip", outcome: "contained", fp: "x", sig: "y", firstAt: "2026-10-26T20:00:00.000Z" }), ...scannerBurst()]);
+    const m = memoryDeps([ev({ kind: "honeytoken_trip", attackClass: "honeytoken_trip", outcome: "recorded", posture: "monitor", fp: "x", sig: "y", firstAt: "2026-10-26T20:00:00.000Z" }), ...scannerBurst()]);
     await runDailyDigest(m.deps, DUE);
     expect(m.sent[0].digest!.totals.incidents).toBe(1);
     expect(m.sent[0].digest!.immediateIncidents).toBe(1);
@@ -529,7 +535,7 @@ describe("lookupBlockDecision (reads what was recorded)", () => {
 });
 
 describe("one email per incident, with the block decision", () => {
-  const trap = () => ev({ kind: "honeytoken_trip", attackClass: "honeytoken_trip", outcome: "contained", reasonKind: "decoy", site: "ogiam.com", fp: "aaaa1111:browser", sig: "bbbb2222", path: "/_ff/records", country: "IS", firstAt: "2026-10-26T10:05:37.367Z" });
+  const trap = () => ev({ kind: "honeytoken_trip", attackClass: "honeytoken_trip", outcome: "recorded", posture: "monitor", reasonKind: "decoy", site: "ogiam.com", fp: "aaaa1111:browser", sig: "bbbb2222", path: "/_ff/records", country: "IS", firstAt: "2026-10-26T10:05:37.367Z" });
 
   it("a trap trip whose automatic block was withheld produces ONE email carrying the decision", async () => {
     mockFanout.mockResolvedValue({ recipientCount: 1, skipped: 0 });
@@ -542,7 +548,7 @@ describe("one email per incident, with the block decision", () => {
     await scanForcefieldWebAlerts(m.deps, at);
     expect(mockSendViaGraph).toHaveBeenCalledTimes(1);
     const mail = mockSendViaGraph.mock.calls[0][0];
-    expect(mail.subject).toBe("[Forcefield] ogiam.com: hostile agent contained (decoy)");
+    expect(mail.subject).toBe("[Forcefield] ogiam.com: hostile agent recorded, not blocked (decoy)");
     expect(mail.text).toContain("Why we did not block this visitor everywhere");
     expect(mail.text).toContain("When: 2026-10-26 10:05:37 UTC");
     expect(mail.html).toContain("https://wolfpack-instinct.vercel.app/admin/site-analytics?tab=forcefield&amp;view=operator&amp;find=bbbb2222&amp;days=7&amp;site=ogiam.com");

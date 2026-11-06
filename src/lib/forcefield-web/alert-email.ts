@@ -790,7 +790,7 @@ function renderDigest(alert: ForcefieldAlert, d: DigestData, opts: RenderOptions
     { label: "Incidents", value: t.incidents.toLocaleString("en-US") },
     { label: "Attempts", value: t.attempts.toLocaleString("en-US") },
     { label: "Sources", value: t.sources > 0 ? `${t.sources.toLocaleString("en-US")} distinct fingerprints` : "Fingerprint not recorded" },
-    { label: "Sent immediately", value: d.immediateIncidents > 0 ? `${plural(d.immediateIncidents, "incident")} (decoy trips or requests not blocked), emailed when they happened` : "None in this period" },
+    { label: "Sent immediately", value: d.immediateIncidents > 0 ? `${plural(d.immediateIncidents, "incident")} (requests not blocked, decoy trips included), emailed when they happened` : "None in this period" },
   ];
   const rowHtml = (rows: Row[]) => rows.map((r) => `<tr><td valign="top" style="padding:9px 12px 9px 0;border-top:1px solid ${C.line};font-family:${FONT};font-size:13px;line-height:19px;color:${C.muted};width:132px;white-space:nowrap;">${e(r.label)}</td><td valign="top" style="padding:9px 0;border-top:1px solid ${C.line};font-family:${FONT};font-size:14px;line-height:19px;color:${C.ink};word-break:break-word;">${e(r.value)}</td></tr>`).join("");
   const siteSummary = (s: DigestData["sites"][number]) =>
