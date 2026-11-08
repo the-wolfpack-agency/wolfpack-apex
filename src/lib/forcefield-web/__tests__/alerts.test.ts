@@ -42,7 +42,7 @@ import {
   type DeliveryOutcome,
   type DigestRowStatus,
 } from "../alerts";
-import { buildIncidents, digestResumeFrom, type HostileEventGroup } from "../incidents";
+import { attentionReasons, buildIncidents, digestResumeFrom, type HostileEventGroup } from "../incidents";
 
 const OK: DeliveryOutcome = { status: "delivered", inAppRecipients: 1, emailAttempted: 1, emailDelivered: 1, detail: "" };
 const FAIL: DeliveryOutcome = { status: "failed", inAppRecipients: 0, emailAttempted: 1, emailDelivered: 0, detail: "email:no_mail_from" };
@@ -457,6 +457,17 @@ describe("our own synthetic probes are never alerted on or counted", () => {
     await liveForcefieldAlertDeps().countHostileEventsBetween("a", "b");
     for (const i of [0, 1]) expect(String(mockSafeQuery.mock.calls[i][0])).toContain(EXCLUDE_SYNTHETIC_SQL);
     expect(String(mockSafeQuery.mock.calls[0][0])).toContain(ATTENTION_SQL);
+  });
+
+  it("the silence check counts as needing attention exactly what the routing alerts on immediately: a request not stopped, a trap trip included, never a blocked or contained one", () => {
+    // the routing (attentionReasons): only a recorded (not stopped) group needs attention, a trip included
+    const g = (kind: string, outcome: string) => ({ kind, outcome, count: 1 }) as never;
+    expect(attentionReasons([g("honeytoken_trip", "contained")])).toEqual([]);
+    expect(attentionReasons([g("honeytoken_trip", "blocked")])).toEqual([]);
+    expect(attentionReasons([g("honeytoken_trip", "recorded")]).length).toBeGreaterThan(0);
+    // the count: the not-stopped rule alone; a trip is not counted for being a trip
+    expect(ATTENTION_SQL).not.toMatch(/agent_trap_tripped/);
+    for (const stop of ["props->>'blocked'", "props->>'tarpit'", "props->>'action'"]) expect(ATTENTION_SQL).toContain(stop);
   });
 
   it("the exemption keys on the token-attested mark only, never the user agent", async () => {

@@ -530,8 +530,10 @@ export const EXCLUDE_SYNTHETIC_SQL = `COALESCE(props->>'synthetic', '') <> 'true
 /** A request that was neither blocked nor sent into the decoy maze. */
 const NOT_STOPPED_SQL = `COALESCE(props->>'blocked', '') <> 'true' AND COALESCE(props->>'tarpit', '') <> 'true' AND COALESCE(props->>'action', '') <> 'tarpit'`;
 
-/** Needs attention: a trap trip, or any request not stopped. */
-export const ATTENTION_SQL = `(event_type = 'site.agent_trap_tripped' OR (${NOT_STOPPED_SQL}))`;
+/** Needs attention: a request recorded but not stopped, the same rule as attentionReasons
+ *  (incidents.ts). A trap trip that was blocked or contained goes in the digest since #1282, so
+ *  counting every trip here raised "no alert reached anyone" for a contained trip (2026-11-08). */
+export const ATTENTION_SQL = `(${NOT_STOPPED_SQL})`;
 
 /** The alert row id (same derivation as the dedupe store), shown in the email
  *  footer so a reader can find the row. */
