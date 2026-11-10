@@ -6,10 +6,11 @@
  *
  * Asks Azure Cost Management for daily cost per resource over the last nine
  * days, keeps the AI services (Cognitive Services, Azure OpenAI, AI Foundry
- * "Foundry Models", Machine Learning, Copilot Studio) and flags a resource
- * whose latest day is more than 3x its trailing 7-day mean and over $5, or an
- * AI resource that has just appeared; and any model deployment whose name says
- * one model while it serves another. Rules: scripts/security/lib/ai-spend.ts.
+ * "Foundry Models", Machine Learning, Copilot Studio) and lists, as info only,
+ * a resource whose latest day is more than 3x its trailing 7-day mean and over
+ * $5, or an AI resource that has just appeared (usage, including our regular
+ * testing, never fails the check); and fails on any model deployment whose
+ * name says one model while it serves another. Rules: scripts/security/lib/ai-spend.ts.
  *
  * READ-ONLY: the Cost Management "query" endpoint is a POST that only reads.
  * Needs Cost Management Reader on each subscription, and Reader on the AI
@@ -154,8 +155,8 @@ async function main(): Promise<number> {
     ...report.stats,
   };
   report.notes.push(
-    "Thresholds: spike = latest day > 3x the trailing 7-day mean and > $5; new = AI resource with spend on the latest day and none in the 7 days before.",
-    "Cost Management data lags usage by several hours to a day, so a spike shows on the next morning's run, not in real time. A per-resource budget alert in Azure is the faster backstop.",
+    "Spend rises with usage (testing, releases, demos), so a rise (latest day > 3x the trailing 7-day mean and > $5) or a new AI resource is listed as info and never fails the check. Only a deployment serving a different model than its name fails it.",
+    "Cost Management data lags usage by several hours to a day, so a rise shows on the next morning's run, not in real time. A per-resource budget alert in Azure is the faster backstop.",
   );
   return emitReport(report, opts);
 }
