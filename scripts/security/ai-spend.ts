@@ -8,16 +8,18 @@
  * days, keeps the AI services (Cognitive Services, Azure OpenAI, AI Foundry
  * "Foundry Models", Machine Learning, Copilot Studio) and flags a resource
  * whose latest day is more than 3x its trailing 7-day mean and over $5, or an
- * AI resource that has just appeared. Rules: scripts/security/lib/ai-spend.ts.
+ * AI resource that has just appeared; and any model deployment whose name says
+ * one model while it serves another. Rules: scripts/security/lib/ai-spend.ts.
  *
  * READ-ONLY: the Cost Management "query" endpoint is a POST that only reads.
- * Needs Cost Management Reader (or Reader) on each subscription. Locally that
+ * Needs Cost Management Reader on each subscription, and Reader on the AI
+ * resources for the deployment check. Locally that
  * is `az login`; in Actions, azure/login with GitHub OIDC (AZURE_CLIENT_ID,
  * AZURE_TENANT_ID, optional AZURE_SUBSCRIPTION_ID secrets). Without a token
  * the check reports SKIPPED and exits 0.
  */
-import { az, apiQuery, getToken } from "./lib/azure";
-import { aiSpendFindings, parseCostQuery, shiftDay, summarizeAiSpend, type CostRow } from "./lib/ai-spend";
+import { az, apiGet, apiQuery, getToken } from "./lib/azure";
+import { aiSpendFindings, deploymentFindings, parseCostQuery, shiftDay, summarizeAiSpend, type CostRow, type ModelDeployment } from "./lib/ai-spend";
 import { emitReport, newReport, parseCliOptions } from "./lib/report";
 
 const ARM = "https://management.azure.com";
@@ -37,6 +39,38 @@ async function subscriptions(): Promise<{ id: string; name: string }[]> {
   } catch {
     return [];
   }
+}
+
+interface ArmList<T> { value: T[]; nextLink?: string | null }
+interface Account { id: string; kind?: string }
+interface Deployment { name: string; sku?: { name?: string }; properties?: { model?: { name?: string; version?: string } } }
+
+/** Every Cognitive Services account's model deployments in one subscription (needs Reader on them). */
+async function modelDeployments(sub: { id: string; name: string }, token: string, notes: string[]): Promise<ModelDeployment[]> {
+  // the generic resource list: the provider's own account list can answer an empty list for a
+  // subscription that holds accounts
+  const list: Account[] = [];
+  let url: string | null = `${ARM}/subscriptions/${sub.id}/resources?api-version=2021-04-01&$filter=${encodeURIComponent("resourceType eq 'Microsoft.CognitiveServices/accounts'")}`;
+  while (url) {
+    const page: Awaited<ReturnType<typeof apiGet<ArmList<Account>>>> = await apiGet<ArmList<Account>>(url, token);
+    if (!page.ok) {
+      notes.push(`${sub.name}: model deployments NOT checked (listing AI accounts: ${page.status}: ${page.message.slice(0, 150)}). Grant the identity Reader on the AI resources.`);
+      return [];
+    }
+    list.push(...page.data.value);
+    url = page.data.nextLink ?? null;
+  }
+  if (!list.length) notes.push(`${sub.name}: no AI accounts visible, so no model deployment was checked. If the subscription has any, grant the identity Reader on them.`);
+  const out: ModelDeployment[] = [];
+  for (const a of list) {
+    const deps = await apiGet<ArmList<Deployment>>(`${ARM}${a.id}/deployments?api-version=2024-10-01`, token);
+    if (!deps.ok) {
+      notes.push(`${sub.name}: deployments of ${a.id.split("/").pop()} NOT checked (${deps.status}).`);
+      continue;
+    }
+    for (const d of deps.data.value) out.push({ accountId: a.id, name: d.name, model: d.properties?.model?.name ?? "", version: d.properties?.model?.version ?? "", sku: d.sku?.name ?? "" });
+  }
+  return out;
 }
 
 async function main(): Promise<number> {
@@ -102,12 +136,21 @@ async function main(): Promise<number> {
     }
     report.findings.push(...aiSpendFindings(spend, lastDay, sub.name));
   }
+
+  // Each model deployment's name against the model it serves (rules: deploymentFindings).
+  let deploymentsChecked = 0;
+  for (const sub of subs) {
+    const deployments = await modelDeployments(sub, token, report.notes);
+    deploymentsChecked += deployments.length;
+    report.findings.push(...deploymentFindings(deployments));
+  }
   report.stats = {
     token_source: reason,
     subscriptions: subs.map((s) => s.name).join(", "),
     window: `${from} to ${to}`,
     ai_resources_with_cost: aiResources,
     ai_cost_latest_day_usd: totalAiLastDay.toFixed(2),
+    model_deployments_checked: deploymentsChecked,
     ...report.stats,
   };
   report.notes.push(

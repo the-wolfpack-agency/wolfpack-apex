@@ -32,15 +32,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      HAS_AZURE: ${{ secrets.AZURE_CLIENT_ID != '' && secrets.AZURE_TENANT_ID != '' }}
+      # the shared read-only identity also runs the AI spend tripwire; this audit additionally needs its
+      # two Graph permissions, so it runs only once the repository variable ENTRA_AUDIT_ENABLED is true
+      HAS_AZURE: ${{ secrets.AZURE_CLIENT_ID != '' && secrets.AZURE_TENANT_ID != '' && vars.ENTRA_AUDIT_ENABLED == 'true' }}
     steps:
-      - name: Skip until AZURE_CLIENT_ID and AZURE_TENANT_ID are configured
+      - name: Skip until the identity and ENTRA_AUDIT_ENABLED are configured
         if: env.HAS_AZURE != 'true'
         run: |
           {
             echo "## Security check: entra-audit"
             echo ""
-            echo "**SKIPPED.** Add repository secrets AZURE_CLIENT_ID and AZURE_TENANT_ID for the read-only OIDC identity (Graph Application.Read.All + AuditLog.Read.All). Steps: docs/security/scheduled-checks.md"
+            echo "**SKIPPED.** Add repository secrets AZURE_CLIENT_ID and AZURE_TENANT_ID for the read-only OIDC identity, grant it Graph Application.Read.All + AuditLog.Read.All, then set the repository variable ENTRA_AUDIT_ENABLED to true. Steps: docs/security/scheduled-checks.md"
           } >> "$GITHUB_STEP_SUMMARY"
           echo "::notice::security:entra-audit skipped: Azure OIDC secrets are not configured."
 

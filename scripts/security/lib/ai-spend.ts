@@ -137,3 +137,45 @@ export function aiSpendFindings(spend: ResourceSpend[], lastDay: string, subscri
   }
   return out;
 }
+
+/**
+ * A model deployment whose NAME says one model while it SERVES another.
+ *
+ * WHY. Code picks a model by deployment name. A deployment named for a cheap
+ * model that serves a dearer one bills every call at the dearer price (gpt-4o
+ * costs about 16x gpt-4o-mini), and no spend threshold notices a steady cost
+ * that was always there. Nothing else compares the name with the model.
+ *
+ *   mismatch: the name reads as a model id and the served model is not that
+ *             model (normalized: the model name equals the deployment name or
+ *             extends it, so "Deepseek-v3" serving DeepSeek-V3.2 is fine and
+ *             "gpt-4o-mini" serving gpt-4o is not)                   -> high
+ */
+export interface ModelDeployment {
+  accountId: string;
+  name: string;
+  model: string;
+  version: string;
+  sku: string;
+}
+
+/** A deployment name that a caller would read as a model id. */
+const MODEL_NAME_RE = /gpt|\bo[1-9]|deepseek|llama|mistral|phi|embedding|dall-?e|whisper|tts|grok|claude/i;
+const normModel = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+export function deploymentNameMismatch(d: Pick<ModelDeployment, "name" | "model">): boolean {
+  if (!d.model || !MODEL_NAME_RE.test(d.name)) return false;
+  const name = normModel(d.name);
+  const model = normModel(d.model);
+  return !(model === name || model.startsWith(name));
+}
+
+export function deploymentFindings(deployments: ModelDeployment[]): Finding[] {
+  return deployments.filter(deploymentNameMismatch).map((d) => ({
+    severity: "high" as const,
+    rule: "ai-spend.deployment-model-mismatch",
+    subject: `${resourceName(d.accountId)} / ${d.name}`,
+    detail: `Deployment "${d.name}" serves ${d.model} ${d.version} (${d.sku}). Code that picks it by name expects a different model, and is billed for ${d.model}. Redeploy it with the model its name says, or rename it and point the callers at the new name.`,
+    source: `https://portal.azure.com/#@/resource${d.accountId}/overview`,
+  }));
+}

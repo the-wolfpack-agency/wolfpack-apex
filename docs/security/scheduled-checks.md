@@ -5,8 +5,8 @@ Checks that used to be done by hand now run on a schedule and on demand. Each on
 | Check | Command | Schedule | Workflow | Needs |
 | --- | --- | --- | --- | --- |
 | Supply chain | `npm run security:supply-chain` | daily | `security-supply-chain.yml` | `SECURITY_AUDIT_GH_TOKEN` |
-| Entra app audit | `npm run security:entra-audit` | monthly (1st) | `security-entra-audit.yml` | `AZURE_CLIENT_ID`, `AZURE_TENANT_ID` |
-| AI spend tripwire | `npm run security:ai-spend` | daily | `security-ai-spend.yml` | same Azure identity, plus Cost Management Reader |
+| Entra app audit | `npm run security:entra-audit` | monthly (1st) | `security-entra-audit.yml` | `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, its Graph permissions, and the repository variable `ENTRA_AUDIT_ENABLED=true` |
+| AI spend tripwire | `npm run security:ai-spend` | daily | `security-ai-spend.yml` | same Azure identity, plus Cost Management Reader on the subscription and Reader on the AI resources |
 | Deployed surface | `npm run security:surface` | weekly, every release, after deploys | `security-surface.yml` | nothing |
 | Public artifacts | `npm run security:public-artifacts` | daily, after each E2E workflow | `security-public-artifacts.yml` | `SECURITY_AUDIT_GH_TOKEN` (plus Actions: read) |
 
@@ -28,7 +28,7 @@ Two limits are printed in every report:
 - The sign-in rule needs the sign-in activity report, which needs an Entra ID P1 or P2 license. On 2026-10-24 our tenant had neither, and the report's newest entry for any app was 2026-03-03. The check detects a stale report and says the rule was not evaluated rather than calling every app unused.
 - Mail scoping in Exchange cannot be read through Graph. See the Exchange step in [monthly-review.md](monthly-review.md).
 
-**AI spend**: daily cost per Azure AI resource (Cognitive Services, Azure OpenAI, AI Foundry, Machine Learning, Copilot Studio) for the last nine days. Flags a resource whose latest day is more than 3 times its 7-day average and more than $5, and any AI resource that has just appeared. Cost data lags by up to a day, so this catches a stolen key the morning after, not the minute after.
+**AI spend**: daily cost per Azure AI resource (Cognitive Services, Azure OpenAI, AI Foundry, Machine Learning, Copilot Studio) for the last nine days. Flags a resource whose latest day is more than 3 times its 7-day average and more than $5, and any AI resource that has just appeared. Cost data lags by up to a day, so this catches a stolen key the morning after, not the minute after. It also reads every model deployment and flags one whose name says one model while it serves another (high): a deployment named `gpt-4o-mini` that serves gpt-4o bills code that chose it as the cheap model at about 16 times the price.
 
 **Deployed surface**: for each site in `scripts/security/surface-sites.json`, the security headers (CSP, HSTS, `X-Content-Type-Options`, frame protection, `Referrer-Policy`), no version banner in `X-Powered-By` or `Server`, `/.env` and `/.git/config` not served, `/_next/image` refusing to fetch an outside URL, and a protected path that stays refused when the request carries `x-middleware-subrequest` (the Next.js middleware bypass, CVE-2025-29927).
 
@@ -110,11 +110,17 @@ az ad app permission admin-consent --id "$APP_ID"
 az role assignment create --assignee "$APP_ID" --role "Cost Management Reader" \
   --scope "/subscriptions/<subscription-id>"
 
+# 5b. Model deployments, read-only, for the deployment-name check (the resource group holding the AI accounts)
+az role assignment create --assignee "$APP_ID" --role "Reader" \
+  --scope "/subscriptions/<subscription-id>/resourceGroups/<ai-resource-group>"
+
 # 6. Tell the workflows who to sign in as
 gh secret set AZURE_CLIENT_ID       -R the-wolfpack-agency/wolfpack-apex --body "$APP_ID"
 gh secret set AZURE_TENANT_ID       -R the-wolfpack-agency/wolfpack-apex --body "<tenant-id>"
 gh secret set AZURE_SUBSCRIPTION_ID -R the-wolfpack-agency/wolfpack-apex --body "<subscription-id>"
 ```
+
+The Entra audit also needs steps 3 and 4 and then `gh variable set ENTRA_AUDIT_ENABLED -R the-wolfpack-agency/wolfpack-apex --body true`; until that variable is set it reports SKIPPED, so the AI spend tripwire can run on the identity alone (steps 1, 2, 5, 5b and 6).
 
 Then run each once:
 
