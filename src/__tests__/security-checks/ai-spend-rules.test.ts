@@ -1,5 +1,7 @@
 import {
   aiSpendFindings,
+  deploymentFindings,
+  deploymentNameMismatch,
   isAiCost,
   normalizeUsageDate,
   parseCostQuery,
@@ -90,5 +92,28 @@ describe("AI spend rules", () => {
       { ...days(RES, [100])[0], date: "2026-10-01" },
     ];
     expect(summarizeAiSpend(rows, "2026-10-23")).toEqual([]);
+  });
+});
+
+describe("deployment name against the model it serves", () => {
+  const dep = (name: string, model: string) => ({ accountId: RES, name, model, version: "1", sku: "GlobalStandard" });
+  it("flags a deployment named for one model that serves another (gpt-4o-mini serving gpt-4o)", () => {
+    expect(deploymentNameMismatch(dep("gpt-4o-mini", "gpt-4o"))).toBe(true);
+    expect(deploymentNameMismatch(dep("gpt-4o-mini", "gpt-4.1"))).toBe(true);
+    expect(deploymentNameMismatch(dep("text-embedding-3-small", "text-embedding-3-large"))).toBe(true);
+  });
+  it("accepts the model itself, a newer point release of the named one, and names that are not model ids", () => {
+    expect(deploymentNameMismatch(dep("gpt-4o-mini", "gpt-4o-mini"))).toBe(false);
+    expect(deploymentNameMismatch(dep("Deepseek-v3", "DeepSeek-V3.2"))).toBe(false);
+    expect(deploymentNameMismatch(dep("Llama-3-3-70b", "Llama-3.3-70B-Instruct"))).toBe(false);
+    expect(deploymentNameMismatch(dep("DeepSeek-V4-Flash", "DeepSeek-V4-Flash"))).toBe(false);
+    expect(deploymentNameMismatch(dep("chat", "gpt-4o"))).toBe(false);
+    expect(deploymentNameMismatch(dep("gpt-4o", ""))).toBe(false);
+  });
+  it("reports each mismatch as high, naming the account, the deployment and the served model", () => {
+    const f = deploymentFindings([dep("gpt-4o-mini", "gpt-4o"), dep("gpt-4o", "gpt-4o")]);
+    expect(f).toHaveLength(1);
+    expect(f[0]).toMatchObject({ severity: "high", rule: "ai-spend.deployment-model-mismatch", subject: "model-a / gpt-4o-mini" });
+    expect(f[0].detail).toContain("serves gpt-4o 1");
   });
 });
