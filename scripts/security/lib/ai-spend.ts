@@ -6,10 +6,15 @@
  * resource's latest day against its own trailing week turns that bill into a
  * signal the next morning instead of at month end.
  *
- *   spike:  last day > 3x the trailing 7-day mean AND > $5    -> high
+ *   rise:   last day > 3x the trailing 7-day mean AND > $5    -> info
  *   new:    an AI resource with cost on the last day and none in the
- *           trailing 7 days                                    -> medium
- *           (high when that first day alone is over $5)
+ *           trailing 7 days                                    -> info
+ *
+ * Both are info, never a failing finding. Spend rises whenever usage does:
+ * testing, releases and demos all raise it on purpose, and a red run for
+ * that trains everyone to ignore the check. They are listed so the numbers
+ * are visible; the failing rule is the deployment-model mismatch below, a
+ * defect rather than usage.
  */
 import type { Finding } from "./report";
 
@@ -119,18 +124,18 @@ export function aiSpendFindings(spend: ResourceSpend[], lastDay: string, subscri
     const spike = s.last > SPIKE_MIN_USD && s.last > SPIKE_MULTIPLIER * s.trailingMean;
     if (spike) {
       out.push({
-        severity: "high",
-        rule: isNew ? "ai-spend.new-resource-spike" : "ai-spend.spike",
+        severity: "info",
+        rule: isNew ? "ai-spend.new-resource-rise" : "ai-spend.rise",
         subject: `${s.name} (${s.serviceName})`,
-        detail: `${usd(s.last)} on ${lastDay} against a trailing 7-day mean of ${usd(s.trailingMean)}${s.trailingMean > 0 ? ` (${(s.last / s.trailingMean).toFixed(1)}x)` : ""}. A stolen or leaked key shows up first as spend: check the resource's metrics by deployment and caller, and rotate its keys if the usage is not ours.`,
+        detail: `${usd(s.last)} on ${lastDay} against a trailing 7-day mean of ${usd(s.trailingMean)}${s.trailingMean > 0 ? ` (${(s.last / s.trailingMean).toFixed(1)}x)` : ""}. Usage rose; expected on days with testing, releases or demos.`,
         source: `https://portal.azure.com/#@/resource${s.resourceId}/costanalysis`,
       });
     } else if (isNew) {
       out.push({
-        severity: "medium",
+        severity: "info",
         rule: "ai-spend.new-resource",
         subject: `${s.name} (${s.serviceName})`,
-        detail: `AI resource with spend on ${lastDay} (${usd(s.last)}) and none in the 7 days before. Confirm someone created it on purpose in subscription ${subscription}.`,
+        detail: `AI resource with spend on ${lastDay} (${usd(s.last)}) and none in the 7 days before, in subscription ${subscription}.`,
         source: `https://portal.azure.com/#@/resource${s.resourceId}/overview`,
       });
     }

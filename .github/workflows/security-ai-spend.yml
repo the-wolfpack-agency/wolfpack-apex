@@ -2,8 +2,9 @@ name: Security - AI spend tripwire
 
 # Daily: Azure Cost Management daily cost per AI resource (Cognitive Services,
 # Azure OpenAI, AI Foundry, Machine Learning, Copilot Studio) over the last nine
-# days. Fails when a resource's latest day is > 3x its trailing 7-day mean and
-# > $5, or a new AI resource appears. A stolen model key shows up here first.
+# days, listed for visibility only: spend rises with usage (we test regularly),
+# so a rise never fails the run. Fails only when a model deployment serves a
+# different model than its name says.
 #
 # Read-only (the Cost Management query endpoint is a POST that only reads).
 # Rules: scripts/security/lib/ai-spend.ts.

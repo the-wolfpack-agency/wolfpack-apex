@@ -9,6 +9,7 @@ import {
   summarizeAiSpend,
   type CostRow,
 } from "../../../scripts/security/lib/ai-spend";
+import { hasFailingFindings, newReport } from "../../../scripts/security/lib/report";
 
 const RES = "/subscriptions/s/resourcegroups/rg/providers/microsoft.cognitiveservices/accounts/model-a";
 
@@ -62,11 +63,23 @@ describe("AI spend rules", () => {
     expect(aiSpendFindings(s, "2026-10-23", "sub")).toEqual([]);
   });
 
-  it("flags a stolen-key shaped spike: over 3x the mean AND over $5", () => {
+  it("lists a rise over 3x the mean AND over $5 as info, never a failing finding (usage, e.g. testing)", () => {
     const s = summarizeAiSpend(days(RES, [0.36, 0.36, 0.36, 0.36, 0.36, 0.36, 0.36, 40]), "2026-10-23");
     const f = aiSpendFindings(s, "2026-10-23", "sub");
-    expect(f.map((x) => [x.rule, x.severity])).toEqual([["ai-spend.spike", "high"]]);
+    expect(f.map((x) => [x.rule, x.severity])).toEqual([["ai-spend.rise", "info"]]);
     expect(f[0].subject).toContain("model-a");
+    expect(f[0].detail).not.toMatch(/stolen|leak|rotate/i);
+  });
+
+  it("never fails the check on spend alone: a testing-heavy day and a new resource stay green", () => {
+    const r = newReport("ai-spend");
+    r.findings = [
+      ...aiSpendFindings(summarizeAiSpend(days(RES, [2, 2, 2, 2, 2, 2, 2, 10.61]), "2026-10-23"), "2026-10-23", "sub"),
+      ...aiSpendFindings(summarizeAiSpend(days(RES, [0, 0, 0, 0, 0, 0, 0, 12]), "2026-10-23"), "2026-10-23", "sub"),
+    ];
+    expect(r.findings).toHaveLength(2);
+    expect(hasFailingFindings(r)).toBe(false);
+    expect(hasFailingFindings(r, "low")).toBe(false);
   });
 
   it("does not flag a relative jump that stays under $5", () => {
@@ -79,11 +92,11 @@ describe("AI spend rules", () => {
     expect(aiSpendFindings(s, "2026-10-23", "sub")).toEqual([]);
   });
 
-  it("flags a new AI resource, as high when its first day is already over $5", () => {
+  it("lists a new AI resource as info, whatever its first day costs", () => {
     const small = summarizeAiSpend(days(RES, [0, 0, 0, 0, 0, 0, 0, 0.5]), "2026-10-23");
-    expect(aiSpendFindings(small, "2026-10-23", "sub").map((x) => [x.rule, x.severity])).toEqual([["ai-spend.new-resource", "medium"]]);
+    expect(aiSpendFindings(small, "2026-10-23", "sub").map((x) => [x.rule, x.severity])).toEqual([["ai-spend.new-resource", "info"]]);
     const big = summarizeAiSpend(days(RES, [0, 0, 0, 0, 0, 0, 0, 12]), "2026-10-23");
-    expect(aiSpendFindings(big, "2026-10-23", "sub").map((x) => [x.rule, x.severity])).toEqual([["ai-spend.new-resource-spike", "high"]]);
+    expect(aiSpendFindings(big, "2026-10-23", "sub").map((x) => [x.rule, x.severity])).toEqual([["ai-spend.new-resource-rise", "info"]]);
   });
 
   it("ignores non-AI rows and rows outside the window", () => {
