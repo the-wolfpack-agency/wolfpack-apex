@@ -4,7 +4,7 @@
  * Proven attacks, per protected site: the top of the Forcefield board.
  *
  * Only events the engine PROVED hostile are counted here (a live payload or a
- * tripped decoy), split blocked vs report-only, with the control-plane false
+ * tripped decoy), split blocked / contained / report-only, with the control-plane false
  * positive already excluded server-side (and its count shown, so nothing is
  * hidden from someone who looks). Flagged / welcomed / page-view volume is
  * context and lives in the panels below.
@@ -41,8 +41,12 @@ function ago(iso: string | null, now: number): string {
 }
 
 function classLabel(c: ProvenAttackClass): string {
-  return c.eventType === "site.agent_trap_tripped" ? "Decoy trip" : attackLabel(c.attack);
+  return c.eventType === "site.agent_trap_tripped" ? "Decoy trip (pages loaded)" : attackLabel(c.attack);
 }
+
+/** A decoy row counts every decoy page a caught source loaded, so the number
+ *  that means "how many were caught" is the fingerprint count, said plainly. */
+const DECOY_NOTE = "Decoy rows count every decoy page a caught source loaded; the sources column is how many were caught.";
 
 /** "fingerprint not recorded" when none was, never a misleading 0. */
 function FingerprintCell({ fingerprints, withoutFingerprint, testId }: { fingerprints: number | null; withoutFingerprint: number; testId: string }) {
@@ -59,15 +63,15 @@ function FingerprintCell({ fingerprints, withoutFingerprint, testId }: { fingerp
   );
 }
 
-function ModeTable({ site, mode, data, now }: { site: string; mode: "blocked" | "report-only"; data: ProvenModeSummary; now: number }) {
+function ModeTable({ site, mode, data, now }: { site: string; mode: "blocked" | "contained" | "report-only"; data: ProvenModeSummary; now: number }) {
   return (
     <div style={{ overflowX: "auto", maxWidth: "100%" }}>
       <table data-testid={`proven-${site}-${mode}-table`} style={{ width: "100%", borderCollapse: "collapse", minWidth: 0 }}>
         <thead>
           <tr>
             <th style={th}>Attack class</th>
-            <th style={{ ...th, textAlign: "right" }}>Events</th>
-            <th style={th}>Distinct fingerprints</th>
+            <th style={{ ...th, textAlign: "right" }}>Requests</th>
+            <th style={th}>Sources (distinct fingerprints)</th>
             <th style={th}>Last seen</th>
           </tr>
         </thead>
@@ -82,11 +86,18 @@ function ModeTable({ site, mode, data, now }: { site: string; mode: "blocked" | 
           ))}
         </tbody>
       </table>
+      {data.byClass.some((c) => c.eventType === "site.agent_trap_tripped") && (
+        <p data-testid={`proven-${site}-${mode}-decoy-note`} style={{ ...muted, fontSize: "0.68rem", marginTop: "0.3rem" }}>{DECOY_NOTE}</p>
+      )}
     </div>
   );
 }
 
-function SiteCard({ s, rangeDays, now }: { s: ProvenSite; rangeDays: number; now: number }) {
+/** A board API from before the contained split has no contained block. */
+const containedOf = (s: ProvenSite): ProvenModeSummary => s.contained ?? { events: 0, fingerprints: null, withoutFingerprint: 0, lastSeen: null, byClass: [] };
+
+function SiteCard({ s: raw, rangeDays, now }: { s: ProvenSite; rangeDays: number; now: number }) {
+  const s = { ...raw, contained: containedOf(raw) };
   const lastReport = s.lastReportAt ? Date.parse(s.lastReportAt) : NaN;
   const stale = !Number.isFinite(lastReport) || now - lastReport > PROVEN_STALE_MS;
   const RED = "var(--wp-error, #ef4444)";
@@ -99,6 +110,9 @@ function SiteCard({ s, rangeDays, now }: { s: ProvenSite; rangeDays: number; now
         <span style={{ fontFamily: "var(--wp-mono, ui-monospace, monospace)", fontWeight: 800, fontSize: "0.95rem", color: "var(--wp-text, #eee)" }}>{s.site}</span>
         <span data-testid={`proven-site-${s.site}-blocked-count`} style={{ fontWeight: 800, color: s.blocked.events > 0 ? RED : "var(--wp-text-muted, #9ca3af)" }}>
           {s.blocked.events.toLocaleString()} blocked
+        </span>
+        <span data-testid={`proven-site-${s.site}-contained-count`} style={{ color: "var(--wp-text-muted, #9ca3af)", fontSize: "0.8rem" }}>
+          {s.contained.events.toLocaleString()} contained
         </span>
         <span data-testid={`proven-site-${s.site}-report-only-count`} style={{ color: "var(--wp-text-muted, #9ca3af)", fontSize: "0.8rem" }}>
           {s.reportOnly.events.toLocaleString()} report-only
@@ -131,8 +145,15 @@ function SiteCard({ s, rangeDays, now }: { s: ProvenSite; rangeDays: number; now
         )}
       </div>
 
+      {s.contained.events > 0 && (
+        <div style={{ display: "grid", gap: "0.35rem" }}>
+          <p style={sub}>Contained (served decoys and slowed down, never reached the site)</p>
+          <ModeTable site={s.site} mode="contained" data={s.contained} now={now} />
+        </div>
+      )}
+
       <div style={{ display: "grid", gap: "0.35rem" }}>
-        <p style={sub}>Report-only (detected, not blocked)</p>
+        <p style={sub}>Report-only (detected and let through)</p>
         {s.reportOnly.events === 0 ? (
           <p data-testid={`proven-site-${s.site}-report-only-empty`} style={muted}>No report-only detections in {rangeDays} days.</p>
         ) : (
@@ -162,7 +183,7 @@ export interface ProvenAttacksPanelProps {
 
 export function ProvenAttacksPanel({ proven, viewIntel, rangeDays, blockedTotal, now = Date.now() }: ProvenAttacksPanelProps) {
   const title = <span>Proven attacks &middot; last {rangeDays}d</span>;
-  const subtitle = "Blocked payloads and decoy trips per protected site. Flagged, welcomed and page-view traffic is not counted here; it is in the panels below.";
+  const subtitle = "Blocked payloads and decoy trips per protected site, counted per request the same way as the daily digest email. Flagged, welcomed and page-view traffic is not counted here; it is in the panels below.";
 
   if (!viewIntel) {
     return (
@@ -185,6 +206,7 @@ export function ProvenAttacksPanel({ proven, viewIntel, rangeDays, blockedTotal,
   }
 
   const totalBlocked = proven.sites.reduce((n, s) => n + s.blocked.events, 0);
+  const totalContained = proven.sites.reduce((n, s) => n + containedOf(s).events, 0);
   const totalReportOnly = proven.sites.reduce((n, s) => n + s.reportOnly.events, 0);
   return (
     <GlassPanel
@@ -195,7 +217,7 @@ export function ProvenAttacksPanel({ proven, viewIntel, rangeDays, blockedTotal,
       actions={
         <span data-testid="proven-attacks-totals" style={{ fontSize: "0.76rem", color: "var(--wp-text-muted, #9ca3af)" }}>
           <strong style={{ color: totalBlocked > 0 ? "var(--wp-error, #ef4444)" : "var(--wp-text, #eee)" }}>{totalBlocked.toLocaleString()}</strong> blocked
-          {" "}&middot; {totalReportOnly.toLocaleString()} report-only
+          {" "}&middot; {totalContained.toLocaleString()} contained &middot; {totalReportOnly.toLocaleString()} report-only
         </span>
       }
     >

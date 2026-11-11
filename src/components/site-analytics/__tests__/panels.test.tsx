@@ -11,7 +11,7 @@ const USAGE = {
   byPage: [{ path: "/pricing", count: 9 }],
   byCountry: [{ country: "US", count: 40 }],
   agentOrigins: [],
-  forcefield: { welcomed: 5, flagged: 2, trapped: 1, blocked: 3, hostileOperators: 1, hostileEvents: 4, topAgents: [{ agent: "GPTBot", count: 7 }] },
+  forcefield: { welcomed: 5, flagged: 2, trapped: 1200, trapSources: 4, contained: 900, blocked: 3, hostileOperators: 1, hostileEvents: 4, topAgents: [{ agent: "GPTBot", count: 7 }] },
 };
 
 test("SiteUsagePanel renders totals, heatmap, and top pages/countries", () => {
@@ -21,6 +21,11 @@ test("SiteUsagePanel renders totals, heatmap, and top pages/countries", () => {
   expect(screen.getByTestId("top-pages")).toHaveTextContent("/pricing");
   expect(screen.getByTestId("top-countries")).toHaveTextContent("US");
   expect(screen.getByTestId("ff-blocked")).toHaveTextContent("3");
+  // decoys: sources caught is the headline; page loads are context, not attacks
+  expect(screen.getByTestId("ff-trap-sources")).toHaveTextContent("4");
+  expect(screen.getByTestId("ff-trapped")).toHaveTextContent("1,200 decoy pages loaded (not separate attacks)");
+  expect(screen.getByTestId("ff-contained")).toHaveTextContent("900 more contained");
+  expect(screen.getByTestId("ff-posture")).toHaveTextContent("3 blocked · 900 contained");
 });
 
 test("SiteUsagePanel shows n/a (not 0) when the property collects no page views", () => {

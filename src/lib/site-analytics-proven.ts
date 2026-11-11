@@ -14,6 +14,7 @@
 
 import { safeQuery } from "@/lib/db";
 import { FORCEFIELD_CONTROL_PLANE_PATHS } from "@/lib/forcefield-web/enforce";
+import { EVENT_WEIGHT_SQL } from "@/lib/site-analytics-weight";
 
 /** The two event types that are proof on their own. */
 export const PROVEN_EVENT_TYPES = ["site.agent_payload_attack", "site.agent_trap_tripped"] as const;
@@ -37,12 +38,16 @@ export const CONTROL_PLANE_FP_ROW =
  *  with no attack prop compares NULL, so the coalesce keeps it. */
 export const NOT_CONTROL_PLANE_FP = ` AND NOT coalesce(${CONTROL_PLANE_FP_ROW}, false)`;
 
-export type ProvenMode = "blocked" | "reportOnly";
+/** blocked = turned away; contained = served a decoy and slowed (the tarpit),
+ *  never let through to the site; reportOnly = detected and let through. */
+export type ProvenMode = "blocked" | "contained" | "reportOnly";
 
 export interface ProvenAttackClass {
   /** props.attack for payloads; "decoy_trip" for a tripped decoy. */
   attack: string;
   eventType: ProvenEventType;
+  /** Requests, repeats included: a decoy trip folded into one stored row with
+   *  repeat_count n is n requests (the same count the digest email uses). */
   count: number;
   /** Distinct operator fingerprints. null = no event in this class recorded one
    *  (older engine copies), which is NOT the same as zero operators. */
@@ -63,6 +68,7 @@ export interface ProvenModeSummary {
 export interface ProvenSite {
   site: string;
   blocked: ProvenModeSummary;
+  contained: ProvenModeSummary;
   reportOnly: ProvenModeSummary;
   /** Control-plane false-positive rows excluded from this site's counts. */
   excludedFalsePositives: number;
@@ -83,7 +89,10 @@ export function emptyProvenMode(): ProvenModeSummary {
   return { events: 0, fingerprints: null, withoutFingerprint: 0, lastSeen: null, byClass: [] };
 }
 
-const MODE_SQL = `CASE WHEN props->>'blocked' = 'true' THEN 'blocked' ELSE 'report_only' END`;
+/** The same three outcomes the alert digest uses (alerts.ts HOSTILE_EVENTS_SQL). */
+const MODE_SQL = `CASE WHEN props->>'blocked' = 'true' THEN 'blocked'
+                      WHEN props->>'tarpit' = 'true' OR props->>'action' = 'tarpit' THEN 'contained'
+                      ELSE 'report_only' END`;
 const SITE_SQL = `coalesce(props->>'site', 'ogiam.com')`;
 const FP_PRESENT = `(props->>'fp' IS NOT NULL AND props->>'fp' <> '')`;
 
@@ -114,20 +123,20 @@ export async function getProvenAttacks(
               CASE WHEN event_type = 'site.agent_trap_tripped' THEN 'decoy_trip'
                    WHEN props->>'attack' IS NULL OR props->>'attack' = '' THEN 'unclassified'
                    ELSE props->>'attack' END AS attack,
-              count(*) AS count,
+              sum(${EVENT_WEIGHT_SQL}) AS count,
               count(DISTINCT props->>'fp') FILTER (WHERE ${FP_PRESENT}) AS fingerprints,
-              count(*) FILTER (WHERE NOT ${FP_PRESENT}) AS without_fp,
+              coalesce(sum(${EVENT_WEIGHT_SQL}) FILTER (WHERE NOT ${FP_PRESENT}), 0) AS without_fp,
               max(created_at)::text AS last_seen
          FROM site_analytics_events
         ${where} AND event_type IN (${PROVEN_IN})${NOT_CONTROL_PLANE_FP}
-        GROUP BY 1, 2, 3, 4 ORDER BY count(*) DESC LIMIT 500`,
+        GROUP BY 1, 2, 3, 4 ORDER BY sum(${EVENT_WEIGHT_SQL}) DESC LIMIT 500`,
       params,
     ),
     safeQuery<ModeRow>(
       `SELECT ${SITE_SQL} AS site, ${MODE_SQL} AS mode,
-              count(*) AS count,
+              sum(${EVENT_WEIGHT_SQL}) AS count,
               count(DISTINCT props->>'fp') FILTER (WHERE ${FP_PRESENT}) AS fingerprints,
-              count(*) FILTER (WHERE NOT ${FP_PRESENT}) AS without_fp,
+              coalesce(sum(${EVENT_WEIGHT_SQL}) FILTER (WHERE NOT ${FP_PRESENT}), 0) AS without_fp,
               max(created_at)::text AS last_seen
          FROM site_analytics_events
         ${where} AND event_type IN (${PROVEN_IN})${NOT_CONTROL_PLANE_FP}
@@ -155,12 +164,12 @@ export async function getProvenAttacks(
   const siteOf = (name: string): ProvenSite => {
     let s = bySite.get(name);
     if (!s) {
-      s = { site: name, blocked: emptyProvenMode(), reportOnly: emptyProvenMode(), excludedFalsePositives: 0, lastReportAt: null };
+      s = { site: name, blocked: emptyProvenMode(), contained: emptyProvenMode(), reportOnly: emptyProvenMode(), excludedFalsePositives: 0, lastReportAt: null };
       bySite.set(name, s);
     }
     return s;
   };
-  const modeKey = (m: string): ProvenMode => (m === "blocked" ? "blocked" : "reportOnly");
+  const modeKey = (m: string): ProvenMode => (m === "blocked" ? "blocked" : m === "contained" ? "contained" : "reportOnly");
 
   // Every known site gets a row, so "no blocked attacks" is said, not implied.
   const filteredSurface = params.length > 1 ? params[1] : null;
@@ -187,11 +196,10 @@ export async function getProvenAttacks(
   for (const r of last?.rows ?? []) siteOf(r.site).lastReportAt = r.last_at ?? null;
 
   const sites = Array.from(bySite.values()).sort(
-    (a, b) => b.blocked.events - a.blocked.events || b.reportOnly.events - a.reportOnly.events || a.site.localeCompare(b.site),
+    (a, b) => b.blocked.events - a.blocked.events || b.contained.events - a.contained.events || b.reportOnly.events - a.reportOnly.events || a.site.localeCompare(b.site),
   );
   for (const s of sites) {
-    s.blocked.byClass.sort((a, b) => b.count - a.count);
-    s.reportOnly.byClass.sort((a, b) => b.count - a.count);
+    for (const m of [s.blocked, s.contained, s.reportOnly]) m.byClass.sort((a, b) => b.count - a.count);
   }
   return { available, generatedAt: new Date().toISOString(), sites, excludedFalsePositives: excludedTotal };
 }
