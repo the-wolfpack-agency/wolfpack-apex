@@ -574,13 +574,14 @@ function sectionTitle(title: string): string {
 function classRowHtml(c: ClassLine): string {
   const td = `border-top:1px solid ${C.line};font-family:${FONT};font-size:14px;line-height:19px;color:${C.ink};`;
   const times = c.firstAt === c.lastAt ? `At ${formatWhen(c.firstAt)}` : `First ${formatWhen(c.firstAt)}<br>Last ${formatWhen(c.lastAt)}`;
-  return `<tr><td valign="top" style="${td}padding:9px 8px 2px 0;font-weight:600;">${e(cap1(attackLabel(c.attackClass)))}</td><td valign="top" align="right" style="${td}padding:9px 8px 2px;white-space:nowrap;">${e(c.count.toLocaleString("en-US"))}</td><td valign="top" align="right" style="${td}padding:9px 8px 2px;white-space:nowrap;">${e(sourcesText(c.sources))}</td><td valign="top" style="${td}padding:9px 0 2px 8px;">${e(outcomeText(c.outcomes))}</td></tr>`
-    + `<tr><td colspan="4" style="padding:0 0 9px;font-family:${FONT};font-size:12px;line-height:18px;color:${C.muted};word-break:break-word;">${times.split("<br>").map(e).join("<br>")}<br><span style="font-family:${MONO};font-size:11px;">${e(pathsText(c))}</span></td></tr>`;
+  const who = whoText(c);
+  return `<tr><td valign="top" style="${td}padding:9px 8px 2px 0;font-weight:600;">${e(cap1(attackLabel(c.attackClass)))}${c.kind === "honeytoken_trip" ? `<br><span style="font-weight:400;font-size:12px;color:${C.muted};">decoy pages loaded, not separate attacks</span>` : ""}</td><td valign="top" align="right" style="${td}padding:9px 8px 2px;white-space:nowrap;">${e(c.count.toLocaleString("en-US"))}</td><td valign="top" align="right" style="${td}padding:9px 8px 2px;white-space:nowrap;">${e(sourcesText(c.sources))}</td><td valign="top" style="${td}padding:9px 0 2px 8px;">${e(outcomeText(c.outcomes))}</td></tr>`
+    + `<tr><td colspan="4" style="padding:0 0 9px;font-family:${FONT};font-size:12px;line-height:18px;color:${C.muted};word-break:break-word;">${times.split("<br>").map(e).join("<br>")}<br><span style="font-family:${MONO};font-size:11px;">${e(pathsText(c))}</span>${who ? `<br>${e(who)}` : ""}</td></tr>`;
 }
 
 function classTableHtml(lines: ClassLine[]): string {
   const th = `padding:0 8px 6px 0;font-family:${FONT};font-size:12px;font-weight:600;color:${C.muted};`;
-  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;"><tr><td style="${th}">Attack type</td><td align="right" style="${th}padding-left:8px;">Attempts</td><td align="right" style="${th}padding-left:8px;">Sources</td><td style="${th}padding-left:8px;">Outcome</td></tr>${lines.map(classRowHtml).join("")}</table>`;
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;"><tr><td style="${th}">Attack type</td><td align="right" style="${th}padding-left:8px;">Requests</td><td align="right" style="${th}padding-left:8px;">Sources</td><td style="${th}padding-left:8px;">Outcome</td></tr>${lines.map(classRowHtml).join("")}</table>`;
 }
 
 function sourcesText(n: number): string {
@@ -595,6 +596,21 @@ export function outcomeText(o: { blocked: number; contained: number; recorded: n
   return parts.length ? parts.join(", ") : "no outcome recorded";
 }
 
+/** Who the sources were: identified agents, networks, client types, countries.
+ *  Empty when the edge recorded none of them. */
+export function whoText(c: Pick<ClassLine, "agents" | "networks" | "clientTypes" | "countries">): string {
+  const parts = [
+    ...(c.agents ?? []).filter((a) => a && a !== "unidentified"),
+    ...(c.networks ?? []),
+    ...(c.clientTypes ?? []),
+    ...(c.countries ?? []),
+  ].filter(Boolean);
+  return parts.length ? `Who: ${parts.join(", ")}` : "";
+}
+
+/** The count column's noun: a decoy row counts pages a caught source loaded. */
+const countNoun = (c: Pick<ClassLine, "kind">) => (c.kind === "honeytoken_trip" ? "decoy page request" : "attempt");
+
 function pathsText(c: Pick<ClassLine, "paths" | "pathCount">): string {
   return `${c.pathCount === 1 ? "Path" : "Top paths"}: ${listWithMore(c.paths, c.pathCount)}`;
 }
@@ -602,9 +618,11 @@ function pathsText(c: Pick<ClassLine, "paths" | "pathCount">): string {
 function classLinesText(lines: ClassLine[]): string[] {
   const t: string[] = [];
   for (const c of lines) {
-    t.push(`- ${cap1(attackLabel(c.attackClass))}: ${plural(c.count, "attempt")}, sources ${sourcesText(c.sources)}, ${outcomeText(c.outcomes)}`);
+    t.push(`- ${cap1(attackLabel(c.attackClass))}: ${plural(c.count, countNoun(c))}, sources ${sourcesText(c.sources)}, ${outcomeText(c.outcomes)}`);
     t.push(c.firstAt === c.lastAt ? `  At ${formatWhen(c.firstAt)}` : `  First ${formatWhen(c.firstAt)}; last ${formatWhen(c.lastAt)}`);
     t.push(`  ${pathsText(c)}`);
+    const who = whoText(c);
+    if (who) t.push(`  ${who}`);
   }
   return t;
 }
@@ -747,14 +765,28 @@ function etDay(etDate: string): string {
   return new Intl.DateTimeFormat("en-US", { timeZone: "UTC", month: "short", day: "numeric", year: "numeric" }).format(new Date(Date.UTC(y, m - 1, d, 12)));
 }
 
+/** Attack attempts and decoy activity, never summed: a source caught in the
+ *  decoy maze loads many pages, and each page is a request, not an attack. */
+function digestParts(d: DigestData): string[] {
+  const t = d.totals;
+  const parts: string[] = [];
+  if (t.attackAttempts > 0) parts.push(`${plural(t.attackAttempts, "attack attempt")} stopped`);
+  if (t.decoyRequests > 0) {
+    parts.push(t.decoySources > 0
+      ? `${plural(t.decoySources, "source")} caught in decoys (${plural(t.decoyRequests, "decoy page request")})`
+      : `${plural(t.decoyRequests, "decoy page request")} caught`);
+  }
+  return parts;
+}
+
 export function digestSubject(d: DigestData): string {
   const t = d.totals;
-  return `[Forcefield] Daily digest ${etDay(d.etDate)}: ${plural(t.incidents, "blocked incident")} on ${plural(t.sites, "site")} (${plural(t.attempts, "attempt")})`;
+  return `[Forcefield] Daily digest ${etDay(d.etDate)}: ${digestParts(d).join("; ")} on ${plural(t.sites, "site")}`;
 }
 
 function digestHeadline(d: DigestData): string {
   const t = d.totals;
-  return `Forcefield stopped ${plural(t.attempts, "attack attempt")} on ${plural(t.sites, "site")} before they reached them (${plural(t.incidents, "incident")})`;
+  return `Forcefield: ${digestParts(d).join("; ")} on ${plural(t.sites, "site")} (${plural(t.incidents, "incident")})`;
 }
 
 function digestStatus(d: DigestData): StatusBlock {
@@ -788,17 +820,22 @@ function renderDigest(alert: ForcefieldAlert, d: DigestData, opts: RenderOptions
     { label: "Period", value: periodText(d) },
     { label: "Sites", value: d.sites.map((s) => displaySite(s.site)).join(", ") },
     { label: "Incidents", value: t.incidents.toLocaleString("en-US") },
-    { label: "Attempts", value: t.attempts.toLocaleString("en-US") },
-    { label: "Sources", value: t.sources > 0 ? `${t.sources.toLocaleString("en-US")} distinct fingerprints` : "Fingerprint not recorded" },
-    { label: "Sent immediately", value: d.immediateIncidents > 0 ? `${plural(d.immediateIncidents, "incident")} (requests not blocked, decoy trips included), emailed when they happened` : "None in this period" },
+    { label: "Attack attempts", value: t.attackAttempts > 0 ? `${t.attackAttempts.toLocaleString("en-US")} from ${t.attackSources > 0 ? plural(t.attackSources, "source") : "sources not recorded"}` : "None in this period" },
+    { label: "Decoy activity", value: t.decoyRequests > 0 ? `${t.decoySources > 0 ? `${plural(t.decoySources, "source")} caught` : "sources not recorded"}, ${plural(t.decoyRequests, "decoy page request")} (pages they loaded, not separate attacks)` : "None in this period" },
+    { label: "Sources", value: t.sources > 0 ? `${t.sources.toLocaleString("en-US")} distinct fingerprints in all` : "Fingerprint not recorded" },
+    { label: "Sent immediately", value: d.immediateIncidents > 0 ? `${plural(d.immediateIncidents, "incident")} (requests recorded but not stopped), emailed as they happened` : "None in this period" },
   ];
   const rowHtml = (rows: Row[]) => rows.map((r) => `<tr><td valign="top" style="padding:9px 12px 9px 0;border-top:1px solid ${C.line};font-family:${FONT};font-size:13px;line-height:19px;color:${C.muted};width:132px;white-space:nowrap;">${e(r.label)}</td><td valign="top" style="padding:9px 0;border-top:1px solid ${C.line};font-family:${FONT};font-size:14px;line-height:19px;color:${C.ink};word-break:break-word;">${e(r.value)}</td></tr>`).join("");
-  const siteSummary = (s: DigestData["sites"][number]) =>
-    `${plural(s.incidents, "incident")} · ${plural(s.attempts, "attempt")} · ${s.sources > 0 ? plural(s.sources, "source") : "sources not recorded"} · ${outcomeText(s.outcomes)}`;
+  const siteSummary = (s: DigestData["sites"][number]) => {
+    const decoy = s.rows.filter((r) => r.kind === "honeytoken_trip").reduce((n, r) => n + r.count, 0);
+    const attacks = s.attempts - decoy;
+    const volume = [attacks > 0 ? plural(attacks, "attack attempt") : "", decoy > 0 ? plural(decoy, "decoy page request") : ""].filter(Boolean).join(" · ");
+    return `${plural(s.incidents, "incident")} · ${volume} · ${s.sources > 0 ? plural(s.sources, "source") : "sources not recorded"} · ${outcomeText(s.outcomes)}`;
+  };
   const siteHtml = d.sites.map((s, n) => `<tr><td style="padding:16px 28px 8px;">${sectionTitle(displaySite(s.site))}<div style="font-family:${FONT};font-size:13px;line-height:19px;color:${C.muted};padding-bottom:10px;">${e(siteSummary(s))}</div>${classTableHtml(s.rows)}<div style="padding-top:6px;font-family:${FONT};font-size:13px;line-height:19px;"><a href="${e(siteLinks[n].href)}" style="color:${C.link};">${e(siteLinks[n].label)}</a></div></td></tr>`).join("\n");
   const sectionsHtml = `<tr><td style="padding:8px 28px 8px;">${sectionTitle("Summary")}<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">${rowHtml(totalsRows)}</table></td></tr>
 ${siteHtml}
-<tr><td style="padding:8px 28px 16px;"><p style="margin:0;font-family:${FONT};font-size:13px;line-height:20px;color:${C.muted};"><strong style="color:${C.ink};">What this digest is.</strong> Payload attacks that were blocked or contained at the edge do not page anyone. They are collected here once a day, one row per attack type per site. Decoy and honeytoken trips, and any request that was recorded but not stopped, are still emailed as they happen. Times are exact; sources are distinct client fingerprints.</p></td></tr>`;
+<tr><td style="padding:8px 28px 16px;"><p style="margin:0;font-family:${FONT};font-size:13px;line-height:20px;color:${C.muted};"><strong style="color:${C.ink};">What this digest is.</strong> Attacks and decoy or honeytoken trips that were blocked or contained at the edge do not page anyone. They are collected here once a day, one row per attack type per site. Only a request that was recorded but not stopped is emailed as it happens. Decoy activity is counted apart from attack attempts: a source caught in the decoy maze loads many decoy pages, and each page is one request, not one attack. Times are exact; sources are distinct client fingerprints.</p></td></tr>`;
   const allLinks = [primary, ...siteLinks, ...secondary];
   const html = renderShell({ audience, subject, severity: "Info", headline, status: st, primary, secondary, sectionsHtml, ...f, footerIds });
 

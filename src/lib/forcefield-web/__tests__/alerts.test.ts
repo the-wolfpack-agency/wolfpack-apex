@@ -42,6 +42,7 @@ import {
   type DeliveryOutcome,
   type DigestRowStatus,
 } from "../alerts";
+import { EVENT_WEIGHT_SQL } from "@/lib/site-analytics-weight";
 import { attentionReasons, buildIncidents, digestResumeFrom, type HostileEventGroup } from "../incidents";
 
 const OK: DeliveryOutcome = { status: "delivered", inAppRecipients: 1, emailAttempted: 1, emailDelivered: 1, detail: "" };
@@ -500,7 +501,7 @@ describe("the collapsed row", () => {
     expect(HOSTILE_EVENTS_SQL).toMatch(/props->>'tarpit' = 'true' OR props->>'action' = 'tarpit' THEN 'contained'/);
     expect(HOSTILE_EVENTS_SQL).toMatch(/ELSE 'recorded'/);
     // Attempts sum repeat_count: a collapsed decoy row stands for many requests.
-    expect(HOSTILE_EVENTS_SQL).toContain("sum(COALESCE((props->>'repeat_count')::int, 1)) AS n");
+    expect(HOSTILE_EVENTS_SQL).toContain(`sum(${EVENT_WEIGHT_SQL}) AS n`);
     expect(HOSTILE_EVENTS_SQL).toContain("last_seen");
   });
 });
