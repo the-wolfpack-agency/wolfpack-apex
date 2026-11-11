@@ -12,6 +12,7 @@ jest.mock("@/lib/db", () => ({
 import { getProvenAttacks, CONTROL_PLANE_FP_ROW, NOT_CONTROL_PLANE_FP, PROVEN_EVENT_TYPES } from "@/lib/site-analytics-proven";
 import { FORCEFIELD_CONTROL_PLANE_PATHS } from "@/lib/forcefield-web/enforce";
 import { getSiteAnalyticsSummary, SITE_EVENT_TYPES } from "@/lib/site-analytics";
+import { EVENT_WEIGHT_SQL } from "@/lib/site-analytics-weight";
 
 const SINCE = `created_at > now() - ($1 || ' days')::interval`;
 
@@ -110,6 +111,29 @@ describe("getProvenAttacks", () => {
     for (const s of provenSqls) expect(s).toContain(NOT_CONTROL_PLANE_FP);
     // the excluded-count query selects exactly the false-positive rows
     expect(sqls.find((s) => s.includes("count(*) AS n"))).toContain(`AND ${CONTROL_PLANE_FP_ROW}`);
+  });
+
+  it("a contained decoy trip (tarpit) is its own mode, never report-only, and counts folded repeats", async () => {
+    route({
+      "GROUP BY 1, 2, 3, 4": [
+        { site: "ogiam.com", mode: "contained", event_type: "site.agent_trap_tripped", attack: "decoy_trip", count: "82876", fingerprints: "5", without_fp: "0", last_seen: "2026-11-11T12:01:10Z" },
+      ],
+      "GROUP BY 1, 2": [
+        { site: "ogiam.com", mode: "contained", count: "82876", fingerprints: "5", without_fp: "0", last_seen: "2026-11-11T12:01:10Z" },
+      ],
+    });
+    const out = await getProvenAttacks(SINCE, "", ["30"], ["ogiam.com"]);
+    const og = out.sites[0];
+    expect(og.contained).toMatchObject({ events: 82876, fingerprints: 5 });
+    expect(og.contained.byClass[0]).toMatchObject({ attack: "decoy_trip", count: 82876 });
+    expect(og.reportOnly.events).toBe(0);
+    const sqls = mockSafeQuery.mock.calls.map(([sql]) => String(sql));
+    const provenSqls = sqls.filter((s) => s.includes("'site.agent_payload_attack','site.agent_trap_tripped'"));
+    for (const s of provenSqls) {
+      // the same outcome rule and per-request weight as the digest (alerts.ts)
+      expect(s).toContain("THEN 'contained'");
+      expect(s).toContain(`sum(${EVENT_WEIGHT_SQL})`);
+    }
   });
 
   it("a failed read is available=false, never an honest-looking zero", async () => {

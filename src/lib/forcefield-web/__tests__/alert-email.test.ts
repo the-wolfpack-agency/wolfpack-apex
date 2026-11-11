@@ -339,6 +339,43 @@ describe("grouped incident email (hostile_incident)", () => {
 });
 
 describe("daily digest email", () => {
+  // The Nov 11, 2026 digest: 5 crawlers looping the decoy maze were reported as
+  // 83,267 "attack attempts". Decoy page loads are counted apart from attacks.
+  const decoyDay = () => [
+    grp({ site: "ogiam.com", attackClass: "open_redirect", count: 2, path: "/wp-json/oembed/1.0/embed" }),
+    ...["fp-1", "fp-2", "fp-3"].map((fp, i) => grp({
+      kind: "honeytoken_trip", attackClass: "honeytoken_trip", site: "ogiam.com", fp, sig: `d${i}`, reasonKind: "decoy",
+      outcome: "contained", count: 1000 * (i + 1), path: `/_ff/ledger-${i}`, agent: i === 0 ? "GPTBot" : "unidentified",
+      network: "AS16509 Amazon", clientType: "library", country: "DE",
+      firstAt: `2026-10-26T14:0${i + 3}:00.000Z`,
+    })),
+  ];
+
+  it("decoy page loads are never counted as attack attempts", () => {
+    const a = digestAlert(decoyDay());
+    const e = op(a);
+    expect(a.digest!.totals).toMatchObject({ attackAttempts: 2, attackSources: 1, decoyRequests: 6000, decoySources: 3, attempts: 6002 });
+    expect(e.subject).toBe("[Forcefield] Daily digest Oct 27, 2026: 2 attack attempts stopped; 3 sources caught in decoys (6,000 decoy page requests) on 1 site");
+    expect(e.text).not.toContain("6,002 attack attempts");
+    expect(e.text).toContain("Attack attempts: 2 from 1 source");
+    expect(e.text).toContain("Decoy activity: 3 sources caught, 6,000 decoy page requests (pages they loaded, not separate attacks)");
+    expect(e.text).toContain("6,000 decoy page requests, sources 3, 6,000 contained");
+    expect(e.html).toContain("decoy pages loaded, not separate attacks");
+    expect(e.text).toContain("1 incident · 2 attack attempts · 6,000 decoy page requests · 4 sources");
+  });
+
+  it("each decoy row says who the sources were", () => {
+    const e = op(digestAlert(decoyDay()));
+    expect(e.text).toContain("Who: GPTBot, AS16509 Amazon, library, DE");
+    expect(e.html).toContain("Who: GPTBot, AS16509 Amazon, library, DE");
+  });
+
+  it("the footer matches the routing: a contained decoy trip is in the digest, not emailed as it happens", () => {
+    const e = op(digestAlert(decoyDay()));
+    expect(e.text + e.html).not.toContain("are still emailed as they happen");
+    expect(e.html).toContain("Only a request that was recorded but not stopped is emailed as it happens.");
+  });
+
   const groups = () => [
     grp({ attackClass: "open_redirect", count: 14, lastAt: "2026-10-26T14:02:46.000Z" }),
     grp({ attackClass: "path_traversal", fp: "fp-c:unknown", sig: "s9", count: 6, path: "/vpn/user/download/client" }),
@@ -348,9 +385,11 @@ describe("daily digest email", () => {
   it("subject and headline carry exact totals; the status says no action needed", () => {
     const a = digestAlert(groups());
     const e = op(a);
-    expect(e.subject).toBe("[Forcefield] Daily digest Oct 27, 2026: 2 blocked incidents on 2 sites (21 attempts)");
+    expect(e.subject).toBe("[Forcefield] Daily digest Oct 27, 2026: 21 attack attempts stopped on 2 sites");
     expect(digestSubject(a.digest!)).toBe(e.subject);
-    expect(e.text).toContain("Forcefield stopped 21 attack attempts on 2 sites before they reached them (2 incidents)");
+    expect(e.text).toContain("Forcefield: 21 attack attempts stopped on 2 sites (2 incidents)");
+    expect(e.text).toContain("Attack attempts: 21 from 3 sources");
+    expect(e.text).toContain("Decoy activity: None in this period");
     expect(e.text).toContain("Blocked at the edge (21 requests)");
     expect(e.text).toContain("No action needed.");
     expect(e.text).toContain("Period: 2026-10-26 12:00:00 UTC (Oct 26, 2026, 8:00:00 AM EDT) to 2026-10-27 12:00:00 UTC (Oct 27, 2026, 8:00:00 AM EDT)");
@@ -359,7 +398,7 @@ describe("daily digest email", () => {
   it("one table per site (hostname), one row per attack type with attempts, sources, first/last, top paths, outcome", () => {
     const e = op(digestAlert(groups()));
     expect(e.text).toContain("WOLFPACK-INSTINCT.VERCEL.APP");
-    expect(e.text).toContain("1 incident · 20 attempts · 2 sources · 20 blocked");
+    expect(e.text).toContain("1 incident · 20 attack attempts · 2 sources · 20 blocked");
     expect(e.text).toContain("- Open redirect: 14 attempts, sources 1, 14 blocked");
     expect(e.text).toContain("  First 2026-10-26 14:02:44 UTC (Oct 26, 2026, 10:02:44 AM EDT); last 2026-10-26 14:02:46 UTC (Oct 26, 2026, 10:02:46 AM EDT)");
     expect(e.text).toContain("  Path: /vpn/user/download/client");
@@ -392,7 +431,7 @@ describe("daily digest email", () => {
     const a = digestAlert([...groups(), grp({ kind: "honeytoken_trip", attackClass: "honeytoken_trip", outcome: "recorded", fp: "t", sig: "t", firstAt: "2026-10-26T20:00:00.000Z", windowStart: "2026-10-26T18:00:00.000Z" })]);
     const e = op(a);
     expect(a.digest!.totals.incidents).toBe(2);
-    expect(e.text).toContain("Sent immediately: 1 incident (requests not blocked, decoy trips included), emailed when they happened");
+    expect(e.text).toContain("Sent immediately: 1 incident (requests recorded but not stopped), emailed as they happened");
   });
 });
 

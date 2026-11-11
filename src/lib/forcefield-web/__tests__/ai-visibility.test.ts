@@ -1,6 +1,7 @@
 /** @jest-environment node */
 import { AGENT_PURPOSE, foldVisibility, getAiVisibility, visibilitySql, type VisibilityRow } from "@/lib/forcefield-web/ai-visibility";
 import { DEFAULT_RULESET } from "@/lib/forcefield-web/ruleset";
+import { EVENT_WEIGHT_SQL } from "@/lib/site-analytics-weight";
 
 const SINCE = "2026-10-01T00:00:00.000Z";
 const row = (o: Partial<VisibilityRow>): VisibilityRow => ({ agent: "GPTBot", verification: "", flagged: false, path: "/", day: "2026-10-01", n: 1, last_seen: "2026-10-01T10:00:00Z", ...o });
@@ -39,7 +40,7 @@ describe("AI visibility: grouped by purpose, with identity, pages and trend", ()
     expect(visibilitySql({ tenantId: "t" })).toMatch(/WHERE forcefield_tenant_id = \$1/);
     expect(visibilitySql({ site: "s" })).toMatch(/forcefield_tenant_id IS NULL AND props->>'site' = \$1/);
     expect(visibilitySql({ site: "s" })).toMatch(/synthetic', ''\) <> 'true'/);
-    expect(visibilitySql({ site: "s" })).toMatch(/sum\(COALESCE\(\(props->>'repeat_count'\)::int, 1\)\)/);
+    expect(visibilitySql({ site: "s" })).toContain(`sum(${EVENT_WEIGHT_SQL})`);
   });
 
   it("getAiVisibility passes the scope key and window, and degrades to empty on a read error", async () => {

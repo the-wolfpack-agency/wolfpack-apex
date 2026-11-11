@@ -49,6 +49,8 @@ interface Summary {
     welcomed: number;
     flagged: number;
     trapped: number;
+    trapSources?: number;
+    contained?: number;
     blocked: number;
     wouldBlock?: number;
     hostileOperators?: number;

@@ -20,6 +20,7 @@ export interface SiteUsageData {
   agentOrigins?: Array<{ country: string; total: number; welcomed: number; welcomedVerified: number; flagged: number; hostile: number }>;
   forcefield: {
     welcomed: number; flagged: number; trapped: number; blocked: number;
+    trapSources?: number; contained?: number;
     hostileOperators?: number; hostileEvents?: number;
     topAgents: Array<{ agent: string; count: number }>;
   };
@@ -142,9 +143,12 @@ export function SiteUsagePanel({ data }: { data: SiteUsageData }) {
               traffic (honeytoken trip / live payload / blocked fingerprint). */}
           <div style={card} data-testid="ff-agent-traffic">
             <div style={label} data-testid="ff-posture">
-              {data.forcefield.blocked > 0
-                ? `Forcefield · agent traffic (enforcing · ${data.forcefield.blocked.toLocaleString()} blocked)`
-                : "Forcefield · agent traffic (monitoring · none turned away in range)"}
+              {data.forcefield.blocked + (data.forcefield.contained ?? 0) > 0
+                ? `Forcefield · agent traffic (enforcing · ${[
+                    data.forcefield.blocked > 0 ? `${data.forcefield.blocked.toLocaleString()} blocked` : "",
+                    (data.forcefield.contained ?? 0) > 0 ? `${(data.forcefield.contained ?? 0).toLocaleString()} contained` : "",
+                  ].filter(Boolean).join(" · ")})`
+                : "Forcefield · agent traffic (none blocked or contained in range)"}
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "1rem", marginTop: "0.8rem" }}>
               <div>
@@ -172,15 +176,21 @@ export function SiteUsagePanel({ data }: { data: SiteUsageData }) {
                 </div>
               </div>
               <div>
-                <div style={{ ...label, color: "var(--wp-error, #ef4444)" }}>Decoy trips</div>
-                <div data-testid="ff-trapped" style={{ marginTop: "0.25rem", fontSize: "1.5rem", fontWeight: 700, color: "var(--wp-text, #eee)" }}>
-                  {data.forcefield.trapped.toLocaleString()}
+                <div style={{ ...label, color: "var(--wp-error, #ef4444)" }}>Caught in decoys</div>
+                <div data-testid="ff-trap-sources" style={{ marginTop: "0.25rem", fontSize: "1.5rem", fontWeight: 700, color: "var(--wp-text, #eee)" }}>
+                  {(data.forcefield.trapSources ?? 0).toLocaleString()}
+                </div>
+                <div data-testid="ff-trapped" style={{ fontSize: "0.62rem", color: "var(--wp-text-muted, #9ca3af)", marginTop: "0.15rem", lineHeight: 1.35 }}>
+                  sources · {data.forcefield.trapped.toLocaleString()} decoy page{data.forcefield.trapped === 1 ? "" : "s"} loaded (not separate attacks)
                 </div>
               </div>
               <div>
                 <div style={{ ...label, color: "var(--wp-error, #ef4444)" }}>Blocked (enforced)</div>
                 <div data-testid="ff-blocked" style={{ marginTop: "0.25rem", fontSize: "1.5rem", fontWeight: 700, color: "var(--wp-text, #eee)" }}>
                   {data.forcefield.blocked.toLocaleString()}
+                </div>
+                <div data-testid="ff-contained" style={{ fontSize: "0.62rem", color: "var(--wp-text-muted, #9ca3af)", marginTop: "0.15rem", lineHeight: 1.35 }}>
+                  requests turned away · {(data.forcefield.contained ?? 0).toLocaleString()} more contained (served decoys, slowed)
                 </div>
               </div>
             </div>

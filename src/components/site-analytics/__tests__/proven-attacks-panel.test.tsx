@@ -24,6 +24,10 @@ const PROVEN: ProvenAttacks = {
           { attack: "path_traversal", eventType: "site.agent_payload_attack", count: 76, fingerprints: 12, withoutFingerprint: 0, lastSeen: "2026-10-24T10:00:00Z" },
         ],
       },
+      contained: {
+        events: 82876, fingerprints: 5, withoutFingerprint: 0, lastSeen: "2026-10-24T11:00:00Z",
+        byClass: [{ attack: "decoy_trip", eventType: "site.agent_trap_tripped", count: 82876, fingerprints: 5, withoutFingerprint: 0, lastSeen: "2026-10-24T11:00:00Z" }],
+      },
       reportOnly: {
         events: 3, fingerprints: 2, withoutFingerprint: 1, lastSeen: "2026-10-22T12:00:00Z",
         byClass: [{ attack: "xss", eventType: "site.agent_payload_attack", count: 3, fingerprints: 2, withoutFingerprint: 1, lastSeen: "2026-10-22T12:00:00Z" }],
@@ -34,6 +38,7 @@ const PROVEN: ProvenAttacks = {
       lastReportAt: "2026-10-24T11:59:00Z",
       excludedFalsePositives: 7828,
       blocked: emptyProvenMode(),
+      contained: emptyProvenMode(),
       reportOnly: emptyProvenMode(),
     },
     {
@@ -41,6 +46,7 @@ const PROVEN: ProvenAttacks = {
       lastReportAt: "2026-10-20T12:00:00Z",
       excludedFalsePositives: 0,
       blocked: emptyProvenMode(),
+      contained: emptyProvenMode(),
       reportOnly: emptyProvenMode(),
     },
   ],
@@ -118,4 +124,19 @@ test("gated: a viewer without forcefield.view sees the org-wide blocked count an
   expect(screen.getByTestId("proven-attacks-gated")).toHaveTextContent("282 requests blocked");
   expect(screen.getByTestId("proven-attacks-gated")).toHaveTextContent("forcefield.view");
   expect(screen.queryByTestId("proven-attacks-error")).toBeNull();
+});
+
+test("contained: decoy visitors served decoys and slowed have their own section, never report-only", () => {
+  render(<ProvenAttacksPanel {...base} proven={PROVEN} />);
+  expect(screen.getByTestId("proven-site-ogiam.com-contained-count")).toHaveTextContent("82,876 contained");
+  const row = screen.getByTestId("proven-ogiam.com-contained-decoy_trip");
+  expect(row).toHaveTextContent("Decoy trip (pages loaded)");
+  expect(row).toHaveTextContent("82,876");
+  expect(screen.getByTestId("proven-ogiam.com-contained-decoy_trip-fp")).toHaveTextContent("5");
+  expect(screen.getByTestId("proven-ogiam.com-contained-decoy-note")).toHaveTextContent("how many were caught");
+  // report-only holds only what was let through
+  expect(screen.getByTestId("proven-ogiam.com-report-only-table")).not.toHaveTextContent("Decoy");
+  expect(screen.getByTestId("proven-attacks-totals")).toHaveTextContent("82,876 contained");
+  // a site with nothing contained shows no contained table
+  expect(screen.queryByTestId("proven-instinct-contained-table")).toBeNull();
 });

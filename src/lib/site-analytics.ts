@@ -190,7 +190,12 @@ export interface SiteAnalyticsSummary {
   forcefield: {
     welcomed: number;
     flagged: number;
+    /** Decoy page requests, repeats included. */
     trapped: number;
+    /** Distinct sources (fingerprint, else session signature) caught in a decoy. */
+    trapSources: number;
+    /** Requests served a decoy and slowed down (tarpit), not blocked. */
+    contained: number;
     blocked: number;
     /* Requests enforcement WOULD have turned away, but watch mode or the plan
        held the block back (props.would_block). Shown next to blocked so a
@@ -396,11 +401,11 @@ async function getDefenseSignals(sinceClause: string, surfaceClause: string, par
   const [reasons, rate, identity, probes, networks] = await Promise.all([
     safeQuery<{ reason: string; blocked: string; would_block: string }>(
       `SELECT coalesce(props->>'reason_kind', 'unspecified') AS reason,
-              count(*) FILTER (WHERE props->>'blocked' = 'true') AS blocked,
-              count(*) FILTER (WHERE props->>'would_block' = 'true' AND coalesce(props->>'blocked', '') <> 'true') AS would_block
+              coalesce(sum(${EVENT_WEIGHT_SQL}) FILTER (WHERE props->>'blocked' = 'true'), 0) AS blocked,
+              coalesce(sum(${EVENT_WEIGHT_SQL}) FILTER (WHERE props->>'would_block' = 'true' AND coalesce(props->>'blocked', '') <> 'true'), 0) AS would_block
          FROM site_analytics_events
         ${where} AND (props->>'blocked' = 'true' OR props->>'would_block' = 'true')
-        GROUP BY 1 ORDER BY count(*) DESC LIMIT 20`,
+        GROUP BY 1 ORDER BY sum(${EVENT_WEIGHT_SQL}) DESC LIMIT 20`,
       params,
     ),
     safeQuery<{ bursts: string; operators: string; peak: string | null; window_s: string | null; from_ingest: string }>(
@@ -537,8 +542,10 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
         WHERE ${sinceClause}${surfaceClause}`,
       params,
     ),
-    safeQuery<{ welcomed: string; flagged: string; trapped: string; blocked: string; would_block: string; hostile_operators: string; hostile_events: string }>(
-      /* welcomed/flagged/trapped/blocked are event tallies. hostile_operators is
+    safeQuery<{ welcomed: string; flagged: string; trapped: string; trap_sources: string; contained: string; blocked: string; would_block: string; hostile_operators: string; hostile_events: string }>(
+      /* Request tallies include folded repeats (EVENT_WEIGHT_SQL), the same
+         count as the digest email, so the board and the email agree.
+         welcomed/flagged/trapped/blocked are event tallies. hostile_operators is
          the number that actually matters: DISTINCT fingerprints that exhibited
          hostile TRADECRAFT (probed a sensitive path, tripped a decoy, sent a
          payload, hit a honeypot). "flagged" is a weak heuristic (unidentified
@@ -548,11 +555,13 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
       `SELECT
          count(*) FILTER (WHERE event_type = 'site.agent_welcomed')     AS welcomed,
          count(*) FILTER (WHERE event_type = 'site.agent_flagged')      AS flagged,
-         count(*) FILTER (WHERE event_type = 'site.agent_trap_tripped') AS trapped,
-         count(*) FILTER (WHERE props->>'blocked' = 'true')             AS blocked,
-         count(*) FILTER (WHERE props->>'would_block' = 'true' AND coalesce(props->>'blocked', '') <> 'true') AS would_block,
+         coalesce(sum(${EVENT_WEIGHT_SQL}) FILTER (WHERE event_type = 'site.agent_trap_tripped'), 0) AS trapped,
+         count(DISTINCT CASE WHEN props->>'fp' <> '' THEN props->>'fp' ELSE props->>'sig' END) FILTER (WHERE event_type = 'site.agent_trap_tripped') AS trap_sources,
+         coalesce(sum(${EVENT_WEIGHT_SQL}) FILTER (WHERE coalesce(props->>'blocked', '') <> 'true' AND (props->>'tarpit' = 'true' OR props->>'action' = 'tarpit')), 0) AS contained,
+         coalesce(sum(${EVENT_WEIGHT_SQL}) FILTER (WHERE props->>'blocked' = 'true'), 0)             AS blocked,
+         coalesce(sum(${EVENT_WEIGHT_SQL}) FILTER (WHERE props->>'would_block' = 'true' AND coalesce(props->>'blocked', '') <> 'true'), 0) AS would_block,
          count(DISTINCT props->>'fp') FILTER (WHERE ${HOSTILE_ROW} AND props->>'fp' IS NOT NULL) AS hostile_operators,
-         count(*) FILTER (WHERE ${HOSTILE_ROW}) AS hostile_events
+         coalesce(sum(${EVENT_WEIGHT_SQL}) FILTER (WHERE ${HOSTILE_ROW}), 0) AS hostile_events
          FROM site_analytics_events
         WHERE ${sinceClause}${surfaceClause}${notAssetFlag}`,
       params,
@@ -728,6 +737,8 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
       welcomed: ff.rows[0] ? Number(ff.rows[0].welcomed) : 0,
       flagged: ff.rows[0] ? Number(ff.rows[0].flagged) : 0,
       trapped: ff.rows[0] ? Number(ff.rows[0].trapped) : 0,
+      trapSources: ff.rows[0] ? Number(ff.rows[0].trap_sources ?? 0) : 0,
+      contained: ff.rows[0] ? Number(ff.rows[0].contained ?? 0) : 0,
       blocked: ff.rows[0] ? Number(ff.rows[0].blocked) : 0,
       wouldBlock: ff.rows[0] ? Number(ff.rows[0].would_block ?? 0) : 0,
       hostileOperators: ff.rows[0] ? Number(ff.rows[0].hostile_operators) : 0,

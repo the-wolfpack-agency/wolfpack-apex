@@ -83,6 +83,12 @@ export interface ClassLine {
   /** Distinct recorded fingerprints (0 = none recorded). */
   sources: number;
   signatureCount: number;
+  /** Who the sources were, most requests first (capped): identified agent
+   *  names, network owners, client types and countries the edge recorded. */
+  agents: string[];
+  networks: string[];
+  clientTypes: string[];
+  countries: string[];
 }
 
 export interface HostileIncident {
@@ -183,6 +189,10 @@ export function classLines(groups: readonly HostileEventGroup[]): ClassLine[] {
       pathCount: d.pathCount,
       sources: d.fingerprintCount,
       signatureCount: d.signatureCount,
+      agents: d.agents,
+      networks: d.networks,
+      clientTypes: d.clientTypes,
+      countries: d.countries,
     });
   }
   return lines.sort((a, b) => b.count - a.count || (a.attackClass < b.attackClass ? -1 : 1));
@@ -362,7 +372,13 @@ export interface DigestData {
   periodStart: string;
   periodEnd: string;
   sites: DigestSite[];
-  totals: { incidents: number; attempts: number; sites: number; sources: number };
+  /** attempts = every request (attacks + decoy). The split below keeps decoy
+   *  activity apart from attack attempts: one source caught in the decoy maze
+   *  loads many decoy pages, and each page is a request, not a separate attack. */
+  totals: {
+    incidents: number; attempts: number; sites: number; sources: number;
+    attackAttempts: number; attackSources: number; decoyRequests: number; decoySources: number;
+  };
   /** Incidents in the same period that were emailed immediately instead. */
   immediateIncidents: number;
   /** Every digest incident's anchor + site + window (for the exactly-once test). */
@@ -388,13 +404,27 @@ export function buildDigest(incidents: readonly HostileIncident[], period: { etD
     sites.push({ site, incidents: list.length, attempts: d.count, sources: d.fingerprintCount, firstAt: d.firstAt, lastAt: d.lastAt, outcomes: d.outcomes, rows: classLines(groups) });
   }
   sites.sort((a, b) => b.attempts - a.attempts || (a.site < b.site ? -1 : 1));
-  const allFps = new Set(digest.flatMap((i) => i.groups.map((g) => g.fp)).filter(Boolean));
+  const allGroups = digest.flatMap((i) => i.groups);
+  const fpsOf = (gs: readonly HostileEventGroup[]) => new Set(gs.map((g) => g.fp).filter(Boolean));
+  const allFps = fpsOf(allGroups);
+  const attackGroups = allGroups.filter((g) => g.kind === "payload_attack");
+  const decoyGroups = allGroups.filter((g) => g.kind === "honeytoken_trip");
+  const sum = (gs: readonly HostileEventGroup[]) => gs.reduce((n, g) => n + g.count, 0);
   return {
     etDate: period.etDate,
     periodStart: period.start.toISOString(),
     periodEnd: period.end.toISOString(),
     sites,
-    totals: { incidents: digest.length, attempts: sites.reduce((n, s) => n + s.attempts, 0), sites: sites.length, sources: allFps.size },
+    totals: {
+      incidents: digest.length,
+      attempts: sites.reduce((n, s) => n + s.attempts, 0),
+      sites: sites.length,
+      sources: allFps.size,
+      attackAttempts: sum(attackGroups),
+      attackSources: fpsOf(attackGroups).size,
+      decoyRequests: sum(decoyGroups),
+      decoySources: fpsOf(decoyGroups).size,
+    },
     immediateIncidents: inPeriod.length - digest.length,
     incidentKeys: digest.map(incidentIdentity),
   };

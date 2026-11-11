@@ -138,7 +138,7 @@ describe("getSiteAnalyticsSummary", () => {
     expect(summary.surfaces).toEqual(["ogiam.com", "instinct"]);
     expect(summary.surface).toBe("all");
     expect(summary.forcefield).toEqual({
-      welcomed: 3, flagged: 5, trapped: 2, blocked: 1, wouldBlock: 0, hostileOperators: 2, hostileEvents: 4, topAgents: [{ agent: "GPTBot", count: 3 }],
+      welcomed: 3, flagged: 5, trapped: 2, trapSources: 0, contained: 0, blocked: 1, wouldBlock: 0, hostileOperators: 2, hostileEvents: 4, topAgents: [{ agent: "GPTBot", count: 3 }],
     });
     expect(summary.learnedSignatures).toEqual({ shadow: 2, enforcing: 1, autoBlocked: 3 });
     // The two correlated events (same fingerprint) fuse into one classified journey.

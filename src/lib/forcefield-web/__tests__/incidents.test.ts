@@ -133,7 +133,7 @@ describe("buildDigest", () => {
       g({ site: "ogiam.com", fp: "c", kind: "honeytoken_trip", attackClass: "honeytoken_trip", outcome: "recorded", firstAt: "2026-10-26T13:00:00.000Z" }),
     ]);
     const d = buildDigest(inc, period);
-    expect(d.totals).toEqual({ incidents: 2, attempts: 6, sites: 2, sources: 2 });
+    expect(d.totals).toEqual({ incidents: 2, attempts: 6, sites: 2, sources: 2, attackAttempts: 6, attackSources: 2, decoyRequests: 0, decoySources: 0 });
     expect(d.immediateIncidents).toBe(1);
     expect(d.sites.map((s) => [s.site, s.attempts, s.rows.map((r) => r.attackClass)])).toEqual([["instinct", 5, ["xss", "sql_injection"]], ["ogiam.com", 1, ["sql_injection"]]]);
   });

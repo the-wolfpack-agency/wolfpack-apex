@@ -42,13 +42,17 @@ function proven() {
             { attack: "path_traversal", eventType: "site.agent_payload_attack", count: 76, fingerprints: 12, withoutFingerprint: 0, lastSeen: iso(2) },
           ],
         },
+        contained: {
+          events: 82876, fingerprints: 5, withoutFingerprint: 0, lastSeen: iso(1),
+          byClass: [{ attack: "decoy_trip", eventType: "site.agent_trap_tripped", count: 82876, fingerprints: 5, withoutFingerprint: 0, lastSeen: iso(1) }],
+        },
         reportOnly: {
           events: 3, fingerprints: 2, withoutFingerprint: 0, lastSeen: iso(30),
           byClass: [{ attack: "xss", eventType: "site.agent_payload_attack", count: 3, fingerprints: 2, withoutFingerprint: 0, lastSeen: iso(30) }],
         },
       },
-      { site: "instinct", lastReportAt: iso(0.1), excludedFalsePositives: 7828, blocked: emptyMode(), reportOnly: emptyMode() },
-      { site: "weekendwithporsche", lastReportAt: iso(1), excludedFalsePositives: 0, blocked: emptyMode(), reportOnly: emptyMode() },
+      { site: "instinct", lastReportAt: iso(0.1), excludedFalsePositives: 7828, blocked: emptyMode(), contained: emptyMode(), reportOnly: emptyMode() },
+      { site: "weekendwithporsche", lastReportAt: iso(1), excludedFalsePositives: 0, blocked: emptyMode(), contained: emptyMode(), reportOnly: emptyMode() },
     ],
   };
 }
@@ -65,7 +69,7 @@ function summary(over: Record<string, unknown> = {}) {
     byPage: [{ path: "/", count: 120 }],
     byCountry: [{ country: "US", count: 100 }],
     byType: [{ type: "site.page_viewed", count: 120 }],
-    forcefield: { welcomed: 5, flagged: 9, trapped: 82, blocked: 158, wouldBlock: 3, hostileOperators: 2, hostileEvents: 6, topAgents: [{ agent: "GPTBot", count: 5 }] },
+    forcefield: { welcomed: 5, flagged: 9, trapped: 82958, trapSources: 5, contained: 82876, blocked: 158, wouldBlock: 3, hostileOperators: 2, hostileEvents: 6, topAgents: [{ agent: "GPTBot", count: 5 }] },
     learnedSignatures: { shadow: 0, enforcing: 0, autoBlocked: 0 },
     agentIntel: { operators: 0, campaigns: 0, automationFleet: 0, aiAgents: 0, scripts: 0, persistedAfterBlock: 0, escalatedAfterBlock: 0, topCampaigns: [] },
     journeys: [],
@@ -133,6 +137,37 @@ test.describe("Forcefield board: proven attacks first", () => {
     expect(provenBox && tabsBox && provenBox.y < tabsBox.y, "proven attacks render above the noise").toBeTruthy();
     // ...and the noise is still reachable for anyone who looks.
     await expect(page.getByTestId("ff-flagged")).toHaveText("9");
+    expectNoFailures(snapshot);
+  });
+
+  test("contained decoy visitors: own section, sources caught, never report-only or attack attempts", async ({ page }) => {
+    await stubInstinctSession(page, { role: "cto" });
+    await stubBoard(page, { summary: summary(), permissions: INTEL });
+    const snapshot = collectConsoleAndNetworkFailures(page);
+    await openBoard(page);
+    await expect(page.getByTestId("proven-site-ogiam.com-contained-count")).toHaveText("82,876 contained");
+    await expect(page.getByTestId("proven-ogiam.com-contained-decoy_trip")).toContainText("Decoy trip (pages loaded)");
+    await expect(page.getByTestId("proven-ogiam.com-contained-decoy_trip-fp")).toHaveText("5");
+    await expect(page.getByTestId("proven-ogiam.com-contained-decoy-note")).toBeVisible();
+    await expect(page.getByTestId("proven-ogiam.com-report-only-table")).not.toContainText("Decoy");
+    await expect(page.getByTestId("proven-attacks-totals")).toContainText("82,876 contained");
+    // the usage tiles: sources caught leads, page loads are context
+    await expect(page.getByTestId("ff-trap-sources")).toHaveText("5");
+    await expect(page.getByTestId("ff-trapped")).toContainText("82,958 decoy pages loaded (not separate attacks)");
+    await expect(page.getByTestId("ff-contained")).toContainText("82,876 more contained");
+    await expect(page.getByTestId("ff-posture")).toContainText("158 blocked · 82,876 contained");
+    expectNoFailures(snapshot);
+  });
+
+  test("older API without the contained block: the board still renders, nothing blank", async ({ page }) => {
+    await stubInstinctSession(page, { role: "cto" });
+    const p = proven();
+    for (const site of p.sites) delete (site as Record<string, unknown>).contained;
+    await stubBoard(page, { summary: summary({ proven: p }), permissions: INTEL });
+    const snapshot = collectConsoleAndNetworkFailures(page);
+    await openBoard(page);
+    await expect(page.getByTestId("proven-site-ogiam.com-blocked-count")).toHaveText("158 blocked");
+    await expect(page.getByTestId("proven-site-ogiam.com-contained-count")).toHaveText("0 contained");
     expectNoFailures(snapshot);
   });
 
