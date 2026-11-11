@@ -42,7 +42,11 @@ const HARD_GATES = [
  * a commented-out argument satisfies. The assertions below check the parsed
  * command each step actually executes.
  */
-const REPORT_ONLY_GATES: string[] = [];
+const REPORT_ONLY_GATES: string[] = [
+  /* Added 2026-11-10. Creates, scans, counts, downloads and archives a real QR
+     code as the smoke account. It mutates state, so it is staged here first. */
+  "tests/e2e/qr-tool-live.spec.ts",
+];
 
 const { load } = require("js-yaml") as { load: (src: string) => unknown };
 interface Step {
@@ -289,6 +293,16 @@ test("with no report-only gates there is no report-only step (an empty playwrigh
   expect(s.if).toBe("steps.cfg.outputs.configured == 'true'");
   // A failure is surfaced on the run summary, not swallowed.
   expect(yaml).toMatch(/steps\.report_only\.outcome == 'failure'/);
+});
+
+test("a skipped report-only run is announced, not read as a pass", () => {
+  /* The report-only specs need the smoke account. Without it they skip, and a
+     skipped Playwright test reports as a pass, so the workflow must warn. */
+  if (!REPORT_ONLY_GATES.length) return;
+  const s = step("Report-only gates credentials");
+  expect(s.if).toMatch(/SMOKE_TEST_EMAIL == ''/);
+  expect(s.if).toMatch(/SMOKE_TEST_PASSWORD == ''/);
+  expect(s.run).toMatch(/::warning::/);
 });
 
 test("no spec is both a hard gate and report-only", () => {

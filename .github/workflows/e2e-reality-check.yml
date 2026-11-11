@@ -9,7 +9,7 @@ name: E2E Reality Check
 #   * The Playwright browser is cached, so the ~1-2 min install only runs on a
 #     version bump.
 #   * The two HARD gates run in ONE parallel invocation on every PR + push.
-#   * Five REPORT-ONLY gates run on every PR + push under continue-on-error,
+#   * REPORT-ONLY gates run on every PR + push under continue-on-error,
 #     until each is green and promoted into the hard-gates step.
 #   * The SOFT specs run in ONE invocation on push-to-main ONLY, so they stay off
 #     the PR critical path (they never gated a merge; they only delayed it).
@@ -144,11 +144,38 @@ jobs:
           tests/e2e/lms-security-course.spec.ts
           --config=playwright.config.ts --workers=2 --reporter=github
 
-      # REPORT-ONLY gates: none today (all five woken specs promoted 2026-10-25).
-      # To stage a new spec, add a "Reality-check gates (report-only, promote when
-      # green)" step with id report_only, continue-on-error and a timeout, plus a
-      # warning step that fires when that step fails, and list it in
-      # REPORT_ONLY_GATES (reality-check-workflow.test.ts pins both).
+      # REPORT-ONLY gates (the five woken specs were promoted 2026-10-25).
+      # To stage a new spec, add it to the "Reality-check gates (report-only,
+      # promote when green)" step below, and list it in REPORT_ONLY_GATES
+      # (reality-check-workflow.test.ts pins both). Remove the step once the
+      # list is empty again: an empty playwright command runs every spec.
+      #   qr-tool-live (added 2026-11-10): signs in as the smoke account,
+      #     creates a QR code, scans /q/<slug>, checks the scan count, downloads
+      #     SVG + PNG, and archives the code. It mutates real state, which is
+      #     why it starts here rather than as a hard gate.
+      # continue-on-error is the report-only mechanism, bounded by its own
+      # timeout so it cannot eat the job budget.
+      - name: Reality-check gates (report-only, promote when green)
+        id: report_only
+        if: steps.cfg.outputs.configured == 'true'
+        continue-on-error: true
+        timeout-minutes: 8
+        run: >-
+          npx playwright test
+          tests/e2e/qr-tool-live.spec.ts
+          --config=playwright.config.ts --workers=2 --reporter=github
+
+      # A report-only failure must still be visible on the run summary, not
+      # only inside a collapsed green step.
+      - name: Report-only gates outcome
+        if: always() && steps.report_only.outcome == 'failure'
+        run: echo "::warning::Report-only reality-check gates failed. They do not block this merge; see the step above and fix before promoting them to hard gates."
+
+      # A skipped Playwright test reports as a pass. The report-only specs need
+      # the smoke account; without it they skip, and that must be said aloud.
+      - name: Report-only gates credentials
+        if: steps.cfg.outputs.configured == 'true' && (env.SMOKE_TEST_EMAIL == '' || env.SMOKE_TEST_PASSWORD == '')
+        run: echo "::warning::SMOKE_TEST_EMAIL or SMOKE_TEST_PASSWORD is not set, so the report-only reality-check specs SKIPPED. A skip is not a pass."
 
       # CSP img-src narrowing, its own invocation. A narrowed CSP fails
       # silently: img-src no longer allows any https host (model output must
