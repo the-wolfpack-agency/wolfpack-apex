@@ -9,8 +9,8 @@
  * Re-fires immediately on tab refocus or visibility change so the
  * user always sees fresh data the moment they look at the screen.
  *
- * Used by the four sidebar/topbar badges (Email, Messages, Teams,
- * NewMessageToast). Combined with the coalesce wrapper in
+ * Used by the sidebar/topbar badges (Email, Messages, Teams; the
+ * NewMessageToast that also polled was removed 2026-11-11). Combined with the coalesce wrapper in
  * `src/lib/coalesced-fetch.ts`, the four badges produce ~4 reqs/min
  * idle (one per unique URL × ~2 polls/min) instead of the previous
  * 48 reqs/min (4 badges × 12 polls/min). Idle backoff drops it

@@ -31,7 +31,10 @@ if ! command -v docker >/dev/null 2>&1; then
   exit 0
 fi
 
-cleanup() { docker rm -f "$NAME" >/dev/null 2>&1 || true; }
+# -v: `docker run postgres` creates an anonymous volume for its data dir, and
+# `docker rm -f` alone leaves it behind. Without -v every run leaked one
+# (86 orphaned volumes, ~5 GB, filled the disk on 2026-11-11).
+cleanup() { docker rm -f -v "$NAME" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 cleanup
 

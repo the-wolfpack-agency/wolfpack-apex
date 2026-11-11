@@ -12,7 +12,6 @@ import {
 } from "@/lib/client-auth";
 import NotificationBell from "@/components/NotificationBell";
 import TeamsUnreadBadge from "@/components/TeamsUnreadBadge";
-import NewMessageToast from "@/components/NewMessageToast";
 import MessagesNavBadge from "@/components/MessagesNavBadge";
 /* EmailNavBadge import removed — Emails route is hidden from the
    nav until the inbox is production-ready, so the badge has nothing
@@ -499,12 +498,6 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
           <WelcomeTooltip />
         </>
       )}
-      {/* New-message slide-in toast — fires whenever the Teams unread
-          count grows during this session. Self-suppresses on /messages
-          (the user's already there). Self-renders nothing when count
-          isn't growing — costs ~1 poll piggybacking on the existing
-          adaptive-poll cadence. */}
-      <NewMessageToast />
       {/* Cmd+K / Ctrl+K command palette — global navigator. Renders
           nothing until toggled. Role-filters routes the user can't
           reach, mirroring the sidebar's gate. */}
