@@ -120,64 +120,20 @@ export default function TeamsUnreadBadge() {
     }
   }, []);
 
-  // React to count changes: fire a browser notification if the count
-  // *grew* (new messages arrived since the last poll), and tag the
-  // document.title so users with the tab in the background see "(N)
-  // Instinct" — same affordance Gmail / Slack use. Only fires when the
-  // user isn't already on /messages (no point notifying about a
-  // message they're staring at).
+  // React to count changes: tag document.title so a tab in the background
+  // shows "(N) Instinct" (the Gmail / Slack affordance). No pop-ups: the
+  // desktop notification and the in-app toast were removed on 2026-11-11 as
+  // noise (operator: they fired constantly, even on their own sent messages).
+  // The badge, the title count and the unread dots in /messages remain.
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (!originalTitleRef.current) {
       originalTitleRef.current = document.title.replace(/^\(\d+\)\s*/, "");
     }
-    const prev = lastCountRef.current;
     lastCountRef.current = count;
-
-    // Title prefix.
     const base = originalTitleRef.current || "Instinct";
     document.title = count > 0 ? `(${count > 99 ? "99+" : count}) ${base}` : base;
-
-    // Notification gate.
-    if (count <= prev) return;
-    if (window.location.pathname === "/messages") return;
-    if (!("Notification" in window)) return;
-    if (Notification.permission === "denied") return;
-
-    const fire = () => {
-      try {
-        const delta = count - prev;
-        const n = new Notification(
-          delta === 1 ? "New Teams message" : `${delta} new Teams messages`,
-          {
-            body: "Open Instinct to read and reply.",
-            icon: "/ogiam-icon.png",
-            tag: "instinct-teams-unread",
-            // Renotify on each new arrival rather than silently
-            // collapsing into the previous notification.
-            renotify: true,
-          } as NotificationOptions,
-        );
-        n.onclick = () => {
-          window.focus();
-          router.push("/messages");
-          n.close();
-        };
-      } catch {
-        /* notification API failure is non-fatal */
-      }
-    };
-
-    if (Notification.permission === "granted") {
-      fire();
-    } else if (Notification.permission === "default") {
-      // Lazy permission ask — only when there's actually something to
-      // notify about. No nagging on first page load with zero unread.
-      void Notification.requestPermission().then((p) => {
-        if (p === "granted") fire();
-      });
-    }
-  }, [count, router]);
+  }, [count]);
 
   // Adaptive polling: 5s when tab is visible, 45s when hidden.
   // Hook owns the visibility + focus listeners.
