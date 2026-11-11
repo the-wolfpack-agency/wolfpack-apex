@@ -23,6 +23,10 @@ on:
       - "tests/e2e/site-analytics-agent-profile.spec.ts"
       - "tests/e2e/site-analytics-defense.spec.ts"
       - "tests/e2e/site-analytics-proven.spec.ts"
+      # the message pop-ups spec rides this PR build (same stubbed-session layer)
+      - "tests/e2e/messages-no-popups.spec.ts"
+      - "src/components/TeamsUnreadBadge.tsx"
+      - "src/app/(dashboard)/layout.tsx"
       - "tests/e2e/site-analytics-accountable.spec.ts"
       - "tests/e2e/site-analytics-ai-visibility.spec.ts"
       - "tests/e2e/site-analytics-page-integrity.spec.ts"
@@ -228,6 +232,7 @@ jobs:
           tests/e2e/evidence-backed-status.spec.ts
           tests/e2e/forcefield-threat-coverage.spec.ts
           tests/e2e/forcefield-exposure.spec.ts
+          tests/e2e/messages-no-popups.spec.ts
           --grep-invert "real sign-in"
           --config=playwright.config.ts
           --reporter=github

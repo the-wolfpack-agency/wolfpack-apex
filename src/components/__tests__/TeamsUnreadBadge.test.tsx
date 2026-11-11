@@ -242,63 +242,39 @@ describe("<TeamsUnreadBadge />", () => {
     await waitFor(() => expect(document.title).toBe("Instinct"));
   });
 
-  test("fires a browser notification when count increases between polls", async () => {
-    // Stub the Notification API. jsdom doesn't implement it.
+  // Pop-ups were removed on 2026-11-11 (operator: constant noise, even on
+  // their own sent messages). Growing unread counts update the badge and the
+  // tab title only: no desktop notification, no permission prompt.
+  test("never fires a desktop notification or asks permission when the count grows", async () => {
     const notificationCtor = jest.fn();
-    (notificationCtor as unknown as { permission: NotificationPermission }).permission =
-      "granted";
-    (notificationCtor as unknown as {
-      requestPermission: () => Promise<NotificationPermission>;
-    }).requestPermission = () => Promise.resolve("granted");
+    const requestPermission = jest.fn(() => Promise.resolve("granted" as NotificationPermission));
+    (notificationCtor as unknown as { permission: NotificationPermission }).permission = "default";
+    (notificationCtor as unknown as { requestPermission: typeof requestPermission }).requestPermission = requestPermission;
     (window as unknown as { Notification: unknown }).Notification = notificationCtor;
-
-    // Pretend we're not on /messages so the gate allows notification.
     window.history.pushState({}, "", "/dashboard");
 
     let response = mkJsonResponse({ count: 1, total_chats: 5 });
     mockFetchWithRefresh.mockImplementation(() => Promise.resolve(response));
-
     render(<TeamsUnreadBadge />);
-    await waitFor(() => expect(mockFetchWithRefresh).toHaveBeenCalled());
-    // First mount: count goes 0 → 1, that IS an increase, notification fires once.
-    await waitFor(() => expect(notificationCtor).toHaveBeenCalledTimes(1));
-    expect(notificationCtor.mock.calls[0][0]).toBe("New Teams message");
+    await waitFor(() => expect(document.title).toBe("(1) Instinct"));
 
-    // Same count on next poll: NO new notification (no increase).
-    await act(async () => {
-      jest.advanceTimersByTime(30_000);
-      await Promise.resolve();
-    });
-    expect(notificationCtor).toHaveBeenCalledTimes(1);
-
-    // Bump to 4: delta is 3, plural copy fires.
     response = mkJsonResponse({ count: 4, total_chats: 5 });
     await act(async () => {
-      jest.advanceTimersByTime(30_000);
+      jest.advanceTimersByTime(60_000);
       await Promise.resolve();
     });
-    await waitFor(() => expect(notificationCtor).toHaveBeenCalledTimes(2));
-    expect(notificationCtor.mock.calls[1][0]).toBe("3 new Teams messages");
-  });
+    await waitFor(() => expect(document.title).toBe("(4) Instinct"));
+    expect(notificationCtor).not.toHaveBeenCalled();
+    expect(requestPermission).not.toHaveBeenCalled();
 
-  test("does NOT fire a browser notification when user is already on /messages", async () => {
-    const notificationCtor = jest.fn();
-    (notificationCtor as unknown as { permission: NotificationPermission }).permission =
-      "granted";
-    (window as unknown as { Notification: unknown }).Notification = notificationCtor;
-
-    window.history.pushState({}, "", "/messages");
-
-    mockFetchWithRefresh.mockResolvedValue(
-      mkJsonResponse({ count: 5, total_chats: 5 }),
-    );
-
-    render(<TeamsUnreadBadge />);
-    await waitFor(() => expect(mockFetchWithRefresh).toHaveBeenCalled());
-    // Give effects time to settle.
+    // granted permission (from before this change) does not fire one either
+    (notificationCtor as unknown as { permission: NotificationPermission }).permission = "granted";
+    response = mkJsonResponse({ count: 6, total_chats: 5 });
     await act(async () => {
+      jest.advanceTimersByTime(60_000);
       await Promise.resolve();
     });
+    await waitFor(() => expect(document.title).toBe("(6) Instinct"));
     expect(notificationCtor).not.toHaveBeenCalled();
   });
 });
