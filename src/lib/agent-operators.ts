@@ -11,6 +11,7 @@
  */
 import { query, safeQuery } from "@/lib/db";
 import { NOT_CONTROL_PLANE_FP } from "@/lib/site-analytics-proven";
+import { ACTOR_KEY_SQL } from "@/lib/site-analytics-weight";
 import { operatorKeyFor, buildDossiers, buildDossier, type Sighting, type AttributionDossier } from "@/lib/agent-dossier";
 import { buildJourneys, type AgentJourney, type CorrelationKind } from "@/lib/agent-behavior";
 import { liveSightingFor } from "@/lib/agent-profile";
@@ -216,8 +217,13 @@ const EMPTY_INTEL: AgentIntelSummary = { operators: 0, campaigns: 0, automationF
 /**
  * Deeper agent intelligence rolled up across the LIVE edge stream: cross-site
  * campaigns, automation/AI/script mix, and who adapted after being blocked.
- * Groups events by the stable edge fingerprint and runs the pure analyzeAgent
- * on each. Fail-safe: empty on any error / no DB.
+ * Groups events by ACTOR (site-analytics-weight.ts ACTOR_KEY_SQL: a proven agent
+ * by its name, anything else by its fingerprint, country and network) and runs
+ * the pure analyzeAgent on each. Grouping by the fingerprint alone mixed real
+ * crawlers with unrelated clients that share their header shape, so a verified
+ * AI crawler was never counted as one (2026-11-12). Reads the NEWEST events of
+ * the window (it read the oldest, so a busy site's recent activity was cut).
+ * Fail-safe: empty on any error / no DB.
  */
 export async function liveAgentIntelligence(rangeDays = 7): Promise<AgentIntelSummary> {
   if (!process.env.DATABASE_URL) return EMPTY_INTEL;
@@ -227,8 +233,8 @@ export async function liveAgentIntelligence(rangeDays = 7): Promise<AgentIntelSu
     // so the site is selected raw and coalesced in JS rather than in SQL.
     // blocked is compared as text, never cast: one malformed props.blocked value
     // would otherwise fail the whole cast and zero the panel.
-    const { rows } = await safeQuery<{ at: string; site: string | null; fp: string; blocked: boolean | null; tool: string | null; ctype: string | null; hosting: string | null; event_type: string; agent: string | null; impersonating: string | null; verification: string | null; signed: boolean | null }>(
-      `SELECT created_at::text AS at, props->>'site' AS site, props->>'fp' AS fp,
+    const { rows } = await safeQuery<{ at: string; site: string | null; fp: string; actor: string; blocked: boolean | null; tool: string | null; ctype: string | null; hosting: string | null; event_type: string; agent: string | null; impersonating: string | null; verification: string | null; signed: boolean | null }>(
+      `SELECT created_at::text AS at, props->>'site' AS site, props->>'fp' AS fp, ${ACTOR_KEY_SQL} AS actor,
               (props->>'blocked' = 'true') AS blocked, props->>'tool' AS tool, props->>'client_type' AS ctype,
               props->>'hosting' AS hosting, event_type,
               props->>'agent' AS agent, props->>'impersonating' AS impersonating,
@@ -237,14 +243,15 @@ export async function liveAgentIntelligence(rangeDays = 7): Promise<AgentIntelSu
         WHERE created_at > now() - ($1 || ' days')::interval
           AND event_type LIKE 'site.agent_%'
           AND props->>'fp' IS NOT NULL${NOT_CONTROL_PLANE_FP}
-        ORDER BY created_at ASC
+        ORDER BY created_at DESC
         LIMIT 20000`,
       [String(days)],
     );
+    // newest first from the query; each actor's events are analyzed oldest first
     const byFp = new Map<string, AgentIntelEvent[]>();
-    for (const r of rows) {
-      let arr = byFp.get(r.fp);
-      if (!arr) byFp.set(r.fp, (arr = []));
+    for (const r of [...rows].reverse()) {
+      let arr = byFp.get(r.actor);
+      if (!arr) byFp.set(r.actor, (arr = []));
       const sig = intelSignalOf(r.event_type);
       arr.push({
         at: r.at, site: r.site ?? "ogiam.com", blocked: r.blocked === true, tool: r.tool ?? undefined, clientType: r.ctype ?? undefined,

@@ -39,6 +39,7 @@ function detail(over: Partial<IncidentDetail> = {}): IncidentDetail {
     networks: [],
     fingerprints: ["aaaa1111:browser"],
     fingerprintCount: 1,
+    sourceCount: over.fingerprintCount ?? 1,
     signatures: ["bbbb2222"],
     signatureCount: 1,
     outcomes: { blocked: 0, contained: 1, recorded: 0 },

@@ -125,6 +125,18 @@ describe("digest period (US Eastern, window aligned)", () => {
 describe("buildDigest", () => {
   const period = { etDate: "2026-10-27", start: new Date("2026-10-26T12:00:00Z"), end: new Date("2026-10-27T12:00:00Z") };
 
+  it("one shared fingerprint from two countries is two sources, not one", () => {
+    const inc = buildIncidents([
+      g({ fp: "aaaa1111:known_crawler", country: "BR", hosting: "residential", firstAt: at(0) }),
+      g({ fp: "aaaa1111:known_crawler", country: "US", hosting: "datacenter", firstAt: at(5) }),
+      g({ fp: "aaaa1111:known_crawler", country: "US", hosting: "datacenter", firstAt: at(9) }),
+    ]);
+    const d = buildDigest(inc, period);
+    expect(d.totals.sources).toBe(2);
+    expect(d.totals.attackSources).toBe(2);
+    expect(d.sites[0].sources).toBe(2);
+  });
+
   it("per site, blocked incidents only, exact totals; immediate ones counted separately", () => {
     const inc = buildIncidents([
       g({ fp: "a", count: 3, attackClass: "xss" }),

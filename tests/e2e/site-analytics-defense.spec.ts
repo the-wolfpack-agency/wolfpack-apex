@@ -36,6 +36,11 @@ const DEFENSE = {
   identity: { verified: 12, impersonation: 3, unverifiable: 2, signed: 1, byAgent: [{ agent: "GPTBot", verified: 12, impersonation: 3, unverifiable: 0, signed: 0 }, { agent: "Claude-User", verified: 0, impersonation: 0, unverifiable: 2, signed: 1 }] },
   probes: [{ probe: "next_server_action", count: 6 }],
   networks: [{ asn: "16509", org: "AMAZON-02", count: 40, hostile: 11 }],
+  exploits: [
+    { cve: "CVE-2026-109618", family: "PHP2Shell", kevAdded: "2026-10-26", detectionSince: "2026-10-26", firstProbe: "2026-10-27", lastProbe: "2026-11-02", requests: 14, sites: 3, actors: 2, leadDays: 1, measured: true },
+    { cve: "CVE-2025-55182", family: "React2Shell", kevAdded: "2025-12-05", detectionSince: "2026-10-24", firstProbe: "2026-10-24", lastProbe: "2026-11-10", requests: 40, sites: 4, actors: 6, leadDays: null, measured: false },
+  ],
+  impersonationOrigins: { sessions: 5, residential: 4, datacenter: 1, other: 0, countries: ["BR", "DE", "FR", "US"], paths: ["/wp", "/news", "/press"] },
 };
 
 function summary(over: Record<string, unknown> = {}) {
@@ -143,6 +148,10 @@ test.describe("Forcefield board: what the edge did", () => {
       await expect(page.getByTestId("ff-defense-probe-next_server_action")).toContainText("Next.js server action probe");
       await expect(page.getByTestId("ff-defense-asn-16509")).toContainText("AMAZON-02");
       await expect(page.getByTestId("ff-defense-operator-mix")).toContainText("1 impersonator");
+      await expect(page.getByTestId("ff-defense-impersonation-origins")).toContainText("5 sessions");
+      await expect(page.getByTestId("ff-defense-impersonation-residential")).toContainText("4");
+      await expect(page.getByTestId("ff-defense-exploit-CVE-2026-109618-lead")).toHaveText("1 day");
+      await expect(page.getByTestId("ff-defense-exploit-CVE-2025-55182-lead")).toContainText("watched from 2026-10-24");
       expectNoFailures(snapshot);
     });
 
@@ -164,6 +173,9 @@ test.describe("Forcefield board: what the edge did", () => {
       await expect(page.getByTestId("ff-defense-rate-empty")).toBeVisible();
       await expect(page.getByTestId("ff-defense-identity-empty")).toBeVisible();
       await expect(page.getByTestId("ff-defense-networks-empty")).toContainText(/Cloudflare/);
+      // An API without the exploit / fake-crawler fields renders neither section.
+      await expect(page.getByTestId("ff-defense-exploits")).toHaveCount(0);
+      await expect(page.getByTestId("ff-defense-impersonation-origins")).toHaveCount(0);
     });
 
     test("API error: an explicit error card, never a blank board", async ({ page }) => {
@@ -201,6 +213,7 @@ test.describe("Forcefield board: what the edge did", () => {
       await stubBoard(page, { summary: summary(), permissions: INTEL });
       await openDefense(page);
       await expect(page.getByTestId("ff-defense-identity-table")).toBeVisible();
+      await expect(page.getByTestId("ff-defense-exploits")).toBeVisible();
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
       expect(overflow, "no horizontal page overflow at 390px").toBeLessThanOrEqual(1);
     });
@@ -272,6 +285,10 @@ test.describe("Forcefield board: what the edge did", () => {
       if (empty === 0) {
         await expect(page.getByTestId("ff-defense-enforcement"), "populated board shows the enforcement row").toBeVisible();
         await expect(page.getByTestId("ff-defense-identity")).toBeVisible();
+      }
+      const defense = body.summary.defense as { exploits?: unknown[] };
+      if (Array.isArray(defense.exploits) && defense.exploits.length > 0) {
+        await expect(page.getByTestId("ff-defense-exploits"), "exploited vulnerabilities render when the API has them").toBeVisible();
       }
       expectNoFailures(snapshot);
     });

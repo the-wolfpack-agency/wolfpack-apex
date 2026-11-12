@@ -3,7 +3,7 @@ const mockQuery = jest.fn();
 const mockSafeQuery = jest.fn();
 jest.mock("@/lib/db", () => ({ query: (...a: unknown[]) => mockQuery(...a), safeQuery: (...a: unknown[]) => mockSafeQuery(...a) }));
 
-import { recordSighting, listSightings, getOperators, blockOperator, unblockOperator, listBlockedOperatorKeys } from "@/lib/agent-operators";
+import { recordSighting, listSightings, getOperators, blockOperator, unblockOperator, listBlockedOperatorKeys, liveAgentIntelligence } from "@/lib/agent-operators";
 import { operatorKeyFor, type Sighting } from "@/lib/agent-dossier";
 
 const journey = (behaviorClass: string, confidence: "proven" | "inferred") => ({ key: "k", confidence, behaviorClass, signals: [], path: ["/", "/admin"], eventCount: 2, firstAt: "t", lastAt: "t", summary: "s" }) as never;
@@ -102,4 +102,22 @@ it("block/unblock write the blocklist; getOperators annotates blocked", async ()
   expect(after[0].blocked).toBe(true);
   await unblockOperator("w1", before[0].operatorKey);
   expect((await getOperators("w1", 30))[0].blocked).toBe(false);
+});
+
+it("liveAgentIntelligence groups by actor, so a verified agent sharing a fingerprint with unidentified traffic still counts as verified", async () => {
+  const fp = "aaaa1111:known_crawler";
+  const row = (at: string, actor: string, over: Record<string, unknown> = {}) => ({
+    at, site: "ogiam.com", fp, actor, blocked: false, tool: null, ctype: "ai_agent", hosting: "datacenter", event_type: "site.agent_seen",
+    agent: "ClaudeBot", impersonating: null, verification: "verified", signed: false, ...over,
+  });
+  mockSafeQuery.mockResolvedValue({ rows: [
+    row("2026-11-12T10:00:03Z", "agent:ClaudeBot"),
+    row("2026-11-12T10:00:02Z", `${fp}|BR|residential`, { agent: "Googlebot", impersonating: "Googlebot", verification: "impersonation", hosting: "residential", ctype: null }),
+    row("2026-11-12T10:00:01Z", "agent:ClaudeBot"),
+  ] });
+  const out = await liveAgentIntelligence(7);
+  const [sql] = mockSafeQuery.mock.calls[0];
+  expect(sql).toMatch(/ORDER BY created_at DESC/); // newest window, not the oldest 20k rows
+  expect(out.operators).toBe(2);
+  expect(out.verifiedAgents).toBe(1);
 });

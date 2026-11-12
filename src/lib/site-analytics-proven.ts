@@ -14,7 +14,7 @@
 
 import { safeQuery } from "@/lib/db";
 import { FORCEFIELD_CONTROL_PLANE_PATHS } from "@/lib/forcefield-web/enforce";
-import { EVENT_WEIGHT_SQL } from "@/lib/site-analytics-weight";
+import { EVENT_WEIGHT_SQL, ACTOR_KEY_SQL } from "@/lib/site-analytics-weight";
 
 /** The two event types that are proof on their own. */
 export const PROVEN_EVENT_TYPES = ["site.agent_payload_attack", "site.agent_trap_tripped"] as const;
@@ -101,7 +101,9 @@ interface ModeRow { site: string; mode: string; count: string; fingerprints: str
 interface CountRow { site: string; n: string }
 interface LastRow { site: string; last_at: string | null }
 
-/** Zero distinct fingerprints means none was recorded, not zero operators. */
+/** Zero distinct sources means no fingerprint was recorded, not zero operators. A source is an
+ *  actor (ACTOR_KEY_SQL: the fingerprint with its country and network, or a proven agent), since
+ *  one fingerprint can hold many unrelated clients. */
 const fpOrNull = (distinct: number): number | null => (distinct > 0 ? distinct : null);
 
 /**
@@ -124,7 +126,7 @@ export async function getProvenAttacks(
                    WHEN props->>'attack' IS NULL OR props->>'attack' = '' THEN 'unclassified'
                    ELSE props->>'attack' END AS attack,
               sum(${EVENT_WEIGHT_SQL}) AS count,
-              count(DISTINCT props->>'fp') FILTER (WHERE ${FP_PRESENT}) AS fingerprints,
+              count(DISTINCT ${ACTOR_KEY_SQL}) FILTER (WHERE ${FP_PRESENT}) AS fingerprints,
               coalesce(sum(${EVENT_WEIGHT_SQL}) FILTER (WHERE NOT ${FP_PRESENT}), 0) AS without_fp,
               max(created_at)::text AS last_seen
          FROM site_analytics_events
@@ -135,7 +137,7 @@ export async function getProvenAttacks(
     safeQuery<ModeRow>(
       `SELECT ${SITE_SQL} AS site, ${MODE_SQL} AS mode,
               sum(${EVENT_WEIGHT_SQL}) AS count,
-              count(DISTINCT props->>'fp') FILTER (WHERE ${FP_PRESENT}) AS fingerprints,
+              count(DISTINCT ${ACTOR_KEY_SQL}) FILTER (WHERE ${FP_PRESENT}) AS fingerprints,
               coalesce(sum(${EVENT_WEIGHT_SQL}) FILTER (WHERE NOT ${FP_PRESENT}), 0) AS without_fp,
               max(created_at)::text AS last_seen
          FROM site_analytics_events
