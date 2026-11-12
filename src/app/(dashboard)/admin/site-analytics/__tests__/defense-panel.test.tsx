@@ -55,6 +55,11 @@ const FULL_DEFENSE = {
   identity: { verified: 12, impersonation: 3, unverifiable: 2, signed: 1, byAgent: [{ agent: "GPTBot", verified: 12, impersonation: 3, unverifiable: 0, signed: 0 }, { agent: "Claude-User", verified: 0, impersonation: 0, unverifiable: 2, signed: 1 }] },
   probes: [{ probe: "next_server_action", count: 6 }, { probe: "/.env", count: 9 }],
   networks: [{ asn: "16509", org: "AMAZON-02", count: 40, hostile: 11 }],
+  exploits: [
+    { cve: "CVE-2026-109618", family: "PHP2Shell", kevAdded: "2026-10-26", detectionSince: "2026-10-26", firstProbe: "2026-10-27", lastProbe: "2026-11-02", requests: 14, sites: 3, actors: 2, leadDays: 1, measured: true },
+    { cve: "CVE-2025-55182", family: "React2Shell", kevAdded: "2025-12-05", detectionSince: "2026-10-24", firstProbe: "2026-10-24", lastProbe: "2026-11-10", requests: 40, sites: 4, actors: 6, leadDays: null, measured: false },
+  ],
+  impersonationOrigins: { sessions: 5, residential: 4, datacenter: 1, other: 0, countries: ["BR", "DE", "FR", "US"], paths: ["/wp", "/news", "/press"] },
 };
 
 function serve(summary: unknown, permissions = { triage: false, manageOperators: false, viewIntel: true }) {
@@ -122,6 +127,35 @@ test("sections without data say so explicitly", async () => {
   expect(screen.getByTestId("ff-defense-identity-empty")).toBeInTheDocument();
   expect(screen.getByTestId("ff-defense-networks-empty")).toHaveTextContent(/Cloudflare/);
   expect(screen.queryByTestId("ff-defense-probes")).not.toBeInTheDocument();
+});
+
+test("exploited vulnerabilities: CISA listing to first probe, measured only when detection predates the listing", async () => {
+  serve(base({ defense: FULL_DEFENSE }));
+  render(<SiteAnalyticsPage />);
+  await waitFor(() => expect(screen.getByTestId("ff-defense-exploits")).toBeInTheDocument());
+  expect(screen.getByTestId("ff-defense-exploit-CVE-2026-109618-lead")).toHaveTextContent(/^1 day$/);
+  expect(screen.getByTestId("ff-defense-exploit-CVE-2025-55182-lead")).toHaveTextContent(/watched from 2026-10-24/);
+  expect(screen.getByTestId("ff-defense-exploits")).toHaveTextContent(/PHP2Shell/);
+});
+
+test("fake crawlers: origin networks, countries and probed paths", async () => {
+  serve(base({ defense: FULL_DEFENSE }));
+  render(<SiteAnalyticsPage />);
+  await waitFor(() => expect(screen.getByTestId("ff-defense-impersonation-origins")).toBeInTheDocument());
+  const line = screen.getByTestId("ff-defense-impersonation-origins");
+  expect(line).toHaveTextContent(/5 sessions/);
+  expect(screen.getByTestId("ff-defense-impersonation-residential")).toHaveTextContent("4");
+  expect(line).toHaveTextContent(/BR, DE, FR, US/);
+  expect(line).toHaveTextContent(/\/wp/);
+});
+
+test("an older API without exploit or origin fields renders neither section and does not crash", async () => {
+  const { exploits: _e, impersonationOrigins: _i, ...older } = FULL_DEFENSE;
+  serve(base({ defense: older }));
+  render(<SiteAnalyticsPage />);
+  await waitFor(() => expect(screen.getByTestId("ff-defense-enforcement")).toBeInTheDocument());
+  expect(screen.queryByTestId("ff-defense-exploits")).not.toBeInTheDocument();
+  expect(screen.queryByTestId("ff-defense-impersonation-origins")).not.toBeInTheDocument();
 });
 
 test("an impersonating operator's path shows blocked vs would-block steps and the impersonation badge", async () => {

@@ -59,6 +59,8 @@ export interface IncidentDetail {
   networks: string[];
   fingerprints: string[];
   fingerprintCount: number;
+  /** Distinct sources (incidents.ts sourceKeyOf): fingerprint split by country and network. */
+  sourceCount: number;
   signatures: string[];
   signatureCount: number;
   /** Per-request outcome counts. */
@@ -180,7 +182,7 @@ function trapNoun(i: IncidentDetail | undefined): "decoy" | "honeytoken" {
 }
 
 function actorPhrase(i: IncidentDetail | undefined): { one: boolean; noun: string } {
-  const actors = i ? Math.max(i.signatureCount, i.fingerprintCount, 1) : 1;
+  const actors = i ? Math.max(i.signatureCount, i.sourceCount, 1) : 1;
   return { one: actors <= 1, noun: actors <= 1 ? "hostile agent" : "hostile agents" };
 }
 
@@ -260,7 +262,7 @@ export function alertHeadline(alert: ForcefieldAlert): string {
   if (kind === "honeytoken_trip") {
     const a = actorPhrase(i);
     // Lead with what Forcefield did, in the reader's terms; the outcome is exact.
-    const who = a.one ? "an automated attacker" : `${plural(Math.max(i?.signatureCount ?? 0, i?.fingerprintCount ?? 0), "automated attacker")}`;
+    const who = a.one ? "an automated attacker" : `${plural(Math.max(i?.signatureCount ?? 0, i?.sourceCount ?? 0), "automated attacker")}`;
     const it = a.one ? "it" : "them";
     if (r === "contained") return `Forcefield caught ${who} on ${site} and kept ${it} away from your real pages`;
     if (r === "blocked") return `Forcefield caught ${who} on ${site} and turned ${it} away`;
@@ -822,7 +824,7 @@ function renderDigest(alert: ForcefieldAlert, d: DigestData, opts: RenderOptions
     { label: "Incidents", value: t.incidents.toLocaleString("en-US") },
     { label: "Attack attempts", value: t.attackAttempts > 0 ? `${t.attackAttempts.toLocaleString("en-US")} from ${t.attackSources > 0 ? plural(t.attackSources, "source") : "sources not recorded"}` : "None in this period" },
     { label: "Decoy activity", value: t.decoyRequests > 0 ? `${t.decoySources > 0 ? `${plural(t.decoySources, "source")} caught` : "sources not recorded"}, ${plural(t.decoyRequests, "decoy page request")} (pages they loaded, not separate attacks)` : "None in this period" },
-    { label: "Sources", value: t.sources > 0 ? `${t.sources.toLocaleString("en-US")} distinct fingerprints in all` : "Fingerprint not recorded" },
+    { label: "Sources", value: t.sources > 0 ? `${t.sources.toLocaleString("en-US")} distinct sources in all` : "Sources not recorded" },
     { label: "Sent immediately", value: d.immediateIncidents > 0 ? `${plural(d.immediateIncidents, "incident")} (requests recorded but not stopped), emailed as they happened` : "None in this period" },
   ];
   const rowHtml = (rows: Row[]) => rows.map((r) => `<tr><td valign="top" style="padding:9px 12px 9px 0;border-top:1px solid ${C.line};font-family:${FONT};font-size:13px;line-height:19px;color:${C.muted};width:132px;white-space:nowrap;">${e(r.label)}</td><td valign="top" style="padding:9px 0;border-top:1px solid ${C.line};font-family:${FONT};font-size:14px;line-height:19px;color:${C.ink};word-break:break-word;">${e(r.value)}</td></tr>`).join("");
@@ -835,7 +837,7 @@ function renderDigest(alert: ForcefieldAlert, d: DigestData, opts: RenderOptions
   const siteHtml = d.sites.map((s, n) => `<tr><td style="padding:16px 28px 8px;">${sectionTitle(displaySite(s.site))}<div style="font-family:${FONT};font-size:13px;line-height:19px;color:${C.muted};padding-bottom:10px;">${e(siteSummary(s))}</div>${classTableHtml(s.rows)}<div style="padding-top:6px;font-family:${FONT};font-size:13px;line-height:19px;"><a href="${e(siteLinks[n].href)}" style="color:${C.link};">${e(siteLinks[n].label)}</a></div></td></tr>`).join("\n");
   const sectionsHtml = `<tr><td style="padding:8px 28px 8px;">${sectionTitle("Summary")}<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">${rowHtml(totalsRows)}</table></td></tr>
 ${siteHtml}
-<tr><td style="padding:8px 28px 16px;"><p style="margin:0;font-family:${FONT};font-size:13px;line-height:20px;color:${C.muted};"><strong style="color:${C.ink};">What this digest is.</strong> Attacks and decoy or honeytoken trips that were blocked or contained at the edge do not page anyone. They are collected here once a day, one row per attack type per site. Only a request that was recorded but not stopped is emailed as it happens. Decoy activity is counted apart from attack attempts: a source caught in the decoy maze loads many decoy pages, and each page is one request, not one attack. Times are exact; sources are distinct client fingerprints.</p></td></tr>`;
+<tr><td style="padding:8px 28px 16px;"><p style="margin:0;font-family:${FONT};font-size:13px;line-height:20px;color:${C.muted};"><strong style="color:${C.ink};">What this digest is.</strong> Attacks and decoy or honeytoken trips that were blocked or contained at the edge do not page anyone. They are collected here once a day, one row per attack type per site. Only a request that was recorded but not stopped is emailed as it happens. Decoy activity is counted apart from attack attempts: a source caught in the decoy maze loads many decoy pages, and each page is one request, not one attack. Times are exact; a source is one client tool from one country and network.</p></td></tr>`;
   const allLinks = [primary, ...siteLinks, ...secondary];
   const html = renderShell({ audience, subject, severity: "Info", headline, status: st, primary, secondary, sectionsHtml, ...f, footerIds });
 

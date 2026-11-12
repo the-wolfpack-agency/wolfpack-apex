@@ -71,7 +71,7 @@ function ModeTable({ site, mode, data, now }: { site: string; mode: "blocked" | 
           <tr>
             <th style={th}>Attack class</th>
             <th style={{ ...th, textAlign: "right" }}>Requests</th>
-            <th style={th}>Sources (distinct fingerprints)</th>
+            <th style={th}>Sources (fingerprint, country and network)</th>
             <th style={th}>Last seen</th>
           </tr>
         </thead>

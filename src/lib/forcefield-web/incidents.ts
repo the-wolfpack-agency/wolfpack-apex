@@ -80,7 +80,7 @@ export interface ClassLine {
   /** Top paths by request count (capped) and the exact distinct count. */
   paths: string[];
   pathCount: number;
-  /** Distinct recorded fingerprints (0 = none recorded). */
+  /** Distinct recorded sources, sourceKeyOf (0 = none recorded). */
   sources: number;
   signatureCount: number;
   /** Who the sources were, most requests first (capped): identified agent
@@ -124,6 +124,13 @@ function ranked(groups: readonly HostileEventGroup[], pick: (g: HostileEventGrou
   return [...n.entries()].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)).map(([v]) => v);
 }
 
+/** One source, as the board counts it (site-analytics-weight.ts ACTOR_KEY_SQL): the fingerprint is a
+ *  header-order tool shape that unrelated clients share, so it is split by country and network. */
+export function sourceKeyOf(g: Pick<HostileEventGroup, "fp" | "sig" | "country" | "hosting">): string {
+  const base = g.fp || g.sig;
+  return base ? `${base}|${g.country}|${g.hosting}` : "";
+}
+
 function outcomesOf(groups: readonly HostileEventGroup[]) {
   const o = { blocked: 0, contained: 0, recorded: 0 };
   for (const g of groups) o[g.outcome] += g.count;
@@ -134,6 +141,7 @@ function outcomesOf(groups: readonly HostileEventGroup[]) {
 export function aggregateGroups(groups: readonly HostileEventGroup[], windowStart: string): IncidentDetail {
   const paths = ranked(groups, (g) => g.path);
   const fps = ranked(groups, (g) => g.fp);
+  const sources = ranked(groups, sourceKeyOf);
   const sigs = ranked(groups, (g) => g.sig);
   let firstAt = groups[0]?.firstAt ?? windowStart;
   let lastAt = groups[0]?.lastAt ?? windowStart;
@@ -158,6 +166,7 @@ export function aggregateGroups(groups: readonly HostileEventGroup[], windowStar
     networks: ranked(groups, (g) => g.network).slice(0, LIST_CAP),
     fingerprints: fps.slice(0, LIST_CAP),
     fingerprintCount: fps.length,
+    sourceCount: sources.length,
     signatures: sigs.slice(0, LIST_CAP),
     signatureCount: sigs.length,
     outcomes: outcomesOf(groups),
@@ -187,7 +196,7 @@ export function classLines(groups: readonly HostileEventGroup[]): ClassLine[] {
       lastAt: d.lastAt,
       paths: d.paths,
       pathCount: d.pathCount,
-      sources: d.fingerprintCount,
+      sources: d.sourceCount,
       signatureCount: d.signatureCount,
       agents: d.agents,
       networks: d.networks,
@@ -401,11 +410,11 @@ export function buildDigest(incidents: readonly HostileIncident[], period: { etD
   for (const [site, list] of bySite) {
     const groups = list.flatMap((i) => i.groups);
     const d = aggregateGroups(groups, list[0].windowStart);
-    sites.push({ site, incidents: list.length, attempts: d.count, sources: d.fingerprintCount, firstAt: d.firstAt, lastAt: d.lastAt, outcomes: d.outcomes, rows: classLines(groups) });
+    sites.push({ site, incidents: list.length, attempts: d.count, sources: d.sourceCount, firstAt: d.firstAt, lastAt: d.lastAt, outcomes: d.outcomes, rows: classLines(groups) });
   }
   sites.sort((a, b) => b.attempts - a.attempts || (a.site < b.site ? -1 : 1));
   const allGroups = digest.flatMap((i) => i.groups);
-  const fpsOf = (gs: readonly HostileEventGroup[]) => new Set(gs.map((g) => g.fp).filter(Boolean));
+  const fpsOf = (gs: readonly HostileEventGroup[]) => new Set(gs.map(sourceKeyOf).filter(Boolean));
   const allFps = fpsOf(allGroups);
   const attackGroups = allGroups.filter((g) => g.kind === "payload_attack");
   const decoyGroups = allGroups.filter((g) => g.kind === "honeytoken_trip");

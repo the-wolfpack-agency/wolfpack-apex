@@ -17,7 +17,8 @@ import { getFindingTriage, type TriageStatus } from "@/lib/site-finding-triage";
 import { listBlockedOperatorKeys, liveAgentIntelligence, type AgentIntelSummary } from "@/lib/agent-operators";
 import { getProvenAttacks, NOT_CONTROL_PLANE_FP, type ProvenAttacks } from "@/lib/site-analytics-proven";
 import { annotateKevProps } from "@/lib/forcefield/kev";
-import { EVENT_WEIGHT_SQL } from "@/lib/site-analytics-weight";
+import { exploitLead } from "@/lib/forcefield/kev/detection-since";
+import { EVENT_WEIGHT_SQL, ACTOR_KEY_SQL } from "@/lib/site-analytics-weight";
 import { getAccountableActions, type AccountableActionsSummary } from "@/lib/site-analytics-accountability";
 
 /** Closed event vocabulary, mirrored from the marketing site's analytics. A
@@ -297,6 +298,11 @@ export interface DefenseSignals {
   };
   probes: Array<{ probe: string; count: number }>;
   networks: Array<{ asn: string; org: string | null; count: number; hostile: number }>;
+  /* Known-exploited CVEs aimed at the site: when CISA listed each, when we could first see it, the
+     first probe ever (all time, not the window) and the lead time where it can be measured. */
+  exploits: Array<{ cve: string; family: string; kevAdded: string | null; detectionSince: string | null; firstProbe: string; lastProbe: string; requests: number; sites: number; actors: number; leadDays: number | null; measured: boolean }>;
+  /* Requests that claimed a known crawler but did not come from its network, by session. */
+  impersonationOrigins: { sessions: number; residential: number; datacenter: number; other: number; countries: string[]; paths: string[] };
 }
 
 const EMPTY_DEFENSE: DefenseSignals = {
@@ -305,6 +311,8 @@ const EMPTY_DEFENSE: DefenseSignals = {
   identity: { verified: 0, impersonation: 0, unverifiable: 0, signed: 0, byAgent: [] },
   probes: [],
   networks: [],
+  exploits: [],
+  impersonationOrigins: { sessions: 0, residential: 0, datacenter: 0, other: 0, countries: [], paths: [] },
 };
 export function emptyDefenseSignals(): DefenseSignals {
   return JSON.parse(JSON.stringify(EMPTY_DEFENSE)) as DefenseSignals;
@@ -398,7 +406,11 @@ const numProp = (k: string) => `CASE WHEN props->>'${k}' ~ '^[0-9]+(\\.[0-9]+)?$
 async function getDefenseSignals(sinceClause: string, surfaceClause: string, params: string[]): Promise<DefenseSignals> {
   // The control-plane false positive is not an attack; it never reaches a count.
   const where = `WHERE ${sinceClause}${surfaceClause}${NOT_CONTROL_PLANE_FP}`;
-  const [reasons, rate, identity, probes, networks] = await Promise.all([
+  // the first probe of a CVE is all time, so its query drops the window but keeps the site filter
+  // ($1 stays bound, unused but typed, so the parameter list matches the board's)
+  const allTime = `WHERE ($1::text IS NOT NULL)${surfaceClause}${NOT_CONTROL_PLANE_FP}`;
+  const IMPERSONATION = `(props->>'agent_verification' = 'impersonation' OR props->>'impersonating' IS NOT NULL)`;
+  const [reasons, rate, identity, probes, networks, exploits, impOrigin, impPaths] = await Promise.all([
     safeQuery<{ reason: string; blocked: string; would_block: string }>(
       `SELECT coalesce(props->>'reason_kind', 'unspecified') AS reason,
               coalesce(sum(${EVENT_WEIGHT_SQL}) FILTER (WHERE props->>'blocked' = 'true'), 0) AS blocked,
@@ -410,7 +422,7 @@ async function getDefenseSignals(sinceClause: string, surfaceClause: string, par
     ),
     safeQuery<{ bursts: string; operators: string; peak: string | null; window_s: string | null; from_ingest: string }>(
       `SELECT count(*) AS bursts,
-              count(DISTINCT coalesce(props->>'fp', props->>'sig')) AS operators,
+              count(DISTINCT ${ACTOR_KEY_SQL}) AS operators,
               max(${numProp("rate")}) AS peak,
               max(${numProp("window_s")}) AS window_s,
               count(*) FILTER (WHERE props->>'source' = 'ingest') AS from_ingest
@@ -444,6 +456,32 @@ async function getDefenseSignals(sinceClause: string, surfaceClause: string, par
         GROUP BY 1 ORDER BY count(*) DESC LIMIT 15`,
       params,
     ),
+    safeQuery<{ cve: string; family: string | null; kev_added: string | null; first_probe: string; last_probe: string; requests: string; sites: string; actors: string }>(
+      `SELECT props->>'cve' AS cve, max(coalesce(nullif(props->>'attack', ''), props->>'probe')) AS family,
+              max(props->>'kev_added') AS kev_added, min(created_at)::date::text AS first_probe, max(created_at)::date::text AS last_probe,
+              sum(${EVENT_WEIGHT_SQL}) AS requests, count(DISTINCT coalesce(props->>'site', 'ogiam.com')) AS sites,
+              count(DISTINCT ${ACTOR_KEY_SQL}) AS actors
+         FROM site_analytics_events
+        ${allTime} AND props->>'cve' IS NOT NULL AND props->>'cve' <> ''
+        GROUP BY 1 ORDER BY min(created_at) DESC LIMIT 20`,
+      params,
+    ),
+    safeQuery<{ sessions: string; residential: string; datacenter: string; countries: string[] | null }>(
+      `SELECT count(DISTINCT props->>'sig') AS sessions,
+              count(DISTINCT props->>'sig') FILTER (WHERE props->>'hosting' = 'residential') AS residential,
+              count(DISTINCT props->>'sig') FILTER (WHERE props->>'hosting' = 'datacenter') AS datacenter,
+              array_remove(array_agg(DISTINCT country), NULL) AS countries
+         FROM site_analytics_events
+        ${where} AND ${IMPERSONATION}`,
+      params,
+    ),
+    safeQuery<{ path: string }>(
+      `SELECT coalesce(nullif(props->>'path', ''), path) AS path
+         FROM site_analytics_events
+        ${where} AND ${IMPERSONATION} AND coalesce(nullif(props->>'path', ''), path) IS NOT NULL
+        GROUP BY 1 ORDER BY count(*) DESC LIMIT 5`,
+      params,
+    ),
   ]);
   const out = emptyDefenseSignals();
   for (const r of reasons.rows) {
@@ -472,6 +510,16 @@ async function getDefenseSignals(sinceClause: string, surfaceClause: string, par
   }
   out.probes = probes.rows.map((r) => ({ probe: r.probe, count: Number(r.count) }));
   out.networks = networks.rows.map((r) => ({ asn: r.asn, org: r.org ?? null, count: Number(r.count), hostile: Number(r.hostile) }));
+  out.exploits = exploits.rows.map((r) => {
+    const lead = exploitLead(r.cve, r.kev_added, r.first_probe);
+    return { cve: r.cve, family: r.family ?? "", kevAdded: r.kev_added ?? null, detectionSince: lead.detectionSince, firstProbe: r.first_probe, lastProbe: r.last_probe,
+      requests: Number(r.requests), sites: Number(r.sites), actors: Number(r.actors), leadDays: lead.leadDays, measured: lead.measured };
+  });
+  const io = impOrigin.rows[0];
+  if (io) {
+    const sessions = Number(io.sessions), residential = Number(io.residential), datacenter = Number(io.datacenter);
+    out.impersonationOrigins = { sessions, residential, datacenter, other: Math.max(0, sessions - residential - datacenter), countries: (io.countries ?? []).slice().sort(), paths: impPaths.rows.map((r) => r.path).filter((p) => p && p !== "/") };
+  }
   return out;
 }
 
@@ -546,7 +594,7 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
       /* Request tallies include folded repeats (EVENT_WEIGHT_SQL), the same
          count as the digest email, so the board and the email agree.
          welcomed/flagged/trapped/blocked are event tallies. hostile_operators is
-         the number that actually matters: DISTINCT fingerprints that exhibited
+         the number that actually matters: DISTINCT actors (ACTOR_KEY_SQL) that exhibited
          hostile TRADECRAFT (probed a sensitive path, tripped a decoy, sent a
          payload, hit a honeypot). "flagged" is a weak heuristic (unidentified
          automation) and is mostly benign crawlers and first-party traffic, so a
@@ -556,11 +604,11 @@ export async function getSiteAnalyticsSummary(rangeDays = 30, workspaceId?: stri
          count(*) FILTER (WHERE event_type = 'site.agent_welcomed')     AS welcomed,
          count(*) FILTER (WHERE event_type = 'site.agent_flagged')      AS flagged,
          coalesce(sum(${EVENT_WEIGHT_SQL}) FILTER (WHERE event_type = 'site.agent_trap_tripped'), 0) AS trapped,
-         count(DISTINCT CASE WHEN props->>'fp' <> '' THEN props->>'fp' ELSE props->>'sig' END) FILTER (WHERE event_type = 'site.agent_trap_tripped') AS trap_sources,
+         count(DISTINCT ${ACTOR_KEY_SQL}) FILTER (WHERE event_type = 'site.agent_trap_tripped') AS trap_sources,
          coalesce(sum(${EVENT_WEIGHT_SQL}) FILTER (WHERE coalesce(props->>'blocked', '') <> 'true' AND (props->>'tarpit' = 'true' OR props->>'action' = 'tarpit')), 0) AS contained,
          coalesce(sum(${EVENT_WEIGHT_SQL}) FILTER (WHERE props->>'blocked' = 'true'), 0)             AS blocked,
          coalesce(sum(${EVENT_WEIGHT_SQL}) FILTER (WHERE props->>'would_block' = 'true' AND coalesce(props->>'blocked', '') <> 'true'), 0) AS would_block,
-         count(DISTINCT props->>'fp') FILTER (WHERE ${HOSTILE_ROW} AND props->>'fp' IS NOT NULL) AS hostile_operators,
+         count(DISTINCT ${ACTOR_KEY_SQL}) FILTER (WHERE ${HOSTILE_ROW}) AS hostile_operators,
          coalesce(sum(${EVENT_WEIGHT_SQL}) FILTER (WHERE ${HOSTILE_ROW}), 0) AS hostile_events
          FROM site_analytics_events
         WHERE ${sinceClause}${surfaceClause}${notAssetFlag}`,

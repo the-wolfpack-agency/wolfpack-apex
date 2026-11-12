@@ -90,7 +90,7 @@ function schemaFromMigrations(): Map<string, Set<string>> {
 
 const KEYWORDS = new Set(
   (
-    "select from where and or not in is null as count filter distinct group by order desc asc limit offset coalesce extract hour " +
+    "select from where and or not in is null as count filter distinct group by order desc asc limit offset coalesce nullif array_remove extract hour " +
     "at time zone now interval like ilike exists case when then else end max min sum avg row_number over partition any all text int " +
     "integer numeric boolean bigint true false on union with having between join left right inner outer cross lateral using values " +
     "insert into update set delete returning conflict do nothing jsonb json array cast date day days string_agg array_agg lower upper"

@@ -107,6 +107,9 @@ interface DefenseSignals {
   identity: { verified: number; impersonation: number; unverifiable: number; signed: number; byAgent: Array<{ agent: string; verified: number; impersonation: number; unverifiable: number; signed: number }> };
   probes: Array<{ probe: string; count: number }>;
   networks: Array<{ asn: string; org: string | null; count: number; hostile: number }>;
+  /* Optional: an older API sends neither (the sections then do not show). */
+  exploits?: Array<{ cve: string; family: string; kevAdded: string | null; detectionSince: string | null; firstProbe: string; lastProbe: string; requests: number; sites: number; actors: number; leadDays: number | null; measured: boolean }>;
+  impersonationOrigins?: { sessions: number; residential: number; datacenter: number; other: number; countries: string[]; paths: string[] };
 }
 
 interface AgentProfile {
@@ -1552,12 +1555,14 @@ function DefenseSignalsPanel({ defense, payloadIntel, agentIntel, rangeDays }: {
   const id = d?.identity ?? { verified: 0, impersonation: 0, unverifiable: 0, signed: 0, byAgent: [] };
   const probes = d?.probes ?? [];
   const networks = d?.networks ?? [];
+  const exploits = d?.exploits ?? [];
+  const imp = d?.impersonationOrigins ?? { sessions: 0, residential: 0, datacenter: 0, other: 0, countries: [], paths: [] };
   const scanners = agentIntel?.scanners ?? 0;
   const impersonators = agentIntel?.impersonators ?? 0;
   const verifiedAgents = agentIntel?.verifiedAgents ?? 0;
   const nothing = enf.blocked + enf.wouldBlock === 0 && payloadIntel.length === 0 && hr.bursts === 0
     && id.verified + id.impersonation + id.unverifiable + id.signed === 0 && probes.length === 0 && networks.length === 0
-    && scanners + impersonators + verifiedAgents === 0;
+    && scanners + impersonators + verifiedAgents === 0 && exploits.length === 0;
 
   return (
     <div style={box} data-testid="ff-defense">
@@ -1667,7 +1672,52 @@ function DefenseSignalsPanel({ defense, payloadIntel, agentIntel, rangeDays }: {
                 <p style={{ ...muted, marginTop: "0.35rem", fontSize: "0.68rem" }}>Impersonating means the request claimed that agent but came from outside its published network. Could not check means the agent publishes no ranges to check against.</p>
               </div>
             )}
+            {imp.sessions > 0 && (
+              <p data-testid="ff-defense-impersonation-origins" style={{ ...muted, color: "var(--wp-text, #eee)" }}>
+                <strong style={{ color: RED }}>Fake crawlers:</strong> {imp.sessions.toLocaleString()} session{imp.sessions === 1 ? "" : "s"},{" "}
+                <span data-testid="ff-defense-impersonation-residential">{imp.residential} from home (residential) network{imp.residential === 1 ? "" : "s"}</span>, {imp.datacenter} from datacenters{imp.other > 0 ? `, ${imp.other} unknown` : ""}
+                {imp.countries.length > 0 && <> · from {imp.countries.join(", ")}</>}
+                {imp.paths.length > 0 && <> · probing <span style={{ fontFamily: "var(--wp-mono, ui-monospace, monospace)" }}>{imp.paths.join(" ")}</span></>}.
+                {imp.residential > imp.datacenter && <span style={muted}> A fake crawler on a home network is usually a residential proxy: its address passes a datacenter blocklist, so only the identity check catches it.</span>}
+              </p>
+            )}
           </div>
+
+          {/* Known-exploited vulnerabilities aimed at the site: listed, first probed, the lead time. */}
+          {exploits.length > 0 && (
+            <div data-testid="ff-defense-exploits" style={{ display: "grid", gap: "0.45rem" }}>
+              <p style={sub}>Exploited vulnerabilities: time to first probe</p>
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.74rem" }}>
+                  <thead>
+                    <tr style={{ color: "var(--wp-text-muted, #9ca3af)", textAlign: "left" }}>
+                      <th style={{ padding: "0.2rem 0.5rem 0.2rem 0", fontWeight: 600 }}>Vulnerability</th>
+                      <th style={{ padding: "0.2rem 0.5rem", fontWeight: 600 }}>Listed by CISA</th>
+                      <th style={{ padding: "0.2rem 0.5rem", fontWeight: 600 }}>First probe here</th>
+                      <th style={{ padding: "0.2rem 0.5rem", fontWeight: 600 }}>Lead time</th>
+                      <th style={{ padding: "0.2rem 0", fontWeight: 600 }}>Requests · sites · actors</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {exploits.map((x) => (
+                      <tr key={x.cve} data-testid={`ff-defense-exploit-${x.cve}`} style={{ borderTop: "1px solid var(--wp-dark-border, #262b34)", color: "var(--wp-text, #eee)" }}>
+                        <td style={{ padding: "0.25rem 0.5rem 0.25rem 0" }}><span style={{ fontFamily: "var(--wp-mono, ui-monospace, monospace)" }}>{x.cve}</span>{x.family ? <span style={{ color: "var(--wp-text-muted, #b8bcc4)" }}> {x.family}</span> : null}</td>
+                        <td style={{ padding: "0.25rem 0.5rem" }}>{x.kevAdded ?? "not listed"}</td>
+                        <td style={{ padding: "0.25rem 0.5rem" }}>{x.firstProbe}</td>
+                        <td data-testid={`ff-defense-exploit-${x.cve}-lead`} style={{ padding: "0.25rem 0.5rem", color: x.measured ? RED : undefined, fontWeight: x.measured ? 700 : undefined }}>
+                          {x.measured && x.leadDays !== null
+                            ? (x.leadDays <= 0 ? "same day" : `${x.leadDays} day${x.leadDays === 1 ? "" : "s"}`)
+                            : <span style={muted}>{x.detectionSince ? `watched from ${x.detectionSince}` : "not measured"}</span>}
+                        </td>
+                        <td style={{ padding: "0.25rem 0" }}>{x.requests.toLocaleString()} · {x.sites} · {x.actors}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <p style={{ ...muted, fontSize: "0.68rem" }}>Lead time is the days from CISA listing the vulnerability as exploited to the first attempt on your sites, shown only where Forcefield was already watching for it on the listing day. First probe is all time, not just this window.</p>
+            </div>
+          )}
 
           {/* Probe labels the engine matched. */}
           {probes.length > 0 && (
