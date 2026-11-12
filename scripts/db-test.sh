@@ -51,5 +51,9 @@ docker exec "$NAME" pg_isready -U postgres >/dev/null 2>&1 || {
   echo "[db-test] postgres never became ready"; exit 1;
 }
 
+# --runInBand, as CI does (db-contract.yml): every suite shares this one
+# database and builds or truncates its own tables, so parallel workers race
+# each other into deadlocks and "relation does not exist" failures that are
+# not real (7 suites failed that way on 2026-11-12).
 echo "[db-test] running db suites"
-TEST_DATABASE_URL="$URL" npx jest --testPathPatterns='\.db\.test\.ts$' "$@"
+TEST_DATABASE_URL="$URL" npx jest --testPathPatterns='\.db\.test\.ts$' --runInBand "$@"

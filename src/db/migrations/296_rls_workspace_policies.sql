@@ -238,13 +238,13 @@ BEGIN
     END IF;
     IF NOT EXISTS (
       SELECT 1 FROM pg_policy p JOIN pg_class c ON c.oid = p.polrelid
-       WHERE c.relname = t AND p.polname = t || '_ws_isolation'
+       WHERE c.relname = t AND c.relnamespace = current_schema()::regnamespace AND p.polname = t || '_ws_isolation'
     ) THEN
       RAISE EXCEPTION 'migration 296: % has no workspace policy', t;
     END IF;
     IF EXISTS (
       SELECT 1 FROM pg_policy p JOIN pg_class c ON c.oid = p.polrelid
-       WHERE c.relname = t AND pg_get_expr(p.polqual, p.polrelid) = 'true'
+       WHERE c.relname = t AND c.relnamespace = current_schema()::regnamespace AND pg_get_expr(p.polqual, p.polrelid) = 'true'
     ) THEN
       RAISE EXCEPTION 'migration 296: % still has a permissive USING (true) policy', t;
     END IF;

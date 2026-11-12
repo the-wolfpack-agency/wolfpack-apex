@@ -48,6 +48,7 @@ const UUID_TABLES = new Set(["instinct_spec_diff_runs"]);
 
 const SUFFIX = `${process.pid}`;
 const SCHEMA = `rls_probe_${SUFFIX}`;
+const OTHER_SCHEMA = `rls_other_${SUFFIX}`;
 const APP_ROLE = `rls_app_${SUFFIX}`; // the future NOBYPASSRLS app role
 const OWNER_ROLE = `rls_owner_${SUFFIX}`; // an owner WITHOUT BYPASSRLS
 const APP_PASSWORD = `pw_${SUFFIX}_rls`;
@@ -93,7 +94,15 @@ describeIfDb("migrations 296/297: workspace RLS policies", () => {
     admin = new Client({ connectionString: requireLocalTestDatabase(URL) });
     await admin.connect();
     await admin.query(`DROP SCHEMA IF EXISTS ${SCHEMA} CASCADE`);
+    await admin.query(`DROP SCHEMA IF EXISTS ${OTHER_SCHEMA} CASCADE`);
     for (const r of [APP_ROLE, OWNER_ROLE]) await admin.query(`DROP ROLE IF EXISTS ${r}`);
+    // A same-named table in ANOTHER schema with the permissive policy (what a
+    // sibling suite leaves in public). The migrations' checks must look only at
+    // the schema they run in, or this fails them by name.
+    await admin.query(`CREATE SCHEMA ${OTHER_SCHEMA}`);
+    await admin.query(`CREATE TABLE ${OTHER_SCHEMA}.${T296[0]} (id text PRIMARY KEY)`);
+    await admin.query(`ALTER TABLE ${OTHER_SCHEMA}.${T296[0]} ENABLE ROW LEVEL SECURITY`);
+    await admin.query(`CREATE POLICY ${T296[0]}_all ON ${OTHER_SCHEMA}.${T296[0]} FOR ALL USING (true) WITH CHECK (true)`);
     await admin.query(`CREATE ROLE ${OWNER_ROLE} NOLOGIN NOBYPASSRLS`);
     await admin.query(`CREATE ROLE ${APP_ROLE} LOGIN PASSWORD '${APP_PASSWORD}' NOBYPASSRLS`);
     await admin.query(`CREATE SCHEMA ${SCHEMA}`);
@@ -121,9 +130,19 @@ describeIfDb("migrations 296/297: workspace RLS policies", () => {
   afterAll(async () => {
     if (!admin) return;
     await admin.query(`DROP SCHEMA IF EXISTS ${SCHEMA} CASCADE`);
+    await admin.query(`DROP SCHEMA IF EXISTS ${OTHER_SCHEMA} CASCADE`);
     await admin.query(`DROP OWNED BY ${APP_ROLE}`).catch(() => undefined);
     for (const r of [APP_ROLE, OWNER_ROLE]) await admin.query(`DROP ROLE IF EXISTS ${r}`);
     await admin.end();
+  });
+
+  it("checks only its own schema: a same-named permissive table elsewhere neither fails it nor is touched", async () => {
+    const { rows } = await admin.query(
+      `SELECT p.polname FROM pg_policy p JOIN pg_class c ON c.oid = p.polrelid JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = $1 AND c.relname = $2`,
+      [OTHER_SCHEMA, T296[0]],
+    );
+    expect(rows.map((r) => r.polname)).toEqual([`${T296[0]}_all`]);
   });
 
   it("covers the tables it says it covers, and no table is FORCEd", async () => {
