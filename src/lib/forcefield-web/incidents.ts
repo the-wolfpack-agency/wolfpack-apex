@@ -261,9 +261,11 @@ export function buildIncidents(input: readonly HostileEventGroup[], burstGapSeco
     let prev = -1;
     let reach = Number.NEGATIVE_INFINITY;
     groups.forEach((g, i) => {
+      // By source, not raw fingerprint: unrelated clients share a tool shape.
       if (g.fp) {
-        const j = byFp.get(g.fp);
-        if (j === undefined) byFp.set(g.fp, i);
+        const k = sourceKeyOf(g);
+        const j = byFp.get(k);
+        if (j === undefined) byFp.set(k, i);
         else union(i, j);
       }
       if (g.sig) {

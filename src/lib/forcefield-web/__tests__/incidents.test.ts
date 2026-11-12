@@ -41,6 +41,17 @@ describe("grouping", () => {
     expect(inc).toHaveLength(2);
   });
 
+  it("a shared fingerprint from another country or network, outside the burst gap, is a separate incident", () => {
+    const fp = "aaaa1111:known_crawler";
+    const inc = buildIncidents([
+      g({ fp, country: "BR", hosting: "residential", firstAt: at(0) }),
+      g({ fp, country: "US", hosting: "datacenter", firstAt: at(3600) }),
+      g({ fp, country: "BR", hosting: "residential", firstAt: at(7200) }),
+    ]);
+    expect(inc).toHaveLength(2);
+    expect(inc.map((i) => i.detail.count).sort()).toEqual([1, 2]);
+  });
+
   it("the same fingerprint or signature links groups however far apart in the window", () => {
     expect(buildIncidents([g({ fp: "a", firstAt: at(0) }), g({ fp: "a", firstAt: at(3600) })])).toHaveLength(1);
     expect(buildIncidents([g({ sig: "s", firstAt: at(0) }), g({ sig: "s", firstAt: at(3600) })])).toHaveLength(1);
