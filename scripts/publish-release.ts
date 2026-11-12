@@ -11,8 +11,15 @@ import "./load-env";
  * and run this. Keep the file OUTSIDE this repository: the repo is public and
  * release notes name clients. createRelease() upserts on version, so a re-run updates
  * in place. It does not email the team.
+ *
+ * It also publishes a lines-of-code snapshot (publish-loc-snapshot.ts), so the
+ * figure on /releases moves with every release instead of waiting for someone
+ * to remember a second script (it sat two months stale that way). --no-loc skips it.
  */
 import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createRelease } from "@/lib/releases";
 import { parseReleaseFile } from "@/lib/release-file";
 
@@ -26,6 +33,9 @@ async function main(): Promise<void> {
   }
   const release = await createRelease({ ...input, created_by: "release-notes" });
   console.log(`published ${release.version}: ${release.entries.length} entries`);
+  if (!process.argv.includes("--no-loc")) {
+    execFileSync("npx", ["tsx", join(dirname(fileURLToPath(import.meta.url)), "publish-loc-snapshot.ts")], { stdio: "inherit" });
+  }
 }
 
 main().catch((err) => {
