@@ -23,7 +23,7 @@
  */
 /* FIRST. Imports hoist, so anything below already read process.env. */
 import "./load-env";
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -41,21 +41,35 @@ const REPOS: { dir: string; area: string }[] = [
   { dir: "wolfpack-porsche-weekend", area: "A Weekend with Porsche" },
   { dir: "wolfpack-lms", area: "LMS" },
   { dir: "wolfpack-site-template", area: "Site Template" },
+  { dir: "wolfpack-ford", area: "Ford" },
+  { dir: "OGIAM", area: "OGIAM site" },
+  { dir: "AgenticQA-core", area: "AgenticQA core" },
+  { dir: "wolfpack-aidan-mulready", area: "Aidan Mulready" },
+  { dir: "wolfpack-feed", area: "Feed" },
 ];
 
-/** Same counting method as backfill-release-notes.ts, so the numbers compare. */
+/** Same counting method as backfill-release-notes.ts, so the numbers compare, but
+ *  read from the repo's default branch on origin (fetched first), not whatever
+ *  branch the local folder happens to have checked out. */
+const SOURCE = ["*.ts", "*.tsx", "*.js", "*.jsx", "*.mjs", "*.cjs", "*.py", "*.sql", "*.css", "*.scss"];
+const EXCLUDED = /(^|\/)(vendor|dist|build|coverage|__generated__)\/|\.d\.ts$|\.min\.(js|css)$/;
+
 function linesOfCode(dir: string): number | null {
   const abs = join(MONO, dir);
   if (!existsSync(join(abs, ".git"))) return null;
+  const git = (args: string[]) => execFileSync("git", ["-C", abs, ...args], { encoding: "utf8", maxBuffer: 512 * 1024 * 1024 });
   try {
-    const cmd =
-      `cd '${abs}' && git ls-files -z -- ` +
-      `'*.ts' '*.tsx' '*.js' '*.jsx' '*.mjs' '*.cjs' '*.py' '*.sql' '*.css' '*.scss' ` +
-      `| grep -zvE '(^|/)(vendor|dist|build|coverage|__generated__)/|\\.d\\.ts$|\\.min\\.(js|css)$' ` +
-      `| xargs -0 cat 2>/dev/null | wc -l`;
-    const out = execSync(cmd, { encoding: "utf8", maxBuffer: 512 * 1024 * 1024, shell: "/bin/bash" });
-    const n = parseInt(out.trim(), 10);
-    return Number.isFinite(n) ? n : null;
+    try { git(["fetch", "-q", "origin"]); } catch { /* offline: count the last fetched state */ }
+    let ref = "HEAD";
+    try { ref = git(["rev-parse", "--abbrev-ref", "origin/HEAD"]).trim(); } catch { /* no origin/HEAD: local HEAD */ }
+    // git grep -c '' prints <ref>:<path>:<lines> for every non-binary file in the tree.
+    const out = git(["grep", "-c", "", ref, "--", ...SOURCE]);
+    let n = 0;
+    for (const line of out.split("\n")) {
+      const m = /^[^:]+:(.*):(\d+)$/.exec(line);
+      if (m && !EXCLUDED.test(m[1])) n += Number(m[2]);
+    }
+    return n;
   } catch {
     return null;
   }
